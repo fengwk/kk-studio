@@ -2390,11 +2390,6 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/environments/{environmentId}/ide/views/{viewId}': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeCloseViewDTO
-    response: void
-  }
   'DELETE /api/issues/{issueId}': {
     path: { issueId: string }
     query: { expectedVersion: string }
@@ -2488,11 +2483,6 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentEventDTO[]
   }
-  'GET /api/environments/{environmentId}/ide/directories': {
-    path: { environmentId: string }
-    query: { path?: string }
-    response: EnvironmentIdeDirectoryListingDTO
-  }
   'GET /api/environments/{environmentId}/install': {
     path: { environmentId: string }
     query: { code: string }
@@ -2502,6 +2492,11 @@ export interface ApiRoutes {
   'GET /api/environments/{environmentId}/runtime': {
     path: { environmentId: string }
     response: EnvironmentRuntimeStatusDTO
+  }
+  'GET /api/ide/environments/{environmentId}/directories': {
+    path: { environmentId: string }
+    query: { path?: string }
+    response: EnvironmentIdeDirectoryListingDTO
   }
   'GET /api/interactions': {
     query: { cursor?: string; limit?: string; rootThreadId?: string }
@@ -2688,21 +2683,6 @@ export interface ApiRoutes {
     body: EnvironmentCreateDTO
     response: EnvironmentCardDTO
   }
-  'POST /api/environments/{environmentId}/ide/views': {
-    path: { environmentId: string }
-    body: EnvironmentIdeOpenViewDTO
-    response: EnvironmentIdeViewDTO
-  }
-  'POST /api/environments/{environmentId}/ide/views/{viewId}/mobile-layout': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeViewBindingDTO
-    response: void
-  }
-  'POST /api/environments/{environmentId}/ide/views/{viewId}/terminal': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeViewBindingDTO
-    response: void
-  }
   'POST /api/environments/{environmentId}/install-code': {
     path: { environmentId: string }
     body: EnvironmentInstallCodeRequestDTO
@@ -2720,6 +2700,26 @@ export interface ApiRoutes {
   'POST /api/environments/{environmentId}/update': {
     path: { environmentId: string }
     response: EnvironmentUpdateStartDTO
+  }
+  'POST /api/ide/environments/{environmentId}/views': {
+    path: { environmentId: string }
+    body: EnvironmentIdeOpenViewDTO
+    response: EnvironmentIdeViewDTO
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/apply-mobile-layout': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/close': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeCloseViewDTO
+    response: void
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/focus-terminal': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
   }
   'POST /api/interactions/{interactionId}/input': {
     path: { interactionId: string }
@@ -2943,15 +2943,15 @@ export interface ApiRoutes {
     body: ChatUpdateDTO
     response: ChatDTO
   }
-  'PUT /api/environments/{environmentId}/ide/views/{viewId}/directory': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeChangeDirectoryDTO
-    response: EnvironmentIdeViewDTO
-  }
   'PUT /api/environments/{environmentId}/install-config': {
     path: { environmentId: string }
     body: Record<string, unknown>
     response: EnvironmentCardDTO
+  }
+  'PUT /api/ide/environments/{environmentId}/views/{viewId}/directory': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeChangeDirectoryDTO
+    response: EnvironmentIdeViewDTO
   }
   'PUT /api/issues/{issueId}': {
     path: { issueId: string }

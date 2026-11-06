@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 public final class IdeInternalPaths {
 
   /** 内部 IDE 元数据前缀。 */
-  public static final String INTERNAL_IDE_PREFIX = "/internal/environment-ide";
+  public static final String INTERNAL_IDE_PREFIX = "/internal/ide/environments";
 
   /** 内部 IDE 元数据请求/回执体的硬上限（字节）；请求与响应都必须严格按此上限读取，超出即 fail-closed。 */
   public static final int MAX_METADATA_BODY_BYTES = 16 * 1024;
@@ -30,10 +30,10 @@ public final class IdeInternalPaths {
   }
 
   public static String terminalPath(EnvironmentId environmentId, String viewId) {
-    return viewsPath(environmentId) + "/" + viewId + "/terminal";
+    return viewsPath(environmentId) + "/" + viewId + "/focus-terminal";
   }
 
-  public static String viewPath(EnvironmentId environmentId, String viewId) {
-    return viewsPath(environmentId) + "/" + viewId;
+  public static String closePath(EnvironmentId environmentId, String viewId) {
+    return viewsPath(environmentId) + "/" + viewId + "/close";
   }
 }

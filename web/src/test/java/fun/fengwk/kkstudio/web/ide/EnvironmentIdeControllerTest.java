@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.controller;
+package fun.fengwk.kkstudio.web.ide;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
@@ -10,7 +10,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -44,14 +43,13 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
+import fun.fengwk.kkstudio.ide.http.EnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Duration;
@@ -64,9 +62,9 @@ import java.util.stream.Stream;
 
 /**
  * Environment IDE 视图控制 API 的实际 HTTP 契约：成功路径映射与参数转发，以及 domain 错误（dirty 拒绝 400、IDE 通道不可用
- * 409）和请求体错误的统一 {@code Result} 信封。
+ * 409）与请求体错误的统一 problem+json。
  */
-class StudioEnvironmentIdeControllerTest {
+class EnvironmentIdeControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("55555555-5555-4555-8555-555555555555");
   private static final String VIEW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -81,12 +79,10 @@ class StudioEnvironmentIdeControllerTest {
   @BeforeEach
   void setUp() {
     environmentIdeService = mock(EnvironmentIdeService.class);
-    StudioEnvironmentIdeController controller =
-        new StudioEnvironmentIdeController(environmentIdeService);
+    EnvironmentIdeController controller = new EnvironmentIdeController(environmentIdeService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -99,13 +95,13 @@ class StudioEnvironmentIdeControllerTest {
     when(environmentIdeService.listDirectories(EnvironmentId.of(ENV_ID), "/a b"))
         .thenReturn(listing);
     mockMvc
-        .perform(get("/api/environments/" + ENV_ID + "/ide/directories").param("path", "/a b"))
+        .perform(get("/api/ide/environments/" + ENV_ID + "/directories").param("path", "/a b"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.path").value("/"))
         .andExpect(jsonPath("$.parentPath").value(nullValue()));
     mockMvc
         .perform(
-            post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/mobile-layout")
+            post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/apply-mobile-layout")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isNoContent());
@@ -126,7 +122,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            post("/api/environments/" + ENV_ID + "/ide/views")
+            post("/api/ide/environments/" + ENV_ID + "/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW_ID + "\",\"directory\":\"/workspace\"}"))
@@ -156,7 +152,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace/subdir\"}"))
@@ -175,7 +171,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
@@ -210,7 +206,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.forLanguageTag(languageTag))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace/subdir\"}"))
@@ -227,7 +223,7 @@ class StudioEnvironmentIdeControllerTest {
   void invalidEnvironmentIdIsRejectedWithoutTouchingService() throws Exception {
     mockMvc
         .perform(
-            post("/api/environments/not-a-uuid/ide/views")
+            post("/api/ide/environments/not-a-uuid/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW_ID + "\"}"))
@@ -238,12 +234,12 @@ class StudioEnvironmentIdeControllerTest {
     verifyNoInteractions(environmentIdeService);
   }
 
-  /** 意图：无法反序列化的请求体仍走项目 400 Result 信封，不泄露 parser 细节也不触达服务。 */
+  /** 意图：无法反序列化的请求体仍走统一 400 problem，不泄露 parser 细节也不触达服务。 */
   @Test
   void malformedJsonBodyUsesCanonicalBadRequestEnvelope() throws Exception {
     mockMvc
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{ invalid json"))
@@ -261,14 +257,14 @@ class StudioEnvironmentIdeControllerTest {
   void focusTerminalAndCloseViewReturnNoContent() throws Exception {
     mockMvc
         .perform(
-            post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/terminal")
+            post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/focus-terminal")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(
-            delete("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID)
+            post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/close")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
@@ -297,7 +293,7 @@ class StudioEnvironmentIdeControllerTest {
   void rejectsUnknownRequestFields() throws Exception {
     mockMvc
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace\",\"unknown\":true}"))
@@ -326,9 +322,8 @@ class StudioEnvironmentIdeControllerTest {
             Duration.ofSeconds(5),
             null);
     MockMvc realChain =
-        MockMvcBuilders.standaloneSetup(new StudioEnvironmentIdeController(service))
-            .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
+        MockMvcBuilders.standaloneSetup(new EnvironmentIdeController(service))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
@@ -341,7 +336,7 @@ class StudioEnvironmentIdeControllerTest {
     openRequest.setDirectory(directory);
     realChain
         .perform(
-            post("/api/environments/" + ENV_ID + "/ide/views")
+            post("/api/ide/environments/" + ENV_ID + "/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(OBJECT_MAPPER.writeValueAsString(openRequest)))
@@ -355,7 +350,7 @@ class StudioEnvironmentIdeControllerTest {
     changeRequest.setDirectory(directory);
     realChain
         .perform(
-            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(OBJECT_MAPPER.writeValueAsString(changeRequest)))

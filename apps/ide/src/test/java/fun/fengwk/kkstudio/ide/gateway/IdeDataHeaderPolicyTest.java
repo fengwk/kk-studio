@@ -93,8 +93,8 @@ class IdeDataHeaderPolicyTest {
     IdeDataHeaderPolicy.applyResponseHeaders(200, headers, req, res, ENV, VIEW, false);
 
     verify(res).setStatus(200);
-    verify(res).addHeader("Location", "/environment-ide/" + ENV + "/" + VIEW + "/dashboard");
-    verify(res).addHeader("Service-Worker-Allowed", "/environment-ide/" + ENV + "/" + VIEW + "/");
+    verify(res).addHeader("Location", "/ide/" + ENV + "/" + VIEW + "/dashboard");
+    verify(res).addHeader("Service-Worker-Allowed", "/ide/" + ENV + "/" + VIEW + "/");
     verify(res).addHeader("Content-Type", "text/html");
   }
 

@@ -26,7 +26,7 @@ class HmacClusterInternalAuthenticationTest {
   private static final Instant NOW = Instant.parse("2026-08-30T10:00:00Z");
   private static final Duration WINDOW = Duration.ofSeconds(30);
   private static final String PATH =
-      "/internal/environment-ide/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/views";
+      "/internal/ide/environments/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/views";
 
   private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
   private final HmacClusterInternalAuthentication authentication =

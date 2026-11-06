@@ -11,8 +11,8 @@ import java.util.UUID;
  * 有界内存重放拒绝。
  *
  * <p>最终约定：不使用额外的 {@code X-KK-IDE-Path} 头；内部 HTTP raw path 作为 URL query 固定放入 canonical {@code
- * requestPath}（例如 {@code /internal/environment-ide/{env}/http?path=<URLEncoded RAW>}），因此原始 query
- * 语义已被签名覆盖。 秘密绝不进入 URL、日志或异常消息。
+ * requestPath}（例如 {@code /internal/ide/environments/{env}/data-http?path=<URLEncoded RAW>}），因此原始
+ * query 语义已被签名覆盖。 秘密绝不进入 URL、日志或异常消息。
  */
 public interface ClusterInternalAuthentication {
 

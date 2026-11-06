@@ -40,19 +40,19 @@ class JettyUriComplianceIntegrationTest extends WebPostgresTestSupport {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "/environment-ide/"
+        "/ide/"
             + ENV_ID
             + "/"
             + VIEW_ID
             + "/stable-hash1234/static/out/vs/code/browser/workbench/workbench.js",
-        "/environment-ide/"
+        "/ide/"
             + ENV_ID
             + "/"
             + VIEW_ID
             + "/stable-hash1234/static/out/vs/code%20space/workbench.js",
-        "/environment-ide/" + ENV_ID + "/" + VIEW_ID + "/?folder=/managed/workspace",
-        "/environment-ide/" + ENV_ID + "/" + VIEW_ID + "/?path=%2F",
-        "/environment-ide/" + ENV_ID + "/" + VIEW_ID + "/static/../stable-hash1234/workbench.js"
+        "/ide/" + ENV_ID + "/" + VIEW_ID + "/?folder=/managed/workspace",
+        "/ide/" + ENV_ID + "/" + VIEW_ID + "/?path=%2F",
+        "/ide/" + ENV_ID + "/" + VIEW_ID + "/static/../stable-hash1234/workbench.js"
       })
   void legitimateCodeServerRoutesReachApplicationFilter(String path) throws Exception {
     HttpResponse<String> resp = send(path);
@@ -64,12 +64,8 @@ class JettyUriComplianceIntegrationTest extends WebPostgresTestSupport {
   @ValueSource(
       strings = {
         "//healthz",
-        "/environment-ide/" + ENV_ID + "/" + VIEW_ID + "//stable-hash1234/static/workbench.js",
-        "/environment-ide/"
-            + ENV_ID
-            + "/"
-            + VIEW_ID
-            + "/stable-hash1234/static/out%2Fvs%2Fworkbench.js"
+        "/ide/" + ENV_ID + "/" + VIEW_ID + "//stable-hash1234/static/workbench.js",
+        "/ide/" + ENV_ID + "/" + VIEW_ID + "/stable-hash1234/static/out%2Fvs%2Fworkbench.js"
       })
   void ambiguousRoutesRejectedByJettyWith400(String path) throws Exception {
     HttpResponse<String> resp = send(path);

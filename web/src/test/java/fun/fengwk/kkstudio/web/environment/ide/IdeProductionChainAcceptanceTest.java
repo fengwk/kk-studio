@@ -72,7 +72,7 @@ import java.util.concurrent.TimeoutException;
  *
  * <ul>
  *   <li><b>浏览器入口用例</b>：走真实浏览器协议——事件通道 {@code /api/events} 登记打开意图、REST {@code
- *       /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换 view 级 cookie、view 基址取 workbench
+ *       /api/ide/environments/{id}/views} 领取视图、一次性 bootstrap 票据换 view 级 cookie、view 基址取 workbench
  *       HTML 与静态/worker 资源、浏览器 WebSocket 升级。
  *   <li><b>生命周期用例</b>：REST 关闭；resume 换代后旧 cookie/旧 epoch 失效；受管 code-server 崩溃后旧绑定判为
  *       VIEW_GONE，新视图在替代实例上恢复服务。
@@ -474,7 +474,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Files.createSymbolicLink(workspace.resolve("link-dir"), workspace.resolve("a-dir"));
     Files.writeString(workspace.resolve("editable.txt"), "initial text in workspace\n");
     String listingUrl =
-        HttpUrl.get(baseUrl() + "/api/environments/" + environmentId + "/ide/directories")
+        HttpUrl.get(baseUrl() + "/api/ide/environments/" + environmentId + "/directories")
             .newBuilder()
             .addQueryParameter("path", workspace.toString())
             .build()
@@ -530,11 +530,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           new Request.Builder()
               .url(
                   baseUrl()
-                      + "/api/environments/"
+                      + "/api/ide/environments/"
                       + environmentId
-                      + "/ide/views/"
+                      + "/views/"
                       + viewId
-                      + "/mobile-layout")
+                      + "/apply-mobile-layout")
               .post(RequestBody.create(binding, JSON))
               .build();
       try (Response response =
@@ -619,8 +619,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             + "\",\"discard\":false}";
     Request request =
         new Request.Builder()
-            .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views/" + viewId)
-            .delete(RequestBody.create(body, JSON))
+            .url(
+                baseUrl()
+                    + "/api/ide/environments/"
+                    + environmentId
+                    + "/views/"
+                    + viewId
+                    + "/close")
+            .post(RequestBody.create(body, JSON))
             .build();
     try (Response response =
         browser.newBuilder().readTimeout(90, TimeUnit.SECONDS).build().newCall(request).execute()) {
@@ -738,7 +744,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     return browser
         .newCall(
             new Request.Builder()
-                .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views")
+                .url(baseUrl() + "/api/ide/environments/" + environmentId + "/views")
                 .post(
                     RequestBody.create(
                         openViewBody(environmentId, viewId, documentId, identity, claimId, mode),
@@ -759,8 +765,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         browser
             .newCall(
                 new Request.Builder()
-                    .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views/" + viewId)
-                    .delete(RequestBody.create(body, JSON))
+                    .url(
+                        baseUrl()
+                            + "/api/ide/environments/"
+                            + environmentId
+                            + "/views/"
+                            + viewId
+                            + "/close")
+                    .post(RequestBody.create(body, JSON))
                     .build())
             .execute();
     try (response) {
@@ -782,8 +794,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     return browser
         .newCall(
             new Request.Builder()
-                .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views/" + viewId)
-                .delete(RequestBody.create(body, JSON))
+                .url(
+                    baseUrl()
+                        + "/api/ide/environments/"
+                        + environmentId
+                        + "/views/"
+                        + viewId
+                        + "/close")
+                .post(RequestBody.create(body, JSON))
                 .build())
         .execute();
   }
@@ -815,7 +833,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         browser
             .newCall(
                 new Request.Builder()
-                    .url(baseUrl() + "/environment-ide/" + environmentId + "/" + viewId + "/")
+                    .url(baseUrl() + "/ide/" + environmentId + "/" + viewId + "/")
                     .header("Cookie", "kk_ide_session=" + cookieValue)
                     .header("Sec-Fetch-Site", "same-origin")
                     .get()
@@ -838,7 +856,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
     try (response) {
       assertEquals(303, response.code(), "the bootstrap entry must return 303 redirect");
-      String expectedPath = "/environment-ide/" + environmentId + "/" + viewId + "/";
+      String expectedPath = "/ide/" + environmentId + "/" + viewId + "/";
       String setCookie = response.header("Set-Cookie");
       assertNotNull(setCookie, "the bootstrap entry must set a session cookie");
       assertTrue(setCookie.startsWith("kk_ide_session="), "cookie name must be kk_ide_session");
@@ -862,7 +880,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         browser
             .newCall(
                 new Request.Builder()
-                    .url(baseUrl() + "/environment-ide/" + environmentId + "/" + viewId + suffix)
+                    .url(baseUrl() + "/ide/" + environmentId + "/" + viewId + suffix)
                     .header("Cookie", "kk_ide_session=" + cookieValue)
                     .header("Sec-Fetch-Site", "same-origin")
                     .get()
@@ -881,7 +899,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     session.socket =
         browser.newWebSocket(
             new Request.Builder()
-                .url(webSocketUrl("/environment-ide/" + environmentId + "/" + viewId + "/"))
+                .url(webSocketUrl("/ide/" + environmentId + "/" + viewId + "/"))
                 .header("Cookie", "kk_ide_session=" + cookieValue)
                 .header("Origin", baseUrl())
                 .build(),

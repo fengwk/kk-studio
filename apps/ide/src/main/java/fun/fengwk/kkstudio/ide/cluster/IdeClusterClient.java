@@ -86,7 +86,7 @@ public class IdeClusterClient {
    *
    * @param method HTTP 方法
    * @param requestPath 已编码的 canonical path（含 query），如 {@code
-   *     /internal/environment-ide/{env}/http?path=...}
+   *     /internal/ide/environments/{env}/data-http?path=...}
    * @param owner 目标 owner 路由
    * @return 认证头
    */
@@ -142,7 +142,7 @@ public class IdeClusterClient {
       EnvironmentIdeViewBindingDTO request) {
     exchange(
         "POST",
-        IdeInternalPaths.viewsPath(environmentId) + "/" + viewId + "/mobile-layout",
+        IdeInternalPaths.viewsPath(environmentId) + "/" + viewId + "/apply-mobile-layout",
         owner,
         request,
         null);
@@ -163,8 +163,8 @@ public class IdeClusterClient {
       String viewId,
       EnvironmentIdeCloseViewDTO request) {
     exchange(
-        "DELETE",
-        IdeInternalPaths.viewPath(environmentId, viewId),
+        "POST",
+        IdeInternalPaths.closePath(environmentId, viewId),
         owner,
         request,
         null,

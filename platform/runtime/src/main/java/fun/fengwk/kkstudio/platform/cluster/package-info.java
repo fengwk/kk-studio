@@ -21,8 +21,9 @@
  *       不承载大字节数据；反向数据面（HTTP/WS 逐 exchange）由 gateway 宿主自行流式实现并复用本包的头签名。
  * </ul>
  *
- * <p>约定：内部 HTTP raw path 作为 URL query（{@code /internal/environment-ide/{env}/http?path=<URLEncoded
- * RAW>}）放入 canonical {@code requestPath}，因此不额外使用 {@code X-KK-IDE-Path} 头；签名的 canonical requestPath
- * 已覆盖原始 query 语义。字节永不进入 SQL/NOTIFY/outbox，本包只操作控制元数据。
+ * <p>约定：内部 HTTP raw path 作为 URL query（{@code
+ * /internal/ide/environments/{env}/data-http?path=<URLEncoded RAW>}）放入 canonical {@code
+ * requestPath}，因此不额外使用 {@code X-KK-IDE-Path} 头；签名的 canonical requestPath 已覆盖原始 query 语义。字节永不进入
+ * SQL/NOTIFY/outbox，本包只操作控制元数据。
  */
 package fun.fengwk.kkstudio.platform.cluster;
