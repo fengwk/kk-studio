@@ -890,6 +890,8 @@ export async function runComposerMatrix(ui) {
             listbox.locator('[role="option"][aria-selected="true"]')
           const selectedText = async () => (await selectedOption().innerText()).trim()
 
+          // 初选由 Debug 视图在事件加载后的 effect 写入：列表先渲染、选中随后到位，不能立刻计数。
+          await selectedOption().first().waitFor({ state: 'visible', timeout: 10_000 })
           assert((await selectedOption().count()) === 1, 'latest model output was not initially selected')
 
           const firstOption = listbox.getByRole('option').nth(0)
