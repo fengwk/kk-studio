@@ -139,11 +139,11 @@ public class ConfigSyncApplier {
         environmentService.importEnvironment(
             spec.name(), spec.registrationTokenHash(), spec.installConfig());
       } else {
+        // Environment 仍以字符串承载 CAS 坐标，跨族边界只做最小适配。
         environmentService.updateImportedEnvironment(
             EnvironmentId.of(existing.getId()),
             spec.registrationTokenHash(),
             spec.installConfig(),
-            // Environment 仍以字符串承载 CAS 坐标，跨族边界只做最小适配。
             Long.toString(existing.getVersion()));
       }
     }
