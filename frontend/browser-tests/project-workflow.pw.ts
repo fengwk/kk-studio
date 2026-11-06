@@ -62,7 +62,7 @@ async function transport(page: Page) {
       await route.fulfill({ json: [state.project] })
     } else if (path === '/api/platform/agents') {
       await route.fulfill({ json: [] })
-    } else if (path === '/api/environments') {
+    } else if (path === '/api/platform/environments') {
       await route.fulfill({ json: [] })
     } else {
       throw new Error(`Unexpected harness request: ${path}`)

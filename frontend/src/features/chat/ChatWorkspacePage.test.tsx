@@ -328,8 +328,8 @@ describe('ChatWorkspacePage', () => {
     })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
       id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
-      status: 'READY', version: '1', createTime: 0, updateTime: 0,
-      capabilities: [], statusExpiresAt: null, lastSeen: null,
+      status: 'READY', version: '1', createdAt: 0, updatedAt: 0,
+      capabilities: [], statusExpiresAt: null, lastSeenAt: null,
     }])
     const togglePanel = vi.fn()
     renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, vi.fn(), togglePanel)
@@ -1146,11 +1146,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         ready: true,
         status: 'READY',
         version: '1',
-        createTime: 1790812800,
-        updateTime: 1790812800,
+        createdAt: 1790812800000,
+        updatedAt: 1790812800000,
         capabilities: [],
         statusExpiresAt: null,
-        lastSeen: null,
+        lastSeenAt: null,
         homeDirectory: '/home/user',
       },
     ])
@@ -1194,11 +1194,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         ready: true,
         status: 'READY',
         version: '1',
-        createTime: 1790812800,
-        updateTime: 1790812800,
+        createdAt: 1790812800000,
+        updatedAt: 1790812800000,
         capabilities: [],
         statusExpiresAt: null,
-        lastSeen: null,
+        lastSeenAt: null,
         homeDirectory: '/home/user',
       },
     ])

@@ -8,7 +8,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { setLocale } from '@/shared/i18n'
 import type {
   AgentDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   SkillEnvironmentSyncDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -23,7 +23,7 @@ const BUILDER_ID = 'e1000000-0000-4000-8000-0000000000e2'
 const CURRENT_SHA = 'a'.repeat(64)
 const PREVIOUS_SHA = 'b'.repeat(64)
 
-const environments: EnvironmentCardDTO[] = [
+const environments: EnvironmentDTO[] = [
   environment(NAS_ID, 'NAS'),
   environment(BUILDER_ID, 'builder'),
 ]
@@ -49,20 +49,20 @@ const agent: AgentDTO = {
   updatedAt: 1790812800,
 }
 
-function environment(id: string, name: string): EnvironmentCardDTO {
+function environment(id: string, name: string): EnvironmentDTO {
   return {
     id,
     name,
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: 1790812800,
+    lastSeenAt: 1790812800000,
     capabilities: [],
     userName: null,
     homeDirectory: null,
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
   }
 }
 

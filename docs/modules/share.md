@@ -41,7 +41,7 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueRunDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunDTO.java) | `agentName`、`endEntryId`、`finalAnswerEntryId`、`nextState`、`error`、`endedAt` |
 | [`IssueRunSummaryDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunSummaryDTO.java) | `agentName`、`endedAt` |
 | [`IssueEvidenceDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
-| [`EnvironmentCardDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/EnvironmentCardDTO.java) | `statusExpiresAt` |
+| [`EnvironmentDTO`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/dto/EnvironmentDTO.java) | `statusExpiresAt` |
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateIssueRequestDTO.java) 的可空字段、[`StopIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/StopIssueRequestDTO.java) 的 `detail` 与 [`AppendIssueActivityRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
 
@@ -53,13 +53,13 @@ Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `ur
 
 ## DTO 组织
 
-源码按领域分包；Canvas DTO 位于 Canvas runtime，其余列出的 DTO 位于 share：
+源码按领域分包；Canvas DTO 位于 Canvas runtime，Environment DTO 位于 platform runtime，其余列出的 DTO 位于 share：
 
 | 包 | 当前 wire |
 | --- | --- |
 | [catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
 | [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | 仅保留嵌入 Agent 配置的 `SkillRef`（`packageName` + `name`）；技能包与 MCP 的 HTTP DTO 由 `platform.catalog.dto` 拥有 |
-| [environment](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
+| [platform/environment/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/dto/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影、有界运维事件、当前运行快照与受管更新投影 |
 | [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
 | [canvas.dto](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project/dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
@@ -119,7 +119,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
 | Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | [`ChatDtoContractTest.java`](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/ChatDtoContractTest.java)：Chat 与 Session 分页 wire 的严格字段 |
-| Environment | [environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/) | [`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java) |
+| Environment | [platform/environment/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/) | [`EnvironmentDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/EnvironmentDtoContractTest.java)：Card、运维事件、安装设置、运行快照与受管更新投影的严格字段和闭集枚举 |
 
 ---
 

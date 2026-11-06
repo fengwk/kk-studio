@@ -30,7 +30,7 @@ import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -66,7 +66,7 @@ function formatUpdateProgress(update: EnvironmentUpdateProgressDTO, t: Translate
 const STATUS_EXPIRY_RECHECK_SLACK_MS = 250
 
 /** 权威列表里最早的状态截止时间（毫秒）；没有任何可解析的截止时间时为 null。 */
-function earliestStatusExpiresAt(cards: EnvironmentCardDTO[]): number | null {
+function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
   let earliest: number | null = null
   for (const card of cards) {
     const at = timestampMillis(card.statusExpiresAt)
@@ -88,16 +88,16 @@ export function EnvironmentsPage() {
   const [createName, setCreateName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const [installTarget, setInstallTarget] = useState<EnvironmentCardDTO | null>(null)
-  const [uninstallTarget, setUninstallTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [installTarget, setInstallTarget] = useState<EnvironmentDTO | null>(null)
+  const [uninstallTarget, setUninstallTarget] = useState<EnvironmentDTO | null>(null)
 
-  const [deleteTarget, setDeleteTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<EnvironmentDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [updateTarget, setUpdateTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [updateTarget, setUpdateTarget] = useState<EnvironmentDTO | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
-  const [rotateTarget, setRotateTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [rotateTarget, setRotateTarget] = useState<EnvironmentDTO | null>(null)
   const [rotateError, setRotateError] = useState<string | null>(null)
-  const [manageTarget, setManageTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [manageTarget, setManageTarget] = useState<EnvironmentDTO | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
   const invalidateEnvironments = useCallback(() => {
@@ -277,13 +277,13 @@ export function EnvironmentsPage() {
             }}
           />
           {environments.map((environment, index) => {
-            const status = String(environment.status).toUpperCase()
+            const status = environment.status
             const ready = environment.ready === true
             const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
             const capabilityIds = (environment.capabilities ?? [])
               .map((capability) => capability.id)
               .filter(Boolean)
-            const lastSeen = formatTimestamp(environment.lastSeen, locale)
+            const lastSeen = formatTimestamp(environment.lastSeenAt, locale)
 
             const runtimeQuery = runtimeQueries[index]
             const runtimeStatus = runtimeQuery.data?.status

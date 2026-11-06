@@ -278,7 +278,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/environments') {
+    if (path === '/api/platform/environments') {
       await route.fulfill({ json: [] })
       return
     }

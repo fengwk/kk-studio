@@ -6,10 +6,11 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,17 +41,23 @@ public final class EnvironmentInstallScripts {
       SystemSettings.Network network) {
     EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
     text(registrationToken, "registrationToken");
-    boolean windows = "windows".equals(normalized.getOperatingSystem());
+    boolean windows = normalized.getOperatingSystem() == DaemonOperatingSystem.WINDOWS;
     return render(
         windows, "install", daemonJson(normalized.getDaemon()), registrationToken, network);
   }
 
-  public static String uninstall(String operatingSystem, SystemSettings.Network network) {
-    if (!Set.of("linux", "macos", "windows").contains(operatingSystem)) {
+  public static String uninstall(
+      DaemonOperatingSystem operatingSystem, SystemSettings.Network network) {
+    if (operatingSystem == null
+        || !Set.of(
+                DaemonOperatingSystem.LINUX,
+                DaemonOperatingSystem.MACOS,
+                DaemonOperatingSystem.WINDOWS)
+            .contains(operatingSystem)) {
       throw DomainException.validation(
           "operatingSystem", "operatingSystem must be linux, macos or windows");
     }
-    return render("windows".equals(operatingSystem), "uninstall", "", "", network);
+    return render(operatingSystem == DaemonOperatingSystem.WINDOWS, "uninstall", "", "", network);
   }
 
   private static String render(

@@ -31,13 +31,13 @@ function environmentWithoutDaemon() {
   const ctx = {
     async call(method, path, body) {
       calls.push({ method, path, body })
-      if (method === 'POST' && path === '/api/environments') {
+      if (method === 'POST' && path === '/api/platform/environments') {
         return { json: { id: ENVIRONMENT_ID, name: body.name, version } }
       }
-      if (method === 'GET' && path === `/api/environments/${ENVIRONMENT_ID}`) {
+      if (method === 'GET' && path === `/api/platform/environments/${ENVIRONMENT_ID}`) {
         return { json: { id: ENVIRONMENT_ID, version } }
       }
-      if (method === 'DELETE' && path.startsWith(`/api/environments/${ENVIRONMENT_ID}?`)) {
+      if (method === 'DELETE' && path.startsWith(`/api/platform/environments/${ENVIRONMENT_ID}?`)) {
         deleted = true
         return { json: null }
       }
@@ -153,7 +153,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
     {
       async call(method, path) {
         assert.equal(method, 'POST')
-        assert.equal(path, '/api/environments')
+        assert.equal(path, '/api/platform/environments')
         return { json: { id: ENVIRONMENT_ID, version: '7' } }
       },
     },
@@ -183,7 +183,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
     {
       async call(method) {
         if (method === 'GET') {
-          throw new HttpError(404, canonicalErrorBody(404, 'not_found', 'environment not found'), '/api/environments/missing')
+          throw new HttpError(404, canonicalErrorBody(404, 'not_found', 'environment not found'), '/api/platform/environments/missing')
         }
         deleteCalls++
         return { json: null }
@@ -198,7 +198,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
       deleteEnvironmentFixture(
         {
           async call() {
-            throw new HttpError(409, canonicalErrorBody(409, 'version_conflict', 'version conflict'), '/api/environments/conflict')
+            throw new HttpError(409, canonicalErrorBody(409, 'version_conflict', 'version conflict'), '/api/platform/environments/conflict')
           },
         },
         ENVIRONMENT_ID,

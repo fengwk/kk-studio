@@ -11,7 +11,7 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import type {
   AgentDTO,
   ChatDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 const params = new URLSearchParams(window.location.search)
@@ -36,30 +36,30 @@ const testAgents: AgentDTO[] = [
   },
 ]
 
-const initialEnvironments: EnvironmentCardDTO[] = [
+const initialEnvironments: EnvironmentDTO[] = [
   {
     id: 'env-docker-node',
     name: 'docker-node',
-    status: 'ONLINE',
+    status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: 1790812800,
+    lastSeenAt: 1790812800000,
     capabilities: [],
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
   },
   {
     id: 'env-ubuntu',
     name: 'ubuntu',
-    status: 'ONLINE',
+    status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: 1790812800,
+    lastSeenAt: 1790812800000,
     capabilities: [],
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
   },
 ]
 

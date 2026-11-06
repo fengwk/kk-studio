@@ -9,7 +9,7 @@ import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import { ApiError } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -35,9 +35,9 @@ const savedNormalized: EnvironmentInstallConfigDTO = {
   daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
     lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'], firstMatchMarkers: [] } } } },
 }
-const card: EnvironmentCardDTO = {
+const card: EnvironmentDTO = {
   id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false, statusExpiresAt: null,
-  lastSeen: null, capabilities: [], createTime: 0, updateTime: 0, installConfig: saved,
+  lastSeenAt: null, capabilities: [], createdAt: 0, updatedAt: 0, installConfig: saved,
 }
 const copyButton = () => screen.getByRole('button', { name: '保存并复制安装命令' })
 const origin = () => screen.getByRole('textbox', { name: 'Studio 地址' })
@@ -48,7 +48,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function open(options: { uninstall?: boolean; environment?: EnvironmentCardDTO } = {}) {
+function open(options: { uninstall?: boolean; environment?: EnvironmentDTO } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const close = vi.fn()
   const environment = options.environment ?? { ...card, version: '1', installConfig: null }
@@ -96,7 +96,7 @@ describe('EnvironmentInstallModal', () => {
       .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
     const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
     expect(copied).toBe(
-      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/environments/env-1/install?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
+      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/platform/environments/env-1/install-script?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
     )
     expect(copied).not.toContain('canonical.example.com')
     expect(copied).not.toContain('registrationToken')
@@ -192,8 +192,8 @@ describe('EnvironmentInstallModal', () => {
 
   it.each(['metadata', 'save', 'code', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
     const user = userEvent.setup()
-    const metadata = deferred<EnvironmentCardDTO>()
-    const save = deferred<EnvironmentCardDTO>()
+    const metadata = deferred<EnvironmentDTO>()
+    const save = deferred<EnvironmentDTO>()
     const code = deferred<{ code: string; expiresAt: number }>()
     const clipboard = deferred<boolean>()
     if (phase === 'metadata') vi.mocked(environmentService.getEnvironment).mockReturnValue(metadata.promise)
@@ -484,7 +484,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
     expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain(
-      `${window.location.origin}/api/environments/uninstall/windows`,
+      `${window.location.origin}/api/platform/daemon-uninstall-scripts/windows`,
     )
     expect(environmentService.getEnvironment).not.toHaveBeenCalled()
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()

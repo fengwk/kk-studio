@@ -240,13 +240,13 @@ export function generateInstallCommand(
   if (!isInstallOperatingSystem(os)) fail('operatingSystem')
   const url = scriptUrl(
     origin,
-    `/api/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
+    `/api/platform/environments/${encodeURIComponent(environmentId)}/install-script?code=${encodeURIComponent(code)}`,
   )
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }
 
 export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
   if (!isInstallOperatingSystem(os)) fail('operatingSystem')
-  const url = scriptUrl(origin, `/api/environments/uninstall/${encodeURIComponent(os)}`)
+  const url = scriptUrl(origin, `/api/platform/daemon-uninstall-scripts/${encodeURIComponent(os)}`)
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }

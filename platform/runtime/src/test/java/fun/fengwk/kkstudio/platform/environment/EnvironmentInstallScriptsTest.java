@@ -16,9 +16,10 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -107,7 +108,9 @@ class EnvironmentInstallScriptsTest {
     assumeFalse(isWindows());
     Execution execution =
         execute(
-            EnvironmentInstallScripts.uninstall(operatingSystem, SystemSettingsTestFixture.NETWORK),
+            EnvironmentInstallScripts.uninstall(
+                DaemonOperatingSystem.fromWireValue(operatingSystem),
+                SystemSettingsTestFixture.NETWORK),
             0);
     assertEquals(0, execution.status());
     assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
@@ -190,7 +193,8 @@ class EnvironmentInstallScriptsTest {
     assertFalse(invocation.contains("-JavaHome"));
     assertFalse(invocation.contains("private"));
     String uninstall =
-        EnvironmentInstallScripts.uninstall("windows", SystemSettingsTestFixture.NETWORK);
+        EnvironmentInstallScripts.uninstall(
+            DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK);
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
@@ -243,7 +247,8 @@ class EnvironmentInstallScriptsTest {
       ProcessResult removed =
           runWindows(
               executable,
-              EnvironmentInstallScripts.uninstall("windows", SystemSettingsTestFixture.NETWORK),
+              EnvironmentInstallScripts.uninstall(
+                  DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK),
               dir,
               fixture,
               recordPath);
@@ -268,9 +273,15 @@ class EnvironmentInstallScriptsTest {
         () ->
             EnvironmentInstallScripts.install(
                 config, "token\u2028", SystemSettingsTestFixture.NETWORK));
+    // WSL 不是安装目标，卸载脚本同样拒绝。
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.uninstall("solaris", SystemSettingsTestFixture.NETWORK));
+        () ->
+            EnvironmentInstallScripts.uninstall(
+                DaemonOperatingSystem.WSL, SystemSettingsTestFixture.NETWORK));
+    assertThrows(
+        DomainException.class,
+        () -> EnvironmentInstallScripts.uninstall(null, SystemSettingsTestFixture.NETWORK));
     assertThrows(
         DomainException.class,
         () -> EnvironmentInstallScripts.install(null, "token", SystemSettingsTestFixture.NETWORK));

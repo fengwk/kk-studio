@@ -1758,12 +1758,12 @@ registerCase({
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
     // Card 只投影公开字段；nullable 字段按 NON_NULL 规则可省略，凭据绝不属于读取结果。
     const optionalFields = [
-      'installConfig', 'lastSeen', 'operatingSystem', 'timeZone', 'userName',
+      'installConfig', 'lastSeenAt', 'operatingSystem', 'timeZone', 'userName',
       'homeDirectory', 'note', 'daemonVersion',
     ]
     assertExactFields(match, [
       'id', 'name', 'status', 'ready', 'statusExpiresAt', 'capabilities', 'version',
-      'createTime', 'updateTime', ...optionalFields.filter((key) => Object.hasOwn(match, key)),
+      'createdAt', 'updatedAt', ...optionalFields.filter((key) => Object.hasOwn(match, key)),
     ], 'environment card')
     assert(match.ready === true, safeDiagnosticJson(match))
     ctx.vars.daemonEnvironment = match

@@ -35,7 +35,7 @@ import type {
 } from '@/features/thread/runtime/root-thread/usePaneHistory'
 import type {
   AgentDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
@@ -76,7 +76,7 @@ export function RootAgentPane({
   owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDTO[]
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
   defaults: AgentPaneDefaults
   focused: boolean
   initialTarget?: PaneTarget

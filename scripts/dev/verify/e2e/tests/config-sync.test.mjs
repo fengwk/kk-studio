@@ -194,7 +194,7 @@ test('install config hard-invalid precheck rejects every endpoint without side e
   const ctx = {
     async call(method, path, body) {
       if (method === 'GET') {
-        assert.equal(path, '/api/environments')
+        assert.equal(path, '/api/platform/environments')
         return { json: [] }
       }
       assert.equal(method, 'POST')
@@ -223,7 +223,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   // 严格限定 method 合法，任何把 path 当 method 的调用会立即失败（回归先前的参数顺序缺陷）。
   const LEGAL_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE'])
   const environmentId = '00000000-0000-4000-8000-0000000000cf'
-  const base = `/api/environments/${environmentId}`
+  const base = `/api/platform/environments/${environmentId}`
   let state = null
   let deleted = false
   let deleteSnapshot = null
@@ -237,7 +237,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
     async call(method, path, body) {
       assert.ok(LEGAL_METHODS.has(method), `illegal method ${JSON.stringify(method)} for ${path}`)
       calls.push({ method, path, body })
-      if (method === 'POST' && path === '/api/environments') {
+      if (method === 'POST' && path === '/api/platform/environments') {
         state = {
           id: environmentId,
           name: body.name,
@@ -247,7 +247,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         }
         return { json: { ...state, registrationToken: 'e2e-token-original' } }
       }
-      if (method === 'PUT' && path === `${base}/install-config`) {
+      if (method === 'PUT' && path === `${base}/install-settings`) {
         assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
         state = { ...state, installConfig: body.installConfig, version: String(Number(state.version) + 1) }
         return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
@@ -311,7 +311,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   await getCase('config_sync.environment_install_config_roundtrip').run(ctx)
 
   const methods = calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)
-  assert.ok(methods.includes(`PUT ${base}/install-config`), 'case must persist installConfig via PUT')
+  assert.ok(methods.includes(`PUT ${base}/install-settings`), 'case must persist installConfig via PUT')
   assert.ok(methods.includes('POST /api/settings/sync/export'), 'case must export the environment')
   assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import/check').length, 2, 'roundtrip plus atomic update precheck')
   assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import').length, 3, 'roundtrip, atomic update, and clearing import')

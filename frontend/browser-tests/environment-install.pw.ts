@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { tokenColor } from './fixture'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -16,11 +16,11 @@ const initialConfig: EnvironmentInstallConfigDTO = {
 }
 
 async function api(page: Page) {
-  let card: EnvironmentCardDTO = { id: 'env-1', name: 'host-one', version: '7', status: 'OFFLINE', ready: false,
-    statusExpiresAt: null, lastSeen: null, capabilities: [], createTime: 0, updateTime: 0, installConfig: initialConfig }
+  let card: EnvironmentDTO = { id: 'env-1', name: 'host-one', version: '7', status: 'OFFLINE', ready: false,
+    statusExpiresAt: null, lastSeenAt: null, capabilities: [], createdAt: 0, updatedAt: 0, installConfig: initialConfig }
   let conflict = false
   const calls: string[] = []
-  await page.route('**/api/environments**', async route => {
+  await page.route('**/api/platform/environments**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const method = request.method()
@@ -37,10 +37,10 @@ async function api(page: Page) {
       card = { ...card, installConfig: body.installConfig, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: card })
     }
-    if (path.endsWith('/install-code')) {
+    if (path.endsWith('/install-codes')) {
       return route.fulfill({ json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' } })
     }
-    if (path.endsWith('/registration-token')) {
+    if (path.endsWith('/rotate-token')) {
       card = { ...card, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: { ...card, registrationToken: token } })
     }
@@ -84,11 +84,11 @@ for (const width of [1280, 390, 320]) {
     await page.screenshot({ path: testInfo.outputPath(`install-toast-${width}.png`), fullPage: true })
     const command = await page.evaluate(() => navigator.clipboard.readText())
     const pageOrigin = new URL(page.url()).origin
-    const url = `${pageOrigin}/api/environments/env-1/install?code=browser-install-code`
+    const url = `${pageOrigin}/api/platform/environments/env-1/install-script?code=browser-install-code`
     expect(command).toBe(`(set -o pipefail; curl -fsSL $'${url}' | bash)`)
     expect(command).not.toContain(token)
-    expect(mock.calls.filter(c => c.endsWith('/install-code'))).toHaveLength(1)
-    expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(0)
+    expect(mock.calls.filter(c => c.endsWith('/install-codes'))).toHaveLength(1)
+    expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(0)
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
     await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
@@ -213,7 +213,7 @@ test('create opens form without exposing credentials; rotate does not fetch toke
   await page.getByRole('button', { name: '重新生成 Token new-host' }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: '重新生成 Token', exact: true }).click()
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
-  expect(mock.calls.some(c => c.endsWith('/token'))).toBe(false)
+  expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(1)
   expect(await page.locator('body').innerText()).not.toContain(token)
 })
 
@@ -227,7 +227,7 @@ test('CAS conflict preserves draft; clipboard rejection explicitly says saved, n
   mock.conflictNext()
   await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
   await expect(page.getByRole('alertdialog', { name: '数据已发生变化' })).toBeVisible()
-  expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(0)
+  expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(0)
   await page.getByRole('alertdialog').getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://draft.example.com')
@@ -404,14 +404,14 @@ test('native Tab skips closed details inputs and disabled controls around both S
 test('keeps event history out of the card and inside the management modal', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   const history = [
-    { time: '2026-07-20T00:00:00.000Z', level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
-    { time: '2026-07-20T00:01:00.000Z', level: 'INFO', type: 'READY', message: 'environment ready' },
+    { occurredAt: '2026-07-20T00:00:00.000Z', level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
+    { occurredAt: '2026-07-20T00:01:00.000Z', level: 'INFO', type: 'READY', message: 'environment ready' },
   ]
-  const card: EnvironmentCardDTO = {
+  const card: EnvironmentDTO = {
     id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
-    statusExpiresAt: null, lastSeen: 1784505660, capabilities: [], createTime: 0, updateTime: 0,
+    statusExpiresAt: null, lastSeenAt: 1784505660000, capabilities: [], createdAt: 0, updatedAt: 0,
   }
-  await page.route('**/api/environments**', async route => {
+  await page.route('**/api/platform/environments**', async route => {
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/events')) {
       return route.fulfill({ json: history })

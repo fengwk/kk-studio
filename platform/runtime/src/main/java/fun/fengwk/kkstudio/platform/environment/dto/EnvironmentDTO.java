@@ -1,15 +1,17 @@
-package fun.fengwk.kkstudio.share.environment;
+package fun.fengwk.kkstudio.platform.environment.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+
 import java.time.Instant;
 import java.util.List;
 
-/** Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。 */
+/** Environment 资源：稳定配置属性与当前 live 连接投影。 */
 @Data
-public class EnvironmentCardDTO {
+public class EnvironmentDTO {
   private String id;
   private String name;
   private @Nullable EnvironmentInstallConfigDTO installConfig;
@@ -18,14 +20,14 @@ public class EnvironmentCardDTO {
   @JsonInclude(JsonInclude.Include.NON_NULL)
   private @Nullable String registrationToken;
 
-  /** 当前连接状态：CONNECTING / READY / OFFLINE（租约或心跳窗口已过期的连接派生为 OFFLINE）。 */
-  private String status;
+  /** 当前连接状态；租约或心跳窗口已过期的连接派生为 OFFLINE。 */
+  private EnvironmentStatus status;
 
   /** 是否就绪。 */
   private boolean ready;
 
   /**
-   * 当前状态仍然成立的截止时间：有效连接取 {@code min(leaseUntil, lastSeen + heartbeatTimeout)}；无连接或已失效时为 null。
+   * 当前状态仍然成立的截止时间：有效连接取 {@code min(leaseUntil, lastSeenAt + heartbeatTimeout)}；无连接或已失效时为 null。
    *
    * <p>它是同一连接行事实的只读时间投影（不是被持久化的过期状态）：服务端读取时用同一时钟派生，浏览器只按它安排一次回读。
    */
@@ -33,10 +35,10 @@ public class EnvironmentCardDTO {
   private @Nullable Instant statusExpiresAt;
 
   /** 最近活跃时间。 */
-  private @Nullable Instant lastSeen;
+  private @Nullable Instant lastSeenAt;
 
-  /** 最近一次被接受的 READY 宿主 OS wire 值：windows/wsl/linux/macos；从未 READY 时为 null。 */
-  private @Nullable String operatingSystem;
+  /** 最近一次被接受的 READY 宿主操作系统；从未 READY 时为 null。 */
+  private @Nullable DaemonOperatingSystem operatingSystem;
 
   /** 最近一次被接受的 READY 宿主 IANA 时区 ID；从未 READY 时为 null。 */
   private @Nullable String timeZone;
@@ -62,6 +64,6 @@ public class EnvironmentCardDTO {
   /** CAS 版本。 */
   private String version;
 
-  private Instant createTime;
-  private Instant updateTime;
+  private Instant createdAt;
+  private Instant updatedAt;
 }

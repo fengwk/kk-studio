@@ -54,10 +54,10 @@ registerCase({
   id: 'environment.install_config_cas_roundtrip',
   level: 'L1',
   title: 'Environment installConfig PUT CAS 持久化与往返',
-  docs: 'PUT /api/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/顶层或嵌套未知字段/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
+  docs: 'PUT /api/platform/environments/{id}/install-settings 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/顶层或嵌套未知字段/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
   async run(ctx) {
     const name = `e2e-install-cfg-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
+    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name })
     const created = createJson
     const environmentId = created.id
     assert(environmentId, `created environment must have id: ${JSON.stringify(createJson)}`)
@@ -66,7 +66,7 @@ registerCase({
       `new environment must not preconfigure install settings: ${JSON.stringify(created.installConfig)}`,
     )
     let version = String(created.version)
-    const path = `/api/environments/${encodeURIComponent(environmentId)}/install-config`
+    const path = `/api/platform/environments/${encodeURIComponent(environmentId)}/install-settings`
 
     try {
       // stale expectedVersion must conflict before any write
@@ -101,7 +101,7 @@ registerCase({
 
       const { json: getJson } = await ctx.call(
         'GET',
-        `/api/environments/${encodeURIComponent(environmentId)}`,
+        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
       )
       assertInstallConfig(getJson.installConfig)
 
@@ -130,7 +130,7 @@ registerCase({
 
       const { json: afterJson } = await ctx.call(
         'GET',
-        `/api/environments/${encodeURIComponent(environmentId)}`,
+        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
       )
       const after = afterJson
       assert(
@@ -147,12 +147,12 @@ registerCase({
     } finally {
       const { json } = await ctx.call(
         'GET',
-        `/api/environments/${encodeURIComponent(environmentId)}`,
+        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
       )
       const current = json
       await ctx.call(
         'DELETE',
-        `/api/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+        `/api/platform/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
       )
     }
   },
@@ -260,21 +260,21 @@ registerCase({
   id: 'environment.install_script_code_roundtrip',
   level: 'L1',
   title: 'Environment 五分钟安装 code 签发、脚本下载与 token 轮换失效',
-  docs: 'POST /api/environments/{id}/install-code 用 expectedVersion 签发一次性 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409），重签覆盖旧 code；GET /{id}/install?code= 兑换生成 fresh UUID token 并推进 version，保留配置且 detail 无 token；Linux UTF-8 纯文本含保存配置（no-store、nosniff，只下载不执行）；重复/缺失/篡改 code 400；POST /{id}/registration-token 使未消费 code 失效，重签兑换 token 与此前均不同；GET /uninstall/{linux,windows} 无 secret/配置且不需要 code，非法 OS 400',
+  docs: 'POST /api/platform/environments/{id}/install-codes 用 expectedVersion 签发一次性 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409），重签覆盖旧 code；GET /{id}/install-script?code= 兑换生成 fresh UUID token 并推进 version，保留配置且 detail 无 token；Linux UTF-8 纯文本含保存配置（no-store、nosniff，只下载不执行）；重复/缺失/篡改 code 400；POST /{id}/rotate-token 使未消费 code 失效，重签兑换 token 与此前均不同；GET /api/platform/daemon-uninstall-scripts/{linux,windows} 无 secret/配置且不需要 code，非法 OS 400',
   async run(ctx) {
     const name = `e2e-install-code-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
+    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name })
     const created = createJson
     const environmentId = created.id
     const token = created.registrationToken
     assert(environmentId, 'created environment must have id')
     assert(typeof token === 'string' && token.length > 0, 'create must return a registration token')
     let version = String(created.version)
-    const cardPath = `/api/environments/${encodeURIComponent(environmentId)}`
+    const cardPath = `/api/platform/environments/${encodeURIComponent(environmentId)}`
     const config = linuxInstallConfig()
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${cardPath}/install-config`, {
+      const { json: putJson } = await ctx.call('PUT', `${cardPath}/install-settings`, {
         expectedVersion: version,
         installConfig: config,
       })
@@ -285,12 +285,12 @@ registerCase({
       version = String(saved.version)
 
       await expectHttpError(
-        () => ctx.call('POST', `${cardPath}/install-code`, { expectedVersion: '999999' }),
+        () => ctx.call('POST', `${cardPath}/install-codes`, { expectedVersion: '999999' }),
         { status: 409 },
       )
 
       const issuedAtMs = Date.now()
-      const { json: codeJson, headers: codeHeaders } = await ctx.call('POST', `${cardPath}/install-code`, {
+      const { json: codeJson, headers: codeHeaders } = await ctx.call('POST', `${cardPath}/install-codes`, {
         expectedVersion: version,
       })
       assertNoStore(codeHeaders, 'install code')
@@ -315,7 +315,7 @@ registerCase({
 
       const { json: script, headers: scriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${cardPath}/install?code=${encodeURIComponent(code)}`,
+        `${cardPath}/install-script?code=${encodeURIComponent(code)}`,
       )
       assert(typeof script === 'string', 'install download must be text, not a JSON envelope')
       assert(
@@ -341,19 +341,19 @@ registerCase({
         version = String(detail.version)
       }
       await checkRedemption()
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(code)}`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(code)}`), 400)
 
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script`), 400)
       await expectStatus(
         () => downloadInstallationScript(
           ctx,
-          `${cardPath}/install?code=${encodeURIComponent(`${code}x`)}`,
+          `${cardPath}/install-script?code=${encodeURIComponent(`${code}x`)}`,
         ),
         400,
       )
 
       const issueCode = async () => {
-        const { json, headers } = await ctx.call('POST', `${cardPath}/install-code`, { expectedVersion: version })
+        const { json, headers } = await ctx.call('POST', `${cardPath}/install-codes`, { expectedVersion: version })
         assertNoStore(headers, 'install code')
         const issued = json
         assert(typeof issued.code === 'string' && issued.code.length > 0, 'install code must be non-empty')
@@ -363,11 +363,11 @@ registerCase({
       const replacedCode = await issueCode()
       const pendingCode = await issueCode()
       assert(pendingCode !== replacedCode, 'reissue must replace the pending code')
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(replacedCode)}`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(replacedCode)}`), 400)
 
       const { json: rotatedJson, headers: rotatedHeaders } = await ctx.call(
         'POST',
-        `${cardPath}/registration-token`,
+        `${cardPath}/rotate-token`,
         { expectedVersion: version },
       )
       assertNoStore(rotatedHeaders, 'registration token rotation')
@@ -380,13 +380,13 @@ registerCase({
       assertInstallConfig(rotated.installConfig)
 
       await expectStatus(
-        () => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(pendingCode)}`),
+        () => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(pendingCode)}`),
         400,
       )
 
       const { json: refreshedJson, headers: refreshedHeaders } = await ctx.call(
         'POST',
-        `${cardPath}/install-code`,
+        `${cardPath}/install-codes`,
         { expectedVersion: version },
       )
       assertNoStore(refreshedHeaders, 'refreshed install code')
@@ -397,7 +397,7 @@ registerCase({
 
       const { json: refreshedScript, headers: refreshedScriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${cardPath}/install?code=${encodeURIComponent(refreshedCode)}`,
+        `${cardPath}/install-script?code=${encodeURIComponent(refreshedCode)}`,
       )
       assertNoStore(refreshedScriptHeaders, 'refreshed install download')
       assert(
@@ -412,7 +412,7 @@ registerCase({
       for (const operatingSystem of ['linux', 'windows']) {
         const { json: uninstall, headers: uninstallHeaders } = await ctx.call(
           'GET',
-          `/api/environments/uninstall/${operatingSystem}`,
+          `/api/platform/daemon-uninstall-scripts/${operatingSystem}`,
         )
         assert(typeof uninstall === 'string', 'uninstall download must be text')
         assert(
@@ -431,7 +431,7 @@ registerCase({
         assertUninstallScript(uninstall, secrets)
       }
       await expectHttpError(
-        () => ctx.call('GET', '/api/environments/uninstall/solaris'),
+        () => ctx.call('GET', '/api/platform/daemon-uninstall-scripts/solaris'),
         { status: 400 },
       )
     } finally {

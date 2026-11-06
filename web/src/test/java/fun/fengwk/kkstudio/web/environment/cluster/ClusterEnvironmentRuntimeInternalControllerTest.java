@@ -18,11 +18,12 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.net.URI;
@@ -59,7 +60,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     when(updateService.runtimeStatus(any())).thenReturn(runtimeStatus("3"));
 
     mockMvc
-        .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
+        .perform(get("/internal/platform/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.revision").value("3"))
         .andExpect(jsonPath("$.status.daemonVersion").value("1.0.9"));
@@ -68,12 +69,12 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
   @Test
   void forwardsUpdateToLocalServiceAndReturnsCommandStatus() throws Exception {
     EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
-    started.setCommandStatus(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED);
+    started.setCommandStatus(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED);
     started.setRuntimeStatus(runtimeStatus("4"));
     when(updateService.startUpdate(any())).thenReturn(started);
 
     mockMvc
-        .perform(post("/internal/environments/" + ENV_ID + "/update"))
+        .perform(post("/internal/platform/environments/" + ENV_ID + "/update-daemon"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.commandStatus").value("SENT_UNCONFIRMED"));
   }
@@ -85,7 +86,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
         .verify(any(), any(), any());
 
     mockMvc
-        .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
+        .perform(get("/internal/platform/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("unauthorized"))
         .andExpect(jsonPath("$.detail").value("internal authentication failed"));
@@ -99,7 +100,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
                 ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://other.internal"))));
 
     mockMvc
-        .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
+        .perform(get("/internal/platform/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("unavailable"));
   }

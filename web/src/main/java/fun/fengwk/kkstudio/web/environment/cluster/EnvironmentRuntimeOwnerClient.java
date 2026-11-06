@@ -17,8 +17,8 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors.Problem;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 
 import java.net.URI;
 import java.net.http.HttpClient;

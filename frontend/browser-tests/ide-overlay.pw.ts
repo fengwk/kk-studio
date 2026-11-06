@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixture'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 const HARNESS_URL = '/browser-tests/ide-overlay-harness.html'
 const SESSION_KEY = 'kk-studio.tab-state:ide'
@@ -11,18 +11,18 @@ const DIRECTORY_A = '/workspace/a'
 const DIRECTORY_B = '/workspace/b'
 const EVENT_NODE = 'e1000000-0000-4000-8000-000000000001'
 
-const CARDS: EnvironmentCardDTO[] = [
+const CARDS: EnvironmentDTO[] = [
   {
     id: ENV_A,
     name: 'local-node',
     ready: true,
     status: 'READY',
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
     capabilities: [],
     statusExpiresAt: null,
-    lastSeen: null,
+    lastSeenAt: null,
     homeDirectory: DIRECTORY_A,
   },
   {
@@ -31,11 +31,11 @@ const CARDS: EnvironmentCardDTO[] = [
     ready: true,
     status: 'READY',
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
     capabilities: [],
     statusExpiresAt: null,
-    lastSeen: null,
+    lastSeenAt: null,
     homeDirectory: DIRECTORY_B,
   },
 ]
@@ -165,7 +165,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
     const path = parsed.pathname
     const method = request.method()
 
-    if (method === 'GET' && path === '/api/environments') {
+    if (method === 'GET' && path === '/api/platform/environments') {
       await route.fulfill({ json: CARDS })
       return
     }

@@ -41,13 +41,13 @@ registerCase({
   id: 'environment.runtime_absent_unavailable',
   level: 'L1',
   title: 'Environment 运行快照缺失时明确 unavailable，不伪造空快照',
-  docs: 'GET /api/environments/{id}/runtime 在没有本代 READY 快照（无 READY owner 路由）时返回 409 unavailable + ENVIRONMENT_UNAVAILABLE，响应不含 revision/daemonVersion/update 等运行快照字段，绝不伪造 update=null 的假快照；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
+  docs: 'GET /api/platform/environments/{id}/runtime 在没有本代 READY 快照（无 READY owner 路由）时返回 409 unavailable + ENVIRONMENT_UNAVAILABLE，响应不含 revision/daemonVersion/update 等运行快照字段，绝不伪造 update=null 的假快照；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
   async run(ctx) {
     const card = await createEnvironmentFixture(ctx, `e2e-runtime-absent-${cid().slice(0, 8)}`)
 
     try {
       const error = await expectHttpError(
-        () => ctx.call('GET', `/api/environments/${encodeURIComponent(card.id)}/runtime`),
+        () => ctx.call('GET', `/api/platform/environments/${encodeURIComponent(card.id)}/runtime`),
         { status: 409 },
       )
       assertCanonicalError(error, { status: 409, code: 'unavailable', reason: 'ENVIRONMENT_UNAVAILABLE' })
@@ -66,7 +66,7 @@ registerCase({
 
       // 非 canonical environmentId 在进入服务之前即被拒绝，不落到运行快照读取。
       const invalid = await expectHttpError(
-        () => ctx.call('GET', '/api/environments/not-a-uuid/runtime'),
+        () => ctx.call('GET', '/api/platform/environments/not-a-uuid/runtime'),
         { status: 400 },
       )
       assertCanonicalError(invalid, { status: 400, code: 'validation' })

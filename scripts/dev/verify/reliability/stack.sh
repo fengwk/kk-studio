@@ -101,7 +101,7 @@ wait_app() {
 }
 
 print_environment_status() {
-  curl -fsS "$APP_URL/api/environments" \
+  curl -fsS "$APP_URL/api/platform/environments" \
     | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" environment-status "$RELIABILITY_ENV_NAME"
 }
 

@@ -66,7 +66,7 @@ import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDTO,
   ModelDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   HarnessModelRequestDebugDTO,
   HarnessProviderRequestPreviewDTO,
   HarnessSessionDTO,
@@ -1126,11 +1126,11 @@ describe('AgentPane orchestration', () => {
       ready: true,
       status: 'READY',
       statusExpiresAt: null,
-      lastSeen: null,
+      lastSeenAt: null,
       capabilities: [],
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }])
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
@@ -2796,7 +2796,7 @@ function threadFixture(
 
 function renderPane(
   owner: { kind: 'CHAT'; id: string },
-  environments: EnvironmentCardDTO[] = [],
+  environments: EnvironmentDTO[] = [],
   validateDraftName: ((target: PaneTarget, name: string) => Promise<string | null>) | null = async () => null,
 ) {
   const client = new QueryClient({
@@ -2912,7 +2912,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     vi.mocked(harnessService.getModelRequestDebug).mockResolvedValue(modelRequestDebug())
   }
 
-  function renderPane(environments: EnvironmentCardDTO[] = []) {
+  function renderPane(environments: EnvironmentDTO[] = []) {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -3167,19 +3167,19 @@ describe('branchDraftFromEntry environment replay', () => {
    * 未知 name 显示 unavailable 而不是 none。
    */
   it('projects unbound environment status from the active draft', async () => {
-    const envCard: EnvironmentCardDTO = {
+    const envCard: EnvironmentDTO = {
       id: 'uuid-env-ready',
       name: 'cluster-ready',
       status: 'READY',
       statusExpiresAt: null,
       ready: true,
-      lastSeen: 1789776000,
+      lastSeenAt: 1789776000000,
       capabilities: [],
       userName: null,
       homeDirectory: null,
       version: '1',
-      createTime: 1789776000,
-      updateTime: 1789776000,
+      createdAt: 1789776000000,
+      updatedAt: 1789776000000,
     }
 
     // 1. unbound 面板：未知环境名称显示 unavailable
@@ -4496,20 +4496,20 @@ describe('AgentPane root control and child observation', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
-  function environmentCard(name: string): EnvironmentCardDTO {
+  function environmentCard(name: string): EnvironmentDTO {
     return {
       id: 'f1000000-0000-4000-8000-0000000000e1',
       name,
       status: 'READY',
       statusExpiresAt: null,
       ready: true,
-      lastSeen: 1789776000,
+      lastSeenAt: 1789776000000,
       capabilities: [],
       userName: null,
       homeDirectory: null,
       version: '1',
-      createTime: 1789776000,
-      updateTime: 1789776000,
+      createdAt: 1789776000000,
+      updatedAt: 1789776000000,
     }
   }
 
@@ -5195,17 +5195,17 @@ describe('AgentPane root control mounting', () => {
   it('routes the typed /files command to the global IDE panel with the resolved environment', async () => {
     // 测试意图：pane 只把显式 /files 动作交给全局面板，不再自行创建 view 或拥有 IDE 生命周期。
     const user = userEvent.setup()
-    const envCard: EnvironmentCardDTO = {
+    const envCard: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: 1790812800,
-      updateTime: 1790812800,
+      createdAt: 1790812800000,
+      updatedAt: 1790812800000,
       capabilities: [],
       statusExpiresAt: null,
-      lastSeen: null,
+      lastSeenAt: null,
       homeDirectory: '/home/user',
     }
     const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
@@ -5246,30 +5246,30 @@ describe('AgentPane root control mounting', () => {
   it('passes /shell and command-menu actions to the panel using the environment active at action time', async () => {
     // 测试意图：pane 不缓存 IDE view；shell 动作与新环境下的 files 动作分别显式携带当时解析到的环境。
     const user = userEvent.setup()
-    const envCard: EnvironmentCardDTO = {
+    const envCard: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: 1790812800,
-      updateTime: 1790812800,
+      createdAt: 1790812800000,
+      updatedAt: 1790812800000,
       capabilities: [],
       statusExpiresAt: null,
-      lastSeen: null,
+      lastSeenAt: null,
       homeDirectory: '/home/user',
     }
-    const secondEnvCard: EnvironmentCardDTO = {
+    const secondEnvCard: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000088',
       name: 'second-node',
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: 1790812800,
-      updateTime: 1790812800,
+      createdAt: 1790812800000,
+      updatedAt: 1790812800000,
       capabilities: [],
       statusExpiresAt: null,
-      lastSeen: null,
+      lastSeenAt: null,
       homeDirectory: '/srv/second',
     }
     const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()

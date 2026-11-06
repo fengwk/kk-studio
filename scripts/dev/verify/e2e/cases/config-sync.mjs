@@ -138,7 +138,7 @@ registerCase({
     let envId = null
     let latestVersion = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/environments', {
+    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', {
       name: envName,
     })
     const created = createJson
@@ -185,7 +185,7 @@ registerCase({
         'import must keep the original registration token hash',
       )
 
-      const { json: listJson } = await ctx.call('GET', '/api/environments')
+      const { json: listJson } = await ctx.call('GET', '/api/platform/environments')
       const envList = listJson
       assert(Array.isArray(envList), 'environment list must be an array')
       const matching = envList.filter((e) => e.name === envName)
@@ -197,7 +197,7 @@ registerCase({
           try {
             const { json } = await ctx.call(
               'GET',
-              `/api/environments/${encodeURIComponent(envId)}`,
+              `/api/platform/environments/${encodeURIComponent(envId)}`,
             )
             const card = json
             if (card?.version != null) {
@@ -209,7 +209,7 @@ registerCase({
           if (versionToDelete) {
             await ctx.call(
               'DELETE',
-              `/api/environments/${encodeURIComponent(envId)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
+              `/api/platform/environments/${encodeURIComponent(envId)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
             )
           }
         } catch {
@@ -274,17 +274,17 @@ registerCase({
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
     const newToken = `e2e-sync-cfg-token-${suffix}`
-    const cardPath = (id) => `/api/environments/${encodeURIComponent(id)}`
+    const cardPath = (id) => `/api/platform/environments/${encodeURIComponent(id)}`
     let envId = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/environments', { name: envName })
+    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name: envName })
     const created = createJson
     envId = created.id
     const originalToken = created.registrationToken
     assert(envId && originalToken, `created environment must carry id and token: ${JSON.stringify(created)}`)
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${cardPath(envId)}/install-config`, {
+      const { json: putJson } = await ctx.call('PUT', `${cardPath(envId)}/install-settings`, {
         expectedVersion: String(created.version),
         installConfig: linuxInstallConfig(),
       })
@@ -399,7 +399,7 @@ registerCase({
       }
     }
 
-    const { json: listJson } = await ctx.call('GET', '/api/environments')
+    const { json: listJson } = await ctx.call('GET', '/api/platform/environments')
     const list = listJson
     assert(Array.isArray(list), 'environment list must be an array')
     assert(

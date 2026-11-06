@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.environment;
+package fun.fengwk.kkstudio.platform.environment.dto;
 
 import lombok.Data;
 
@@ -14,16 +14,13 @@ import java.time.Instant;
 public class EnvironmentEventDTO {
 
   /** 事件发生时间。 */
-  private Instant time;
+  private Instant occurredAt;
 
-  /** 级别，取 {@code INFO / WARN / ERROR}。 */
-  private String level;
+  /** 事件级别。 */
+  private EnvironmentEventLevel level;
 
-  /**
-   * 事件类型，取 {@code CONNECTING / READY / DISCONNECTED / SKILL_SYNC_STARTED / SKILL_SYNC_SUCCEEDED /
-   * SKILL_SYNC_FAILED / UPDATE_FAILED}。
-   */
-  private String type;
+  /** 事件类型。 */
+  private EnvironmentEventType type;
 
   /** 去敏后的有界说明（不含 stdout、凭据或签名地址）。 */
   private String message;

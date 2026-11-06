@@ -123,7 +123,7 @@ describe('HTTP client', () => {
     const parser = vi.fn(() => ['parsed'])
     expect(await request('GET /api/canvases', {}, { jsonParser: parser })).toEqual(['parsed'])
     expect(parser).toHaveBeenCalledWith('{"n":1}')
-    expect(await request('GET /api/environments/uninstall/{operatingSystem}', {
+    expect(await request('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
       path: { operatingSystem: 'linux' },
     })).toBe('script')
     const blob = await request('GET /api/harness/sessions/{sessionId}/files/download', {
@@ -145,7 +145,7 @@ describe('HTTP client', () => {
     vi.stubGlobal('fetch', transport)
     await expect(request('GET /api/canvases', {})).resolves.toBeUndefined()
     await expect(request('GET /api/canvases', {})).resolves.toBeUndefined()
-    await expect(request('GET /api/environments/uninstall/{operatingSystem}', {
+    await expect(request('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
       path: { operatingSystem: 'linux' },
     })).resolves.toBeUndefined()
     await expect(request('GET /api/harness/sessions/{sessionId}/files/download', {

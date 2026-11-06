@@ -44,8 +44,8 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -197,7 +197,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(body(parseError).contains(credential));
 
     // 清理本用例新建资源，避免污染同库后续断言。
-    deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
+    deleteOk(
+        "/api/platform/environments/" + envDto.path("id").asText(),
+        envDto.path("version").asText());
     deleteOk(
         "/api/platform/providers/" + provider, findProvider(provider).path("version").asText());
   }
@@ -541,7 +543,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     deleteOk("/api/platform/models/" + model, modelDto.path("version").asText());
     deleteOk("/api/platform/skill-packages/" + pkg, skillDto.path("version").asText());
     deleteOk("/api/platform/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
-    deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
+    deleteOk(
+        "/api/platform/environments/" + envDto.path("id").asText(),
+        envDto.path("version").asText());
     deleteOk("/api/platform/providers/" + provider, providerDto.path("version").asText());
     assertNull(findAgent(agentA), "agent must be gone before import");
 
@@ -1234,7 +1238,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private JsonNode createEnvironment(String name) throws Exception {
     EnvironmentCreateDTO dto = new EnvironmentCreateDTO();
     dto.setName(name);
-    return postData("/api/environments", dto);
+    return postData("/api/platform/environments", dto);
   }
 
   private JsonNode importYaml(String yaml) throws Exception {
@@ -1329,7 +1333,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode findEnvironment(String name) throws Exception {
-    return findByName(getData("/api/environments"), name);
+    return findByName(getData("/api/platform/environments"), name);
   }
 
   private static JsonNode findByName(JsonNode results, String name) {

@@ -86,7 +86,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
         }))
       } else if (path === '/api/platform/agents') {
         data = []
-      } else if (path === '/api/environments') {
+      } else if (path === '/api/platform/environments') {
         data = []
       }
       await route.fulfill({ json: data })

@@ -9,7 +9,7 @@ import { setLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
 import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -20,31 +20,31 @@ setLocale('zh-CN')
 export const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 export const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 
-export const CARD_A: EnvironmentCardDTO = {
+export const CARD_A: EnvironmentDTO = {
   id: ENV_A,
   name: 'local-node',
   ready: true,
   status: 'READY',
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
   capabilities: [],
   statusExpiresAt: null,
-  lastSeen: null,
+  lastSeenAt: null,
   homeDirectory: '/workspace/a',
 }
 
-export const CARD_B: EnvironmentCardDTO = {
+export const CARD_B: EnvironmentDTO = {
   id: ENV_B,
   name: 'remote-node',
   ready: true,
   status: 'READY',
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
   capabilities: [],
   statusExpiresAt: null,
-  lastSeen: null,
+  lastSeenAt: null,
   homeDirectory: '/workspace/b',
 }
 

@@ -103,7 +103,7 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
+  curl -fsS "$app_url/api/platform/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
 }
 
 wait_environment_ready() {

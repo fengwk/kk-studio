@@ -9,7 +9,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
@@ -45,20 +45,20 @@ function renderPage() {
   return { queryClient, view, sockets }
 }
 
-function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO {
+function environment(overrides: Partial<EnvironmentDTO>): EnvironmentDTO {
   return {
     id: 'env-id-1',
     name: 'env',
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: null,
+    lastSeenAt: null,
     capabilities: [],
     userName: null,
     homeDirectory: null,
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784505600,
+    createdAt: 1784505600000,
+    updatedAt: 1784505600000,
     ...overrides,
   }
 }
@@ -122,13 +122,13 @@ describe('EnvironmentsPage', () => {
         homeDirectory: '/home/dev',
         status: 'READY',
         ready: true,
-        statusExpiresAt: 1784509383,
-        lastSeen: 1784509323,
+        statusExpiresAt: 1784509383000,
+        lastSeenAt: 1784509323000,
         capabilities: [{ id: 'process.exec' }],
         daemonVersion: '1.2.3',
         version: '1',
-        createTime: 1784505600,
-        updateTime: 1784505600,
+        createdAt: 1784505600000,
+        updatedAt: 1784505600000,
       },
       {
         id: 'env-2',
@@ -138,12 +138,12 @@ describe('EnvironmentsPage', () => {
         status: 'READY',
         ready: false,
         statusExpiresAt: null,
-        lastSeen: 1784419200,
+        lastSeenAt: 1784419200000,
         capabilities: [],
         daemonVersion: 'development',
         version: '1',
-        createTime: 1784419200,
-        updateTime: 1784419200,
+        createdAt: 1784419200000,
+        updatedAt: 1784419200000,
       },
       {
         id: 'env-3',
@@ -152,12 +152,12 @@ describe('EnvironmentsPage', () => {
         homeDirectory: null,
         status: 'CONNECTING',
         ready: false,
-        statusExpiresAt: 1784505660,
-        lastSeen: null,
+        statusExpiresAt: 1784505660000,
+        lastSeenAt: null,
         capabilities: [],
         version: '1',
-        createTime: 1784505600,
-        updateTime: 1784505600,
+        createdAt: 1784505600000,
+        updatedAt: 1784505600000,
       },
     ])
     renderPage()
@@ -245,13 +245,13 @@ describe('EnvironmentsPage', () => {
       status: 'CONNECTING',
       ready: false,
       statusExpiresAt: null,
-      lastSeen: null,
+      lastSeenAt: null,
       capabilities: [],
       userName: null,
       homeDirectory: null,
       version: '1',
-      createTime: 1784505600,
-      updateTime: 1784505600,
+      createdAt: 1784505600000,
+      updatedAt: 1784505600000,
     })
     const clipboard = installClipboard()
     const { queryClient } = renderPage()
@@ -569,9 +569,9 @@ describe('EnvironmentsPage', () => {
   })
 
   it('shows the loading state while the registry request is pending', async () => {
-    let resolveListing: ((value: EnvironmentCardDTO[]) => void) | undefined
+    let resolveListing: ((value: EnvironmentDTO[]) => void) | undefined
     vi.mocked(environmentService.listEnvironments).mockImplementation(
-      () => new Promise<EnvironmentCardDTO[]>((resolve) => {
+      () => new Promise<EnvironmentDTO[]>((resolve) => {
         resolveListing = resolve
       }),
     )
@@ -619,8 +619,8 @@ describe('EnvironmentsPage', () => {
 
   it('formats epoch-millisecond lastSeen, including sub-second values', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({ id: 'env-id-sec', name: 'seconds-box', lastSeen: 1750000000000 }),
-      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeen: 1750000000500 }),
+      environment({ id: 'env-id-sec', name: 'seconds-box', lastSeenAt: 1750000000000 }),
+      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeenAt: 1750000000500 }),
     ])
     renderPage()
 
@@ -757,13 +757,13 @@ describe('EnvironmentsPage', () => {
     ])
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([
       {
-        time: 1784505600,
+        occurredAt: 1784505600000,
         level: 'WARN',
         type: 'DISCONNECTED',
         message: 'daemon connection lost',
       },
       {
-        time: 1784505660,
+        occurredAt: 1784505660000,
         level: 'INFO',
         type: 'READY',
         message: 'environment ready',

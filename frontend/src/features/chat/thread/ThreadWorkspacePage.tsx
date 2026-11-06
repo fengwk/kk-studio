@@ -17,7 +17,7 @@ import '@/features/chat/chat-workspace.css'
 import '@/features/thread/thread-state.css'
 import type {
   AgentDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   HarnessThreadDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -79,7 +79,7 @@ export function ThreadWorkspacePage() {
 function ThreadWorkspaceContent({ thread, agents, environments }: {
   thread: HarnessThreadDTO
   agents: AgentDTO[]
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
 }) {
   const { t } = useI18n()
   const threadId = thread.threadId

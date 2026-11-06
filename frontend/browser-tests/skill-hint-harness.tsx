@@ -5,39 +5,39 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
-import type { AgentDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
 export const HARNESS_ROOT_THREAD_ID = 'a1000000-0000-4000-8000-0000000000b1'
 
 /** 环境注册表：NAS 缺少部分技能的当前版本，builder 已安装全部技能。 */
-const HARNESS_ENVIRONMENTS: EnvironmentCardDTO[] = [{
+const HARNESS_ENVIRONMENTS: EnvironmentDTO[] = [{
   id: 'a2000000-0000-4000-8000-0000000000e1',
   name: 'NAS',
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeen: 1790812800,
+  lastSeenAt: 1790812800000,
   capabilities: [],
   userName: null,
   homeDirectory: null,
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800000,
+  updatedAt: 1790812800000,
 }, {
   id: 'a2000000-0000-4000-8000-0000000000e2',
   name: 'builder',
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeen: 1790812800,
+  lastSeenAt: 1790812800000,
   capabilities: [],
   userName: null,
   homeDirectory: null,
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800000,
+  updatedAt: 1790812800000,
 }]
 
 const HARNESS_AGENT: AgentDTO = {

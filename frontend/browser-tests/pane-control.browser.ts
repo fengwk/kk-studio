@@ -67,13 +67,13 @@ function environmentCards() {
     status: 'READY',
     statusExpiresAt: null,
     ready: true,
-    lastSeen: 1790812800,
+    lastSeenAt: 1790812800000,
     capabilities: [],
     userName: null,
     homeDirectory: null,
     version: '1',
-    createdAt: 1790812800,
-    updatedAt: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
   }]
 }
 
@@ -218,7 +218,7 @@ async function installPaneApi(
       await route.fulfill({ json: [] })
       return
     }
-    if (path === '/api/environments') {
+    if (path === '/api/platform/environments') {
       await route.fulfill({ json: environmentCards() })
       return
     }

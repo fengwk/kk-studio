@@ -9,7 +9,7 @@ public final class ClusterInternalPaths {
   public static final String INTERNAL_REALTIME_PREFIX = "/internal/harness-realtime";
 
   /** Environment owner 单跳的内部 runtime/update 前缀。 */
-  public static final String INTERNAL_ENVIRONMENT_PREFIX = "/internal/environments";
+  public static final String INTERNAL_ENVIRONMENT_PREFIX = "/internal/platform/environments";
 
   private ClusterInternalPaths() {}
 
@@ -25,6 +25,6 @@ public final class ClusterInternalPaths {
 
   /** owner 发起受管更新并返回当前运行快照的内部路径。 */
   public static String environmentUpdatePath(UUID environmentId) {
-    return INTERNAL_ENVIRONMENT_PREFIX + "/" + environmentId + "/update";
+    return INTERNAL_ENVIRONMENT_PREFIX + "/" + environmentId + "/update-daemon";
   }
 }

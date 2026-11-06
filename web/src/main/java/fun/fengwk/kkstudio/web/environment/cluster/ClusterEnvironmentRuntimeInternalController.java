@@ -14,10 +14,11 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.http.RequestParameters;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
+
+import java.util.UUID;
 
 /**
  * 跨节点 Environment runtime/update 的内部 REST 入口。
@@ -43,24 +44,24 @@ public class ClusterEnvironmentRuntimeInternalController {
 
   @GetMapping("/runtime")
   public EnvironmentRuntimeStatusDTO runtimeStatus(
-      @PathVariable String environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     return localEnvironmentUpdateService.runtimeStatus(environment);
   }
 
-  @PostMapping("/update")
+  @PostMapping("/update-daemon")
   public EnvironmentUpdateStartDTO startUpdate(
-      @PathVariable String environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     return localEnvironmentUpdateService.startUpdate(environment);
   }
 
-  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
+  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, UUID environmentId) {
     authentication.verify(
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = RequestParameters.environmentId(environmentId);
+    EnvironmentId environment = EnvironmentId.of(environmentId);
     boolean local =
         clusterNodeRegistry.route(environment).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {

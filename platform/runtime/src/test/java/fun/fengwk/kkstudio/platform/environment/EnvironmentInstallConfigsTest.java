@@ -9,8 +9,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -31,13 +32,14 @@ class EnvironmentInstallConfigsTest {
                       "daemon",
                       Map.of("studioUrl", "https://studio.example.com/"))));
       assertEquals("https://studio.example.com", value.getDaemon().getStudioUrl());
+      assertEquals(DaemonOperatingSystem.fromWireValue(os), value.getOperatingSystem());
       assertEquals(value, EnvironmentInstallConfigs.read(EnvironmentInstallConfigs.write(value)));
     }
     assertNull(EnvironmentInstallConfigs.read(null));
     assertNull(EnvironmentInstallConfigs.write(null));
   }
 
-  /** 未知字段与非法系统字段一样是硬错误，严格拒绝。 */
+  /** 未知字段、不可安装的系统 family 与非法标量一样是硬错误，严格拒绝。 */
   @Test
   void rejectsUnknownFieldsInvalidOperatingSystemAndNull() {
     assertThrows(
@@ -52,6 +54,7 @@ class EnvironmentInstallConfigsTest {
                         "/opt/jdk21",
                         "daemon",
                         Map.of("studioUrl", "https://studio.example.com")))));
+    // WSL 与未知取值都不是安装目标。
     for (Object os : List.of("wsl", "", 123, true)) {
       assertThrows(
           DomainException.class,
@@ -67,46 +70,6 @@ class EnvironmentInstallConfigsTest {
     assertThrows(DomainException.class, () -> EnvironmentInstallConfigs.validate(null));
   }
 
-  @Test
-  void strictRequestAndDeepKnownInvalidFieldsAreHardErrors() throws Exception {
-    for (String raw :
-        List.of(
-            "null",
-            "[]",
-            "{}",
-            "{\"expectedVersion\":0,\"installConfig\":{}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{},\"unknown\":1}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com/path\"}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{}}}}}")) {
-      assertThrows(
-          DomainException.class, () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
-    }
-  }
-
-  /** 边界必须原样保留未知字段与标量类型：成功请求解析，嵌套未知字段/错误类型一律拒绝，不静默丢弃或强转。 */
-  @Test
-  void parseUpdateAcceptsValidBodyAndRejectsUnknownNestedFieldsAndTypeCoercion() throws Exception {
-    var parsed =
-        EnvironmentInstallConfigs.parseUpdate(
-            json.readTree(
-                "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}"));
-    assertEquals("0", parsed.getExpectedVersion());
-    assertEquals("linux", parsed.getInstallConfig().getOperatingSystem());
-
-    for (String raw :
-        List.of(
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"unknown\":true}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{\"jdtls\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"],\"unknown\":true}}}}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":\"string\"}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":[]}}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"note\":42}}}")) {
-      assertThrows(
-          DomainException.class, () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
-    }
-  }
-
   /** validate 也覆盖程序化构造的模型；read 遇到损坏持久化 JSON 必须失败而非静默返回空配置。 */
   @Test
   void validateRejectsProgrammaticModelAndReadRejectsCorruptPersistedJson() {
@@ -116,7 +79,7 @@ class EnvironmentInstallConfigsTest {
     DaemonConfiguration invalidDaemon = new DaemonConfiguration();
     invalidDaemon.setStudioUrl("not-an-origin");
     EnvironmentInstallConfigDTO bad = new EnvironmentInstallConfigDTO();
-    bad.setOperatingSystem("linux");
+    bad.setOperatingSystem(DaemonOperatingSystem.LINUX);
     bad.setDaemon(invalidDaemon);
     assertThrows(DomainException.class, () -> EnvironmentInstallConfigs.validate(bad));
     assertThrows(IllegalStateException.class, () -> EnvironmentInstallConfigs.read("not json"));

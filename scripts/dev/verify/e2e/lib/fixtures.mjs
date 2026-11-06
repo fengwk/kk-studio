@@ -505,7 +505,7 @@ export function providerUpdateBody(overrides = {}) {
  * <p>用例只依赖 Card 的 id 与 CAS version；一次性 registrationToken 不进入断言，也不写入 artifact。
  */
 export async function createEnvironmentFixture(ctx, name) {
-  const { json } = await ctx.call('POST', '/api/environments', { name })
+  const { json } = await ctx.call('POST', '/api/platform/environments', { name })
   const card = json
   assert(
     card && typeof card === 'object' && card.id && card.version != null,
@@ -520,7 +520,7 @@ export async function createEnvironmentFixture(ctx, name) {
  * <p>环境已经不存在（404）视为清理完成；其它 canonical 错误原样抛出，既不用陈旧版本盲删，也不静默吞掉失败。
  */
 export async function deleteEnvironmentFixture(ctx, environmentId) {
-  const path = `/api/environments/${encodeURIComponent(environmentId)}`
+  const path = `/api/platform/environments/${encodeURIComponent(environmentId)}`
   let card
   try {
     const { json } = await ctx.call('GET', path)

@@ -4,14 +4,15 @@ import { formatDateTime24 } from '@/shared/lib/date-format'
 import { formatByteCount } from '@/shared/lib/format-bytes'
 import type { AppLocale } from '@/shared/i18n'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
+  EnvironmentEventLevel,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
 
 export function filterEnvironments(
-  environments: EnvironmentCardDTO[],
+  environments: EnvironmentDTO[],
   search: string,
-): EnvironmentCardDTO[] {
+): EnvironmentDTO[] {
   return environments
     .filter((environment) => includesSearch(environment.name, search) || includesSearch(environment.id, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))
@@ -19,7 +20,7 @@ export function filterEnvironments(
 
 /** 统一可用性规则（服务端 ready 标记：READY + 连接打开 + 心跳未过期）；过期/未连接一律不可选。 */
 /** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */
-export function environmentEventLevelClass(level: string): string {
+export function environmentEventLevelClass(level: EnvironmentEventLevel): string {
   return `is-${level.toLowerCase()}`
 }
 

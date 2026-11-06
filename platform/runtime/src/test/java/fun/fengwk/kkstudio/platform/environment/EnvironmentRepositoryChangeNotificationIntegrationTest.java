@@ -19,9 +19,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -47,7 +47,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
     try (EnvironmentChannelListener listener = listen()) {
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
-      EnvironmentCardDTO[] created = new EnvironmentCardDTO[1];
+      EnvironmentDTO[] created = new EnvironmentDTO[1];
       transaction.executeWithoutResult(
           status -> {
             created[0] = environmentService.create(createDto("notify-commit"));
@@ -66,7 +66,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       assertEquals(0, countEnvironments("notify-rollback"));
 
       // rotateToken 是真实 CAS 更新。
-      EnvironmentCardDTO rotated =
+      EnvironmentDTO rotated =
           environmentService.rotateToken(
               EnvironmentId.parse(created[0].getId()), created[0].getVersion());
       listener.assertNotification(rotated.getId());
@@ -175,7 +175,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   @Test
   void cascadedConnectionDeleteIsCoveredByTheSameEnvironmentNotification() throws Exception {
     try (EnvironmentChannelListener listener = listen()) {
-      EnvironmentCardDTO created = environmentService.create(createDto("notify-cascade"));
+      EnvironmentDTO created = environmentService.create(createDto("notify-cascade"));
       listener.assertNotification(created.getId());
 
       EnvironmentId environmentId = EnvironmentId.parse(created.getId());

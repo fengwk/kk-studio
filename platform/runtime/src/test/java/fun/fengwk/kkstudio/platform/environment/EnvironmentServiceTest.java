@@ -29,6 +29,15 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -36,12 +45,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentEventDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -107,10 +110,10 @@ class EnvironmentServiceTest {
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
-    EnvironmentCardDTO card = service.create(create);
+    EnvironmentDTO card = service.create(create);
 
     assertNotNull(card.getId());
-    assertEquals("OFFLINE", card.getStatus());
+    assertEquals(EnvironmentStatus.OFFLINE, card.getStatus());
     assertNull(card.getOperatingSystem());
     assertNull(card.getTimeZone());
     assertNull(card.getNote());
@@ -168,7 +171,7 @@ class EnvironmentServiceTest {
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
 
-    EnvironmentCardDTO result = service.create(create);
+    EnvironmentDTO result = service.create(create);
 
     assertEquals("local-env", result.getName());
     ArgumentCaptor<Environment> created = ArgumentCaptor.forClass(Environment.class);
@@ -221,20 +224,20 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO single = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO single = service.get(EnvironmentId.of(ENV_ID));
     assertNull(single.getRegistrationToken());
-    assertEquals("READY", single.getStatus());
+    assertEquals(EnvironmentStatus.READY, single.getStatus());
     assertTrue(single.isReady());
     assertEquals(NOW.plusSeconds(60), single.getStatusExpiresAt());
-    assertEquals("linux", single.getOperatingSystem());
+    assertEquals(DaemonOperatingSystem.LINUX, single.getOperatingSystem());
     assertEquals("Asia/Shanghai", single.getTimeZone());
     assertEquals("Note", single.getNote());
     assertEquals("dev", single.getUserName());
     assertEquals("/home/dev", single.getHomeDirectory());
-    List<EnvironmentCardDTO> list = service.list();
+    List<EnvironmentDTO> list = service.list();
     assertEquals(1, list.size());
     assertNull(list.get(0).getRegistrationToken());
-    assertEquals("READY", list.get(0).getStatus());
+    assertEquals(EnvironmentStatus.READY, list.get(0).getStatus());
   }
 
   /** 测试意图：从未连接过的 Environment 没有保留的宿主 metadata，Card 除状态外全部为空。 */
@@ -259,9 +262,9 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
-    assertEquals("OFFLINE", card.getStatus());
+    assertEquals(EnvironmentStatus.OFFLINE, card.getStatus());
     assertFalse(card.isReady());
     assertNull(card.getOperatingSystem());
     assertNull(card.getTimeZone());
@@ -317,11 +320,11 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
-    assertEquals("CONNECTING", card.getStatus());
+    assertEquals(EnvironmentStatus.CONNECTING, card.getStatus());
     assertFalse(card.isReady());
-    assertEquals("wsl", card.getOperatingSystem());
+    assertEquals(DaemonOperatingSystem.WSL, card.getOperatingSystem());
     assertEquals("Asia/Shanghai", card.getTimeZone());
     assertEquals("Retained note", card.getNote());
     assertEquals("dev", card.getUserName());
@@ -349,7 +352,7 @@ class EnvironmentServiceTest {
     DaemonConfiguration daemon = new DaemonConfiguration();
     daemon.setStudioUrl("https://studio.example.com");
     EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
-    config.setOperatingSystem("linux");
+    config.setOperatingSystem(DaemonOperatingSystem.LINUX);
     config.setDaemon(daemon);
     env.setInstallConfig(config);
     when(repo.getById(ENV_ID)).thenReturn(env);
@@ -443,8 +446,9 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service = service(repo);
 
-    assertTrue(service.uninstallationScript("macos").contains("uninstall"));
-    assertThrows(DomainException.class, () -> service.uninstallationScript("unknown"));
+    assertTrue(service.uninstallationScript(DaemonOperatingSystem.MACOS).contains("uninstall"));
+    assertThrows(
+        DomainException.class, () -> service.uninstallationScript(DaemonOperatingSystem.WSL));
     verify(repo, never()).getByRegistrationTokenHash(any());
   }
 
@@ -479,7 +483,7 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
+    EnvironmentDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
 
     assertNotNull(rotated.getRegistrationToken());
     assertNotEquals("old-token", rotated.getRegistrationToken());
@@ -555,9 +559,9 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
     // 卡片只投影当前连接状态，且序列化后不含任何历史事件字段。
-    assertEquals("READY", card.getStatus());
+    assertEquals(EnvironmentStatus.READY, card.getStatus());
     assertTrue(card.isReady());
     ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode json = mapper.readTree(mapper.writeValueAsString(card));
@@ -566,9 +570,9 @@ class EnvironmentServiceTest {
     // 历史事件仍按时间正序完整保留，供管理 Events 展示。
     List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
     assertEquals(2, events.size());
-    assertEquals("SKILL_SYNC_FAILED", events.get(0).getType());
-    assertEquals("WARN", events.get(0).getLevel());
-    assertEquals("READY", events.get(1).getType());
+    assertEquals(EnvironmentEventType.SKILL_SYNC_FAILED, events.get(0).getType());
+    assertEquals(EnvironmentEventLevel.WARN, events.get(0).getLevel());
+    assertEquals(EnvironmentEventType.READY, events.get(1).getType());
   }
 
   /** 测试意图：事件端点按时间正序返回同一连接行的保留事件窗口，未知 Environment 抛 404 语义错误。 */
@@ -605,9 +609,9 @@ class EnvironmentServiceTest {
 
     List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
     assertEquals(2, events.size());
-    assertEquals("CONNECTING", events.get(0).getType());
-    assertEquals("DISCONNECTED", events.get(1).getType());
-    assertEquals(NOW, events.get(0).getTime());
+    assertEquals(EnvironmentEventType.CONNECTING, events.get(0).getType());
+    assertEquals(EnvironmentEventType.DISCONNECTED, events.get(1).getType());
+    assertEquals(NOW, events.get(0).getOccurredAt());
 
     // 从未连接过（无连接行）的 Environment 事件窗口为空，而不是错误。
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
@@ -641,7 +645,7 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    EnvironmentCardDTO card = service.importEnvironment("imported", h("token-1"), null);
+    EnvironmentDTO card = service.importEnvironment("imported", h("token-1"), null);
 
     assertEquals("imported", card.getName());
     assertNull(card.getRegistrationToken());
@@ -707,7 +711,7 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    EnvironmentCardDTO card =
+    EnvironmentDTO card =
         service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0");
     assertNull(card.getRegistrationToken());
     assertEquals("1", card.getVersion());
@@ -781,7 +785,7 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    EnvironmentCardDTO card =
+    EnvironmentDTO card =
         service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, "0");
 
     assertNull(card.getRegistrationToken());
@@ -955,9 +959,9 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
-    assertEquals("OFFLINE", card.getStatus());
+    assertEquals(EnvironmentStatus.OFFLINE, card.getStatus());
     assertFalse(card.isReady());
     assertNull(card.getStatusExpiresAt(), "失效连接没有未来的状态截止时间");
     assertTrue(card.getCapabilities().isEmpty(), "过期连接的能力不得再当作可用");
@@ -978,23 +982,23 @@ class EnvironmentServiceTest {
     when(registry.find(EnvironmentId.of(ENV_ID)))
         .thenReturn(
             Optional.of(connectionAt(LiveEnvironmentStatus.READY, NOW, NOW.plusSeconds(300))));
-    EnvironmentCardDTO heartbeatBound = service.get(EnvironmentId.of(ENV_ID));
-    assertEquals("READY", heartbeatBound.getStatus());
+    EnvironmentDTO heartbeatBound = service.get(EnvironmentId.of(ENV_ID));
+    assertEquals(EnvironmentStatus.READY, heartbeatBound.getStatus());
     assertEquals(NOW.plusSeconds(60), heartbeatBound.getStatusExpiresAt());
 
     // 租约先到：截止时间取 leaseUntil。
     when(registry.find(EnvironmentId.of(ENV_ID)))
         .thenReturn(
             Optional.of(connectionAt(LiveEnvironmentStatus.READY, NOW, NOW.plusSeconds(10))));
-    EnvironmentCardDTO leaseBound = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentDTO leaseBound = service.get(EnvironmentId.of(ENV_ID));
     assertEquals(NOW.plusSeconds(10), leaseBound.getStatusExpiresAt());
 
     // 未过期的 CONNECTING 也必须给出截止时间：否则一个永远不 READY 的连接会让浏览器无限期保留旧状态。
     when(registry.find(EnvironmentId.of(ENV_ID)))
         .thenReturn(
             Optional.of(connectionAt(LiveEnvironmentStatus.CONNECTING, NOW, NOW.plusSeconds(30))));
-    EnvironmentCardDTO connecting = service.get(EnvironmentId.of(ENV_ID));
-    assertEquals("CONNECTING", connecting.getStatus());
+    EnvironmentDTO connecting = service.get(EnvironmentId.of(ENV_ID));
+    assertEquals(EnvironmentStatus.CONNECTING, connecting.getStatus());
     assertEquals(NOW.plusSeconds(30), connecting.getStatusExpiresAt());
   }
 

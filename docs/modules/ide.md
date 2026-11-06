@@ -52,7 +52,7 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 | GET `/api/environments/{id}/ide/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
 | DELETE `/api/environments/{id}/ide/views/{viewId}` | 当前 `documentId`、`bindingEpoch` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
 | 应用事件 WS `ide-use` | `documentId`、`revision`、`views[]`；空列表分离全部，不表示确认销毁 |
-| GET `/api/environments/{id}/runtime` | owner 返回当前 `{revision, status}`；无本代 READY 快照时返回 unavailable |
+| GET `/api/platform/environments/{id}/runtime` | owner 返回当前 `{revision, status}`；无本代 READY 快照时返回 unavailable |
 
 目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。
 

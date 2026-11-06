@@ -214,7 +214,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: [] })
           return
         }
-        if (path === `/api/environments`) {
+        if (path === `/api/platform/environments`) {
           await route.fulfill({ json: [] })
           return
         }

@@ -6,31 +6,32 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.environment.DaemonConfigurationCodec;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigurationCodec;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 
 import java.util.Set;
 
-/** HTTP、配置同步和持久化共用的安装设置边界；只检查输入，不探测服务器上的宿主路径。 */
+/** 配置同步与持久化共用的安装设置边界；只检查输入，不探测服务器上的宿主路径。 */
 public final class EnvironmentInstallConfigs {
   private static final ObjectMapper JSON = JsonMapper.builder().build();
 
-  private EnvironmentInstallConfigs() {}
+  /** 可由安装脚本部署的操作系统 family；WSL 在宿主侧按 Linux 安装，不作为安装目标。 */
+  private static final Set<DaemonOperatingSystem> INSTALLABLE =
+      Set.of(
+          DaemonOperatingSystem.LINUX, DaemonOperatingSystem.MACOS, DaemonOperatingSystem.WINDOWS);
 
-  public static EnvironmentInstallConfigUpdateDTO parseUpdate(JsonNode node) {
-    fields(node, Set.of("expectedVersion", "installConfig"), "request");
-    EnvironmentInstallConfigUpdateDTO result = new EnvironmentInstallConfigUpdateDTO();
-    result.setExpectedVersion(text(node.get("expectedVersion"), "expectedVersion", true));
-    result.setInstallConfig(parse(node.get("installConfig")));
-    return result;
-  }
+  private EnvironmentInstallConfigs() {}
 
   public static EnvironmentInstallConfigDTO parse(JsonNode node) {
     fields(node, Set.of("operatingSystem", "daemon"), "installConfig");
     EnvironmentInstallConfigDTO result = new EnvironmentInstallConfigDTO();
-    result.setOperatingSystem(
-        text(node.get("operatingSystem"), "installConfig.operatingSystem", true));
+    String operatingSystem = text(node.get("operatingSystem"), "installConfig.operatingSystem");
+    try {
+      result.setOperatingSystem(DaemonOperatingSystem.fromWireValue(operatingSystem));
+    } catch (IllegalArgumentException error) {
+      throw invalid("installConfig.operatingSystem must be linux, macos or windows");
+    }
     try {
       result.setDaemon(DaemonConfigurationCodec.parse(node.get("daemon")));
     } catch (IllegalArgumentException error) {
@@ -44,8 +45,8 @@ public final class EnvironmentInstallConfigs {
     if (value == null) {
       throw invalid("installConfig must be an object");
     }
-    String os = value.getOperatingSystem();
-    if (!Set.of("linux", "macos", "windows").contains(os == null ? "" : os)) {
+    DaemonOperatingSystem os = value.getOperatingSystem();
+    if (os == null || !INSTALLABLE.contains(os)) {
       throw invalid("installConfig.operatingSystem must be linux, macos or windows");
     }
     EnvironmentInstallConfigDTO result = new EnvironmentInstallConfigDTO();
@@ -97,14 +98,8 @@ public final class EnvironmentInstallConfigs {
             });
   }
 
-  private static String text(JsonNode node, String path, boolean required) {
-    if (node == null || node.isNull()) {
-      if (required) {
-        throw invalid(path + " must be a string");
-      }
-      return null;
-    }
-    if (!node.isTextual()) {
+  private static String text(JsonNode node, String path) {
+    if (node == null || node.isNull() || !node.isTextual()) {
       throw invalid(path + " must be a string");
     }
     return node.textValue();

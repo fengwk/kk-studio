@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.environment;
+package fun.fengwk.kkstudio.platform.environment.dto;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;

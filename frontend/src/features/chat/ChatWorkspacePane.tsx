@@ -7,7 +7,7 @@ import { isNotFoundError } from '@/shared/api/client'
 import type {
   AgentDTO,
   ChatDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 /** Chat 只提供 owner/defaults；发送、导航、命令和 Thread projection 全部由 AgentPane 共享。 */
@@ -30,7 +30,7 @@ export function ChatWorkspacePane({
 }: {
   chat: ChatDTO
   agents: AgentDTO[]
-  environments?: EnvironmentCardDTO[]
+  environments?: EnvironmentDTO[]
   pane: { id: string }
   focused: boolean
   hidden?: boolean

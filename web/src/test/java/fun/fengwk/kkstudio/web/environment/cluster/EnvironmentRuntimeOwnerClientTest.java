@@ -16,7 +16,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -63,7 +64,7 @@ class EnvironmentRuntimeOwnerClientTest {
     AtomicReference<String> path = new AtomicReference<>();
     AtomicReference<String> auth = new AtomicReference<>();
     server.createContext(
-        "/internal/environments/" + ENV + "/runtime",
+        "/internal/platform/environments/" + ENV + "/runtime",
         exchange -> {
           method.set(exchange.getRequestMethod());
           path.set(exchange.getRequestURI().getRawPath());
@@ -77,7 +78,7 @@ class EnvironmentRuntimeOwnerClientTest {
     var snapshot = client.runtimeStatus(remote(), ENV);
 
     assertEquals("GET", method.get());
-    assertEquals("/internal/environments/" + ENV + "/runtime", path.get());
+    assertEquals("/internal/platform/environments/" + ENV + "/runtime", path.get());
     assertEquals("ok", auth.get());
     assertEquals("7", snapshot.getRevision());
     assertEquals("1.0.9", snapshot.getStatus().getDaemonVersion());
@@ -87,7 +88,7 @@ class EnvironmentRuntimeOwnerClientTest {
   void postsUpdateAndDecodesExplicitCommandStatus() {
     AtomicReference<String> method = new AtomicReference<>();
     server.createContext(
-        "/internal/environments/" + ENV + "/update",
+        "/internal/platform/environments/" + ENV + "/update-daemon",
         exchange -> {
           method.set(exchange.getRequestMethod());
           respond(
@@ -102,7 +103,7 @@ class EnvironmentRuntimeOwnerClientTest {
     EnvironmentUpdateStartDTO result = client.startUpdate(remote(), ENV);
 
     assertEquals("POST", method.get());
-    assertEquals(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, result.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, result.getCommandStatus());
     assertEquals(8L, Long.parseLong(result.getRuntimeStatus().getRevision()));
     assertEquals(12L, result.getRuntimeStatus().getStatus().getUpdate().getDownloadedBytes());
   }
@@ -110,16 +111,16 @@ class EnvironmentRuntimeOwnerClientTest {
   @Test
   void mapsBusyAndUnavailableWithoutLeakingBody() {
     server.createContext(
-        "/internal/environments/" + ENV + "/update",
+        "/internal/platform/environments/" + ENV + "/update-daemon",
         exchange -> respond(exchange, 409, "{\"code\":\"in_use\",\"detail\":\"busy\"}"));
     DomainException busy =
         assertThrows(DomainException.class, () -> client.startUpdate(remote(), ENV));
     assertEquals("in_use", busy.code().code());
     assertEquals("busy", busy.getMessage());
 
-    server.removeContext("/internal/environments/" + ENV + "/update");
+    server.removeContext("/internal/platform/environments/" + ENV + "/update-daemon");
     server.createContext(
-        "/internal/environments/" + ENV + "/runtime",
+        "/internal/platform/environments/" + ENV + "/runtime",
         exchange ->
             respond(
                 exchange,
@@ -138,7 +139,7 @@ class EnvironmentRuntimeOwnerClientTest {
     assertThrows(DomainException.class, () -> client.runtimeStatus(withPath, ENV));
 
     server.createContext(
-        "/internal/environments/" + ENV + "/runtime",
+        "/internal/platform/environments/" + ENV + "/runtime",
         exchange -> respond(exchange, 200, "{\"revision\":\"7\",\"status\":{\"extra\":true}}"));
     assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
   }
@@ -146,7 +147,7 @@ class EnvironmentRuntimeOwnerClientTest {
   @Test
   void rejectsOversizedOwnerResponse() {
     server.createContext(
-        "/internal/environments/" + ENV + "/runtime",
+        "/internal/platform/environments/" + ENV + "/runtime",
         exchange ->
             respond(
                 exchange,
@@ -165,7 +166,7 @@ class EnvironmentRuntimeOwnerClientTest {
         new EnvironmentRuntimeOwnerClient(
             HttpClient.newHttpClient(), authentication, Duration.ofMillis(100));
     server.createContext(
-        "/internal/environments/" + ENV + "/runtime",
+        "/internal/platform/environments/" + ENV + "/runtime",
         exchange -> {
           try {
             Thread.sleep(500);
