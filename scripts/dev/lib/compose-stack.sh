@@ -55,14 +55,14 @@ stack_wait_environment() {
   local attempt status=""
 
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if curl -fsS "$app_url/api/environments" 2>/dev/null \
+    if curl -fsS "$app_url/api/platform/environments" 2>/dev/null \
       | node "$probe" environment-ready "$env_name" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$interval"
   done
 
-  status=$(curl -fsS "$app_url/api/environments" 2>/dev/null \
+  status=$(curl -fsS "$app_url/api/platform/environments" 2>/dev/null \
     | node "$probe" environment-status "$env_name" 2>/dev/null || true)
   die "timed out waiting for $label (last status='${status:-unknown}')"
 }

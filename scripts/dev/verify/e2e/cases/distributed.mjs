@@ -26,7 +26,7 @@ const ENV_C_NAME = 'distributed-c'
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await callNode(node, 'GET', `/api/environments/${encodeURIComponent(envId)}`)
+      const res = await callNode(node, 'GET', `/api/platform/environments/${encodeURIComponent(envId)}`)
       const card = res.json
       if (card?.ready === true && card?.status === 'READY') {
         return card
@@ -93,7 +93,7 @@ registerCase({
 
     try {
       // 1. 在 node A 创建临时 Environment Card
-      const createRes = await ctx.callNode('a', 'POST', '/api/environments', { name: envName })
+      const createRes = await ctx.callNode('a', 'POST', '/api/platform/environments', { name: envName })
       const created = createRes.json
       assert(created?.id, 'expected created environment id')
       assert(created.name === envName, `expected name ${envName}, got ${created.name}`)
@@ -106,7 +106,7 @@ registerCase({
       latestVersion = created.version
 
       // 2. 在 node B 读取并验证一致性（注意 registrationToken 不暴露）
-      const getBRes = await ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
+      const getBRes = await ctx.callNode('b', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
       const fromB = getBRes.json
       assert(fromB.id === createdId, 'node B get: id mismatch')
       assert(fromB.name === envName, 'node B get: name mismatch')
@@ -117,7 +117,7 @@ registerCase({
       const rotateOnBRes = await ctx.callNode(
         'b',
         'POST',
-        `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
+        `/api/platform/environments/${encodeURIComponent(createdId)}/rotate-token`,
         { expectedVersion: latestVersion },
       )
       const rotatedOnB = rotateOnBRes.json
@@ -137,7 +137,7 @@ registerCase({
           ctx.callNode(
             'a',
             'POST',
-            `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
+            `/api/platform/environments/${encodeURIComponent(createdId)}/rotate-token`,
             { expectedVersion: created.version },
           ),
         { status: 409 },
@@ -145,7 +145,7 @@ registerCase({
       const rotateOnARes = await ctx.callNode(
         'a',
         'POST',
-        `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
+        `/api/platform/environments/${encodeURIComponent(createdId)}/rotate-token`,
         { expectedVersion: latestVersion },
       )
       const rotatedOnA = rotateOnARes.json
@@ -164,12 +164,12 @@ registerCase({
           ctx.callNode(
             'a',
             'PUT',
-            `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+            `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
             { name: `${envName}-renamed` },
           ),
         { status: 405 },
       )
-      const getARes = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
+      const getARes = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
       const fromA = getARes.json
       assert(fromA.name === envName, 'node A verify: name must stay immutable')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
@@ -178,14 +178,14 @@ registerCase({
       await ctx.callNode(
         'b',
         'DELETE',
-        `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+        `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
       )
       await expectHttpError(
-        () => ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
       await expectHttpError(
-        () => ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('b', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
 
@@ -209,13 +209,13 @@ registerCase({
       // 尽力清理临时环境卡片
       if (createdId) {
         try {
-          const probe = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
+          const probe = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
           const card = probe.json
           if (card?.version) {
             await ctx.callNode(
               'a',
               'DELETE',
-              `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
+              `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
             )
           }
         } catch {
@@ -334,7 +334,7 @@ registerCase({
         ctx.callNode(
           'a',
           'GET',
-          `/api/environments/${encodeURIComponent(ENV_A_ID)}`,
+          `/api/platform/environments/${encodeURIComponent(ENV_A_ID)}`,
           undefined,
           10_000,
         ),

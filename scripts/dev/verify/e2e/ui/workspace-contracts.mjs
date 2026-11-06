@@ -806,7 +806,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
-    const environmentResponse = await apiCtx.call('POST', '/api/environments', {
+    const environmentResponse = await apiCtx.call('POST', '/api/platform/environments', {
       name: `offline-${suffix}`,
     })
     assert(
@@ -883,7 +883,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       intervalMs: 100,
     })
     // 切换只读 Footer 的 Environment 事实通过 branch settings 的 setEnvironmentCommand 表达。
-    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/environments', {
+    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/platform/environments', {
       name: `offline-alt-${suffix}`,
     })
     assert(
@@ -1267,7 +1267,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.environment?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
+        `/api/platform/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
       )
     }
   })
@@ -1275,7 +1275,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.otherEnvironment?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
+        `/api/platform/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
       )
     }
   })

@@ -366,7 +366,7 @@ start_daemon() {
   local _ env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for _ in $(seq 1 180); do
-    env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/platform/environments" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" = "READY" ]; then
@@ -429,7 +429,7 @@ ensure_stack() {
   fi
 
   if [ "$with_daemon" = "true" ]; then
-    env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/platform/environments" \
       | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" != "READY" ]; then

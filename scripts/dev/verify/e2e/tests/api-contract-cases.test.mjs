@@ -41,7 +41,7 @@ function chatDefaultEnvironmentFixture() {
     if (method === 'GET' && pathname === '/api/agents') {
       return { status: 200, json: { results: [agent] } }
     }
-    if (method === 'POST' && pathname === '/api/environments') {
+    if (method === 'POST' && pathname === '/api/platform/environments') {
       const environment = {
         id: nextId(),
         name: body.name,
@@ -106,7 +106,7 @@ function chatDefaultEnvironmentFixture() {
         return { status: 204, json: null }
       }
     }
-    const environmentMatch = pathname.match(/^\/api\/environments\/([^/]+)$/)
+    const environmentMatch = pathname.match(/^\/api\/platform\/environments\/([^/]+)$/)
     if (environmentMatch) {
       const id = decodeURIComponent(environmentMatch[1])
       if (method === 'GET') {
@@ -241,7 +241,7 @@ test('chat default environment case executes the create/retain/clear wire with o
     (request) => request.method === 'POST' && request.path === '/api/chats',
   )
   const environmentCreate = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/environments',
+    (request) => request.method === 'POST' && request.path === '/api/platform/environments',
   )
   // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
   assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
