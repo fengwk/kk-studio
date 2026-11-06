@@ -54,9 +54,9 @@ export function useAgentThreadQueries(threadId: string) {
   const hasEnvironmentTools = environmentTools.length > 0
   const deadlines = environmentTools.flatMap((invocation) => {
     const at = invocation.environmentWaitFreshnessAt
-    return at == null ? [] : [at * 1000]
+    return at == null ? [] : [at]
   })
-  const earliest = deadlines.length > 0 ? Math.min(...deadlines) / 1000 : null
+  const earliest = deadlines.length > 0 ? Math.min(...deadlines) : null
   useReadModelFreshnessRecheck(queryKeys.threads.snapshot(threadId), earliest)
   useResourceSync(hasEnvironmentTools && rootThreadId ? { kind: 'interactions' } : null, {
     sync: () => {

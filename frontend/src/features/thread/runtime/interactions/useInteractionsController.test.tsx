@@ -693,7 +693,7 @@ describe('useInteractionsController', () => {
       const listSpy = vi
         .spyOn(interactionService, 'listInteractions')
         .mockResolvedValue({ items: [mockItem1], nextCursor: null, total: 1,
-          freshnessAt: base / 1000 + 5 })
+          freshnessAt: base + 5_000 })
 
       const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
       await act(async () => {

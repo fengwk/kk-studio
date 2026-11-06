@@ -602,14 +602,14 @@ function assertInstant(value, field) {
 function instantEpochMillis(value, field = 'instant') {
   if (typeof value === 'number') {
     assert(
-      Number.isFinite(value) && value >= 0,
-      `${field} must be a non-negative epoch-second number: ${JSON.stringify(value)}`,
+      Number.isInteger(value) && value >= 0,
+      `${field} must be a non-negative epoch-millisecond integer: ${JSON.stringify(value)}`,
     )
-    return Math.round(value * 1000)
+    return value
   }
   assert(
     typeof value === 'string' && value.trim() && Number.isFinite(Date.parse(value)),
-    `${field} must be an ISO instant or epoch-second number: ${JSON.stringify(value)}`,
+    `${field} must be an ISO instant or epoch-millisecond integer: ${JSON.stringify(value)}`,
   )
   return Date.parse(value)
 }

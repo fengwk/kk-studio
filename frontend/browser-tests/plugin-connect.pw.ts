@@ -185,7 +185,7 @@ async function transport(
         json: {
           pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
           appliedRevision: postData.expectedRevision,
-          checkedAt: 1772366400,
+          checkedAt: 1772366400000,
           reachability: 'REACHABLE',
           authentication: 'ACCEPTED',
           browserSession: 'UNKNOWN',

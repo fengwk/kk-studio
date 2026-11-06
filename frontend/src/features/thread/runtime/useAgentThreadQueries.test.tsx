@@ -110,16 +110,16 @@ it('snapshot 最早自然截止单次回读，续租注销旧 timer，旧过期�
   const now = Date.now()
   vi.useFakeTimers()
   vi.setSystemTime(now)
-  let current = snapshot(ROOT, { environmentWaitFreshnessAt: (now + 10000) / 1000 })
+  let current = snapshot(ROOT, { environmentWaitFreshnessAt: now + 10000 })
   current.toolInvocations.push({
-    ...current.toolInvocations[0], id: 'later', environmentWaitFreshnessAt: (now + 60000) / 1000,
+    ...current.toolInvocations[0], id: 'later', environmentWaitFreshnessAt: now + 60000,
   })
   const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockImplementation(async () => current)
   const { result, unmount } = renderHook(() => useAgentThreadQueries(ROOT), { wrapper })
   await act(async () => vi.advanceTimersByTimeAsync(1))
   expect(result.current.snapshotQuery.isSuccess).toBe(true)
   const socket = sockets.openLatest()
-  current = snapshot(ROOT, { environmentWaitFreshnessAt: (now + 20000) / 1000 })
+  current = snapshot(ROOT, { environmentWaitFreshnessAt: now + 20000 })
   await act(async () => {
     socket.emitServer({ type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId: ROOT } })
     await vi.advanceTimersByTimeAsync(1)
@@ -140,7 +140,7 @@ it('无通知续租时在旧截止点回读，并在新租约自然到期后显�
   vi.setSystemTime(now)
   let current = snapshot(ROOT, {
     waitingForEnvironment: false,
-    environmentWaitFreshnessAt: (now + 10000) / 1000,
+    environmentWaitFreshnessAt: now + 10000,
   })
   const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockImplementation(async () => current)
   const { result } = renderHook(() => useAgentThreadQueries(ROOT), { wrapper })
@@ -149,7 +149,7 @@ it('无通知续租时在旧截止点回读，并在新租约自然到期后显�
 
   current = snapshot(ROOT, {
     waitingForEnvironment: false,
-    environmentWaitFreshnessAt: (now + 20000) / 1000,
+    environmentWaitFreshnessAt: now + 20000,
   })
   await act(async () => vi.advanceTimersByTimeAsync(10250))
   expect(get).toHaveBeenCalledTimes(2)
