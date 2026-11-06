@@ -236,7 +236,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"rm -rf /"}',
-      approval: '{"required":true}',
+      approval: { required: true },
       result: null,
       error: null,
       createdAt: 1790467200,
@@ -248,7 +248,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
         threadId="th-app"
         invocationId="inv-app-1"
         toolName="bash"
-        approval={JSON.stringify({ required: true, reason: '高危操作确认' })}
+        approval={{ required: true, reason: '高危操作确认' }}
         argumentsJson='{"command":"rm -rf /"}'
       />,
       { wrapper },

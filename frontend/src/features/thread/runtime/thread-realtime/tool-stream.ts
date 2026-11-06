@@ -151,11 +151,10 @@ function parseToolResultPayload(value: unknown): {
   if (value == null) {
     return null
   }
-  const record = typeof value === 'string' ? parseJsonRecord(value) : value
-  if (!isRecord(record)) {
+  if (!isRecord(value)) {
     return null
   }
-  return { text: partialText(record), error: record[TOOL_RESULT_ERROR_KEY] === true }
+  return { text: partialText(value), error: value[TOOL_RESULT_ERROR_KEY] === true }
 }
 
 /** 将规范的错误 JSON 节点解析为用于展示的 message（不存在时返回 null）。 */
@@ -163,44 +162,20 @@ export function parseToolErrorText(value: unknown): string | null {
   if (value == null) {
     return null
   }
-  const record = typeof value === 'string' ? parseJsonRecord(value) : value
-  if (isRecord(record)) {
-    const message = record.message
+  if (isRecord(value)) {
+    const message = value.message
     if (typeof message === 'string' && message.trim()) {
       return message
     }
   }
-  return typeof value === 'string' && value.trim() ? value : null
-}
-
-function parseJsonRecord(value: string): unknown {
-  if (!value.trim()) {
-    return null
-  }
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
+  return null
 }
 
 export function parseProcessOutputDetails(details: unknown): ProcessOutputDetails | null {
-  let record: Record<string, unknown> | null = null
-  if (isRecord(details)) {
-    record = details
-  } else if (typeof details === 'string' && details.trim()) {
-    try {
-      const parsed: unknown = JSON.parse(details)
-      if (isRecord(parsed)) {
-        record = parsed
-      }
-    } catch {
-      return null
-    }
-  }
-  if (record == null || record.kind !== 'process.output') {
+  if (!isRecord(details) || details.kind !== 'process.output') {
     return null
   }
+  const record = details
   const rawMode = typeof record.mode === 'string' ? record.mode.toUpperCase() : ''
   if (rawMode !== 'APPEND' && rawMode !== 'SNAPSHOT') {
     return null

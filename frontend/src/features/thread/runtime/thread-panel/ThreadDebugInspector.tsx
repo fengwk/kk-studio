@@ -13,6 +13,7 @@ import type {
 import { formatByteCount } from '@/shared/lib/format-bytes'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
+import { formatRawJsonText } from '@/features/thread/runtime/payload-json'
 
 export type DebugInspectorSelection =
   | { type: 'tool'; tool: ThreadModelRequestDebugTool }
@@ -25,14 +26,6 @@ export type DebugInspectorSelection =
 function formatJson(raw: unknown): string {
   if (raw == null) {
     return ''
-  }
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw)
-      return JSON.stringify(parsed, null, 2)
-    } catch {
-      return raw
-    }
   }
   try {
     return JSON.stringify(raw, null, 2) ?? ''
@@ -311,7 +304,7 @@ export function ThreadDebugInspector({
                 tabIndex={0}
                 data-testid="frozen-request-json"
               >
-                {formatJson(debug.frozenInvocation.requestJson)}
+                {formatRawJsonText(debug.frozenInvocation.requestJson)}
               </Code>
               <p className="inline-hint">{t('ai.runtime.debug.frozenNotice')}</p>
               <p className="inline-hint">{t('ai.runtime.debug.httpOriginalUnavailable')}</p>
@@ -352,7 +345,7 @@ export function ThreadDebugInspector({
               tabIndex={0}
               data-testid="preview-request-body"
             >
-              {formatJson(selection.preview.bodyJson)}
+              {formatRawJsonText(selection.preview.bodyJson)}
             </Code>
           </div>
         </div>

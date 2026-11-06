@@ -286,7 +286,7 @@ describe('thread realtime state', () => {
     const result = snapshotToolStream(
       {
         ...base,
-        result: JSON.stringify({
+        result: {
           toolCallId: 'call-1',
           contents: [
             { type: 'text', text: 'answer' },
@@ -294,7 +294,7 @@ describe('thread realtime state', () => {
           ],
           error: null,
           details: null,
-        }),
+        },
       },
       '7',
     )
@@ -304,19 +304,19 @@ describe('thread realtime state', () => {
     const failedResult = snapshotToolStream(
       {
         ...base,
-        result: JSON.stringify({
+        result: {
           toolCallId: 'call-1',
           contents: [{ type: 'text', text: 'partial output' }],
           error: true,
           details: null,
-        }),
+        },
       },
       '7',
     )
     expect(failedResult).toMatchObject({ error: true, text: 'partial output' })
 
     const failed = snapshotToolStream(
-      { ...base, error: '{"message":"boom"}' },
+      { ...base, error: { message: 'boom' } },
       '7',
     )
     expect(failed).toMatchObject({ error: true, errorText: 'boom' })
@@ -350,12 +350,11 @@ describe('thread realtime state', () => {
       createdAt: 1785232800,
       updatedAt: 1785232800,
     }
-    // 瞬时上传引用投影为 attachment；invalid result 回退
-    // 到空文本 base；空白 result 不算终态；非法 error 原样暴露 message。
+    // 瞬时上传引用投影为 attachment；非对象节点不被当作 JSON 原文解析。
     const managed = snapshotToolStream(
       {
         ...base,
-        result: JSON.stringify({
+        result: {
           toolCallId: 'call-2',
           contents: [
             { type: 'text', text: 'ok' },
@@ -370,7 +369,7 @@ describe('thread realtime state', () => {
           ],
           error: false,
           details: null,
-        }),
+        },
       },
       '7',
     )
@@ -386,10 +385,9 @@ describe('thread realtime state', () => {
     expect(snapshotToolStream({ ...base, error: ' ' }, '7')).toMatchObject({
       error: false,
     })
-    // 非法 error 原样作为 errorText 暴露。
+    // 非对象 error 不投影为错误文本。
     expect(snapshotToolStream({ ...base, error: 'not-json' }, '7')).toMatchObject({
-      error: true,
-      errorText: 'not-json',
+      error: false,
     })
   })
 
@@ -804,19 +802,19 @@ describe('thread realtime state', () => {
       snapshotToolStream(
         {
           ...toolInvocation(),
-          result: JSON.stringify({
+          result: {
             toolCallId: 'call-1',
             contents: [null, { type: 'text', text: 'ok' }],
             error: false,
             details: null,
-          }),
+          },
         },
         '7',
       ),
     ).toMatchObject({ text: 'ok', error: false })
-    // 非 record 的 error：错误文本原样暴露。
-    expect(parseToolErrorText('[1]')).toBe('[1]')
-    expect(parseToolErrorText('{"noMessage":1}')).toBe('{"noMessage":1}')
+    // 非 record 的 error 不当作原文重新解析。
+    expect(parseToolErrorText('[1]')).toBeNull()
+    expect(parseToolErrorText('{"noMessage":1}')).toBeNull()
   })
 
   it('handles non-record tool partial chunks and json stringify fallbacks', () => {
@@ -970,16 +968,16 @@ describe('thread realtime state', () => {
         observedBytes: 100,
       })
 
-      // case-insensitive mode & string details parsing
+      // Mode is case-insensitive, but details must be a node.
       expect(
         parseProcessOutputDetails(
-          JSON.stringify({
+          {
             kind: 'process.output',
             mode: 'snapshot',
             startOffset: 50,
             endOffset: 200,
             observedBytes: 200,
-          }),
+          },
         ),
       ).toEqual({
         kind: 'process.output',
@@ -991,6 +989,7 @@ describe('thread realtime state', () => {
 
       // rejected shapes
       expect(parseProcessOutputDetails(null)).toBeNull()
+      expect(parseProcessOutputDetails('{"kind":"process.output"}')).toBeNull()
       expect(parseProcessOutputDetails({})).toBeNull()
       expect(parseProcessOutputDetails({ kind: 'other' })).toBeNull()
       expect(parseProcessOutputDetails({ kind: 'process.output', mode: 'UNKNOWN' })).toBeNull()

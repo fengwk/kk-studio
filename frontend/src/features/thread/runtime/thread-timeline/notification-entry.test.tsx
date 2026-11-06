@@ -21,12 +21,12 @@ function notificationEntry(
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'NOTIFICATION',
-    payload: JSON.stringify({
+    payload: {
       notificationId: `notification-${kind}`,
       kind,
       sourceThreadId: 'child-thread-1',
       message: { role: 'USER', contents: [{ type: 'text', text }] },
-    }),
+    },
     createdAt: 1785232800,
     usageCost: null,
   }
@@ -38,9 +38,9 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payload: JSON.stringify({
+    payload: {
       message: { role: 'USER', contents: [{ type: 'text', text }] },
-    }),
+    },
     createdAt: 1785232800,
     usageCost: null,
   }
@@ -58,13 +58,13 @@ function queuedCommand(
     state: 'QUEUED',
     idempotencyKey: `queued-${type}-${sequence}`,
     payload: type === 'USER_MESSAGE'
-      ? JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text }] } })
-      : JSON.stringify({
+      ? { message: { role: 'USER', contents: [{ type: 'text', text }] } }
+      : {
           notificationId: `notification-${sequence}`,
           kind: 'SUBAGENT_RESULT',
           sourceThreadId: 'child-thread-1',
           message: { role: 'USER', contents: [{ type: 'text', text }] },
-        }),
+        },
     cancelledAt: null,
     createdAt: 1785232801,
   }

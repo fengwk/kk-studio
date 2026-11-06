@@ -5,6 +5,7 @@ import {
   parseQuestionnaire,
 } from '@/features/thread/runtime/interactions/questionnaire-parser'
 import type { ToolContent } from '@/features/thread/runtime/thread-timeline-types'
+import { parseRawJsonText } from '@/features/thread/runtime/payload-json'
 import { useI18n } from '@/shared/i18n'
 
 /**
@@ -76,7 +77,7 @@ function resultPayload(contents: ToolContent[]): unknown {
       return content.value
     }
     if (content.type === 'text' && content.text.trim()) {
-      return content.text
+      return parseRawJsonText(content.text)
     }
   }
   return null

@@ -1,4 +1,4 @@
-import { parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/payload-json'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 export interface GoalProgressRecord {
@@ -39,26 +39,14 @@ export function parseGoalProgress(
     if (!entry || entry.entryType !== 'CUSTOM') {
       continue
     }
-    const payload = parsePayload(entry.payload)
+    const payload = asRecord(entry.payload)
     if (
       payload.contributorId !== 'builtin'
       || payload.customType !== 'goal.progress'
     ) {
       continue
     }
-    let data: Record<string, unknown> | null = null
-    if (typeof payload.dataJson === 'string') {
-      try {
-        data = JSON.parse(payload.dataJson)
-      } catch {
-        // malformed dataJson ignored
-      }
-    } else if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
-      data = payload.data as Record<string, unknown>
-    }
-    if (!data || typeof data !== 'object') {
-      continue
-    }
+    const data = asRecord(payload.data)
     const goalId = typeof data.goalId === 'string' ? data.goalId : null
     const status = data.status === 'complete' || data.status === 'blocked' ? data.status : null
     const reason = typeof data.reason === 'string' ? data.reason : null

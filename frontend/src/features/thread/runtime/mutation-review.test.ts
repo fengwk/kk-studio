@@ -60,15 +60,15 @@ describe('mutation-review parser and extractor', () => {
     expect(parseEditReview([])).toBeNull()
   })
 
-  it('extracts editReview from approval string', () => {
-    const approval = JSON.stringify({
+  it('extracts editReview from an approval node', () => {
+    const approval = {
       required: true,
       editReview: {
         path: '/workspace/file.txt',
         diff: '-old\n+new',
         sha256: validSha,
       },
-    })
+    }
     expect(extractApprovalEditReview(approval)).toEqual({
       path: '/workspace/file.txt',
       diff: '-old\n+new',
@@ -79,8 +79,9 @@ describe('mutation-review parser and extractor', () => {
     expect(extractApprovalEditReview(null)).toBeNull()
     expect(extractApprovalEditReview('invalid json')).toBeNull()
     expect(extractApprovalEditReview('{}')).toBeNull()
-    expect(extractApprovalEditReview(JSON.stringify({ required: true }))).toBeNull()
-    expect(extractApprovalEditReview(JSON.stringify({ editReview: { path: '' } }))).toBeNull()
+    expect(extractApprovalEditReview({ required: true })).toBeNull()
+    expect(extractApprovalEditReview({ editReview: { path: '' } })).toBeNull()
+    expect(extractApprovalEditReview(JSON.stringify(approval))).toBeNull()
   })
 
   it('extracts editReview strictly from canonical details object', () => {
@@ -104,7 +105,7 @@ describe('mutation-review parser and extractor', () => {
       sha256: validSha,
     })
 
-    // Works with JSON string payload directly
+    // A serialized result is not a result node, even when it contains valid JSON.
     const rawResultJson = JSON.stringify({
       toolCallId: 'call-1',
       contents: [{ type: 'text', text: 'ok' }],
@@ -117,11 +118,7 @@ describe('mutation-review parser and extractor', () => {
         },
       },
     })
-    expect(extractResultEditReview(rawResultJson)).toEqual({
-      path: '/file.ts',
-      diff: '+added',
-      sha256: validSha,
-    })
+    expect(extractResultEditReview(rawResultJson)).toBeNull()
 
     // Rejects non-canonical locations (direct editReview, detailsJson, metadata, etc.)
     expect(

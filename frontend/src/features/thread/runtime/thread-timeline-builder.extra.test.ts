@@ -852,14 +852,14 @@ describe('thread timeline edge branches', () => {
   it('normalizes approval JSON defensively across shape and garbage inputs', () => {
     // parseApproval 的规范映射：未知 decision 归一为 null、非字符串/空白 reason
     // 归一为 null、字符串 decisionId 原样保留、required 缺失视为 false。
-    expect(parseApproval(JSON.stringify({ required: true, decision: 'DENIED' }))).toEqual({
+    expect(parseApproval({ required: true, decision: 'DENIED' })).toEqual({
       required: true,
       decision: 'DENIED',
       decisionId: null,
       reason: null,
       editReview: null,
     })
-    expect(parseApproval(JSON.stringify({ decision: 'ALLOW' }))).toEqual({
+    expect(parseApproval({ decision: 'ALLOW' })).toEqual({
       required: false,
       decision: null,
       decisionId: null,
@@ -868,12 +868,12 @@ describe('thread timeline edge branches', () => {
     })
     expect(
       parseApproval(
-        JSON.stringify({
+        {
           required: true,
           decision: 'ALLOWED',
           decisionId: 42,
           reason: '   ',
-        }),
+        },
       ),
     ).toEqual({
       required: true,
@@ -882,13 +882,7 @@ describe('thread timeline edge branches', () => {
       reason: null,
       editReview: null,
     })
-    expect(parseApproval('{"required":true}')).toEqual({
-      required: true,
-      decision: null,
-      decisionId: null,
-      reason: null,
-      editReview: null,
-    })
+    expect(parseApproval('{"required":true}')).toBeNull()
   })
 })
 
@@ -898,7 +892,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payload: JSON.stringify(payload),
+    payload,
     createdAt: 1767225600,
     usageCost: null,
   }
@@ -917,7 +911,7 @@ function command(
     type,
     state,
     idempotencyKey: `cid-${label}`,
-    payload: JSON.stringify(payload),
+    payload,
     cancelledAt: null,
     createdAt: 1767225600,
   }
@@ -954,7 +948,7 @@ describe('Turn usage after TURN_END', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType,
-      payload: JSON.stringify(payload),
+      payload,
       createdAt,
       usageCost: null,
     }

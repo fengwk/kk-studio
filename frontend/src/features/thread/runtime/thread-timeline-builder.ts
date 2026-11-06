@@ -2,7 +2,7 @@ import {
   extractResultEditReview,
   parseEditReview,
 } from '@/features/thread/runtime/mutation-review'
-import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
@@ -87,7 +87,7 @@ export function buildThreadTimeline(
 
   for (const entry of entries) {
     if (entry.entryType === 'TURN_START') {
-      const payload = asRecord(parsePayload(entry.payload))
+      const payload = asRecord(entry.payload)
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
       inCompactionTurn = latestTurnIsCompaction
       compactionTurn = latestTurnIsCompaction
@@ -103,14 +103,14 @@ export function buildThreadTimeline(
     }
     if (inCompactionTurn) {
       if (entry.entryType === 'COMPACTION') {
-        const summaryText = getString(asRecord(parsePayload(entry.payload)).summaryText)
+        const summaryText = getString(asRecord(entry.payload).summaryText)
         if (compactionTurn != null && summaryText.trim() !== '') {
           // 只保留最后一次仍是唯一结果；原回合的内流/思考/usage 继续屏蔽。
           compactionTurn.summaryEntry = entry
           compactionTurn.summaryText = summaryText
         }
       } else if (entry.entryType === 'TURN_END') {
-        const payload = asRecord(parsePayload(entry.payload))
+        const payload = asRecord(entry.payload)
         if (
           compactionTurn != null
           && compactionTurn.summaryEntry != null
@@ -484,7 +484,7 @@ function terminalInvocationResult(
   call: ToolDialogueMessage,
 ): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> | null {
   if (invocation.result != null) {
-    const projected = projectToolResultContent(parsePayload(invocation.result), call.arguments)
+    const projected = projectToolResultContent(asRecord(invocation.result), call.arguments)
     return {
       ...projected,
       editReview: extractResultEditReview(invocation.result) ?? projected.editReview,
@@ -521,14 +521,7 @@ function hasDurableToolResult(
 
 /** 将规范的 ToolApproval JSON 节点解析为可安全展示的投影。 */
 export function parseApproval(approval: unknown): ToolApprovalState | null {
-  let value = approval
-  if (typeof approval === 'string') {
-    try {
-      value = JSON.parse(approval)
-    } catch {
-      return null
-    }
-  }
+  const value = approval
   if (!isRecord(value)) {
     return null
   }
@@ -553,7 +546,7 @@ function toolCallOrdinal(messageId: string): number {
 function extractQueuedMessage(
   payloadValue: unknown,
 ): { role: 'user'; text: string } | null {
-  const payload = parsePayload(payloadValue)
+  const payload = asRecord(payloadValue)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
   const text = contents.map(contentText).filter(Boolean).join('\n')

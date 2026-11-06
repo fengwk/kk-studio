@@ -1,5 +1,5 @@
 import { extractResultEditReview } from '@/features/thread/runtime/mutation-review'
-import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList, parseRawJsonText } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   DialogueContent,
@@ -54,7 +54,7 @@ export function projectDurableEntry(
   durableToolArguments: Map<string, string[]>,
   context: EntryProjectionContext,
 ) {
-  const payload = parsePayload(entry.payload)
+  const payload = asRecord(entry.payload)
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
     const settings = parseSettingsSnapshot(payload.settings)
@@ -434,6 +434,13 @@ function decodeDurableToolResultContent(content: Record<string, unknown>): Recor
   }
   return {
     ...content,
+    // AgentMessageJsonCodec 的 durable content.json 是明确的 JSON 原文；
+    // ToolResultJsonCodec 的实时和 invocation content.json 则已是节点。
+    contents: getRecordList(content.contents).map((item) =>
+      item.type === 'json' && typeof item.json === 'string'
+        ? { ...item, json: parseRawJsonText(item.json) }
+        : item,
+    ),
     details,
   }
 }

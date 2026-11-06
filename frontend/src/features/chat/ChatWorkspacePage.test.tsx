@@ -172,7 +172,7 @@ function acceptedResponse(currentThread = thread()): HarnessAcceptedCommandsDTO 
     sessionId: currentThread.sessionId,
     parentEntryId: null,
     entryType: 'ROOT',
-    payload: '{}',
+    payload: {},
     createdAt: 0,
     usageCost: null,
   }
@@ -672,7 +672,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'ROOT',
-    payload: '{}',
+    payload: {},
     createdAt: 0,
     usageCost: null,
   }
@@ -681,7 +681,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: 'entry-1',
     entryType: 'TURN_END',
-    payload: JSON.stringify({ outcome: 'COMPLETED' }),
+    payload: { outcome: 'COMPLETED' },
     createdAt: 0,
     usageCost: null,
   }
@@ -690,9 +690,9 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: 'entry-2',
     entryType: 'MESSAGE',
-    payload: JSON.stringify({
+    payload: {
       message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
-    }),
+    },
     createdAt: 0,
     usageCost: null,
   }

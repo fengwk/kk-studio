@@ -9,7 +9,7 @@ import { createUuid } from '@/shared/lib/uuid'
 import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 import { extractApprovalEditReview } from '@/features/thread/runtime/mutation-review'
-import { parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/payload-json'
 import { previewForToolCall } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages/ToolCallPreview'
 import './interaction-cards.css'
@@ -41,7 +41,7 @@ export function ApprovalCard({
   // 幂等 decisionId
   const [decisionIdMap] = useState(() => new Map<string, string>())
 
-  const approvalData = useMemo(() => parsePayload(approval), [approval])
+  const approvalData = useMemo(() => asRecord(approval), [approval])
 
   const reason = typeof approvalData.reason === 'string' ? approvalData.reason : null
   const decided = approvalData.decision === 'ALLOWED' || approvalData.decision === 'DENIED'

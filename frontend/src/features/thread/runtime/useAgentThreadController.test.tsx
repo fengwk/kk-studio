@@ -178,7 +178,7 @@ function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedComma
       sessionId: currentThread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     },
@@ -206,7 +206,7 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{}',
-    approval: '{}',
+    approval: {},
     result: null,
     error: null,
     createdAt: 0,
@@ -1331,7 +1331,7 @@ describe('useAgentThreadController', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType,
-      payload: JSON.stringify(payload),
+      payload,
       createdAt: 0,
       usageCost: null,
     })
@@ -2481,7 +2481,7 @@ describe('useAgentThreadController', () => {
         id: 'inv-1',
         toolName: 'test',
         rendererKey: 'test',
-        approval: JSON.stringify({ decision: 'ALLOW', decisionId: body.decisionId, reason: null }),
+        approval: { decision: 'ALLOW', decisionId: body.decisionId, reason: null },
       })
     })
 
@@ -2520,7 +2520,7 @@ describe('useAgentThreadController', () => {
           id: 'inv-1',
           toolName: 'test',
           rendererKey: 'test',
-          approval: JSON.stringify({ decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null }),
+          approval: { decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null },
         }),
       )
       await approvalActionEpoch0

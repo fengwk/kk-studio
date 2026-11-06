@@ -393,7 +393,7 @@ describe('TaskToolRenderer result phase', () => {
           },
           contents: [
             { type: 'text', text: 'subagent task rejected' },
-            { type: 'json', value: '{"code":"CONCURRENCY_LIMIT"}' },
+            { type: 'json', value: { code: 'CONCURRENCY_LIMIT' } },
           ],
         })}
       />,

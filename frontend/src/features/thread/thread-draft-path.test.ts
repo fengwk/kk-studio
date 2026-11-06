@@ -4,7 +4,7 @@ import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 const entry = (entryId: string, parentEntryId: string | null, entryType: EntryType = 'MESSAGE'): HarnessSessionEntryDTO => ({
-  entryId, parentEntryId, entryType, sessionId: 'session', payload: '{}', createdAt: 0,
+  entryId, parentEntryId, entryType, sessionId: 'session', payload: {}, createdAt: 0,
   usageCost: null,
 })
 

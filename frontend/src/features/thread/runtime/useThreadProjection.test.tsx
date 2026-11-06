@@ -81,12 +81,12 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'custom-1',
-          payload: JSON.stringify({
+          payload: {
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '补充要求：增加边界测试' }],
             },
-          }),
+          },
           cancelledAt: null,
           createdAt: 1774958410,
         },
@@ -96,12 +96,12 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'user-1',
-          payload: JSON.stringify({
+          payload: {
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '用户正常输入' }],
             },
-          }),
+          },
           cancelledAt: null,
           createdAt: 1774958420,
         },
@@ -133,12 +133,12 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'custom-1',
-          payload: JSON.stringify({
+          payload: {
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '待处理补充要求' }],
             },
-          }),
+          },
           cancelledAt: null,
           createdAt: 1774958410,
         },
@@ -158,12 +158,12 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'APPLIED',
           idempotencyKey: 'custom-1',
-          payload: JSON.stringify({
+          payload: {
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '待处理补充要求' }],
             },
-          }),
+          },
           cancelledAt: null,
           createdAt: 1774958410,
         },

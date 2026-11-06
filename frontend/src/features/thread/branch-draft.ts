@@ -4,7 +4,7 @@ import {
   getBuiltinModelSelection,
   isSameExecution,
 } from '@/shared/api/contracts/ai-runtime'
-import { parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/payload-json'
 import type {
   AgentDTO,
   HarnessBranchSettingsDTO,
@@ -178,7 +178,7 @@ export function projectPendingTarget(
 }
 
 function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO): BranchDraft {
-  const payload = parsePayload(command.payload)
+  const payload = asRecord(command.payload)
   switch (command.type) {
     case 'SET_AGENT': {
       const agentName = typeof payload.agentName === 'string' ? payload.agentName : base.agentName
