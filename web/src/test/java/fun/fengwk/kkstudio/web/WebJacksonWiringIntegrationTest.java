@@ -106,10 +106,7 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
             .andReturn();
 
     JsonNode totalCount =
-        objectMapper
-            .readTree(result.getResponse().getContentAsString())
-            .path("data")
-            .path("totalCount");
+        objectMapper.readTree(result.getResponse().getContentAsString()).path("totalCount");
     assertTrue(totalCount.isString(), "totalCount must be serialized as a decimal string");
     assertTrue(totalCount.asText().matches("\\d+"), "totalCount must contain only digits");
   }

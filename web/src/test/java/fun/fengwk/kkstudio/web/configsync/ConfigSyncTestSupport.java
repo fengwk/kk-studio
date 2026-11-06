@@ -98,7 +98,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return data(result);
   }
 
-  /** GET 请求；断言 2xx 后返回 {@code data} 节点。 */
+  /** GET 请求；断言 2xx 后返回资源体。 */
   protected JsonNode getData(String path) throws Exception {
     MvcResult result = mockMvc.perform(get(path)).andExpect(status().is2xxSuccessful()).andReturn();
     return data(result);
@@ -175,6 +175,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
 
     ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     variant.setProtocolOptionsJson(protocolOptionsJson);
     variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
 

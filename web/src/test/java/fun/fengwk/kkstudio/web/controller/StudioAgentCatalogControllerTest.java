@@ -141,6 +141,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     provider.setModelCallIdleTimeoutMillis(3_000L);
     ObjectNode providerBody = objectMapper.valueToTree(provider);
     providerBody.put("credential", provider.getCredential());
+    providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis());
+    providerBody.put("modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis());
     JsonNode providerData =
         data(
             mockMvc

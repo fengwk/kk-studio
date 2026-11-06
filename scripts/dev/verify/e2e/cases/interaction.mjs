@@ -57,8 +57,8 @@ const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'a
 
 function instantMillis(value) {
   if (typeof value === 'number') {
-    assert(Number.isFinite(value) && value >= 0, `invalid epoch-second instant: ${value}`)
-    return value * 1000
+    assert(Number.isInteger(value) && value >= 0, `invalid epoch-millisecond instant: ${value}`)
+    return value
   }
   assert(
     typeof value === 'string' && Number.isFinite(Date.parse(value)),

@@ -38,6 +38,8 @@ final class CanvasHttpJsonTestSupport {
     return JsonMapper.builder()
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
         .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS)
+        .disable(DateTimeFeature.READ_DATE_TIMESTAMPS_AS_NANOSECONDS)
         .changeDefaultPropertyInclusion(
             incl ->
                 incl.withValueInclusion(JsonInclude.Include.NON_NULL)

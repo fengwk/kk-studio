@@ -28,7 +28,7 @@ describe('plugin HTTP contract', () => {
     expect(plugins[3].desiredRevision).toBe('2')
     expect(plugins[3].appliedRevision).toBe('1')
     expect(plugins[3].applicationError).not.toBeNull()
-    expect(plugins[4].expiresAt).toBe(1777574730)
+    expect(plugins[4].expiresAt).toBe(1777574730000)
     expect(plugins[0].connectionCheckSupported).toBe(false)
     expect(plugins[4].connectionCheckSupported).toBe(true)
     const raw = plugins[4].configuration.valuesJson
@@ -61,7 +61,7 @@ describe('plugin HTTP contract', () => {
     expect(raw).toEqual({
       pluginId: 'beta-deep-connected',
       appliedRevision: '8',
-      checkedAt: 1772366400,
+      checkedAt: 1772366400000,
       reachability: 'REACHABLE',
       authentication: 'ACCEPTED',
       browserSession: 'UNKNOWN',

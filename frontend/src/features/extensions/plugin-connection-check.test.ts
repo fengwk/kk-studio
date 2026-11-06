@@ -39,7 +39,7 @@ function result(overrides: Partial<PluginConnectionCheckDTO> = {}): PluginConnec
   return {
     pluginId: 'opencli',
     appliedRevision: '8',
-    checkedAt: 1772366400,
+    checkedAt: 1772366400000,
     reachability: 'REACHABLE',
     authentication: 'ACCEPTED',
     browserSession: 'UNKNOWN',

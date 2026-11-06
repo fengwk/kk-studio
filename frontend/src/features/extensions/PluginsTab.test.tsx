@@ -84,8 +84,8 @@ describe('PluginsTab', () => {
       samplePlugin({
         status: 'CONNECTED',
         region: 'CN',
-        expiresAt: 1790856000,
-        nextRefreshAt: 1790337600,
+        expiresAt: 1790856000000,
+        nextRefreshAt: 1790337600000,
       }),
     ])
 
@@ -106,12 +106,12 @@ describe('PluginsTab', () => {
     expect(screen.queryByText(/token/i)).not.toHaveTextContent(/secret|bearer|key_val/i)
   })
 
-  it('formats HTTP epoch seconds including zero and shows static key rejection diagnostics', async () => {
+  it('formats HTTP epoch milliseconds including zero and shows static key rejection diagnostics', async () => {
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([
       samplePlugin({
         status: 'CONNECTED',
         region: 'CN',
-        expiresAt: 1777574730,
+        expiresAt: 1777574730000,
         nextRefreshAt: 0,
       }),
       samplePlugin({
@@ -123,7 +123,7 @@ describe('PluginsTab', () => {
       }),
     ])
     renderTab()
-    expect(await screen.findByText(new Date(1777574730 * 1000).toLocaleString('zh-CN')))
+    expect(await screen.findByText(new Date(1777574730000).toLocaleString('zh-CN')))
       .toBeInTheDocument()
     expect(screen.getByText(new Date(0).toLocaleString('zh-CN'))).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('provider rejected the stored static key')
@@ -486,7 +486,7 @@ describe('PluginsTab', () => {
     return {
       pluginId: 'opencli',
       appliedRevision: '8',
-      checkedAt: 1772366400,
+      checkedAt: 1772366400000,
       reachability: 'REACHABLE',
       authentication: 'ACCEPTED',
       browserSession: 'UNKNOWN',
@@ -614,7 +614,7 @@ describe('PluginsTab', () => {
       '未知；本检查不核验浏览器登录态',
     )
     expect(within(dialog).getByTestId('plugin-check-checked-at')).toHaveTextContent(
-      new Date(1772366400 * 1000).toLocaleString('zh-CN'),
+      new Date(1772366400000).toLocaleString('zh-CN'),
     )
     // 三个维度各自独立呈现，绝不把认证结论说成浏览器登录。
     expect(within(dialog).getByTestId('plugin-check-authentication')).not.toHaveTextContent('浏览器')
