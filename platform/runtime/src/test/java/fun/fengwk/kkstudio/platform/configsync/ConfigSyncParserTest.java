@@ -378,6 +378,26 @@ class ConfigSyncParserTest {
     assertTrue(mcp.mcpServers().isEmpty());
   }
 
+  /** Agent 条目不再识别旧 model/variant 字段：它们与其它未知字段同规则，整条 skip 并报告字段名。 */
+  @Test
+  void legacyAgentModelAndVariantAreUnknownFields() {
+    ConfigSyncParser.ParsedDocument parsed =
+        parser.parse(
+            "agents:\n"
+                + "  - name: a\n"
+                + "    model: legacy-model\n"
+                + "    variant: legacy-variant\n"
+                + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
+                + "    config:\n"
+                + "      tools: []\n"
+                + "      skills: []\n"
+                + "      subagents: []\n");
+    assertTrue(parsed.agents().isEmpty());
+    assertEquals(1, parsed.skipped().size());
+    assertEquals(ConfigSyncKind.AGENTS, parsed.skipped().get(0).getKind());
+    assertTrue(parsed.skipped().get(0).getReason().contains("unsupported field"));
+  }
+
   @Test
   void currentCommitInSkillPackageIsSkippedAsUnknownField() {
     ConfigSyncParser.ParsedDocument skill =
