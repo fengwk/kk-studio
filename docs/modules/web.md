@@ -88,7 +88,7 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Issue | `/api/project/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 配置 CRUD、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
+| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 创建、读取与删除，当前运行状态快照、注册令牌轮换、安装设置、一次性安装码与脚本、卸载脚本、受管二进制在线更新、运维 events；创建和轮换响应及安装脚本含凭据 |
 | Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 

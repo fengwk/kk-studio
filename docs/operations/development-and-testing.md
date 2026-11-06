@@ -644,8 +644,7 @@ Daemon。
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
 runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
-TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
-create+delete 工作负载结果比较。
+TERM 时脚本执行 `down --volumes --remove-orphans`。基线测量的是创建事务。
 
 ## 供应链门禁
 
@@ -712,8 +711,7 @@ user（UID `10001`）下检查 `/opt/kk-studio/daemon/main.js` 与冻结运行�
 Daemon 镜像以 Node 24.21.0 为 builder、`debian:bookworm-slim` 为 runtime，并将 npm bundle 的
 `brace-expansion`、`ip-address`、`undici` 分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm
 自带的 `7.5.22`。
-`http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
-不能据此宣称镜像扫描通过。
+镜像扫描以当次 Trivy 结果为准，不将探针断言当作漏洞扫描通过。
 
 Daemon 原有 smoke 成功后，通过 stdin 注入
 [`npm-cache-probe.mjs`](../../scripts/dev/verify/supply-chain/npm-cache-probe.mjs)，无需重建镜像。
@@ -734,7 +732,6 @@ JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 
 - 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
   `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
 
-实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
 `ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
 **不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
 退出非零、JSON 空/非法或预期报告缺失使 Daemon smoke 失败，随后仍运行 Trivy；
@@ -830,6 +827,7 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 或登录流程里录入。
 
 可导出 Provider、Model、Agent、Skill Package（仅限 Git 渠道）、Environment、MCP 服务、插件普通配置与系统设置。上传渠道的本地归档技能包不进入配置导出，升级或重建后须在平台重新上传发布。
+配置同步 YAML 使用 YAML 数字，与 HTTP 中 64 位整数的字符串表示分别处理。
 Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationTokenHash` 并列嵌套，缺失
 该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。

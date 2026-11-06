@@ -36,7 +36,7 @@
 | [Platform：Harness 持久化与调度](modules/platform.md#harness-持久化与调度) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
 | [Harness Model](modules/harness-model.md) | 模型契约、Provider 请求、SSE、reasoning replay、用量与计价和上游错误如何处理？ |
 | [内置工具与异步委派](modules/builtin-tools.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
-| [Common](modules/common.md) | 严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
+| [Common](modules/common.md) | 领域错误、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些契约？ |
 
 ### Environment 与主机能力
 
