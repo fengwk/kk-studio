@@ -70,7 +70,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   static HarnessThreadCommandBatchDTO cursorBatch(HarnessCommandCreateDTO... commands) {
     HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
     batch.setExpectedHeadEntryId(idText(3));
-    batch.setExpectedNextCommandSequence("4");
+    batch.setExpectedNextCommandSequence(4L);
     batch.setCommands(List.of(commands));
     return batch;
   }

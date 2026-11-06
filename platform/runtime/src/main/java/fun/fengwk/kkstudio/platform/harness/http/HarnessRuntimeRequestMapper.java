@@ -5,7 +5,6 @@ import org.jspecify.annotations.Nullable;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
@@ -84,7 +83,7 @@ public final class HarnessRuntimeRequestMapper {
     requireNonNull(dto, "compactDTO");
     return new CompactThreadCommand(
         parseUuid(threadId, "threadId"),
-        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
+        requireNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   public static StopCommand toStopCommand(String threadId, HarnessThreadStopDTO dto) {
@@ -92,7 +91,7 @@ public final class HarnessRuntimeRequestMapper {
     return new StopCommand(
         parseUuid(threadId, "threadId"),
         parseUuid(dto.getStopRequestId(), "stopRequestId"),
-        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
+        requireNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 解析放弃退出确认目标；执行 id 与 Thread id 都是 canonical UUID，expectedVersion 是 non-negative bigint。 */
@@ -102,7 +101,7 @@ public final class HarnessRuntimeRequestMapper {
     return new AbandonExecutionTarget(
         parseUuid(threadId, "threadId"),
         parseUuid(executionId, "executionId"),
-        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
+        requireNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 已校验的放弃退出确认目标。 */
@@ -204,7 +203,7 @@ public final class HarnessRuntimeRequestMapper {
     boolean cursorRequired =
         requireCursor || !AcceptCommandsCommand.isPureUserMessageBatch(commands);
     String headEntryId = dto.getExpectedHeadEntryId();
-    String nextCommandSequence = dto.getExpectedNextCommandSequence();
+    Long nextCommandSequence = dto.getExpectedNextCommandSequence();
     if (cursorRequired) {
       if (headEntryId == null || nextCommandSequence == null) {
         throw DomainException.validation(
@@ -222,7 +221,7 @@ public final class HarnessRuntimeRequestMapper {
             headEntryId == null ? null : parseUuid(headEntryId, "expectedHeadEntryId"),
             nextCommandSequence == null
                 ? null
-                : parsePositiveLong(nextCommandSequence, "expectedNextCommandSequence"));
+                : requirePositive(nextCommandSequence, "expectedNextCommandSequence"));
     return new AcceptCommandsCommand(target, commands);
   }
 
@@ -459,20 +458,24 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  private static long parseNonNegativeLong(String value, String field) {
-    try {
-      return DecimalLongs.parseNonNegative(value, field);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("request", error.getMessage(), error);
+  private static long requireNonNegative(Long value, String field) {
+    if (value == null) {
+      throw DomainException.validation("request", field + " must not be null");
     }
+    if (value < 0) {
+      throw DomainException.validation("request", field + " must be non-negative");
+    }
+    return value;
   }
 
-  private static long parsePositiveLong(String value, String field) {
-    try {
-      return DecimalLongs.parsePositive(value, field);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("request", error.getMessage(), error);
+  private static long requirePositive(Long value, String field) {
+    if (value == null) {
+      throw DomainException.validation("request", field + " must not be null");
     }
+    if (value <= 0) {
+      throw DomainException.validation("request", field + " must be positive");
+    }
+    return value;
   }
 
   private static <T> T validation(String resource, Supplier<T> construction) {

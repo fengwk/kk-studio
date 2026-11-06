@@ -50,8 +50,8 @@ class HarnessRuntimeResponseMapperThreadTest {
     // 根 Thread 没有执行父关系：DTO 必须显式 null 而不是空串。
     assertNull(dto.getParentThreadId());
     assertEquals(idText(1), dto.getHeadEntryId());
-    assertEquals("4", dto.getNextCommandSequence());
-    assertEquals("3", dto.getVersion());
+    assertEquals(4L, dto.getNextCommandSequence());
+    assertEquals(3L, dto.getVersion());
     // 根 Thread 是自身的执行根并携带自己的 YOLO 开关。
     assertEquals(dto.getThreadId(), dto.getRootThreadId());
     assertTrue(dto.isYoloEnabled());

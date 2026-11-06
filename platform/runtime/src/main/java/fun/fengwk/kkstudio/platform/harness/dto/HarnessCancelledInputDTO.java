@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 @Data
 public class HarnessCancelledInputDTO {
 
-  /** Thread 内命令序号：strict positive decimal string。 */
-  private String sequence;
+  /** Thread 内命令序号：strict positive integer。 */
+  private Long sequence;
 
   /** 原命令稳定幂等键：canonical UUID string。 */
   private String idempotencyKey;

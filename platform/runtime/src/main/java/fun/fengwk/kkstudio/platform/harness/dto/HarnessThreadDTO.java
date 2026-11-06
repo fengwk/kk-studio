@@ -11,7 +11,7 @@ import java.time.Instant;
 
 /**
  * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code version} 为 durable snapshot
- * cursor（非负十进制字符串）。
+ * cursor（非负整数）。
  *
  * <p>{@code status} 直接来自 Thread 快照的本地 runtime 状态投影，只有三态（{@code RUNNING / WAITING / IDLE}）， 不属于
  * durable 列，也不由调用方拼装；{@code executionControl} 是持久执行控制（{@code RUNNABLE / STOPPED}），与 {@code status}
@@ -44,11 +44,11 @@ public class HarnessThreadDTO {
   /** 执行根的 YOLO 开关；子代理恒为 false，其有效值取自执行根。 */
   private boolean yoloEnabled;
 
-  /** 已分配的 command sequence 高水位 +1（strict positive decimal string）。 */
-  private String nextCommandSequence;
+  /** 已分配的 command sequence 高水位 +1（strict positive integer）。 */
+  private Long nextCommandSequence;
 
-  /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string)。 */
-  private String version;
+  /** PostgreSQL authoritative durable projection cursor (non-negative bigint)。 */
+  private Long version;
 
   /** 展示状态（派生）：{@code RUNNING / WAITING / IDLE}。只描述该 Thread 自身与直接委派，不递归整树。 */
   private ThreadRuntimeStatus status;

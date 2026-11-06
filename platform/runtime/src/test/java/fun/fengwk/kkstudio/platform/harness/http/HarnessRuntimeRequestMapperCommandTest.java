@@ -102,13 +102,13 @@ class HarnessRuntimeRequestMapperCommandTest {
   void mapsControlCommandsAndBothApprovalDecisions() {
     // compact/stop/yolo/approval 的 CAS 与幂等 id 必须经过同一严格解析入口。
     HarnessThreadCompactDTO compact = new HarnessThreadCompactDTO();
-    compact.setExpectedVersion("7");
+    compact.setExpectedVersion(7L);
     assertEquals(
         7L,
         HarnessRuntimeRequestMapper.toCompactThreadCommand(THREAD_ID, compact).expectedVersion());
 
     HarnessThreadStopDTO stop = new HarnessThreadStopDTO();
-    stop.setExpectedVersion("8");
+    stop.setExpectedVersion(8L);
     stop.setStopRequestId(idText(20));
     assertEquals(8L, HarnessRuntimeRequestMapper.toStopCommand(THREAD_ID, stop).expectedVersion());
 

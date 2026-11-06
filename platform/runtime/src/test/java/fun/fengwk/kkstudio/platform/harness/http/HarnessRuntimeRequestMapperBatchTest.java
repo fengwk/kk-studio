@@ -110,7 +110,7 @@ class HarnessRuntimeRequestMapperBatchTest {
 
     HarnessThreadCommandBatchDTO empty = new HarnessThreadCommandBatchDTO();
     empty.setExpectedHeadEntryId(idText(3));
-    empty.setExpectedNextCommandSequence("4");
+    empty.setExpectedNextCommandSequence(4L);
     assertThrows(
         DomainException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, empty));
@@ -159,7 +159,7 @@ class HarnessRuntimeRequestMapperBatchTest {
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, partialCursor));
     HarnessThreadCommandBatchDTO malformedCursor = new HarnessThreadCommandBatchDTO();
     malformedCursor.setExpectedHeadEntryId("not-a-uuid");
-    malformedCursor.setExpectedNextCommandSequence("4");
+    malformedCursor.setExpectedNextCommandSequence(4L);
     malformedCursor.setCommands(List.of(userCommand("malformed")));
     assertThrows(
         DomainException.class,

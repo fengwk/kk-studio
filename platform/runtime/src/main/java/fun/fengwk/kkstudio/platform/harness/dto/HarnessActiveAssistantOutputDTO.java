@@ -33,8 +33,8 @@ public class HarnessActiveAssistantOutputDTO {
   /** 已持久化 RUNNING 的执行次数（非负整数）。 */
   private Integer attempt;
 
-  /** 当前已完成输出覆盖到的 canonical 非负十进制 sequence；无输出时为 "0"。 */
-  private String sequence;
+  /** 当前已完成输出覆盖到的非负 sequence；无输出时为 0。 */
+  private Long sequence;
 
   /** 有序的已完成 text/thinking 片段。 */
   private List<HarnessAgentMessageContentDTO> contents = List.of();

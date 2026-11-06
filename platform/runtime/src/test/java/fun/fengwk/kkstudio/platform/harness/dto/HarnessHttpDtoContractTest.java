@@ -161,6 +161,11 @@ class HarnessHttpDtoContractTest {
     assertEquals(ThreadRuntimeStatus.RUNNING, thread.getStatus());
     assertEquals(ThreadExecutionControl.STOPPED, thread.getExecutionControl());
     assertNull(thread.getParentThreadId());
+    assertEquals(1L, thread.getNextCommandSequence());
+    assertEquals(7L, thread.getVersion());
+    assertEquals(
+        Long.class, HarnessThreadDTO.class.getDeclaredField("nextCommandSequence").getType());
+    assertEquals(Long.class, HarnessThreadDTO.class.getDeclaredField("version").getType());
     assertEquals(Instant.class, HarnessThreadDTO.class.getDeclaredField("createdAt").getType());
     assertEquals(Instant.class, HarnessThreadDTO.class.getDeclaredField("updatedAt").getType());
     assertThrows(

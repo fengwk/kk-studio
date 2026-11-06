@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 public class HarnessExecutionAbandonDTO {
 
-  /** 必填 exact version CAS 游标：strict non-negative decimal string，读取自最新 Thread 快照。 */
-  private String expectedVersion;
+  /** 必填 exact version CAS 游标：strict non-negative integer，读取自最新 Thread 快照。 */
+  private Long expectedVersion;
 }

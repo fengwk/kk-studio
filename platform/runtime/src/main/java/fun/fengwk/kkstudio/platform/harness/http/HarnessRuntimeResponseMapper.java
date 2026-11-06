@@ -118,8 +118,8 @@ public final class HarnessRuntimeResponseMapper {
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setRootThreadId(snapshot.thread().rootThreadId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
-    dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
-    dto.setVersion(Long.toString(snapshot.thread().version()));
+    dto.setNextCommandSequence(snapshot.thread().nextCommandSequence());
+    dto.setVersion(snapshot.thread().version());
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status);
     dto.setExecutionControl(snapshot.thread().executionControl());
@@ -179,7 +179,7 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(command, "command");
     HarnessThreadCommandDTO dto = new HarnessThreadCommandDTO();
     dto.setThreadId(command.threadId().toString());
-    dto.setSequence(Long.toString(command.sequence()));
+    dto.setSequence(command.sequence());
     dto.setType(command.type());
     dto.setState(command.state());
     dto.setIdempotencyKey(command.idempotencyKey().toString());
@@ -198,7 +198,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
     dto.setStatus(generation.status());
     dto.setAttempt(generation.attempt());
-    dto.setSequence(Long.toString(generation.sequence()));
+    dto.setSequence(generation.sequence());
     dto.setContents(
         mapAll(generation.outputContents(), HarnessRuntimeResponseMapper::toContentDto));
     if (generation.error() != null) {
@@ -256,7 +256,7 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(snapshot, "snapshot");
     Objects.requireNonNull(usageCosts, "usageCosts");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
-    dto.setVersion(Long.toString(snapshot.thread().version()));
+    dto.setVersion(snapshot.thread().version());
     dto.setThread(toThreadDto(snapshot));
     dto.setBaseEntryId(
         snapshot.entrySlice().baseEntryId() == null
@@ -385,7 +385,7 @@ public final class HarnessRuntimeResponseMapper {
     failureDto.setTurnStartEntryId(generation.turnStartEntryId().toString());
     failureDto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
     failureDto.setAttempt(failure.attempt());
-    failureDto.setSequence(Long.toString(failure.sequence()));
+    failureDto.setSequence(failure.sequence());
     failureDto.setText(failure.text());
     failureDto.setThinking(failure.thinking());
     failureDto.setErrorCode(failure.errorCode());
@@ -407,7 +407,7 @@ public final class HarnessRuntimeResponseMapper {
 
   private static HarnessCancelledInputDTO toCancelledInputDto(CancelledThreadInput input) {
     HarnessCancelledInputDTO inputDto = new HarnessCancelledInputDTO();
-    inputDto.setSequence(Long.toString(input.sequence()));
+    inputDto.setSequence(input.sequence());
     inputDto.setIdempotencyKey(input.idempotencyKey().toString());
     inputDto.setType(input.payload().type());
     inputDto.setPayload(COMMAND_PAYLOADS.encodeNode(input.payload()));
