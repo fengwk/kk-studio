@@ -435,7 +435,7 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 `NONE`、`ROUTED` 工具保留，未选环境时只过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
 subagent 生成；执行根已选 Environment 时只有精确安装的技能进入 `[skills]`，未安装或安装失败
-只保留结构化事实、不进入 prompt。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
+只保留结构化事实、不进入 prompt。规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 Compaction Agent 的 variant，后续配置更改不影响已冻结调用。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的

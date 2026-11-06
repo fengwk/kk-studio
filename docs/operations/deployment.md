@@ -179,6 +179,8 @@ KK Studio 2.0.0 与 1.x 不兼容。升级前先备份，并按 V1 重建或新�
 4. **重新安装各环境 Daemon 并在平台配置全局代理**：在每台主机通过 Studio 的 Environment 卡片打开安装弹窗，重新复制安装命令并执行覆盖安装，使 Daemon 升级至与 2.0.0 匹配的版本并重新达到 `READY`；在 Studio“系统设置 → 网络”配置全局代理（HTTP 代理地址及绕过规则）。
 5. **重新上传上传渠道技能包**：配置同步导出仅包含 Git 渠道技能包，上传渠道的本地归档技能包不进入配置导出，升级后须在平台“技能包”页面重新上传发布。
 
+1.x 导出的 YAML 不含必填的 `promptCacheRetention`；导入前须为每个模型 variant 手工补齐支持的档位，否则导入校验会逐条报错。Gemini 只支持 `NONE`，其他协议支持 `NONE`、`SHORT` 与 `LONG`。新建 variant 时，OpenAI Chat 和 Responses 默认预填 `SHORT`，会发送 `prompt_cache_key` 与 `prompt_cache_retention`；严格拒绝未知参数的兼容服务应选择 `NONE`，即不发送显式缓存指令。
+
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
