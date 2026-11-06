@@ -100,15 +100,14 @@ class StudioHarnessThreadCommandBatchControllerTest {
                     + userMessageElement(COMMAND_KEY)
                     + "]"))
         .andExpect(status().isAccepted())
-        .andExpect(
-            jsonPath("$.data.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
-        .andExpect(jsonPath("$.data.session.name").value("session"))
-        .andExpect(jsonPath("$.data.rootEntry.entryType").value("ROOT"))
-        .andExpect(jsonPath("$.data.thread.threadId").value(AUTHORITATIVE_THREAD_ID))
-        .andExpect(jsonPath("$.data.thread.name").value("thread"))
-        .andExpect(jsonPath("$.data.acceptedCommands", hasSize(1)))
-        .andExpect(jsonPath("$.data.acceptedCommands[0].type").value("USER_MESSAGE"))
-        .andExpect(jsonPath("$.data.replayed").value(false));
+        .andExpect(jsonPath("$.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
+        .andExpect(jsonPath("$.session.name").value("session"))
+        .andExpect(jsonPath("$.rootEntry.entryType").value("ROOT"))
+        .andExpect(jsonPath("$.thread.threadId").value(AUTHORITATIVE_THREAD_ID))
+        .andExpect(jsonPath("$.thread.name").value("thread"))
+        .andExpect(jsonPath("$.acceptedCommands", hasSize(1)))
+        .andExpect(jsonPath("$.acceptedCommands[0].type").value("USER_MESSAGE"))
+        .andExpect(jsonPath("$.replayed").value(false));
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
@@ -275,13 +274,13 @@ class StudioHarnessThreadCommandBatchControllerTest {
         .thenThrow(new IllegalArgumentException("thread command batch rejected"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("thread command batch rejected"));
+        .andExpect(jsonPath("$.detail").value("thread command batch rejected"));
 
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenThrow(new HarnessRuntimeNotFoundException("thread not found"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.errors.detail").value("thread not found"));
+        .andExpect(jsonPath("$.detail").value("thread not found"));
 
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenThrow(
@@ -290,8 +289,9 @@ class StudioHarnessThreadCommandBatchControllerTest {
                 "client command id was reused"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
-        .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("IDEMPOTENCY_KEY_REUSED"))
+        .andExpect(jsonPath("$.detail").value("client command id was reused"));
 
     // 类型化拒绝路径不追加 snapshot 回读；仅有根身份判定这一只读探测。
     verify(runtime, never()).getThreadSnapshot(any());
@@ -333,8 +333,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
             .formatted(HEAD_ENTRY_ID, field, extraValue, userMessageCommand(COMMAND_KEY));
     postBatch(THREAD_ID, body)
         .andExpect(status().isBadRequest())
-        .andExpect(
-            jsonPath("$.errors.detail").value("unknown thread command batch field: " + field));
+        .andExpect(jsonPath("$.detail").value("unknown thread command batch field: " + field));
   }
 
   private static String batch(String commands) {
