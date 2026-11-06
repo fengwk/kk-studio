@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
@@ -589,7 +590,8 @@ public class IssueReconciler {
     try {
       ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
       return workflow.find(ProjectStateCode.of(state)).orElse(null);
-    } catch (IllegalArgumentException error) {
+    } catch (IllegalArgumentException | DomainException error) {
+      // 只解码持久化事实：损坏的 workflow 或状态编码不参与重建，也不向调用方暴露。
       return null;
     }
   }

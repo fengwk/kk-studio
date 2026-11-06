@@ -50,42 +50,45 @@ public class ProjectDtoMapper {
     if (dto == null) {
       throw DomainException.validation("workflow", "workflow is required");
     }
+    if (dto.getStates() == null) {
+      throw DomainException.validation("workflow", "workflow states must not be null");
+    }
+    List<ProjectWorkflowState> states = new ArrayList<>();
+    for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
+      if (stateDto == null) {
+        throw DomainException.validation("workflow", "workflow state must not be null");
+      }
+      ProjectStateCode stateCode = requireWorkflowStateCode(stateDto.getState(), "state");
+      String name = stateDto.getName();
+      String agent = stateDto.getAgent();
+      String environment = stateDto.getEnvironment();
+      String instructions = stateDto.getInstructions();
+      Integer maxRuns = parseMaxRuns(stateDto.getMaxRuns());
+      boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
+      List<ProjectStateCode> next =
+          stateDto.getNext() == null
+              ? List.of()
+              : stateDto.getNext().stream()
+                  .map(value -> requireWorkflowStateCode(value, "next"))
+                  .toList();
+      states.add(
+          new ProjectWorkflowState(
+              stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
+    }
+    return new ProjectWorkflow(states);
+  }
+
+  /** maxRuns 是字符串传输的客户端值：只在这一处做窄范围翻译，不包住 workflow 构造。 */
+  private static Integer parseMaxRuns(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
     try {
-      if (dto.getStates() == null) {
-        throw new IllegalArgumentException("workflow states must not be null");
+      long parsed = DecimalLongs.parseNonNegative(value, "maxRuns");
+      if (parsed > Integer.MAX_VALUE) {
+        throw new IllegalArgumentException("maxRuns exceeds int range");
       }
-      List<ProjectWorkflowState> states = new ArrayList<>();
-      for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
-        if (stateDto == null) {
-          throw new IllegalArgumentException("workflow state must not be null");
-        }
-        ProjectStateCode stateCode = requireWorkflowStateCode(stateDto.getState(), "state");
-        String name = stateDto.getName();
-        String agent = stateDto.getAgent();
-        String environment = stateDto.getEnvironment();
-        String instructions = stateDto.getInstructions();
-        Integer maxRuns = null;
-        if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
-          long parsed = DecimalLongs.parseNonNegative(stateDto.getMaxRuns(), "maxRuns");
-          if (parsed > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("maxRuns exceeds int range");
-          }
-          maxRuns = (int) parsed;
-        }
-        boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
-        List<ProjectStateCode> next =
-            stateDto.getNext() == null
-                ? List.of()
-                : stateDto.getNext().stream()
-                    .map(value -> requireWorkflowStateCode(value, "next"))
-                    .toList();
-        states.add(
-            new ProjectWorkflowState(
-                stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
-      }
-      return new ProjectWorkflow(states);
-    } catch (DomainException error) {
-      throw error;
+      return (int) parsed;
     } catch (IllegalArgumentException error) {
       throw DomainException.validation("workflow", error.getMessage(), error);
     }
@@ -93,7 +96,7 @@ public class ProjectDtoMapper {
 
   private static ProjectStateCode requireWorkflowStateCode(String value, String field) {
     if (value == null) {
-      throw new IllegalArgumentException("workflow " + field + " must not be null");
+      throw DomainException.validation("workflow", "workflow " + field + " must not be null");
     }
     return ProjectStateCode.of(value);
   }

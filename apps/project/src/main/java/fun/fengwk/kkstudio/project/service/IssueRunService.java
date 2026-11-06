@@ -402,8 +402,7 @@ public class IssueRunService {
       ProjectWorkflow workflow = workflowCodec.decode(locked.project().getWorkflowJson());
       ProjectStateCode from = ProjectStateCode.of(run.getState());
       ProjectStateCode to = ProjectStateCode.of(nextState);
-      ProjectValidationUtils.validate(
-          "issue", () -> new IssueStateTransitions(workflow).requireTransition(from, to));
+      new IssueStateTransitions(workflow).requireTransition(from, to);
       ObjectNode data = objectMapper.createObjectNode();
       data.put("action", "HANDOFF");
       data.put("from", from.value());

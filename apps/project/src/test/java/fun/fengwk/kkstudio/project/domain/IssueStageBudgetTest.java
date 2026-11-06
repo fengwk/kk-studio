@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
 import java.util.List;
@@ -21,15 +22,12 @@ class IssueStageBudgetTest {
         0L, StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 3, 0).budgetAfterOrdinal());
     for (String reserved : List.of("INIT", "BLOCKED", "DONE")) {
       assertThrows(
-          IllegalArgumentException.class,
-          () -> StageBudgetView.budget(ProjectStateCode.of(reserved), 3, 0));
+          DomainException.class, () -> StageBudgetView.budget(ProjectStateCode.of(reserved), 3, 0));
     }
     assertThrows(
-        IllegalArgumentException.class,
-        () -> StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 0, 0));
+        DomainException.class, () -> StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 0, 0));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> StageBudgetView.budget(ProjectStateCode.of("DESIGN"), -1, 0));
+        DomainException.class, () -> StageBudgetView.budget(ProjectStateCode.of("DESIGN"), -1, 0));
     assertThrows(
         IllegalArgumentException.class,
         () -> StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 3, -1));
@@ -43,18 +41,18 @@ class IssueStageBudgetTest {
         StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 2, 0),
         StageBudgetView.authorize(workflow, ProjectStateCode.of("DESIGN"), 2));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> StageBudgetView.authorize(workflow, ProjectStateCode.of("INIT"), 1));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> StageBudgetView.authorize(workflow, ProjectStateCode.of("GHOST"), 1));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             StageBudgetView.authorize(
                 ProjectDomainFixtures.manualWorkflow(), ProjectStateCode.of("MANUAL"), 1));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             StageBudgetView.authorize(
                 ProjectDomainFixtures.disabledStageWorkflow(), ProjectStateCode.of("WORK"), 1));
@@ -72,12 +70,11 @@ class IssueStageBudgetTest {
         StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 5, 3), budget.reset(workflow, 5, 4));
     assertThrows(IllegalArgumentException.class, () -> budget.reset(workflow, 5, 2));
     assertThrows(IllegalArgumentException.class, () -> budget.reset(workflow, 5, 0));
-    assertThrows(IllegalArgumentException.class, () -> budget.reset(workflow, 0, 4));
+    assertThrows(DomainException.class, () -> budget.reset(workflow, 0, 4));
     assertThrows(NullPointerException.class, () -> budget.reset(null, 5, 4));
 
     StageBudgetView manual = StageBudgetView.budget(ProjectStateCode.of("MANUAL"), 1, 0);
     assertThrows(
-        IllegalArgumentException.class,
-        () -> manual.reset(ProjectDomainFixtures.manualWorkflow(), 2, 1));
+        DomainException.class, () -> manual.reset(ProjectDomainFixtures.manualWorkflow(), 2, 1));
   }
 }

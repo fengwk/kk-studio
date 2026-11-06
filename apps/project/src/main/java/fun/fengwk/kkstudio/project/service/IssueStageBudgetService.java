@@ -48,9 +48,7 @@ public class IssueStageBudgetService {
     IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
-    StageBudgetView authorized =
-        ProjectValidationUtils.resolve(
-            "stage_budget", () -> StageBudgetView.authorize(locked.workflow(), code, maxRuns));
+    StageBudgetView authorized = StageBudgetView.authorize(locked.workflow(), code, maxRuns);
     if (stageBudgetRepository.get(issueId, state) != null) {
       throw DomainException.duplicate("stage_budget", "Stage budget is already authorized");
     }
@@ -95,15 +93,10 @@ public class IssueStageBudgetService {
     long previousAfter = existing != null ? existing.budgetAfterOrdinal() : 0;
     StageBudgetView currentBudget =
         existing == null
-            ? ProjectValidationUtils.resolve(
-                "stage_budget", () -> StageBudgetView.authorize(locked.workflow(), code, maxRuns))
+            ? StageBudgetView.authorize(locked.workflow(), code, maxRuns)
             : StageBudgetView.budget(code, existing.maxRuns(), existing.budgetAfterOrdinal());
     StageBudgetView reset =
-        ProjectValidationUtils.resolve(
-            "stage_budget",
-            () ->
-                currentBudget.reset(
-                    locked.workflow(), maxRuns, locked.issue().getNextRunOrdinal()));
+        currentBudget.reset(locked.workflow(), maxRuns, locked.issue().getNextRunOrdinal());
     boolean applied =
         existing == null
             ? stageBudgetRepository.insert(issueId, reset)

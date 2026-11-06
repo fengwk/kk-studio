@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 /** {@link IssueStateTransitions} 的正常边、业务阻塞/恢复与 DONE 重开契约。 */
 class IssueStateTransitionsTest {
 
@@ -28,8 +30,7 @@ class IssueStateTransitionsTest {
 
     assertEquals(code("REVIEW"), transitions.requireTransition(code("DESIGN"), code("REVIEW")));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> transitions.requireTransition(code("DESIGN"), code("DONE")));
+        DomainException.class, () -> transitions.requireTransition(code("DESIGN"), code("DONE")));
     assertThrows(NullPointerException.class, () -> new IssueStateTransitions(null));
   }
 
@@ -41,8 +42,7 @@ class IssueStateTransitionsTest {
 
     assertFalse(disabled.canTransition(code("INIT"), code("WORK")));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> disabled.requireTransition(code("INIT"), code("WORK")));
+        DomainException.class, () -> disabled.requireTransition(code("INIT"), code("WORK")));
   }
 
   /** 业务阻塞必须记录原阶段与非空原因；BLOCKED 与 DONE 本身不能再被阻塞。 */
@@ -50,15 +50,11 @@ class IssueStateTransitionsTest {
   void blocksOnlyWorkingStagesWithReason() {
     assertEquals(code("INIT"), transitions.requireBlock(code("INIT"), "等需求确认"));
     assertEquals(code("DESIGN"), transitions.requireBlock(code("DESIGN"), "等需求确认"));
-    assertThrows(
-        IllegalArgumentException.class, () -> transitions.requireBlock(code("BLOCKED"), "等需求确认"));
-    assertThrows(
-        IllegalArgumentException.class, () -> transitions.requireBlock(code("DONE"), "等需求确认"));
-    assertThrows(
-        IllegalArgumentException.class, () -> transitions.requireBlock(code("GHOST"), "等需求确认"));
-    assertThrows(
-        IllegalArgumentException.class, () -> transitions.requireBlock(code("DESIGN"), " "));
-    assertThrows(NullPointerException.class, () -> transitions.requireBlock(code("DESIGN"), null));
+    assertThrows(DomainException.class, () -> transitions.requireBlock(code("BLOCKED"), "等需求确认"));
+    assertThrows(DomainException.class, () -> transitions.requireBlock(code("DONE"), "等需求确认"));
+    assertThrows(DomainException.class, () -> transitions.requireBlock(code("GHOST"), "等需求确认"));
+    assertThrows(DomainException.class, () -> transitions.requireBlock(code("DESIGN"), " "));
+    assertThrows(DomainException.class, () -> transitions.requireBlock(code("DESIGN"), null));
   }
 
   /** 恢复只能显式回到仍然启用的阻塞前阶段：BLOCKED、DONE 与已停用阶段都不是有效恢复点。 */
@@ -66,20 +62,20 @@ class IssueStateTransitionsTest {
   void recoversOnlyIntoEnabledStages() {
     assertEquals(code("INIT"), transitions.requireRecover(code("INIT")));
     assertEquals(code("DESIGN"), transitions.requireRecover(code("DESIGN")));
-    assertThrows(IllegalArgumentException.class, () -> transitions.requireRecover(code("BLOCKED")));
-    assertThrows(IllegalArgumentException.class, () -> transitions.requireRecover(code("DONE")));
-    assertThrows(IllegalArgumentException.class, () -> transitions.requireRecover(code("GHOST")));
+    assertThrows(DomainException.class, () -> transitions.requireRecover(code("BLOCKED")));
+    assertThrows(DomainException.class, () -> transitions.requireRecover(code("DONE")));
+    assertThrows(DomainException.class, () -> transitions.requireRecover(code("GHOST")));
     IssueStateTransitions disabled =
         new IssueStateTransitions(ProjectDomainFixtures.disabledStageWorkflow());
-    assertThrows(IllegalArgumentException.class, () -> disabled.requireRecover(code("WORK")));
+    assertThrows(DomainException.class, () -> disabled.requireRecover(code("WORK")));
   }
 
   /** DONE 只能由显式重开操作回到 INIT，其他阶段不能重开。 */
   @Test
   void reopensOnlyDoneIntoInit() {
     assertEquals(code("INIT"), transitions.requireReopen(code("DONE")));
-    assertThrows(IllegalArgumentException.class, () -> transitions.requireReopen(code("INIT")));
-    assertThrows(IllegalArgumentException.class, () -> transitions.requireReopen(null));
+    assertThrows(DomainException.class, () -> transitions.requireReopen(code("INIT")));
+    assertThrows(DomainException.class, () -> transitions.requireReopen(null));
   }
 
   private static ProjectStateCode code(String value) {

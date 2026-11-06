@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project.domain;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.Objects;
 
 /**
@@ -32,7 +34,7 @@ public final class IssueStateTransitions {
   /** 要求一次合法正常转移，返回目标阶段。 */
   public ProjectStateCode requireTransition(ProjectStateCode from, ProjectStateCode to) {
     if (!canTransition(from, to)) {
-      throw new IllegalArgumentException("state " + from + " cannot transition to " + to);
+      throw DomainException.validation("issue", "state " + from + " cannot transition to " + to);
     }
     return to;
   }
@@ -43,9 +45,11 @@ public final class IssueStateTransitions {
     ProjectStateCode blocked = ProjectWorkflowReservedState.BLOCKED.code();
     ProjectStateCode done = ProjectWorkflowReservedState.DONE.code();
     if (blocked.equals(source.state()) || done.equals(source.state())) {
-      throw new IllegalArgumentException("state " + from + " cannot be blocked");
+      throw DomainException.validation("issue", "state " + from + " cannot be blocked");
     }
-    ProjectValidation.requireText(reason, "blockReason");
+    if (reason == null || reason.isBlank()) {
+      throw DomainException.validation("issue", "blockReason must not be blank");
+    }
     return source.state();
   }
 
@@ -55,8 +59,8 @@ public final class IssueStateTransitions {
     ProjectStateCode blocked = ProjectWorkflowReservedState.BLOCKED.code();
     ProjectStateCode done = ProjectWorkflowReservedState.DONE.code();
     if (blocked.equals(stage.state()) || done.equals(stage.state()) || !stage.enabled()) {
-      throw new IllegalArgumentException(
-          "state " + blockedFromState + " cannot be a blocked recovery target");
+      throw DomainException.validation(
+          "issue", "state " + blockedFromState + " cannot be a blocked recovery target");
     }
     return stage.state();
   }
@@ -64,7 +68,7 @@ public final class IssueStateTransitions {
   /** DONE 重开：只能由显式重开操作回到 INIT。 */
   public ProjectStateCode requireReopen(ProjectStateCode from) {
     if (from == null || !ProjectWorkflowReservedState.DONE.code().equals(from)) {
-      throw new IllegalArgumentException("state " + from + " cannot be reopened");
+      throw DomainException.validation("issue", "state " + from + " cannot be reopened");
     }
     return ProjectWorkflowReservedState.INIT.code();
   }

@@ -262,7 +262,7 @@ class IssueTransitionServiceTest {
     assertRejected(ASSISTANT_ENTRY_ID, "DONE", "cannot transition to DONE");
     assertRejected(ASSISTANT_ENTRY_ID, "BLOCKED", "cannot transition to BLOCKED");
     assertRejected(ASSISTANT_ENTRY_ID, "INIT", "cannot transition to INIT");
-    assertRejected(ASSISTANT_ENTRY_ID, "design", "invalid to_state: design");
+    assertRejected(ASSISTANT_ENTRY_ID, "design", "state code must match");
     assertRejected(ASSISTANT_ENTRY_ID, "  ", "non-blank");
     verify(runs, never()).updateById(any(), anyLong());
   }
@@ -377,7 +377,7 @@ class IssueTransitionServiceTest {
   void rejectsInvalidIssueState() {
     useIssue("invalid state");
 
-    assertRejected(ASSISTANT_ENTRY_ID, "REVIEW", "invalid project workflow or issue state");
+    assertRejected(ASSISTANT_ENTRY_ID, "REVIEW", "state code must match");
     verify(runs, never()).updateById(any(), anyLong());
   }
 

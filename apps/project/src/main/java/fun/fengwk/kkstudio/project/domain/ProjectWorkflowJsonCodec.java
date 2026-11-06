@@ -10,6 +10,8 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -36,9 +38,21 @@ public final class ProjectWorkflowJsonCodec {
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  /** 解码 workflow 配置；任何非法 JSON 结构或非法 workflow 语义都抛 {@link IllegalArgumentException}。 */
+  /**
+   * 解码 workflow 配置；任何非法 JSON 结构或非法 workflow 语义都抛 {@link IllegalArgumentException}。
+   *
+   * <p>workflow JSON 同时是持久化格式：领域语义错误在这里保持内部异常契约，客户端提交边界再把编解码错误统一翻译为 validation，避免损坏的持久化数据被误报为请求错误。
+   */
   public ProjectWorkflow decode(String json) {
     Objects.requireNonNull(json, "json");
+    try {
+      return decodeStrict(json);
+    } catch (DomainException error) {
+      throw new IllegalArgumentException(error.getMessage(), error);
+    }
+  }
+
+  private ProjectWorkflow decodeStrict(String json) {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);

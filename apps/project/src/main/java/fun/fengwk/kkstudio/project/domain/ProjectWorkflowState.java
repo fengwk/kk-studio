@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project.domain;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -51,13 +53,16 @@ public record ProjectWorkflowState(
     for (ProjectStateCode target : next) {
       Objects.requireNonNull(target, "next target");
       if (target.equals(state)) {
-        throw new IllegalArgumentException("state " + state + " must not declare a self edge");
+        throw DomainException.validation(
+            "workflow", "state " + state + " must not declare a self edge");
       }
       if (ProjectWorkflowReservedState.BLOCKED.code().equals(target)) {
-        throw new IllegalArgumentException("BLOCKED is not reachable through normal edges");
+        throw DomainException.validation(
+            "workflow", "BLOCKED is not reachable through normal edges");
       }
       if (!seen.add(target)) {
-        throw new IllegalArgumentException("state " + state + " declares duplicate next " + target);
+        throw DomainException.validation(
+            "workflow", "state " + state + " declares duplicate next " + target);
       }
       targets.add(target);
     }
@@ -73,16 +78,19 @@ public record ProjectWorkflowState(
       boolean enabled,
       List<ProjectStateCode> next) {
     if (agent != null || environment != null || instructions != null || maxRuns != null) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "workflow",
           "reserved state "
               + state
               + " must not configure agent, environment, instructions or maxRuns");
     }
     if (!enabled) {
-      throw new IllegalArgumentException("reserved state " + state + " cannot be disabled");
+      throw DomainException.validation(
+          "workflow", "reserved state " + state + " cannot be disabled");
     }
     if (!next.isEmpty() && !ProjectWorkflowReservedState.INIT.code().equals(state)) {
-      throw new IllegalArgumentException("reserved state " + state + " declares no normal edges");
+      throw DomainException.validation(
+          "workflow", "reserved state " + state + " declares no normal edges");
     }
   }
 
@@ -90,16 +98,17 @@ public record ProjectWorkflowState(
       ProjectStateCode state, String agent, String environment, Integer maxRuns) {
     if (agent == null) {
       if (environment != null || maxRuns != null) {
-        throw new IllegalArgumentException(
-            "manual stage " + state + " must not configure environment or maxRuns");
+        throw DomainException.validation(
+            "workflow", "manual stage " + state + " must not configure environment or maxRuns");
       }
       return;
     }
     if (maxRuns == null) {
-      throw new IllegalArgumentException("stage " + state + " with agent must declare maxRuns");
+      throw DomainException.validation(
+          "workflow", "stage " + state + " with agent must declare maxRuns");
     }
     if (maxRuns <= 0) {
-      throw new IllegalArgumentException("stage " + state + " maxRuns must be > 0");
+      throw DomainException.validation("workflow", "stage " + state + " maxRuns must be > 0");
     }
   }
 }
