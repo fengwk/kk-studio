@@ -127,7 +127,7 @@ IDE_LEASE
 SKILL_SYNC / SKILL_STATE
 ```
 
-`ControlEnvelope` 的固定字段为：
+Protobuf `Envelope` 的固定字段为：
 
 ```text
 message_type / environment_id / invocation_id? / payload (oneof body)
