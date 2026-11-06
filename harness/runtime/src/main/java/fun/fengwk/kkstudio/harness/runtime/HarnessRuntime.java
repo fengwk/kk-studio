@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
@@ -277,8 +276,8 @@ public final class HarnessRuntime {
   /**
    * 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。
    *
-   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成节点；不按 Session 成员替代永久父子关系，也不装载历史 Entry。目标不存在抛 {@link
-   * HarnessRuntimeNotFoundException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
+   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成节点；不按 Session 成员替代永久父子关系，也不装载历史 Entry。目标不存在抛 not-found
+   * {@link DomainException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
    */
   public List<ThreadTreeNode> getThreadTree(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
@@ -288,8 +287,8 @@ public final class HarnessRuntime {
               ThreadTreeLocks.lockForThread(tx, threadId)
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + threadId + " does not exist"));
+                          DomainException.notFound(
+                              "thread", "thread " + threadId + " does not exist"));
           List<UUID> lockOrder =
               tx.threads().listByRoot(target.rootThreadId()).stream()
                   .map(ThreadState::id)
@@ -339,7 +338,7 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 读取 Session 当前投影；不存在抛 {@link HarnessRuntimeNotFoundException}。
+   * 读取 Session 当前投影；不存在抛 not-found {@link DomainException}。
    *
    * <p>只读快照，不产生锁；用于读侧展示（名称 / 归属校验），不与后续写操作跨事务组合。
    */
@@ -351,8 +350,8 @@ public final class HarnessRuntime {
                 .find(sessionId)
                 .orElseThrow(
                     () ->
-                        new HarnessRuntimeNotFoundException(
-                            "session " + sessionId + " does not exist")));
+                        DomainException.notFound(
+                            "session", "session " + sessionId + " does not exist")));
   }
 
   /**
@@ -369,8 +368,8 @@ public final class HarnessRuntime {
                   .lockForUpdate(command.sessionId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "session " + command.sessionId() + " does not exist"));
+                          DomainException.notFound(
+                              "session", "session " + command.sessionId() + " does not exist"));
           if (session.name().equals(command.name())) {
             return session;
           }
@@ -397,8 +396,8 @@ public final class HarnessRuntime {
                   .lock(command.threadId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + command.threadId() + " does not exist"));
+                          DomainException.notFound(
+                              "thread", "thread " + command.threadId() + " does not exist"));
           if (thread.name().equals(command.name())) {
             return thread;
           }
@@ -425,8 +424,8 @@ public final class HarnessRuntime {
                   .lock(command.threadId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + command.threadId() + " does not exist"));
+                          DomainException.notFound(
+                              "thread", "thread " + command.threadId() + " does not exist"));
           if (thread.parentThreadId() != null) {
             throw new IllegalArgumentException(
                 "thread "
@@ -504,12 +503,12 @@ public final class HarnessRuntime {
           ExecutionExitLedger.lockAncestorChain(tx, threadId);
           ThreadState thread = tx.threads().lock(threadId).orElse(null);
           if (thread == null) {
-            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
+            throw DomainException.notFound("thread", "thread " + threadId + " does not exist");
           }
           ExecutionExitFact stored = tx.exits().find(executionId).orElse(null);
           if (stored == null) {
-            throw new HarnessRuntimeNotFoundException(
-                "execution " + executionId + " does not exist");
+            throw DomainException.notFound(
+                "execution", "execution " + executionId + " does not exist");
           }
           if (!stored.threadId().equals(threadId)) {
             throw conflict(
@@ -804,7 +803,7 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           if (tx.sessions().find(sessionId).isEmpty()) {
-            throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
+            throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
           return tx.entries().loadBySession(sessionId);
         });
@@ -825,7 +824,7 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           if (tx.sessions().find(sessionId).isEmpty()) {
-            throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
+            throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
           List<Entry> rows = tx.entries().loadPageBySession(sessionId, afterEntryId, probeSize);
           boolean hasMore = rows.size() > limit;
@@ -839,7 +838,7 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           if (tx.sessions().find(sessionId).isEmpty()) {
-            throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
+            throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
           return tx.threads().listBySession(sessionId);
         });

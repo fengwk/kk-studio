@@ -16,7 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
@@ -94,8 +95,14 @@ class HarnessRuntimeSessionEntriesTest {
 
   @Test
   void missingSessionIsNotFoundAndDoesNotMutateStore() {
-    assertThrows(
-        HarnessRuntimeNotFoundException.class, () -> runtime.getSessionEntries(TestIds.id(999)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> runtime.getSessionEntries(TestIds.id(999)));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("session", error.resource());
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> runtime.listThreadsBySession(TestIds.id(999)))
+            .code());
   }
 
   @Test
@@ -144,9 +151,11 @@ class HarnessRuntimeSessionEntriesTest {
     assertTrue(exhausted.entries().isEmpty());
     assertFalse(exhausted.hasMore());
 
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.listSessionEntryPage(TestIds.id(999), null, 2));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class, () -> runtime.listSessionEntryPage(TestIds.id(999), null, 2))
+            .code());
     assertThrows(
         IllegalArgumentException.class,
         () -> runtime.listSessionEntryPage(baseline.sessionId(), TestIds.id(999), 2));

@@ -9,8 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -125,12 +126,18 @@ class HarnessRuntimeAbandonExitTest {
         HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
 
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.abandonExecution(UUID.randomUUID(), UUID.randomUUID(), 0L));
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), 0L));
+    DomainException missingThread =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.abandonExecution(UUID.randomUUID(), UUID.randomUUID(), 0L));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingThread.code());
+    assertEquals("thread", missingThread.resource());
+    DomainException missingExecution =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), 0L));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingExecution.code());
+    assertEquals("execution", missingExecution.resource());
     assertThrows(
         IllegalArgumentException.class,
         () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), -1L));

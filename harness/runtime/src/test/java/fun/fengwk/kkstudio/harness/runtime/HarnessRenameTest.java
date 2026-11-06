@@ -9,14 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -93,11 +95,16 @@ class HarnessRenameTest {
   @Test
   void renameSessionMissingSessionThrowsNotFound() {
     // 重命名不存在的 Session 抛 NotFound，不落任何行。
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.renameSession(new RenameSessionCommand(TestIds.id(999), "x")));
+    DomainException rename =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.renameSession(new RenameSessionCommand(TestIds.id(999), "x")));
+    assertEquals(DomainErrorCode.NOT_FOUND, rename.code());
+    assertEquals("session", rename.resource());
     // getSession 查询门面：不存在的 Session 同样抛 NotFound（不暴露 Optional）。
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> runtime.getSession(TestIds.id(999)));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> runtime.getSession(TestIds.id(999))).code());
   }
 
   @Test
@@ -162,9 +169,18 @@ class HarnessRenameTest {
 
   @Test
   void renameThreadMissingThreadThrowsNotFound() {
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.renameThread(new RenameThreadCommand(TestIds.id(999), "x")));
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.renameThread(new RenameThreadCommand(TestIds.id(999), "x")));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> runtime.setThreadYolo(new SetThreadYoloCommand(TestIds.id(999), true)))
+            .code());
   }
 
   @Test
