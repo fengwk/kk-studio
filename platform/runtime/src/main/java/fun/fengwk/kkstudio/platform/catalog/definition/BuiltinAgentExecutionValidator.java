@@ -17,7 +17,7 @@ import java.util.Objects;
 @Component
 public final class BuiltinAgentExecutionValidator {
 
-  private static final String RESOURCE = "agent";
+  private static final String MODEL_RESOURCE = "model";
   private final ModelRepository modelRepository;
   private final ModelDefaultVariantResolver variantResolver;
 
@@ -50,12 +50,12 @@ public final class BuiltinAgentExecutionValidator {
     }
     if (model.kind() == ModelKind.GROUP) {
       throw DomainException.validation(
-          RESOURCE, "variant must be blank when the selected model is a GROUP");
+          MODEL_RESOURCE, "variant must be blank when the selected model is a GROUP");
     }
     try {
       variantResolver.resolve(model.name(), variant);
     } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(MODEL_RESOURCE, error.getMessage(), error);
     }
   }
 
@@ -67,7 +67,7 @@ public final class BuiltinAgentExecutionValidator {
       }
       return selection;
     } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(MODEL_RESOURCE, error.getMessage(), error);
     }
   }
 }

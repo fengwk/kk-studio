@@ -167,8 +167,7 @@ class AgentServiceUnitTest {
                             List.of(skillRef("tools", "java"), skillRef("tools", "java"))),
                         null)));
     assertEquals(
-        "agent definition config skills must not contain duplicates: tools/java",
-        duplicate.getMessage());
+        "agent config skills must not contain duplicates: tools/java", duplicate.getMessage());
     DomainException tool =
         assertThrows(
             DomainException.class,
@@ -176,7 +175,7 @@ class AgentServiceUnitTest {
                 service.validateImport(
                     "agent", create("agent", "model", config(List.of(" read "), List.of()), null)));
     assertEquals(
-        "agent definition config tools must contain valid model-visible tool names:  read ",
+        "agent config tools must contain valid model-visible tool names:  read ",
         tool.getMessage());
 
     for (String invalidName : List.of(" ", " agent ", "n".repeat(65), "agent/name")) {

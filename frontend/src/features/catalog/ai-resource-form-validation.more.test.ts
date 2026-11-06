@@ -101,7 +101,7 @@ describe('ai-resource-form-validation additional branches', () => {
   it('surfaces model name conflicts under a provider as readable Chinese', () => {
     expect(
       toUserFacingErrorMessage(
-        new Error('agent model name already exists under this provider: MiniMax-M2.7'),
+        new Error('model name already exists: MiniMax-M2.7'),
       ),
     ).toBe('当前 Provider 下已存在同名 Model，请换一个名称')
   })

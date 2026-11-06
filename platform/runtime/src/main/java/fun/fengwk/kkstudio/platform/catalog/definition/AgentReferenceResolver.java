@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.TreeSet;
 
 /**
- * 解析全局 Agent definition、Skill 与 MCP 工具引用。
+ * 解析全局 Agent、Skill 与 MCP 工具引用。
  *
  * <p>写入事务的锁序固定为 Skill package {@code FOR SHARE}、MCP server {@code FOR SHARE}、Agent {@code FOR
  * UPDATE}。 引用集合先完整收集再按 canonical name 升序加锁，锁后重读存在性，不边锁边遍历。
