@@ -33,7 +33,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 ```text
 前置 advisory 围栏：task 准入（仅接受路径）-> tree（根 UUID 升序）
-行锁阶梯：Session -> Thread -> Command -> Model -> Tool -> Work
+行锁阶梯：Session -> Thread -> Command -> Driver 私有行 -> Tool -> Work
 ```
 
 tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork、Join 结算、压缩 spawn）与整树查询，以 Thread 行上不可变的 `rootThreadId` 定位并在锁内重读确认；单 Thread 控制与 Model/Tool 状态提交只锁自己的 Thread 及其 Model/Tool/Work，与持 tree 锁的写操作在同一 Thread 行上线性化。task 接受另取全局准入锁，使跨树的子代理额度判定与接受原子。创建、请求或删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一只锁单条 Work 的事务，且不得制造新的业务唤醒。同级排序与树内交付的细节见 [Platform](platform.md#事务边界与锁序)。
@@ -403,6 +403,12 @@ System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environmen
 
 Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。各 codec 仍负责自己的字段校验和错误语义。
 
+平台 HTTP 投影直接承载 codec 定义的 JSON 节点：Entry、队列命令与取消输入的 `payload`，
+工具调用的 `result` / `error` / `approval`、交互的 `approval`，以及 Debug 的
+`inputSchema` / `configuration`。模型输出的 `argumentsJson` 可能不是合法 JSON，Provider 请求的
+`requestJson` 也保持原文字符串；execution 的 `settings` 是 JSON 对象。64 位整数在 HTTP 请求与响应中
+都是规范十进制字符串，客户端输入错误在产生处以 `DomainException` 表达。
+
 ## 包架构
 
 生产源码位于 `fun.fengwk.kkstudio.harness` 之下，公开值类型集中在 `api` 根与 `api.*` 子包，它们的 wire codec 在 `codec`，`runtime.*` 只保留实现与仅内核可见的内部值；表中省略该前缀：
@@ -458,7 +464,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 - Runtime test-jar 是唯一中立 kernel 测试基座：提供内存 Store、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `platform-runtime` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
 - 内存参考 Store 与 PostgreSQL 实现同构：`InMemoryHarnessStore` 只持有唯一已提交快照与全局 monitor，`InMemoryHarnessTransaction` 负责复制快照、commit/rollback、事务时钟、id 分配与锁阶梯，九个聚合原语各由一个 `InMemory*Store` 类实现，Driver 私有行经事务核心公开的测试 hook 在同一事务快照内挂载。锁阶梯为 `Session → Thread → Command → Driver → Tool → Work`，不存在第二份状态或按聚合拆分的快照。
 - `FakeAgentDriver` 是 `AgentDriver` 的最小确定性实现：默认没有私有状态，Stop 只为位于 request basis 的活跃 generation 追加 CANCELLED barrier；可配置 turn resolution、活动投影、响应物化与停止结果。其私有状态只存在内存、不参与 Store 事务回滚，因此只用于不验证 Driver 私有持久化的内核测试。
-- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 28 个 kernel 关键类，按类实际所在包分布在 `api` / `api.*`（`api.thread.ThreadSnapshot`、`api.thread.ThreadState`、`api.tool.ToolBinding`、`api.SpawnRequest` 等）、`runtime` / `runtime.*`（控制面、Processor、压缩与执行实现）、`tool` / `tool.codec`、`codec`（`codec.ToolBindingJsonCodec`）、`contributor` 与 `prompt`，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Platform](platform.md#harness-持久化与调度) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
+- 关键类覆盖由各模块自身 `verify` 阶段的 `jacoco:check` 按各自 POM 中的类清单校验，逐类 `LINE` 覆盖率不低于 90%。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Platform](platform.md#harness-持久化与调度) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 
 ---
 

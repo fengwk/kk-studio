@@ -2,7 +2,7 @@
 
 `harness-agent-builtin` 是第一方 Builtin Agent Driver。它实现 [Harness Runtime](harness-runtime.md) 的 `AgentDriver` 契约，拥有 Builtin 分支的模型生成状态、Turn 解析、请求物化与响应物化，以及 Builtin 专属的自动压缩策略。Runtime 只保留与执行后端无关的公共内核；Builtin 的模型调用、流式 checkpoint、重试与模型组推进都在本模块完成。
 
-模块生产依赖只有 `kk-studio-common`、`kk-studio-harness-model` 与 `kk-studio-harness-runtime`，不依赖 Spring、JDBC、HTTP 或模型 SDK，也不依赖 Platform。依赖声明见 [`pom.xml`](../../harness/agent-builtin/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
+模块内部生产依赖为 `kk-studio-common`、`kk-studio-harness-model` 与 `kk-studio-harness-runtime`，另依赖 SLF4J 和 Jackson；不依赖 Spring、JDBC、HTTP 或模型 SDK，也不依赖 Platform。依赖声明见 [`pom.xml`](../../harness/agent-builtin/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
 
 ## Driver 边界
 
@@ -41,7 +41,7 @@ systemInstruction / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。它根据冻结的 variant 留存档位与本次 Session UUID 生成 [`ProviderCacheControl`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/cache/ProviderCacheControl.java)；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 平台在 invocation 创建时冻结当前实际模型的完整 variants；模型组每个成员各自冻结列表，切换成员时一起切换。历史 assistant 的实际模型名匹配当前模型时，按其 variant ID 在该冻结列表中查找可空 effort；缺失或不匹配为未知。新 invocation 使用最新配置重解释历史，重试与重启沿用冻结列表，不新增 Entry 历史字段。
 
