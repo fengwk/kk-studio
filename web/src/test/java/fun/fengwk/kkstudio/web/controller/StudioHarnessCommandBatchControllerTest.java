@@ -100,7 +100,8 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(newThreadTarget())))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("THREAD_NAME_CONFLICT"));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("THREAD_NAME_CONFLICT"));
   }
 
   /** Runtime 的精确重放结果仍按 202 返回，而不是把已有名称的身份误译为冲突。 */
@@ -121,7 +122,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(newThreadTarget())))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.replayed").value(true));
+        .andExpect(jsonPath("$.replayed").value(true));
   }
 
   @Test
@@ -135,16 +136,14 @@ class StudioHarnessCommandBatchControllerTest {
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(batch(target)))
           .andExpect(status().isAccepted())
-          .andExpect(
-              jsonPath("$.data.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
-          .andExpect(jsonPath("$.data.session.name").value("session"))
-          .andExpect(jsonPath("$.data.rootEntry.entryType").value("ROOT"))
-          .andExpect(
-              jsonPath("$.data.thread.threadId").value("00000000-0000-0000-0000-000000000001"))
-          .andExpect(jsonPath("$.data.thread.name").value("thread"))
-          .andExpect(jsonPath("$.data.acceptedCommands", hasSize(1)))
-          .andExpect(jsonPath("$.data.acceptedCommands[0].type").value("USER_MESSAGE"))
-          .andExpect(jsonPath("$.data.replayed").value(false));
+          .andExpect(jsonPath("$.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
+          .andExpect(jsonPath("$.session.name").value("session"))
+          .andExpect(jsonPath("$.rootEntry.entryType").value("ROOT"))
+          .andExpect(jsonPath("$.thread.threadId").value("00000000-0000-0000-0000-000000000001"))
+          .andExpect(jsonPath("$.thread.name").value("thread"))
+          .andExpect(jsonPath("$.acceptedCommands", hasSize(1)))
+          .andExpect(jsonPath("$.acceptedCommands[0].type").value("USER_MESSAGE"))
+          .andExpect(jsonPath("$.replayed").value(false));
     }
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
@@ -182,7 +181,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(unknownTarget))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown target type: UNKNOWN_TARGET"));
+        .andExpect(jsonPath("$.detail").value("unknown target type: UNKNOWN_TARGET"));
   }
 
   @Test
@@ -216,7 +215,7 @@ class StudioHarnessCommandBatchControllerTest {
                                 "\"yoloEnabled\":false",
                                 "\"yoloEnabled\":false,\"unknown\":true"))))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown command target field: unknown"));
+        .andExpect(jsonPath("$.detail").value("unknown command target field: unknown"));
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
@@ -242,7 +241,7 @@ class StudioHarnessCommandBatchControllerTest {
             post("/api/command-batches").contentType(MediaType.APPLICATION_JSON).content(forbidden))
         .andExpect(status().isBadRequest())
         .andExpect(
-            jsonPath("$.errors.detail")
+            jsonPath("$.detail")
                 .value("field target.rootSettings is forbidden for target type NEW_THREAD"));
 
     mockMvc
@@ -442,8 +441,9 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(newThreadTarget())))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
-        .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("IDEMPOTENCY_KEY_REUSED"))
+        .andExpect(jsonPath("$.detail").value("client command id was reused"));
   }
 
   @Test
@@ -465,11 +465,10 @@ class StudioHarnessCommandBatchControllerTest {
         .perform(
             post("/api/command-batches").contentType(MediaType.APPLICATION_JSON).content(payload))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.title").value("Bad Request"))
-        .andExpect(
-            jsonPath("$.errors.detail").value("unknown HTTP command field: unexpectedField"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.title").value("The request is invalid."))
+        .andExpect(jsonPath("$.detail").value("unknown HTTP command field: unexpectedField"));
 
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
@@ -484,10 +483,10 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{ invalid json"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.title").value("Bad Request"))
-        .andExpect(jsonPath("$.errors.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.title").value("The request is invalid."))
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
 
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
