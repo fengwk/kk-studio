@@ -80,6 +80,9 @@ public class CanvasController {
   @PostMapping("/{canvasId}/commands")
   public CanvasPatchDTO applyCommands(
       @PathVariable UUID canvasId, @RequestBody ApplyCanvasCommandsRequestDTO request) {
+    if (request.getIdempotencyKey() == null) {
+      throw DomainException.validation("idempotencyKey", "idempotencyKey is required");
+    }
     CanvasCommandResult result =
         canvasCommandService.applyCommands(
             canvasId, request.getIdempotencyKey(), mapper.toCommands(request.getCommands()));

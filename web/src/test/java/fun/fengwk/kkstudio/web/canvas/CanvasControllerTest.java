@@ -479,6 +479,44 @@ class CanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isBadRequest());
     mockMvc.perform(get("/api/canvas/canvases/not-a-uuid")).andExpect(status().isBadRequest());
+    // 缺失幂等键与非法 transform 都是客户端请求错误，而不是 500。
+    mockMvc
+        .perform(
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"commands":[{"type":"DELETE_NODE","nodeId":"%s",
+                    "expectedResourceIds":[]}]}
+                    """
+                        .formatted(NODE_1)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    mockMvc
+        .perform(
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"idempotencyKey":"%s","commands":[{"type":"CREATE_NODE","nodeId":"%s",
+                    "name":"n","transform":{"x":0,"y":0,"width":0,"height":1},
+                    "resources":[]}]}
+                    """
+                        .formatted(COMMAND, NODE_1)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    mockMvc
+        .perform(
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"idempotencyKey":"%s","commands":[{"type":"DELETE_NODE",
+                    "expectedResourceIds":[]}]}
+                    """
+                        .formatted(COMMAND)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
 
     verify(commandService, never()).applyCommands(any(UUID.class), any(UUID.class), anyList());
   }
