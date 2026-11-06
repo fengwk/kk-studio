@@ -26,10 +26,10 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

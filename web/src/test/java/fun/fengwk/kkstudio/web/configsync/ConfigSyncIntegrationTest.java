@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
@@ -122,7 +124,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     MvcResult inventoryResult =
         mockMvc
-            .perform(get("/api/settings/sync"))
+            .perform(get("/api/platform/config-sync"))
             .andExpect(status().isOk())
             .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
             .andReturn();
@@ -147,7 +149,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult exportResult =
         mockMvc
             .perform(
-                post("/api/settings/sync/export")
+                post("/api/platform/config-sync/export")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(exportRequest(providerRef(provider)))))
             .andExpect(status().isOk())
@@ -160,7 +162,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     // import 成功 no-store。
     mockMvc
         .perform(
-            post("/api/settings/sync/import")
+            post("/api/platform/config-sync/import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
         .andExpect(status().isOk())
@@ -171,7 +173,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult errorResult =
         mockMvc
             .perform(
-                post("/api/settings/sync/import")
+                post("/api/platform/config-sync/import")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(Map.of("yaml", badYaml))))
             .andExpect(status().isBadRequest())
@@ -183,7 +185,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult parseError =
         mockMvc
             .perform(
-                post("/api/settings/sync/import")
+                post("/api/platform/config-sync/import")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"yaml\":\"" + credential))
             .andExpect(status().isBadRequest())
@@ -206,7 +208,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String created = "ck_created_" + suffix;
     createProvider(existing, "existing provider");
     String existingYaml =
-        postData("/api/settings/sync/export", exportRequest(providerRef(existing)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(existing)))
             .path("yaml")
             .asText();
 
@@ -234,28 +236,28 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   void checkEndpointEnforcesStrictRequestShape() throws Exception {
     mockMvc
         .perform(
-            post("/api/settings/sync/import/check")
+            post("/api/platform/config-sync/check-import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yaml\":\"providers: []\\n\",\"extra\":1}"))
         .andExpect(status().isBadRequest())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
     mockMvc
         .perform(
-            post("/api/settings/sync/import/check")
+            post("/api/platform/config-sync/check-import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yaml\":123}"))
         .andExpect(status().isBadRequest());
     // allowPartial 只属于执行请求，检查请求不接受。
     mockMvc
         .perform(
-            post("/api/settings/sync/import/check")
+            post("/api/platform/config-sync/check-import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yaml\":\"providers: []\\n\",\"allowPartial\":true}"))
         .andExpect(status().isBadRequest());
     // 执行请求的 allowPartial 必须是布尔，不接受字符串。
     mockMvc
         .perform(
-            post("/api/settings/sync/import")
+            post("/api/platform/config-sync/import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yaml\":\"providers: []\\n\",\"allowPartial\":\"yes\"}"))
         .andExpect(status().isBadRequest());
@@ -380,7 +382,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "providers:\n  - name: " + provider + "\n    providerType: openai\nunknownThing: []\n";
 
     JsonNode check = checkData(yaml);
-    assertTrue(check.path("skipped").findValuesAsString("kind").contains("unknownThing"));
+    assertTrue(check.path("skipped").findValuesAsString("name").contains("unknownThing"));
     assertTrue(check.path("created").findValuesAsString("name").contains(provider));
     assertNull(findProvider(provider), "check must not write");
 
@@ -390,7 +392,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     JsonNode imported = importYaml(yaml, true);
     assertTrue(imported.path("imported").findValuesAsString("name").contains(provider));
-    assertTrue(imported.path("skipped").findValuesAsString("kind").contains("unknownThing"));
+    assertTrue(imported.path("skipped").findValuesAsString("name").contains("unknownThing"));
     assertNotNull(findProvider(provider));
 
     deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
@@ -509,7 +511,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             ref("mcpServers", mcpName),
             ref("settings", "settings"));
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(selection)).path("yaml").asText();
+        postData("/api/platform/config-sync/export", exportRequest(selection))
+            .path("yaml")
+            .asText();
     // 凭据与 MCP header 原值随导出；Environment 只导出凭证摘要。
     assertTrue(yaml.contains("sk-configsync-" + provider), "provider credential must be exported");
     assertTrue(yaml.contains("Bearer literal-secret"), "MCP credential headers must be exported");
@@ -588,7 +592,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 再次导出逐字段比对，而不是只证明同名条目存在或 imported 列表非空。
     String restoredYaml =
-        postData("/api/settings/sync/export", exportRequest(selection)).path("yaml").asText();
+        postData("/api/platform/config-sync/export", exportRequest(selection))
+            .path("yaml")
+            .asText();
     assertEquals(
         parseYaml(yaml), parseYaml(restoredYaml), "all seven kinds must preserve editable facts");
   }
@@ -628,7 +634,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     createAgent(unrelatedAgent, model, List.of(), List.of(), List.of());
 
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(agentRef(agentA)))
+        postData("/api/platform/config-sync/export", exportRequest(agentRef(agentA)))
             .path("yaml")
             .asText();
     assertTrue(
@@ -667,7 +673,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(commit1, skillDto.path("packageVersion").asText());
 
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(ref("skillPackages", pkg)))
+        postData("/api/platform/config-sync/export", exportRequest(ref("skillPackages", pkg)))
             .path("yaml")
             .asText();
     assertFalse(yaml.contains(commit1), "export must not pin a published commit");
@@ -701,7 +707,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode providerDto = createProvider(name, "original description");
     JsonNode survivorDto = createProvider(survivor, "must survive");
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText();
 
@@ -717,7 +723,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     updateProviderPut(name, providerDto.path("version").asText(), update);
     assertEquals("changed later", findProvider(name).path("description").asText());
     assertTrue(
-        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText()
             .contains("credential: sk-updated"),
@@ -731,7 +737,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(
         parseYaml(yaml),
         parseYaml(
-            postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
                 .path("yaml")
                 .asText()),
         "same-name import must restore all file facts, including the original credential");
@@ -748,7 +754,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode created = createProvider(name, "configured target");
     assertTrue(created.path("configured").asBoolean());
     String originalYaml =
-        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText();
     putData(
@@ -759,7 +765,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "expectedVersion", created.path("version").asText()));
     assertTrue(findProvider(name).path("configured").asBoolean());
     assertTrue(
-        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText()
             .contains("sk-configsync-" + name),
@@ -769,7 +775,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     assertFalse(findProvider(name).path("configured").asBoolean());
     String exported =
-        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+        postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText();
     assertFalse(
@@ -780,7 +786,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(
         parseYaml(originalYaml),
         parseYaml(
-            postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            postData("/api/platform/config-sync/export", exportRequest(providerRef(name)))
                 .path("yaml")
                 .asText()),
         "importing the original file must restore the credential and other editable facts");
@@ -791,7 +797,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   void concurrentSettingsChangeRejectsThePreparedAggregateAndRollsBackEarlierWrites()
       throws Exception {
     String name = "settings_cas_" + unique();
-    JsonNode before = getData("/api/settings");
+    JsonNode before = getData("/api/platform/settings");
     String settingsYaml = exportedSettingsYaml();
     String planned =
         mutateYaml(
@@ -810,7 +816,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             document ->
                 settingsSection(document, "tool")
                     .put("modelGatewayBusyRetryMillis", concurrentBusyRetry)));
-    JsonNode concurrent = getData("/api/settings");
+    JsonNode concurrent = getData("/api/platform/settings");
 
     DomainException conflict =
         assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
@@ -818,14 +824,16 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     assertNull(findProvider(name), "writes preceding the settings CAS must be rolled back");
     assertEquals(
-        concurrent, getData("/api/settings"), "concurrent values and version must remain intact");
+        concurrent,
+        getData("/api/platform/settings"),
+        "concurrent values and version must remain intact");
   }
 
   /** settings 必须完整七节：完整导入生效，未知字段剔除并报告，局部 patch 与空对象硬拒绝。 */
   @Test
   void fullSettingsImportAndUnknownSectionIsReported() throws Exception {
     String settingsYaml = exportedSettingsYaml();
-    JsonNode before = getData("/api/settings");
+    JsonNode before = getData("/api/platform/settings");
     int originalRetries = before.path("aiRuntime").path("retryMaxRetries").asInt();
 
     String changed =
@@ -836,7 +844,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(
         imported.path("imported").findValuesAsString("name").contains("settings"),
         "full settings must be imported");
-    JsonNode after = getData("/api/settings");
+    JsonNode after = getData("/api/platform/settings");
     assertEquals("9999", after.path("aiRuntime").path("retryBaseDelayMillis").asText());
     assertEquals(
         originalRetries,
@@ -853,21 +861,23 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "unknown settings section must be reported");
     assertEquals(
         "9999",
-        getData("/api/settings").path("aiRuntime").path("retryBaseDelayMillis").asText(),
+        getData("/api/platform/settings").path("aiRuntime").path("retryBaseDelayMillis").asText(),
         "supported settings sections must apply when another section is unknown");
 
     // 局部 settings 与空对象都不满足完整七节契约：硬拒绝且不改变现值或版本。
-    JsonNode held = getData("/api/settings");
+    JsonNode held = getData("/api/platform/settings");
     importRejected("settings:\n  aiRuntime:\n    retryBaseDelayMillis: 8888\n");
     importRejected("settings: {}\n");
     assertEquals(
-        held, getData("/api/settings"), "rejected settings must not alter values or version");
+        held,
+        getData("/api/platform/settings"),
+        "rejected settings must not alter values or version");
   }
 
   /** 完整 settings 参与真实 YAML 往返；仅含 network 的局部 settings 必须硬拒绝。 */
   @Test
   void networkSettingsRoundtripAndPartialImportsAreRejected() throws Exception {
-    JsonNode before = getData("/api/settings");
+    JsonNode before = getData("/api/platform/settings");
     String original = exportedSettingsYaml();
     String configured =
         mutateYaml(
@@ -879,7 +889,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     try {
       JsonNode imported = importYaml(configured);
       assertEquals(0, imported.path("skipped").size());
-      JsonNode current = getData("/api/settings");
+      JsonNode current = getData("/api/platform/settings");
       assertEquals("http://127.0.0.1:9", current.path("network").path("proxyUrl").asText());
       assertEquals("localhost,127.0.0.1", current.path("network").path("noProxyHosts").asText());
       assertEquals(before.path("aiRuntime"), current.path("aiRuntime"));
@@ -888,9 +898,10 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       // 导出完整快照后再导入：network 恢复为导出的值。
       String exported = exportedSettingsYaml();
       importYaml(original);
-      assertTrue(getData("/api/settings").path("network").path("proxyUrl").isMissingNode());
+      assertTrue(
+          getData("/api/platform/settings").path("network").path("proxyUrl").isMissingNode());
       importYaml(exported);
-      assertEquals(current.path("network"), getData("/api/settings").path("network"));
+      assertEquals(current.path("network"), getData("/api/platform/settings").path("network"));
     } finally {
       importYaml(original);
     }
@@ -936,7 +947,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     // 未知顶层类别是条目级 skip，而不是整份文档错误。
     JsonNode unknownCategory = importYaml("unknownThing: []\n", true);
     assertTrue(
-        unknownCategory.path("skipped").findValuesAsString("kind").contains("unknownThing"),
+        unknownCategory.path("skipped").findValuesAsString("name").contains("unknownThing"),
         "unknown top-level category must be reported as skip");
   }
 
@@ -949,7 +960,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                post("/api/settings/sync/import")
+                post("/api/platform/config-sync/import")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"yaml\": " + secret + "}"))
             .andExpect(status().isBadRequest())
@@ -957,8 +968,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .andReturn();
     assertFalse(output.getAll().contains(secret), "invalid input must not enter request logs");
     assertEquals(
-        "Failed to read request",
-        objectMapper.readTree(body(result)).path("errors").path("detail").asText());
+        "Failed to read request", objectMapper.readTree(body(result)).path("detail").asText());
     assertFalse(body(result).contains(secret));
   }
 
@@ -970,7 +980,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode envDto =
         createEnvironment("rb_env_existing_" + UUID.randomUUID().toString().substring(0, 8));
     String collidingToken = envDto.path("registrationToken").asText();
-    JsonNode settingsBefore = getData("/api/settings");
+    JsonNode settingsBefore = getData("/api/platform/settings");
 
     String yaml =
         "providers:\n"
@@ -990,7 +1000,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "error must not echo the token hash");
     assertNull(findProvider("rb_provider"), "rejected file must not write earlier entries");
     assertNull(findEnvironment("rb_env_new"), "rejected environment must not be created");
-    assertEquals(settingsBefore, getData("/api/settings"), "settings must not change");
+    assertEquals(settingsBefore, getData("/api/platform/settings"), "settings must not change");
   }
 
   /** 同一文件内不同身份共用凭证摘要同样是硬错误。 */
@@ -1105,7 +1115,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     createProvider(provider, "precision provider");
     JsonNode modelDto = createModel(provider, model, price, "{}");
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(ref("models", model)))
+        postData("/api/platform/config-sync/export", exportRequest(ref("models", model)))
             .path("yaml")
             .asText();
     deleteOk("/api/models/" + model, modelDto.path("version").asText());
@@ -1123,7 +1133,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                post("/api/settings/sync/import")
+                post("/api/platform/config-sync/import")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
             .andExpect(status().isBadRequest())
@@ -1149,9 +1159,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "credential",
             "sk-configsync-" + name,
             "modelCallTimeoutMillis",
-            120000L,
+            120000,
             "modelCallIdleTimeoutMillis",
-            30000L));
+            30000));
   }
 
   private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)
@@ -1162,8 +1172,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     update.put("providerType", source.getProviderType());
     update.put("baseUrl", source.getBaseUrl());
     update.put("credential", source.getCredential());
-    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
-    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
+    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis().intValue());
+    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis().intValue());
     update.put("expectedVersion", expectedVersion);
     putData("/api/providers/" + name, update);
   }
@@ -1214,7 +1224,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setHeaders(headers);
     dto.setEnabled(true);
     dto.setTimeoutMillis(10000L);
-    return postData("/api/mcp-servers", dto);
+    ObjectNode body = objectMapper.valueToTree(dto);
+    body.put("timeoutMillis", 10000);
+    return postData("/api/mcp-servers", body);
   }
 
   private JsonNode discover(String name, String expectedVersion) throws Exception {
@@ -1229,18 +1241,18 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode importYaml(String yaml) throws Exception {
-    return postData("/api/settings/sync/import", Map.of("yaml", yaml));
+    return postData("/api/platform/config-sync/import", Map.of("yaml", yaml));
   }
 
   private JsonNode importYaml(String yaml, boolean allowPartial) throws Exception {
     return postData(
-        "/api/settings/sync/import", Map.of("yaml", yaml, "allowPartial", allowPartial));
+        "/api/platform/config-sync/import", Map.of("yaml", yaml, "allowPartial", allowPartial));
   }
 
   private MvcResult checkRequest(String yaml) throws Exception {
     return mockMvc
         .perform(
-            post("/api/settings/sync/import/check")
+            post("/api/platform/config-sync/check-import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
         .andExpect(status().isOk())
@@ -1255,7 +1267,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private MvcResult checkRejected(String yaml) throws Exception {
     return mockMvc
         .perform(
-            post("/api/settings/sync/import/check")
+            post("/api/platform/config-sync/check-import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
         .andExpect(status().isBadRequest())
@@ -1270,7 +1282,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private MvcResult importRejected(String yaml, boolean allowPartial) throws Exception {
     return mockMvc
         .perform(
-            post("/api/settings/sync/import")
+            post("/api/platform/config-sync/import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     objectMapper.writeValueAsString(
@@ -1367,6 +1379,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

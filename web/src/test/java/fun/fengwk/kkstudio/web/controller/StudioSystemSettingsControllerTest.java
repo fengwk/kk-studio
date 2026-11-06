@@ -38,7 +38,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
   @Test
   public void getReturnsSafeDefaultAggregateWithVersionZero() throws Exception {
     mockMvc
-        .perform(get("/api/settings"))
+        .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"))
         .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("5000"))
@@ -52,14 +52,14 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.network.noProxyHosts").value("localhost,127.*,::1"))
         .andExpect(jsonPath("$.advanced.applicationEventQueueCapacity").value(512))
-        .andExpect(jsonPath("$.createTime").exists())
-        .andExpect(jsonPath("$.updateTime").exists());
+        .andExpect(jsonPath("$.createdAt").exists())
+        .andExpect(jsonPath("$.updatedAt").exists());
   }
 
   @Test
   public void schemaReturnsOrderedSectionsGroupsAndFields() throws Exception {
     mockMvc
-        .perform(get("/api/settings/schema"))
+        .perform(get("/api/platform/settings/schema"))
         .andExpect(status().isOk())
         // section 顺序：aiRuntime -> tool -> environment -> network -> storageMedia
         // -> advanced（General 是前端本地 tab，不在 server schema）。
@@ -155,10 +155,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "0");
-              body.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", "6000");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(first))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(first))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("1"))
         .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("6000"));
@@ -168,10 +169,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "1");
-              body.withObject("tool").put("modelGatewayBusyRetryMillis", 7000L);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", "7000");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(second))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(second))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"))
         .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("7000"));
@@ -183,10 +185,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "99");
-              update.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
+              update.withObject("tool").put("modelGatewayBusyRetryMillis", "6000");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
         .andExpect(jsonPath("$.errors.expectedVersion").value("99"))
@@ -201,7 +204,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               update.put("expectedVersion", "not-a-version");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -213,10 +217,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "0");
-              update.withObject("advanced").put("processorHeartbeatIntervalMillis", 60_000L);
+              update.withObject("advanced").put("processorHeartbeatIntervalMillis", "60000");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -230,7 +235,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               update.put("bogusSection", true);
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest());
   }
 
@@ -238,7 +244,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
   public void putWithoutExpectedVersionReturns400() throws Exception {
     String body = bodyFromGet(update -> {});
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -254,13 +261,14 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               update.withObject("network").put("noProxyHosts", "");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(proxy))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(proxy))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("1"))
         .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
         .andExpect(jsonPath("$.network.noProxyHosts").value(""));
     mockMvc
-        .perform(get("/api/settings"))
+        .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
         .andExpect(jsonPath("$.network.noProxyHosts").value(""));
@@ -271,7 +279,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               update.withObject("network").putNull("proxyUrl");
             });
     mockMvc
-        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(direct))
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(direct))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"))
         .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
@@ -296,7 +305,10 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               });
       MvcResult result =
           mockMvc
-              .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+              .perform(
+                  put("/api/platform/settings")
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(body))
               .andExpect(status().isBadRequest())
               .andExpect(jsonPath("$.code").value("validation"))
               .andReturn();
@@ -306,7 +318,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
       assertFalse(response.contains(url));
     }
     mockMvc
-        .perform(get("/api/settings"))
+        .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"))
         .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
@@ -335,24 +347,26 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                 invalid.accept(update);
               });
       mockMvc
-          .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+          .perform(
+              put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
           .andExpect(status().isBadRequest());
     }
     mockMvc
-        .perform(get("/api/settings"))
+        .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"));
   }
 
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {
-    MvcResult result = mockMvc.perform(get("/api/settings")).andExpect(status().isOk()).andReturn();
+    MvcResult result =
+        mockMvc.perform(get("/api/platform/settings")).andExpect(status().isOk()).andReturn();
     JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString());
     assertNotNull(data, "GET must return the settings resource");
     ObjectNode body = ((ObjectNode) data).deepCopy();
-    // version / createTime / updateTime 是只读输出，写请求 DTO 没有这些字段，必须先剔除。
+    // version / createdAt / updatedAt 是只读输出，写请求 DTO 没有这些字段，必须先剔除。
     body.remove("version");
-    body.remove("createTime");
-    body.remove("updateTime");
+    body.remove("createdAt");
+    body.remove("updatedAt");
     mutator.accept(body);
     return objectMapper.writeValueAsString(body);
   }

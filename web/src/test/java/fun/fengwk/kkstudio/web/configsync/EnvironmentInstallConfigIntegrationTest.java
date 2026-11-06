@@ -98,7 +98,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     JsonNode saved = putData(path + "/install-config", update("0", config()));
     String yaml =
         postData(
-                "/api/settings/sync/export",
+                "/api/platform/config-sync/export",
                 Map.of("items", List.of(Map.of("kind", "environments", "name", "roundtrip-env"))))
             .path("yaml")
             .asText();
@@ -106,10 +106,10 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     String createdToken = created.path("registrationToken").asText();
     assertTrue(yaml.contains(RegistrationTokens.hash(createdToken)));
     assertFalse(yaml.contains(createdToken), "the export never carries the plaintext token");
-    postData("/api/settings/sync/import", Map.of("yaml", yaml));
+    postData("/api/platform/config-sync/import", Map.of("yaml", yaml));
     assertEquals(saved.path("version"), getData(path).path("version"));
     perform(delete(path).param("expectedVersion", "1"), 204);
-    postData("/api/settings/sync/import", Map.of("yaml", yaml));
+    postData("/api/platform/config-sync/import", Map.of("yaml", yaml));
     JsonNode imported = getData("/api/environments").get(0);
     assertEquals(saved.path("installConfig"), imported.path("installConfig"));
     String importedPath = "/api/environments/" + imported.path("id").asText();
@@ -127,7 +127,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
                       "daemon",
                       Map.of("studioUrl", "https://new.example.com")));
             });
-    postData("/api/settings/sync/import", Map.of("yaml", changed));
+    postData("/api/platform/config-sync/import", Map.of("yaml", changed));
     JsonNode updated = getData(importedPath);
     assertEquals("1", updated.path("version").asText());
     assertEquals("macos", updated.at("/installConfig/operatingSystem").asText());
@@ -135,10 +135,10 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
         RegistrationTokens.hash("replacement-token"),
         storedTokenHash(imported.path("id").asText()));
     String cleared = mutateYaml(changed, doc -> environment(doc).remove("installConfig"));
-    postData("/api/settings/sync/import", Map.of("yaml", cleared));
+    postData("/api/platform/config-sync/import", Map.of("yaml", cleared));
     assertFalse(getData(importedPath).hasNonNull("installConfig"));
     assertEquals("2", getData(importedPath).path("version").asText());
-    postData("/api/settings/sync/import", Map.of("yaml", cleared));
+    postData("/api/platform/config-sync/import", Map.of("yaml", cleared));
     assertEquals("2", getData(importedPath).path("version").asText());
   }
 
@@ -163,9 +163,9 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
                       extensions: [.java]
                       rootMarkers: [../outside]
         """;
-    for (String endpoint : List.of("import/check", "import")) {
+    for (String endpoint : List.of("check-import", "import")) {
       perform(
-          post("/api/settings/sync/" + endpoint)
+          post("/api/platform/config-sync/" + endpoint)
               .contentType(MediaType.APPLICATION_JSON)
               .content(objectMapper.writeValueAsString(Map.of("yaml", yaml, "allowPartial", true))),
           400);
@@ -201,7 +201,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
         """;
     try {
       perform(
-          post("/api/settings/sync/import")
+          post("/api/platform/config-sync/import")
               .contentType(MediaType.APPLICATION_JSON)
               .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))),
           409);

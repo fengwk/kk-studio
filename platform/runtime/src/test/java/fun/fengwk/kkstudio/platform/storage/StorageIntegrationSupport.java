@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.platform.storage;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -51,7 +52,8 @@ public class StorageIntegrationSupport {
     StorageUploadDTO pending =
         reserve("first.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
-    return storageUploadService.complete(UUID.fromString(pending.getId())).getBlobId();
+    return ((StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId())))
+        .getBlobId();
   }
 
   /** 把上传创建时间回拨到默认 TTL（86400s）之外，使其在当下 policy 下已过期。 */

@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.ApplyTiming;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.FieldType;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.FieldType;
 
 import java.util.List;
 

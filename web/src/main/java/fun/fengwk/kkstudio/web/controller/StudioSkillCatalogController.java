@@ -13,11 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.share.skill.SkillEnvironmentSyncDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO;

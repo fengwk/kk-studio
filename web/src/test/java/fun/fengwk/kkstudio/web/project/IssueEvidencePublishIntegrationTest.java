@@ -25,14 +25,14 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;

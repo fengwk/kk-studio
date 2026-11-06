@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.storage.s3;
 import lombok.Builder;
 import lombok.Value;
 
+import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -25,6 +26,6 @@ public class S3PresignedUrl {
   /** 发起请求时必须显式设置的 signed headers；不包含浏览器自动发送的 Host。 */
   Map<String, String> headers;
 
-  /** 签名过期时刻（UTC，ISO-8601 字符串）。 */
-  String expiresAt;
+  /** 签名过期时刻。 */
+  Instant expiresAt;
 }

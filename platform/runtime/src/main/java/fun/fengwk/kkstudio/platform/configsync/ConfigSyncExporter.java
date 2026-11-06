@@ -16,13 +16,13 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

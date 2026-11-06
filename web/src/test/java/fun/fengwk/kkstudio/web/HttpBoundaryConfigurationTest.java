@@ -29,7 +29,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
 
 import java.util.ArrayList;
 import java.util.List;

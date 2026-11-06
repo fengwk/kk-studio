@@ -61,6 +61,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
@@ -72,7 +73,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.io.IOException;
 import java.io.InputStream;

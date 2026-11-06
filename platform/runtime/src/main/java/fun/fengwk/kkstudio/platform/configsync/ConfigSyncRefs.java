@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
 
 /** 配置同步引用构造工具：Model 使用全局逻辑 name。 */
 public final class ConfigSyncRefs {

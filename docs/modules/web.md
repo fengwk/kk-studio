@@ -82,8 +82,8 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
-| Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
-| Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
+| Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
+| Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/api/harness/environment-daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |

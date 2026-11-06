@@ -25,6 +25,11 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -37,10 +42,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -662,13 +663,10 @@ public class StorageUploadService {
 
   private static StorageUploadDTO toDTO(
       UUID uploadId, UUID blobId, Instant expiresAt, StoragePresignedUrlDTO presignedPut) {
-    return StorageUploadDTO.builder()
-        .id(uploadId.toString())
-        .state(blobId == null ? StorageUploadState.PENDING : StorageUploadState.READY)
-        .blobId(blobId == null ? null : blobId.toString())
-        .presignedPut(presignedPut)
-        .expiresAt(expiresAt)
-        .build();
+    if (blobId == null) {
+      return new StorageUploadPendingDTO(uploadId.toString(), presignedPut, expiresAt);
+    }
+    return new StorageUploadReadyDTO(uploadId.toString(), blobId.toString(), expiresAt);
   }
 
   private record ReserveOutcome(StorageUpload upload, UUID blobId) {}

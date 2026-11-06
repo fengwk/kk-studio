@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.http.StorageController;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
@@ -27,7 +28,7 @@ class StudioStorageProblemWireTest {
   private final StorageUploadService uploads = mock(StorageUploadService.class);
   private final StorageBlobManager blobs = mock(StorageBlobManager.class);
   private final MockMvc mvc =
-      standaloneSetup(new StudioStorageController(uploads, blobs))
+      standaloneSetup(new StorageController(uploads, blobs))
           .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
           .build();
 
@@ -36,7 +37,7 @@ class StudioStorageProblemWireTest {
   void verificationFailureIsConflictProblem() throws Exception {
     UUID id = UUID.fromString("11111111-1111-1111-1111-111111111111");
     when(uploads.complete(id)).thenThrow(new StorageVerificationException("checksum mismatch"));
-    mvc.perform(post("/api/storage/uploads/{uploadId}/complete", id))
+    mvc.perform(post("/api/platform/storage/uploads/{uploadId}/complete", id))
         .andExpect(status().isConflict())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
         .andExpect(jsonPath("$.code").value("conflict"))
@@ -48,13 +49,16 @@ class StudioStorageProblemWireTest {
   @Test
   void invalidInputAndDomainFailureRetainTheirCategories() throws Exception {
     when(uploads.reserve(any())).thenThrow(new IllegalArgumentException("filename is required"));
-    mvc.perform(post("/api/storage/uploads").contentType(MediaType.APPLICATION_JSON).content("{}"))
+    mvc.perform(
+            post("/api/platform/storage/uploads")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("filename is required"));
     UUID id = UUID.fromString("22222222-2222-2222-2222-222222222222");
     when(blobs.presignOriginalUrl(id)).thenThrow(DomainException.notFound("blob"));
-    mvc.perform(post("/api/storage/blobs/{blobId}/download-url", id))
+    mvc.perform(post("/api/platform/storage/blobs/{blobId}/download-url", id))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
   }

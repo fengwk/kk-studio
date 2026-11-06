@@ -28,9 +28,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.RecordingS3PresignService;
@@ -84,14 +84,14 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                post("/api/storage/uploads")
+                post("/api/platform/storage/uploads")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         reserveBody("photo.png", "image/png", content.length, sha256Hex(content))))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.id").isString())
-            .andExpect(jsonPath("$.state").value("PENDING"))
-            .andExpect(jsonPath("$.blobId").value(nullValue()))
+            .andExpect(jsonPath("$.type").value("PENDING"))
+            .andExpect(jsonPath("$.blobId").doesNotExist())
             .andExpect(jsonPath("$.presignedPut.method").value("PUT"))
             .andExpect(jsonPath("$.presignedPut.headers['if-none-match']").value("*"))
             .andExpect(
@@ -125,17 +125,17 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
 
     MvcResult completed =
         mockMvc
-            .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
+            .perform(post("/api/platform/storage/uploads/" + uploadId + "/complete"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.state").value("READY"))
+            .andExpect(jsonPath("$.type").value("READY"))
             .andExpect(jsonPath("$.blobId").isString())
-            .andExpect(jsonPath("$.presignedPut").value(nullValue()))
+            .andExpect(jsonPath("$.presignedPut").doesNotExist())
             .andReturn();
     String blobId = readJsonString(completed.getResponse().getContentAsString(), "$.blobId");
 
     MvcResult original =
         mockMvc
-            .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
+            .perform(post("/api/platform/storage/blobs/" + blobId + "/download-url"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.method").value("GET"))
             .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/original")))
@@ -149,7 +149,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
 
     MvcResult preview =
         mockMvc
-            .perform(post("/api/storage/blobs/" + blobId + "/preview-url"))
+            .perform(post("/api/platform/storage/blobs/" + blobId + "/preview-url"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/preview.webp")))
             .andExpect(jsonPath("$.mediaType").value(nullValue()))
@@ -161,7 +161,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     assertTrue(previewJson.has("sizeBytes"));
     assertTrue(previewJson.at("/sizeBytes").isNull());
 
-    mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
+    mockMvc
+        .perform(delete("/api/platform/storage/uploads/" + uploadId))
+        .andExpect(status().isNoContent());
 
     assertEquals(
         1,
@@ -186,11 +188,11 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         "maintenance must delete the original object after finalizing the upload row");
 
     mockMvc
-        .perform(delete("/api/storage/uploads/" + uploadId))
+        .perform(delete("/api/platform/storage/uploads/" + uploadId))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
     mockMvc
-        .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
+        .perform(post("/api/platform/storage/blobs/" + blobId + "/download-url"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
   }
@@ -205,20 +207,20 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         content,
         "application/octet-stream");
     mockMvc
-        .perform(post("/api/storage/uploads/" + firstUploadId + "/complete"))
+        .perform(post("/api/platform/storage/uploads/" + firstUploadId + "/complete"))
         .andExpect(status().isOk());
 
     mockMvc
         .perform(
-            post("/api/storage/uploads")
+            post("/api/platform/storage/uploads")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     reserveBody(
                         "b.bin", "application/octet-stream", content.length, sha256Hex(content))))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.state").value("READY"))
+        .andExpect(jsonPath("$.type").value("READY"))
         .andExpect(jsonPath("$.blobId").isString())
-        .andExpect(jsonPath("$.presignedPut").value(nullValue()));
+        .andExpect(jsonPath("$.presignedPut").doesNotExist());
 
     assertEquals(
         1,
@@ -232,7 +234,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     byte[] content = "sized".getBytes(StandardCharsets.UTF_8);
     mockMvc
         .perform(
-            post("/api/storage/uploads")
+            post("/api/platform/storage/uploads")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -253,7 +255,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         "application/octet-stream");
 
     mockMvc
-        .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
+        .perform(post("/api/platform/storage/uploads/" + uploadId + "/complete"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"))
@@ -279,7 +281,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         "application/octet-stream");
 
     mockMvc
-        .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
+        .perform(post("/api/platform/storage/uploads/" + uploadId + "/complete"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"))
@@ -295,27 +297,27 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     blankFilename.setSha256("0".repeat(64));
     mockMvc
         .perform(
-            post("/api/storage/uploads")
+            post("/api/platform/storage/uploads")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(blankFilename)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
-        .perform(post("/api/storage/uploads/not-a-uuid/complete"))
+        .perform(post("/api/platform/storage/uploads/not-a-uuid/complete"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
-        .perform(post("/api/storage/uploads/" + UUID.randomUUID() + "/complete"))
+        .perform(post("/api/platform/storage/uploads/" + UUID.randomUUID() + "/complete"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
 
     mockMvc
-        .perform(post("/api/storage/blobs/" + UUID.randomUUID() + "/download-url"))
+        .perform(post("/api/platform/storage/blobs/" + UUID.randomUUID() + "/download-url"))
         .andExpect(status().isNotFound());
     mockMvc
-        .perform(post("/api/storage/blobs/" + UUID.randomUUID() + "/preview-url"))
+        .perform(post("/api/platform/storage/blobs/" + UUID.randomUUID() + "/preview-url"))
         .andExpect(status().isNotFound());
   }
 
@@ -329,7 +331,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         new byte[] {1},
         "application/octet-stream");
 
-    mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
+    mockMvc
+        .perform(delete("/api/platform/storage/uploads/" + uploadId))
+        .andExpect(status().isNoContent());
 
     assertTrue(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(uploadId))),
@@ -353,7 +357,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                post("/api/storage/uploads")
+                post("/api/platform/storage/uploads")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(reserveBody(filename, mediaType, size, sha256)))
             .andExpect(status().isCreated())

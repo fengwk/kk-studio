@@ -19,21 +19,21 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter.VariantIssue;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -210,7 +210,7 @@ public final class ConfigSyncPlanner {
         if (!availableProviders.contains(spec.properties().getProviderName())) {
           skipped.add(
               new ConfigSyncSkipped(
-                  ConfigSyncKind.MODELS.wireValue(),
+                  ConfigSyncKind.MODELS,
                   key,
                   "missing provider: " + spec.properties().getProviderName()));
           skippedModels.add(key);
@@ -249,8 +249,7 @@ public final class ConfigSyncPlanner {
         if (reason == null) {
           continue;
         }
-        skipped.add(
-            new ConfigSyncSkipped(ConfigSyncKind.MODELS.wireValue(), entry.getKey(), reason));
+        skipped.add(new ConfigSyncSkipped(ConfigSyncKind.MODELS, entry.getKey(), reason));
         skippedModels.add(entry.getKey());
         availableModels.remove(entry.getKey());
         modelPoolChanged = true;
@@ -396,7 +395,7 @@ public final class ConfigSyncPlanner {
         // 契约：发现失败不伪造 UNVERIFIED 成功，skip 当前 MCP 并让依赖它的 Agent 一并 skip。
         skipped.add(
             new ConfigSyncSkipped(
-                ConfigSyncKind.MCP_SERVERS.wireValue(), spec.name(), "cannot discover mcp tools"));
+                ConfigSyncKind.MCP_SERVERS, spec.name(), "cannot discover mcp tools"));
         skippedMcp.add(spec.name());
         availableMcpTools.remove(spec.name());
         return null;
@@ -498,7 +497,7 @@ public final class ConfigSyncPlanner {
       } else {
         skipped.add(
             new ConfigSyncSkipped(
-                ConfigSyncKind.AGENTS.wireValue(),
+                ConfigSyncKind.AGENTS,
                 spec.name(),
                 agentUnsatisfiedReason(
                     spec,
@@ -534,8 +533,7 @@ public final class ConfigSyncPlanner {
       }
       String reason = pluginUnsatisfiedReason(spec, revision, agentPool);
       if (reason != null) {
-        skipped.add(
-            new ConfigSyncSkipped(ConfigSyncKind.PLUGINS.wireValue(), spec.pluginId(), reason));
+        skipped.add(new ConfigSyncSkipped(ConfigSyncKind.PLUGINS, spec.pluginId(), reason));
         continue;
       }
       pluginImports.add(
@@ -658,9 +656,7 @@ public final class ConfigSyncPlanner {
   private static Set<String> skippedNames(List<ConfigSyncSkipped> skipped, ConfigSyncKind kind) {
     Set<String> names = new LinkedHashSet<>();
     for (ConfigSyncSkipped entry : skipped) {
-      if (kind.wireValue().equals(entry.getKind())
-          && entry.getName() != null
-          && !entry.getName().isEmpty()) {
+      if (kind == entry.getKind() && entry.getName() != null && !entry.getName().isEmpty()) {
         names.add(entry.getName());
       }
     }

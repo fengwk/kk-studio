@@ -9,15 +9,14 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -110,17 +109,11 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
   private static Ticket toTicket(StorageUploadDTO dto) {
     Objects.requireNonNull(dto, "storage upload");
     UUID uploadId = parseUploadId(dto.getId());
-    if (dto.getState() == StorageUploadState.READY) {
-      if (dto.getBlobId() == null || dto.getPresignedPut() != null) {
-        throw new IllegalStateException("READY upload has an invalid shape");
-      }
-      parseCanonicalUuid(dto.getBlobId(), "blobId");
+    if (dto instanceof StorageUploadReadyDTO ready) {
+      parseCanonicalUuid(ready.getBlobId(), "blobId");
       return new Ticket.Ready(uploadId);
     }
-    if (dto.getState() != StorageUploadState.PENDING || dto.getBlobId() != null) {
-      throw new IllegalStateException("storage upload has an invalid state");
-    }
-    StoragePresignedUrlDTO presigned = dto.getPresignedPut();
+    StoragePresignedUrlDTO presigned = ((StorageUploadPendingDTO) dto).getPresignedPut();
     if (presigned == null || presigned.getMethod() == null || presigned.getUrl() == null) {
       throw new IllegalStateException("PENDING upload must carry a presigned PUT");
     }
@@ -129,24 +122,7 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
     return new Ticket.Pending(
         uploadId,
         new DaemonPresignedPut(
-            presigned.getMethod(), presigned.getUrl(), headers, parseExpiresAt(presigned)));
-  }
-
-  /** 预签名签名过期时刻：wire 上的权威 ISO-8601 事实；缺失或非法都是服务端缺陷，直接失败。 */
-  private static Instant parseExpiresAt(StoragePresignedUrlDTO presigned) {
-    String expiresAt = presigned.getExpiresAt();
-    if (expiresAt == null || expiresAt.isBlank()) {
-      throw new IllegalStateException("PENDING upload must carry presigned expiresAt");
-    }
-    try {
-      Instant parsed = Instant.parse(expiresAt);
-      if (!parsed.toString().equals(expiresAt)) {
-        throw new IllegalStateException("presigned expiresAt must be canonical");
-      }
-      return parsed;
-    } catch (DateTimeParseException error) {
-      throw new IllegalStateException("presigned expiresAt must be an ISO-8601 instant", error);
-    }
+            presigned.getMethod().name(), presigned.getUrl(), headers, presigned.getExpiresAt()));
   }
 
   private static UUID parseUploadId(String id) {

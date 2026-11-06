@@ -295,25 +295,6 @@ export interface AgentProviderUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskDTO */
-export interface AgentTaskDTO {
-  ticketId: string
-  threadId: string
-  agent: string
-  state: string
-  report: string
-  partialResult: string
-  error: string
-}
-
-/** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskSubmitDTO */
-export interface AgentTaskSubmitDTO {
-  ticketId: string
-  agent: string
-  prompt: string
-  maxTurns?: number | null
-}
-
 /** Java：fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO */
 export interface AppendIssueActivityRequestDTO {
   expectedVersion: string
@@ -745,53 +726,53 @@ export interface ChatUpdateDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncExportDTO */
 export interface ConfigSyncExportDTO {
   yaml: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncExportRequestDTO */
 export interface ConfigSyncExportRequestDTO {
   items: ConfigSyncRef[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportCheckDTO */
 export interface ConfigSyncImportCheckDTO {
   created: ConfigSyncRef[]
   updated: ConfigSyncRef[]
   skipped: ConfigSyncSkipped[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportCheckRequestDTO */
 export interface ConfigSyncImportCheckRequestDTO {
   yaml: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO */
 export interface ConfigSyncImportRequestDTO {
   yaml: string
   allowPartial?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportResultDTO */
 export interface ConfigSyncImportResultDTO {
   imported: ConfigSyncRef[]
   skipped: ConfigSyncSkipped[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncInventoryDTO */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncInventoryDTO */
 export interface ConfigSyncInventoryDTO {
   items: ConfigSyncItem[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncItem */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncItem */
 export interface ConfigSyncItem {
   kind: ConfigSyncKind
   name: string
   dependencies: ConfigSyncRef[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncKind */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind */
 export type ConfigSyncKind =
   | 'providers'
   | 'models'
@@ -813,15 +794,15 @@ export const CONFIG_SYNC_KIND_VALUES: readonly ConfigSyncKind[] = [
   'plugins',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncRef */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef */
 export interface ConfigSyncRef {
   kind: ConfigSyncKind
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped */
+/** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped */
 export interface ConfigSyncSkipped {
-  kind: string
+  kind?: ConfigSyncKind | null
   name: string
   reason: string
 }
@@ -1546,6 +1527,16 @@ export interface InteractionPageDTO {
   freshnessAt: number | null
 }
 
+/** Java：fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy */
+export type InvocationRetryBackoffStrategy =
+  | 'FIXED'
+  | 'EXPONENTIAL'
+
+export const INVOCATION_RETRY_BACKOFF_STRATEGY_VALUES: readonly InvocationRetryBackoffStrategy[] = [
+  'FIXED',
+  'EXPONENTIAL',
+]
+
 /** Java：fun.fengwk.kkstudio.project.dto.IssueActivityDTO */
 export interface IssueActivityDTO {
   issueId: string
@@ -1959,7 +1950,7 @@ export interface ResumeIssueRequestDTO {
   requestKey: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO */
 export interface SkillArchiveDownloadDTO {
   filename: string
   sha256: string
@@ -2101,44 +2092,56 @@ export interface StopIssueRequestDTO {
   detail?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO */
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO */
 export interface StoragePresignedUrlDTO {
-  method: string
+  method: StorageUrlMethod
   url: string
   headers: Record<string, string>
-  expiresAt: string
+  expiresAt: number
   mediaType: string | null
   sizeBytes: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.storage.StorageUploadDTO */
-export interface StorageUploadDTO {
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO */
+export interface StorageUploadPendingDTO {
+  type: 'PENDING'
   id: string
-  state: StorageUploadState
-  blobId: string | null
-  presignedPut: StoragePresignedUrlDTO | null
+  presignedPut: StoragePresignedUrlDTO
   expiresAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO */
+export interface StorageUploadReadyDTO {
+  type: 'READY'
+  id: string
+  blobId: string
+  expiresAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO */
+export type StorageUploadDTO =
+  | StorageUploadPendingDTO
+  | StorageUploadReadyDTO
+
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO */
 export interface StorageUploadReserveRequestDTO {
   filename: string
   mediaType: string
-  sha256: string
   sizeBytes: number
+  sha256: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.storage.StorageUploadState */
-export type StorageUploadState =
-  | 'PENDING'
-  | 'READY'
+/** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod */
+export type StorageUrlMethod =
+  | 'PUT'
+  | 'GET'
 
-export const STORAGE_UPLOAD_STATE_VALUES: readonly StorageUploadState[] = [
-  'PENDING',
-  'READY',
+export const STORAGE_URL_METHOD_VALUES: readonly StorageUrlMethod[] = [
+  'PUT',
+  'GET',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO */
 export interface SystemSettingsAdvancedDTO {
   resourceMaxBytes: string
   processorLeaseDurationMillis: string
@@ -2155,10 +2158,10 @@ export interface SystemSettingsAdvancedDTO {
   postgresqlWorkReconnectBackoffMillis: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO */
 export interface SystemSettingsAiRuntimeDTO {
   retryMaxRetries: number
-  retryBackoffStrategy: string
+  retryBackoffStrategy: InvocationRetryBackoffStrategy
   retryBaseDelayMillis: string
   retryMaxDelayMillis: string
   compactionKeepRecentTokens: number
@@ -2169,7 +2172,7 @@ export interface SystemSettingsAiRuntimeDTO {
   modelHttpRetryStatusCodes: number[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO */
 export interface SystemSettingsDTO {
   tool: SystemSettingsToolDTO
   aiRuntime: SystemSettingsAiRuntimeDTO
@@ -2178,23 +2181,23 @@ export interface SystemSettingsDTO {
   storageMedia: SystemSettingsStorageMediaDTO
   advanced: SystemSettingsAdvancedDTO
   version: string
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO */
 export interface SystemSettingsEnvironmentDTO {
   maxResourceBytes: string
   heartbeatTimeoutMillis: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO */
 export interface SystemSettingsNetworkDTO {
   proxyUrl?: string | null
   noProxyHosts: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.ApplyTiming */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming */
 export type SystemSettingsSchemaApplyTiming =
   | 'NEXT_INVOCATION'
   | 'NEXT_HTTP_REQUEST'
@@ -2206,12 +2209,12 @@ export const SYSTEM_SETTINGS_SCHEMA_APPLY_TIMING_VALUES: readonly SystemSettings
   'RESTART',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO */
 export interface SystemSettingsSchemaDTO {
   sections: SystemSettingsSchemaSectionDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.FieldDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.FieldDTO */
 export interface SystemSettingsSchemaFieldDTO {
   path: string
   labelKey: string
@@ -2223,7 +2226,7 @@ export interface SystemSettingsSchemaFieldDTO {
   options: SystemSettingsSchemaOptionDTO[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.FieldType */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.FieldType */
 export type SystemSettingsSchemaFieldType =
   | 'BOOLEAN'
   | 'INTEGER'
@@ -2243,7 +2246,7 @@ export const SYSTEM_SETTINGS_SCHEMA_FIELD_TYPE_VALUES: readonly SystemSettingsSc
   'PERMISSION',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.GroupDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.GroupDTO */
 export interface SystemSettingsSchemaGroupDTO {
   key: string
   labelKey: string
@@ -2253,13 +2256,13 @@ export interface SystemSettingsSchemaGroupDTO {
   fields: SystemSettingsSchemaFieldDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.OptionDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.OptionDTO */
 export interface SystemSettingsSchemaOptionDTO {
   value: string
   labelKey: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO.SectionDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.SectionDTO */
 export interface SystemSettingsSchemaSectionDTO {
   key: string
   labelKey: string
@@ -2268,7 +2271,7 @@ export interface SystemSettingsSchemaSectionDTO {
   groups: SystemSettingsSchemaGroupDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsStorageMediaDTO */
 export interface SystemSettingsStorageMediaDTO {
   uploadExpiresSeconds: string
   s3PresignDefaultExpiresSeconds: string
@@ -2280,20 +2283,20 @@ export interface SystemSettingsStorageMediaDTO {
   temporaryResourceCleanupIntervalSeconds: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO */
 export interface SystemSettingsToolDTO {
   permission: Record<string, SystemSettingsToolPermissionRuleDTO[]>
   modelGatewayBusyRetryMillis: string
   toolGatewayOverloadRetryMillis: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO.PermissionRuleDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO.PermissionRuleDTO */
 export interface SystemSettingsToolPermissionRuleDTO {
   pattern: string
   action: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO */
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO */
 export interface SystemSettingsUpdateDTO {
   tool: SystemSettingsToolDTO
   aiRuntime: SystemSettingsAiRuntimeDTO
@@ -2410,6 +2413,10 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
+  'DELETE /api/platform/storage/uploads/{uploadId}': {
+    path: { uploadId: string }
+    response: void
+  }
   'DELETE /api/plugins/{pluginId}/auth': {
     path: { pluginId: string }
     response: void
@@ -2428,14 +2435,6 @@ export interface ApiRoutes {
     path: { name: string }
     query: { expectedVersion: string }
     response: void
-  }
-  'DELETE /api/storage/uploads/{uploadId}': {
-    path: { uploadId: string }
-    response: void
-  }
-  'GET /api/agent-tasks/{ticketId}': {
-    path: { ticketId: string }
-    response: AgentTaskDTO
   }
   'GET /api/agents': {
     query: { pageNumber?: number; pageSize?: number }
@@ -2536,6 +2535,15 @@ export interface ApiRoutes {
     query: { pageNumber?: number; pageSize?: number }
     response: Page<AgentModelDTO>
   }
+  'GET /api/platform/config-sync': {
+    response: ConfigSyncInventoryDTO
+  }
+  'GET /api/platform/settings': {
+    response: SystemSettingsDTO
+  }
+  'GET /api/platform/settings/schema': {
+    response: SystemSettingsSchemaDTO
+  }
   'GET /api/plugins': {
     response: PluginDTO[]
   }
@@ -2592,15 +2600,6 @@ export interface ApiRoutes {
     path: { sessionId: string }
     response: HarnessThreadSummaryDTO[]
   }
-  'GET /api/settings': {
-    response: SystemSettingsDTO
-  }
-  'GET /api/settings/schema': {
-    response: SystemSettingsSchemaDTO
-  }
-  'GET /api/settings/sync': {
-    response: ConfigSyncInventoryDTO
-  }
   'GET /api/skill-packages': {
     response: SkillPackageSummaryDTO[]
   }
@@ -2631,14 +2630,6 @@ export interface ApiRoutes {
   }
   'GET /api/tools': {
     response: ToolCatalogEntryDTO[]
-  }
-  'POST /api/agent-tasks': {
-    body: AgentTaskSubmitDTO
-    response: AgentTaskDTO
-  }
-  'POST /api/agent-tasks/{ticketId}/stop': {
-    path: { ticketId: string }
-    response: AgentTaskDTO
   }
   'POST /api/agents': {
     body: AgentDefinitionCreateDTO
@@ -2797,6 +2788,34 @@ export interface ApiRoutes {
     body: AgentModelCreateDTO
     response: AgentModelDTO
   }
+  'POST /api/platform/config-sync/check-import': {
+    body: ConfigSyncImportCheckRequestDTO
+    response: ConfigSyncImportCheckDTO
+  }
+  'POST /api/platform/config-sync/export': {
+    body: ConfigSyncExportRequestDTO
+    response: ConfigSyncExportDTO
+  }
+  'POST /api/platform/config-sync/import': {
+    body: ConfigSyncImportRequestDTO
+    response: ConfigSyncImportResultDTO
+  }
+  'POST /api/platform/storage/blobs/{blobId}/download-url': {
+    path: { blobId: string }
+    response: StoragePresignedUrlDTO
+  }
+  'POST /api/platform/storage/blobs/{blobId}/preview-url': {
+    path: { blobId: string }
+    response: StoragePresignedUrlDTO
+  }
+  'POST /api/platform/storage/uploads': {
+    body: StorageUploadReserveRequestDTO
+    response: StorageUploadDTO
+  }
+  'POST /api/platform/storage/uploads/{uploadId}/complete': {
+    path: { uploadId: string }
+    response: StorageUploadDTO
+  }
   'POST /api/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }
     body: PluginAuthCompleteRequestDTO
@@ -2840,18 +2859,6 @@ export interface ApiRoutes {
     body: HarnessDraftPreviewRequestDTO
     response: HarnessProviderRequestPreviewDTO
   }
-  'POST /api/settings/sync/export': {
-    body: ConfigSyncExportRequestDTO
-    response: ConfigSyncExportDTO
-  }
-  'POST /api/settings/sync/import': {
-    body: ConfigSyncImportRequestDTO
-    response: ConfigSyncImportResultDTO
-  }
-  'POST /api/settings/sync/import/check': {
-    body: ConfigSyncImportCheckRequestDTO
-    response: ConfigSyncImportCheckDTO
-  }
   'POST /api/skill-packages/git': {
     body: SkillPackageGitCreateDTO
     response: SkillPackageDetailDTO
@@ -2881,22 +2888,6 @@ export interface ApiRoutes {
   'POST /api/skill-packages/{name}/archive-url': {
     path: { name: string }
     response: SkillArchiveDownloadDTO
-  }
-  'POST /api/storage/blobs/{blobId}/download-url': {
-    path: { blobId: string }
-    response: StoragePresignedUrlDTO
-  }
-  'POST /api/storage/blobs/{blobId}/preview-url': {
-    path: { blobId: string }
-    response: StoragePresignedUrlDTO
-  }
-  'POST /api/storage/uploads': {
-    body: StorageUploadReserveRequestDTO
-    response: StorageUploadDTO
-  }
-  'POST /api/storage/uploads/{uploadId}/complete': {
-    path: { uploadId: string }
-    response: StorageUploadDTO
   }
   'POST /api/threads/{threadId}/command-batches': {
     path: { threadId: string }
@@ -2968,6 +2959,10 @@ export interface ApiRoutes {
     body: AgentModelUpdateDTO
     response: AgentModelDTO
   }
+  'PUT /api/platform/settings': {
+    body: SystemSettingsUpdateDTO
+    response: SystemSettingsDTO
+  }
   'PUT /api/plugins/{pluginId}/configuration': {
     path: { pluginId: string }
     body: PluginConfigurationUpdateRequestDTO
@@ -2997,10 +2992,6 @@ export interface ApiRoutes {
     path: { sessionId: string }
     body: HarnessNameUpdateDTO
     response: HarnessSessionDTO
-  }
-  'PUT /api/settings': {
-    body: SystemSettingsUpdateDTO
-    response: SystemSettingsDTO
   }
   'PUT /api/skill-packages/{name}': {
     path: { name: string }

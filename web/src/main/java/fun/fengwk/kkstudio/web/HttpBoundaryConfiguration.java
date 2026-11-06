@@ -26,11 +26,11 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsStorageMediaDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
 import java.beans.PropertyEditorSupport;
 import java.util.List;

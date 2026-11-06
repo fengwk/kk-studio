@@ -18,7 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>覆盖 BrowserRouter 刷新回退的所有边界，确保：
  *
  * <ul>
- *   <li>Controller/API（如 {@code /api/settings/schema}）正常返回；
+ *   <li>Controller/API（如 {@code /api/platform/settings/schema}）正常返回；
  *   <li>真实静态资源（如 {@code /assets/index.js}）由 {@code PathResourceResolver} 正常返回；
  *   <li>不存在的 {@code /api/**} 与 {@code /actuator/**} 返回 404 而不是 {@code index.html}；
  *   <li>不存在且带文件扩展名的资源返回 404 而不是 {@code index.html}；
@@ -38,7 +38,7 @@ public class SpaFallbackTest extends WebPostgresTestSupport {
 
   @Test
   public void shouldServeExistingControllerRoute() throws Exception {
-    mockMvc.perform(get("/api/settings/schema")).andExpect(status().isOk());
+    mockMvc.perform(get("/api/platform/settings/schema")).andExpect(status().isOk());
   }
 
   @Test

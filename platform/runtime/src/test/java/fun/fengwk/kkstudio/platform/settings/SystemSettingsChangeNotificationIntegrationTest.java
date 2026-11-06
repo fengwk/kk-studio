@@ -17,8 +17,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
 import java.sql.Connection;
 import java.sql.SQLException;

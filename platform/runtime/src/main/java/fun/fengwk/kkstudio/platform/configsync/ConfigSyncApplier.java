@@ -22,6 +22,8 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
@@ -29,8 +31,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.util.List;
 import java.util.Map;

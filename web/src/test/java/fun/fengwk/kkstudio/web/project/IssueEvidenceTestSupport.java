@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.web.project;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 
 import java.nio.charset.StandardCharsets;
@@ -40,7 +40,7 @@ public class IssueEvidenceTestSupport {
     StorageUploadReserveRequestDTO reserve = new StorageUploadReserveRequestDTO();
     reserve.setFilename(filename);
     reserve.setMediaType(MEDIA_TYPE);
-    reserve.setSizeBytes(bytes.length);
+    reserve.setSizeBytes((long) bytes.length);
     reserve.setSha256(sha256Hex(bytes));
     StorageUploadDTO pending = uploadService.reserve(reserve);
     s3Storage.putDirect(

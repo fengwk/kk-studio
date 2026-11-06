@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;

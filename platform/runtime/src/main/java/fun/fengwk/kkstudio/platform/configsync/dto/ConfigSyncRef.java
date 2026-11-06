@@ -1,0 +1,24 @@
+package fun.fengwk.kkstudio.platform.configsync.dto;
+
+import lombok.Data;
+
+/**
+ * 单个配置条目的稳定身份：{@code kind + name}。
+ *
+ * <p>name 是现有业务名称：Provider/Agent/Environment/MCP 为资源名，Model（含模型组）为全局逻辑名，Skill Package 为
+ * packageName，Settings 固定为 {@code settings}，Plugin 为安装身份 {@code pluginId}。引用不携带任何配置值或凭据。
+ */
+@Data
+public class ConfigSyncRef {
+
+  private ConfigSyncKind kind;
+
+  private String name;
+
+  public ConfigSyncRef() {}
+
+  public ConfigSyncRef(ConfigSyncKind kind, String name) {
+    this.kind = kind;
+    this.name = name;
+  }
+}

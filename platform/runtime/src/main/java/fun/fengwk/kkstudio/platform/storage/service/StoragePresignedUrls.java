@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.s3.S3PresignedUrl;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 /** 预签名对象到公开 DTO 的映射：向调用方暴露标准化传输字段。 */
 public final class StoragePresignedUrls {
@@ -10,7 +11,7 @@ public final class StoragePresignedUrls {
 
   public static StoragePresignedUrlDTO from(S3PresignedUrl signed) {
     return StoragePresignedUrlDTO.builder()
-        .method(signed.getMethod())
+        .method(StorageUrlMethod.valueOf(signed.getMethod()))
         .url(signed.getUrl())
         .headers(signed.getHeaders())
         .expiresAt(signed.getExpiresAt())

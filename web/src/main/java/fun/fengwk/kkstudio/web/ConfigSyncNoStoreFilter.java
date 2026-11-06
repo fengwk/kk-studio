@@ -21,7 +21,8 @@ public class ConfigSyncNoStoreFilter extends OncePerRequestFilter {
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
     String path = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
-    return !path.equals("/api/settings/sync") && !path.startsWith("/api/settings/sync/");
+    return !path.equals("/api/platform/config-sync")
+        && !path.startsWith("/api/platform/config-sync/");
   }
 
   @Override

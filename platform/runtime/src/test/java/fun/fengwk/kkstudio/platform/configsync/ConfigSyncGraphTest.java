@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
 
 import java.util.List;
 import java.util.Set;

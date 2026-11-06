@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.HashMap;

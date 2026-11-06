@@ -61,11 +61,13 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
     HttpResponse<String> response =
         HttpClient.newHttpClient()
             .send(
-                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/settings/schema"))
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + port + "/api/platform/settings/schema"))
                     .GET()
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
-    assertEquals(200, response.statusCode(), "the embedded container must serve the settings schema");
+    assertEquals(
+        200, response.statusCode(), "the embedded container must serve the settings schema");
 
     assertEquals(
         6, servletContext.getMajorVersion(), "Boot 4 requires a Servlet 6.1 or newer container");

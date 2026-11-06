@@ -30,13 +30,15 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -47,6 +49,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -688,7 +691,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://s3.example.com/uploads/" + uploadId)
             .headers(signedHeaders)
             .build();
@@ -696,11 +699,8 @@ class StoragePluginResourceGatewayTest {
     mockReservePending(uploadId, presignedPut);
 
     StorageUploadDTO completed =
-        StorageUploadDTO.builder()
-            .id(uploadId.toString())
-            .state(StorageUploadState.READY)
-            .blobId(blobId.toString())
-            .build();
+        new StorageUploadReadyDTO(
+            uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
     when(storageUploadService.complete(uploadId)).thenReturn(completed);
 
     transport.setGetResponse(
@@ -739,7 +739,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("POST")
+            .method(StorageUrlMethod.GET)
             .url("https://s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -765,7 +765,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://user:pass@s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -792,7 +792,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -819,7 +819,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -831,10 +831,8 @@ class StoragePluginResourceGatewayTest {
     // complete 返回 PENDING
     when(storageUploadService.complete(uploadId))
         .thenReturn(
-            StorageUploadDTO.builder()
-                .id(uploadId.toString())
-                .state(StorageUploadState.PENDING)
-                .build());
+            new StorageUploadPendingDTO(
+                uploadId.toString(), null, Instant.parse("2026-07-28T10:01:00Z")));
     assertThrows(
         PluginResourceUnavailableException.class,
         () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
@@ -880,7 +878,7 @@ class StoragePluginResourceGatewayTest {
 
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -1010,7 +1008,7 @@ class StoragePluginResourceGatewayTest {
     UUID uploadId = UUID.randomUUID();
     StoragePresignedUrlDTO presignedPut =
         StoragePresignedUrlDTO.builder()
-            .method("PUT")
+            .method(StorageUrlMethod.PUT)
             .url("https://s3.example.com/uploads/" + uploadId)
             .build();
     mockReservePending(uploadId, presignedPut);
@@ -1133,7 +1131,8 @@ class StoragePluginResourceGatewayTest {
   void stageRemoteMediaPutRejectsMissingPresignedTarget() throws IOException {
     byte[] pngData = createPngData(96);
     UUID uploadId = UUID.randomUUID();
-    mockReservePending(uploadId, StoragePresignedUrlDTO.builder().method("PUT").url("   ").build());
+    mockReservePending(
+        uploadId, StoragePresignedUrlDTO.builder().method(StorageUrlMethod.PUT).url("   ").build());
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
@@ -1159,7 +1158,10 @@ class StoragePluginResourceGatewayTest {
     UUID uploadId = UUID.randomUUID();
     mockReservePending(
         uploadId,
-        StoragePresignedUrlDTO.builder().method("PUT").url("https://s3.example.com/a b").build());
+        StoragePresignedUrlDTO.builder()
+            .method(StorageUrlMethod.PUT)
+            .url("https://s3.example.com/a b")
+            .build());
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
@@ -1186,7 +1188,7 @@ class StoragePluginResourceGatewayTest {
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
     when(storageUploadService.reserve(any()))
-        .thenReturn(StorageUploadDTO.builder().state(StorageUploadState.PENDING).build());
+        .thenReturn(new StorageUploadPendingDTO(null, null, Instant.parse("2026-07-28T10:01:00Z")));
     PluginResourceUnavailableException noId =
         assertThrows(
             PluginResourceUnavailableException.class,
@@ -1199,7 +1201,7 @@ class StoragePluginResourceGatewayTest {
 
     when(storageUploadService.reserve(any()))
         .thenReturn(
-            StorageUploadDTO.builder().id("not-a-uuid").state(StorageUploadState.PENDING).build());
+            new StorageUploadPendingDTO("not-a-uuid", null, Instant.parse("2026-07-28T10:01:00Z")));
     PluginResourceUnavailableException badId =
         assertThrows(
             PluginResourceUnavailableException.class,
@@ -1292,21 +1294,15 @@ class StoragePluginResourceGatewayTest {
 
   private void mockReserveReady(UUID uploadId, UUID blobId) {
     StorageUploadDTO upload =
-        StorageUploadDTO.builder()
-            .id(uploadId.toString())
-            .state(StorageUploadState.READY)
-            .blobId(blobId.toString())
-            .build();
+        new StorageUploadReadyDTO(
+            uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
     when(storageUploadService.reserve(any())).thenReturn(upload);
   }
 
   private void mockReservePending(UUID uploadId, StoragePresignedUrlDTO presignedPut) {
     StorageUploadDTO upload =
-        StorageUploadDTO.builder()
-            .id(uploadId.toString())
-            .state(StorageUploadState.PENDING)
-            .presignedPut(presignedPut)
-            .build();
+        new StorageUploadPendingDTO(
+            uploadId.toString(), presignedPut, Instant.parse("2026-07-28T10:01:00Z"));
     when(storageUploadService.reserve(any())).thenReturn(upload);
   }
 

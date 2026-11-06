@@ -27,6 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSchemaProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
+import fun.fengwk.kkstudio.platform.settings.http.SystemSettingsController;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -57,7 +58,7 @@ class StudioHttpRetryStatusCodesContractTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new StudioAgentProviderController(providerService),
-                new StudioSystemSettingsController(
+                new SystemSettingsController(
                     settingsService, mock(SystemSettingsSchemaProvider.class)))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttpMapper()))
             .setControllerAdvice(new ApiResponseStatusAdvice())
@@ -157,7 +158,7 @@ class StudioHttpRetryStatusCodesContractTest {
 
       mockMvc
           .perform(
-              put("/api/settings")
+              put("/api/platform/settings")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"expectedVersion\":\"0\",\"aiRuntime\":{\"modelHttpRetryStatusCodes\":"

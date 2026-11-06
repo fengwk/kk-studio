@@ -34,15 +34,15 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -168,12 +168,20 @@ class ConfigSyncPlannerTest {
 
   private static boolean skipped(List<ConfigSyncSkipped> skipped, String kind, String name) {
     return skipped.stream()
-        .anyMatch(entry -> kind.equals(entry.getKind()) && name.equals(entry.getName()));
+        .anyMatch(
+            entry ->
+                entry.getKind() != null
+                    && kind.equals(entry.getKind().wireValue())
+                    && name.equals(entry.getName()));
   }
 
   private static String reason(List<ConfigSyncSkipped> skipped, String kind, String name) {
     return skipped.stream()
-        .filter(entry -> kind.equals(entry.getKind()) && name.equals(entry.getName()))
+        .filter(
+            entry ->
+                entry.getKind() != null
+                    && kind.equals(entry.getKind().wireValue())
+                    && name.equals(entry.getName()))
         .map(ConfigSyncSkipped::getReason)
         .findFirst()
         .orElseThrow();
@@ -556,8 +564,9 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
     SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
-    sections.getAiRuntime().setRetryBackoffStrategy("BOGUS");
-    String yamlText = ConfigSyncFixtures.settingsYaml(sections);
+    String yamlText =
+        ConfigSyncFixtures.settingsYaml(sections)
+            .replace("retryBackoffStrategy: EXPONENTIAL", "retryBackoffStrategy: BOGUS");
     assertThrows(DomainException.class, () -> plan(yamlText));
   }
 

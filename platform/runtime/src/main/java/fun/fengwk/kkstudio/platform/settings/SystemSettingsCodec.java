@@ -19,13 +19,13 @@ import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsStorageMediaDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -213,8 +213,7 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("aiRuntime is required");
     }
     InvocationRetryBackoffStrategy strategy =
-        InvocationRetryBackoffStrategy.fromValue(
-            requiredText(dto.getRetryBackoffStrategy(), "aiRuntime.retryBackoffStrategy"));
+        Objects.requireNonNull(dto.getRetryBackoffStrategy(), "aiRuntime.retryBackoffStrategy");
     return new SystemSettings.AiRuntime(
         requiredInt(dto.getRetryMaxRetries(), "aiRuntime.retryMaxRetries"),
         strategy,
@@ -366,7 +365,7 @@ public class SystemSettingsCodec {
   private static SystemSettingsAiRuntimeDTO fromAiRuntime(SystemSettings.AiRuntime aiRuntime) {
     SystemSettingsAiRuntimeDTO dto = new SystemSettingsAiRuntimeDTO();
     dto.setRetryMaxRetries(aiRuntime.retryMaxRetries());
-    dto.setRetryBackoffStrategy(aiRuntime.retryBackoffStrategy().name());
+    dto.setRetryBackoffStrategy(aiRuntime.retryBackoffStrategy());
     dto.setRetryBaseDelayMillis(aiRuntime.retryBaseDelayMillis());
     dto.setRetryMaxDelayMillis(aiRuntime.retryMaxDelayMillis());
     dto.setCompactionKeepRecentTokens(aiRuntime.compactionKeepRecentTokens());

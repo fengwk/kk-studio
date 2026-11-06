@@ -16,12 +16,12 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -265,7 +265,8 @@ class StrictJacksonConfigurationTest {
         + "\"overrides\":["
         + overrides
         + "],\"multipliers\":[]},"
-        + "\"defaultVariant\":\"default\",\"variants\":[{\"id\":\"default\"}]}";
+        + "\"defaultVariant\":\"default\","
+        + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}]}";
   }
 
   /** 测试意图：验证严格重复键检测仍然生效，解析包含重复 key 的 JSON 时拒绝。 */
@@ -320,12 +321,13 @@ class StrictJacksonConfigurationTest {
         });
   }
 
-  /** 测试意图：实际 HTTP Jackson 3 不能把网络字段的布尔/数字转换成合法主机名，同时保留 null 与空字符串语义。 */
+  /** 测试意图：HTTP 严格 mapper 不能把网络字段的布尔/数字转换成合法主机名，同时保留 null 与空字符串语义。 */
   @Test
   void shouldRejectNonStringNetworkTokensAndUnknownFields() {
     runner.run(
         context -> {
-          JsonMapper mapper = context.getBean(JsonMapper.class);
+          JsonMapper mapper =
+              HttpBoundaryConfiguration.strictHttpMapper(context.getBean(JsonMapper.class));
           SystemSettingsNetworkDTO direct =
               mapper.readValue(
                   "{\"proxyUrl\":null,\"noProxyHosts\":\"\"}", SystemSettingsNetworkDTO.class);
