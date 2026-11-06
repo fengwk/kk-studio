@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
@@ -207,8 +207,6 @@ public class AgentTaskService {
           throw gone;
         }
         return;
-      } catch (HarnessRuntimeNotFoundException gone) {
-        return;
       }
       Optional<ThreadJoin> current = runtime.findJoin(ticketId);
       if (current.isEmpty() || isTerminal(current.get())) {
@@ -222,17 +220,9 @@ public class AgentTaskService {
           return;
         }
         if (failure.code() != DomainErrorCode.CONFLICT
-            || !HarnessRuntimeConflictException.Reason.STALE_VERSION
-                .name()
-                .equals(failure.reason())) {
+            || !HarnessConflictReason.STALE_VERSION.name().equals(failure.reason())) {
           throw failure;
         }
-      } catch (HarnessRuntimeConflictException conflict) {
-        if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
-          throw conflict;
-        }
-      } catch (HarnessRuntimeNotFoundException gone) {
-        return;
       }
     }
     throw new IllegalStateException(
@@ -252,8 +242,6 @@ public class AgentTaskService {
           throw gone;
         }
         return;
-      } catch (HarnessRuntimeNotFoundException gone) {
-        return;
       }
       try {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
@@ -263,18 +251,9 @@ public class AgentTaskService {
           return;
         }
         if (failure.code() != DomainErrorCode.CONFLICT
-            || !HarnessRuntimeConflictException.Reason.STALE_VERSION
-                .name()
-                .equals(failure.reason())) {
+            || !HarnessConflictReason.STALE_VERSION.name().equals(failure.reason())) {
           throw failure;
         }
-      } catch (HarnessRuntimeConflictException conflict) {
-        if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
-          // 只有真正的 stale version 才是有界 CAS 重读；其它冲突必须明确失败。
-          throw conflict;
-        }
-      } catch (HarnessRuntimeNotFoundException gone) {
-        return;
       }
     }
     throw new IllegalStateException(

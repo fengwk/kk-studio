@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -234,9 +233,7 @@ class AgentTaskServiceTest {
     when(second.thread()).thenReturn(thread(childId, 1L));
     when(runtime.getThreadSnapshot(childId)).thenReturn(first).thenReturn(second);
     when(runtime.stop(any(StopCommand.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"))
+        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
         .thenReturn(null);
 
     service.stop(ticketId);
@@ -294,8 +291,7 @@ class AgentTaskServiceTest {
   @Test
   void stopToleratesAnAlreadyGoneThread() {
     UUID threadId = UUID.randomUUID();
-    when(runtime.getThreadSnapshot(threadId))
-        .thenThrow(new HarnessRuntimeNotFoundException("gone"));
+    when(runtime.getThreadSnapshot(threadId)).thenThrow(DomainException.notFound("thread", "gone"));
 
     service.stopThread(threadId);
 
