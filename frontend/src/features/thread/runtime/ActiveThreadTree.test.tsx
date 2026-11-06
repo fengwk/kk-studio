@@ -61,7 +61,7 @@ function renderTree(rootId: string, currentThreadId?: string, history = false) {
     sockets,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <TreeHarness rootId={rootId} currentThreadId={currentThreadId} history={history} />
           </MemoryRouter>
@@ -223,7 +223,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <ThreadNavigationContext.Provider value={observe}>
               <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
@@ -397,7 +397,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     const { unmount } = render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <RefcountHarness rootId={ROOT_ID} />
           </MemoryRouter>

@@ -37,7 +37,7 @@ describe('loadDaemonConfig', () => {
     expect(config.dataDir).toBe(root)
     expect(config.tokenPath).toBe(tokenPath(root))
     expect(config.studioUrl).toBe('https://studio.example.com')
-    expect(config.gatewayUri).toBe('wss://studio.example.com/api/harness/environment-daemon')
+    expect(config.gatewayUri).toBe('wss://studio.example.com/ws/daemon')
     expect(config.distributionDir).toBe(root)
     expect(config.note).toBeNull()
     expect(config.lsp).toEqual({})
@@ -48,7 +48,7 @@ describe('loadDaemonConfig', () => {
     const configPath = writeConfig(root, { studioUrl: 'http://127.0.0.1:8080/' })
     const config = loadDaemonConfig(configPath)
     expect(config.studioUrl).toBe('http://127.0.0.1:8080')
-    expect(config.gatewayUri).toBe('ws://127.0.0.1:8080/api/harness/environment-daemon')
+    expect(config.gatewayUri).toBe('ws://127.0.0.1:8080/ws/daemon')
   })
 
   it('rejects non-origin studio urls', () => {

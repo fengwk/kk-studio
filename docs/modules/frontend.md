@@ -66,13 +66,13 @@ Java long 游标保持字符串，版本比较使用长度与字典序，保留�
 
 ## Snapshot、realtime 与恢复
 
-Thread/Canvas 先读取 Snapshot，再订阅 `/api/events`。
+Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 浏览器只有一个应用事件 WebSocket，连接与订阅由应用级 manager 按资源引用计数管理：
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
 连接建立后服务端先发 `connected` 帧，manager 用它给出本次物理连接的 `eventNodeId` 与 `connectionId`；
 每次重连都是新身份，需要绑定到连接的 IDE 视图必须按新身份重新登记，旧身份不续用。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
-projects/tree/interactions/environments 只发 changed 提示、不携带 cursor。
+projects/thread-tree/interactions/environments 只发 changed 提示、不携带 cursor。
 subscribed（含重连）、resync、资源 error 和版本提示触发回读；
 Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，
 Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；

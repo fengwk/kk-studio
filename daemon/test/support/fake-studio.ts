@@ -81,6 +81,12 @@ export class FakeStudioPeer {
     this.wss = new WebSocketServer({ noServer: true })
 
     this.server.on('upgrade', (req, socket, head) => {
+      // 测试替身只接受与 Studio 相同的控制连接路径。
+      if (req.url !== '/ws/daemon') {
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        socket.destroy()
+        return
+      }
       if (this.rejectStatus !== null) {
         const status = this.rejectStatus
         socket.write(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
@@ -127,7 +133,7 @@ export class FakeStudioPeer {
   }
 
   get gatewayUri(): string {
-    return `ws://127.0.0.1:${this.port}/api/harness/environment-daemon`
+    return `ws://127.0.0.1:${this.port}/ws/daemon`
   }
 
   getHandshake(): HandshakeInfo | null {

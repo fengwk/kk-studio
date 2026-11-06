@@ -1977,7 +1977,7 @@ export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
       }
     }
     const onWebSocket = (socket) => {
-      if (new URL(socket.url()).pathname !== '/api/events') return
+      if (new URL(socket.url()).pathname !== '/ws/events') return
       sockets.add(socket)
       socket.on('framereceived', onFrame)
     }

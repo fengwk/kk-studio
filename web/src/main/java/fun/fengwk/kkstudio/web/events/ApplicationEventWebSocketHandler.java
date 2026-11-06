@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
 /**
- * 浏览器事件通道 {@code /api/events} 的 Spring WebSocket 适配器。
+ * 浏览器事件通道 {@code /ws/events} 的 Spring WebSocket 适配器。
  *
  * <p>连接建立时解包 {@link NativeWebSocketSession} 获得 {@link Session}，正文与原生 ping 全部经 {@link
  * AsyncTextSender} 异步串行发送，不使用同步 Spring sendMessage。会话状态（订阅表、发送队列、IDE 使用登记）按物理连接维护：重复 subscribe
@@ -47,7 +47,7 @@ import java.util.function.LongSupplier;
 @Component
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
 
-  public static final String PATH = "/api/events";
+  public static final String PATH = "/ws/events";
 
   static final long PING_INTERVAL_MILLIS = 15_000L;
   static final long PONG_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(45);

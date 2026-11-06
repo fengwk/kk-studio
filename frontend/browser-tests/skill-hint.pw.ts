@@ -106,7 +106,7 @@ async function installSkillHintApi(
     socket: null,
     installed: false,
   }
-  await page.routeWebSocket(/\/api\/events$/, (socket) => {
+  await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     state.socket = socket
     socket.onMessage((message) => {
       const frame = JSON.parse(String(message))

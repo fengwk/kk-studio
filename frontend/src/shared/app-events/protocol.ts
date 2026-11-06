@@ -1,5 +1,5 @@
 /**
- * 应用事件 WebSocket 协议（/api/events）。
+ * 应用事件 WebSocket 协议（/ws/events）。
  *
  * client -> server（JSON 文本）：
  * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<UUID>"}}

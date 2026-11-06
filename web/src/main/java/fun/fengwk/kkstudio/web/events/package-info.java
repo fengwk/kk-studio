@@ -1,5 +1,5 @@
 /**
- * 浏览器单应用 WebSocket 事件通道（{@code /api/events}）。
+ * 浏览器单应用 WebSocket 事件通道（{@code /ws/events}）。
  *
  * <p>连接建立后的第一帧（严格 JSON）：
  *

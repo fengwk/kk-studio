@@ -32,7 +32,7 @@ function renderPanel() {
   const sockets = new FakeWebSocketHarness()
   render(
     <QueryClientProvider client={client}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <MemoryRouter><Panel /></MemoryRouter>
       </ApplicationEventProvider>
     </QueryClientProvider>,

@@ -177,7 +177,7 @@ async function installChatApi(
       }
     },
   }
-  await page.routeWebSocket(/\/api\/events$/, (socket) => {
+  await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     sockets.push(socket)
     socket.onMessage((message) => {
       const frame = JSON.parse(String(message))

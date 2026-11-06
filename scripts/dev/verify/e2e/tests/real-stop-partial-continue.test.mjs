@@ -22,7 +22,7 @@ class FakeApplicationEventSocket {
   static instances = []
 
   constructor(url) {
-    assert.equal(new URL(url).pathname, '/api/events')
+    assert.equal(new URL(url).pathname, '/ws/events')
     this.url = url
     this.listeners = new Map()
     this.sent = []

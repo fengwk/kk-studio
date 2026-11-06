@@ -60,7 +60,7 @@ test('service native close honors Cancel, Save and Don’t Save through real bri
   }
   const config = {
     configPath: join(root, 'config.json'), dataDir: root, tokenPath: join(root, 'token'),
-    studioUrl: 'https://studio.example', gatewayUri: 'wss://studio.example/api/harness/environment-daemon',
+    studioUrl: 'https://studio.example', gatewayUri: 'wss://studio.example/ws/daemon',
     bashExecutable: '/bin/bash', note: null, lsp: {}, distributionDir: join(root, 'distribution'),
   }
   const processes = { async start() { throw new Error('unexpected supervisor start') }, async close() {}, async trackDescendant() {} }

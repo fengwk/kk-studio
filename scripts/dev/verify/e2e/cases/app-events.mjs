@@ -8,7 +8,7 @@ registerCase({
   id: 'events.heartbeat_keepalive',
   level: 'L1',
   title: '应用事件 WebSocket 周期 heartbeat 保活',
-  docs: '原生 WebSocket 直连 /api/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId，再等待严格 {type:"heartbeat"} 且连接保持打开',
+  docs: '原生 WebSocket 直连 /ws/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId，再等待严格 {type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
     const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
     const startedAt = Date.now()
@@ -107,7 +107,7 @@ registerCase({
 function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events'
+  url.pathname = '/ws/events'
   url.search = ''
   url.hash = ''
   return url.toString()

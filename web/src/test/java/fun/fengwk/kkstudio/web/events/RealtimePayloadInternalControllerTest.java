@@ -54,7 +54,8 @@ class RealtimePayloadInternalControllerTest {
   @Test
   void authenticatedRequestReturnsExactCanonicalJson() throws Exception {
     UUID payloadId = buffer.put(THREAD, EVENT_JSON).orElseThrow();
-    String path = ClusterInternalPaths.realtimePayloadPath(payloadId);
+    // 以外部可见路径发起签名请求，验证路由和认证路径同时迁移。
+    String path = "/internal/events/payloads/" + payloadId;
 
     mockMvc
         .perform(

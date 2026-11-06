@@ -166,7 +166,7 @@ async function installPaneApi(
     uploadCalls: [],
     deletedUploads: [],
   }
-  await page.routeWebSocket(/\/api\/events$/, () => {})
+  await page.routeWebSocket(/\/ws\/events$/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname

@@ -172,7 +172,7 @@ function config(distributionDir: string): DaemonConfig {
     dataDir: join(distributionDir, 'data'),
     tokenPath: join(distributionDir, 'daemon.token'),
     studioUrl: 'http://127.0.0.1:9999',
-    gatewayUri: 'ws://127.0.0.1:1/api/harness/environment-daemon',
+    gatewayUri: 'ws://127.0.0.1:1/ws/daemon',
     bashExecutable: 'bash',
     note: null,
     lsp: {},

@@ -74,7 +74,8 @@ class ClusterRealtimePayloadClientTest {
     String body = client.fetch(NODE_B, THREAD, PAYLOAD);
 
     assertEquals(EVENT_JSON, body);
-    assertEquals(ClusterInternalPaths.realtimePayloadPath(PAYLOAD), server.lastCanonicalPath.get());
+    // 真实请求及签名必须使用新的内部路径，而非仅与共享常量自洽。
+    assertEquals("/internal/events/payloads/" + PAYLOAD, server.lastCanonicalPath.get());
     assertEquals(NODE_B.toString(), server.lastTarget.get());
   }
 

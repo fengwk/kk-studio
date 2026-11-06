@@ -87,7 +87,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
-| Environment Daemon | `/api/harness/environment-daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
+| Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
 Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
 内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。
@@ -246,7 +246,7 @@ invocation 归属与 attempt，再让本地 active owner 立即提交 checkpoint
 该 channel 与 `harness_realtime` 共用独立 realtime LISTEN 连接。接收节点只对本地 active owner 执行
 attempt fence，不回广播、不回查 head；连接重连不重放追帧提示。数据库查询/发布失败直接向上传播为 5xx。
 
-`/api/events` 是唯一的浏览器事件通道，采用无版本帧（严格拒绝携带 `version` 或未知字段）。
+`/ws/events` 是唯一的浏览器事件通道，采用无版本帧（严格拒绝携带 `version` 或未知字段）。
 连接建立后的第一帧是 `connected`，携带本次物理连接的 `eventNodeId` 与 `connectionId`；每次重连都是新身份，
 浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
 资源为 `{kind:thread|canvas|thread-tree,id}` 或全局 `{kind:projects|interactions|environments}`；
@@ -277,14 +277,14 @@ AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预�
 完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。
 
 Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical event 放入短期有界内存，
-`GET /internal/harness-realtime/{payloadId}` 供其它节点按 `cluster_node` 有效租约与内部 HMAC 认证回拉。
+`GET /internal/events/payloads/{payloadId}` 供其它节点按 `cluster_node` 有效租约与内部 HMAC 认证回拉。
 端点只接受 canonical UUID，认证先于读取；payload 缺失、过期或被驱逐时返回 404。回拉总超时约 2 秒，
 接收方校验 Thread 后本地投递一次，失败只触发 RESYNC，不影响 durable 执行。
 
 ## Daemon 端点
 
 [`EnvironmentDaemonAdmissionController`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonAdmissionController.java)
-提供 `/api/harness/environment-daemon` 准入端点，使用 Jetty 原生 `JettyWebSocketServerContainer` 升级 HTTP 连接为 WebSocket（`maxBinaryMessageSize = 1 MiB`）。
+提供 `/ws/daemon` 准入端点，使用 Jetty 原生 `JettyWebSocketServerContainer` 升级 HTTP 连接为 WebSocket（`maxBinaryMessageSize = 1 MiB`）。
 
 准入阶段在升级前严格校验握手：
 - 缺失或非 `websocket` 升级头：HTTP 400 Bad Request 或 426 Upgrade Required。
@@ -303,7 +303,7 @@ Flyway 加载 Schema 的 canonical baseline，各 profile 选择受控 seed，�
 
 Web 的 distribution profile 在 prepare-package 执行 npm ci/Vite build，将产物写入 target
 再复制到 classes/static，由 Boot repackage 嵌入 Fat JAR。
-SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径；真实 asset/Controller 优先。
+SPA fallback 仅适用于 GET、非 API/actuator/ws/ide 且末段无扩展名的路径；真实 asset/Controller 优先。
 
 部署参数、secret 与启动操作见 [部署与运行](../operations/deployment.md)，
 跨模块配置归属见 [Platform 配置](platform.md#配置)。

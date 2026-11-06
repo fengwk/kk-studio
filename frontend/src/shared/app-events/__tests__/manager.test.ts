@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
-const URL = 'ws://test/api/events'
+const URL = 'ws://test/ws/events'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const

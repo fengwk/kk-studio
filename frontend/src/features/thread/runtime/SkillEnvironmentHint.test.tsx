@@ -100,7 +100,7 @@ function renderHint(environmentName: string | null) {
   const sockets = new FakeWebSocketHarness()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <SkillEnvironmentHint
           agentName={agent.name}
           environmentName={environmentName}

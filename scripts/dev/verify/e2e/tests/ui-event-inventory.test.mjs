@@ -15,7 +15,7 @@ test('workspace observer requires a thread ack, ignoring connected and other res
   let resolved = false
   pending.then(() => { resolved = true })
   const other = socket('/api/other')
-  const current = socket('/api/events')
+  const current = socket('/ws/events')
   page.emit('websocket', other)
   page.emit('websocket', current)
   const ack = { type: 'subscribed', resource: { kind: 'thread', id: threadId }, cursor: '0' }

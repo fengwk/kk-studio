@@ -19,7 +19,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
     let socketCount = 0
     const subscriptions = new Set<string>()
     const writes: string[] = []
-    await page.routeWebSocket(/\/api\/events$/, (ws) => {
+    await page.routeWebSocket(/\/ws\/events$/, (ws) => {
       socket = ws
       socketCount += 1
       ws.onMessage((raw) => {

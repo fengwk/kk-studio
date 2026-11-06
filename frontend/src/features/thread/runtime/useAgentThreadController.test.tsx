@@ -236,7 +236,7 @@ function wrapper({ children }: { children: ReactNode }) {
   })
   return (
     <QueryClientProvider client={client}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={realtimeSockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={realtimeSockets.factory}>
         {children}
       </ApplicationEventProvider>
     </QueryClientProvider>
@@ -247,7 +247,7 @@ function clientWrapper(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={client}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={realtimeSockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={realtimeSockets.factory}>
           {children}
         </ApplicationEventProvider>
       </QueryClientProvider>

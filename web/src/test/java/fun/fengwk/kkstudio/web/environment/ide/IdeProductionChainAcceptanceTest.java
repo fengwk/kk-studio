@@ -71,7 +71,7 @@ import java.util.concurrent.TimeoutException;
  * <p><b>覆盖范围：</b>
  *
  * <ul>
- *   <li><b>浏览器入口用例</b>：走真实浏览器协议——事件通道 {@code /api/events} 登记打开意图、REST {@code
+ *   <li><b>浏览器入口用例</b>：走真实浏览器协议——事件通道 {@code /ws/events} 登记打开意图、REST {@code
  *       /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换 view 级 cookie、view 基址取 workbench
  *       HTML 与静态/worker 资源、浏览器 WebSocket 升级。
  *   <li><b>生命周期用例</b>：REST 关闭；resume 换代后旧 cookie/旧 epoch 失效；受管 code-server 崩溃后旧绑定判为
@@ -177,7 +177,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void servesRealManagedCodeServerViewsThroughTheProductionDataPlane() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID firstView = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -247,7 +247,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void closesTheManagedViewThroughTheRestApi() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
@@ -279,7 +279,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void resumeIssuesANewBindingAndInvalidatesTheOldEpoch() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -326,7 +326,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void invalidatesTheOldBindingAfterTheManagedCodeServerCrashes() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -389,7 +389,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         workspace.resolve("editable.txt"), "initial text in workspace\n", StandardCharsets.UTF_8);
 
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
@@ -509,7 +509,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Files.writeString(workspace.resolve(".vscode/settings.json"), "{\"files.autoSave\":\"off\"}\n");
 
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();

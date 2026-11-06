@@ -412,7 +412,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
-事件 L1 使用 `/api/events`：heartbeat case 校验首帧 `connected` 的
+事件 L1 使用 `/ws/events`：heartbeat case 校验首帧 `connected` 的
 `eventNodeId` / `connectionId` 与保活帧，Project case 验证全局失效通知。
 L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`）；
 它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
@@ -805,7 +805,7 @@ install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared
 
 Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，通过 Studio 的
 安装弹窗保存配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
-`wss://<studio-origin>/api/harness/environment-daemon`。
+`wss://<studio-origin>/ws/daemon`。
 
 ### 共享数据库重建
 

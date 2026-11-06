@@ -21,7 +21,7 @@ describe('platform invalidation bridges', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <ProjectsInvalidationBridge />
         </ApplicationEventProvider>
       </QueryClientProvider>,
@@ -130,7 +130,7 @@ describe('platform invalidation bridges', () => {
 
     const { findByText } = render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <ProjectsInvalidationBridge />
           <TestConsumer />
         </ApplicationEventProvider>

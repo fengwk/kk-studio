@@ -36,7 +36,7 @@ import java.util.concurrent.Executor;
 @Controller
 public class EnvironmentDaemonAdmissionController {
 
-  public static final String PATH = "/api/harness/environment-daemon";
+  public static final String PATH = "/ws/daemon";
   private static final Logger log =
       LoggerFactory.getLogger(EnvironmentDaemonAdmissionController.class);
   private static final int MAX_BINARY_MESSAGE_SIZE = 1024 * 1024;
