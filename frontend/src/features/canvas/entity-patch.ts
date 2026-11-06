@@ -39,7 +39,7 @@ function applyNodePatches(
 ): CanvasResourceNodeDTO[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   for (const patch of patches) {
-    if (patch.op === 'UPSERT') {
+    if (patch.type === 'UPSERT') {
       byId.set(patch.node.id, patch.node)
     } else {
       byId.delete(patch.nodeId)
@@ -54,7 +54,7 @@ function applyGroupPatches(
 ): CanvasGroupDTO[] {
   const byId = new Map(groups.map((group) => [group.id, group]))
   for (const patch of patches) {
-    if (patch.op === 'UPSERT') {
+    if (patch.type === 'UPSERT') {
       byId.set(patch.group.id, patch.group)
     } else {
       byId.delete(patch.groupId)

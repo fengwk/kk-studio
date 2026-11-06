@@ -184,21 +184,21 @@ export type CanvasCommandDTO =
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.TargetMissing */
 export interface CanvasConflictTargetMissing {
-  kind: 'TARGET_MISSING'
+  type: 'TARGET_MISSING'
   targetId: string
   target: CanvasConflictTarget
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.TargetPresent */
 export interface CanvasConflictTargetPresent {
-  kind: 'TARGET_PRESENT'
+  type: 'TARGET_PRESENT'
   targetId: string
   target: CanvasConflictTarget
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.StaleNode */
 export interface CanvasConflictStaleNode {
-  kind: 'STALE_NODE'
+  type: 'STALE_NODE'
   nodeId: string
   group: CanvasConflictNodeGroup
   current: CanvasResourceNodeDTO
@@ -206,21 +206,21 @@ export interface CanvasConflictStaleNode {
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.StaleGroup */
 export interface CanvasConflictStaleGroup {
-  kind: 'STALE_GROUP'
+  type: 'STALE_GROUP'
   groupId: string
   current: CanvasGroupDTO
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.NodeRunning */
 export interface CanvasConflictNodeRunning {
-  kind: 'NODE_RUNNING'
+  type: 'NODE_RUNNING'
   nodeId: string
   run: CanvasFunctionRunDTO
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.NodeReferenced */
 export interface CanvasConflictNodeReferenced {
-  kind: 'NODE_REFERENCED'
+  type: 'NODE_REFERENCED'
   nodeId: string
   referencingNodeIds: string[]
 }
@@ -373,13 +373,13 @@ export interface CanvasGroupDTO {
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupPatchDTO.Upsert */
 export interface CanvasGroupPatchUpsert {
-  op: 'UPSERT'
+  type: 'UPSERT'
   group: CanvasGroupDTO
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupPatchDTO.Remove */
 export interface CanvasGroupPatchRemove {
-  op: 'REMOVE'
+  type: 'REMOVE'
   groupId: string
 }
 
@@ -390,13 +390,13 @@ export type CanvasGroupPatchDTO =
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasNodePatchDTO.Upsert */
 export interface CanvasNodePatchUpsert {
-  op: 'UPSERT'
+  type: 'UPSERT'
   node: CanvasResourceNodeDTO
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasNodePatchDTO.Remove */
 export interface CanvasNodePatchRemove {
-  op: 'REMOVE'
+  type: 'REMOVE'
   nodeId: string
 }
 
@@ -466,20 +466,20 @@ export type CanvasResourceDTO =
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Keep */
 export interface CanvasResourceInputKeep {
-  kind: 'KEEP'
+  type: 'KEEP'
   resourceId: string
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Text */
 export interface CanvasResourceInputText {
-  kind: 'TEXT'
+  type: 'TEXT'
   name: string
   textContent: string
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Blob */
 export interface CanvasResourceInputBlob {
-  kind: 'BLOB'
+  type: 'BLOB'
   name: string
   blobId: string
 }
@@ -843,6 +843,16 @@ export interface EnvironmentIdeDirectoryListingEntry {
   path: string
 }
 
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode */
+export type EnvironmentIdeOpenMode =
+  | 'create'
+  | 'resume'
+
+export const ENVIRONMENT_IDE_OPEN_MODE_VALUES: readonly EnvironmentIdeOpenMode[] = [
+  'create',
+  'resume',
+]
+
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
@@ -850,7 +860,7 @@ export interface EnvironmentIdeOpenViewDTO {
   eventNodeId: string
   connectionId: string
   claimId: string
-  mode: string
+  mode: EnvironmentIdeOpenMode
   directory?: string | null
 }
 
@@ -872,9 +882,19 @@ export interface EnvironmentIdeViewDTO {
   bindingEpoch: string
   directory: string
   workspacePath: string
-  state: string
+  state: EnvironmentIdeViewState
   entryUrl?: string | null
 }
+
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState */
+export type EnvironmentIdeViewState =
+  | 'OPEN'
+  | 'CLOSING'
+
+export const ENVIRONMENT_IDE_VIEW_STATE_VALUES: readonly EnvironmentIdeViewState[] = [
+  'OPEN',
+  'CLOSING',
+]
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO */
 export interface EnvironmentIdeViewsDTO {

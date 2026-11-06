@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
@@ -538,7 +539,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     request.setEventNodeId(EVENT_NODE);
     request.setConnectionId(CONNECTION);
     request.setClaimId(CLAIM);
-    request.setMode("create");
+    request.setMode(EnvironmentIdeOpenMode.CREATE);
     request.setDirectory(directory);
     return request;
   }

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 /** Canvas group 的 patch 项：完整 UPSERT 或按 id REMOVE。 */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "op")
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = CanvasGroupPatchDTO.Upsert.class, name = "UPSERT"),
   @JsonSubTypes.Type(value = CanvasGroupPatchDTO.Remove.class, name = "REMOVE")

@@ -44,7 +44,7 @@ test('test intent: the upload batch is one CREATE_NODE whose resource is a BLOB 
         nodeId: 'node-1',
         name: 'uploaded',
         transform: { x: 0, y: 0, width: 320, height: 260 },
-        resources: [{ kind: 'BLOB', name: 'tiny.png', blobId: BLOB_ID }],
+        resources: [{ type: 'BLOB', name: 'tiny.png', blobId: BLOB_ID }],
       },
     ],
   })
@@ -96,7 +96,7 @@ test('test intent: the document snapshot requires a canonical revision', () => {
 })
 
 test('test intent: a successful batch advances the revision by one', () => {
-  assert.equal(assertPatch(patchDto('1', [{ op: 'UPSERT', node: { id: 'n1' } }]), 0), 1)
+  assert.equal(assertPatch(patchDto('1', [{ type: 'UPSERT', node: { id: 'n1' } }]), 0), 1)
 })
 
 test('test intent: patches with non-canonical or non-advancing revisions are rejected', () => {
@@ -110,7 +110,7 @@ test('test intent: patches with non-canonical or non-advancing revisions are rej
 test('test intent: an exact replay is an empty patch at the same revision', () => {
   assert.equal(assertPatch(patchDto('1'), 1, true), 1)
   assert.throws(
-    () => assertPatch(patchDto('1', [{ op: 'UPSERT', node: { id: 'n1' } }]), 1, true),
+    () => assertPatch(patchDto('1', [{ type: 'UPSERT', node: { id: 'n1' } }]), 1, true),
     assert.AssertionError,
   )
   assert.throws(() => assertPatch(patchDto('2'), 1, true), assert.AssertionError)

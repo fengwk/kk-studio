@@ -48,7 +48,7 @@ function snapshot(revision: number | string): CanvasSnapshotDTO {
 
 function advancePatch(
   to: number | string,
-  nodes: CanvasNodePatchDTO[] = [{ op: 'REMOVE', nodeId: NODE_ID }],
+  nodes: CanvasNodePatchDTO[] = [{ type: 'REMOVE', nodeId: NODE_ID }],
 ): CanvasPatchDTO {
   return {
     revision: String(to),

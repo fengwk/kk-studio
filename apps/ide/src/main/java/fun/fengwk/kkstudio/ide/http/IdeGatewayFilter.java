@@ -29,7 +29,9 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
 
   private static final Pattern ROUTE_PATTERN =
       Pattern.compile(
-          "^/ide/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(/.*)?$");
+          "^"
+              + Pattern.quote(IdeGatewayConstants.ROUTE_PREFIX)
+              + "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(/.*)?$");
 
   private final IdeGatewayDataPlane dataPlane;
 

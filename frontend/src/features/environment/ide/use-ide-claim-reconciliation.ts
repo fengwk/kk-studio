@@ -15,6 +15,7 @@ import {
 } from '@/features/environment/ide/environment-ide-service'
 import { ApiError } from '@/shared/api/client'
 import type {
+  EnvironmentIdeOpenMode,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewDTO,
 } from '@/shared/api/generated/contracts'
@@ -203,7 +204,7 @@ export function useIdeClaimReconciliation({
     environmentId: string,
     attempt: number,
     error: unknown,
-    mode: 'create' | 'resume',
+    mode: EnvironmentIdeOpenMode,
   ): void {
     const current = viewsRef.current[environmentId]
     if (current == null || current.attempt !== attempt) {
@@ -372,7 +373,7 @@ export function useIdeClaimReconciliation({
   function beginClaim(
     environmentId: string,
     spec: {
-      mode: 'create' | 'resume'
+      mode: EnvironmentIdeOpenMode
       viewId: string
       claimId: string
       directory?: string | null
@@ -407,7 +408,7 @@ export function useIdeClaimReconciliation({
     environmentId: string,
     view: IdeViewState,
     claimId = createUuid(),
-    mode: 'create' | 'resume' = 'resume',
+    mode: EnvironmentIdeOpenMode = 'resume',
   ): void {
     beginClaim(environmentId, {
       mode,

@@ -46,10 +46,10 @@ describe('Canvas entity patch reducer', () => {
     const patch: CanvasPatchDTO = {
       revision: '4',
       nodes: [
-        { op: 'UPSERT', node: { ...NODE_DTO(NODE_A), name: 'renamed' } },
-        { op: 'UPSERT', node: NODE_DTO(NODE_B) },
+        { type: 'UPSERT', node: { ...NODE_DTO(NODE_A), name: 'renamed' } },
+        { type: 'UPSERT', node: NODE_DTO(NODE_B) },
       ],
-      groups: [{ op: 'REMOVE', groupId: GROUP_A }],
+      groups: [{ type: 'REMOVE', groupId: GROUP_A }],
     }
 
     const next = applyEntityPatch(current, patch)

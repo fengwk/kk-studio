@@ -141,11 +141,7 @@ public class IdeClusterClient {
       String viewId,
       EnvironmentIdeViewBindingDTO request) {
     exchange(
-        "POST",
-        IdeInternalPaths.viewsPath(environmentId) + "/" + viewId + "/apply-mobile-layout",
-        owner,
-        request,
-        null);
+        "POST", IdeInternalPaths.mobileLayoutPath(environmentId, viewId), owner, request, null);
   }
 
   public EnvironmentIdeDirectoryListingDTO listDirectories(
@@ -168,7 +164,7 @@ public class IdeClusterClient {
         owner,
         request,
         null,
-        !Boolean.FALSE.equals(request.getDiscard()));
+        request.isDiscard());
   }
 
   private <T> T exchange(

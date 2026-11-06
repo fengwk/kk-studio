@@ -48,7 +48,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fsrc%2Fa.ts");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    controller.dataHttp(ENV.toString(), VIEW.toString(), "/src/a.ts", req, res);
+    controller.dataHttp(ENV.value(), VIEW, "/src/a.ts", req, res);
 
     verify(auth).verify(any(), any(), any());
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/src/a.ts"), any(), eq(res));
@@ -71,7 +71,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fws");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    controller.dataWebSocket(ENV.toString(), VIEW.toString(), "/ws", req, res);
+    controller.dataWebSocket(ENV.value(), VIEW, "/ws", req, res);
 
     verify(auth).verify(any(), any(), any());
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/ws"), any(), eq(res));
@@ -98,8 +98,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     assertThrows(
-        DomainException.class,
-        () -> controller.dataHttp(ENV.toString(), VIEW.toString(), "/path", req, res));
+        DomainException.class, () -> controller.dataHttp(ENV.value(), VIEW, "/path", req, res));
     verifyNoInteractions(dataPlane);
   }
 
@@ -122,7 +121,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
-        () -> controller.dataWebSocket(ENV.toString(), VIEW.toString(), "/ws", req, res));
+        () -> controller.dataWebSocket(ENV.value(), VIEW, "/ws", req, res));
     verifyNoInteractions(dataPlane);
     verifyNoInteractions(registry);
   }

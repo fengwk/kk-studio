@@ -95,7 +95,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .andExpect(status().isOk());
     verify(localEnvironmentIdeService).listDirectories(ENV, "/a+b");
 
-    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/apply-mobile-layout";
+    String mobile = IdeInternalPaths.mobileLayoutPath(ENV, VIEW);
     mockMvc
         .perform(
             post(mobile)
@@ -145,7 +145,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk());
-    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/apply-mobile-layout";
+    String mobile = IdeInternalPaths.mobileLayoutPath(ENV, VIEW);
     mockMvc
         .perform(
             post(mobile)

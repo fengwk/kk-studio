@@ -119,7 +119,7 @@ export function useCanvasTextEditor({
           type: 'SET_NODE_RESOURCES',
           nodeId: editor.nodeId,
           expectedResourceIds: node.resources.map((r) => r.id),
-          resources: [{ kind: 'TEXT', name: 'text', textContent: editor.markdown }],
+          resources: [{ type: 'TEXT', name: 'text', textContent: editor.markdown }],
         },
       ]
       if (node.name !== editor.name.trim()) {
@@ -144,7 +144,7 @@ export function useCanvasTextEditor({
       nodeId: crypto.randomUUID(),
       name: alias,
       transform: nextTransform(),
-      resources: [{ kind: 'TEXT', name: 'text', textContent: editor.markdown }],
+      resources: [{ type: 'TEXT', name: 'text', textContent: editor.markdown }],
     }]).then(closeEditor).catch(() => undefined).finally(() => releaseNodeAlias(alias))
   }, [drafts, executeCommands, nextTransform, releaseNodeAlias, reserveNodeAlias, scope, setState, snapshot, textEditor])
 

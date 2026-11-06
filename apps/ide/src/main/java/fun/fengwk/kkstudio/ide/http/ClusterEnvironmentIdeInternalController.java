@@ -31,10 +31,10 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.UUID;
 
 /**
  * 跨节点 IDE 元数据命令的内部 REST 入口。
@@ -79,7 +79,7 @@ public class ClusterEnvironmentIdeInternalController {
 
   @PostMapping("/views")
   public EnvironmentIdeViewDTO openView(
-      @PathVariable String environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeOpenViewDTO body = readBody(request, EnvironmentIdeOpenViewDTO.class);
     return localEnvironmentIdeService.openView(environment, body);
@@ -87,21 +87,21 @@ public class ClusterEnvironmentIdeInternalController {
 
   @GetMapping("/views")
   public EnvironmentIdeViewsDTO listViews(
-      @PathVariable String environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     return localEnvironmentIdeService.listViews(environment);
   }
 
   @GetMapping("/directories")
   public EnvironmentIdeDirectoryListingDTO listDirectories(
-      @PathVariable String environmentId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     return localEnvironmentIdeService.listDirectories(environment, request.getParameter("path"));
   }
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/apply-mobile-layout")
   public void collapseMobile(
-      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
     localEnvironmentIdeService.collapseMobile(environment, viewId, body);
@@ -109,7 +109,7 @@ public class ClusterEnvironmentIdeInternalController {
 
   @PutMapping("/views/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
-      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeChangeDirectoryDTO body =
         readBody(request, EnvironmentIdeChangeDirectoryDTO.class);
@@ -118,7 +118,7 @@ public class ClusterEnvironmentIdeInternalController {
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/focus-terminal")
   public void focusTerminal(
-      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
     localEnvironmentIdeService.focusTerminal(environment, viewId, body);
@@ -126,19 +126,19 @@ public class ClusterEnvironmentIdeInternalController {
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/close")
   public void closeView(
-      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+      @PathVariable UUID environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeCloseViewDTO body = readBody(request, EnvironmentIdeCloseViewDTO.class);
     localEnvironmentIdeService.closeView(environment, viewId, body);
   }
 
   /** 认证 + owner 核对先于请求体读取；任一失败都不会有任何 daemon 副作用。 */
-  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
+  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, UUID environmentId) {
     authentication.verify(
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = RequestParameters.environmentId(environmentId);
+    EnvironmentId environment = EnvironmentId.of(environmentId);
     requireLocalOwner(environment);
     return environment;
   }

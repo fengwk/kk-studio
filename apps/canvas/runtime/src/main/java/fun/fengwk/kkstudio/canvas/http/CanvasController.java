@@ -92,7 +92,7 @@ public class CanvasController {
 
   /** 冲突响应只透出受影响对象、语义组与服务端权威值，不携带新的编辑基线。 */
   private static DomainException conflict(List<CanvasConflictDTO> conflicts) {
-    // 数组保留元素的静态类型，判别值 kind 才会随类型信息写出；List 在无类型上下文里会丢失它。
+    // 数组保留元素的静态类型，判别值 type 才会随类型信息写出；List 在无类型上下文里会丢失它。
     return DomainException.conflict(
         "CANVAS_COMMAND_CONFLICT",
         "command prerequisites are stale; no write was applied",

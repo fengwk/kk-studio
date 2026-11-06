@@ -93,13 +93,11 @@ public final class IdeDataPaths {
   public static String viewBase(
       HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
     String contextPath = request.getContextPath();
-    String base =
-        contextPath == null || contextPath.isEmpty()
-            ? IdeGatewayConstants.ROUTE_PREFIX + environmentId + "/"
-            : (contextPath.endsWith("/") ? contextPath : contextPath + "/")
-                + "ide/"
-                + environmentId
-                + "/";
+    String contextPrefix = contextPath == null ? "" : contextPath;
+    if (contextPrefix.endsWith("/")) {
+      contextPrefix = contextPrefix.substring(0, contextPrefix.length() - 1);
+    }
+    String base = contextPrefix + IdeGatewayConstants.ROUTE_PREFIX + environmentId + "/";
     return viewId == null ? base : base + viewId + "/";
   }
 

@@ -22,7 +22,7 @@ public class EnvironmentIdeViewDTO {
   private String bindingEpoch;
   private String directory;
   private String workspacePath;
-  private String state;
+  private EnvironmentIdeViewState state;
 
   /** Studio 根相对的短时一次性 bootstrap 入口；只有 claim 成功时返回。 */
   private @Nullable String entryUrl;

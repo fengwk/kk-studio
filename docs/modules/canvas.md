@@ -217,7 +217,8 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 读模型的固定取值是 wire 枚举：资源与 Function 输出的 `kind`（`IMAGE` / `VIDEO` / `AUDIO` / `TEXT`）、Function run 的
 `status`、UNKNOWN 决议与画布冲突的 `target` / `group`。时间字段是 epoch 毫秒的 `Instant`（`createdAt`、`updatedAt`、
 预签名 `expiresAt`）；`revision` 与 Long 仍是规范十进制字符串。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
-`BLOB` 只带 `blobId` 与服务端媒体事实。
+`BLOB` 只带 `blobId` 与服务端媒体事实。Canvas 的多形态 DTO（命令、资源槽位、快照资源、节点/分组 patch 与冲突载荷）统一用
+`type` 判别；资源自身的 `kind` 是内容品类，不是判别属性。
 
 ## 部署参数
 

@@ -13,7 +13,7 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
     code: 'conflict',
     reason: 'STALE_COMMAND_CURSOR',
     detail: 'command cursor is stale',
-    errors: { conflicts: [{ kind: 'STALE_NODE' }] },
+    errors: { conflicts: [{ type: 'STALE_NODE' }] },
   }
   const server = createServer((request, response) => {
     if (request.url === '/empty') {

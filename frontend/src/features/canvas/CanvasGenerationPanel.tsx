@@ -34,6 +34,7 @@ import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
+  CanvasFunctionUnknownResolution,
   CanvasTransformDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -66,7 +67,7 @@ export function CanvasGenerationPanel({
         ? createDefaultFunctionConfig(sourceModel)
         : { prompt: '', references: [], parameters: {} }
   ))
-  const [unknownResolution, setUnknownResolution] = useState<'RESUME' | 'FAILED' | 'CANCELLED'>('RESUME')
+  const [unknownResolution, setUnknownResolution] = useState<CanvasFunctionUnknownResolution>('RESUME')
   const [verificationText, setVerificationText] = useState('')
   const [showJsonArgs, setShowJsonArgs] = useState(false)
   const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.rawArgs ?? config.parameters, null, 2))
@@ -644,7 +645,7 @@ export function CanvasGenerationPanel({
                 aria-label={t('canvas.generation.verifyDecision')}
                 value={unknownResolution}
                 options={unknownResolutionOptions}
-                onChange={(next) => setUnknownResolution(next as 'RESUME' | 'FAILED' | 'CANCELLED')}
+                onChange={(next) => setUnknownResolution(next as CanvasFunctionUnknownResolution)}
               />
               <TextInput
                 className="generation-verify-note"

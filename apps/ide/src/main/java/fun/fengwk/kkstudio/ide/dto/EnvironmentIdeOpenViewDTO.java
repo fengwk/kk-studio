@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.ide.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
@@ -19,11 +18,6 @@ public class EnvironmentIdeOpenViewDTO {
   private String eventNodeId;
   private String connectionId;
   private String claimId;
-  private String mode;
+  private EnvironmentIdeOpenMode mode;
   private @Nullable String directory;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String fieldName, Object value) {
-    throw new IllegalArgumentException("unknown environment ide view field: " + fieldName);
-  }
 }

@@ -1,5 +1,6 @@
 import { ApiError, isNotFoundError } from '@/shared/api/client'
 import type {
+  EnvironmentIdeOpenMode,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewDTO,
 } from '@/shared/api/generated/contracts'
@@ -26,7 +27,7 @@ export interface IdeViewState {
   environmentId: string
   viewId: string
   claimId: string
-  mode: 'create' | 'resume'
+  mode: EnvironmentIdeOpenMode
   status: IdeViewStatus
   attempt: number
   claimInFlight: boolean
@@ -200,7 +201,7 @@ export function buildUsageViews(
 }
 
 export interface BeginClaimSpec {
-  mode: 'create' | 'resume'
+  mode: EnvironmentIdeOpenMode
   viewId: string
   claimId: string
   directory?: string | null
@@ -231,7 +232,7 @@ export type IdeClaimAction =
       type: 'CLAIM_FAILED'
       environmentId: string
       attempt: number
-      mode: 'create' | 'resume'
+      mode: EnvironmentIdeOpenMode
       error: unknown
     }
   | {

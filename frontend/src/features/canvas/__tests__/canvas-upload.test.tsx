@@ -137,7 +137,7 @@ describe('useCanvasUploadPipeline', () => {
       nodeId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
       name: 'upload.png',
       resources: [{
-        kind: 'BLOB',
+        type: 'BLOB',
         name: 'upload.png',
         blobId: 'blob-existing',
       }],

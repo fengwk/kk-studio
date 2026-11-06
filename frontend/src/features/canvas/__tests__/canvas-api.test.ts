@@ -391,7 +391,7 @@ describe('canvas api transport adapter', () => {
         reason: 'CANVAS_COMMAND_CONFLICT',
         detail: 'command prerequisites are stale; no write was applied',
         errors: {
-          conflicts: [{ kind: 'GROUP', id: ID, serverRevision: '5' }],
+          conflicts: [{ type: 'TARGET_MISSING', targetId: ID, target: 'NODE' }],
         },
       }),
     )
@@ -407,7 +407,7 @@ describe('canvas api transport adapter', () => {
       expect(err.reason).toBe('CANVAS_COMMAND_CONFLICT')
       expect(err.detail).toBe('command prerequisites are stale; no write was applied')
       expect(err.errors).toEqual({
-        conflicts: [{ kind: 'GROUP', id: ID, serverRevision: '5' }],
+        conflicts: [{ type: 'TARGET_MISSING', targetId: ID, target: 'NODE' }],
       })
       return true
     })
