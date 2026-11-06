@@ -399,7 +399,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
             + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
             + "      pricing: {base: {input: \"0\", output: \"0\"}}\n"
             + "      defaultVariant: default\n"
-            + "      variants: [{id: default}]\n");
+            + "      variants: [{id: default, promptCacheRetention: NONE}]\n");
     ExecutorService executor = Executors.newFixedThreadPool(2);
     CountDownLatch start = new CountDownLatch(1);
     try {

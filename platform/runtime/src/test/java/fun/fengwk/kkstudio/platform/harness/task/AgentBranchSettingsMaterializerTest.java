@@ -185,8 +185,8 @@ class AgentBranchSettingsMaterializerTest {
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
-        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"},"
-        + "{\"id\":\"fast\",\"reasoningEffort\":\"off\"}],"
+        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\",\"promptCacheRetention\":\"NONE\"},"
+        + "{\"id\":\"fast\",\"reasoningEffort\":\"off\",\"promptCacheRetention\":\"NONE\"}],"
         + "\"pricing\":{\"base\":{\"input\":\"1.1\",\"output\":\"2.2\","
         + "\"cacheRead\":\"0.3\",\"cacheWrite\":\"0.4\",\"reasoning\":\"3.6\"},"
         + "\"overrides\":[],\"multipliers\":[]}}";

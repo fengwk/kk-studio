@@ -448,7 +448,7 @@ class ModelsDevCatalogParserTest {
             + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
             + "\"inputModalities\":[\"TEXT\"]},"
             + "\"defaultVariant\":\"default\","
-            + "\"variants\":[{\"id\":\"default\"}],"
+            + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}],"
             + "\"pricing\":"
             + mapper.writeValueAsString(pricing)
             + "}";
