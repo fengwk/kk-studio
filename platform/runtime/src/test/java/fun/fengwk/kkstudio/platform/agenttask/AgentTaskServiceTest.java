@@ -322,6 +322,8 @@ class AgentTaskServiceTest {
     DomainException wrongCode = DomainException.validationReason("STALE_VERSION", "not a conflict");
     doThrow(wrongCode).when(runtime).stop(any(StopCommand.class));
     assertSame(wrongCode, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
+    doThrow(DomainException.notFound("thread", "gone")).when(runtime).stop(any(StopCommand.class));
+    service.stopThread(threadId);
     DomainException validation = DomainException.validation("thread", "invalid");
     when(runtime.getThreadSnapshot(threadId)).thenThrow(validation);
     assertSame(validation, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
@@ -346,6 +348,12 @@ class AgentTaskServiceTest {
     DomainException other = DomainException.conflict("STOP_REQUEST_ID_REUSED", "other");
     doThrow(other).when(runtime).stop(any(StopCommand.class));
     assertSame(other, assertThrows(DomainException.class, () -> service.stop(ticketId)));
+
+    DomainException invalid = DomainException.validation("thread", "invalid");
+    doThrow(invalid).when(runtime).getThreadSnapshot(childId);
+    assertSame(invalid, assertThrows(DomainException.class, () -> service.stop(ticketId)));
+    doThrow(DomainException.notFound("thread", "gone")).when(runtime).getThreadSnapshot(childId);
+    service.stop(ticketId);
   }
 
   @Test

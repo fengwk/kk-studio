@@ -651,6 +651,11 @@ class SubagentTaskRunnerTest {
     assertTrue(rejected.getMessage().contains("was not found"));
 
     DomainException validation = DomainException.validation("thread", "invalid");
+    doThrow(validation).when(runtime).getThreadSnapshot(missingChild);
+    assertSame(
+        validation,
+        assertThrows(
+            DomainException.class, () -> runner(config()).accept(request(null, missingChild))));
     doThrow(validation).when(runtime).getThreadSnapshot(parentThreadId);
     assertSame(
         validation,
@@ -662,6 +667,34 @@ class SubagentTaskRunnerTest {
             () -> runner(config()).accept(request(null, null)));
     assertSame(missing, rejected.getCause());
     assertTrue(rejected.getMessage().contains("no longer attached"));
+  }
+
+  @Test
+  void domainMissingReplayChildIsNotSwallowed() {
+    // 既有票据回放仍需解析子 Session，不存在时保留原始 not-found cause。
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    DomainException missing = DomainException.notFound("thread", "gone");
+    doThrow(missing).when(runtime).getThreadSnapshot(childThreadId);
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertSame(missing, rejected.getCause());
+    DomainException other = DomainException.validation("thread", "invalid");
+    doThrow(other).when(runtime).getThreadSnapshot(childThreadId);
+    assertSame(
+        other,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
   }
 
   @Test
