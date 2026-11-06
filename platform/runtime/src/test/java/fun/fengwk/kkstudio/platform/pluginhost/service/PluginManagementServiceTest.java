@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRo
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
@@ -207,13 +208,13 @@ class PluginManagementServiceTest {
     PluginSecretPatchDTO set = patch("SET", secret);
     service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", set));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.set(secret)));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
     service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("KEEP", null)));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.keep()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
     service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("CLEAR", null)));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.clear()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
 
     Map<String, PluginSecretPatchDTO> nullEntry = new HashMap<>();
     nullEntry.put("apiKey", null);

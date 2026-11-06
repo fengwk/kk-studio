@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepos
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.InMemoryTransactionManager;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Instant;
 import java.util.List;
@@ -97,13 +98,13 @@ class PluginConfigurationServiceTest {
   /** SET 写入只含声明字段的新载荷，候选凭据先交给 configure 校验；CLEAR 最后一个字段删除凭据。 */
   @Test
   void secretPatchWritesOrRemovesTheCredential() {
-    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", PluginSecretPatch.set("k1")));
+    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.set("k1")));
     verify(credentials).upsertConnected(STATIC_ID, "{\"apiKey\":\"k1\"}", null, null, null);
     assertEquals("{\"apiKey\":\"k1\"}", staticPlugin.lastCandidate.payloadJson());
     assertEquals(1, credentialWakes.get());
 
     when(credentials.find(STATIC_ID)).thenReturn(Optional.of(credential("{\"apiKey\":\"k1\"}")));
-    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", PluginSecretPatch.clear()));
+    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.clear()));
     verify(credentials).delete(STATIC_ID);
     assertNull(staticPlugin.lastCandidate);
   }
@@ -118,7 +119,7 @@ class PluginConfigurationServiceTest {
         STATIC_ID,
         3L,
         VALUES_A,
-        Map.of("apiKey", PluginSecretPatch.keep(), "region", PluginSecretPatch.set("eu")));
+        Map.of("apiKey", SecretUpdate.keep(), "region", SecretUpdate.set("eu")));
 
     verify(credentials)
         .upsertConnected(STATIC_ID, "{\"apiKey\":\"k1\",\"region\":\"eu\"}", null, null, null);
@@ -133,7 +134,7 @@ class PluginConfigurationServiceTest {
     service.configure(STATIC_ID, 3L, VALUES_B, Map.of());
     verify(credentials).delete(STATIC_ID);
 
-    service.configure(STATIC_ID, 3L, VALUES_B, Map.of("apiKey", PluginSecretPatch.set("k2")));
+    service.configure(STATIC_ID, 3L, VALUES_B, Map.of("apiKey", SecretUpdate.set("k2")));
     verify(credentials).upsertConnected(STATIC_ID, "{\"apiKey\":\"k2\"}", null, null, null);
   }
 
@@ -157,13 +158,10 @@ class PluginConfigurationServiceTest {
         () -> service.configure(STATIC_ID, 3L, "{\"endpoint\":1}", Map.of()));
     assertThrows(
         DomainException.class,
-        () ->
-            service.configure(
-                STATIC_ID, 3L, VALUES_A, Map.of("other", PluginSecretPatch.set("x"))));
+        () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of("other", SecretUpdate.set("x"))));
     assertThrows(
         DomainException.class,
-        () ->
-            service.configure(DEEPLINK_ID, 1L, "{}", Map.of("token", PluginSecretPatch.set("x"))));
+        () -> service.configure(DEEPLINK_ID, 1L, "{}", Map.of("token", SecretUpdate.set("x"))));
     staticPlugin.reject = true;
     assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
     verify(configurations, never()).update(anyString(), anyLong(), anyString());

@@ -49,8 +49,8 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepos
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
-import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
@@ -239,7 +239,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
                     STATIC_PLUGIN_ID,
                     1L,
                     VALUES_V1,
-                    Map.of("apiKey", PluginSecretPatch.set(SYNTHETIC_SECRET))));
+                    Map.of("apiKey", SecretUpdate.set(SYNTHETIC_SECRET))));
     assertEquals(
         "{\"apiKey\":\"" + SYNTHETIC_SECRET + "\"}",
         credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow().payloadJson());

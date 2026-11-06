@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
@@ -129,9 +130,9 @@ public final class PluginManagementService {
   }
 
   /** 校验秘密补丁并转为领域操作；错误不得包含请求字段名或秘密值。 */
-  private static Map<String, PluginSecretPatch> toSecretPatch(
+  private static Map<String, SecretUpdate> toSecretPatch(
       Map<String, PluginSecretPatchDTO> secretPatch) {
-    Map<String, PluginSecretPatch> mapped = new LinkedHashMap<>();
+    Map<String, SecretUpdate> mapped = new LinkedHashMap<>();
     if (secretPatch == null) {
       return mapped;
     }
@@ -152,9 +153,9 @@ public final class PluginManagementService {
         mapped.put(
             field,
             switch (operation) {
-              case "KEEP" -> PluginSecretPatch.keep();
-              case "SET" -> PluginSecretPatch.set(dto.getValue());
-              case "CLEAR" -> PluginSecretPatch.clear();
+              case "KEEP" -> SecretUpdate.keep();
+              case "SET" -> SecretUpdate.set(dto.getValue());
+              case "CLEAR" -> SecretUpdate.clear();
               default -> throw DomainException.validation(
                   RESOURCE, "secretPatch operation must be KEEP, SET or CLEAR");
             });

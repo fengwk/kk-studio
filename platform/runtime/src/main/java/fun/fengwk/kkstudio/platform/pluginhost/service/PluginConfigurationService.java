@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -82,9 +83,9 @@ public final class PluginConfigurationService {
       String pluginId,
       long expectedRevision,
       String valuesJson,
-      Map<String, PluginSecretPatch> secretPatch) {
+      Map<String, SecretUpdate> secretPatch) {
     StudioPlugin plugin = requirePlugin(pluginId);
-    Map<String, PluginSecretPatch> patch = requirePatch(plugin, secretPatch);
+    Map<String, SecretUpdate> patch = requirePatch(plugin, secretPatch);
     String resolved;
     try {
       resolved = plugin.configurationSchema().resolveValues(valuesJson);
@@ -151,11 +152,11 @@ public final class PluginConfigurationService {
       StudioPlugin plugin,
       PluginConfigurationRow current,
       String resolved,
-      Map<String, PluginSecretPatch> patch,
+      Map<String, SecretUpdate> patch,
       Optional<PluginCredentialRow> existing) {
     boolean touched =
         patch.values().stream()
-            .anyMatch(operation -> operation.operation() != PluginSecretPatch.Operation.KEEP);
+            .anyMatch(operation -> operation.operation() != SecretUpdate.Operation.KEEP);
     boolean contextChanged =
         contextChanged(plugin.authenticationSpec(), current.valuesJson(), resolved);
     if (!touched && !contextChanged) {
@@ -165,7 +166,7 @@ public final class PluginConfigurationService {
     if (!contextChanged && existing.isPresent()) {
       payload = declaredPayload(plugin, existing.get().payloadJson());
     }
-    for (Map.Entry<String, PluginSecretPatch> operation : patch.entrySet()) {
+    for (Map.Entry<String, SecretUpdate> operation : patch.entrySet()) {
       switch (operation.getValue().operation()) {
         case SET -> payload.put(operation.getKey(), operation.getValue().value());
         case CLEAR -> payload.remove(operation.getKey());
@@ -248,21 +249,21 @@ public final class PluginConfigurationService {
     return declared;
   }
 
-  private static Map<String, PluginSecretPatch> requirePatch(
-      StudioPlugin plugin, Map<String, PluginSecretPatch> secretPatch) {
-    Map<String, PluginSecretPatch> patch = new LinkedHashMap<>();
+  private static Map<String, SecretUpdate> requirePatch(
+      StudioPlugin plugin, Map<String, SecretUpdate> secretPatch) {
+    Map<String, SecretUpdate> patch = new LinkedHashMap<>();
     if (secretPatch == null) {
       return patch;
     }
     boolean interactive = plugin.authenticationSpec() instanceof PluginAuthSpec.DeepLink;
-    for (Map.Entry<String, PluginSecretPatch> entry : secretPatch.entrySet()) {
+    for (Map.Entry<String, SecretUpdate> entry : secretPatch.entrySet()) {
       if (!plugin.configurationSchema().secrets().containsKey(entry.getKey())) {
         // 字段名来自请求体，绝不回显。
         throw DomainException.validation(
             RESOURCE, "secret patch must name a declared secret field");
       }
-      PluginSecretPatch operation = Objects.requireNonNull(entry.getValue(), "secretPatch value");
-      if (interactive && operation.operation() != PluginSecretPatch.Operation.KEEP) {
+      SecretUpdate operation = Objects.requireNonNull(entry.getValue(), "secretPatch value");
+      if (interactive && operation.operation() != SecretUpdate.Operation.KEEP) {
         throw DomainException.validation(
             RESOURCE, "interactive credentials are replaced by login completion");
       }
