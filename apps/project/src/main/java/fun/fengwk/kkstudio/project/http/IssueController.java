@@ -97,14 +97,14 @@ public class IssueController {
   @GetMapping("/issues/{issueId}")
   public IssueDetailDTO getIssue(
       @PathVariable("issueId") UUID issueId,
-      @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
-          long afterSequence,
+      @RequestParam(value = "afterSequence", required = false) Long afterSequence,
       @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
     if (limit < 1 || limit > MAX_ACTIVITY_LIMIT) {
       throw DomainException.validation(
           "limit", "limit must be within [1, " + MAX_ACTIVITY_LIMIT + "]");
     }
-    return issueDetailAssembler.assemble(issueId, afterSequence, limit);
+    return issueDetailAssembler.assemble(
+        issueId, afterSequence == null ? 0L : afterSequence, limit);
   }
 
   @PutMapping("/issues/{issueId}")
