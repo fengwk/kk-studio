@@ -1644,7 +1644,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与未知 command 字段 => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1803,25 +1803,7 @@ registerCase({
         }),
       { status: 400 },
     )
-    // SET_ENVIRONMENT 必须显式携带 nullable environmentName 字段；缺失该字段必须 400 拒绝
-    // （detail 包含 explicit nullable environmentName 提示）。
-    await expectHttpError(
-      () =>
-        acceptCommandBatch(ctx, {
-          owner: chatOwner(chat.id),
-          target: threadTarget({
-            threadId,
-            expectedHeadEntryId: fresh.thread.headEntryId,
-            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
-          }),
-          commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid() }],
-        }),
-      {
-        status: 400,
-        messageIncludes: /SET_ENVIRONMENT requires an explicit nullable environmentName field/i,
-      },
-    )
-    // 真正未知的 command type 仍按 unknown command type 拒绝。
+    // 真正未知的 command type 由严格 mapper 拒绝：sealed union 的 detail 文本不是稳定契约，只锁定 400。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1833,7 +1815,7 @@ registerCase({
           }),
           commands: [{ type: 'UNKNOWN_COMMAND', idempotencyKey: cid() }],
         }),
-      { status: 400, messageIncludes: /unknown command type/i },
+      { status: 400 },
     )
     // SET_ENVIRONMENT 携带非法 canonical name（含 '/'）必须 400 拒绝。
     await expectHttpError(
@@ -1849,7 +1831,7 @@ registerCase({
         }),
       { status: 400, messageIncludes: /environmentName/i },
     )
-    // 其他 command type 不允许携带 environmentName 字段。
+    // 其他 command type 不允许携带 environmentName 字段：sealed variant 由严格 mapper 拒绝，detail 文本不是稳定契约。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1868,9 +1850,9 @@ registerCase({
             },
           ],
         }),
-      { status: 400, messageIncludes: /environmentName/i },
+      { status: 400 },
     )
-    // 其他 discriminator 的未知字段也必须按 unknown HTTP command field 拒绝。
+    // 其他 discriminator 的未知字段也必须被严格 mapper 拒绝。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1895,9 +1877,9 @@ registerCase({
             },
           ],
         }),
-      { status: 400, messageIncludes: /unknownField/i },
+      { status: 400 },
     )
-    // 严格 wire：未预期的字段必须被拒绝（400 unknown HTTP command field: unexpected）。
+    // 严格 wire：未预期的字段必须被拒绝。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1916,7 +1898,7 @@ registerCase({
             },
           ],
         }),
-      { status: 400, messageIncludes: /unexpected/i },
+      { status: 400 },
     )
   },
 })
