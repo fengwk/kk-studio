@@ -439,8 +439,9 @@ class PostgresqlSubagentContinuationTest {
           DomainException.class,
           () -> runtime.acceptCommands(direct, AcceptancePreflight.IDENTITY));
       UUID continuationTicket = UUID.randomUUID();
+      // 子线程 spawn 的请求构造器先拒绝子线程环境命令，因此仍以 IllegalArgumentException 拒绝且不写 join。
       assertThrows(
-          DomainException.class,
+          IllegalArgumentException.class,
           () ->
               SpawnTestSupport.acceptAndJoin(
                   runtime,
@@ -450,7 +451,7 @@ class PostgresqlSubagentContinuationTest {
       assertTrue(runtime.findJoin(continuationTicket).isEmpty());
       UUID newTicket = UUID.randomUUID();
       assertThrows(
-          DomainException.class,
+          IllegalArgumentException.class,
           () ->
               SpawnTestSupport.acceptAndJoin(
                   runtime,
