@@ -76,7 +76,8 @@ public final class HarnessRuntimeRequestMapper {
     requireNonNull(dto, "commandBatchDTO");
     // 创建型 target 必须携带恰一条末尾 user-like 输入；纯设置批次只对既有 Thread 开放。
     List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands", true);
-    return new AcceptCommandsCommand(toTarget(dto.getTarget()), commands);
+    return validation(
+        "commands", () -> new AcceptCommandsCommand(toTarget(dto.getTarget()), commands));
   }
 
   public static CompactThreadCommand toCompactThreadCommand(
@@ -223,7 +224,7 @@ public final class HarnessRuntimeRequestMapper {
             nextCommandSequence == null
                 ? null
                 : parsePositiveLong(nextCommandSequence, "expectedNextCommandSequence"));
-    return new AcceptCommandsCommand(target, commands);
+    return validation("commands", () -> new AcceptCommandsCommand(target, commands));
   }
 
   /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */

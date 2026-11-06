@@ -91,10 +91,12 @@ class HarnessAcceptanceProblemWireTest {
     when(owner.kind()).thenReturn("CHAT");
     when(owner.allowsDirectCommands()).thenReturn(true);
     when(owner.ownsSession(any(), any())).thenReturn(true);
+    SessionOwnership issueAgentOwner = mock(SessionOwnership.class);
+    when(issueAgentOwner.kind()).thenReturn("ISSUE_AGENT");
     uploads = mock(StorageUploadService.class);
     HarnessCommandAcceptanceOrchestrator acceptance =
         new HarnessCommandAcceptanceOrchestrator(
-            List.of(owner),
+            List.of(owner, issueAgentOwner),
             provider,
             uploads,
             mock(SessionBlobRefManager.class),
@@ -130,6 +132,33 @@ class HarnessAcceptanceProblemWireTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
     postMessage("{\"type\":\"IMAGE\",\"source\":\"https://example.com/x\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    postMessage("{\"type\":\"TEXT\",\"text\":\"hello\",\"unknown\":true}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+  }
+
+  /** 同一批中的重复命令幂等键是请求错误，必须在分配 durable sequence 前稳定返回 400。 */
+  @Test
+  void duplicateCommandIdempotencyKeysAreValidation() throws Exception {
+    String key = UUID.randomUUID().toString();
+    mvc.perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"owner":{"kind":"CHAT","id":"owner"},"target":{"type":"NEW_SESSION",
+                    "sessionId":"%s","threadId":"%s",
+                    "rootSettings":{"agentName":"assistant",
+                    "execution":{"driver":"fake","settings":{}}},
+                    "yoloEnabled":false},
+                    "commands":[
+                    {"type":"SET_AGENT","idempotencyKey":"%s","agentName":"assistant"},
+                    {"type":"USER_MESSAGE","idempotencyKey":"%s",
+                    "contents":[{"type":"TEXT","text":"hello"}]}]}
+                    """
+                        .formatted(session, thread, key, key)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -180,7 +209,14 @@ class HarnessAcceptanceProblemWireTest {
         .andExpect(jsonPath("$.code").value("not_found"));
     postFork("PROJECT", root.rootEntry().id())
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("Unknown or ambiguous session owner kind: PROJECT"));
+    postFork("ISSUE_AGENT", root.rootEntry().id())
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("DIRECT_COMMANDS_NOT_ALLOWED"))
+        .andExpect(
+            jsonPath("$.detail").value("Direct commands are not allowed for this session owner"));
     postFork("CHAT", root.rootEntry().id()).andExpect(status().isAccepted());
   }
 

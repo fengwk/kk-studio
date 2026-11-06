@@ -70,7 +70,8 @@ public class HarnessCommandAcceptanceOrchestrator {
     List<SessionOwnership> matches =
         ownerships.stream().filter(item -> owner.kind().equals(item.kind())).toList();
     if (matches.isEmpty()) {
-      throw DomainException.validation("owner", "Unknown session owner kind: " + owner.kind());
+      throw DomainException.validation(
+          "owner", "Unknown or ambiguous session owner kind: " + owner.kind());
     }
     if (matches.size() != 1) {
       throw new IllegalStateException("Ambiguous session owner kind: " + owner.kind());

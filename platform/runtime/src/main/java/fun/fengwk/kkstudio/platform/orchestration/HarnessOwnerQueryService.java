@@ -53,7 +53,8 @@ public class HarnessOwnerQueryService {
     List<SessionOwnership> matches =
         ownerships.stream().filter(ownership -> owner.kind().equals(ownership.kind())).toList();
     if (matches.isEmpty()) {
-      throw DomainException.validation("owner", "Unknown session owner kind: " + owner.kind());
+      throw DomainException.validation(
+          "owner", "Unknown or ambiguous session owner kind: " + owner.kind());
     }
     if (matches.size() != 1) {
       throw new IllegalStateException("Ambiguous session owner kind: " + owner.kind());

@@ -828,15 +828,15 @@ class ProviderRequestPreviewServiceTest {
     EntryPath sessionTree = toolRoundPath();
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
 
-    IllegalArgumentException notAnOutput =
+    DomainException notAnOutput =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> service.previewHistorical(SESSION_ID, TURN_ONE_USER_ID));
+            DomainException.class, () -> service.previewHistorical(SESSION_ID, TURN_ONE_USER_ID));
+    assertEquals(DomainErrorCode.VALIDATION, notAnOutput.code());
     assertTrue(notAnOutput.getMessage().contains("assistant model output"));
 
-    IllegalArgumentException foreign =
-        assertThrows(
-            IllegalArgumentException.class, () -> service.previewHistorical(SESSION_ID, id(99L)));
+    DomainException foreign =
+        assertThrows(DomainException.class, () -> service.previewHistorical(SESSION_ID, id(99L)));
+    assertEquals(DomainErrorCode.VALIDATION, foreign.code());
     assertTrue(foreign.getMessage().contains("does not belong to the session"));
     verify(turnResolver, never()).planLive(any(), any(), any());
   }
