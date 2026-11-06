@@ -1,17 +1,16 @@
 package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -30,12 +29,9 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
@@ -52,7 +48,6 @@ import java.io.InputStream;
  * <p>只有本 controller 自己的元数据路径受此约束；gateway 宿主的 {@code /http} 与 {@code /ws} 反向数据面不经过本 controller，也不受
  * 16KiB 限制。
  */
-@Slf4j
 @RestController
 @RequestMapping(IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}")
 public class ClusterEnvironmentIdeInternalController {
@@ -163,7 +158,8 @@ public class ClusterEnvironmentIdeInternalController {
     try (InputStream stream = request.getInputStream()) {
       byte[] data = stream.readNBytes(MAX_METADATA_BODY_BYTES + 1);
       if (data.length > MAX_METADATA_BODY_BYTES) {
-        throw new ClusterInternalPayloadTooLargeException();
+        throw new ResponseStatusException(
+            HttpStatus.PAYLOAD_TOO_LARGE, "internal IDE request body is too large");
       }
       return data;
     } catch (IOException error) {
@@ -177,32 +173,6 @@ public class ClusterEnvironmentIdeInternalController {
     if (!local) {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "internal IDE request does not match this node's READY owner route");
-    }
-  }
-
-  @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
-      ClusterInternalAuthenticationException error) {
-    log.debug("rejected internal IDE request: {}", error.getMessage());
-    return ClusterInternalErrors.unauthorized();
-  }
-
-  @ExceptionHandler(ClusterInternalPayloadTooLargeException.class)
-  public ResponseEntity<ApiResponse<Void>> handlePayloadTooLarge(
-      ClusterInternalPayloadTooLargeException error) {
-    return ClusterInternalErrors.payloadTooLarge("internal IDE request body is too large");
-  }
-
-  @ExceptionHandler(DomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
-    return ClusterInternalErrors.domain(error);
-  }
-
-  /** 内部 metadata 请求体超出硬上限；映射为 413。 */
-  private static final class ClusterInternalPayloadTooLargeException extends RuntimeException {
-
-    private ClusterInternalPayloadTooLargeException() {
-      super("internal IDE request body is too large");
     }
   }
 }

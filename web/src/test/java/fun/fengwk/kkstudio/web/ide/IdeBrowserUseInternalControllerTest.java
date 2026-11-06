@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.web.ide;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,7 +18,10 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUsePaths;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
+import fun.fengwk.kkstudio.ide.web.IdeBrowserUseInternalController;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -53,6 +56,7 @@ class IdeBrowserUseInternalControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new IdeBrowserUseInternalController(authentication, registry))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -64,7 +68,7 @@ class IdeBrowserUseInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(intentBody()))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        .andExpect(jsonPath("$.code").value("unauthorized"));
   }
 
   @Test
@@ -139,7 +143,7 @@ class IdeBrowserUseInternalControllerTest {
           .perform(get(path).headers(headers(authentication.sign("GET", path, NODE))))
           .andExpect(status().isBadRequest())
           .andExpect(jsonPath("$.code").value("validation"))
-          .andExpect(jsonPath("$.errors.resource").value("browserUse"));
+          .andExpect(jsonPath("$.detail").value("browser-use query is invalid"));
     }
   }
 
@@ -195,7 +199,7 @@ class IdeBrowserUseInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(IdeBrowserUsePaths.MAX_BODY_BYTES + 1) + "\"}"))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        .andExpect(jsonPath("$.code").value("unauthorized"));
   }
 
   /** 认证通过后超限的请求体仍按内部信封返回 413，不与认证失败混用状态或格式。 */
@@ -210,8 +214,8 @@ class IdeBrowserUseInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(IdeBrowserUsePaths.MAX_BODY_BYTES + 1) + "\"}"))
         .andExpect(status().isPayloadTooLarge())
-        .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"))
-        .andExpect(jsonPath("$.errors.detail").value("browser-use request body is too large"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("browser-use request body is too large"));
   }
 
   private long registerUsage(long revision, IdeBrowserUseView... views) {

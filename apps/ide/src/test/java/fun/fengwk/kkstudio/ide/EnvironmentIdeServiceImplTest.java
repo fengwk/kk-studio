@@ -219,9 +219,9 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
 
-  /** 用户取消关闭不撤销当前绑定，并提供可跨节点识别的校验资源。 */
+  /** 用户取消关闭不撤销当前绑定，并提供可跨节点识别的原因。 */
   @Test
-  void cancelledCloseKeepsBindingAndReturnsCancellationResource() {
+  void cancelledCloseKeepsBindingAndReturnsCancellationReason() {
     open();
     EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
     request.setDocumentId(DOCUMENT.toString());
@@ -231,7 +231,7 @@ class EnvironmentIdeServiceImplTest {
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
     DomainException error =
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
-    assertEquals("ide_close_cancelled", error.resource());
+    assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertTrue(bindings.find(ENV, VIEW).isPresent());
     assertTrue(authorization.closed.isEmpty());
   }

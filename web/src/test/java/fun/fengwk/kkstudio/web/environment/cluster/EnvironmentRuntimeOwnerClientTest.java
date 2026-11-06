@@ -111,14 +111,20 @@ class EnvironmentRuntimeOwnerClientTest {
   void mapsBusyAndUnavailableWithoutLeakingBody() {
     server.createContext(
         "/internal/environments/" + ENV + "/update",
-        exchange -> respond(exchange, 409, "{\"code\":\"in_use\",\"message\":\"busy\"}"));
-    assertThrows(DomainException.class, () -> client.startUpdate(remote(), ENV));
+        exchange -> respond(exchange, 409, "{\"code\":\"in_use\",\"detail\":\"busy\"}"));
+    DomainException busy =
+        assertThrows(DomainException.class, () -> client.startUpdate(remote(), ENV));
+    assertEquals("in_use", busy.code().code());
+    assertEquals("busy", busy.getMessage());
 
     server.removeContext("/internal/environments/" + ENV + "/update");
     server.createContext(
         "/internal/environments/" + ENV + "/runtime",
         exchange ->
-            respond(exchange, 409, "{\"code\":\"unavailable\",\"message\":\"unavailable\"}"));
+            respond(
+                exchange,
+                409,
+                "{\"code\":\"unavailable\",\"reason\":\"ENVIRONMENT_UNAVAILABLE\",\"detail\":\"environment runtime is unavailable\"}"));
     DomainException unavailable =
         assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
     assertEquals("ENVIRONMENT_UNAVAILABLE", unavailable.reason());

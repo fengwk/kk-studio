@@ -19,9 +19,11 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationExcepti
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.net.URI;
 import java.util.Optional;
@@ -48,6 +50,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
         MockMvcBuilders.standaloneSetup(
                 new ClusterEnvironmentRuntimeInternalController(
                     updateService, clusterNodeRegistry, authentication))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -84,8 +87,8 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     mockMvc
         .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
-        .andExpect(jsonPath("$.errors.detail").value("internal authentication failed"));
+        .andExpect(jsonPath("$.code").value("unauthorized"))
+        .andExpect(jsonPath("$.detail").value("internal authentication failed"));
   }
 
   @Test

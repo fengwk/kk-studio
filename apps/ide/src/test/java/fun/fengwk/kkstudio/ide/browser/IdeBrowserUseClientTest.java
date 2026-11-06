@@ -132,7 +132,7 @@ class IdeBrowserUseClientTest {
         exchange -> {
           verifyAuth("GET", exchange);
           requests.incrementAndGet();
-          respond(exchange, 503, "{\"message\":\"busy\"}");
+          respond(exchange, 503, "{\"code\":\"unavailable\",\"detail\":\"busy\"}");
         });
     IdeBrowserUseRegistry registry = new IdeBrowserUseRegistry();
     ClusterNodeRegistry nodes = mock(ClusterNodeRegistry.class);
@@ -172,7 +172,7 @@ class IdeBrowserUseClientTest {
     startServer(
         exchange -> {
           verifyAuth("GET", exchange);
-          respond(exchange, 404, "");
+          respond(exchange, 404, "{\"code\":\"not_found\"}");
         });
     IdeBrowserUseRegistry registry = new IdeBrowserUseRegistry();
     ClusterNodeRegistry nodes = mock(ClusterNodeRegistry.class);

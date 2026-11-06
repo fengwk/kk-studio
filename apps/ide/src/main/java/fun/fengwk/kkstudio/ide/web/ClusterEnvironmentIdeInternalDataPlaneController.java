@@ -2,9 +2,6 @@ package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,12 +15,9 @@ import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.gateway.IdeForwardedRequest;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
@@ -36,7 +30,6 @@ import java.util.UUID;
  * <p>单跳转发的 HTTP 请求与 WebSocket upgrade 均在此完成 HMAC 验证与 owner 核对后， 由 {@link IdeGatewayDataPlane} 交付给本地
  * Daemon 隧道。
  */
-@Slf4j
 @RestController
 @RequestMapping(IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}")
 public class ClusterEnvironmentIdeInternalDataPlaneController {
@@ -82,7 +75,7 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
   }
 
-  /** 认证与 owner 核对先于任何转发；失败按内部错误信封抛出，绝不进入数据面。 */
+  /** 认证与 owner 核对先于任何转发；失败不会进入数据面。 */
   private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
     authentication.verify(
         request.getMethod(),
@@ -96,17 +89,5 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
           "internal IDE data request does not match this node's READY owner route");
     }
     return envId;
-  }
-
-  @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
-      ClusterInternalAuthenticationException error) {
-    log.debug("rejected internal IDE data request: {}", error.getMessage());
-    return ClusterInternalErrors.unauthorized();
-  }
-
-  @ExceptionHandler(DomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
-    return ClusterInternalErrors.domain(error);
   }
 }

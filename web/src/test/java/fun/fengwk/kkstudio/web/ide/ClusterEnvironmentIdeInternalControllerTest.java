@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.web.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,9 +34,12 @@ import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.web.ClusterEnvironmentIdeInternalController;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -77,6 +80,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
         MockMvcBuilders.standaloneSetup(
                 new ClusterEnvironmentIdeInternalController(
                     localEnvironmentIdeService, clusterNodeRegistry, authentication))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -162,11 +166,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .collapseMobile(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
   }
 
-  /** 客户端通过 HTTP 收到真实 controller 的错误 JSON，只允许已知取消资源穿透。 */
+  /** 客户端通过真实 controller 与 advice 收到 problem，只允许已知取消原因穿透。 */
   @Test
-  void cancellationResourceSurvivesControllerJsonAndClusterClient() throws Exception {
+  void cancellationReasonSurvivesControllerJsonAndClusterClient() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    doThrow(DomainException.validation("ide_close_cancelled", "cancelled"))
+    doThrow(DomainException.validationReason("IDE_CLOSE_CANCELLED", "cancelled"))
         .doThrow(DomainException.validation("other_resource", "cancelled"))
         .doThrow(DomainException.unavailable("IDE_UNAVAILABLE", "cancelled"))
         .when(localEnvironmentIdeService)
@@ -214,7 +218,8 @@ class ClusterEnvironmentIdeInternalControllerTest {
       request.setDiscard(false);
       DomainException cancelled =
           assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
-      assertEquals("ide_close_cancelled", cancelled.resource());
+      assertEquals("IDE_CLOSE_CANCELLED", cancelled.reason());
+      assertEquals("validation", cancelled.code().code());
       DomainException other =
           assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
       assertEquals("environment", other.resource());
@@ -232,8 +237,8 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
-        .andExpect(jsonPath("$.errors.detail").value("internal authentication failed"));
+        .andExpect(jsonPath("$.code").value("unauthorized"))
+        .andExpect(jsonPath("$.detail").value("internal authentication failed"));
     verifyNoInteractions(localEnvironmentIdeService);
     verifyNoInteractions(clusterNodeRegistry);
   }
@@ -348,7 +353,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
         .andExpect(status().isPayloadTooLarge())
-        .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
+        .andExpect(jsonPath("$.code").value("validation"));
     verifyNoInteractions(localEnvironmentIdeService);
   }
 

@@ -1,14 +1,13 @@
 package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -25,10 +24,7 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUsePaths;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseSnapshot;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -44,7 +40,6 @@ import java.util.UUID;
  * <p>认证严格先于查询参数/请求体读取；端点只读本节点内存，不查全局数据库连接表。POST 精确查询连接/document 是否仍存活且登记了相同的 environment/view/claim
  * 意图；GET 返回同一连接/document 当前带 binding epoch 的续租证明。缺失或过期返回 404，不以空壳成功掩盖。
  */
-@Slf4j
 @RestController
 @RequestMapping(IdeBrowserUsePaths.INTERNAL_PATH)
 public class IdeBrowserUseInternalController {
@@ -110,9 +105,9 @@ public class IdeBrowserUseInternalController {
       throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
     Optional<IdeBrowserUse> proofs = registry.activeBoundProofs(identity, documentId);
-    return proofs
-        .map(usage -> ResponseEntity.ok(IdeBrowserUseSnapshot.from(identity, usage)))
-        .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+    return ResponseEntity.ok(
+        IdeBrowserUseSnapshot.from(
+            identity, proofs.orElseThrow(() -> DomainException.notFound("browserUse"))));
   }
 
   private void authenticate(HttpServletRequest request) {
@@ -144,35 +139,12 @@ public class IdeBrowserUseInternalController {
     try (InputStream stream = request.getInputStream()) {
       byte[] data = stream.readNBytes(IdeBrowserUsePaths.MAX_BODY_BYTES + 1);
       if (data.length > IdeBrowserUsePaths.MAX_BODY_BYTES) {
-        throw new BrowserUsePayloadTooLargeException();
+        throw new ResponseStatusException(
+            HttpStatus.PAYLOAD_TOO_LARGE, "browser-use request body is too large");
       }
       return data;
     } catch (IOException error) {
       throw DomainException.validation("browserUse", "browser-use request body is unreadable");
-    }
-  }
-
-  @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
-      ClusterInternalAuthenticationException error) {
-    log.debug("rejected internal browser-use request: {}", error.getMessage());
-    return ClusterInternalErrors.unauthorized();
-  }
-
-  @ExceptionHandler(DomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
-    return ClusterInternalErrors.domain(error);
-  }
-
-  @ExceptionHandler(BrowserUsePayloadTooLargeException.class)
-  public ResponseEntity<ApiResponse<Void>> handlePayloadTooLarge(
-      BrowserUsePayloadTooLargeException error) {
-    return ClusterInternalErrors.payloadTooLarge("browser-use request body is too large");
-  }
-
-  private static final class BrowserUsePayloadTooLargeException extends RuntimeException {
-    private BrowserUsePayloadTooLargeException() {
-      super("browser-use request body is too large");
     }
   }
 }

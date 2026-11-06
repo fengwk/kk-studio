@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
@@ -16,6 +15,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors.Problem;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
 import java.net.URI;
@@ -45,8 +46,6 @@ public class IdeClusterClient {
   public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
   private static final int DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
-
-  private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
 
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
@@ -249,11 +248,16 @@ public class IdeClusterClient {
     if (status == 204) {
       return null;
     }
-    String message = errorMessage(responseBody);
-    if (status == 400) {
-      throw DomainException.validation(errorResource(responseBody), message);
+    Problem problem = ClusterInternalErrors.parse(objectMapper, payload);
+    String detail =
+        problem.detail() == null ? "cluster IDE owner rejected the request" : problem.detail();
+    if (status == 400 && "validation".equals(problem.code())) {
+      if ("IDE_CLOSE_CANCELLED".equals(problem.reason())) {
+        throw DomainException.validationReason("IDE_CLOSE_CANCELLED", detail);
+      }
+      throw DomainException.validation("environment", detail);
     }
-    throw DomainException.unavailable("IDE_UNAVAILABLE", message);
+    throw DomainException.unavailable("IDE_UNAVAILABLE", detail);
   }
 
   private static DomainException mapFailure(Throwable cause) {
@@ -290,45 +294,6 @@ public class IdeClusterClient {
     } catch (JacksonException error) {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "cluster IDE owner returned an invalid response", error);
-    }
-  }
-
-  /** 只读取内部端点统一错误信封（{@code ApiResponse}）的顶层 {@code message}，回退 {@code errors.detail}。 */
-  private String errorMessage(String body) {
-    JsonNode root = errorEnvelope(body);
-    JsonNode message = root == null ? null : root.get("message");
-    if (message == null || message.asText().isBlank()) {
-      JsonNode errors = root == null ? null : root.get("errors");
-      message = errors == null ? null : errors.get("detail");
-    }
-    if (message != null && !message.asText().isBlank()) {
-      String text = message.asText();
-      return text.length() > MAX_ERROR_MESSAGE_LENGTH
-          ? text.substring(0, MAX_ERROR_MESSAGE_LENGTH)
-          : text;
-    }
-    return "cluster IDE owner rejected the request";
-  }
-
-  /** 只把已知的取消资源从错误信封的 {@code errors.resource} 穿透出来。 */
-  private String errorResource(String body) {
-    JsonNode root = errorEnvelope(body);
-    JsonNode errors = root == null ? null : root.get("errors");
-    JsonNode resource = errors == null ? null : errors.get("resource");
-    return resource != null && "ide_close_cancelled".equals(resource.asText())
-        ? "ide_close_cancelled"
-        : "environment";
-  }
-
-  /** 非 JSON 错误体不是可信来源：解析失败一律按无结构错误处理，绝不回显原始内容。 */
-  private JsonNode errorEnvelope(String body) {
-    if (body == null || body.isBlank()) {
-      return null;
-    }
-    try {
-      return objectMapper.readTree(body);
-    } catch (JacksonException error) {
-      return null;
     }
   }
 }

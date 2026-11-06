@@ -1,23 +1,19 @@
 package fun.fengwk.kkstudio.web.events;
 
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.util.Optional;
 
@@ -53,16 +49,10 @@ public class RealtimePayloadInternalController {
     Optional<RealtimePayloadBuffer.Payload> payload =
         payloadBuffer.get(Uuids.parseCanonical(payloadId, "payloadId"));
     if (payload.isEmpty()) {
-      return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+      throw DomainException.notFound("realtime_payload");
     }
     return ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_JSON)
         .body(payload.get().canonicalJson());
-  }
-
-  @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
-      ClusterInternalAuthenticationException error) {
-    return ClusterInternalErrors.unauthorized();
   }
 }

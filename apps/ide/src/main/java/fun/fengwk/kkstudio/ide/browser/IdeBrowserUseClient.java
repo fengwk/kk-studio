@@ -8,6 +8,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors.Problem;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 
 import java.net.URI;
@@ -111,7 +113,7 @@ public final class IdeBrowserUseClient {
     byte[] payload = writeJson(query);
     Response response = exchange("POST", path, identity.eventNodeId(), payload);
     if (response.status() != 200) {
-      throw unavailableStatus(response.status());
+      throw unavailableStatus(response);
     }
     return readJson(response.body(), IdeBrowserUseIntentReply.class).matched();
   }
@@ -125,11 +127,12 @@ public final class IdeBrowserUseClient {
     }
     String path = IdeBrowserUsePaths.activeProofsPath(identity, documentId);
     Response response = exchange("GET", path, identity.eventNodeId(), null);
-    if (response.status() == 404) {
+    Problem problem = ClusterInternalErrors.parse(objectMapper, response.body());
+    if (response.status() == 404 && "not_found".equals(problem.code())) {
       return Optional.empty();
     }
     if (response.status() != 200) {
-      throw unavailableStatus(response.status());
+      throw unavailableStatus(response);
     }
     IdeBrowserUseSnapshot snapshot = readJson(response.body(), IdeBrowserUseSnapshot.class);
     if (!snapshot.eventNodeId().equals(identity.eventNodeId().toString())
@@ -263,13 +266,17 @@ public final class IdeBrowserUseClient {
     return future.get(remaining, TimeUnit.NANOSECONDS);
   }
 
-  private static DomainException unavailableStatus(int status) {
-    if (status == 400) {
+  private DomainException unavailableStatus(Response response) {
+    Problem problem = ClusterInternalErrors.parse(objectMapper, response.body());
+    if (response.status() == 400 && "validation".equals(problem.code())) {
       return DomainException.unavailable(
-          "IDE_UNAVAILABLE", "browser event node rejected the usage query");
+          "IDE_UNAVAILABLE",
+          problem.detail() == null
+              ? "browser event node rejected the usage query"
+              : problem.detail());
     }
     return DomainException.unavailable(
-        "IDE_UNAVAILABLE", "browser event node returned status " + status);
+        "IDE_UNAVAILABLE", "browser event node returned status " + response.status());
   }
 
   private record Response(int status, byte[] body) {}

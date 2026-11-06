@@ -83,7 +83,10 @@ class ClusterRealtimePayloadClientTest {
     server =
         new ServerFixture(
             exchange -> {
-              respond(exchange, 401, "{\"message\":\"internal authentication failed\"}");
+              respond(
+                  exchange,
+                  401,
+                  "{\"code\":\"unauthorized\",\"detail\":\"internal authentication failed\"}");
             });
     StubRegistry registry = new StubRegistry();
     registry.origins.put(NODE_B, server.origin());
@@ -138,7 +141,7 @@ class ClusterRealtimePayloadClientTest {
         new ServerFixture(
             exchange -> {
               authenticate(exchange);
-              respond(exchange, 404, "");
+              respond(exchange, 404, "{\"code\":\"not_found\"}");
             });
     StubRegistry registry = new StubRegistry();
     registry.origins.put(NODE_B, server.origin());

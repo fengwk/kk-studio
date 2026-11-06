@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.cluster;
 
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadLimits;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadUnavailableException;
 import fun.fengwk.kkstudio.harness.spi.RealtimePayloadFetcher;
@@ -29,6 +32,8 @@ public final class ClusterRealtimePayloadClient implements RealtimePayloadFetche
 
   /** 回拉必须短于实时 LISTEN 可接受的最坏阻塞；覆盖连接、响应头与 body 读取。 */
   public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(2);
+
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private final HttpClient httpClient;
   private final ClusterInternalAuthentication authentication;
@@ -102,11 +107,15 @@ public final class ClusterRealtimePayloadClient implements RealtimePayloadFetche
     long deadlineNanos = System.nanoTime() + requestTimeout.toNanos();
     try {
       HttpResponse<byte[]> response = await(responseFuture, deadlineNanos);
+      byte[] body = await(subscriber.bodyFuture(), deadlineNanos);
       if (response.statusCode() != 200) {
+        ClusterInternalErrors.Problem problem = ClusterInternalErrors.parse(MAPPER, body);
+        if (response.statusCode() == 404 && "not_found".equals(problem.code())) {
+          throw new RealtimePayloadUnavailableException("realtime payload was not found");
+        }
         throw new RealtimePayloadUnavailableException(
             "realtime payload origin returned status " + response.statusCode());
       }
-      byte[] body = await(subscriber.bodyFuture(), deadlineNanos);
       return new String(body, StandardCharsets.UTF_8);
     } catch (TimeoutException error) {
       throw new RealtimePayloadUnavailableException("realtime payload request timed out", error);

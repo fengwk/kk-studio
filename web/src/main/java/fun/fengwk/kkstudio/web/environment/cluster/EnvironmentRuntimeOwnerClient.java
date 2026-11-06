@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -14,6 +13,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors.Problem;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
@@ -159,26 +160,21 @@ public class EnvironmentRuntimeOwnerClient {
   }
 
   private static RuntimeException mapFailure(int status, byte[] body) {
-    String code = errorCode(body);
-    if (status == 409 && "in_use".equals(code)) {
-      return DomainException.inUse("environment", "environment runtime operation is busy");
+    Problem problem = ClusterInternalErrors.parse(MAPPER, body);
+    if (status == 409 && "in_use".equals(problem.code())) {
+      return DomainException.inUse(
+          "environment",
+          problem.detail() == null ? "environment runtime operation is busy" : problem.detail());
     }
-    if (status == 409 && "unavailable".equals(code)) {
+    if (status == 409
+        && "unavailable".equals(problem.code())
+        && "ENVIRONMENT_UNAVAILABLE".equals(problem.reason())) {
       return DomainException.unavailable(
-          "ENVIRONMENT_UNAVAILABLE", "environment runtime is unavailable");
+          "ENVIRONMENT_UNAVAILABLE",
+          problem.detail() == null ? "environment runtime is unavailable" : problem.detail());
     }
     return DomainException.unavailable(
         "ENVIRONMENT_UNAVAILABLE", "environment owner returned status " + status);
-  }
-
-  private static String errorCode(byte[] body) {
-    try {
-      JsonNode value = MAPPER.readTree(body);
-      JsonNode code = value == null ? null : value.get("code");
-      return code != null && code.isString() ? code.stringValue() : null;
-    } catch (JacksonException ignored) {
-      return null;
-    }
   }
 
   /** origin 必须已经是裸 http(s) origin；解析后的 authority/path 也必须是固定内部路径。 */

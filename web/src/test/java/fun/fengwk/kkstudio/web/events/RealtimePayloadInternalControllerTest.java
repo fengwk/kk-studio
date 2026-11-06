@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -45,6 +47,7 @@ class RealtimePayloadInternalControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new RealtimePayloadInternalController(authentication, buffer))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -71,7 +74,7 @@ class RealtimePayloadInternalControllerTest {
         mockMvc
             .perform(get(ClusterInternalPaths.realtimePayloadPath(payloadId)))
             .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+            .andExpect(jsonPath("$.code").value("unauthorized"))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -96,7 +99,8 @@ class RealtimePayloadInternalControllerTest {
 
     mockMvc
         .perform(get(path).headers(headers(authentication.sign("GET", path, NODE))))
-        .andExpect(status().isNotFound());
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
   }
 
   @Test
