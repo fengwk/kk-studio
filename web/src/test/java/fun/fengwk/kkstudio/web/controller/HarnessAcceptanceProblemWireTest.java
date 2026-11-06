@@ -25,6 +25,9 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
@@ -57,16 +60,16 @@ class HarnessAcceptanceProblemWireTest {
   private StorageUploadService uploads;
   private MockMvc mvc;
   private HarnessRuntime runtime;
+  private InMemoryHarnessStore store;
   private AcceptedCommands root;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
+    store = new InMemoryHarnessStore();
     runtime =
         new HarnessRuntime(
-            new InMemoryHarnessStore(),
-            new DriverRegistry(new FakeAgentDriver("fake")),
-            () -> CompactionConfig.DEFAULT);
+            store, new DriverRegistry(new FakeAgentDriver("fake")), () -> CompactionConfig.DEFAULT);
     root =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
@@ -152,6 +155,29 @@ class HarnessAcceptanceProblemWireTest {
     postFork("CHAT", other.rootEntry().id())
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
+    UUID nonBoundary = UUID.randomUUID();
+    store.transaction(
+        tx -> {
+          tx.entries()
+              .insert(
+                  new Entry(
+                      nonBoundary,
+                      session,
+                      root.rootEntry().id(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          new BranchSettings(
+                              "assistant", new ExecutionSelection("fake", "{}"), null),
+                          thread),
+                      root.rootEntry().createdAt()));
+          return null;
+        });
+    postFork("CHAT", nonBoundary)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    postFork("CHAT", UUID.randomUUID())
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
     postFork("PROJECT", root.rootEntry().id())
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
