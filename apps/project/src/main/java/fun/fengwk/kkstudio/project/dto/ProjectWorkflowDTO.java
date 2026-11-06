@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,9 +15,4 @@ import java.util.List;
 public class ProjectWorkflowDTO {
 
   private List<ProjectWorkflowStateDTO> states;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
 }

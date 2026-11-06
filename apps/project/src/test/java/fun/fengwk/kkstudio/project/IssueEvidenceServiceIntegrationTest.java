@@ -326,21 +326,6 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
                 issue.getId(), null, UUID.randomUUID(), blobId, "test.txt"));
   }
 
-  /** 已归档 Issue 禁止发布证据：抛出校验异常。 */
-  @Test
-  void publishEvidenceToArchivedIssueIsRejected() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-    jdbc.update(
-        "update project_issue set archived_at = clock_timestamp() where id = ?", issue.getId());
-
-    UUID blobId = UUID.randomUUID();
-    insertStorageBlob(blobId);
-
-    assertValidation(
-        () -> issueEvidenceService.publishBlob(issue.getId(), null, null, blobId, "test.txt"));
-  }
-
   /** 深删除释放全部引用：逐行调用 release 并删除该 Issue 下的所有证据行。 */
   @Test
   void releaseAllReleasesEveryBlobAndRemovesAllRows() {
@@ -372,18 +357,6 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID uploadId = UUID.randomUUID();
     UUID nonExistentIssueId = UUID.randomUUID();
     assertNotFound(() -> issueEvidenceService.publishHumanUpload(nonExistentIssueId, uploadId));
-  }
-
-  /** 人工上传目标 Issue 已归档时拒绝发布。 */
-  @Test
-  void publishHumanUploadArchivedIssueIsRejected() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-    jdbc.update(
-        "update project_issue set archived_at = clock_timestamp() where id = ?", issue.getId());
-    UUID uploadId = UUID.randomUUID();
-
-    assertValidation(() -> issueEvidenceService.publishHumanUpload(issue.getId(), uploadId));
   }
 
   /** 发布 Blob 证据时 blobId 必须非空。 */

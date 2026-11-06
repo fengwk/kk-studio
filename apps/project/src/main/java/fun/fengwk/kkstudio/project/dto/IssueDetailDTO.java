@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -10,7 +9,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
-/** Issue 详情公开聚合 DTO。 */
+/** Issue 详情聚合：资料、活动窗口、Run 投影、阶段额度与 Agent 绑定。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -33,9 +32,4 @@ public class IssueDetailDTO {
 
   private List<IssueStageBudgetDTO> stageBudgets;
   private List<IssueAgentThreadDTO> agentThreads;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
 }

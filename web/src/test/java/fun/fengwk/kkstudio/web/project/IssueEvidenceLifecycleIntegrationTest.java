@@ -125,7 +125,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     for (int attempt = 0; attempt < 2; attempt++) {
       mockMvc
           .perform(
-              post("/api/issues/" + fixture.issueId() + "/activities")
+              post("/api/project/issues/" + fixture.issueId() + "/activities")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(body))
           .andExpect(status().isCreated())
@@ -147,7 +147,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     String commentKey = "comment-" + UUID.randomUUID();
     mockMvc
         .perform(
-            post("/api/issues/" + fixture.issueId() + "/activities")
+            post("/api/project/issues/" + fixture.issueId() + "/activities")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"expectedVersion\":\""

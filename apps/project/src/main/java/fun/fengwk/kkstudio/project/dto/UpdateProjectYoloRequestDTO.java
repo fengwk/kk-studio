@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 更新项目 YOLO 模式请求 DTO。 */
+/** 独立编辑项目 YOLO 策略请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,9 +14,4 @@ public class UpdateProjectYoloRequestDTO {
 
   private String expectedVersion;
   private Boolean yoloEnabled;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
 }

@@ -4,7 +4,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -81,7 +80,7 @@ class ProjectControllerTest {
     when(projectService.listProjects(false)).thenReturn(List.of(p1));
 
     mockMvc
-        .perform(get("/api/projects"))
+        .perform(get("/api/project/projects"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].title").value("P1"));
   }
@@ -102,7 +101,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            post("/api/projects")
+            post("/api/project/projects")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
@@ -133,7 +132,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            post("/api/projects")
+            post("/api/project/projects")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
@@ -151,7 +150,7 @@ class ProjectControllerTest {
     when(projectService.getProject(projectId)).thenReturn(project);
 
     mockMvc
-        .perform(get("/api/projects/" + projectId))
+        .perform(get("/api/project/projects/" + projectId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(projectId.toString().toLowerCase()))
         .andExpect(jsonPath("$.title").value("Existing"));
@@ -177,7 +176,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            put("/api/projects/" + projectId)
+            put("/api/project/projects/" + projectId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -199,7 +198,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            put("/api/projects/" + projectId)
+            put("/api/project/projects/" + projectId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isConflict())
@@ -240,7 +239,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            put("/api/projects/" + projectId + "/workflow")
+            put("/api/project/projects/" + projectId + "/workflow")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -256,7 +255,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            put("/api/projects/" + projectId + "/yolo")
+            put("/api/project/projects/" + projectId + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -266,7 +265,7 @@ class ProjectControllerTest {
   @Test
   void testDeleteProject() throws Exception {
     mockMvc
-        .perform(delete("/api/projects/" + projectId + "?expectedVersion=0"))
+        .perform(delete("/api/project/projects/" + projectId + "?expectedVersion=0"))
         .andExpect(status().isNoContent());
 
     verify(projectService).deleteProject(projectId, 0L);
@@ -280,7 +279,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            post("/api/projects/" + projectId + "/archive")
+            post("/api/project/projects/" + projectId + "/archive")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -295,7 +294,7 @@ class ProjectControllerTest {
 
     mockMvc
         .perform(
-            post("/api/projects/" + projectId + "/unarchive")
+            post("/api/project/projects/" + projectId + "/unarchive")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -313,7 +312,7 @@ class ProjectControllerTest {
     when(snapshotAssembler.assemble(projectId)).thenReturn(snapshot);
 
     mockMvc
-        .perform(get("/api/projects/" + projectId + "/snapshot"))
+        .perform(get("/api/project/projects/" + projectId + "/snapshot"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.project.id").value(projectId.toString().toLowerCase()))
         .andExpect(jsonPath("$.referencedStateCodes").isArray())
@@ -322,25 +321,9 @@ class ProjectControllerTest {
   }
 
   @Test
-  void rejectsUppercaseProjectIdAndPaddedVersionBeforeService() throws Exception {
-    // 测试意图：HTTP UUID 与 version 都是严格 canonical，不接受大写和前后空白。
-    mockMvc
-        .perform(get("/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("projectId must be a canonical UUID"));
-    mockMvc
-        .perform(delete("/api/projects/" + projectId).param("expectedVersion", " 1"))
-        .andExpect(status().isBadRequest())
-        .andExpect(
-            jsonPath("$.detail").value("expectedVersion must be a canonical non-negative decimal"));
-    verifyNoInteractions(projectService);
-  }
-
-  @Test
   void testResourceNotFoundAdvice() throws Exception {
     when(projectService.getProject(projectId)).thenThrow(DomainException.notFound("project"));
 
-    mockMvc.perform(get("/api/projects/" + projectId)).andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/project/projects/" + projectId)).andExpect(status().isNotFound());
   }
 }

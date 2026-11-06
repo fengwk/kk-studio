@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
-import fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -37,7 +36,6 @@ import fun.fengwk.kkstudio.project.dto.ResetStageBudgetRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ResumeIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO;
-import fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.http.IssueController;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -136,7 +134,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/projects/" + projectId + "/issues")
+            post("/api/project/projects/" + projectId + "/issues")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
@@ -178,7 +176,7 @@ class IssueControllerTest {
     when(issueRunService.listRuns(issueId)).thenReturn(List.of(run));
 
     mockMvc
-        .perform(get("/api/issues/" + issueId))
+        .perform(get("/api/project/issues/" + issueId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.issue.id").value(issueId.toString().toLowerCase()))
         .andExpect(jsonPath("$.currentRun.agentName").value("coder"))
@@ -205,7 +203,7 @@ class IssueControllerTest {
     when(issueRunService.listRuns(issueId)).thenReturn(List.of());
 
     mockMvc
-        .perform(get("/api/issues/" + issueId))
+        .perform(get("/api/project/issues/" + issueId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.issue.id").value(issueId.toString()))
         .andExpect(jsonPath("$.runs").isEmpty())
@@ -239,13 +237,13 @@ class IssueControllerTest {
     when(issueEditingService.listActivities(issueId, 0L, 1)).thenReturn(List.of(act));
 
     mockMvc
-        .perform(get("/api/issues/" + issueId).param("limit", "1"))
+        .perform(get("/api/project/issues/" + issueId).param("limit", "1"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.activities[0].sequence").value("1"))
         .andExpect(jsonPath("$.activities[0].body").value("Hello"))
         .andExpect(jsonPath("$.nextActivityCursor").value("1"));
     mockMvc
-        .perform(get("/api/issues/" + issueId + "/activities"))
+        .perform(get("/api/project/issues/" + issueId + "/activities"))
         .andExpect(status().isMethodNotAllowed());
   }
 
@@ -263,7 +261,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            put("/api/issues/" + issueId)
+            put("/api/project/issues/" + issueId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -284,7 +282,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/transition")
+            post("/api/project/issues/" + issueId + "/transition")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -311,7 +309,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/block")
+            post("/api/project/issues/" + issueId + "/block")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -328,7 +326,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/recover")
+            post("/api/project/issues/" + issueId + "/recover")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -344,7 +342,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/resume")
+            post("/api/project/issues/" + issueId + "/resume")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -360,7 +358,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/reopen")
+            post("/api/project/issues/" + issueId + "/reopen")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -381,7 +379,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/budget-reset")
+            post("/api/project/issues/" + issueId + "/reset-budget")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -391,42 +389,12 @@ class IssueControllerTest {
   }
 
   @Test
-  void testArchive() throws Exception {
-    ArchiveIssueRequestDTO req = ArchiveIssueRequestDTO.builder().expectedVersion("1").build();
-    Issue archived = Issue.builder().id(issueId).version(2L).archivedAt(now).build();
-    when(issueLifecycleService.archiveIssue(issueId, 1L)).thenReturn(archived);
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/archive")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.archivedAt").isNotEmpty());
-  }
-
-  @Test
-  void testUnarchive() throws Exception {
-    UnarchiveIssueRequestDTO req = UnarchiveIssueRequestDTO.builder().expectedVersion("1").build();
-    Issue unarchived = Issue.builder().id(issueId).version(2L).archivedAt(null).build();
-    when(issueLifecycleService.unarchiveIssue(issueId, 1L)).thenReturn(unarchived);
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/unarchive")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.archivedAt").isEmpty());
-  }
-
-  @Test
   void testAppendActivityComment() throws Exception {
     AppendIssueActivityRequestDTO req =
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k1")
-            .kind("COMMENT")
+            .kind(IssueActivityKind.COMMENT)
             .body("A human comment")
             .build();
     IssueActivity act =
@@ -439,19 +407,21 @@ class IssueControllerTest {
             .idempotencyKey("comment:k1")
             .createdAt(now)
             .build();
-    when(issueEditingService.appendActivity(issueId, 1L, "COMMENT", "k1", "A human comment"))
+    when(issueEditingService.appendActivity(
+            issueId, 1L, IssueActivityKind.COMMENT, "k1", "A human comment"))
         .thenReturn(act);
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/activities")
+            post("/api/project/issues/" + issueId + "/activities")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.body").value("A human comment"))
         .andExpect(jsonPath("$.kind").value("COMMENT"));
 
-    verify(issueEditingService).appendActivity(issueId, 1L, "COMMENT", "k1", "A human comment");
+    verify(issueEditingService)
+        .appendActivity(issueId, 1L, IssueActivityKind.COMMENT, "k1", "A human comment");
   }
 
   @Test
@@ -460,7 +430,7 @@ class IssueControllerTest {
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k2")
-            .kind("INSTRUCTION")
+            .kind(IssueActivityKind.INSTRUCTION)
             .body("A human instruction")
             .build();
     IssueActivity act =
@@ -474,12 +444,12 @@ class IssueControllerTest {
             .createdAt(now)
             .build();
     when(issueEditingService.appendActivity(
-            issueId, 1L, "INSTRUCTION", "k2", "A human instruction"))
+            issueId, 1L, IssueActivityKind.INSTRUCTION, "k2", "A human instruction"))
         .thenReturn(act);
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/activities")
+            post("/api/project/issues/" + issueId + "/activities")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
@@ -487,7 +457,7 @@ class IssueControllerTest {
         .andExpect(jsonPath("$.kind").value("INSTRUCTION"));
 
     verify(issueEditingService)
-        .appendActivity(issueId, 1L, "INSTRUCTION", "k2", "A human instruction");
+        .appendActivity(issueId, 1L, IssueActivityKind.INSTRUCTION, "k2", "A human instruction");
   }
 
   @Test
@@ -496,18 +466,18 @@ class IssueControllerTest {
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k1")
-            .kind("COMMENT")
+            .kind(IssueActivityKind.COMMENT)
             .body("Different content reusing key")
             .build();
     when(issueEditingService.appendActivity(
-            issueId, 1L, "COMMENT", "k1", "Different content reusing key"))
+            issueId, 1L, IssueActivityKind.COMMENT, "k1", "Different content reusing key"))
         .thenThrow(
             DomainException.duplicate(
                 "issue_activity", "Request key was reused with a different request payload"));
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/activities")
+            post("/api/project/issues/" + issueId + "/activities")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isConflict());
@@ -516,15 +486,16 @@ class IssueControllerTest {
   @Test
   void testGetIssueInvalidLimitReturns400() throws Exception {
     mockMvc
-        .perform(get("/api/issues/" + issueId).param("limit", "abc"))
+        .perform(get("/api/project/issues/" + issueId).param("limit", "abc"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("limit has an invalid value"));
+    mockMvc
+        .perform(get("/api/project/issues/" + issueId).param("limit", "0"))
+        .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value("limit must be within [1, 200]"));
     mockMvc
-        .perform(get("/api/issues/" + issueId).param("limit", "0"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/issues/" + issueId).param("limit", "201"))
+        .perform(get("/api/project/issues/" + issueId).param("limit", "201"))
         .andExpect(status().isBadRequest());
   }
 
@@ -533,7 +504,7 @@ class IssueControllerTest {
     UUID uploadId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     AddIssueEvidenceRequestDTO req =
-        AddIssueEvidenceRequestDTO.builder().uploadId(uploadId.toString()).build();
+        AddIssueEvidenceRequestDTO.builder().uploadId(uploadId).build();
     IssueEvidence evidence =
         IssueEvidence.builder()
             .issueId(issueId)
@@ -545,7 +516,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
@@ -567,7 +538,7 @@ class IssueControllerTest {
                     .createdAt(now)
                     .build()));
     mockMvc
-        .perform(get("/api/issues/" + issueId + "/evidence"))
+        .perform(get("/api/project/issues/" + issueId + "/evidence"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].blobId").value(blobId.toString()))
         .andExpect(jsonPath("$[0].name").value("deliverable.txt"));
@@ -600,7 +571,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/stop")
+            post("/api/project/issues/" + issueId + "/stop")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
@@ -613,7 +584,7 @@ class IssueControllerTest {
   @Test
   void testDeleteIssue() throws Exception {
     mockMvc
-        .perform(delete("/api/issues/" + issueId).param("expectedVersion", "3"))
+        .perform(delete("/api/project/issues/" + issueId).param("expectedVersion", "3"))
         .andExpect(status().isNoContent());
 
     verify(issueLifecycleService).deleteIssue(issueId, 3L);
@@ -628,7 +599,7 @@ class IssueControllerTest {
 
     mockMvc
         .perform(
-            put("/api/issues/" + issueId)
+            put("/api/project/issues/" + issueId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isConflict())

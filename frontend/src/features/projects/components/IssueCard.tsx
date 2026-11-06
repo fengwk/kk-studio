@@ -79,9 +79,6 @@ export function IssueCard({
               FAILED
             </Badge>
           )}
-          {issue.archivedAt && (
-            <Badge tone="neutral">{t('projects.archived')}</Badge>
-          )}
         </div>
       </div>
 

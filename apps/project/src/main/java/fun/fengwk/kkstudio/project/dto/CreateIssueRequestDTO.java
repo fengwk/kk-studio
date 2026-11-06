@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,11 +15,5 @@ public class CreateIssueRequestDTO {
 
   private String title;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String description;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
 }

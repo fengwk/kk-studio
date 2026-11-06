@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -8,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
 
-/** Project Snapshot 中的 Issue 投影条目 DTO。 */
+/** 项目快照中的单个 Issue 投影。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -19,9 +18,4 @@ public class ProjectIssueSnapshotDTO {
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable IssueRunSummaryDTO currentOrLatestRun;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
 }

@@ -1,14 +1,12 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
 
-/** 更新 Issue 请求 DTO。 */
+/** 修改 Issue 需求事实请求 DTO：整体替换标题与描述。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -17,14 +15,7 @@ public class UpdateIssueRequestDTO {
 
   private String expectedVersion;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String title;
+  private String title;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String description;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
 }

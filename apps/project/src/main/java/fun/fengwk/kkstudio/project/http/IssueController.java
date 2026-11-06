@@ -14,10 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
-import fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.IssueActivityDTO;
@@ -32,7 +31,6 @@ import fun.fengwk.kkstudio.project.dto.ResetStageBudgetRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ResumeIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO;
-import fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
@@ -54,7 +52,7 @@ import java.util.UUID;
  * <p>提供 Issue 需求事实、工作流流转、阻塞/恢复、人工终止/显式恢复、阶段额度重置、活动事实流与证据公开的权威 HTTP 操作面。
  */
 @RestController
-@RequestMapping
+@RequestMapping("/api/project")
 public class IssueController {
 
   private static final int DEFAULT_ACTIVITY_LIMIT = 50;
@@ -87,138 +85,114 @@ public class IssueController {
         Objects.requireNonNull(issueDetailAssembler, "issueDetailAssembler");
   }
 
-  @PostMapping("/api/projects/{projectId}/issues")
-  public ResponseEntity<ApiResponse<IssueDTO>> createIssue(
-      @PathVariable("projectId") String projectIdStr, @RequestBody CreateIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID projectId = ProjectHttpInputs.uuid(projectIdStr, "projectId");
+  @PostMapping("/projects/{projectId}/issues")
+  public ResponseEntity<IssueDTO> createIssue(
+      @PathVariable("projectId") UUID projectId, @RequestBody CreateIssueRequestDTO request) {
     Issue created =
         issueEditingService.createIssue(projectId, request.getTitle(), request.getDescription());
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(ApiResponse.created(mapper.toDto(created)));
+    return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toDto(created));
   }
 
-  @GetMapping("/api/issues/{issueId}")
-  public ApiResponse<IssueDetailDTO> getIssue(
-      @PathVariable("issueId") String issueIdStr,
+  @GetMapping("/issues/{issueId}")
+  public IssueDetailDTO getIssue(
+      @PathVariable("issueId") UUID issueId,
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
-          String afterSequenceStr,
-      @RequestParam(value = "limit", required = false, defaultValue = "50") String limitStr) {
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    long afterSequence = parseActivityCursor(afterSequenceStr);
-    int activityLimit =
-        ProjectHttpInputs.limit(limitStr, DEFAULT_ACTIVITY_LIMIT, MAX_ACTIVITY_LIMIT);
-    return ApiResponse.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
+          long afterSequence,
+      @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
+    if (limit < 1 || limit > MAX_ACTIVITY_LIMIT) {
+      throw DomainException.validation(
+          "limit", "limit must be within [1, " + MAX_ACTIVITY_LIMIT + "]");
+    }
+    return issueDetailAssembler.assemble(issueId, afterSequence, limit);
   }
 
-  @PutMapping("/api/issues/{issueId}")
-  public ApiResponse<IssueDTO> updateIssue(
-      @PathVariable("issueId") String issueIdStr, @RequestBody UpdateIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PutMapping("/issues/{issueId}")
+  public IssueDTO updateIssue(
+      @PathVariable("issueId") UUID issueId, @RequestBody UpdateIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
         issueEditingService.updateIssue(
             issueId, expectedVersion, request.getTitle(), request.getDescription());
-    return ApiResponse.ok(mapper.toDto(updated));
+    return mapper.toDto(updated);
   }
 
-  @PostMapping("/api/issues/{issueId}/transition")
-  public ApiResponse<IssueDTO> transition(
-      @PathVariable("issueId") String issueIdStr, @RequestBody TransitionIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/transition")
+  public IssueDTO transition(
+      @PathVariable("issueId") UUID issueId, @RequestBody TransitionIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
         issueLifecycleService.transition(
             issueId, expectedVersion, request.getRequestKey(), request.getToState());
-    return ApiResponse.ok(mapper.toDto(updated));
+    return mapper.toDto(updated);
   }
 
-  @PostMapping("/api/issues/{issueId}/block")
-  public ApiResponse<IssueDTO> block(
-      @PathVariable("issueId") String issueIdStr, @RequestBody BlockIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/block")
+  public IssueDTO block(
+      @PathVariable("issueId") UUID issueId, @RequestBody BlockIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue blocked =
         issueLifecycleService.blockIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getReason());
-    return ApiResponse.ok(mapper.toDto(blocked));
+    return mapper.toDto(blocked);
   }
 
-  @PostMapping("/api/issues/{issueId}/recover")
-  public ApiResponse<IssueDTO> recover(
-      @PathVariable("issueId") String issueIdStr, @RequestBody RecoverIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/recover")
+  public IssueDTO recover(
+      @PathVariable("issueId") UUID issueId, @RequestBody RecoverIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue recovered =
         issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
-    return ApiResponse.ok(mapper.toDto(recovered));
+    return mapper.toDto(recovered);
   }
 
-  @PostMapping("/api/issues/{issueId}/resume")
-  public ApiResponse<IssueDTO> resume(
-      @PathVariable("issueId") String issueIdStr, @RequestBody ResumeIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/resume")
+  public IssueDTO resume(
+      @PathVariable("issueId") UUID issueId, @RequestBody ResumeIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue resumed =
         issueLifecycleService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
-    return ApiResponse.ok(mapper.toDto(resumed));
+    return mapper.toDto(resumed);
   }
 
-  @PostMapping("/api/issues/{issueId}/stop")
-  public ApiResponse<IssueDTO> stop(
-      @PathVariable("issueId") String issueIdStr, @RequestBody StopIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/stop")
+  public IssueDTO stop(
+      @PathVariable("issueId") UUID issueId, @RequestBody StopIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue stopped =
         issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
-    return ApiResponse.ok(mapper.toDto(stopped));
+    return mapper.toDto(stopped);
   }
 
-  @DeleteMapping("/api/issues/{issueId}")
+  @DeleteMapping("/issues/{issueId}")
   public ResponseEntity<Void> deleteIssue(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestParam("expectedVersion") String expectedVersionStr) {
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    long expectedVersion = ProjectHttpInputs.nonNegative(expectedVersionStr, "expectedVersion");
+      @PathVariable("issueId") UUID issueId,
+      @RequestParam("expectedVersion") long expectedVersion) {
     issueLifecycleService.deleteIssue(issueId, expectedVersion);
     return ResponseEntity.noContent().build();
   }
 
-  @PostMapping("/api/issues/{issueId}/reopen")
-  public ApiResponse<IssueDTO> reopen(
-      @PathVariable("issueId") String issueIdStr, @RequestBody ReopenIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/reopen")
+  public IssueDTO reopen(
+      @PathVariable("issueId") UUID issueId, @RequestBody ReopenIssueRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue reopened =
         issueLifecycleService.reopen(issueId, expectedVersion, request.getRequestKey());
-    return ApiResponse.ok(mapper.toDto(reopened));
+    return mapper.toDto(reopened);
   }
 
-  @PostMapping("/api/issues/{issueId}/budget-reset")
-  public ApiResponse<IssueStageBudgetDTO> resetBudget(
-      @PathVariable("issueId") String issueIdStr, @RequestBody ResetStageBudgetRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    if (request.getMaxRuns() == null) {
-      throw DomainException.validation("maxRuns", "maxRuns must not be null");
-    }
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/reset-budget")
+  public IssueStageBudgetDTO resetBudget(
+      @PathVariable("issueId") UUID issueId, @RequestBody ResetStageBudgetRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     StageBudgetView view =
         issueStageBudgetService.resetStageBudget(
             issueId,
@@ -226,42 +200,14 @@ public class IssueController {
             request.getRequestKey(),
             request.getState(),
             request.getMaxRuns());
-    return ApiResponse.ok(mapper.toDto(view));
+    return mapper.toDto(view);
   }
 
-  @PostMapping("/api/issues/{issueId}/archive")
-  public ApiResponse<IssueDTO> archive(
-      @PathVariable("issueId") String issueIdStr, @RequestBody ArchiveIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
+  @PostMapping("/issues/{issueId}/activities")
+  public ResponseEntity<IssueActivityDTO> appendActivity(
+      @PathVariable("issueId") UUID issueId, @RequestBody AppendIssueActivityRequestDTO request) {
     long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
-    Issue archived = issueLifecycleService.archiveIssue(issueId, expectedVersion);
-    return ApiResponse.ok(mapper.toDto(archived));
-  }
-
-  @PostMapping("/api/issues/{issueId}/unarchive")
-  public ApiResponse<IssueDTO> unarchive(
-      @PathVariable("issueId") String issueIdStr, @RequestBody UnarchiveIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
-    Issue unarchived = issueLifecycleService.unarchiveIssue(issueId, expectedVersion);
-    return ApiResponse.ok(mapper.toDto(unarchived));
-  }
-
-  @PostMapping("/api/issues/{issueId}/activities")
-  public ResponseEntity<ApiResponse<IssueActivityDTO>> appendActivity(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestBody AppendIssueActivityRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    long expectedVersion =
-        ProjectHttpInputs.nonNegative(request.getExpectedVersion(), "expectedVersion");
-    if (request.getBody() == null || request.getBody().isBlank()) {
-      throw DomainException.validation("body", "body must not be blank");
-    }
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     IssueActivity activity =
         issueEditingService.appendActivity(
             issueId,
@@ -269,35 +215,19 @@ public class IssueController {
             request.getKind(),
             request.getRequestKey(),
             request.getBody());
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(ApiResponse.created(mapper.toDto(activity)));
+    return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toDto(activity));
   }
 
-  @GetMapping("/api/issues/{issueId}/evidence")
-  public ApiResponse<List<IssueEvidenceDTO>> listEvidence(
-      @PathVariable("issueId") String issueIdStr) {
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    return ApiResponse.ok(
-        issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
+  @GetMapping("/issues/{issueId}/evidence")
+  public List<IssueEvidenceDTO> listEvidence(@PathVariable("issueId") UUID issueId) {
+    return issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList();
   }
 
-  @PostMapping("/api/issues/{issueId}/evidence")
-  public ResponseEntity<ApiResponse<IssueEvidenceDTO>> addEvidence(
-      @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectHttpInputs.uuid(issueIdStr, "issueId");
-    UUID uploadId = ProjectHttpInputs.uuid(request.getUploadId(), "uploadId");
-
-    IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
-
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(ApiResponse.created(mapper.toDto(evidence)));
-  }
-
-  private static long parseActivityCursor(String value) {
-    if (value == null || value.isBlank()) {
-      return 0;
-    }
-    return ProjectHttpInputs.nonNegative(value, "afterSequence");
+  @PostMapping("/issues/{issueId}/evidence")
+  public ResponseEntity<IssueEvidenceDTO> addEvidence(
+      @PathVariable("issueId") UUID issueId, @RequestBody AddIssueEvidenceRequestDTO request) {
+    IssueEvidence evidence =
+        issueEvidenceService.publishHumanUpload(issueId, request.getUploadId());
+    return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toDto(evidence));
   }
 }

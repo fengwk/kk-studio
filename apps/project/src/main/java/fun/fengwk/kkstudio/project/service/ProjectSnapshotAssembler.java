@@ -26,8 +26,7 @@ import java.util.UUID;
 /**
  * Project Snapshot 权威聚合器。
  *
- * <p>读取 Project、未归档 Issues 与每 Issue 的当前/最近 Run 概要（含解析自稳定 Thread 的 Agent 名称）。 所有未归档及归档 Issue
- * 仅共同贡献状态引用集合，归档 Issue 的内容与 Run/Thread 不进入快照。
+ * <p>读取 Project、所有 Issue 与每 Issue 的当前/最近 Run 概要（含解析自稳定 Thread 的 Agent 名称）。
  *
  * <p>整个组装在同一个只读 {@code REPEATABLE_READ} 事务内完成（声明式，由 Spring 代理生效）：否则多个独立查询之间可能有其它事务提交， 从而拼出旧 Project
  * + 新 Issue/Run 的撕裂响应。
@@ -65,11 +64,9 @@ public class ProjectSnapshotAssembler {
       throw new IllegalStateException("Foreign project returned for snapshot");
     }
 
-    List<Issue> issues = issueEditingService.listIssues(projectId, false);
+    List<Issue> issues = issueEditingService.listIssues(projectId);
     Set<String> referencedStateCodes = new TreeSet<>();
     collectReferencedStates(projectId, issues, referencedStateCodes);
-    collectReferencedStates(
-        projectId, issueEditingService.listIssues(projectId, true), referencedStateCodes);
     List<ProjectIssueSnapshotDTO> issueSnapshots = new ArrayList<>(issues.size());
     for (Issue issue : issues) {
       List<IssueRun> runs = issueRunService.listRuns(issue.getId());

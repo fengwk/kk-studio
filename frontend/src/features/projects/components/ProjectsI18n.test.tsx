@@ -44,8 +44,8 @@ const project: ProjectDTO = {
   nextIssueNumber: '1',
   version: '1',
   archivedAt: null,
-  createdAt: '2026-09-14T00:00:00Z',
-  updatedAt: '2026-09-14T00:00:00Z',
+  createdAt: Date.UTC(2026, 8, 14),
+  updatedAt: Date.UTC(2026, 8, 14),
 }
 
 const issueDetail: IssueDetailDTO = {
@@ -61,9 +61,8 @@ const issueDetail: IssueDetailDTO = {
     pauseReason: null,
     pauseDetail: null,
     version: '3',
-    archivedAt: null,
-    createdAt: '2026-09-20T10:00:00Z',
-    updatedAt: '2026-09-20T11:00:00Z',
+    createdAt: Date.UTC(2026, 8, 20, 10),
+    updatedAt: Date.UTC(2026, 8, 20, 11),
   },
   activities: [],
   nextActivityCursor: null,

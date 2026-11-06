@@ -70,9 +70,9 @@ final class IssueMutationSupport {
    *
    * <p>没有活动 receipt 的写路径使用本方法。带请求键的路径必须先 {@link #lockOwner(UUID)}，在锁内查 receipt，再做版本校验。
    */
-  Locked lock(UUID issueId, long expectedVersion, boolean allowArchivedIssue) {
+  Locked lock(UUID issueId, long expectedVersion) {
     Locked locked = lockOwner(issueId);
-    requireMutable(locked, allowArchivedIssue);
+    requireMutable(locked);
     requireVersion(locked, expectedVersion);
     return locked;
   }
@@ -80,7 +80,7 @@ final class IssueMutationSupport {
   /**
    * 只取得 owner 锁与归属校验。
    *
-   * <p>归档只拒绝首次写入。带 receipt 的路径必须先重放，再调用 {@link #requireMutable}。
+   * <p>带 receipt 的路径必须先重放，再调用 {@link #requireMutable}。
    */
   Locked lockOwner(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
@@ -99,13 +99,10 @@ final class IssueMutationSupport {
     return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
   }
 
-  /** 首次写入前的归档门禁：项目或 Issue 已归档时拒绝；精确重放不经过这里。 */
-  void requireMutable(Locked locked, boolean allowArchivedIssue) {
+  /** 首次写入前检查项目归档门禁；精确重放不经过这里。 */
+  void requireMutable(Locked locked) {
     if (locked.project().isArchived()) {
       throw DomainException.validation("project", "Cannot modify an issue in an archived project");
-    }
-    if (locked.issue().isArchived() && !allowArchivedIssue) {
-      throw DomainException.validation("issue", "Cannot modify an archived issue");
     }
   }
 

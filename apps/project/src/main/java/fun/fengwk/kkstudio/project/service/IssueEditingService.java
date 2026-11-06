@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.project.service;
 
 import lombok.AllArgsConstructor;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -88,16 +89,16 @@ public class IssueEditingService {
     return mutationSupport.currentIssue(issueId);
   }
 
-  public List<Issue> listIssues(UUID projectId, boolean archived) {
+  public List<Issue> listIssues(UUID projectId) {
     Objects.requireNonNull(projectId, "projectId");
-    return issueRepository.listByProjectIdAndArchived(projectId, archived);
+    return issueRepository.listByProjectId(projectId);
   }
 
   /** 编辑 Issue 需求事实（标题与描述）；当前阶段与执行事实不由本操作改变。 */
   @Transactional
   public Issue updateIssue(UUID issueId, long expectedVersion, String title, String description) {
     Objects.requireNonNull(issueId, "issueId");
-    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, false);
+    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion);
     locked
         .issue()
         .setTitle(
@@ -118,25 +119,29 @@ public class IssueEditingService {
    *
    * @param issueId 目标 Issue ID
    * @param expectedVersion 预期的 Issue CAS 版本
-   * @param kind 活动种类，支持 COMMENT（默认）与 INSTRUCTION
+   * @param kind 人工活动种类，支持 COMMENT（默认）与 INSTRUCTION
    * @param requestKey 幂等请求键
    * @param body 活动内容
    * @return 已落库或重放拿到的活动实体
    */
   @Transactional
   public IssueActivity appendActivity(
-      UUID issueId, long expectedVersion, String kind, String requestKey, String body) {
+      UUID issueId,
+      long expectedVersion,
+      @Nullable IssueActivityKind kind,
+      String requestKey,
+      String body) {
     Objects.requireNonNull(issueId, "issueId");
     String validRequestKey = ProjectValidationUtils.requireRequestKey(requestKey);
     String validBody =
         ProjectValidationUtils.requireUtf8Text(
             body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
-    if ("INSTRUCTION".equalsIgnoreCase(kind)) {
+    if (kind == IssueActivityKind.INSTRUCTION) {
       return appendInstructionActivity(issueId, expectedVersion, validRequestKey, validBody);
-    } else if (kind == null || kind.isBlank() || "COMMENT".equalsIgnoreCase(kind)) {
+    } else if (kind == null || kind == IssueActivityKind.COMMENT) {
       return appendCommentActivity(issueId, expectedVersion, validRequestKey, validBody);
     } else {
-      throw new IllegalArgumentException("kind is invalid");
+      throw DomainException.validation("kind", "kind must be COMMENT or INSTRUCTION");
     }
   }
 
@@ -151,7 +156,7 @@ public class IssueEditingService {
       return receipt.activity();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     mutationSupport.appendActivity(
         locked.issue(),
@@ -181,7 +186,7 @@ public class IssueEditingService {
       return receipt.activity();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {

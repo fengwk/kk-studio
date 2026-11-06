@@ -480,7 +480,7 @@ Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不
 缺失 Agent 或非法额度不能保存。Projects 的删除确认复用共享 ConfirmActionModal，
 复杂弹窗统一使用 Dialog 的 modal-body/modal-footer，并在窄屏通过 modal-touch-target
 提供 44px 触区与安全区留白；Issue 详情的规格编辑与证据上传分别由独立 pane 与 hook 承担。
-快照的 `referencedStateCodes` 汇总所有 Issue（含归档）的阶段与阻塞恢复点，
+快照的 `referencedStateCodes` 汇总所有 Issue 的阶段与阻塞恢复点，
 因此可见列表为空也不能删除或改码这些阶段。项目级推送同时失效该项目下的 Issue 与 Evidence，
 订阅与重连共用既有 WebSocket。
 

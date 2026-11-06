@@ -226,7 +226,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         return
       }
 
-      if (requestPath === `/api/issues/${ISSUE_ID}` && method === 'GET') {
+      if (requestPath === `/api/project/issues/${ISSUE_ID}` && method === 'GET') {
         await route.fulfill({
           json: {
               issue: {
@@ -237,9 +237,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
                 description: '',
                 state: 'IN_PROGRESS',
                 version: '1',
-                archivedAt: null,
-                createdAt: '2026-10-05T09:58:00Z',
-                updatedAt: '2026-10-05T09:58:00Z',
+                createdAt: Date.UTC(2026, 9, 5, 9, 58),
+                updatedAt: Date.UTC(2026, 9, 5, 9, 58),
               },
               activities: [],
               nextActivityCursor: null,

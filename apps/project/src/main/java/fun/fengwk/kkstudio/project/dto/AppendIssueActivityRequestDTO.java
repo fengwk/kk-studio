@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 
 /** 追加 Issue Activity 请求 DTO。 */
 @Data
@@ -18,13 +18,8 @@ public class AppendIssueActivityRequestDTO {
   private String expectedVersion;
   private String requestKey;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String kind;
+  /** 人工活动类型，只接受 COMMENT 与 INSTRUCTION；省略等同 COMMENT。 */
+  private @Nullable IssueActivityKind kind;
 
   private String body;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
 }

@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import java.time.Instant;
 
 /**
  * Project 公开传输对象。
@@ -28,13 +29,8 @@ public class ProjectDTO {
   private String version;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String archivedAt;
+  private @Nullable Instant archivedAt;
 
-  private String createdAt;
-  private String updatedAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
+  private Instant createdAt;
+  private Instant updatedAt;
 }

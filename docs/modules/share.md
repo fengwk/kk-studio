@@ -33,7 +33,7 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`ProjectDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDTO.java) | `archivedAt` |
 | [`ProjectWorkflowStateDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectWorkflowStateDTO.java) | `agent`、`environment`、`instructions`、`maxRuns` |
 | [`ProjectIssueSnapshotDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectIssueSnapshotDTO.java) | `currentOrLatestRun` |
-| [`IssueDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueDTO.java) | `blockedFromState`、`blockReason`、`pauseReason`、`pauseDetail`、`archivedAt` |
+| [`IssueDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueDTO.java) | `blockedFromState`、`blockReason`、`pauseReason`、`pauseDetail` |
 | [`IssueDetailDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueDetailDTO.java) | `nextActivityCursor`、`currentRun`、`latestRun` |
 | [`IssueActivityDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueActivityDTO.java) | `actorAgentName`、`runId`、`body` |
 | [`IssueRunDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunDTO.java) | `agentName`、`endEntryId`、`finalAnswerEntryId`、`nextState`、`error`、`endedAt` |
@@ -62,7 +62,7 @@ Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `ur
 | [canvas.dto](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project/dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
 
-只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries（每条带读取时 `usageCost`；金额是精确十进制字符串，无法计价显式为 null）、queued commands、活跃 invocation、tool siblings、未物化的 attempt failure 与该 Thread 自己的 Stop 回执；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/dto/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
+只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries（每条带读取时 `usageCost`；金额是精确十进制字符串，无法计价显式为 null）、queued commands、活跃 invocation、tool siblings、未物化的 attempt failure 与该 Thread 自己的 Stop 回执；Project Snapshot 包含项目资料、Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/dto/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
 
@@ -74,7 +74,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 序列化规范。这些字段可在同一 Thread version 下因时间推移而变化，重新 GET 不产生持久写入。
 
 `ProjectSnapshotDTO.referencedStateCodes` 是非 null 的去重、有序阶段集合，
-包含活动及归档 Issue 的 `state` 与非 null `blockedFromState`。引用集合不改变正常 Issue 列表，
+包含所有 Issue 的 `state` 与非 null `blockedFromState`。引用集合不改变 Issue 列表，
 供工作流编辑保护删除与改码；保存仍由领域约束和版本 CAS 最终裁决。
 
 严格程度按用途区分：请求体与对外投影显式拒绝未知字段，纯响应投影（如 `CanvasSnapshotDTO`）与内部嵌套结构不需要重复声明。领域身份使用 sealed interface / record 表达封闭集合（命令、patch 项、资源输入、冲突载荷），普通数据用 Lombok `@Data`。

@@ -3,15 +3,19 @@ package fun.fengwk.kkstudio.project.dto;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +38,6 @@ class ProjectDtoContractTest {
     "IssueDTO.blockReason",
     "IssueDTO.pauseReason",
     "IssueDTO.pauseDetail",
-    "IssueDTO.archivedAt",
     "IssueDetailDTO.nextActivityCursor",
     "IssueDetailDTO.currentRun",
     "IssueDetailDTO.latestRun",
@@ -50,16 +53,7 @@ class ProjectDtoContractTest {
     "IssueRunSummaryDTO.agentName",
     "IssueRunSummaryDTO.endedAt",
     "IssueEvidenceDTO.actorAgentName",
-    "IssueEvidenceDTO.runId",
-    "CreateProjectRequestDTO.description",
-    "CreateProjectRequestDTO.yoloEnabled",
-    "UpdateProjectRequestDTO.title",
-    "UpdateProjectRequestDTO.description",
-    "CreateIssueRequestDTO.description",
-    "UpdateIssueRequestDTO.title",
-    "UpdateIssueRequestDTO.description",
-    "StopIssueRequestDTO.detail",
-    "AppendIssueActivityRequestDTO.kind"
+    "IssueEvidenceDTO.runId"
   };
 
   private static final String[] DECIMAL_STRING_FIELDS = {
@@ -89,8 +83,6 @@ class ProjectDtoContractTest {
     "ReopenIssueRequestDTO.expectedVersion",
     "ResetStageBudgetRequestDTO.expectedVersion",
     "StopIssueRequestDTO.expectedVersion",
-    "ArchiveIssueRequestDTO.expectedVersion",
-    "UnarchiveIssueRequestDTO.expectedVersion",
     "AppendIssueActivityRequestDTO.expectedVersion"
   };
 
@@ -140,7 +132,6 @@ class ProjectDtoContractTest {
             "pauseReason",
             "pauseDetail",
             "version",
-            "archivedAt",
             "createdAt",
             "updatedAt"),
         getInstanceFieldNames(IssueDTO.class));
@@ -262,10 +253,6 @@ class ProjectDtoContractTest {
         Set.of("expectedVersion", "requestKey", "detail"),
         getInstanceFieldNames(StopIssueRequestDTO.class));
 
-    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
-
-    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(UnarchiveIssueRequestDTO.class));
-
     assertEquals(
         Set.of("expectedVersion", "requestKey", "kind", "body"),
         getInstanceFieldNames(AppendIssueActivityRequestDTO.class));
@@ -273,7 +260,7 @@ class ProjectDtoContractTest {
     assertEquals(Set.of("uploadId"), getInstanceFieldNames(AddIssueEvidenceRequestDTO.class));
   }
 
-  /** 测试意图：验证必须显式发射 null 的字段声明了 @JsonInclude(ALWAYS)。 */
+  /** 测试意图：验证响应 DTO 中必填可空字段声明了 @JsonInclude(ALWAYS)。 */
   @Test
   void requiredNullableFieldsAreAlwaysIncluded() throws Exception {
     for (String fieldPath : REQUIRED_ALWAYS_FIELDS) {
@@ -292,41 +279,6 @@ class ProjectDtoContractTest {
       Field f = resolveField(fieldPath);
       assertEquals(String.class, f.getType(), fieldPath + " must be a String");
     }
-  }
-
-  /** 测试意图：验证请求 DTO 与响应 DTO 通过 @JsonAnySetter 严格拒绝未知字段。 */
-  @Test
-  void unknownFieldsAreRejectedInRequestAndResponse() {
-    // 验证请求 DTO 拒绝未知字段
-    CreateProjectRequestDTO request = new CreateProjectRequestDTO();
-    IllegalArgumentException reqEx =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> request.rejectUnknownField("unknownField", "val"));
-    assertEquals("Unknown request field", reqEx.getMessage());
-
-    // 验证响应 DTO 拒绝未知字段
-    ProjectDTO response = new ProjectDTO();
-    IllegalArgumentException respEx =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> response.rejectUnknownField("unknownField", "val"));
-    assertEquals("Unknown response field", respEx.getMessage());
-  }
-
-  /** 测试意图：验证 Jackson 反序列化包含未知属性的 JSON 时会触发 @JsonAnySetter 拒绝。 */
-  @Test
-  void unknownFieldsAreRejectedDuringJacksonDeserialization() {
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unexpected\":123}", CreateProjectRequestDTO.class));
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unexpected\":123}", TransitionIssueRequestDTO.class));
-    assertThrows(
-        Exception.class, () -> objectMapper.readValue("{\"unexpected\":123}", ProjectDTO.class));
-    assertThrows(
-        Exception.class, () -> objectMapper.readValue("{\"unexpected\":123}", IssueDTO.class));
   }
 
   /** 测试意图：验证 ProjectWorkflowDTO 的完整 JSON 编解码回环，包含工作流状态列表与可空字段。 */
@@ -413,22 +365,21 @@ class ProjectDtoContractTest {
             .pauseReason(null)
             .pauseDetail(null)
             .version("0")
-            .archivedAt(null)
-            .createdAt("2026-09-27T10:00:00Z")
-            .updatedAt("2026-09-27T10:00:00Z")
+            .createdAt(Instant.parse("2026-09-27T10:00:00Z"))
+            .updatedAt(Instant.parse("2026-09-27T10:00:00Z"))
             .build();
 
     IssueActivityDTO activity =
         IssueActivityDTO.builder()
             .issueId(issue.getId())
             .sequence("1")
-            .kind("COMMENT")
-            .actorType("HUMAN")
+            .kind(IssueActivityKind.COMMENT)
+            .actorType(IssueActivityActorType.HUMAN)
             .actorAgentName(null)
             .runId(null)
             .body("comment body")
             .data(Map.of("key", "value", "count", 42))
-            .createdAt("2026-09-27T10:00:00Z")
+            .createdAt(Instant.parse("2026-09-27T10:00:00Z"))
             .build();
 
     IssueRunDTO run =
@@ -440,7 +391,7 @@ class ProjectDtoContractTest {
             .agentName(null)
             .sessionId("sess-1")
             .threadId("th-1")
-            .status("RUNNING")
+            .status(IssueRunStatus.RUNNING)
             .startEntryId("entry-start")
             .endEntryId(null)
             .finalAnswerEntryId(null)
@@ -449,7 +400,7 @@ class ProjectDtoContractTest {
             .remainingExecutionMs("300000")
             .error(null)
             .version("1")
-            .startedAt("2026-09-27T10:00:00Z")
+            .startedAt(Instant.parse("2026-09-27T10:00:00Z"))
             .endedAt(null)
             .build();
 
@@ -488,7 +439,6 @@ class ProjectDtoContractTest {
     assertTrue(json.contains("\"blockReason\":null"));
     assertTrue(json.contains("\"pauseReason\":null"));
     assertTrue(json.contains("\"pauseDetail\":null"));
-    assertTrue(json.contains("\"archivedAt\":null"));
     assertTrue(json.contains("\"nextActivityCursor\":null"));
     assertTrue(json.contains("\"actorAgentName\":null"));
     assertTrue(json.contains("\"runId\":null"));

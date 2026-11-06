@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
@@ -114,8 +115,8 @@ class ProjectDtoMapperTest {
     assertEquals(Boolean.TRUE, dto.getYoloEnabled());
     assertEquals("10", dto.getNextIssueNumber());
     assertEquals("2", dto.getVersion());
-    assertEquals(now.toString(), dto.getArchivedAt());
-    assertEquals(now.toString(), dto.getCreatedAt());
+    assertEquals(now, dto.getArchivedAt());
+    assertEquals(now, dto.getCreatedAt());
   }
 
   @Test
@@ -242,7 +243,6 @@ class ProjectDtoMapperTest {
             .pauseReason("USER")
             .pauseDetail("User paused execution")
             .version(3L)
-            .archivedAt(null)
             .createdAt(now)
             .updatedAt(now)
             .build();
@@ -254,10 +254,9 @@ class ProjectDtoMapperTest {
     assertEquals("BLOCKED", dto.getState());
     assertEquals("WORK", dto.getBlockedFromState());
     assertEquals("Waiting for review", dto.getBlockReason());
-    assertEquals("USER", dto.getPauseReason());
+    assertEquals(PauseReason.USER, dto.getPauseReason());
     assertEquals("User paused execution", dto.getPauseDetail());
     assertEquals("3", dto.getVersion());
-    assertNull(dto.getArchivedAt());
   }
 
   @Test
@@ -281,13 +280,13 @@ class ProjectDtoMapperTest {
     IssueActivityDTO dto = mapper.toDto(activity);
     assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
     assertEquals("5", dto.getSequence());
-    assertEquals("COMMENT", dto.getKind());
-    assertEquals("HUMAN", dto.getActorType());
+    assertEquals(IssueActivityKind.COMMENT, dto.getKind());
+    assertEquals(IssueActivityActorType.HUMAN, dto.getActorType());
     assertNull(dto.getActorAgentName());
     assertNull(dto.getRunId());
     assertEquals("Input body", dto.getBody());
     assertTrue(dto.getData() instanceof Map);
-    assertEquals(now.toString(), dto.getCreatedAt());
+    assertEquals(now, dto.getCreatedAt());
   }
 
   @Test
@@ -347,7 +346,7 @@ class ProjectDtoMapperTest {
     assertEquals("evidence.txt", dto.getName());
     assertEquals("coder", dto.getActorAgentName());
     assertEquals(runId.toString().toLowerCase(), dto.getRunId());
-    assertEquals(now.toString(), dto.getCreatedAt());
+    assertEquals(now, dto.getCreatedAt());
   }
 
   @Test
@@ -407,7 +406,7 @@ class ProjectDtoMapperTest {
     IssueRunSummaryDTO summary = mapper.toSummaryDto(run, "coder");
     assertNotNull(summary);
     assertEquals("1", summary.getOrdinal());
-    assertEquals("RUNNING", summary.getStatus());
+    assertEquals(IssueRunStatus.RUNNING, summary.getStatus());
     assertEquals("WORK", summary.getState());
     assertEquals("coder", summary.getAgentName());
 

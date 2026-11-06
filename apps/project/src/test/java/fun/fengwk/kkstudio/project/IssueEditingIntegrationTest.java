@@ -43,8 +43,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>测试意图：
  *
  * <ul>
- *   <li>Issue 编辑：需求事实（标题/描述）修改与版本推进、过期版本 CAS 拒绝、归档 Issue 禁止编辑。
- *   <li>Issue 归档/恢复：切换 {@code archived_at}、列表过滤成员变化、归档态拒绝执行与写操作、有活动 Run 时禁止归档、重放安全。
+ *   <li>Issue 编辑：需求事实（标题/描述）修改与版本推进、过期版本 CAS 拒绝。
  *   <li>普通评论追加：写入单条 COMMENT 活动且绝对不生成/推进 Work 行（不唤醒 Agent）。
  *   <li>定向指示追加：有活动 Run 时记录 INSTRUCTION 活动并唤醒 Work；无活动 Run 时拒绝且不留下未来阶段队列。
  *   <li>活动流分页读取：按序号严格升序、严格 {@code > afterSequence} 过滤、有界 limit 截断与合法性校验。
@@ -99,150 +98,15 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(0L, ((Number) row.get("version")).longValue());
   }
 
-  /** updateIssue 尝试修改已归档的 Issue 被确定性拒绝，数据库行不被修改。 */
+  /** 列表返回项目的所有 Issue，并保持编号顺序。 */
   @Test
-  void updateIssueRejectsArchivedIssueWithoutModifyingRow() {
+  void listIssuesReturnsAllInNumberOrder() {
     UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-    Issue archived = issueLifecycleService.archiveIssue(issue.getId(), 0L);
-    assertEquals(1L, archived.getVersion());
-
-    assertValidation(() -> issueEditingService.updateIssue(issue.getId(), 1L, "归档后修改", "描述"));
-
-    Map<String, Object> row =
-        jdbc.queryForMap("select title, version from project_issue where id = ?", issue.getId());
-    assertEquals(issue.getTitle(), row.get("title"));
-    assertEquals(1L, ((Number) row.get("version")).longValue());
-  }
-
-  // =========================================================================
-  // 2. archiveIssue / unarchiveIssue: 归档状态切换、列表过滤与执行保护
-  // =========================================================================
-
-  /** archiveIssue 与 unarchiveIssue 切换 archived_at，并正确影响 listIssues(archived) 过滤结果。 */
-  @Test
-  void archiveAndUnarchiveIssueTogglesArchivedAtAndFilterMembership() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-
-    assertEquals(1, issueEditingService.listIssues(projectId, false).size());
-    assertEquals(0, issueEditingService.listIssues(projectId, true).size());
+    Issue first = createIssue(projectId);
+    Issue second = createIssue(projectId);
     assertEquals(
-        0L,
-        count(
-            "select count(*) from project_issue where id = ? and archived_at is not null",
-            issue.getId()));
-
-    // 归档
-    Issue archived = issueLifecycleService.archiveIssue(issue.getId(), 0L);
-    assertTrue(archived.isArchived());
-    assertNotNull(archived.getArchivedAt());
-    assertEquals(1L, archived.getVersion());
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue where id = ? and archived_at is not null",
-            issue.getId()));
-    assertEquals(0, issueEditingService.listIssues(projectId, false).size());
-    assertEquals(1, issueEditingService.listIssues(projectId, true).size());
-
-    // 恢复归档
-    Issue unarchived = issueLifecycleService.unarchiveIssue(issue.getId(), 1L);
-    assertFalse(unarchived.isArchived());
-    assertNull(unarchived.getArchivedAt());
-    assertEquals(2L, unarchived.getVersion());
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from project_issue where id = ? and archived_at is not null",
-            issue.getId()));
-    assertEquals(1, issueEditingService.listIssues(projectId, false).size());
-    assertEquals(0, issueEditingService.listIssues(projectId, true).size());
-  }
-
-  /** 已归档的 Issue 拒绝执行流转、阻塞、评论、终止等写操作。 */
-  @Test
-  void archivedIssueRejectsExecutionAndWorkflowWrites() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.archiveIssue(issue.getId(), 0L);
-
-    assertValidation(() -> issueLifecycleService.transition(issue.getId(), 1L, key("t"), "WORK"));
-    assertValidation(() -> issueLifecycleService.blockIssue(issue.getId(), 1L, key("b"), "阻塞原因"));
-    assertValidation(
-        () -> issueEditingService.appendActivity(issue.getId(), 1L, "COMMENT", key("c"), "普通评论"));
-    assertValidation(() -> issueLifecycleService.stopIssue(issue.getId(), 1L, key("s"), "终止详情"));
-
-    assertEquals(
-        0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
-    assertEquals("INIT", issueEditingService.getIssue(issue.getId()).getState());
-    assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
-  }
-
-  /** 存在活动 Run 时拒绝归档 Issue。 */
-  @Test
-  void archiveIssueRejectsWhenActiveRunExists() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("活动Run归档保护", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueEditingService.getIssue(issue.getId());
-    IssueRun run = issueRunService.acceptRun(inDesign.getId(), key("accept"));
-    assertEquals(IssueRunStatus.RUNNING, run.getStatus());
-
-    Issue current = issueEditingService.getIssue(issue.getId());
-    assertValidation(
-        () -> issueLifecycleService.archiveIssue(current.getId(), current.getVersion()));
-
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from project_issue where id = ? and archived_at is not null",
-            issue.getId()));
-  }
-
-  /** 当前版本重复归档是 no-op；陈旧版本即使目标已经归档也必须版本冲突。 */
-  @Test
-  void archiveReplayWhenAlreadyArchived() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-
-    Issue archived = issueLifecycleService.archiveIssue(issue.getId(), 0L);
-    assertEquals(1L, archived.getVersion());
-    assertTrue(archived.isArchived());
-
-    Issue replayed = issueLifecycleService.archiveIssue(issue.getId(), 1L);
-    assertEquals(1L, replayed.getVersion());
-    assertVersionConflict(() -> issueLifecycleService.archiveIssue(issue.getId(), 0L));
-    assertTrue(replayed.isArchived());
-    assertEquals(
-        1L,
-        count("select count(*) from project_issue where id = ? and version = 1", issue.getId()));
-  }
-
-  /** 当前版本重复恢复归档是 no-op；陈旧版本必须版本冲突，不能借 no-op 绕过 CAS。 */
-  @Test
-  void unarchiveReplayWhenAlreadyUnarchived() {
-    UUID projectId = createProject();
-    Issue issue = createIssue(projectId);
-    assertEquals(0L, issue.getVersion());
-
-    // 对初始未归档状态的 Issue 调用 unarchiveIssue
-    Issue replayed = issueLifecycleService.unarchiveIssue(issue.getId(), 0L);
-    assertEquals(0L, replayed.getVersion());
-    assertFalse(replayed.isArchived());
-
-    // 归档后再恢复归档
-    issueLifecycleService.archiveIssue(issue.getId(), 0L);
-    Issue unarchived = issueLifecycleService.unarchiveIssue(issue.getId(), 1L);
-    assertEquals(2L, unarchived.getVersion());
-    assertFalse(unarchived.isArchived());
-
-    // 恢复归档后的重复调用直接返回当前事实
-    Issue reUnarchived = issueLifecycleService.unarchiveIssue(issue.getId(), 2L);
-    assertEquals(2L, reUnarchived.getVersion());
-    assertVersionConflict(() -> issueLifecycleService.unarchiveIssue(issue.getId(), 1L));
-    assertFalse(reUnarchived.isArchived());
+        List.of(first.getId(), second.getId()),
+        issueEditingService.listIssues(projectId).stream().map(Issue::getId).toList());
   }
 
   // =========================================================================
@@ -265,7 +129,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     String commentKey = key("cmt");
     IssueActivity afterComment =
-        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, "这是第一条需求讨论评论");
+        issueEditingService.appendActivity(
+            issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, "这是第一条需求讨论评论");
 
     Issue afterIssue = issueEditingService.getIssue(issue.getId());
     assertEquals(1L, afterIssue.getVersion());
@@ -324,7 +189,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     String instructionText = "请在方案中补充数据库索引设计";
     IssueActivity updatedActivity =
         issueEditingService.appendActivity(
-            current.getId(), current.getVersion(), "INSTRUCTION", instKey, instructionText);
+            current.getId(),
+            current.getVersion(),
+            IssueActivityKind.INSTRUCTION,
+            instKey,
+            instructionText);
 
     Issue updated = issueEditingService.getIssue(issue.getId());
     assertEquals(current.getVersion() + 1, updated.getVersion());
@@ -367,7 +236,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         assertValidation(
             () ->
                 issueEditingService.appendActivity(
-                    issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "没有 Run 时的指示"));
+                    issue.getId(),
+                    issue.getVersion(),
+                    IssueActivityKind.INSTRUCTION,
+                    key("inst"),
+                    "没有 Run 时的指示"));
     assertTrue(ex.getMessage().contains("Cannot deliver an instruction without an active run"));
 
     assertEquals(
@@ -392,7 +265,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     for (int i = 1; i <= 5; i++) {
       Issue current = issueEditingService.getIssue(issue.getId());
       issueEditingService.appendActivity(
-          current.getId(), current.getVersion(), "COMMENT", key("cmt-" + i), "评论正文 " + i);
+          current.getId(),
+          current.getVersion(),
+          IssueActivityKind.COMMENT,
+          key("cmt-" + i),
+          "评论正文 " + i);
     }
 
     // 从头读取，limit 大于总条数
@@ -495,7 +372,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 首次写评论
     IssueActivity firstResult =
-        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, commentBody);
+        issueEditingService.appendActivity(
+            issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, commentBody);
     assertEquals(1L, firstResult.getSequence());
     assertEquals("comment:" + commentKey, firstResult.getIdempotencyKey());
     assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
@@ -507,7 +385,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 同键同指纹重试（模拟丢响应后重发）：即使传入旧 expectedVersion 也必须精确重放成功，不重复写活动行，版本不增加
     IssueActivity replayedResult =
-        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, commentBody);
+        issueEditingService.appendActivity(
+            issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, commentBody);
     assertEquals(firstResult.getSequence(), replayedResult.getSequence());
     assertEquals(firstResult.getIdempotencyKey(), replayedResult.getIdempotencyKey());
     assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
@@ -521,7 +400,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertDuplicate(
         () ->
             issueEditingService.appendActivity(
-                issue.getId(), 1L, "COMMENT", commentKey, "被篡改的不同评论正文"));
+                issue.getId(), 1L, IssueActivityKind.COMMENT, commentKey, "被篡改的不同评论正文"));
     assertEquals(
         1L,
         count(
@@ -742,14 +621,14 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
               () -> {
                 barrier.await(10, TimeUnit.SECONDS);
                 return issueEditingService.appendActivity(
-                    issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
+                    issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, "同一条评论");
               });
       Future<IssueActivity> second =
           executor.submit(
               () -> {
                 barrier.await(10, TimeUnit.SECONDS);
                 return issueEditingService.appendActivity(
-                    issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
+                    issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, "同一条评论");
               });
       IssueActivity left = first.get(15, TimeUnit.SECONDS);
       IssueActivity right = second.get(15, TimeUnit.SECONDS);
@@ -805,7 +684,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
   private Object invokeComment(UUID issueId, String commentKey, String body) {
     try {
-      return issueEditingService.appendActivity(issueId, 0L, "COMMENT", commentKey, body);
+      return issueEditingService.appendActivity(
+          issueId, 0L, IssueActivityKind.COMMENT, commentKey, body);
     } catch (DomainException conflict) {
       if (conflict.code() != DomainErrorCode.DUPLICATE
           || !"issue_activity".equals(conflict.resource())) {
@@ -850,7 +730,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
               try {
                 replayed.set(
                     issueEditingService.appendActivity(
-                        issue.getId(), 0L, "COMMENT", commentKey, "同一条评论"));
+                        issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, "同一条评论"));
               } catch (Throwable error) {
                 replayedError.set(error);
               }
@@ -860,7 +740,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     try {
       assertTrue(awaitingReceipt.await(10, TimeUnit.SECONDS), "第二个请求应停在锁前 receipt 检查");
       // 第一个请求在读走旧快照之后完整提交：数据库版本与 receipt 一起推进。
-      first = issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
+      first =
+          issueEditingService.appendActivity(
+              issue.getId(), 0L, IssueActivityKind.COMMENT, commentKey, "同一条评论");
       assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
       firstCommitted.countDown();
       replayer.join(15_000);

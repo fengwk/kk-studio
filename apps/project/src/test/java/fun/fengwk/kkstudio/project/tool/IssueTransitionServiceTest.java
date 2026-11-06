@@ -361,17 +361,6 @@ class IssueTransitionServiceTest {
     verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：归档的 Issue 不接受新的交接意图。 */
-  @Test
-  void rejectsArchivedIssue() {
-    Issue archived = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).state("DESIGN").build();
-    archived.setArchivedAt(Instant.now());
-    when(issues.lockById(ISSUE_ID)).thenReturn(archived);
-
-    assertRejected(ASSISTANT_ENTRY_ID, "REVIEW", "Issue is archived");
-    verify(runs, never()).updateById(any(), anyLong());
-  }
-
   /** 测试意图：Issue 不在可执行工作阶段（保留态）时没有可交接的阶段。 */
   @Test
   void rejectsIssueWithoutWorkStage() {

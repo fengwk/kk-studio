@@ -7,9 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -103,7 +101,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(issue1, issue2));
+    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(issue1, issue2));
 
     IssueRun run =
         IssueRun.builder()
@@ -144,47 +142,38 @@ class ProjectSnapshotAssemblerTest {
   }
 
   @Test
-  void testReferencedStatesIncludeArchivedAndBlockedWithoutArchivedDetails() {
-    // 两类 Issue 的状态与恢复目标必须合并；归档内容不映射，也不读取其 Run 或 Thread。
+  void testReferencedStatesIncludeEveryIssueStateAndBlockedSource() {
+    // 每个 Issue 的当前状态与阻塞恢复目标都必须进入引用集合，且不重复。
     when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
-    Issue active = referenceIssue(projectId, "BLOCKED", "WORK", false);
-    Issue activeInit = referenceIssue(projectId, "INIT", null, false);
-    Issue archived = referenceIssue(projectId, "BLOCKED", "REVIEW", true);
-    Issue archivedDone = referenceIssue(projectId, "DONE", null, true);
-    Issue archivedDuplicate = referenceIssue(projectId, "BLOCKED", "WORK", true);
-    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(active, activeInit));
-    when(issueEditingService.listIssues(projectId, true))
-        .thenReturn(List.of(archivedDone, archivedDuplicate, archived));
+    Issue active = referenceIssue(projectId, "BLOCKED", "WORK");
+    Issue activeInit = referenceIssue(projectId, "INIT", null);
+    Issue blockedFromReview = referenceIssue(projectId, "BLOCKED", "REVIEW");
+    Issue done = referenceIssue(projectId, "DONE", null);
+    Issue blockedFromWork = referenceIssue(projectId, "BLOCKED", "WORK");
+    when(issueEditingService.listIssues(projectId))
+        .thenReturn(List.of(active, activeInit, blockedFromReview, done, blockedFromWork));
     when(issueRunService.listRuns(active.getId())).thenReturn(List.of());
     when(issueRunService.listRuns(activeInit.getId())).thenReturn(List.of());
+    when(issueRunService.listRuns(blockedFromReview.getId())).thenReturn(List.of());
+    when(issueRunService.listRuns(done.getId())).thenReturn(List.of());
+    when(issueRunService.listRuns(blockedFromWork.getId())).thenReturn(List.of());
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 
     assertEquals(
         List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK"), snapshot.getReferencedStateCodes());
-    assertEquals(
-        Set.of(active.getId().toString(), activeInit.getId().toString()),
-        snapshot.getIssues().stream()
-            .map(item -> item.getIssue().getId())
-            .collect(Collectors.toSet()));
+    assertEquals(5, snapshot.getIssues().size());
     var json = jsonMapper.valueToTree(snapshot);
     assertEquals(
         jsonMapper.valueToTree(List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK")),
         json.get("referencedStateCodes"));
-    verify(issueRunService).listRuns(active.getId());
-    verify(issueRunService).listRuns(activeInit.getId());
-    verifyNoMoreInteractions(issueRunService);
-    verify(issueEditingService).listIssues(projectId, false);
-    verify(issueEditingService).listIssues(projectId, true);
-    verifyNoMoreInteractions(issueEditingService);
   }
 
   @Test
   void testEmptyProjectProvidesEmptyReferenceArray() {
     // 没有 Issue 时仍提供真实非 null 数组，而非缺失字段的兼容默认值。
     when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
-    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of());
-    when(issueEditingService.listIssues(projectId, true)).thenReturn(List.of());
+    when(issueEditingService.listIssues(projectId)).thenReturn(List.of());
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 
@@ -196,24 +185,7 @@ class ProjectSnapshotAssemblerTest {
     verifyNoInteractions(issueRunService);
   }
 
-  @Test
-  void testFailClosedOnForeignArchivedIssue() {
-    // 归档查询也必须验证项目归属，且失败时不得读取任何 Run。
-    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
-    when(issueEditingService.listIssues(projectId, false))
-        .thenReturn(List.of(referenceIssue(projectId, "INIT", null, false)));
-    when(issueEditingService.listIssues(projectId, true))
-        .thenReturn(List.of(referenceIssue(UUID.randomUUID(), "BLOCKED", "WORK", true)));
-
-    IllegalStateException ex =
-        assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
-
-    assertTrue(ex.getMessage().contains("Foreign issue"));
-    verifyNoInteractions(issueRunService);
-  }
-
-  private Issue referenceIssue(
-      UUID ownerProjectId, String state, String blockedFromState, boolean archived) {
+  private Issue referenceIssue(UUID ownerProjectId, String state, String blockedFromState) {
     return Issue.builder()
         .id(UUID.randomUUID())
         .projectId(ownerProjectId)
@@ -222,7 +194,6 @@ class ProjectSnapshotAssemblerTest {
         .state(state)
         .blockedFromState(blockedFromState)
         .blockReason(blockedFromState == null ? null : "Blocked")
-        .archivedAt(archived ? now : null)
         .createdAt(now)
         .updatedAt(now)
         .build();
@@ -260,7 +231,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(foreignIssue));
+    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(foreignIssue));
 
     IllegalStateException ex =
         assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
@@ -292,7 +263,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(issue));
+    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(issue));
 
     IssueRun foreignRun =
         IssueRun.builder()
