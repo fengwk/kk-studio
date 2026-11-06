@@ -35,9 +35,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -85,6 +86,11 @@ import java.util.concurrent.TimeUnit;
  * durable 事实保持不动； （6）清理与损坏边界：物化后按原 Thread 精确 replay，跨 Thread 不适用，执行型结果不是回答，冻结问卷损坏时 fail closed。
  */
 class HarnessRuntimeToolInputTest {
+
+  private static void assertConflict(HarnessConflictReason reason, DomainException error) {
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(reason.name(), error.reason());
+  }
 
   private static final UUID CURSOR_START = new UUID(0L, 0L);
 
@@ -221,21 +227,21 @@ class HarnessRuntimeToolInputTest {
     runtime.submitToolInput(
         command(baseline.threadId(), baseline.toolId(), submissionId, "alice", answers));
 
-    HarnessRuntimeConflictException anotherSubmission =
+    DomainException anotherSubmission =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
                         baseline.threadId(), baseline.toolId(), TestIds.id(14), "alice", answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherSubmission.reason());
-    HarnessRuntimeConflictException anotherActor =
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, anotherSubmission);
+    DomainException anotherActor =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(baseline.threadId(), baseline.toolId(), submissionId, "bob", answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherActor.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, anotherActor);
     ToolInvocation stored =
         store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(submissionId, stored.inputReceipt().submissionId());
@@ -256,9 +262,9 @@ class HarnessRuntimeToolInputTest {
             "alice",
             List.of(List.of("fast"), List.of("a"))));
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -268,7 +274,7 @@ class HarnessRuntimeToolInputTest {
                         "alice",
                         List.of(List.of("safe"), List.of("a")))));
 
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, conflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, conflict);
   }
 
   /** 非法答案：类型化拒绝、store 不变、等待继续存在，且错误信息绝不回显提交值。 */
@@ -283,14 +289,14 @@ class HarnessRuntimeToolInputTest {
     List<List<String>> twoCustomAnswers = List.of(List.of(secret, "another"), List.of("a"));
     List<List<String>> blankAnswer = List.of(List.of("   "), List.of("a"));
     for (List<List<String>> invalid : List.of(missingQuestion, twoCustomAnswers, blankAnswer)) {
-      HarnessRuntimeConflictException conflict =
+      DomainException conflict =
           assertThrows(
-              HarnessRuntimeConflictException.class,
+              DomainException.class,
               () ->
                   runtime.submitToolInput(
                       command(
                           baseline.threadId(), baseline.toolId(), submissionId, "alice", invalid)));
-      assertEquals(Reason.INPUT_SUBMISSION_INVALID, conflict.reason());
+      assertConflict(HarnessConflictReason.INPUT_SUBMISSION_INVALID, conflict);
       // 拒绝只报告问题下标与原因，不回显任何提交值。
       assertFalse(conflict.getMessage().contains(secret));
     }
@@ -328,11 +334,9 @@ class HarnessRuntimeToolInputTest {
             TestIds.id(18),
             "alice",
             List.of(List.of("fast"), List.of("a")));
-    assertEquals(
-        Reason.INPUT_SUBMISSION_NOT_APPLICABLE,
-        assertThrows(
-                HarnessRuntimeConflictException.class, () -> runtime.submitToolInput(readyCommand))
-            .reason());
+    assertConflict(
+        HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE,
+        assertThrows(DomainException.class, () -> runtime.submitToolInput(readyCommand)));
 
     ToolBaseline approval = seedToolBaseline(store);
     setWaitingApproval(store, approval);
@@ -343,12 +347,9 @@ class HarnessRuntimeToolInputTest {
             TestIds.id(19),
             "alice",
             List.of(List.of("fast")));
-    assertEquals(
-        Reason.INPUT_SUBMISSION_NOT_APPLICABLE,
-        assertThrows(
-                HarnessRuntimeConflictException.class,
-                () -> runtime.submitToolInput(approvalCommand))
-            .reason());
+    assertConflict(
+        HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE,
+        assertThrows(DomainException.class, () -> runtime.submitToolInput(approvalCommand)));
 
     ToolBaseline cancelled = seedAskUserBaseline(store);
     parkForInput(store, cancelled, T3);
@@ -360,11 +361,9 @@ class HarnessRuntimeToolInputTest {
             TestIds.id(20),
             "alice",
             List.of(List.of("fast"), List.of("a")));
-    assertEquals(
-        Reason.INPUT_SUBMISSION_NOT_APPLICABLE,
-        assertThrows(
-                HarnessRuntimeConflictException.class, () -> runtime.submitToolInput(lateCommand))
-            .reason());
+    assertConflict(
+        HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE,
+        assertThrows(DomainException.class, () -> runtime.submitToolInput(lateCommand)));
     assertEquals(
         ToolInvocationStatus.CANCELLED,
         store.transaction(tx -> tx.tools().find(cancelled.toolId()).orElseThrow()).status());
@@ -378,11 +377,9 @@ class HarnessRuntimeToolInputTest {
             TestIds.id(21),
             "alice",
             List.of(List.of("fast"), List.of("a")));
-    assertEquals(
-        Reason.INPUT_SUBMISSION_NOT_APPLICABLE,
-        assertThrows(
-                HarnessRuntimeConflictException.class, () -> runtime.submitToolInput(foreignThread))
-            .reason());
+    assertConflict(
+        HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE,
+        assertThrows(DomainException.class, () -> runtime.submitToolInput(foreignThread)));
   }
 
   /** 未知 Thread / 未知调用：not applicable，而不是泄漏其他 Thread 的事实。 */
@@ -392,9 +389,9 @@ class HarnessRuntimeToolInputTest {
     parkForInput(store, baseline, T3);
     UUID unknownThread = TestIds.id(22);
 
-    HarnessRuntimeConflictException unknownThreadFailure =
+    DomainException unknownThreadFailure =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -403,11 +400,11 @@ class HarnessRuntimeToolInputTest {
                         TestIds.id(23),
                         "alice",
                         List.of(List.of("fast"), List.of("a")))));
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownThreadFailure.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownThreadFailure);
 
-    HarnessRuntimeConflictException unknownToolFailure =
+    DomainException unknownToolFailure =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -416,7 +413,7 @@ class HarnessRuntimeToolInputTest {
                         TestIds.id(25),
                         "alice",
                         List.of(List.of("fast"), List.of("a")))));
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownToolFailure.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownToolFailure);
   }
 
   /** 并发同 submissionId：恰好被接受一次，另一个请求读到的已是同一 durable 结果（不允许双写）。 */
@@ -464,9 +461,9 @@ class HarnessRuntimeToolInputTest {
     markRunningTool(store, baseline.toolId());
     succeedTool(store, baseline.toolId());
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -475,7 +472,7 @@ class HarnessRuntimeToolInputTest {
                         TestIds.id(27),
                         "alice",
                         List.of(List.of("fast"), List.of("a")))));
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict);
   }
 
   /** 冻结问卷来自 Assistant ToolCall：调用行本身不复制问卷，题库只以 argumentsJson 为事实源。 */
@@ -619,26 +616,26 @@ class HarnessRuntimeToolInputTest {
     assertEquals(initial.receipt().acceptedAt(), reorderedReplay.receipt().acceptedAt());
 
     // 5. 其他 submissionId、不同 actor、不同答案报 MISMATCH
-    HarnessRuntimeConflictException anotherSubmission =
+    DomainException anotherSubmission =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
                         baseline.threadId(), baseline.toolId(), TestIds.id(16), "alice", answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherSubmission.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, anotherSubmission);
 
-    HarnessRuntimeConflictException anotherActor =
+    DomainException anotherActor =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(baseline.threadId(), baseline.toolId(), submissionId, "bob", answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherActor.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, anotherActor);
 
-    HarnessRuntimeConflictException differentAnswers =
+    DomainException differentAnswers =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -647,13 +644,13 @@ class HarnessRuntimeToolInputTest {
                         submissionId,
                         "alice",
                         List.of(List.of("fast"), List.of("a")))));
-    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, differentAnswers.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH, differentAnswers);
 
     // 6. 不拥有该物化结果的 foreign threadId -> NOT_APPLICABLE
     ToolBaseline foreignThread = seedToolBaseline(store);
-    HarnessRuntimeConflictException foreignConflict =
+    DomainException foreignConflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -662,16 +659,16 @@ class HarnessRuntimeToolInputTest {
                         submissionId,
                         "alice",
                         answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, foreignConflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, foreignConflict);
 
     // 7. 从未存在过的未知 toolInvocationId -> NOT_APPLICABLE
-    HarnessRuntimeConflictException unknownToolConflict =
+    DomainException unknownToolConflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(baseline.threadId(), TestIds.id(99), submissionId, "alice", answers)));
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownToolConflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownToolConflict);
   }
 
   /**
@@ -733,9 +730,9 @@ class HarnessRuntimeToolInputTest {
     UUID liveToolId = seedClosedTurnWithLiveAskUser(stale);
     long versionBefore = threadVersion(stale.threadId());
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -745,7 +742,7 @@ class HarnessRuntimeToolInputTest {
                         "alice",
                         List.of(List.of("fast"), List.of("a")))));
 
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict);
     // 拒绝不触碰任何 durable 事实：陈旧等待保持 WAITING_INPUT，当前调用保持 READY，Thread 不推进。
     assertEquals(
         ToolInvocationStatus.WAITING_INPUT,
@@ -772,14 +769,14 @@ class HarnessRuntimeToolInputTest {
     UUID siblingThreadId = seedThreadAt(store, baseline.rootEntryId());
     long siblingVersion = threadVersion(siblingThreadId);
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(siblingThreadId, baseline.toolId(), submissionId, "alice", answers)));
 
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict);
     assertEquals(siblingVersion, threadVersion(siblingThreadId));
     ToolInputAcceptance replayed =
         runtime.submitToolInput(
@@ -798,9 +795,9 @@ class HarnessRuntimeToolInputTest {
     materializeTerminalTool(baseline.threadId(), baseline.toolId(), TestIds.id(61));
     long versionBefore = threadVersion(baseline.threadId());
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.submitToolInput(
                     command(
@@ -810,7 +807,7 @@ class HarnessRuntimeToolInputTest {
                         "alice",
                         List.of(List.of("fast")))));
 
-    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict.reason());
+    assertConflict(HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE, conflict);
     assertEquals(versionBefore, threadVersion(baseline.threadId()));
   }
 
