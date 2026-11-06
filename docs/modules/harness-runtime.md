@@ -401,7 +401,7 @@ System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environmen
 
 持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 保留原文；厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
 
-Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。各 codec 仍负责自己的字段校验和错误语义。
+Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。object 判定与精确字段集合校验统一走模型模块的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)，各 codec 只声明自己的字段集合、错误上下文与值类型语义。
 
 ## 包架构
 
