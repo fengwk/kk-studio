@@ -31,7 +31,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `LIST_VIEWS` | 无 | `views[]`：`viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`state(OPEN/CLOSING)` |
 | `LIST_DIRECTORIES` | 可选 `directory`，省略时为宿主主目录 | `directoryListing`：规范 `path`、可选 `parentPath`、`children[]`、`truncated` |
 
-失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CANCELLED`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，`bindingEpoch` 是规范正十进制字符串且不超过 Java long 上限；`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
+失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CANCELLED`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，Protobuf 中的 `binding_epoch` 是正 int64；HTTP 中对应的 `bindingEpoch` 是规范正十进制字符串。`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
 
 Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。命令确认后服务端再读一次 `LIST_VIEWS`，但这次回读只用于刷新绑定缓存与补充响应：回读本身失败只记录告警，已确认的目录切换仍按成功返回，响应只带命令确认的目录与已知绑定身份，不伪造 workspace 与视图状态；回读成功且快照中已没有该绑定时，视图确实已关闭或换代，调用仍按不可用结束。
 
