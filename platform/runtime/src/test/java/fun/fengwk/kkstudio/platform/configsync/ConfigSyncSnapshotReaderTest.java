@@ -19,9 +19,10 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
@@ -30,7 +31,6 @@ import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.util.List;
 import java.util.Set;
@@ -42,8 +42,7 @@ class ConfigSyncSnapshotReaderTest {
 
   private final ProviderRepository providerRepository = mock(ProviderRepository.class);
   private final ModelRepository modelRepository = mock(ModelRepository.class);
-  private final AgentDefinitionRepository definitionRepository =
-      mock(AgentDefinitionRepository.class);
+  private final AgentRepository definitionRepository = mock(AgentRepository.class);
   private final SkillPackageRepository skillPackageRepository = mock(SkillPackageRepository.class);
   private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
@@ -126,25 +125,21 @@ class ConfigSyncSnapshotReaderTest {
   void excludesBuiltinAgentsFromTheSnapshot() {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
     when(skillPackageRepository.listPackages()).thenReturn(List.of());
-    AgentDefinition user =
+    Agent user =
         agent("user-agent", "m", agentConfig(List.of(), List.of(), List.of())).toBuilder()
-            .type(AgentDefinitionType.USER)
+            .type(AgentType.USER)
             .build();
-    AgentDefinition builtin =
-        agent(
-                BuiltinAgentDefinitions.COMPACTION_NAME,
-                null,
-                agentConfig(List.of(), List.of(), List.of()))
+    Agent builtin =
+        agent(BuiltinAgents.COMPACTION_NAME, null, agentConfig(List.of(), List.of(), List.of()))
             .toBuilder()
-            .type(AgentDefinitionType.BUILTIN)
+            .type(AgentType.BUILTIN)
             .build();
     when(definitionRepository.listAll()).thenReturn(List.of(user, builtin));
 
     ConfigSyncSnapshot snapshot = reader.read();
 
-    assertEquals(
-        List.of("user-agent"), snapshot.agents().stream().map(AgentDefinition::name).toList());
-    assertEquals(Set.of(BuiltinAgentDefinitions.COMPACTION_NAME), snapshot.builtinAgentNames());
+    assertEquals(List.of("user-agent"), snapshot.agents().stream().map(Agent::name).toList());
+    assertEquals(Set.of(BuiltinAgents.COMPACTION_NAME), snapshot.builtinAgentNames());
   }
 
   @Test

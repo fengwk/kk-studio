@@ -6,27 +6,26 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.ArrayList;
 import java.util.List;
 
-class AgentDefinitionConfigCodecTest {
+class AgentConfigCodecTest {
 
-  private final AgentDefinitionConfigCodec codec =
-      new AgentDefinitionConfigCodec(JsonMapper.builder().build());
+  private final AgentConfigCodec codec = new AgentConfigCodec(JsonMapper.builder().build());
 
   /** 测试意图：验证完整配置（含全局 Skill 引用）能够正确往返编解码并保持元素顺序。 */
   @Test
   void roundTripsCompleteConfigAndPreservesOrder() {
-    AgentDefinitionConfigDTO config = config();
+    AgentConfigDTO config = config();
     config.setTools(List.of("read"));
     config.setSkills(List.of(skillRef("tools", "dev"), skillRef("ops-tools", "ops")));
     config.setSubagents(List.of("reviewer"));
 
     String encoded = codec.encode(config);
-    AgentDefinitionConfigDTO decoded = codec.decode(encoded);
+    AgentConfigDTO decoded = codec.decode(encoded);
 
     assertEquals(List.of("read"), decoded.getTools());
     assertEquals(
@@ -39,19 +38,19 @@ class AgentDefinitionConfigCodecTest {
   void rejectsIncompleteAndNonCanonicalTypedConfigs() {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(null));
 
-    AgentDefinitionConfigDTO missingTools = config();
+    AgentConfigDTO missingTools = config();
     missingTools.setTools(null);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingTools));
 
-    AgentDefinitionConfigDTO missingSkills = config();
+    AgentConfigDTO missingSkills = config();
     missingSkills.setSkills(null);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSkills));
 
-    AgentDefinitionConfigDTO missingSubagents = config();
+    AgentConfigDTO missingSubagents = config();
     missingSubagents.setSubagents(null);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSubagents));
 
-    AgentDefinitionConfigDTO whitespace = config();
+    AgentConfigDTO whitespace = config();
     whitespace.setTools(List.of(" read "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(whitespace));
   }
@@ -59,7 +58,7 @@ class AgentDefinitionConfigCodecTest {
   /** 测试意图：验证 skills 引用列表拒绝包含 null 元素。 */
   @Test
   void rejectsNullElementsInSkills() {
-    AgentDefinitionConfigDTO config = config();
+    AgentConfigDTO config = config();
     List<SkillRefDTO> skillsWithNull = new ArrayList<>();
     skillsWithNull.add(skillRef("tools", "dev"));
     skillsWithNull.add(null);
@@ -70,39 +69,39 @@ class AgentDefinitionConfigCodecTest {
   /** 测试意图：验证 Skill 名称与包名必须是规范短名，拒绝空白、首尾空格、超长以及包含非法分隔符或控制字符的名称。 */
   @Test
   void rejectsInvalidCanonicalShortNames() {
-    AgentDefinitionConfigDTO blankName = config();
+    AgentConfigDTO blankName = config();
     blankName.setSkills(List.of(skillRef("tools", " ")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(blankName));
 
-    AgentDefinitionConfigDTO padded = config();
+    AgentConfigDTO padded = config();
     padded.setSkills(List.of(skillRef("tools", " dev ")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(padded));
 
-    AgentDefinitionConfigDTO slash = config();
+    AgentConfigDTO slash = config();
     slash.setSkills(List.of(skillRef("tools", "my/skill")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(slash));
 
-    AgentDefinitionConfigDTO colon = config();
+    AgentConfigDTO colon = config();
     colon.setSkills(List.of(skillRef("tools", "my:skill")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(colon));
 
-    AgentDefinitionConfigDTO at = config();
+    AgentConfigDTO at = config();
     at.setSkills(List.of(skillRef("tools", "my@skill")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(at));
 
-    AgentDefinitionConfigDTO backslash = config();
+    AgentConfigDTO backslash = config();
     backslash.setSkills(List.of(skillRef("tools", "my\\skill")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(backslash));
 
-    AgentDefinitionConfigDTO control = config();
+    AgentConfigDTO control = config();
     control.setSkills(List.of(skillRef("tools", "my\nskill")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(control));
 
-    AgentDefinitionConfigDTO tooLong = config();
+    AgentConfigDTO tooLong = config();
     tooLong.setSkills(List.of(skillRef("tools", "a".repeat(129))));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(tooLong));
 
-    AgentDefinitionConfigDTO invalidPkg = config();
+    AgentConfigDTO invalidPkg = config();
     invalidPkg.setSkills(List.of(skillRef("my/pkg", "dev")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidPkg));
   }
@@ -110,7 +109,7 @@ class AgentDefinitionConfigCodecTest {
   /** 测试意图：验证全局 Skill 引用严格拒绝重复。 */
   @Test
   void rejectsDuplicateSkillIdentities() {
-    AgentDefinitionConfigDTO duplicate = config();
+    AgentConfigDTO duplicate = config();
     duplicate.setSkills(List.of(skillRef("tools", "dev"), skillRef("tools", "dev")));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(duplicate));
   }
@@ -157,8 +156,8 @@ class AgentDefinitionConfigCodecTest {
         () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]} {}"));
   }
 
-  private static AgentDefinitionConfigDTO config() {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private static AgentConfigDTO config() {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());

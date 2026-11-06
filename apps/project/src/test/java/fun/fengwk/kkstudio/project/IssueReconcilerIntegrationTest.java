@@ -1769,8 +1769,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
-    // 删除 agent_definition 模拟数据损坏或环境异常，验证异常向外传播而不是被吞为 CONVERGED_UNDISPATCHABLE
-    jdbc.update("delete from agent_definition where name = ?", agent);
+    // 删除 agent 模拟数据损坏或环境异常，验证异常向外传播而不是被吞为 CONVERGED_UNDISPATCHABLE
+    jdbc.update("delete from agent where name = ?", agent);
 
     WorkClaim claim = claimWork(issue.getId());
     assertThrows(RuntimeException.class, () -> reconciler.reconcile(claim));

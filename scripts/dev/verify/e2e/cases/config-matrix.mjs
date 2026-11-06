@@ -143,7 +143,7 @@ for (const row of agentConfigMatrix()) {
         config: row.build(),
       }
       if (row.ok) {
-        const { status, json } = await ctx.call('POST', '/api/agents', body)
+        const { status, json } = await ctx.call('POST', '/api/platform/agents', body)
         assert([200, 201].includes(status), `status ${status} ${JSON.stringify(json)}`)
         const agent = json
         assert(agent?.name, JSON.stringify(json))
@@ -151,10 +151,10 @@ for (const row of agentConfigMatrix()) {
         ctx.writeArtifact(`agent-${row.id}.json`, JSON.stringify(agent, null, 2))
         await ctx.call(
           'DELETE',
-          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       } else {
-        const err = await expectHttpError(() => ctx.call('POST', '/api/agents', body), {
+        const err = await expectHttpError(() => ctx.call('POST', '/api/platform/agents', body), {
           status: row.expectStatus || 400,
           messageIncludes: row.messageIncludes,
         })
@@ -172,15 +172,15 @@ registerCase({
   async run(ctx) {
     // best-effort cleanup of leftover matrix agents that block model delete
     try {
-      const { json } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')
-      const agents = (json?.results || [])
+      const { json } = await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')
+      const agents = Array.isArray(json) ? json : []
       for (const agent of agents) {
         const name = String(agent.name || '')
         if (name.startsWith('ag-') || name.startsWith('e2e-agent-') || name.startsWith('t-[')) {
           try {
             await ctx.call(
               'DELETE',
-              `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+              `/api/platform/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
             )
           } catch {
             // ignore

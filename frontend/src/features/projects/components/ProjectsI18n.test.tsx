@@ -12,10 +12,7 @@ import type { IssueDetailDTO, ProjectDTO } from '@/shared/api/generated/contract
 // Agent 目录/环境列表是工作流编辑器的共享查询依赖；这里固定内容以保证双语渲染断言稳定。
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
-    listAgents: vi.fn().mockResolvedValue({
-      results: [{ name: 'architect' }, { name: 'backend-dev' }],
-      totalCount: '2',
-    }),
+    listAgents: vi.fn().mockResolvedValue([{ name: 'architect' }, { name: 'backend-dev' }]),
   },
 }))
 

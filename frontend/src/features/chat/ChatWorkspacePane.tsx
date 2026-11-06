@@ -5,7 +5,7 @@ import type { ThreadPresentation } from '@/features/thread/runtime/thread-presen
 import { chatService } from '@/features/chat/chat-service'
 import { isNotFoundError } from '@/shared/api/client'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ChatDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
@@ -29,7 +29,7 @@ export function ChatWorkspacePane({
   onPresentation,
 }: {
   chat: ChatDTO
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments?: EnvironmentCardDTO[]
   pane: { id: string }
   focused: boolean

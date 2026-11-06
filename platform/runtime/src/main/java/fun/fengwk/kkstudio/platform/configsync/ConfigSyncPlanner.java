@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter.Var
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -685,7 +685,7 @@ public final class ConfigSyncPlanner {
     if (modelKey != null && !availableModelKeys.contains(modelKey)) {
       return "missing model: " + modelKey;
     }
-    AgentDefinitionConfigDTO config = spec.properties().getConfig();
+    AgentConfigDTO config = spec.properties().getConfig();
     if (config == null) {
       return "missing config";
     }

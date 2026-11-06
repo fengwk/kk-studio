@@ -4,7 +4,7 @@ import static org.mockito.Mockito.mock;
 
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -23,7 +23,7 @@ public final class SkillCatalogTestFixtures {
   public static SkillCatalogService realValidator() {
     return new SkillCatalogService(
         mock(SkillPackageRepository.class),
-        mock(AgentDefinitionRepository.class),
+        mock(AgentRepository.class),
         mock(SkillGitRepository.class),
         new AgentEditableSupport(JsonMapper.builder().build()),
         mock(SkillCatalogWrites.class),

@@ -4,8 +4,9 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
@@ -16,7 +17,6 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -33,7 +33,7 @@ public class ConfigSyncSnapshotReader {
 
   private final ProviderRepository providerRepository;
   private final ModelRepository modelRepository;
-  private final AgentDefinitionRepository definitionRepository;
+  private final AgentRepository agentRepository;
   private final SkillPackageRepository skillPackageRepository;
   private final EnvironmentRepository environmentRepository;
   private final McpServerRepository mcpServerRepository;
@@ -61,10 +61,10 @@ public class ConfigSyncSnapshotReader {
             .toList();
     List<SkillPackage> skillPackages = skillPackageRepository.listPackages();
     // 同一次 listAll 里按持有者类型分流：内置 Agent 只贡献名称，绝不进入可导出条目。
-    List<AgentDefinition> agents = new ArrayList<>();
+    List<Agent> agents = new ArrayList<>();
     Set<String> builtinAgentNames = new LinkedHashSet<>();
-    for (AgentDefinition agent : definitionRepository.listAll()) {
-      if (agent.type() == AgentDefinitionType.BUILTIN) {
+    for (Agent agent : agentRepository.listAll()) {
+      if (agent.type() == AgentType.BUILTIN) {
         builtinAgentNames.add(agent.name());
       } else {
         agents.add(agent);

@@ -1,7 +1,7 @@
 import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentUpdateDTO,
   ModelCreateDTO,
   ModelUpdateDTO,
   ProviderCreateDTO,
@@ -52,11 +52,11 @@ export type ResourceSubmitPlan =
   | {
       kind: 'agent'
       mode: 'create'
-      data: AgentDefinitionCreateDTO
+      data: AgentCreateDTO
     }
   | {
       kind: 'agent'
       mode: 'edit'
       name: string
-      data: AgentDefinitionUpdateDTO
+      data: AgentUpdateDTO
     }

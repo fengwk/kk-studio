@@ -328,7 +328,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         try (Statement st = conn.createStatement()) {
           st.executeUpdate("update provider set credential = 'tampered-key' where name = 'stub'");
           st.executeUpdate(
-              "update agent_definition set system_prompt = 'tampered-prompt' where name ="
+              "update agent set system_prompt = 'tampered-prompt' where name ="
                   + " 'default-assistant'");
           st.executeUpdate(
               "insert into model"
@@ -416,8 +416,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
     try (Statement st = conn.createStatement();
         ResultSet rs =
-            st.executeQuery(
-                "select count(*) from agent_definition where name = 'default-assistant'")) {
+            st.executeQuery("select count(*) from agent where name = 'default-assistant'")) {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }
@@ -435,7 +434,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
     assertSingleCount(conn, "provider", 8L);
     assertSingleCount(conn, "model", 21L);
-    assertSingleCount(conn, "agent_definition", 1L);
+    assertSingleCount(conn, "agent", 1L);
     try (Statement st = conn.createStatement()) {
       assertEquals(
           "MiniMax-M2.7:high",
@@ -443,7 +442,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select (a.execution -> 'settings' ->> 'modelName') || ':'"
                   + " || (a.execution -> 'settings' ->> 'variant')"
-                  + " from agent_definition a"
+                  + " from agent a"
                   + " where a.name = 'default-assistant' and a.execution ->> 'driver' = 'builtin'"),
           "the default E2E agent must remain bound to the global model name MiniMax-M2.7");
       assertEquals(
@@ -451,7 +450,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           singleString(
               st,
               "select m.provider_name || ':' || m.kind"
-                  + " from agent_definition a"
+                  + " from agent a"
                   + " join model m on m.name = a.execution -> 'settings' ->> 'modelName'"
                   + " where a.name = 'default-assistant'"),
           "the default E2E agent model must resolve to the minimax MODEL row");
@@ -538,7 +537,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           singleString(
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
-                  + " from agent_definition"));
+                  + " from agent"));
     }
     return sb.toString();
   }
@@ -552,7 +551,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select greatest("
                     + "(select coalesce(max(version), 0) from provider),"
                     + "(select coalesce(max(version), 0) from model),"
-                    + "(select coalesce(max(version), 0) from agent_definition))")) {
+                    + "(select coalesce(max(version), 0) from agent))")) {
       assertTrue(rs.next());
       max = rs.getLong(1);
     }
@@ -581,7 +580,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           singleString(
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
-                  + " from agent_definition"));
+                  + " from agent"));
     }
     return sb.toString();
   }

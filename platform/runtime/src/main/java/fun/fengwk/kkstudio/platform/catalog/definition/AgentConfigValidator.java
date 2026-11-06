@@ -4,9 +4,9 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.HashSet;
@@ -22,15 +22,15 @@ import java.util.Set;
  * Platform 的全局目录，因此配置阶段只校验形状，存在性与锁定由引用解析器负责。
  */
 @Component
-public final class AgentDefinitionConfigValidator {
+public final class AgentConfigValidator {
 
   private final RuntimeToolCatalogSource toolCatalogSource;
 
-  public AgentDefinitionConfigValidator(RuntimeToolCatalogSource toolCatalogSource) {
+  public AgentConfigValidator(RuntimeToolCatalogSource toolCatalogSource) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
   }
 
-  public void validate(AgentDefinitionConfigDTO config) {
+  public void validate(AgentConfigDTO config) {
     Objects.requireNonNull(config, "config");
     validateToolNames(config.getTools());
     validateSkills(config.getSkills());

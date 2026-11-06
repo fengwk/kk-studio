@@ -211,7 +211,7 @@ async function createStubCatalog({ jsonCall }) {
       variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     },
   })
-  await jsonCall('POST', '/api/agents', {
+  await jsonCall('POST', '/api/platform/agents', {
     name: 'default-assistant',
     description: 'offline smoke stub agent',
     systemPrompt: 'You are the offline smoke assistant.',

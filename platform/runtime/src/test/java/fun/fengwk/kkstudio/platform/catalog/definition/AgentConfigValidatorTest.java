@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
@@ -29,7 +30,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Duration;
@@ -41,7 +41,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /** Agent 配置的校验：工具名必须来自运行时目录的当前 epoch 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
-class AgentDefinitionConfigValidatorTest {
+class AgentConfigValidatorTest {
 
   private static final String CUSTOM_TOOL_NAME = "custom_tool";
   private static final String ENVIRONMENT_TOOL_NAME = "read";
@@ -56,7 +56,7 @@ class AgentDefinitionConfigValidatorTest {
     Tool fixedEnvironmentTool =
         tool(hostDescriptor(CUSTOM_TOOL_NAME), ToolRequirements.environment());
     try (Fixture fixture = new Fixture(List.of(hostTool("host_tool"), fixedEnvironmentTool))) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME, "host_tool", CUSTOM_TOOL_NAME));
       config.setSkills(List.of(skillRef("tools", "dev"), skillRef("tools", "ops")));
       config.setSubagents(List.of("reviewer"));
@@ -69,7 +69,7 @@ class AgentDefinitionConfigValidatorTest {
   void acceptsGenericEnvironmentToolRequirements() {
     // environmentRequired 但无固定 Environment 的通用环境能力同样随时可配置。
     try (Fixture fixture = new Fixture(List.of())) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
@@ -81,7 +81,7 @@ class AgentDefinitionConfigValidatorTest {
   @Test
   void rejectsUnknownToolName() {
     try (Fixture fixture = new Fixture(List.of())) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of("missing_tool"));
       config.setSkills(List.of());
       config.setSubagents(List.of());
@@ -96,7 +96,7 @@ class AgentDefinitionConfigValidatorTest {
   void rejectsSkillNameExceeding128Characters() {
     try (Fixture fixture = new Fixture(List.of())) {
       String tooLong = "x".repeat(129);
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of());
       config.setSkills(List.of(skillRef("tools", tooLong)));
       config.setSubagents(List.of());
@@ -110,7 +110,7 @@ class AgentDefinitionConfigValidatorTest {
   @Test
   void rejectsInternalToolSelection() {
     try (Fixture fixture = new Fixture(List.of())) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of(INTERNAL_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
@@ -124,7 +124,7 @@ class AgentDefinitionConfigValidatorTest {
   @Test
   void rejectsSubagentNameExceeding64Characters() {
     try (Fixture fixture = new Fixture(List.of())) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      AgentConfigDTO config = new AgentConfigDTO();
       config.setTools(List.of());
       config.setSkills(List.of());
       config.setSubagents(List.of("x".repeat(65)));
@@ -188,10 +188,10 @@ class AgentDefinitionConfigValidatorTest {
     when(repo.listAllServers()).thenReturn(List.of(server));
     when(repo.listTools("test_server")).thenReturn(List.of(mcpTool));
 
-    AgentDefinitionConfigValidator validator =
-        new AgentDefinitionConfigValidator(TestRuntimeToolCatalogSource.ofMcp(mcpCatalog));
+    AgentConfigValidator validator =
+        new AgentConfigValidator(TestRuntimeToolCatalogSource.ofMcp(mcpCatalog));
 
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of("mcp_test_server_echo"));
     config.setSkills(List.of());
     config.setSubagents(List.of());
@@ -238,7 +238,7 @@ class AgentDefinitionConfigValidatorTest {
 
   private static final class Fixture implements AutoCloseable {
     private final HarnessCatalog catalog;
-    private final AgentDefinitionConfigValidator validator;
+    private final AgentConfigValidator validator;
 
     private Fixture(List<Tool> tools) {
       List<HarnessContributor> contributors = new ArrayList<>();
@@ -264,7 +264,7 @@ class AgentDefinitionConfigValidatorTest {
                 }));
       }
       this.catalog = HarnessCatalog.from(contributors);
-      this.validator = new AgentDefinitionConfigValidator(TestRuntimeToolCatalogSource.of(catalog));
+      this.validator = new AgentConfigValidator(TestRuntimeToolCatalogSource.of(catalog));
     }
 
     @Override

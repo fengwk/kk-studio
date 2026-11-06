@@ -25,7 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
@@ -83,7 +83,7 @@ class EnvironmentServiceTest {
   void createLeavesNoAcceptedHostMetadata() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -123,7 +123,7 @@ class EnvironmentServiceTest {
   void createPropagatesCardInsertFailure() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -143,7 +143,7 @@ class EnvironmentServiceTest {
   void createExposesRegistrationTokenOnce() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -181,7 +181,7 @@ class EnvironmentServiceTest {
   void getAndListNeverExposeRegistrationToken() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -242,7 +242,7 @@ class EnvironmentServiceTest {
   void neverConnectedCardHasNoHostMetadata() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -280,7 +280,7 @@ class EnvironmentServiceTest {
   void connectingConnectionStillProjectsRetainedHostMetadata() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -459,7 +459,7 @@ class EnvironmentServiceTest {
   void rotateTokenAllowedWhileLeaseIsActive() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
@@ -492,7 +492,7 @@ class EnvironmentServiceTest {
   void deleteChecksOnlineLeaseAndActiveWork() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentRepository agents = mock(AgentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 

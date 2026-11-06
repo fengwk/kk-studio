@@ -12,7 +12,7 @@ import {
 } from '@/features/catalog/ai-agent-draft-codec'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ModelConfigDTO,
   SkillPackageSummaryDTO,
 } from '@/shared/api/generated/contracts'
@@ -64,7 +64,7 @@ function skillPackage(
   }
 }
 
-function agentDefinition(name: string, description: string | null): AgentDefinitionDTO {
+function agent(name: string, description: string | null): AgentDTO {
   return {
     name,
     description,
@@ -73,8 +73,8 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: null } },
     config: { tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -271,8 +271,8 @@ describe('AgentForm current contracts', () => {
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft(modelWithVariants()))
       const agents = [
-        agentDefinition('helper', 'delegated helper'),
-        agentDefinition('reviewer', 'code reviewer'),
+        agent('helper', 'delegated helper'),
+        agent('reviewer', 'code reviewer'),
       ]
       return (
         <AgentForm

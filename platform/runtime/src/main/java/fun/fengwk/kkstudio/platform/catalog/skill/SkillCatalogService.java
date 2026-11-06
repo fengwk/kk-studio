@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
@@ -91,7 +91,7 @@ public class SkillCatalogService {
   private static final int MAX_CHECK_ERROR_BYTES = 4096;
 
   private final SkillPackageRepository skillPackageRepository;
-  private final AgentDefinitionRepository agentDefinitionRepository;
+  private final AgentRepository agentRepository;
   private final SkillGitRepository skillGitRepository;
   private final AgentEditableSupport editableSupport;
   private final SkillCatalogWrites writes;
@@ -103,7 +103,7 @@ public class SkillCatalogService {
 
   public SkillCatalogService(
       SkillPackageRepository skillPackageRepository,
-      AgentDefinitionRepository agentDefinitionRepository,
+      AgentRepository agentRepository,
       SkillGitRepository skillGitRepository,
       AgentEditableSupport editableSupport,
       SkillCatalogWrites writes,
@@ -114,8 +114,7 @@ public class SkillCatalogService {
       EnvironmentRegistry environmentRegistry) {
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
-    this.agentDefinitionRepository =
-        Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
+    this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.skillGitRepository = Objects.requireNonNull(skillGitRepository, "skillGitRepository");
     this.editableSupport = Objects.requireNonNull(editableSupport, "editableSupport");
     this.writes = Objects.requireNonNull(writes, "writes");
@@ -811,7 +810,7 @@ public class SkillCatalogService {
   private void ensureSkillsRemovable(String packageName, Collection<String> removedSkillNames) {
     List<String> referenced =
         removedSkillNames.stream()
-            .filter(name -> agentDefinitionRepository.existsReferencingSkill(packageName, name))
+            .filter(name -> agentRepository.existsReferencingSkill(packageName, name))
             .sorted()
             .toList();
     if (!referenced.isEmpty()) {

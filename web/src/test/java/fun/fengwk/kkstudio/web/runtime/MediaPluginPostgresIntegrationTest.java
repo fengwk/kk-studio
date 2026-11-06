@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
@@ -177,8 +177,7 @@ class MediaPluginPostgresIntegrationTest {
         configurationRepository,
         credentialRepository,
         context.getBean(PluginContextFactory.class),
-        new PluginAgentDependencies(
-            registry, configurationRepository, mock(AgentDefinitionRepository.class)),
+        new PluginAgentDependencies(registry, configurationRepository, mock(AgentRepository.class)),
         new DataSourceTransactionManager(dataSource),
         runtime::refresh,
         () -> {});

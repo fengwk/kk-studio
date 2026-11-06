@@ -24,9 +24,13 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
@@ -48,10 +52,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationServic
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
@@ -73,9 +73,8 @@ class ConfigSyncApplierTest {
   private final ModelService modelService = mock(ModelService.class);
   private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
   private final McpServerService mcpServerService = mock(McpServerService.class);
-  private final AgentDefinitionRepository definitionRepository =
-      mock(AgentDefinitionRepository.class);
-  private final AgentDefinitionService definitionService = mock(AgentDefinitionService.class);
+  private final AgentRepository definitionRepository = mock(AgentRepository.class);
+  private final AgentService definitionService = mock(AgentService.class);
   private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
   private final EnvironmentService environmentService = mock(EnvironmentService.class);
   private final SystemSettingsService systemSettingsService = mock(SystemSettingsService.class);
@@ -141,8 +140,8 @@ class ConfigSyncApplierTest {
   }
 
   /** 合成依赖插件：普通值里的 Agent 名称字段由测试显式给出。 */
-  private static AgentDefinition existingAgent(String name) {
-    AgentDefinition agent = AgentDefinition.builder().name(name).version(0L).build();
+  private static Agent existingAgent(String name) {
+    Agent agent = Agent.builder().name(name).version(0L).build();
     return agent;
   }
 
@@ -157,8 +156,8 @@ class ConfigSyncApplierTest {
 
   @Test
   void agentTwoStageWriteResolvesCyclicSubagents() {
-    AgentDefinition existingA = AgentDefinition.builder().name("a").version(0L).build();
-    AgentDefinition existingB = AgentDefinition.builder().name("b").version(0L).build();
+    Agent existingA = Agent.builder().name("a").version(0L).build();
+    Agent existingB = Agent.builder().name("b").version(0L).build();
     // 阶段一每个名字返回 null（尚不存在），阶段二返回已创建的行。
     when(definitionRepository.getByName("a")).thenReturn(null, existingA);
     when(definitionRepository.getByName("b")).thenReturn(null, existingB);
@@ -178,25 +177,23 @@ class ConfigSyncApplierTest {
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(specA, specB), null),
         List.of());
 
-    ArgumentCaptor<AgentDefinitionCreateDTO> createCaptor =
-        ArgumentCaptor.forClass(AgentDefinitionCreateDTO.class);
+    ArgumentCaptor<AgentCreateDTO> createCaptor = ArgumentCaptor.forClass(AgentCreateDTO.class);
     verify(definitionService, times(2)).createAgent(createCaptor.capture());
     // 阶段一创建时 subagents 必须为空，否则循环引用无目标行。
-    for (AgentDefinitionCreateDTO created : createCaptor.getAllValues()) {
+    for (AgentCreateDTO created : createCaptor.getAllValues()) {
       assertTrue(created.getConfig().getSubagents().isEmpty());
       assertEquals("builtin", created.getExecution().getDriver());
       assertEquals(
           Map.of("modelName", "m", "variant", "default"), created.getExecution().getSettings());
     }
 
-    ArgumentCaptor<AgentDefinitionUpdateDTO> updateCaptor =
-        ArgumentCaptor.forClass(AgentDefinitionUpdateDTO.class);
+    ArgumentCaptor<AgentUpdateDTO> updateCaptor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
     verify(definitionService, times(2)).updateAgent(any(), updateCaptor.capture());
     List<List<String>> subagents =
         updateCaptor.getAllValues().stream().map(dto -> dto.getConfig().getSubagents()).toList();
     assertTrue(subagents.contains(List.of("b")));
     assertTrue(subagents.contains(List.of("a")));
-    for (AgentDefinitionUpdateDTO updated : updateCaptor.getAllValues()) {
+    for (AgentUpdateDTO updated : updateCaptor.getAllValues()) {
       assertEquals("builtin", updated.getExecution().getDriver());
       assertEquals(
           Map.of("modelName", "m", "variant", "default"), updated.getExecution().getSettings());
@@ -405,7 +402,7 @@ class ConfigSyncApplierTest {
   /** 意图：重检发生在 Agent 两阶段写入之后、任何 plugin configure 之前。 */
   @Test
   void pluginAgentDependenciesAreRecheckedAfterAgentsAndBeforePlugins() {
-    AgentDefinition existing = existingAgent("dep-agent");
+    Agent existing = existingAgent("dep-agent");
     when(definitionRepository.getByName("dep-agent")).thenReturn(existing);
     when(definitionRepository.getByNameForUpdate("dep-agent")).thenReturn(existing);
 
@@ -482,9 +479,8 @@ class ConfigSyncApplierTest {
     verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
-  private static AgentDefinitionEditablePropertiesDTO agentProperties(
-      AgentDefinitionConfigDTO config) {
-    AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
+  private static AgentEditablePropertiesDTO agentProperties(AgentConfigDTO config) {
+    AgentEditablePropertiesDTO properties = new AgentEditablePropertiesDTO();
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
     execution.setSettings(Map.of("modelName", "m", "variant", "default"));
@@ -586,7 +582,7 @@ class ConfigSyncApplierTest {
   /** 意图：已存在的 Agent 不再创建，直接进入第二阶段用既有版本 CAS 更新完整配置。 */
   @Test
   void existingAgentIsUpdatedWithoutCreate() {
-    AgentDefinition existing = AgentDefinition.builder().name("a").version(7L).build();
+    Agent existing = Agent.builder().name("a").version(7L).build();
     when(definitionRepository.getByName("a")).thenReturn(existing);
     ConfigSyncParser.AgentSpec spec =
         new ConfigSyncParser.AgentSpec(
@@ -599,8 +595,7 @@ class ConfigSyncApplierTest {
         List.of());
 
     verify(definitionService, never()).createAgent(any());
-    ArgumentCaptor<AgentDefinitionUpdateDTO> captor =
-        ArgumentCaptor.forClass(AgentDefinitionUpdateDTO.class);
+    ArgumentCaptor<AgentUpdateDTO> captor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
     verify(definitionService).updateAgent(eq("a"), captor.capture());
     assertEquals("7", captor.getValue().getExpectedVersion());
   }

@@ -8,7 +8,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 export function CreateChatModal({
   open,
@@ -30,7 +30,7 @@ export function CreateChatModal({
 }: {
   open: boolean
   mode?: 'create' | 'edit'
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   selectedAgentName: string
   title: string
   yoloEnabled: boolean

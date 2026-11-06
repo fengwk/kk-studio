@@ -7,7 +7,7 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { agentService } from '@/shared/api/agent-service'
 import { setLocale } from '@/shared/i18n'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   EnvironmentCardDTO,
   SkillEnvironmentSyncDTO,
 } from '@/shared/api/generated/contracts'
@@ -28,7 +28,7 @@ const environments: EnvironmentCardDTO[] = [
   environment(BUILDER_ID, 'builder'),
 ]
 
-const agent: AgentDefinitionDTO = {
+const agent: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: 'paired agent',
@@ -45,8 +45,8 @@ const agent: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
 }
 
 function environment(id: string, name: string): EnvironmentCardDTO {

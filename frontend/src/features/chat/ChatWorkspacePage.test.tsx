@@ -29,7 +29,7 @@ import {
 import { setLocale } from '@/shared/i18n'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessSessionEntryDTO,
@@ -92,7 +92,7 @@ vi.mock('@/shared/api/session-file-service', () => ({
   },
 }))
 
-const assistantAgent: AgentDefinitionDTO = {
+const assistantAgent: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
@@ -100,8 +100,8 @@ const assistantAgent: AgentDefinitionDTO = {
   execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
   config: { tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 const model: ModelDTO = {
@@ -201,12 +201,7 @@ beforeEach(() => {
     createTime: 0,
     updateTime: 0,
   })
-  vi.mocked(agentService.listAgents).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: '1',
-    results: [assistantAgent],
-  })
+  vi.mocked(agentService.listAgents).mockResolvedValue([assistantAgent])
   vi.mocked(agentService.listModels).mockResolvedValue([model])
   vi.mocked(chatService.getChatSession).mockResolvedValue({
     sessionId: 'session-1',

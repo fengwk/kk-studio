@@ -4,11 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentResourceCard } from '@/features/catalog/AiAgentResourceCard'
 import { ModelResourceCard } from '@/features/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
-import type {
-  AgentDefinitionDTO,
-  ProviderDTO,
-  SingleModelDTO,
-} from '@/shared/api/generated/contracts'
+import type { AgentDTO, ProviderDTO, SingleModelDTO } from '@/shared/api/generated/contracts'
 
 function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
   return {
@@ -40,7 +36,7 @@ function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
   }
 }
 
-function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO {
+function agent(overrides: Partial<AgentDTO> = {}): AgentDTO {
   return {
     name: 'assistant',
     description: 'agent description',
@@ -53,8 +49,8 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       subagents: ['writer'],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }

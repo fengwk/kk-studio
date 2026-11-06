@@ -8,7 +8,7 @@
 -- environment when the e2e process actually authenticates.
 -- This file must never contain real secrets.
 
-delete from agent_definition where name = 'default-assistant';
+delete from agent where name = 'default-assistant';
 delete from model where provider_name in (
     'minimax', 'openai', 'xai', 'deepseek', 'google', 'anthropic', 'zai', 'minimax-anthropic'
 );
@@ -129,7 +129,7 @@ select
     0
 from model_seed;
 
-insert into agent_definition (
+insert into agent (
     name, description, system_prompt, execution, config,
     created_at, updated_at, version
 ) values (

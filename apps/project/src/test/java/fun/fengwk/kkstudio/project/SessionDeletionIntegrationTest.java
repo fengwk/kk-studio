@@ -106,7 +106,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   @Test
   void deletesIssueAgentSessionByBindingAndKeepsIssueIntact() {
     // Issue+Agent 的 Session 只能由稳定绑定 Thread 解析：归属行先于 harness 行删除，Issue/Project 事实保持完整。
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
     UUID sessionId = seedSession("issue-agent-session");
@@ -131,7 +131,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   @Test
   void runReferenceRollsBackProjectOwnershipDeletion() {
     // 真实 FK 阻止绑定删除时，产品归属和 runtime 事实必须在同一事务中保留。
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
     UUID sessionId = seedSession("run-bound");

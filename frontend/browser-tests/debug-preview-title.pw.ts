@@ -254,7 +254,7 @@ async function installPreviewApiMock(
         await route.fulfill({ json: threadSnapshot(cursor, options.entries ?? []) })
         return
       }
-      if (path === '/api/agents') {
+      if (path === '/api/platform/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
           type: 'USER',
@@ -262,9 +262,7 @@ async function installPreviewApiMock(
           config: { tools: [], skills: [], subagents: [] },
           version: '1',
         })) : []
-        await route.fulfill({
-          json: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results },
-        })
+        await route.fulfill({ json: results })
         return
       }
       if (path === '/api/platform/models') {

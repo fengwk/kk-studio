@@ -64,7 +64,7 @@ import { setLocale } from '@/shared/i18n'
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ModelDTO,
   EnvironmentCardDTO,
   HarnessModelRequestDebugDTO,
@@ -314,7 +314,7 @@ vi.mock('@/shared/api/harness-service', () => ({
   },
 }))
 
-const agents: AgentDefinitionDTO[] = [{
+const agents: AgentDTO[] = [{
   name: 'assistant',
   description: null,
   systemPrompt: null,
@@ -322,8 +322,8 @@ const agents: AgentDefinitionDTO[] = [{
   execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
   config: { tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }]
 
 const models: ModelDTO[] = [{
@@ -516,12 +516,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   setLocale('zh-CN')
-  vi.mocked(agentService.listAgents).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: String(agents.length),
-    results: agents,
-  })
+  vi.mocked(agentService.listAgents).mockResolvedValue(agents)
   vi.mocked(agentService.listModels).mockResolvedValue(models)
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
   vi.mocked(harnessService.getCompactionAvailability).mockResolvedValue({
@@ -4162,7 +4157,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       updatedAt: 0,
     }
 
-    const coderAgent: AgentDefinitionDTO = {
+    const coderAgent: AgentDTO = {
       name: 'coder',
       description: null,
       systemPrompt: null,
@@ -4170,11 +4165,11 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       execution: { driver: 'builtin', settings: { modelName: 'Claude', variant: 'fast' } },
       config: { tools: [], skills: [], subagents: [] },
       version: '0',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
-    const brokenAgent: AgentDefinitionDTO = {
+    const brokenAgent: AgentDTO = {
       name: 'broken-agent',
       description: null,
       systemPrompt: null,
@@ -4182,18 +4177,13 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       execution: { driver: 'builtin', settings: { modelName: 'nonexistent-model', variant: null } },
       config: { tools: [], skills: [], subagents: [] },
       version: '0',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     // 两类入口均需先验证完整预设；拒绝选择不得清空正文、附件或关闭选择面板。
     it.each(['blank', 'bound'])('preserves draft and interaction on invalid agent selection in %s mode', async (mode) => {
-      vi.mocked(agentService.listAgents).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: '3',
-        results: [agents[0]!, coderAgent, brokenAgent],
-      })
+      vi.mocked(agentService.listAgents).mockResolvedValue([agents[0]!, coderAgent, brokenAgent])
       vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
       if (mode === 'bound') {
@@ -4260,12 +4250,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
 
     it('atomically follows target agent model in bound mode, sending SET_AGENT+SET_EXECUTION+USER_MESSAGE on submit', async () => {
       // 发送必须把 Agent 与模型设置放在同一消息批次，不能只更新 UI 标签。
-      vi.mocked(agentService.listAgents).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: '2',
-        results: [agents[0]!, coderAgent],
-      })
+      vi.mocked(agentService.listAgents).mockResolvedValue([agents[0]!, coderAgent])
       vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
       localStorage.setItem(

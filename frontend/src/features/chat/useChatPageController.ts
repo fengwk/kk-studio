@@ -16,7 +16,7 @@ export function useChatPageController() {
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
   })
-  const agents = agentsQuery.data?.results ?? []
+  const agents = agentsQuery.data ?? []
   // 已有可用 Agent 即说明 Provider / Model 齐备；否则才查询它们来渲染首次使用引导（与 Catalog 页共享缓存）。
   const hasAgent = agents.some((agent) => agent.execution != null)
   const needsSetupFacts = agentsQuery.isSuccess && !hasAgent

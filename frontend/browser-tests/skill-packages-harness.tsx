@@ -425,24 +425,19 @@ agentService.getSkillPackageArchiveUrl = async (name: string) => {
 
 agentService.resyncEnvironmentSkills = async () => undefined
 
-agentService.listAgents = async () => ({
-  pageNumber: 1,
-  pageSize: 100,
-  totalCount: '1',
-  results: [
-    {
-      name: 'demo-agent',
-      type: 'USER' as const,
-      description: null,
-      systemPrompt: null,
-      execution: null,
-      config: { tools: [], skills: [{ packageName: 'upload-pack', name: 'dropped' }], subagents: [] },
-      version: '1',
-      createTime: 0,
-      updateTime: 0,
-    },
-  ],
-})
+agentService.listAgents = async () => [
+  {
+    name: 'demo-agent',
+    type: 'USER' as const,
+    description: null,
+    systemPrompt: null,
+    execution: null,
+    config: { tools: [], skills: [{ packageName: 'upload-pack', name: 'dropped' }], subagents: [] },
+    version: '1',
+    createdAt: 0,
+    updatedAt: 0,
+  },
+]
 
 // 上传直传由可控的 XHR 替身驱动：只在浏览器内模拟进度事件，服务端校验仍由预览接口承担。
 storageService.reserveUpload = async () => ({

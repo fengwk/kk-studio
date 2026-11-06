@@ -10,9 +10,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
@@ -21,10 +24,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.HashMap;
@@ -32,11 +31,11 @@ import java.util.List;
 import java.util.Map;
 
 /** Agent 定义全局唯一并引用当前模型名称；记录存续期间名称不可变，硬删除后可同名重建。 */
-public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
+public class AgentServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private ProviderService agentProviderService;
   @Autowired private ModelService agentModelService;
-  @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private AgentService agentService;
 
   @Test
   public void shouldPersistGlobalStructuredDefinition() {
@@ -48,44 +47,42 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals("vendor/agent model-" + suffix, modelRef);
     assertTrue(model instanceof SingleModelDTO);
 
-    AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(modelRef, name));
+    AgentDTO definition = agentService.createAgent(agent(modelRef, name));
     assertEquals(execution(modelRef, "default"), definition.getExecution());
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
     assertEquals("0", definition.getVersion());
-    assertThrows(
-        DomainException.class, () -> agentDefinitionService.createAgent(agent(modelRef, name)));
+    assertThrows(DomainException.class, () -> agentService.createAgent(agent(modelRef, name)));
     assertThrows(DomainException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
 
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO update = new AgentUpdateDTO();
     update.setDescription("updated");
     update.setSystemPrompt(definition.getSystemPrompt());
     update.setExecution(definition.getExecution());
     update.setConfig(definition.getConfig());
     update.setExpectedVersion(definition.getVersion());
-    AgentDefinitionDTO updated = agentDefinitionService.updateAgent(name, update);
+    AgentDTO updated = agentService.updateAgent(name, update);
     assertEquals(name, updated.getName());
     assertEquals(modelRef, updated.getExecution().getSettings().get("modelName"));
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
-        agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(candidate -> candidate.getName().equals(name)));
+        agentService.listAgents().stream().anyMatch(candidate -> candidate.getName().equals(name)));
 
-    AgentDefinitionUpdateDTO stale = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO stale = new AgentUpdateDTO();
     stale.setDescription("stale");
     stale.setExecution(definition.getExecution());
     stale.setConfig(definition.getConfig());
     stale.setExpectedVersion(definition.getVersion());
-    assertThrows(DomainException.class, () -> agentDefinitionService.updateAgent(name, stale));
+    assertThrows(DomainException.class, () -> agentService.updateAgent(name, stale));
 
-    agentDefinitionService.deleteAgent(name, updated.getVersion());
+    agentService.deleteAgent(name, updated.getVersion());
     // 硬删除：同名立即可重建。
-    AgentDefinitionDTO recreated = agentDefinitionService.createAgent(agent(modelRef, name));
+    AgentDTO recreated = agentService.createAgent(agent(modelRef, name));
     assertEquals("0", recreated.getVersion());
-    agentDefinitionService.deleteAgent(name, recreated.getVersion());
-    assertThrows(DomainException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
+    agentService.deleteAgent(name, recreated.getVersion());
+    assertThrows(DomainException.class, () -> agentService.deleteAgent(name, "0"));
     agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
@@ -96,41 +93,40 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     ProviderDTO provider = provider("subagent-provider-" + suffix);
     ModelDTO model = model(provider.getName(), "subagent-model-" + suffix);
     String modelRef = model.getName();
-    AgentDefinitionDTO child =
-        agentDefinitionService.createAgent(agent(modelRef, "subagent-child-" + suffix));
-    AgentDefinitionCreateDTO parentCreate = agent(modelRef, "subagent-parent-" + suffix);
+    AgentDTO child = agentService.createAgent(agent(modelRef, "subagent-child-" + suffix));
+    AgentCreateDTO parentCreate = agent(modelRef, "subagent-parent-" + suffix);
     parentCreate.getConfig().setSubagents(List.of(child.getName()));
-    AgentDefinitionDTO parent = agentDefinitionService.createAgent(parentCreate);
+    AgentDTO parent = agentService.createAgent(parentCreate);
     try {
       assertEquals(List.of(child.getName()), parent.getConfig().getSubagents());
       assertThrows(
           DomainException.class,
-          () -> agentDefinitionService.deleteAgent(child.getName(), child.getVersion()));
+          () -> agentService.deleteAgent(child.getName(), child.getVersion()));
 
-      AgentDefinitionCreateDTO missing = agent(modelRef, "subagent-missing-" + suffix);
+      AgentCreateDTO missing = agent(modelRef, "subagent-missing-" + suffix);
       missing.getConfig().setSubagents(List.of("missing-" + suffix));
-      assertThrows(DomainException.class, () -> agentDefinitionService.createAgent(missing));
+      assertThrows(DomainException.class, () -> agentService.createAgent(missing));
 
-      AgentDefinitionUpdateDTO removeReference = new AgentDefinitionUpdateDTO();
+      AgentUpdateDTO removeReference = new AgentUpdateDTO();
       removeReference.setDescription(parent.getDescription());
       removeReference.setSystemPrompt(parent.getSystemPrompt());
       removeReference.setExecution(parent.getExecution());
       removeReference.setConfig(parent.getConfig());
       removeReference.getConfig().setSubagents(List.of());
       removeReference.setExpectedVersion(parent.getVersion());
-      parent = agentDefinitionService.updateAgent(parent.getName(), removeReference);
+      parent = agentService.updateAgent(parent.getName(), removeReference);
 
-      agentDefinitionService.deleteAgent(child.getName(), child.getVersion());
-      agentDefinitionService.deleteAgent(parent.getName(), parent.getVersion());
+      agentService.deleteAgent(child.getName(), child.getVersion());
+      agentService.deleteAgent(parent.getName(), parent.getVersion());
     } finally {
-      if (agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+      if (agentService.listAgents().stream()
           .anyMatch(candidate -> candidate.getName().equals(parentCreate.getName()))) {
-        AgentDefinitionDTO current =
-            agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+        AgentDTO current =
+            agentService.listAgents().stream()
                 .filter(candidate -> candidate.getName().equals(parentCreate.getName()))
                 .findFirst()
                 .orElseThrow();
-        agentDefinitionService.deleteAgent(current.getName(), current.getVersion());
+        agentService.deleteAgent(current.getName(), current.getVersion());
       }
       agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
@@ -148,43 +144,42 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     String leftName = "recursive-left-" + suffix;
     String rightName = "recursive-right-" + suffix;
 
-    AgentDefinitionCreateDTO selfCreate = agent(modelRef, selfName);
+    AgentCreateDTO selfCreate = agent(modelRef, selfName);
     selfCreate.getConfig().setSubagents(List.of(selfName));
-    AgentDefinitionDTO self = agentDefinitionService.createAgent(selfCreate);
+    AgentDTO self = agentService.createAgent(selfCreate);
     assertEquals(List.of(selfName), self.getConfig().getSubagents());
-    agentDefinitionService.deleteAgent(selfName, self.getVersion());
+    agentService.deleteAgent(selfName, self.getVersion());
 
-    AgentDefinitionDTO left = agentDefinitionService.createAgent(agent(modelRef, leftName));
-    AgentDefinitionCreateDTO rightCreate = agent(modelRef, rightName);
+    AgentDTO left = agentService.createAgent(agent(modelRef, leftName));
+    AgentCreateDTO rightCreate = agent(modelRef, rightName);
     rightCreate.getConfig().setSubagents(List.of(leftName));
-    AgentDefinitionDTO right = agentDefinitionService.createAgent(rightCreate);
+    AgentDTO right = agentService.createAgent(rightCreate);
 
-    AgentDefinitionUpdateDTO closeCycle = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO closeCycle = new AgentUpdateDTO();
     closeCycle.setDescription(left.getDescription());
     closeCycle.setSystemPrompt(left.getSystemPrompt());
     closeCycle.setExecution(left.getExecution());
     closeCycle.setConfig(left.getConfig());
     closeCycle.getConfig().setSubagents(List.of(rightName));
     closeCycle.setExpectedVersion(left.getVersion());
-    left = agentDefinitionService.updateAgent(leftName, closeCycle);
+    left = agentService.updateAgent(leftName, closeCycle);
     assertEquals(List.of(rightName), left.getConfig().getSubagents());
     assertEquals(List.of(leftName), right.getConfig().getSubagents());
 
     assertThrows(
-        DomainException.class,
-        () -> agentDefinitionService.deleteAgent(rightName, right.getVersion()));
+        DomainException.class, () -> agentService.deleteAgent(rightName, right.getVersion()));
 
-    AgentDefinitionUpdateDTO openCycle = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO openCycle = new AgentUpdateDTO();
     openCycle.setDescription(left.getDescription());
     openCycle.setSystemPrompt(left.getSystemPrompt());
     openCycle.setExecution(left.getExecution());
     openCycle.setConfig(left.getConfig());
     openCycle.getConfig().setSubagents(List.of());
     openCycle.setExpectedVersion(left.getVersion());
-    left = agentDefinitionService.updateAgent(leftName, openCycle);
+    left = agentService.updateAgent(leftName, openCycle);
 
-    agentDefinitionService.deleteAgent(rightName, right.getVersion());
-    agentDefinitionService.deleteAgent(leftName, left.getVersion());
+    agentService.deleteAgent(rightName, right.getVersion());
+    agentService.deleteAgent(leftName, left.getVersion());
     agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
@@ -195,26 +190,25 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     ProviderDTO provider = provider("agent-variant-provider-" + suffix);
     ModelDTO model = model(provider.getName(), "agent-variant-model-" + suffix);
     String modelRef = model.getName();
-    AgentDefinitionCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
+    AgentCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
     invalid.setExecution(execution(modelRef, "missing"));
 
-    assertThrows(DomainException.class, () -> agentDefinitionService.createAgent(invalid));
+    assertThrows(DomainException.class, () -> agentService.createAgent(invalid));
 
-    AgentDefinitionCreateDTO valid = agent(modelRef, "agent-valid-variant-" + suffix);
+    AgentCreateDTO valid = agent(modelRef, "agent-valid-variant-" + suffix);
     valid.setExecution(execution(modelRef, null));
-    AgentDefinitionDTO created = agentDefinitionService.createAgent(valid);
+    AgentDTO created = agentService.createAgent(valid);
     try {
       assertNull(created.getExecution().getSettings().get("variant"));
-      AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
+      AgentUpdateDTO invalidUpdate = new AgentUpdateDTO();
       invalidUpdate.setDescription(created.getDescription());
       invalidUpdate.setExecution(execution(modelRef, "missing"));
       invalidUpdate.setConfig(created.getConfig());
       invalidUpdate.setExpectedVersion(created.getVersion());
       assertThrows(
-          DomainException.class,
-          () -> agentDefinitionService.updateAgent(created.getName(), invalidUpdate));
+          DomainException.class, () -> agentService.updateAgent(created.getName(), invalidUpdate));
     } finally {
-      agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
+      agentService.deleteAgent(created.getName(), created.getVersion());
       agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
@@ -228,30 +222,28 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     ModelDTO next = model(provider.getName(), "agent-rebind-next-" + suffix);
     String originalRef = original.getName();
     String nextRef = next.getName();
-    AgentDefinitionDTO definition =
-        agentDefinitionService.createAgent(agent(originalRef, "agent-rebind-" + suffix));
+    AgentDTO definition = agentService.createAgent(agent(originalRef, "agent-rebind-" + suffix));
     try {
-      AgentDefinitionUpdateDTO rebind = new AgentDefinitionUpdateDTO();
+      AgentUpdateDTO rebind = new AgentUpdateDTO();
       rebind.setDescription(definition.getDescription());
       rebind.setSystemPrompt(definition.getSystemPrompt());
       rebind.setExecution(execution(nextRef, null));
       rebind.setConfig(definition.getConfig());
       rebind.setExpectedVersion(definition.getVersion());
-      AgentDefinitionDTO updated = agentDefinitionService.updateAgent(definition.getName(), rebind);
+      AgentDTO updated = agentService.updateAgent(definition.getName(), rebind);
       assertEquals(nextRef, updated.getExecution().getSettings().get("modelName"));
       assertNull(updated.getExecution().getSettings().get("variant"));
 
-      AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();
+      AgentUpdateDTO missing = new AgentUpdateDTO();
       missing.setDescription(updated.getDescription());
       missing.setExecution(execution("missing-" + suffix, null));
       missing.setConfig(updated.getConfig());
       missing.setExpectedVersion(updated.getVersion());
       assertThrows(
-          DomainException.class,
-          () -> agentDefinitionService.updateAgent(updated.getName(), missing));
+          DomainException.class, () -> agentService.updateAgent(updated.getName(), missing));
       definition = updated;
     } finally {
-      agentDefinitionService.deleteAgent(definition.getName(), definition.getVersion());
+      agentService.deleteAgent(definition.getName(), definition.getVersion());
       agentModelService.deleteModel(next.getName(), next.getVersion());
       agentModelService.deleteModel(original.getName(), original.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
@@ -273,12 +265,12 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     return agentModelService.createModel(dto);
   }
 
-  private AgentDefinitionCreateDTO agent(String model, String name) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private AgentCreateDTO agent(String model, String name) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
-    AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
+    AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
     dto.setExecution(execution(model, "default"));
     dto.setConfig(config);

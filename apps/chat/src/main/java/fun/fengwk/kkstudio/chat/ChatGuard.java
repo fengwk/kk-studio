@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 
 import java.util.UUID;
@@ -14,19 +14,19 @@ import java.util.UUID;
 public class ChatGuard {
 
   private static final String RESOURCE = "chat";
-  private static final String AGENT_RESOURCE = "agent_definition";
+  private static final String AGENT_RESOURCE = "agent";
   private static final String ENVIRONMENT_RESOURCE = "environment";
 
   private final ChatRepository chatRepository;
-  private final AgentDefinitionRepository agentDefinitionRepository;
+  private final AgentRepository agentRepository;
   private final EnvironmentRepository environmentRepository;
 
   public ChatGuard(
       ChatRepository chatRepository,
-      AgentDefinitionRepository agentDefinitionRepository,
+      AgentRepository agentRepository,
       EnvironmentRepository environmentRepository) {
     this.chatRepository = chatRepository;
-    this.agentDefinitionRepository = agentDefinitionRepository;
+    this.agentRepository = agentRepository;
     this.environmentRepository = environmentRepository;
   }
 
@@ -52,7 +52,7 @@ public class ChatGuard {
     if (agentName == null || agentName.isBlank()) {
       throw DomainException.validation(RESOURCE, "agentName must not be blank");
     }
-    if (agentDefinitionRepository.getByName(agentName) == null) {
+    if (agentRepository.getByName(agentName) == null) {
       throw DomainException.validation(
           AGENT_RESOURCE, "unknown " + AGENT_RESOURCE + ": " + agentName);
     }

@@ -123,8 +123,7 @@ class FlywayAutoConfigurationIntegrationTest {
         st.executeUpdate("delete from model where name='group-without-wire'");
       }
       try (ResultSet seed =
-          st.executeQuery(
-              "select count(*) from agent_definition where name = 'default-assistant'")) {
+          st.executeQuery("select count(*) from agent where name = 'default-assistant'")) {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "fixture seed must be visible through the data-source");
       }

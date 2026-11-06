@@ -55,8 +55,8 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
   beforeEach(() => {
     sockets = new FakeWebSocketHarness()
     client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-    vi.spyOn(agentService, 'listAgents').mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
-    vi.spyOn(agentService, 'listModels').mockResolvedValue([])
+  vi.spyOn(agentService, 'listAgents').mockResolvedValue([])
+  vi.spyOn(agentService, 'listModels').mockResolvedValue([])
   })
 
   afterEach(() => {

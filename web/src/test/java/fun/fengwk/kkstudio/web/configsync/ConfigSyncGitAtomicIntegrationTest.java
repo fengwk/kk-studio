@@ -19,9 +19,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
@@ -39,7 +40,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -99,8 +99,8 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private SkillPackageRepository skillPackageRepository;
   @Autowired private ProviderRepository agentProviderRepository;
   @Autowired private ModelRepository agentModelRepository;
-  @Autowired private AgentDefinitionRepository agentDefinitionRepository;
-  @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private AgentRepository agentRepository;
+  @Autowired private AgentService agentService;
   @Autowired private StorageUploadRepository storageUploadRepository;
   @Autowired private StorageBlobManager storageBlobManager;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -185,7 +185,7 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
         agentModelRepository.getByName(modelName),
         "model must be rolled back after write transaction failure");
     assertNull(
-        agentDefinitionRepository.getByName(agentName),
+        agentRepository.getByName(agentName),
         "agent must be rolled back after write transaction failure");
 
     // 既有包状态完全未改变，artifactBlobId 与引用计数保持原状
@@ -303,9 +303,9 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(COMMIT_SUCCESS, pkg.packageVersion());
     assertNotNull(pkg.findSkill("dev"));
 
-    AgentDefinition agent = agentDefinitionRepository.getByName(agentName);
+    Agent agent = agentRepository.getByName(agentName);
     assertNotNull(agent);
-    AgentDefinitionDTO agentDto = agentDefinitionService.toDto(agent);
+    AgentDTO agentDto = agentService.toDto(agent);
     assertEquals(1, agentDto.getConfig().getSkills().size());
     assertEquals(SUCCESS_PKG, agentDto.getConfig().getSkills().get(0).getPackageName());
     assertEquals("dev", agentDto.getConfig().getSkills().get(0).getName());

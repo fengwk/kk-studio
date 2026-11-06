@@ -284,13 +284,13 @@ public class McpServerRepository {
         .update();
   }
 
-  /** 返回任一 agent_definition.config.tools 引用的 MCP 模型可见工具名集合。 */
+  /** 返回任一 agent.config.tools 引用的 MCP 模型可见工具名集合。 */
   public List<String> selectReferencedToolNames() {
     return jdbcClient
         .sql(
             """
             select distinct tool_name
-            from agent_definition,
+            from agent,
                  lateral jsonb_array_elements_text(
                    case when jsonb_typeof(config -> 'tools') = 'array'
                         then config -> 'tools'

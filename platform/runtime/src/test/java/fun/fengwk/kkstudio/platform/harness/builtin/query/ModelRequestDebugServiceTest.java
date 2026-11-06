@@ -60,9 +60,9 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
@@ -125,12 +125,11 @@ class ModelRequestDebugServiceTest {
 
   private final HarnessRuntime runtime = mock(HarnessRuntime.class);
   private final DatabaseTurnResolver turnResolver = mock(DatabaseTurnResolver.class);
-  private final AgentDefinitionRepository agentDefinitionRepository =
-      mock(AgentDefinitionRepository.class);
+  private final AgentRepository agentRepository = mock(AgentRepository.class);
   // 使用真实 codec：canonical config JSON 的 wire 形状与“无凭据”由真实编码证明，而不是 mock 约定。
   // 宿主 mapper 实际禁用字母序，这里显式对齐，保证断言的是生产声明的持久化形状。
-  private final AgentDefinitionConfigCodec agentConfigCodec =
-      new AgentDefinitionConfigCodec(
+  private final AgentConfigCodec agentConfigCodec =
+      new AgentConfigCodec(
           JsonMapper.builder().disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build());
   private final BuiltinRequestQuery builtinRequestQuery = mock(BuiltinRequestQuery.class);
 
@@ -138,7 +137,7 @@ class ModelRequestDebugServiceTest {
       new ModelRequestDebugService(
           runtime,
           turnResolver,
-          agentDefinitionRepository,
+          agentRepository,
           agentConfigCodec,
           builtinRequestQuery,
           Clock.fixed(NOW, ZoneOffset.UTC));
@@ -421,7 +420,7 @@ class ModelRequestDebugServiceTest {
     // 顶层草稿选择与生成时间不因 planning 失败而丢失。
     assertEquals(DRAFT_ENV, debug.getEnvironmentName());
     // 规划失败时不读取任何 subagent definition，不静默伪造配置。
-    verifyNoMoreInteractions(agentDefinitionRepository);
+    verifyNoMoreInteractions(agentRepository);
 
     String json = JSON.writeValueAsString(debug);
     assertTrue(
@@ -527,8 +526,8 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.SubagentDTO subagent = debug.getSubagents().getFirst();
     assertEquals(List.of("nested"), subagent.getSubagents());
     // nested 只是声明：绝不作为下一层 definition 被查询。
-    verify(agentDefinitionRepository).getByName("coder");
-    verifyNoMoreInteractions(agentDefinitionRepository);
+    verify(agentRepository).getByName("coder");
+    verifyNoMoreInteractions(agentRepository);
 
     String configurationJson = subagent.getConfigurationJson();
     assertEquals(CODER_CONFIG_JSON, configurationJson);
@@ -541,7 +540,7 @@ class ModelRequestDebugServiceTest {
 
   /** 测试意图：规划已保证 subagent 存在，Debug 侧同名缺失或配置非法必须明确失败，绝不静默返回空配置。 */
   @Test
-  void rejectsMissingOrInvalidSubagentDefinitionInsteadOfReturningEmptyConfiguration() {
+  void rejectsMissingOrInvalidSubagentInsteadOfReturningEmptyConfiguration() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
     when(turnResolver.planLiveWithSettings(
@@ -558,9 +557,8 @@ class ModelRequestDebugServiceTest {
         missing.getMessage());
 
     // 同名 definition 存在但配置非法。
-    AgentDefinition invalid =
-        AgentDefinition.builder().name("coder").configJson("{ not json").build();
-    when(agentDefinitionRepository.getByName("coder")).thenReturn(invalid);
+    Agent invalid = Agent.builder().name("coder").configJson("{ not json").build();
+    when(agentRepository.getByName("coder")).thenReturn(invalid);
     IllegalStateException broken =
         assertThrows(
             IllegalStateException.class,
@@ -606,9 +604,8 @@ class ModelRequestDebugServiceTest {
   }
 
   private void stubCoderDefinition() {
-    AgentDefinition coder =
-        AgentDefinition.builder().name("coder").configJson(CODER_CONFIG_JSON).build();
-    when(agentDefinitionRepository.getByName("coder")).thenReturn(coder);
+    Agent coder = Agent.builder().name("coder").configJson(CODER_CONFIG_JSON).build();
+    when(agentRepository.getByName("coder")).thenReturn(coder);
   }
 
   private static ThreadSnapshot idleSnapshot() {

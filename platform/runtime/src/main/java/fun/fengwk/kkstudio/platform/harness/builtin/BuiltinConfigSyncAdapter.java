@@ -21,7 +21,7 @@ public final class BuiltinConfigSyncAdapter {
     return BuiltinExecution.model(execution);
   }
 
-  /** 仅在调用方已通过 AgentDefinitionService.validateImport 后使用。 */
+  /** 仅在调用方已通过 AgentService.validateImport 后使用。 */
   public static ModelSelection model(HarnessExecutionSelectionDTO execution) {
     if (execution == null || !BuiltinExecution.DRIVER.equals(execution.getDriver())) {
       return null;

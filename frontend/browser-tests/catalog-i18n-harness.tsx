@@ -123,7 +123,7 @@ agentService.deleteSkillPackage = rejectMutation
 agentService.checkSkillPackage = rejectMutation
 agentService.publishSkillPackage = rejectMutation
 agentService.getSkillPackageArchiveUrl = rejectMutation
-agentService.listAgents = async () => ({ pageNumber: 1, pageSize: 100, totalCount: '0', results: [] })
+agentService.listAgents = async () => []
 
 const queryClient = new QueryClient({
   defaultOptions: {

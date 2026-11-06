@@ -41,7 +41,7 @@ import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
 import '@/features/thread/thread-state.css'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ChatDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
@@ -85,7 +85,7 @@ export function ChatLayoutSelector({
 
 interface ChatWorkspaceContentProps {
   chat: ChatDTO
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments: EnvironmentCardDTO[]
 }
 
@@ -588,7 +588,7 @@ export function ChatWorkspacePage() {
     <ChatWorkspaceContent
       key={chat.id}
       chat={chat}
-      agents={agentsQuery.data?.results ?? []}
+      agents={agentsQuery.data ?? []}
       environments={environmentsQuery.data ?? []}
     />
   )

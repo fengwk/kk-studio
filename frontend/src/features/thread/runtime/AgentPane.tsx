@@ -28,7 +28,7 @@ import type {
   SessionSummaryResolver,
 } from '@/features/thread/runtime/root-thread/usePaneHistory'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -66,7 +66,7 @@ export function AgentPane({
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments?: EnvironmentCardDTO[]
   defaults?: AgentPaneDefaults
   focused?: boolean

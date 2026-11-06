@@ -154,12 +154,7 @@ describe('SkillPackagesPage', () => {
       },
     })
     vi.mocked(agentService.resyncEnvironmentSkills).mockResolvedValue(undefined)
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '0',
-      results: [],
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment('env-nas', 'NAS', true),
       environment('env-offline', '离线机器', false),

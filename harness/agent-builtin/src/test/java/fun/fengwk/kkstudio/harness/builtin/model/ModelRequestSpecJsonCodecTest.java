@@ -179,7 +179,7 @@ class ModelRequestSpecJsonCodecTest {
     assertEquals(requestSpec, codec.decode(encoded));
   }
 
-  // 测试意图: agent_definition.description 放开为 text 后，subagent 描述不能再被 512 字符上限拒绝，
+  // 测试意图: agent.description 放开为 text 后，subagent 描述不能再被 512 字符上限拒绝，
   // 且长描述必须无损地穿过冻结 spec 的编解码边界。
   @Test
   void roundTripsLongSubagentDescription() {

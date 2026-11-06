@@ -24,9 +24,10 @@ import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
@@ -54,7 +55,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
@@ -114,7 +114,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
   private PluginConfigurationService configurationService;
-  private AgentDefinitionRepository definitionRepository;
+  private AgentRepository definitionRepository;
   private ConfigSyncApplier applier;
   private ProviderService providerService;
 
@@ -148,7 +148,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
-    definitionRepository = new AgentDefinitionRepository(jdbcClient);
+    definitionRepository = new AgentRepository(jdbcClient);
 
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
@@ -191,7 +191,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             mock(SkillCatalogService.class),
             mock(McpServerService.class),
             definitionRepository,
-            mock(AgentDefinitionService.class),
+            mock(AgentService.class),
             mock(EnvironmentRepository.class),
             mock(EnvironmentService.class),
             mock(SystemSettingsService.class),
@@ -205,7 +205,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     seedCatalog();
 
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DEPENDENCY_AGENT)));
+    assertTrue(definitionRepository.create(agent(DEPENDENCY_AGENT)));
     ConfigSyncPlan plan =
         plan(
             List.of(providerSpec(PROVIDER_NAME)),
@@ -324,11 +324,11 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
         .update();
   }
 
-  private static AgentDefinition agentDefinition(String name) {
-    AgentDefinition agent =
-        AgentDefinition.builder()
+  private static Agent agent(String name) {
+    Agent agent =
+        Agent.builder()
             .name(name)
-            .type(AgentDefinitionType.USER)
+            .type(AgentType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(new ModelSelection(MODEL_NAME, null)))
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")

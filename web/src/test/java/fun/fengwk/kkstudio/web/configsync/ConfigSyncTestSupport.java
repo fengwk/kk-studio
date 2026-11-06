@@ -27,6 +27,7 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -188,9 +188,9 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return config;
   }
 
-  protected static AgentDefinitionConfigDTO agentConfig(
+  protected static AgentConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(subagents);

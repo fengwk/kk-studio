@@ -6,21 +6,18 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.List;
@@ -34,29 +31,29 @@ import java.util.Objects;
  * <p>内置 Agent 的名称与存在性由系统持有：用户不能同名创建或删除，但可以编辑，且允许显式未配置 execution。
  */
 @Service
-public class AgentDefinitionService {
+public class AgentService {
 
-  private static final String RESOURCE = "agent_definition";
+  private static final String RESOURCE = "agent";
   private static final int NAME_MAX_LENGTH = 64;
   private static final StrictJson JSON = StrictJson.standard();
 
-  private final AgentDefinitionRepository repository;
-  private final AgentDefinitionReferenceResolver referenceResolver;
+  private final AgentRepository repository;
+  private final AgentReferenceResolver referenceResolver;
   private final DriverRegistry driverRegistry;
   private final BuiltinAgentExecutionValidator builtinExecutionValidator;
-  private final AgentDefinitionConfigValidator configValidator;
-  private final AgentDefinitionConfigCodec configCodec;
+  private final AgentConfigValidator configValidator;
+  private final AgentConfigCodec configCodec;
   private final AgentEditableSupport editableSupport;
   private final PluginAgentDependencies pluginAgentDependencies;
   private final List<AgentReferenceCheck> productReferences;
 
-  public AgentDefinitionService(
-      AgentDefinitionRepository repository,
-      AgentDefinitionReferenceResolver referenceResolver,
+  public AgentService(
+      AgentRepository repository,
+      AgentReferenceResolver referenceResolver,
       DriverRegistry driverRegistry,
       BuiltinAgentExecutionValidator builtinExecutionValidator,
-      AgentDefinitionConfigValidator configValidator,
-      AgentDefinitionConfigCodec configCodec,
+      AgentConfigValidator configValidator,
+      AgentConfigCodec configCodec,
       AgentEditableSupport editableSupport,
       PluginAgentDependencies pluginAgentDependencies,
       List<AgentReferenceCheck> productReferences) {
@@ -73,19 +70,18 @@ public class AgentDefinitionService {
     this.productReferences = List.copyOf(productReferences);
   }
 
-  public Page<AgentDefinitionDTO> pageAgents(PageQuery pageQuery) {
-    return repository.page(pageQuery).map(this::toDto);
+  public List<AgentDTO> listAgents() {
+    return repository.listAll().stream().map(this::toDto).toList();
   }
 
   @Transactional
-  public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
+  public AgentDTO createAgent(AgentCreateDTO createDTO) {
     String name = createDTO == null ? null : createDTO.getName();
     rejectReservedName(name);
     Mutation mutation = mutation(name, createDTO, true);
-    AgentDefinition definition =
-        mutation.applyTo(AgentDefinition.builder().type(AgentDefinitionType.USER)).build();
+    Agent definition = mutation.applyTo(Agent.builder().type(AgentType.USER)).build();
     builtinExecutionValidator.validateCatalog(definition.execution());
-    AgentDefinitionConfigDTO config = configCodec.decode(definition.configJson());
+    AgentConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
     referenceResolver.requireSubagentsForCreate(definition.name(), config.getSubagents());
@@ -101,27 +97,26 @@ public class AgentDefinitionService {
   }
 
   @Transactional
-  public AgentDefinitionDTO updateAgent(String name, AgentDefinitionUpdateDTO updateDTO) {
+  public AgentDTO updateAgent(String name, AgentUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    AgentDefinition current = referenceResolver.requireAgent(name);
+    Agent current = referenceResolver.requireAgent(name);
     ensureExpectedVersion(current, rawExpected, expected);
     // 内置 Agent 允许显式未配置 execution。
-    boolean executionRequired = current.type() != AgentDefinitionType.BUILTIN;
-    AgentDefinition definition =
+    boolean executionRequired = current.type() != AgentType.BUILTIN;
+    Agent definition =
         mutation(current.name(), updateDTO, executionRequired).applyTo(current.toBuilder()).build();
     builtinExecutionValidator.validateCatalog(definition.execution());
-    AgentDefinitionConfigDTO config = configCodec.decode(definition.configJson());
+    AgentConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
-    AgentDefinition locked =
-        referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
+    Agent locked = referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
     ensureExpectedVersion(locked, rawExpected, expected);
     if (!repository.updateByName(definition, expected)) {
-      AgentDefinition reread = repository.getByName(name);
+      Agent reread = repository.getByName(name);
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
@@ -134,8 +129,8 @@ public class AgentDefinitionService {
   @Transactional
   public void deleteAgent(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentDefinition definition = referenceResolver.requireAgentForUpdate(name);
-    if (definition.type() == AgentDefinitionType.BUILTIN) {
+    Agent definition = referenceResolver.requireAgentForUpdate(name);
+    if (definition.type() == AgentType.BUILTIN) {
       // 内置 Agent 的名称与存在性由系统持有，用户不能删除。
       throw DomainException.inUse(RESOURCE, "built-in agent cannot be deleted: " + name);
     }
@@ -153,7 +148,7 @@ public class AgentDefinitionService {
           RESOURCE, RESOURCE + " is referenced by plugin configuration: " + name);
     }
     if (!repository.deleteByName(name, expected)) {
-      AgentDefinition reread = repository.getByName(name);
+      Agent reread = repository.getByName(name);
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
@@ -163,13 +158,13 @@ public class AgentDefinitionService {
   }
 
   /** 与写入共用字段和 execution 形状校验；导入预检不访问尚未导入的模型。 */
-  public void validateImport(String name, AgentDefinitionEditablePropertiesDTO properties) {
+  public void validateImport(String name, AgentEditablePropertiesDTO properties) {
     mutation(name, properties, true);
   }
 
   /** 将 Agent definition 投影为公开 DTO。 */
-  public AgentDefinitionDTO toDto(AgentDefinition definition) {
-    AgentDefinitionDTO dto = new AgentDefinitionDTO();
+  public AgentDTO toDto(Agent definition) {
+    AgentDTO dto = new AgentDTO();
     dto.setName(definition.name());
     dto.setType(definition.type());
     dto.setDescription(definition.description());
@@ -177,13 +172,13 @@ public class AgentDefinitionService {
     dto.setExecution(toExecutionDto(definition.execution()));
     dto.setConfig(configCodec.decode(definition.configJson()));
     dto.setVersion(CatalogVersions.format(definition.version()));
-    dto.setCreateTime(definition.createTime());
-    dto.setUpdateTime(definition.updateTime());
+    dto.setCreatedAt(definition.createTime());
+    dto.setUpdatedAt(definition.updateTime());
     return dto;
   }
 
   private static void ensureExpectedVersion(
-      AgentDefinition definition, String expectedVersion, long expected) {
+      Agent definition, String expectedVersion, long expected) {
     if (definition.version() != expected) {
       throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(definition.version()));
@@ -195,14 +190,14 @@ public class AgentDefinitionService {
       return;
     }
     String normalized = name.strip();
-    if (BuiltinAgentDefinitions.isReservedName(normalized)) {
+    if (BuiltinAgents.isReservedName(normalized)) {
       // 内置 Agent 的身份由系统持有：用户不能以同名创建自己的 Agent 覆盖它。
       throw DomainException.duplicate(
           RESOURCE, "agent definition name is reserved for a built-in agent: " + normalized);
     }
   }
 
-  private void validateConfig(AgentDefinitionConfigDTO config) {
+  private void validateConfig(AgentConfigDTO config) {
     try {
       configValidator.validate(config);
     } catch (IllegalArgumentException error) {
@@ -211,7 +206,7 @@ public class AgentDefinitionService {
   }
 
   private Mutation mutation(
-      String name, AgentDefinitionEditablePropertiesDTO properties, boolean executionRequired) {
+      String name, AgentEditablePropertiesDTO properties, boolean executionRequired) {
     if (properties == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -233,7 +228,7 @@ public class AgentDefinitionService {
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
-    AgentDefinitionConfigDTO config = properties.getConfig();
+    AgentConfigDTO config = properties.getConfig();
     if (config == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " config must not be null");
     }
@@ -287,7 +282,7 @@ public class AgentDefinitionService {
       ExecutionSelection execution,
       String configJson) {
 
-    AgentDefinition.AgentDefinitionBuilder applyTo(AgentDefinition.AgentDefinitionBuilder builder) {
+    Agent.AgentBuilder applyTo(Agent.AgentBuilder builder) {
       return builder
           .name(name)
           .description(description)

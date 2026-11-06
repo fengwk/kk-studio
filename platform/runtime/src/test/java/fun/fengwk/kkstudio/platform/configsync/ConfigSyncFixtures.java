@@ -20,13 +20,14 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionConfigValidator;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceResolver;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentConfigValidator;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentReferenceResolver;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
 import fun.fengwk.kkstudio.platform.catalog.definition.BuiltinAgentExecutionValidator;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
@@ -70,7 +71,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
@@ -92,8 +92,7 @@ import java.util.UUID;
 final class ConfigSyncFixtures {
 
   static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  static final AgentDefinitionConfigCodec AGENT_CONFIG_CODEC =
-      new AgentDefinitionConfigCodec(MAPPER);
+  static final AgentConfigCodec AGENT_CONFIG_CODEC = new AgentConfigCodec(MAPPER);
   static final ModelRuntimeConfigParser MODEL_CONFIG_PARSER = new ModelRuntimeConfigParser(MAPPER);
   static final ModelGroupConfigCodec GROUP_CONFIG_CODEC = new ModelGroupConfigCodec(MAPPER);
   static final ProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
@@ -117,15 +116,15 @@ final class ConfigSyncFixtures {
           MODEL_CONFIG_PARSER,
           GROUP_CONFIG_CODEC);
 
-  /** 真实 {@code AgentDefinitionService.validateImport}：纯静态校验，仓储与引用解析以 mock 占位。 */
-  static final AgentDefinitionService AGENT_SERVICE =
-      new AgentDefinitionService(
-          mock(AgentDefinitionRepository.class),
-          mock(AgentDefinitionReferenceResolver.class),
+  /** 真实 {@code AgentService.validateImport}：纯静态校验，仓储与引用解析以 mock 占位。 */
+  static final AgentService AGENT_SERVICE =
+      new AgentService(
+          mock(AgentRepository.class),
+          mock(AgentReferenceResolver.class),
           builtinDrivers(),
           new BuiltinAgentExecutionValidator(
               mock(ModelRepository.class), mock(ModelDefaultVariantResolver.class)),
-          mock(AgentDefinitionConfigValidator.class),
+          mock(AgentConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
           mock(PluginAgentDependencies.class),
@@ -214,9 +213,9 @@ final class ConfigSyncFixtures {
     return config;
   }
 
-  static AgentDefinitionConfigDTO agentConfig(
+  static AgentConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(subagents);
@@ -255,10 +254,10 @@ final class ConfigSyncFixtures {
         .build();
   }
 
-  static AgentDefinition agent(String name, String modelName, AgentDefinitionConfigDTO config) {
+  static Agent agent(String name, String modelName, AgentConfigDTO config) {
     // 未配置的内置 Agent 没有执行选择；只有绑定了模型的 Agent 才构造 ModelSelection。
-    AgentDefinition agent =
-        AgentDefinition.builder()
+    Agent agent =
+        Agent.builder()
             .name(name)
             .execution(
                 modelName == null ? null : BuiltinExecution.of(new ModelSelection(modelName, null)))
@@ -344,7 +343,7 @@ final class ConfigSyncFixtures {
   static ConfigSyncSnapshot snapshot(
       List<Provider> providers,
       List<Model> models,
-      List<AgentDefinition> agents,
+      List<Agent> agents,
       List<SkillPackage> skillPackages,
       List<Environment> environments,
       List<McpServer> mcpServers,
@@ -364,7 +363,7 @@ final class ConfigSyncFixtures {
   static ConfigSyncSnapshot snapshotWithPlugins(
       List<Provider> providers,
       List<Model> models,
-      List<AgentDefinition> agents,
+      List<Agent> agents,
       Set<String> builtinAgentNames,
       List<SkillPackage> skillPackages,
       List<Environment> environments,
@@ -395,13 +394,11 @@ final class ConfigSyncFixtures {
   /** 宿主依赖服务替身：Graph/Planner 只做纯声明解析，仓库替身不会被调用。 */
   static PluginAgentDependencies agentDependencies(StudioPlugin... plugins) {
     return new PluginAgentDependencies(
-        registry(plugins),
-        mock(PluginConfigurationRepository.class),
-        mock(AgentDefinitionRepository.class));
+        registry(plugins), mock(PluginConfigurationRepository.class), mock(AgentRepository.class));
   }
 
   static PluginAgentDependencies agentDependencies(
-      AgentDefinitionRepository definitionRepository, StudioPlugin... plugins) {
+      AgentRepository definitionRepository, StudioPlugin... plugins) {
     return new PluginAgentDependencies(
         registry(plugins), mock(PluginConfigurationRepository.class), definitionRepository);
   }
@@ -554,7 +551,7 @@ final class ConfigSyncFixtures {
   }
 
   /** 把 typed Agent config 序列化为 config sync 纯结构。 */
-  static Map<String, Object> agentConfigMap(AgentDefinitionConfigDTO config) {
+  static Map<String, Object> agentConfigMap(AgentConfigDTO config) {
     return new ConfigSyncYaml().toMap(config, "config");
   }
 

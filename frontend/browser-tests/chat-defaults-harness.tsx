@@ -9,7 +9,7 @@ import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ChatDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
@@ -18,7 +18,7 @@ const params = new URLSearchParams(window.location.search)
 const initialLocale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
 setLocale(initialLocale)
 
-const testAgents: AgentDefinitionDTO[] = [
+const testAgents: AgentDTO[] = [
   {
     name: 'assistant',
     description: null,
@@ -31,8 +31,8 @@ const testAgents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
   },
 ]
 

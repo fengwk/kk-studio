@@ -6,7 +6,7 @@ import {
   toEditableAgentUpdate,
 } from '@/features/catalog/ai-agent-draft-codec'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
-import type { AgentDefinitionDTO, ModelDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ModelDTO } from '@/shared/api/generated/contracts'
 
 function model(): ModelDTO {
   return {
@@ -87,7 +87,7 @@ describe('ai-agent-draft-codec', () => {
   })
 
   it('projects persisted definitions and normalizes nullable values', () => {
-    const agent: AgentDefinitionDTO = {
+    const agent: AgentDTO = {
       name: 'assistant',
       description: null,
       systemPrompt: null,
@@ -99,8 +99,8 @@ describe('ai-agent-draft-codec', () => {
         subagents: [' writer ', ''],
       },
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     expect(toAgentDraft(agent)).toEqual({
@@ -204,7 +204,7 @@ describe('ai-agent-draft-codec', () => {
   })
 
   it('projects an unconfigured built-in model as empty and only BUILTIN may write null without leaking type', () => {
-    const builtin: AgentDefinitionDTO = {
+    const builtin: AgentDTO = {
       name: 'compaction',
       description: null,
       systemPrompt: null,
@@ -216,8 +216,8 @@ describe('ai-agent-draft-codec', () => {
         subagents: [],
       },
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     // 未配置模型投影为空字符串，绝不回退到父/第一个 model。

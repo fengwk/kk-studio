@@ -245,7 +245,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
       subagents: [],
     },
   }
-  const { status, json } = await ctx.call('POST', '/api/agents', body)
+  const { status, json } = await ctx.call('POST', '/api/platform/agents', body)
   assert(status === 201, `create Agent status ${status}`)
   const agent = json
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
@@ -265,7 +265,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
 async function deleteAgent(ctx, agent) {
   await ctx.call(
     'DELETE',
-    `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+    `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
   )
 }
 

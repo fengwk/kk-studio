@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +24,7 @@ class AgentTurnContextTest {
         () ->
             new AgentTurnContext(
                 null,
-                new AgentDefinitionConfigDTO(),
+                new AgentConfigDTO(),
                 environment,
                 List.of(),
                 List.of(),
@@ -48,7 +48,7 @@ class AgentTurnContextTest {
         () ->
             new AgentTurnContext(
                 agent(),
-                new AgentDefinitionConfigDTO(),
+                new AgentConfigDTO(),
                 null,
                 List.of(),
                 List.of(),
@@ -60,7 +60,7 @@ class AgentTurnContextTest {
     AgentTurnContext context =
         new AgentTurnContext(
             agent(),
-            new AgentDefinitionConfigDTO(),
+            new AgentConfigDTO(),
             environment,
             skills,
             new ArrayList<>(),
@@ -78,7 +78,7 @@ class AgentTurnContextTest {
     assertEquals("assistant", context.agent().name());
   }
 
-  private static AgentDefinition agent() {
-    return AgentDefinition.builder().name("assistant").type(AgentDefinitionType.USER).build();
+  private static Agent agent() {
+    return Agent.builder().name("assistant").type(AgentType.USER).build();
   }
 }

@@ -414,7 +414,7 @@ async function setupDistributedHarness(ctx, suffix) {
   const model = modelRes.json
   assert(model?.name, 'model creation failed')
 
-  const agentRes = await ctx.callNode('a', 'POST', '/api/agents', {
+  const agentRes = await ctx.callNode('a', 'POST', '/api/platform/agents', {
     name: `e2e-dist-agent-${suffix}`,
     description: 'Distributed test agent',
     systemPrompt: 'You are an agent with bash tools.',
@@ -437,14 +437,14 @@ async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
       await ctx.callNode(
         'a',
         'DELETE',
-        `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+        `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
       )
     } catch {
       try {
         await ctx.callNode(
           'b',
           'DELETE',
-          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       } catch {
         // best effort

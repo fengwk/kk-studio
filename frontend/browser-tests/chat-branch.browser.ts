@@ -212,13 +212,9 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/agents') {
+    if (path === '/api/platform/agents') {
       await route.fulfill({
-        json: {
-            pageNumber: 1,
-            pageSize: 50,
-            totalCount: '1',
-            results: [{
+        json: [{
               name: 'assistant',
               description: '通用助手',
               systemPrompt: null,
@@ -226,10 +222,9 @@ async function installChatApi(
               execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
               config: { tools: [], skills: [], subagents: [] },
               version: '1',
-              createTime: null,
-              updateTime: null,
+              createdAt: null,
+              updatedAt: null,
             }],
-        },
       })
       return
     }

@@ -8,16 +8,16 @@ import {
 } from '@/shared/api/client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentDTO,
+  AgentUpdateDTO,
+  ModelCatalogPageDTO,
   ModelCreateDTO,
   ModelDTO,
   ModelUpdateDTO,
   ProviderCreateDTO,
   ProviderDTO,
   ProviderUpdateDTO,
-  ModelCatalogPageDTO,
   SkillArchiveDownloadDTO,
   SkillEnvironmentSyncDTO,
   SkillPackageCheckDTO,
@@ -33,7 +33,6 @@ import type {
   ToolCatalogEntryDTO,
   ApiRoutes,
 } from '@/shared/api/generated/contracts'
-import type { PageResult } from '@/shared/api/contracts/base'
 
 export type CatalogRequester = <R extends keyof ApiRoutes>(
   route: R,
@@ -109,20 +108,22 @@ export function createAgentService(
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
-    listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
-      client.get('/agents', { params: { pageNumber, pageSize } }),
+    listAgents: (): Promise<AgentDTO[]> => catalogRequest('GET /api/platform/agents', {}),
 
     listTools: (): Promise<ToolCatalogEntryDTO[]> =>
       catalogRequest('GET /api/platform/tools', {}),
 
-    createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
-      client.post('/agents', data),
+    createAgent: (data: AgentCreateDTO): Promise<AgentDTO> =>
+      catalogRequest('POST /api/platform/agents', { body: data }),
 
-    updateAgent: (name: string, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/agents/${encodeURIComponent(name)}`, data),
+    updateAgent: (name: string, data: AgentUpdateDTO): Promise<AgentDTO> =>
+      catalogRequest('PUT /api/platform/agents/{name}', { path: { name }, body: data }),
 
     deleteAgent: (name: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/agents/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
+      catalogRequest('DELETE /api/platform/agents/{name}', {
+        path: { name },
+        query: { expectedVersion },
+      }),
 
     // --- Global Skills & Skill Packages ---
 

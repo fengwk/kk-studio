@@ -229,11 +229,9 @@ public abstract class WebPostgresTestSupport {
   private static void verifyDevSeed(Connection conn) throws SQLException {
     try (Statement st = conn.createStatement();
         ResultSet rs =
-            st.executeQuery(
-                "select count(*) from agent_definition where name = 'default-assistant'")) {
+            st.executeQuery("select count(*) from agent where name = 'default-assistant'")) {
       if (!rs.next() || rs.getLong(1) != 1L) {
-        throw new IllegalStateException(
-            "fixture seed did not insert agent_definition default-assistant");
+        throw new IllegalStateException("fixture seed did not insert agent default-assistant");
       }
     }
   }

@@ -4,38 +4,22 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 /**
- * 递归/分页拉取全部 Catalog Agent 名称列表，支持 >50 个 Agent 的完整枚举。
+ * 读取全部 Catalog Agent 名称列表。
  * 针对拉取失败进行防御性捕获，避免抛出或生成非法幻影值。
  */
 export async function fetchAllCatalogAgentNames(): Promise<string[]> {
-  const pageSize = 50
-  let pageNumber = 1
   const names: string[] = []
 
   try {
-    while (true) {
-      const page = await agentService.listAgents(pageNumber, pageSize)
-      const list = page?.results ?? []
-      for (const item of list) {
-        if (item?.name && typeof item.name === 'string') {
-          names.push(item.name.trim())
-        }
+    const agents = await agentService.listAgents()
+    for (const item of agents ?? []) {
+      if (item?.name && typeof item.name === 'string') {
+        names.push(item.name.trim())
       }
-      const totalCount = Number(page?.totalCount ?? 0)
-      if (
-        list.length < pageSize ||
-        (totalCount > 0 && names.length >= totalCount) ||
-        list.length === 0
-      ) {
-        break
-      }
-      pageNumber += 1
     }
   } catch {
     // 网络或接口失败时防御性降级为空，避免产生虚假错误值
-    return names.length > 0
-      ? Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-      : []
+    return []
   }
 
   return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))

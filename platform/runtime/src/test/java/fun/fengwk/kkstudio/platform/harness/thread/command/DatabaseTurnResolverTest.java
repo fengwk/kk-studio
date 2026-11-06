@@ -94,9 +94,10 @@ import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
@@ -138,7 +139,6 @@ import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Duration;
@@ -2999,11 +2999,10 @@ class DatabaseTurnResolverTest {
 
   private static final class Fixture {
 
-    private final AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    private final AgentRepository agents = mock(AgentRepository.class);
     private final ModelRepository models = mock(ModelRepository.class);
     private final ProviderRepository providers = mock(ProviderRepository.class);
-    private final AgentDefinitionConfigCodec agentConfigCodec =
-        mock(AgentDefinitionConfigCodec.class);
+    private final AgentConfigCodec agentConfigCodec = mock(AgentConfigCodec.class);
     private final ModelRuntimeConfigParser modelConfigParser = mock(ModelRuntimeConfigParser.class);
     private final ModelGroupConfigCodec groupConfigCodec = mock(ModelGroupConfigCodec.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
@@ -3015,8 +3014,8 @@ class DatabaseTurnResolverTest {
     private final StorageBlobManager blobManager = mock(StorageBlobManager.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private String observedHeadCommit;
-    private AgentDefinition agent;
-    private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
+    private Agent agent;
+    private final AgentConfigDTO agentConfig = new AgentConfigDTO();
     private Provider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
 
@@ -3100,7 +3099,7 @@ class DatabaseTurnResolverTest {
         HarnessCatalog providedCatalog,
         RuntimeToolCatalogSource providedToolCatalogSource) {
       agent =
-          AgentDefinition.builder()
+          Agent.builder()
               .name("assistant")
               .systemPrompt("agent system prompt")
               .configJson("agent-config")
@@ -3294,8 +3293,8 @@ class DatabaseTurnResolverTest {
     }
 
     /** Agent 为不可变记录：按编辑重建并重新绑定仓库桩。 */
-    private void editAgent(Consumer<AgentDefinition.AgentDefinitionBuilder> edit) {
-      AgentDefinition.AgentDefinitionBuilder builder = agent.toBuilder();
+    private void editAgent(Consumer<Agent.AgentBuilder> edit) {
+      Agent.AgentBuilder builder = agent.toBuilder();
       edit.accept(builder);
       agent = builder.build();
       when(agents.getByName("assistant")).thenReturn(agent);
@@ -3332,8 +3331,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void subagent(String name, String description) {
-      AgentDefinition subagent =
-          AgentDefinition.builder().name(name).description(description).build();
+      Agent subagent = Agent.builder().name(name).description(description).build();
       when(agents.getByName(name)).thenReturn(subagent);
     }
 
@@ -3471,8 +3469,8 @@ class DatabaseTurnResolverTest {
 
     private void compactionAgent(ModelSelection selection) {
       // 与普通 Agent 一样提供可解码的普通执行配置，使内置压缩 Agent 也能走 live 规划路径。
-      AgentDefinition.AgentDefinitionBuilder compaction =
-          AgentDefinition.builder()
+      Agent.AgentBuilder compaction =
+          Agent.builder()
               .name("Compaction")
               .systemPrompt(COMPACTION_SYSTEM_PROMPT)
               .configJson("agent-config");

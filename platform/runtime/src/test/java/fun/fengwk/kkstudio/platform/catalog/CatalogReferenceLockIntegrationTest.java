@@ -15,9 +15,13 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
@@ -32,10 +36,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
@@ -67,8 +67,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
 
   private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
-  @Autowired private AgentDefinitionService definitionService;
-  @Autowired private AgentDefinitionRepository definitionRepository;
+  @Autowired private AgentService agentService;
+  @Autowired private AgentRepository agentRepository;
   @Autowired private ProviderService providerService;
   @Autowired private ModelService modelService;
   @Autowired private SkillPackageRepository skillPackages;
@@ -83,12 +83,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     Model model = model("skill-create-" + suffix);
     String packageName = "pkg" + suffix;
     insertPackage(packageName, "dev");
-    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    AgentCreateDTO create = agent(model.ref(), "agent-" + suffix);
     create.getConfig().setSkills(List.of(skill(packageName, "dev")));
 
-    Outcome<AgentDefinitionDTO> created =
+    Outcome<AgentDTO> created =
         race(
-            () -> definitionService.createAgent(create),
+            () -> agentService.createAgent(create),
             () -> {
               skillPackages.lockPackage(packageName);
               return null;
@@ -98,15 +98,15 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    Agent persisted = agentRepository.getByName(create.getName());
     if (created.value() != null) {
       assertNotNull(persisted);
       assertNotNull(skillPackages.getPackage(packageName));
-      definitionService.deleteAgent(created.value().getName(), created.value().getVersion());
+      agentService.deleteAgent(created.value().getName(), created.value().getVersion());
     } else {
       assertTrue(domainFailure(created.error(), DomainErrorCode.VALIDATION));
       if (persisted != null) {
-        definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+        agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       }
     }
     deletePackage(packageName, skillPackages.getPackage(packageName) == null ? -1 : 0);
@@ -119,14 +119,13 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     Model model = model("skill-update-" + suffix);
     String packageName = "pkg" + suffix;
     insertPackage(packageName, "dev", "review");
-    AgentDefinitionDTO created =
-        definitionService.createAgent(agent(model.ref(), "agent-" + suffix));
-    AgentDefinitionUpdateDTO update = update(created);
+    AgentDTO created = agentService.createAgent(agent(model.ref(), "agent-" + suffix));
+    AgentUpdateDTO update = update(created);
     update.getConfig().setSkills(List.of(skill(packageName, "review")));
 
-    Outcome<AgentDefinitionDTO> updated =
+    Outcome<AgentDTO> updated =
         race(
-            () -> definitionService.updateAgent(created.getName(), update),
+            () -> agentService.updateAgent(created.getName(), update),
             () -> {
               skillPackages.lockPackage(packageName);
               return null;
@@ -136,14 +135,14 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(created.getName());
+    Agent persisted = agentRepository.getByName(created.getName());
     boolean referencesReview = persisted.configJson().contains("\"name\": \"review\"");
     if (referencesReview) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("review"));
     }
     assertTrue(
         updated.value() != null || domainFailure(updated.error(), DomainErrorCode.VALIDATION));
-    definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+    agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).version());
     }
@@ -156,12 +155,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     Model model = model("skill-second-" + suffix);
     String packageName = "pkg" + suffix;
     insertPackage(packageName, "alpha", "zeta");
-    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    AgentCreateDTO create = agent(model.ref(), "agent-" + suffix);
     create.getConfig().setSkills(List.of(skill(packageName, "alpha"), skill(packageName, "zeta")));
 
-    Outcome<AgentDefinitionDTO> created =
+    Outcome<AgentDTO> created =
         race(
-            () -> definitionService.createAgent(create),
+            () -> agentService.createAgent(create),
             () -> {
               skillPackages.lockPackage(packageName);
               return null;
@@ -171,14 +170,14 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    Agent persisted = agentRepository.getByName(create.getName());
     if (persisted != null && persisted.configJson().contains("\"name\": \"zeta\"")) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("zeta"));
     }
     assertTrue(
         created.value() != null || domainFailure(created.error(), DomainErrorCode.VALIDATION));
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).version());
@@ -193,12 +192,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     McpServerDTO server = mcp("mcp" + suffix.substring(Math.max(0, suffix.length() - 8)));
     insertTool(server.getName(), "critical");
     String toolName = "mcp_" + server.getName() + "_critical";
-    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    AgentCreateDTO create = agent(model.ref(), "agent-" + suffix);
     create.getConfig().setTools(List.of(toolName));
 
-    Outcome<AgentDefinitionDTO> created =
+    Outcome<AgentDTO> created =
         race(
-            () -> definitionService.createAgent(create),
+            () -> agentService.createAgent(create),
             () -> {
               mcpServers.getForUpdate(server.getName());
               return null;
@@ -208,14 +207,14 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    Agent persisted = agentRepository.getByName(create.getName());
     if (persisted != null && persisted.configJson().contains(toolName)) {
       assertTrue(
           mcpServers.getTool(toolName).isPresent(),
           () -> created.value() + " / " + created.error() + " / " + persisted.configJson());
     }
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     assertTrue(
         created.value() != null
@@ -234,12 +233,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     insertTool(server.getName(), "zeta");
     String alpha = "mcp_" + server.getName() + "_alpha";
     String zeta = "mcp_" + server.getName() + "_zeta";
-    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    AgentCreateDTO create = agent(model.ref(), "agent-" + suffix);
     create.getConfig().setTools(List.of(alpha, zeta));
 
-    Outcome<AgentDefinitionDTO> created =
+    Outcome<AgentDTO> created =
         race(
-            () -> definitionService.createAgent(create),
+            () -> agentService.createAgent(create),
             () -> {
               mcpServers.getForUpdate(server.getName());
               return null;
@@ -249,7 +248,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    Agent persisted = agentRepository.getByName(create.getName());
     if (persisted != null && persisted.configJson().contains(zeta)) {
       assertTrue(mcpServers.getTool(zeta).isPresent(), () -> persisted.configJson());
     }
@@ -258,7 +257,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             || domainFailure(created.error(), DomainErrorCode.VALIDATION)
             || persisted == null);
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -271,11 +270,11 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     McpServerDTO server = mcp("gone" + suffix.substring(Math.max(0, suffix.length() - 8)));
     insertTool(server.getName(), "critical");
     String toolName = "mcp_" + server.getName() + "_critical";
-    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    AgentCreateDTO create = agent(model.ref(), "agent-" + suffix);
     create.getConfig().setTools(List.of(toolName));
 
     race(
-        () -> definitionService.createAgent(create),
+        () -> agentService.createAgent(create),
         () -> {
           mcpServers.getForUpdate(server.getName());
           return null;
@@ -285,10 +284,10 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           return null;
         });
 
-    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    Agent persisted = agentRepository.getByName(create.getName());
     if (persisted != null && persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -301,14 +300,13 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     McpServerDTO server = mcp("del" + suffix.substring(Math.max(0, suffix.length() - 8)));
     insertTool(server.getName(), "critical");
     String toolName = "mcp_" + server.getName() + "_critical";
-    AgentDefinitionDTO created =
-        definitionService.createAgent(agent(model.ref(), "agent-" + suffix));
-    AgentDefinitionUpdateDTO update = update(created);
+    AgentDTO created = agentService.createAgent(agent(model.ref(), "agent-" + suffix));
+    AgentUpdateDTO update = update(created);
     update.getConfig().setTools(List.of(toolName));
 
-    Outcome<AgentDefinitionDTO> updated =
+    Outcome<AgentDTO> updated =
         race(
-            () -> definitionService.updateAgent(created.getName(), update),
+            () -> agentService.updateAgent(created.getName(), update),
             () -> {
               mcpServers.getForUpdate(server.getName());
               return null;
@@ -325,16 +323,16 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               return null;
             });
 
-    AgentDefinition persisted = definitionRepository.getByName(created.getName());
+    Agent persisted = agentRepository.getByName(created.getName());
     if (persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getByName(server.getName()).isPresent());
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     } else {
       assertTrue(
           domainFailure(updated.error(), DomainErrorCode.VALIDATION) || updated.value() != null);
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       if (mcpServers.getByName(server.getName()).isPresent()) {
         mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
       }
@@ -351,13 +349,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     McpServerDTO server = mcp("same" + suffix.substring(Math.max(0, suffix.length() - 8)));
     insertTool(server.getName(), "critical");
     String toolName = "mcp_" + server.getName() + "_critical";
-    AgentDefinitionDTO created =
-        definitionService.createAgent(agent(model.ref(), "agent-" + suffix));
-    AgentDefinitionUpdateDTO left = update(created);
+    AgentDTO created = agentService.createAgent(agent(model.ref(), "agent-" + suffix));
+    AgentUpdateDTO left = update(created);
     left.setDescription("left");
     left.getConfig().setSkills(List.of(skill(packageName, "dev")));
     left.getConfig().setTools(List.of(toolName));
-    AgentDefinitionUpdateDTO right = update(created);
+    AgentUpdateDTO right = update(created);
     right.setDescription("right");
     right.getConfig().setSkills(List.of(skill(packageName, "dev")));
     right.getConfig().setTools(List.of(toolName));
@@ -366,28 +363,26 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
     try {
-      Future<AgentDefinitionDTO> first =
+      Future<AgentDTO> first =
           executor.submit(
               () -> {
                 ready.countDown();
                 await(start);
-                return definitionService.updateAgent(created.getName(), left);
+                return agentService.updateAgent(created.getName(), left);
               });
-      Future<AgentDefinitionDTO> second =
+      Future<AgentDTO> second =
           executor.submit(
               () -> {
                 ready.countDown();
                 await(start);
-                return definitionService.updateAgent(created.getName(), right);
+                return agentService.updateAgent(created.getName(), right);
               });
       assertTrue(ready.await(5, TimeUnit.SECONDS));
       start.countDown();
       List<Object> results = List.of(outcome(first), outcome(second));
       // 两个事务使用同一个 expectedVersion：一个 CAS 成功，另一个确定性冲突；任一锁等待或死锁都会让 get 超时。
       assertEquals(
-          1,
-          results.stream().filter(AgentDefinitionDTO.class::isInstance).count(),
-          results::toString);
+          1, results.stream().filter(AgentDTO.class::isInstance).count(), results::toString);
       assertEquals(
           1,
           results.stream()
@@ -397,8 +392,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
                           && domain.code() == DomainErrorCode.VERSION_CONFLICT)
               .count(),
           results::toString);
-      AgentDefinition persisted = definitionRepository.getByName(created.getName());
-      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      Agent persisted = agentRepository.getByName(created.getName());
+      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     } finally {
       start.countDown();
       executor.shutdownNow();
@@ -618,12 +613,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     return new Model(createdProvider, createdModel);
   }
 
-  private AgentDefinitionCreateDTO agent(String modelRef, String name) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private AgentCreateDTO agent(String modelRef, String name) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    AgentCreateDTO create = new AgentCreateDTO();
     create.setName(name);
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
@@ -633,12 +628,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     return create;
   }
 
-  private AgentDefinitionUpdateDTO update(AgentDefinitionDTO current) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private AgentUpdateDTO update(AgentDTO current) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(new ArrayList<>(current.getConfig().getTools()));
     config.setSkills(new ArrayList<>(current.getConfig().getSkills()));
     config.setSubagents(new ArrayList<>(current.getConfig().getSubagents()));
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO update = new AgentUpdateDTO();
     update.setDescription(current.getDescription());
     update.setSystemPrompt(current.getSystemPrompt());
     update.setExecution(current.getExecution());

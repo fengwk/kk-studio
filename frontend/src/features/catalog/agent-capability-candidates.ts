@@ -1,5 +1,5 @@
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   SkillPackageSummaryDTO,
   SkillRefDTO,
   ToolCatalogEntryDTO,
@@ -112,7 +112,7 @@ export function buildSkillCandidates(
  * 候选来自全局 Agent 定义（名称 + 描述）；create 模式下的「与当前 draft.name 同名」排除由表单负责，
  * 这里只做名称去重与空名过滤。
  */
-export function buildSubagentCandidates(agents: AgentDefinitionDTO[]): CapabilityOption[] {
+export function buildSubagentCandidates(agents: AgentDTO[]): CapabilityOption[] {
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
   for (const agent of agents) {

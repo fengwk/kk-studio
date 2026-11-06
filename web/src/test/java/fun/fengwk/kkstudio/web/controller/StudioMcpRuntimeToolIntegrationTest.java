@@ -49,6 +49,8 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
@@ -62,8 +64,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -239,11 +239,11 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         .andExpect(jsonPath("$.name").value(configuredModelName));
 
     // 4.1 负向测试：证明未知工具名会被校验器确定性拒绝
-    AgentDefinitionConfigDTO invalidConfig = new AgentDefinitionConfigDTO();
+    AgentConfigDTO invalidConfig = new AgentConfigDTO();
     invalidConfig.setTools(List.of("unknown_invalid_tool"));
     invalidConfig.setSkills(List.of());
     invalidConfig.setSubagents(List.of());
-    AgentDefinitionCreateDTO invalidAgent = new AgentDefinitionCreateDTO();
+    AgentCreateDTO invalidAgent = new AgentCreateDTO();
     invalidAgent.setName(agentName + "-invalid");
     HarnessExecutionSelectionDTO agentExecution = new HarnessExecutionSelectionDTO();
     agentExecution.setDriver("builtin");
@@ -253,25 +253,25 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(invalidAgent)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
 
     // 4.2 正向测试：Agent 定义校验器接受动态 MCP 工具名
-    AgentDefinitionConfigDTO validConfig = new AgentDefinitionConfigDTO();
+    AgentConfigDTO validConfig = new AgentConfigDTO();
     validConfig.setTools(List.of(modelName));
     validConfig.setSkills(List.of());
     validConfig.setSubagents(List.of());
-    AgentDefinitionCreateDTO agentDto = new AgentDefinitionCreateDTO();
+    AgentCreateDTO agentDto = new AgentCreateDTO();
     agentDto.setName(agentName);
     agentDto.setExecution(agentExecution);
     agentDto.setConfig(validConfig);
 
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentDto)))
         .andExpect(status().isCreated())

@@ -19,7 +19,7 @@ insert into model (kind, provider_name, name, model_id, description, config, cre
        "defaultVariant":"probe-variant","variants":[{"id":"probe-variant","promptCacheRetention":"SHORT"}]}'::jsonb,
      '2024-01-05 00:00:00.003+00', '2024-01-06 00:00:00.004+00', 3);
 
-insert into agent_definition (name, description, system_prompt, execution,
+insert into agent (name, description, system_prompt, execution,
     config, created_at, updated_at, version) values
     ('bound-agent', 'probe agent description', 'probe system prompt',
      '{"driver":"builtin","settings":{"modelName":"probe-model","variant":"probe-variant"}}',

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { environmentService } from '@/features/environment/environment-service'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -14,7 +14,7 @@ vi.mock('@/features/environment/environment-service', () => ({
   },
 }))
 
-const agentWithEnv: AgentDefinitionDTO = {
+const agentWithEnv: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
@@ -26,8 +26,8 @@ const agentWithEnv: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 function createModalProps(

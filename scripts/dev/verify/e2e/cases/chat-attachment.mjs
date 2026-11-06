@@ -307,7 +307,7 @@ registerCase({
           })
         ).json
       agent = (
-          await ctx.call('POST', '/api/agents', {
+          await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
@@ -373,7 +373,7 @@ registerCase({
       // 既有 Thread 的第二轮必须读取最新 Agent config.tools。
       // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
       agent = (
-          await ctx.call('PUT', `/api/agents/${encodeURIComponent(agent.name)}`, {
+          await ctx.call('PUT', `/api/platform/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
             execution: agent.execution,
@@ -484,7 +484,7 @@ registerCase({
         if (!agent?.name) return
         await ctx.call(
           'DELETE',
-          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       })
       await cleanup('model', cleanupErrors, async () => {

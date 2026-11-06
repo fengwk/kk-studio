@@ -525,7 +525,7 @@ async function cleanupAgent(ctx, agent) {
   try {
     await ctx.call(
       'DELETE',
-      `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version ?? '0')}`,
+      `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version ?? '0')}`,
     )
   } catch {
     // 尽力 cleanup，保留主断言失败
@@ -570,7 +570,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       let agent = null
       let chat = null
       try {
-        const { json: agentJson } = await ctx.call('POST', '/api/agents', {
+        const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
           name: `e2e-cache-${def.idSuffix}-${suffix}`,
           description: `Temporary text cache agent for ${def.title}.`,
           systemPrompt,
@@ -768,7 +768,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
     try {
       const varSuffix = cid().slice(0, 8)
       const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
-      const { json: varAgentJson } = await ctx.call('POST', '/api/agents', {
+      const { json: varAgentJson } = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-reason-${def.idSuffix}-${variant}-${varSuffix}`,
         description: `Temporary reasoning agent for ${def.title} ${variant}.`,
         systemPrompt:
@@ -899,7 +899,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       let agent = null
       let chat = null
       try {
-        const { json: agentJson } = await ctx.call('POST', '/api/agents', {
+        const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
           name: `e2e-tool-${def.idSuffix}-${suffix}`,
           description: `Temporary tool agent for ${def.title}.`,
           systemPrompt:
@@ -1148,7 +1148,7 @@ registerCase({
     let parentThreadId = null
     try {
       childAgent = (
-          await ctx.call('POST', '/api/agents', {
+          await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-task-child-${suffix}`,
             description: 'Return the requested marker without using tools.',
             systemPrompt:
@@ -1158,7 +1158,7 @@ registerCase({
           })
         ).json
       parentAgent = (
-          await ctx.call('POST', '/api/agents', {
+          await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-task-parent-${suffix}`,
             description: 'Always delegates once to the configured child.',
             systemPrompt:
@@ -1330,7 +1330,7 @@ registerCase({
     let tempAgent = null
     let chat = null
     try {
-      const { json: agentJson } = await ctx.call('POST', '/api/agents', {
+      const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-stop-agent-${suffix}`,
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
@@ -1574,7 +1574,7 @@ registerCase({
     let agent = null
     let chat = null
     try {
-      const { json: agentJson } = await ctx.call('POST', '/api/agents', {
+      const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-branch-agent-${suffix}`,
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
@@ -1781,7 +1781,7 @@ registerCase({
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
     const suffix = cid().slice(0, 8)
-    const { json: agentJson } = await ctx.call('POST', '/api/agents', {
+    const { json: agentJson } = await ctx.call('POST', '/api/platform/agents', {
       name: `e2e-tool-agent-${suffix}`,
       description: 'Temporary E2E agent with the daemon read tool.',
       systemPrompt:
@@ -1807,10 +1807,10 @@ registerCase({
         'execution',
         'config',
         'version',
-        'createTime',
-        'updateTime',
+        'createdAt',
+        'updatedAt',
       ],
-      'AgentDefinitionDTO',
+      'AgentDTO',
     )
     let chat = null
     let tid = null

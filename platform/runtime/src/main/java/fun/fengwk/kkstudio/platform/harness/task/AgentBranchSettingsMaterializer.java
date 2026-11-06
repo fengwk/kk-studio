@@ -5,8 +5,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
 
 import java.util.Objects;
@@ -15,12 +15,11 @@ import java.util.Objects;
 @Component
 public final class AgentBranchSettingsMaterializer {
 
-  private final AgentDefinitionRepository agentRepository;
+  private final AgentRepository agentRepository;
   private final BuiltinAgentExecutionMaterializer builtinMaterializer;
 
   public AgentBranchSettingsMaterializer(
-      AgentDefinitionRepository agentRepository,
-      BuiltinAgentExecutionMaterializer builtinMaterializer) {
+      AgentRepository agentRepository, BuiltinAgentExecutionMaterializer builtinMaterializer) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.builtinMaterializer = Objects.requireNonNull(builtinMaterializer, "builtinMaterializer");
   }
@@ -30,15 +29,15 @@ public final class AgentBranchSettingsMaterializer {
     return materialize(agentName, requireAgent(agentName));
   }
 
-  private AgentDefinition requireAgent(String agentName) {
-    AgentDefinition agent = agentRepository.getByName(agentName);
+  private Agent requireAgent(String agentName) {
+    Agent agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);
     }
     return agent;
   }
 
-  private BranchSettings materialize(String agentName, AgentDefinition agent) {
+  private BranchSettings materialize(String agentName, Agent agent) {
     ExecutionSelection execution = agent.execution();
     if (execution == null) {
       // 未配置的内置 Agent 不能被普通调用当作路由来源：明确拒绝，不猜测或回退。

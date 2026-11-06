@@ -267,7 +267,7 @@ registerCase({
       model = modelResponse.json
       assert(model?.providerName === provider.name, JSON.stringify(modelResponse.json))
 
-      const agentResponse = await ctx.call('POST', '/api/agents', {
+      const agentResponse = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-agent-interaction-${suffix}`,
         description: 'Local pending input E2E agent.',
         systemPrompt: 'Ask the user with ask_user, then report the accepted answer.',
@@ -527,7 +527,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
           )
         }
       })

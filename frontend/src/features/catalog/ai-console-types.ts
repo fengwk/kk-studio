@@ -1,7 +1,7 @@
 import type { AgentProviderType, ModelKind } from '@/shared/api/contracts/ai-catalog'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 import type {
-  AgentDefinitionType,
+  AgentType,
   ModelInputModality,
   ModelPricingDTO,
   HarnessExecutionSelectionDTO,
@@ -104,13 +104,13 @@ export type ResourceModal =
       name: string
       expectedVersion: CatalogVersion
     }
-  | { kind: 'agent'; mode: 'create'; type: AgentDefinitionType }
+  | { kind: 'agent'; mode: 'create'; type: AgentType }
   | {
       kind: 'agent'
       mode: 'edit'
       name: string
       /** 系统持有的 identity 类型；前端据此保护删除等动作，不随请求发送。 */
-      type: AgentDefinitionType
+      type: AgentType
       model: string | null
       expectedVersion: CatalogVersion
     }

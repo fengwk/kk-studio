@@ -3,8 +3,8 @@ import { createAgentService, type CatalogRequester } from '@/shared/api/agent-se
 import { createMockHttpClient } from '@/test-support/mock-http-client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentUpdateDTO,
   ModelCreateDTO,
   ModelUpdateDTO,
   ProviderCreateDTO,
@@ -21,13 +21,12 @@ function createCatalogRequest() {
 
 describe('agentService', () => {
   it('maps global resource lists to catalog routes', async () => {
-    const client = createClient()
     const catalogRequest = createCatalogRequest()
-    const service = createAgentService(client, catalogRequest)
+    const service = createAgentService(createClient(), catalogRequest)
 
     await service.listProviders()
     await service.listModels()
-    await service.listAgents(4, 40)
+    await service.listAgents()
     await service.listTools()
 
     expect(catalogRequest).toHaveBeenNthCalledWith(1, 'GET /api/platform/providers', {})
@@ -37,19 +36,8 @@ describe('agentService', () => {
       {},
       { jsonParser: parseJsonPreservingPathEqualsNumbers },
     )
-    expect(client.get).toHaveBeenCalledWith('/agents', { params: { pageNumber: 4, pageSize: 40 } })
-    expect(catalogRequest).toHaveBeenNthCalledWith(3, 'GET /api/platform/tools', {})
-  })
-
-  it('keeps the standard page defaults for the Agent list', async () => {
-    const client = createClient()
-    const service = createAgentService(client, createCatalogRequest())
-
-    await service.listAgents()
-
-    expect(client.get).toHaveBeenNthCalledWith(1, '/agents', {
-      params: { pageNumber: 1, pageSize: 50 },
-    })
+    expect(catalogRequest).toHaveBeenNthCalledWith(3, 'GET /api/platform/agents', {})
+    expect(catalogRequest).toHaveBeenNthCalledWith(4, 'GET /api/platform/tools', {})
   })
 
   /**
@@ -86,7 +74,7 @@ describe('agentService', () => {
         variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
       },
     }
-    const agentBody: AgentDefinitionCreateDTO = {
+    const agentBody: AgentCreateDTO = {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
@@ -119,14 +107,13 @@ describe('agentService', () => {
         variants: [{ id: 'fast', promptCacheRetention: 'NONE' }],
       },
     }
-    const updateAgentBody: AgentDefinitionUpdateDTO = {
+    const updateAgentBody: AgentUpdateDTO = {
       description: 'updated',
       expectedVersion: '9',
       systemPrompt: null,
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: { tools: [], skills: [], subagents: [] },
     }
-
     await service.createProvider(providerBody)
     await service.updateProvider('minimax', updateProviderBody)
     await service.deleteProvider('minimax', '8')
@@ -162,10 +149,14 @@ describe('agentService', () => {
       path: { name: 'vendor/MiniMax M2.7' },
       query: { expectedVersion: '10' },
     })
-    expect(client.post).toHaveBeenNthCalledWith(1, '/agents', agentBody)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/agents/default-assistant', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/agents/default-assistant', {
-      params: { expectedVersion: '11' },
+    expect(catalogRequest).toHaveBeenNthCalledWith(7, 'POST /api/platform/agents', { body: agentBody })
+    expect(catalogRequest).toHaveBeenNthCalledWith(8, 'PUT /api/platform/agents/{name}', {
+      path: { name: 'default-assistant' },
+      body: updateAgentBody,
+    })
+    expect(catalogRequest).toHaveBeenNthCalledWith(9, 'DELETE /api/platform/agents/{name}', {
+      path: { name: 'default-assistant' },
+      query: { expectedVersion: '11' },
     })
   })
 

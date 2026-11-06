@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -48,7 +48,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
@@ -103,9 +102,9 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
   private PluginConfigurationService configurationService;
-  private AgentDefinitionRepository definitionRepository;
+  private AgentRepository definitionRepository;
   private PluginAgentDependencies pluginAgentDependencies;
-  private AgentDefinitionService definitionService;
+  private AgentService definitionService;
 
   @BeforeAll
   static void beforeAll() throws SQLException {
@@ -134,27 +133,27 @@ class PluginAgentDependencyPostgresIntegrationTest {
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
-    definitionRepository = new AgentDefinitionRepository(jdbcClient);
+    definitionRepository = new AgentRepository(jdbcClient);
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
 
     configurationService = configurationServiceWith(pluginAgentDependencies);
 
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
             definitionRepository,
             mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
             TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of())));
     definitionService =
-        new AgentDefinitionService(
+        new AgentService(
             definitionRepository,
             resolver,
             mock(DriverRegistry.class),
             mock(BuiltinAgentExecutionValidator.class),
-            new AgentDefinitionConfigValidator(
+            new AgentConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
-            new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
+            new AgentConfigCodec(JsonMapper.builder().build()),
             new AgentEditableSupport(JsonMapper.builder().build()),
             pluginAgentDependencies,
             List.of());
@@ -184,7 +183,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   @Test
   void configureAcceptsAnExistingDeclaredAgent() {
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
+    assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     assertEquals(
         2L, configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
 
@@ -197,7 +196,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   @Test
   void deleteRejectsAnAgentReferencedByTheDesiredPluginConfiguration() {
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
+    assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
 
     DomainException error =
@@ -212,7 +211,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   @Test
   void deleteSucceedsAfterTheDeclaringConfigurationIsRemoved() {
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
+    assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
     configurationService.configure(DECLARING_PLUGIN_ID, 2L, VALUES_NO_DECLARATION, Map.of());
 
@@ -226,14 +225,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
   @Test
   void saveWinningTheAgentRowLockMakesTheConcurrentDeleteReject() throws Exception {
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
+    assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     CountDownLatch saveLockHeld = new CountDownLatch(1);
     CountDownLatch releaseSave = new CountDownLatch(1);
     PluginAgentDependencies gatedDependencies =
         new PluginAgentDependencies(
             registry,
             configurationRepository,
-            new GatedAgentDefinitionRepository(jdbcClient, saveLockHeld, releaseSave));
+            new GatedAgentRepository(jdbcClient, saveLockHeld, releaseSave));
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
@@ -279,7 +278,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   @Test
   void deleteWinningTheAgentRowLockMakesTheConcurrentSaveFail() throws Exception {
     seedAgentModel();
-    assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
+    assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     CountDownLatch deleteLockHeld = new CountDownLatch(1);
     CountDownLatch releaseDelete = new CountDownLatch(1);
 
@@ -420,11 +419,11 @@ class PluginAgentDependencyPostgresIntegrationTest {
         .update();
   }
 
-  private static AgentDefinition agentDefinition(String name) {
-    AgentDefinition agent =
-        AgentDefinition.builder()
+  private static Agent agent(String name) {
+    Agent agent =
+        Agent.builder()
             .name(name)
-            .type(AgentDefinitionType.USER)
+            .type(AgentType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(ModelSelection.model(MODEL_NAME, null)))
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
@@ -472,12 +471,12 @@ class PluginAgentDependencyPostgresIntegrationTest {
   }
 
   /** 只在保存侧生效的闸门：代理真实仓库，在取得 Agent 行锁后通知测试并等待放行，用于确定性地制造「保存先持锁」的顺序。 */
-  private static final class GatedAgentDefinitionRepository extends AgentDefinitionRepository {
+  private static final class GatedAgentRepository extends AgentRepository {
 
     private final CountDownLatch lockAcquired;
     private final CountDownLatch release;
 
-    GatedAgentDefinitionRepository(
+    GatedAgentRepository(
         JdbcClient jdbcClient, CountDownLatch lockAcquired, CountDownLatch release) {
       super(jdbcClient);
       this.lockAcquired = lockAcquired;
@@ -485,8 +484,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
     }
 
     @Override
-    public AgentDefinition getByNameForUpdate(String name) {
-      AgentDefinition locked = super.getByNameForUpdate(name);
+    public Agent getByNameForUpdate(String name) {
+      Agent locked = super.getByNameForUpdate(name);
       lockAcquired.countDown();
       awaitLatchQuietly(release);
       return locked;

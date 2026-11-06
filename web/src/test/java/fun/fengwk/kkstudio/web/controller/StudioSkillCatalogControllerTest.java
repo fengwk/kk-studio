@@ -25,8 +25,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
@@ -338,11 +338,11 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   /** 通过公开 API 建立真实 Skill 引用：Agent config 精确指向某 Package 的 Skill。 */
   private void referencingAgent(String packageName, String skillName) throws Exception {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of(skillRef(packageName, skillName)));
     config.setSubagents(List.of());
-    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
+    AgentCreateDTO agent = new AgentCreateDTO();
     agent.setName("web-agent-" + System.nanoTime());
     agent.setDescription("skill reference guard agent");
     agent.setSystemPrompt("guard");
@@ -353,7 +353,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     agent.setConfig(config);
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agent)))
         .andExpect(status().isCreated());

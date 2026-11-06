@@ -160,8 +160,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
       }),
     ).toMatchObject({
       name: 'assistant',
@@ -313,7 +313,6 @@ describe('AI domain utilities', () => {
   it('filters resources and formats helper values', () => {
     const agents = [
       {
-        id: 'agent-1',
         name: 'assistant',
         description: 'Cloud agent',
         systemPrompt: null,
@@ -325,8 +324,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
       },
     ]
     const models: AgentModelView[] = [
@@ -434,8 +433,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
       }),
     ).toMatchObject({
       description: '',

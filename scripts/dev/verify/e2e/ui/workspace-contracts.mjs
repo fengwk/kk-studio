@@ -846,7 +846,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     assert(modelResponse.status === 201, `create usage model: ${JSON.stringify(modelResponse)}`)
     state.model = modelResponse.json
 
-    const agentResponse = await apiCtx.call('POST', '/api/agents', {
+    const agentResponse = await apiCtx.call('POST', '/api/platform/agents', {
       name: `e2e-ui-usage-agent-${suffix}`,
       description: 'Local completion agent for free Footer usage tests.',
       systemPrompt: 'Return the deterministic local response.',
@@ -891,7 +891,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
     )
     state.otherEnvironment = otherEnvironmentResponse.json
-    const otherAgentResponse = await apiCtx.call('POST', '/api/agents', {
+    const otherAgentResponse = await apiCtx.call('POST', '/api/platform/agents', {
       name: `e2e-ui-usage-alt-agent-${suffix}`,
       description: 'Second environment-bound agent for Footer projection tests.',
       systemPrompt: 'Return the deterministic local response.',
@@ -989,7 +989,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(modelResponse.status === 201, `create task model: ${JSON.stringify(modelResponse)}`)
     state.model = modelResponse.json
 
-    const childResponse = await apiCtx.call('POST', '/api/agents', {
+    const childResponse = await apiCtx.call('POST', '/api/platform/agents', {
       name: childName,
       description: 'Held child used by the TaskStatus browser fixture.',
       systemPrompt: 'Stay in the deterministic local model call.',
@@ -999,7 +999,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
     state.childAgent = childResponse.json
 
-    const parentResponse = await apiCtx.call('POST', '/api/agents', {
+    const parentResponse = await apiCtx.call('POST', '/api/platform/agents', {
       name: `e2e-ui-task-parent-${suffix}`,
       description: 'Parent used by the TaskStatus browser fixture.',
       systemPrompt: 'Call the configured task subagent exactly once.',
@@ -1154,7 +1154,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     state.model = modelResponse.json
 
 
-    const agentResponse = await apiCtx.call('POST', '/api/agents', {
+    const agentResponse = await apiCtx.call('POST', '/api/platform/agents', {
       name: `e2e-ui-tool-card-agent-${suffix}`,
       description: 'Agent used by deterministic Tool card browser contracts.',
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
@@ -1250,7 +1250,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.agent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+        `/api/platform/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
       )
     }
   })
@@ -1259,7 +1259,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.otherAgent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
+        `/api/platform/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
       )
     }
   })
@@ -1323,7 +1323,7 @@ async function cleanupActiveTaskFixture(state) {
       if (agent?.name) {
         await state.apiCtx.call(
           'DELETE',
-          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       }
     })
@@ -1369,7 +1369,7 @@ async function cleanupToolCardFixture(state) {
     if (state.agent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+        `/api/platform/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
       )
     }
   })

@@ -8,7 +8,7 @@ import {
   editProviderEditorPlan,
 } from '@/features/catalog/ai-resource-editor-open-plans'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ModelConfigDTO,
   ModelDTO,
   ProviderDTO,
@@ -59,7 +59,7 @@ function model(id: string, providerName: string): ModelDTO {
   }
 }
 
-function agent(id: string, model: string): AgentDefinitionDTO {
+function agent(id: string, model: string): AgentDTO {
   return {
     name: id,
     description: null,
@@ -72,8 +72,8 @@ function agent(id: string, model: string): AgentDefinitionDTO {
       subagents: [],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -139,7 +139,7 @@ describe('ai-resource-editor-open-plans', () => {
 
   it('carries BUILTIN identity and an unconfigured model into the edit plan without seeding a fallback', () => {
     const models = [model('MiniMax', 'minimax')]
-    const builtin: AgentDefinitionDTO = {
+    const builtin: AgentDTO = {
       ...agent('summarizer', 'MiniMax'),
       type: 'BUILTIN',
       execution: null,

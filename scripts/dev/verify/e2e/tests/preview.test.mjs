@@ -13,7 +13,7 @@ test('seed case reads the execution contract, including a null builtin variant',
   const agent = {
     name: 'fixture-agent', type: 'USER', description: 'fixture', systemPrompt: 'prompt',
     execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: null } },
-    config: {}, version: '0', createTime: 0, updateTime: 0,
+    config: {}, version: '0', createdAt: 0, updatedAt: 0,
   }
   const providers = Object.entries({
     minimax: 'openai_responses', openai: 'openai_responses', xai: 'openai_responses',
@@ -28,14 +28,16 @@ test('seed case reads the execution contract, including a null builtin variant',
     vars: {},
     async call(method, path) {
       assert.equal(method, 'GET')
-      const results = path.startsWith('/api/agents') ? [agent] : providers
-      return { json: { results } }
+      if (path.startsWith('/api/platform/agents')) {
+        return { json: [agent] }
+      }
+      return { json: { results: providers } }
     },
   }
   await getCase('seed.agent_and_provider').run(ctx)
   assert.deepEqual(ctx.vars.agent.execution, agent.execution)
   agent.model = 'fixture-model'
-  await assert.rejects(getCase('seed.agent_and_provider').run(ctx), /AgentDefinitionDTO/)
+  await assert.rejects(getCase('seed.agent_and_provider').run(ctx), /AgentDTO/)
 })
 
 function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], code = 'conflict') {
@@ -184,8 +186,8 @@ function modelRequestDebugFixture() {
   const call = async (method, path, body) => {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
-    if (method === 'GET' && pathname === '/api/agents') {
-      return { status: 200, json: { results: [agent] } }
+    if (method === 'GET' && pathname === '/api/platform/agents') {
+      return { status: 200, json: [agent] }
     }
     if (method === 'GET' && pathname === '/api/platform/models') {
       return { status: 200, json: { results: [model] } }

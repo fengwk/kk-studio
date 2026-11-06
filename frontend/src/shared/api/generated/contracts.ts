@@ -11,52 +11,33 @@ export interface AddIssueEvidenceRequestDTO {
   uploadId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO */
-export interface AgentDefinitionConfigDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO */
+export interface AgentConfigDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO */
-export interface AgentDefinitionCreateDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO */
+export interface AgentCreateDTO {
   description?: string | null
   systemPrompt?: string | null
   execution?: HarnessExecutionSelectionDTO | null
-  config: AgentDefinitionConfigDTO
+  config: AgentConfigDTO
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO */
-export interface AgentDefinitionDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO */
+export interface AgentDTO {
   name: string
-  type: AgentDefinitionType
+  type: AgentType
   description?: string | null
   systemPrompt?: string | null
   execution: HarnessExecutionSelectionDTO | null
-  config: AgentDefinitionConfigDTO
+  config: AgentConfigDTO
   version: string
-  createTime: number
-  updateTime: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionType */
-export type AgentDefinitionType =
-  | 'USER'
-  | 'BUILTIN'
-
-export const AGENT_DEFINITION_TYPE_VALUES: readonly AgentDefinitionType[] = [
-  'USER',
-  'BUILTIN',
-]
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO */
-export interface AgentDefinitionUpdateDTO {
-  description?: string | null
-  systemPrompt?: string | null
-  execution?: HarnessExecutionSelectionDTO | null
-  config: AgentDefinitionConfigDTO
-  expectedVersion: string
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskDTO */
@@ -76,6 +57,25 @@ export interface AgentTaskSubmitDTO {
   agent: string
   prompt: string
   maxTurns?: number | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.definition.AgentType */
+export type AgentType =
+  | 'USER'
+  | 'BUILTIN'
+
+export const AGENT_TYPE_VALUES: readonly AgentType[] = [
+  'USER',
+  'BUILTIN',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO */
+export interface AgentUpdateDTO {
+  description?: string | null
+  systemPrompt?: string | null
+  execution?: HarnessExecutionSelectionDTO | null
+  config: AgentConfigDTO
+  expectedVersion: string
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO */
@@ -2454,11 +2454,6 @@ export interface UpdateProjectYoloRequestDTO {
 }
 
 export interface ApiRoutes {
-  'DELETE /api/agents/{name}': {
-    path: { name: string }
-    query: { expectedVersion: string }
-    response: void
-  }
   'DELETE /api/chats/{chatId}': {
     path: { chatId: string }
     query: { expectedVersion: string }
@@ -2480,6 +2475,11 @@ export interface ApiRoutes {
     response: void
   }
   'DELETE /api/mcp-servers/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/platform/agents/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
     response: void
@@ -2515,10 +2515,6 @@ export interface ApiRoutes {
   'GET /api/agent-tasks/{ticketId}': {
     path: { ticketId: string }
     response: AgentTaskDTO
-  }
-  'GET /api/agents': {
-    query: { pageNumber?: number; pageSize?: number }
-    response: Page<AgentDefinitionDTO>
   }
   'GET /api/canvas-functions': {
     response: CanvasFunctionDefinitionDTO[]
@@ -2606,6 +2602,9 @@ export interface ApiRoutes {
   'GET /api/mcp-servers/{name}/config': {
     path: { name: string }
     response: McpServerConfigDTO
+  }
+  'GET /api/platform/agents': {
+    response: AgentDTO[]
   }
   'GET /api/platform/model-catalog': {
     query: { cursor?: string; limit?: number; query?: string }
@@ -2716,10 +2715,6 @@ export interface ApiRoutes {
   'POST /api/agent-tasks/{ticketId}/stop': {
     path: { ticketId: string }
     response: AgentTaskDTO
-  }
-  'POST /api/agents': {
-    body: AgentDefinitionCreateDTO
-    response: AgentDefinitionDTO
   }
   'POST /api/canvases': {
     body?: CreateCanvasRequestDTO
@@ -2867,6 +2862,10 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: McpServerDTO
   }
+  'POST /api/platform/agents': {
+    body: AgentCreateDTO
+    response: AgentDTO
+  }
   'POST /api/platform/model-catalog/refresh': {
     response: ModelCatalogPageDTO
   }
@@ -3010,11 +3009,6 @@ export interface ApiRoutes {
     body: HarnessThreadStreamCatchupDTO
     response: void
   }
-  'PUT /api/agents/{name}': {
-    path: { name: string }
-    body: AgentDefinitionUpdateDTO
-    response: AgentDefinitionDTO
-  }
   'PUT /api/chats/{chatId}': {
     path: { chatId: string }
     body: ChatUpdateDTO
@@ -3039,6 +3033,11 @@ export interface ApiRoutes {
     path: { name: string }
     body: McpServerUpdateDTO
     response: McpServerDTO
+  }
+  'PUT /api/platform/agents/{name}': {
+    path: { name: string }
+    body: AgentUpdateDTO
+    response: AgentDTO
   }
   'PUT /api/platform/models/{*name}': {
     path: { name: string }

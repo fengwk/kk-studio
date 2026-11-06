@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
@@ -38,7 +39,6 @@ import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -661,8 +661,7 @@ class ConfigSyncPlannerTest {
                 List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    AgentDefinitionConfigDTO config =
-        ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of());
+    AgentConfigDTO config = ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of());
     ConfigSyncPlan plan =
         plan(ConfigSyncFixtures.documentYaml(document(agent("no_variant", "m", null, config))));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "no_variant")));
@@ -801,7 +800,7 @@ class ConfigSyncPlannerTest {
   }
 
   private static Map<String, Object> agent(
-      String name, String model, String variant, AgentDefinitionConfigDTO config) {
+      String name, String model, String variant, AgentConfigDTO config) {
     Map<String, Object> entry = new LinkedHashMap<>();
     entry.put("name", name);
     entry.put(

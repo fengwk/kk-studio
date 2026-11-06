@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/features/chat/chat-service'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -24,7 +24,7 @@ vi.mock('@/features/chat/chat-service', () => ({
 describe('useChatPageController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
+    vi.mocked(agentService.listAgents).mockResolvedValue([agent()])
     vi.mocked(chatService.listChats).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(chatService.createChat).mockResolvedValue({
       id: 'chat-1',
@@ -61,7 +61,7 @@ describe('useChatPageController', () => {
 
   // 没有可用 Agent 时才查询 Provider / Model，用于首次使用引导。
   it('reports catalog setup progress when no usable agent exists', async () => {
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ execution: null })]))
+    vi.mocked(agentService.listAgents).mockResolvedValue([agent({ execution: null })])
     vi.mocked(agentService.listProviders).mockResolvedValue([{ name: 'p' }] as never)
     vi.mocked(agentService.listModels).mockResolvedValue([])
 
@@ -172,7 +172,7 @@ function page<T>(results: T[]) {
   }
 }
 
-function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO {
+function agent(overrides: Partial<AgentDTO> = {}): AgentDTO {
   return {
     name: 'default-assistant',
     description: null,
@@ -185,8 +185,8 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       subagents: [],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }

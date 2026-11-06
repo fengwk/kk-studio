@@ -5,10 +5,10 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 
 /**
  * 启动期以 add-if-missing 方式初始化系统内置 Agent。
@@ -20,25 +20,25 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 @AllArgsConstructor
 public class BuiltinAgentInitializer implements InitializingBean {
 
-  private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentDefinitionConfigCodec configCodec;
+  private final AgentRepository agentRepository;
+  private final AgentConfigCodec configCodec;
 
   @Override
   public void afterPropertiesSet() {
-    for (BuiltinAgentDefinitions.BuiltinAgent definition : BuiltinAgentDefinitions.definitions()) {
-      if (agentDefinitionRepository.getByName(definition.name()) != null) {
+    for (BuiltinAgents.BuiltinAgent definition : BuiltinAgents.definitions()) {
+      if (agentRepository.getByName(definition.name()) != null) {
         continue;
       }
-      AgentDefinition builtin =
-          AgentDefinition.builder()
+      Agent builtin =
+          Agent.builder()
               .name(definition.name())
-              .type(AgentDefinitionType.BUILTIN)
+              .type(AgentType.BUILTIN)
               .systemPrompt(definition.systemPrompt())
               .execution(null)
               .configJson(configCodec.encode(definition.config()))
               .build();
       try {
-        agentDefinitionRepository.create(builtin);
+        agentRepository.create(builtin);
       } catch (DuplicateKeyException ignored) {
         // 并发初始化：其它实例已插入同名行；不覆盖既有定义。
       }

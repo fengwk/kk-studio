@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { agentService } from '@/shared/api/agent-service'
 import { fetchAllCatalogAgentNames, useCatalogAgentNames } from './useCatalogAgentNames'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -22,33 +22,18 @@ function createWrapper() {
 }
 
 describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
-  it('paginates across multiple pages to fetch >50 catalog agents', async () => {
-    // 测试意图：验证当 catalog 包含超过 50 个 Agent 时，自动执行分页查询直到拉取完所有页并排序去重
-    const page1Agents = Array.from({ length: 50 }, (_, i) => ({
+  it('reads the complete catalog agent list in one request', async () => {
+    // 测试意图：Agent 列表已不分页，超过 50 个 Agent 时必须一次全部返回并排序去重
+    const catalogAgents = Array.from({ length: 65 }, (_, i) => ({
       name: `agent-${String(i + 1).padStart(3, '0')}`,
     }))
-    const page2Agents = Array.from({ length: 15 }, (_, i) => ({
-      name: `agent-${String(i + 51).padStart(3, '0')}`,
-    }))
 
-    vi.mocked(agentService.listAgents)
-      .mockResolvedValueOnce({
-        results: page1Agents as AgentDefinitionDTO[],
-        totalCount: '65',
-        pageNumber: 1,
-        pageSize: 50,
-      })
-      .mockResolvedValueOnce({
-        results: page2Agents as AgentDefinitionDTO[],
-        totalCount: '65',
-        pageNumber: 2,
-        pageSize: 50,
-      })
+    vi.mocked(agentService.listAgents).mockResolvedValueOnce(catalogAgents as AgentDTO[])
 
     const names = await fetchAllCatalogAgentNames()
 
-    expect(agentService.listAgents).toHaveBeenCalledWith(1, 50)
-    expect(agentService.listAgents).toHaveBeenCalledWith(2, 50)
+    expect(agentService.listAgents).toHaveBeenCalledTimes(1)
+    expect(agentService.listAgents).toHaveBeenCalledWith()
     expect(names).toHaveLength(65)
     expect(names[0]).toBe('agent-001')
     expect(names[64]).toBe('agent-065')
@@ -64,12 +49,9 @@ describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
 
   it('transparently preserves stale assigned names in options', async () => {
     // 测试意图：验证 Hook 正确合并 catalog 中的 Agent 以及历史已分配但已从 catalog 下线的 stale Agent，且不会静默丢失
-    vi.mocked(agentService.listAgents).mockResolvedValueOnce({
-      results: [{ name: 'catalog-agent-b' }, { name: 'catalog-agent-a' }] as AgentDefinitionDTO[],
-      totalCount: '2',
-      pageNumber: 1,
-      pageSize: 50,
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValueOnce(
+      [{ name: 'catalog-agent-b' }, { name: 'catalog-agent-a' }] as AgentDTO[],
+    )
 
     const { result } = renderHook(
       () =>

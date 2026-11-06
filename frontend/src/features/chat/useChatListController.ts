@@ -8,12 +8,12 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AgentDefinitionDTO, ChatDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ChatDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
 
 function resolveChatAgentName(
   agentName: string | undefined,
   selectedAgentName: string,
-  agents: AgentDefinitionDTO[],
+  agents: AgentDTO[],
 ): string {
   if (agentName && agents.some((agent) => agent.name === agentName)) {
     return agentName
@@ -25,7 +25,7 @@ function resolveChatAgentName(
 }
 
 export function useChatListController(
-  agents: AgentDefinitionDTO[],
+  agents: AgentDTO[],
   enabled: boolean,
 ) {
   const navigate = useNavigate()

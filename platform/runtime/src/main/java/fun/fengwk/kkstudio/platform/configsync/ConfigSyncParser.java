@@ -6,8 +6,10 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
@@ -25,8 +27,6 @@ import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
@@ -74,7 +74,7 @@ public final class ConfigSyncParser {
   private final ConfigSyncYaml yaml;
   private final ProviderService providerService;
   private final ModelService modelService;
-  private final AgentDefinitionService agentService;
+  private final AgentService agentService;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
   private final StudioPluginRegistry pluginRegistry;
@@ -83,7 +83,7 @@ public final class ConfigSyncParser {
       ConfigSyncYaml yaml,
       ProviderService providerService,
       ModelService modelService,
-      AgentDefinitionService agentService,
+      AgentService agentService,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
       StudioPluginRegistry pluginRegistry) {
@@ -303,7 +303,7 @@ public final class ConfigSyncParser {
   private AgentSpec parseAgent(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqName("name");
-    if (BuiltinAgentDefinitions.isReservedName(name)) {
+    if (BuiltinAgents.isReservedName(name)) {
       // 内置 Agent 身份由系统持有：文件声明同名条目是硬冲突，不能通过导入覆盖或降级内置定义。
       throw DomainException.validation(
           RESOURCE, "agent name is reserved for a built-in agent: " + name);
@@ -323,14 +323,13 @@ public final class ConfigSyncParser {
     List<String> removed = new ArrayList<>();
     Object cleanedConfig =
         yaml.removeUnknownProperties(
-            AgentDefinitionConfigDTO.class, configNode, entry.path + ".config", removed);
-    AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
+            AgentConfigDTO.class, configNode, entry.path + ".config", removed);
+    AgentEditablePropertiesDTO properties = new AgentEditablePropertiesDTO();
     properties.setDescription(description);
     properties.setSystemPrompt(systemPrompt);
     properties.setExecution(
         yaml.convert(executionNode, HarnessExecutionSelectionDTO.class, entry.path + ".execution"));
-    properties.setConfig(
-        yaml.convert(cleanedConfig, AgentDefinitionConfigDTO.class, entry.path + ".config"));
+    properties.setConfig(yaml.convert(cleanedConfig, AgentConfigDTO.class, entry.path + ".config"));
     // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
     validateEntry(ConfigSyncKind.AGENTS, name, () -> agentService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.AGENTS, name, skipped)) {
@@ -564,7 +563,7 @@ public final class ConfigSyncParser {
   }
 
   public record AgentSpec(
-      String name, ModelSelection builtinModel, AgentDefinitionEditablePropertiesDTO properties) {}
+      String name, ModelSelection builtinModel, AgentEditablePropertiesDTO properties) {}
 
   public record SkillSpec(
       String packageName, String description, String repositoryUrl, String branch, String token) {}

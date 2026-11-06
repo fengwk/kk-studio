@@ -13,8 +13,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
@@ -25,10 +29,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.List;
@@ -45,10 +45,10 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ProviderService providerService;
   @Autowired private ModelService modelService;
-  @Autowired private AgentDefinitionService definitionService;
+  @Autowired private AgentService agentService;
   @Autowired private ProviderRepository providerRepository;
   @Autowired private ModelRepository modelRepository;
-  @Autowired private AgentDefinitionRepository definitionRepository;
+  @Autowired private AgentRepository agentRepository;
   @Autowired private PlatformTransactionManager transactionManager;
 
   @Test
@@ -108,8 +108,8 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
         providerService.createProvider(provider("lock-agent-provider-" + suffix));
     ModelDTO model =
         modelService.createModel(model(provider.getName(), "lock-agent-model-" + suffix));
-    AgentDefinitionCreateDTO agentCreate = agent(model.getName(), "lock-agent-" + suffix);
-    AtomicReference<AgentDefinitionDTO> createdAgent = new AtomicReference<>();
+    AgentCreateDTO agentCreate = agent(model.getName(), "lock-agent-" + suffix);
+    AtomicReference<AgentDTO> createdAgent = new AtomicReference<>();
     CountDownLatch childCreated = new CountDownLatch(1);
     CountDownLatch releaseChildTransaction = new CountDownLatch(1);
     CountDownLatch deleteStarted = new CountDownLatch(1);
@@ -122,7 +122,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
                   transaction.executeWithoutResult(
                       status -> {
                         assertNotNull(modelRepository.getByNameForUpdate(model.getName()));
-                        createdAgent.set(definitionService.createAgent(agentCreate));
+                        createdAgent.set(agentService.createAgent(agentCreate));
                         childCreated.countDown();
                         await(releaseChildTransaction);
                       }));
@@ -142,13 +142,13 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
       agentCreation.get(5, TimeUnit.SECONDS);
       modelDeletion.get(5, TimeUnit.SECONDS);
-      assertNotNull(definitionRepository.getByName(createdAgent.get().getName()));
+      assertNotNull(agentRepository.getByName(createdAgent.get().getName()));
       assertNotNull(modelRepository.getByName(model.getName()));
     } finally {
       releaseChildTransaction.countDown();
       executor.shutdownNow();
     }
-    definitionService.deleteAgent(createdAgent.get().getName(), createdAgent.get().getVersion());
+    agentService.deleteAgent(createdAgent.get().getName(), createdAgent.get().getVersion());
     modelService.deleteModel(model.getName(), model.getVersion());
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
@@ -161,39 +161,37 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     ModelDTO model =
         modelService.createModel(model(provider.getName(), "cross-agent-model-" + suffix));
     String modelRef = model.getName();
-    AgentDefinitionDTO createdAlpha =
-        definitionService.createAgent(agent(modelRef, "cross-alpha-" + suffix));
-    AgentDefinitionDTO createdOmega =
-        definitionService.createAgent(agent(modelRef, "cross-omega-" + suffix));
+    AgentDTO createdAlpha = agentService.createAgent(agent(modelRef, "cross-alpha-" + suffix));
+    AgentDTO createdOmega = agentService.createAgent(agent(modelRef, "cross-omega-" + suffix));
     ExecutorService executor = Executors.newFixedThreadPool(2);
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
     try {
-      Future<AgentDefinitionDTO> alphaUpdate =
+      Future<AgentDTO> alphaUpdate =
           executor.submit(
               () -> {
                 ready.countDown();
                 await(start);
-                return definitionService.updateAgent(
+                return agentService.updateAgent(
                     createdAlpha.getName(), update(createdAlpha, List.of(createdOmega.getName())));
               });
-      Future<AgentDefinitionDTO> omegaUpdate =
+      Future<AgentDTO> omegaUpdate =
           executor.submit(
               () -> {
                 ready.countDown();
                 await(start);
-                return definitionService.updateAgent(
+                return agentService.updateAgent(
                     createdOmega.getName(), update(createdOmega, List.of(createdAlpha.getName())));
               });
       assertTrue(ready.await(5, TimeUnit.SECONDS));
       start.countDown();
 
-      AgentDefinitionDTO alpha = alphaUpdate.get(5, TimeUnit.SECONDS);
-      AgentDefinitionDTO omega = omegaUpdate.get(5, TimeUnit.SECONDS);
-      alpha = definitionService.updateAgent(alpha.getName(), update(alpha, List.of()));
-      omega = definitionService.updateAgent(omega.getName(), update(omega, List.of()));
-      definitionService.deleteAgent(alpha.getName(), alpha.getVersion());
-      definitionService.deleteAgent(omega.getName(), omega.getVersion());
+      AgentDTO alpha = alphaUpdate.get(5, TimeUnit.SECONDS);
+      AgentDTO omega = omegaUpdate.get(5, TimeUnit.SECONDS);
+      alpha = agentService.updateAgent(alpha.getName(), update(alpha, List.of()));
+      omega = agentService.updateAgent(omega.getName(), update(omega, List.of()));
+      agentService.deleteAgent(alpha.getName(), alpha.getVersion());
+      agentService.deleteAgent(omega.getName(), omega.getVersion());
     } finally {
       start.countDown();
       executor.shutdownNow();
@@ -217,12 +215,12 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     return create;
   }
 
-  private AgentDefinitionCreateDTO agent(String model, String name) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private AgentCreateDTO agent(String model, String name) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    AgentCreateDTO create = new AgentCreateDTO();
     create.setName(name);
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
@@ -232,12 +230,12 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     return create;
   }
 
-  private AgentDefinitionUpdateDTO update(AgentDefinitionDTO current, List<String> subagentNames) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private AgentUpdateDTO update(AgentDTO current, List<String> subagentNames) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(current.getConfig().getTools());
     config.setSkills(current.getConfig().getSkills());
     config.setSubagents(subagentNames);
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO update = new AgentUpdateDTO();
     update.setDescription(current.getDescription());
     update.setSystemPrompt(current.getSystemPrompt());
     update.setExecution(current.getExecution());

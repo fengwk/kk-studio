@@ -448,7 +448,7 @@ export function agentConfigMatrix() {
       id: 'invalid.unknown_subagent',
       ok: false,
       expectStatus: 404,
-      messageIncludes: /agent_definition.*not found|not found/i,
+      messageIncludes: /agent.*not found|not found/i,
       title: '未知 subagent 引用',
       build: () => ({
         tools: [],

@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 
@@ -50,7 +50,7 @@ class ConfigSyncGraphTest {
   }
 
   private static ConfigSyncSnapshot pluginSnapshot(String requiredAgent, boolean agentPresent) {
-    List<AgentDefinition> agents =
+    List<Agent> agents =
         agentPresent
             ? List.of(agent(requiredAgent, "m", agentConfig(List.of(), List.of(), List.of())))
             : List.of();
@@ -116,7 +116,7 @@ class ConfigSyncGraphTest {
   /** 非 builtin driver 的私有 settings 不形成模型边，但 Agent 的技能依赖仍需展开。 */
   @Test
   void nonBuiltinExecutionDoesNotCreateModelDependency() {
-    AgentDefinition external =
+    Agent external =
         agent("external", "m", agentConfig(List.of(), List.of(skillRef("pkg", "s")), List.of()))
             .toBuilder()
             .execution(new ExecutionSelection("external", "{\"modelName\":\"m\"}"))

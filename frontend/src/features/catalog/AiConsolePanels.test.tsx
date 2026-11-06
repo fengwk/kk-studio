@@ -72,8 +72,8 @@ describe('AiConsolePanels', () => {
                 subagents: [],
               },
               version: '1',
-              createTime: 0,
-              updateTime: 0,
+              createdAt: 0,
+              updatedAt: 0,
             },
           ]}
           models={[model]}

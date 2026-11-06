@@ -258,7 +258,7 @@ describe('ThreadWorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setLocale('zh-CN')
-    vi.mocked(agentService.listAgents).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
+    vi.mocked(agentService.listAgents).mockResolvedValue([])
     vi.mocked(agentService.listModels).mockResolvedValue([{
         providerName: 'minimax',
         type: 'MODEL',

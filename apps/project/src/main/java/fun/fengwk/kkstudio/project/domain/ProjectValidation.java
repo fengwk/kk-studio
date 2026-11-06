@@ -5,7 +5,7 @@ import java.util.Objects;
 /** Project 领域值对象的共享边界校验：显示名、正文与 Agent/Environment 规范名。 */
 final class ProjectValidation {
 
-  /** agent_definition.name 与 environment.name 的列宽约束。 */
+  /** agent.name 与 environment.name 的列宽约束。 */
   private static final int MAX_CANONICAL_NAME_LENGTH = 64;
 
   private ProjectValidation() {}

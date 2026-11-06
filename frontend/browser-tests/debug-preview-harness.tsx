@@ -6,7 +6,7 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -50,10 +50,10 @@ const router = createMemoryRouter([{
               subagents: [],
             },
             version: '1',
-            createTime: 1790812800,
-            updateTime: 1790812800,
+            createdAt: 1790812800,
+            updatedAt: 1790812800,
           },
-          ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
+          ...['coder', 'broken-agent'].map((name): AgentDTO => ({
             name,
             description: name,
             systemPrompt: null,
@@ -61,8 +61,8 @@ const router = createMemoryRouter([{
             execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'anthropic/Claude' : 'missing/model', variant: 'fast' } },
             config: { tools: [], skills: [], subagents: [] },
             version: '1',
-            createTime: 1790812800,
-            updateTime: 1790812800,
+            createdAt: 1790812800,
+            updatedAt: 1790812800,
           })),
         ]}
       />

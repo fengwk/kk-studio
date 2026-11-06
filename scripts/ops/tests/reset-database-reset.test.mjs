@@ -39,7 +39,7 @@ describe('reset-database.sh reset', { skip: !dockerAvailable() && 'Docker daemon
   })
   afterEach(() => ctx.cleanup())
 
-  const agentCount = (database) => Number(ctx.psql(database, 'SELECT count(*) FROM agent_definition'))
+  const agentCount = (database) => Number(ctx.psql(database, 'SELECT count(*) FROM agent'))
   const allowConn = (database) => ctx.psql('postgres', `SELECT datallowconn FROM pg_database WHERE datname = '${database}'`)
   const snapshotCount = (database) => Number(ctx.psql('postgres', `SELECT count(*) FROM pg_database WHERE datname LIKE '${database}_pre_%'`))
 
@@ -372,7 +372,7 @@ describe('reset-database.sh reset', { skip: !dockerAvailable() && 'Docker daemon
     }
     assert.equal(result.status, 0, sanitizeError(result.stderr))
     assert.equal(ctx.psql(target, "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"), '0')
-    assert.equal(ctx.psql(untouched, 'SELECT count(*) FROM agent_definition'), '2')
+    assert.equal(ctx.psql(untouched, 'SELECT count(*) FROM agent'), '2')
   })
 
   // Credential non-disclosure.

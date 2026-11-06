@@ -101,7 +101,7 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
   void pageTotalCountIsDecimalStringOnTheHttpWire() throws Exception {
     MvcResult result =
         mockMvc
-            .perform(get("/api/agents").param("pageNumber", "1").param("pageSize", "1"))
+            .perform(get("/api/models").param("pageNumber", "1").param("pageSize", "1"))
             .andExpect(status().isOk())
             .andReturn();
 

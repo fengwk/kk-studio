@@ -920,6 +920,7 @@ function checkHarnessPackageAccess() {
  * 前缀映射只有这一份，schema 中的每张表都必须能命中。
  */
 const tableOwners = [
+  ['agent', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['agent_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
@@ -1167,7 +1168,7 @@ const harnessCatalogImporters = new Set([
 const harnessCatalogConsumers = [
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseAgentTurnContextResolver.java',
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
-  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentDefinitionConfigValidator.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentConfigValidator.java',
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/ToolCatalogQueryService.java',
 ]
 const harnessCatalogGatewayRun =
@@ -1193,7 +1194,7 @@ function checkHarnessCatalogBoundary() {
     if (
       relativePath.endsWith('DatabaseAgentTurnContextResolver.java') ||
       relativePath.endsWith('ToolExecutionGateway.java') ||
-      relativePath.endsWith('AgentDefinitionConfigValidator.java')
+      relativePath.endsWith('AgentConfigValidator.java')
     ) {
       if (!source.includes('import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;')) {
         addError(`${relativePath}: must import RuntimeToolCatalogSource`)

@@ -1,12 +1,12 @@
-import type { AgentDefinitionEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { createBuiltinExecution, getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { translate } from '@/shared/i18n'
 import type {
-  AgentDefinitionConfigDTO,
-  AgentDefinitionCreateDTO,
-  AgentDefinitionDTO,
+  AgentConfigDTO,
+  AgentCreateDTO,
+  AgentDTO,
   ModelDTO,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
@@ -74,7 +74,7 @@ function normalizeSkills(items: SkillRefDTO[] | null | undefined): SkillRefDTO[]
   return result
 }
 
-function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
+function toConfig(draft: AgentDraft): AgentConfigDTO {
   return {
     tools: normalizeCapabilityValues(draft.tools, 'tools'),
     skills: normalizeSkills(draft.skills),
@@ -96,7 +96,7 @@ export function emptyAgentDraft(model?: ModelDTO): AgentDraft {
   }
 }
 
-export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
+export function toAgentDraft(agent: AgentDTO): AgentDraft {
   const config = agent.config
   const selection = getBuiltinModelSelection(agent.execution)
   return {
@@ -115,7 +115,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
   }
 }
 
-export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
+export function toEditableAgent(draft: AgentDraft): AgentCreateDTO {
   const name = draft.name.trim()
   if (!name) {
     throw new Error('name must not be blank')
@@ -150,7 +150,7 @@ function draftExecution(draft: AgentDraft, allowUnconfigured: boolean) {
 export function toEditableAgentUpdate(
   draft: AgentDraft,
   allowUnconfiguredModel = false,
-): AgentDefinitionEditablePropertiesDTO {
+): AgentEditablePropertiesDTO {
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),

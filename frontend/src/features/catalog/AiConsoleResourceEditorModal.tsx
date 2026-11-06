@@ -11,7 +11,7 @@ import { resourceTitle } from '@/features/catalog/catalog-utils'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { useI18n } from '@/shared/i18n'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   ProviderDTO,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
@@ -45,7 +45,7 @@ export function ResourceEditorModal({
   modal: ResourceModal | null
   providers: ProviderDTO[]
   models: AgentModelView[]
-  agents?: AgentDefinitionDTO[]
+  agents?: AgentDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
   skills?: SkillPackageSummaryDTO[]
   skillsLoading?: boolean

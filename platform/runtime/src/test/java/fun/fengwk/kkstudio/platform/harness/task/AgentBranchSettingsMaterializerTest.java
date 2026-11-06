@@ -17,9 +17,9 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
@@ -29,13 +29,13 @@ import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMateria
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
-  private AgentDefinitionRepository agentRepository;
+  private AgentRepository agentRepository;
   private ModelRepository modelRepository;
   private AgentBranchSettingsMaterializer materializer;
 
   @BeforeEach
   void setUp() {
-    agentRepository = mock(AgentDefinitionRepository.class);
+    agentRepository = mock(AgentRepository.class);
     modelRepository = mock(ModelRepository.class);
     materializer =
         new AgentBranchSettingsMaterializer(
@@ -45,8 +45,8 @@ class AgentBranchSettingsMaterializerTest {
   }
 
   private void stub(String agentName, String variant, String modelConfigJson) {
-    AgentDefinition agent =
-        AgentDefinition.builder()
+    Agent agent =
+        Agent.builder()
             .name(agentName)
             .execution(BuiltinExecution.of(new ModelSelection("gpt-x", variant)))
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
@@ -99,7 +99,7 @@ class AgentBranchSettingsMaterializerTest {
         materializer.materialize("alpha").execution());
     when(agentRepository.getByName("alpha"))
         .thenReturn(
-            AgentDefinition.builder()
+            Agent.builder()
                 .name("alpha")
                 .execution(BuiltinExecution.of(new ModelSelection("gpt-x", "fast")))
                 .build());
@@ -111,7 +111,7 @@ class AgentBranchSettingsMaterializerTest {
   void passesThroughNonBuiltinExecution() {
     ExecutionSelection execution = new ExecutionSelection("custom", "{\"profile\":\"fast\"}");
     when(agentRepository.getByName("alpha"))
-        .thenReturn(AgentDefinition.builder().name("alpha").execution(execution).build());
+        .thenReturn(Agent.builder().name("alpha").execution(execution).build());
 
     BranchSettings settings = materializer.materialize("alpha");
 
@@ -161,23 +161,21 @@ class AgentBranchSettingsMaterializerTest {
   /** 测试意图：未配置 execution 的内置 Agent 被明确拒绝，而不是 NPE 或回退到其它模型。 */
   @Test
   void rejectsUnconfiguredAgentModelExplicitly() {
-    AgentDefinition unconfigured =
-        AgentDefinition.builder()
-            .name(BuiltinAgentDefinitions.COMPACTION_NAME)
+    Agent unconfigured =
+        Agent.builder()
+            .name(BuiltinAgents.COMPACTION_NAME)
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .build();
-    when(agentRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME))
-        .thenReturn(unconfigured);
+    when(agentRepository.getByName(BuiltinAgents.COMPACTION_NAME)).thenReturn(unconfigured);
 
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> materializer.materialize(BuiltinAgentDefinitions.COMPACTION_NAME));
+            () -> materializer.materialize(BuiltinAgents.COMPACTION_NAME));
     assertTrue(
         error
             .getMessage()
-            .contains(
-                "agent execution is not configured: " + BuiltinAgentDefinitions.COMPACTION_NAME));
+            .contains("agent execution is not configured: " + BuiltinAgents.COMPACTION_NAME));
   }
 
   private static String validModelConfig() {

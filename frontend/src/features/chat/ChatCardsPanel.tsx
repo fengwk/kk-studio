@@ -5,7 +5,7 @@ import { useI18n } from '@/shared/i18n'
 import { CatalogSetupGuide } from '@/features/chat/CatalogSetupGuide'
 import { isCatalogSetupComplete, type CatalogSetupState } from '@/features/chat/catalog-setup'
 import { Button } from '@/shared/ui/controls/Button'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ChatDTO } from '@/shared/api/generated/contracts'
 import './chat-cards.css'
 
 export function ChatCardsPanel({
@@ -21,7 +21,7 @@ export function ChatCardsPanel({
   onLoadMore,
 }: {
   chats: ChatDTO[]
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   onCreate: () => void
   onEdit?: (chat: ChatDTO) => void
   onDelete?: (chat: ChatDTO) => void

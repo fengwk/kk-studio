@@ -20,7 +20,7 @@ public record ToolDescriptor(
     ToolSideEffect sideEffect,
     Duration defaultTimeout) {
 
-  /** 模型可见工具名的全局上限，与 {@code agent_definition.name}、{@code mcp_tool.model_name} 等持久化列一致。 */
+  /** 模型可见工具名的全局上限，与 {@code agent.name}、{@code mcp_tool.model_name} 等持久化列一致。 */
   public static final int NAME_MAX_LENGTH = 64;
 
   private static final Pattern NAME_SYNTAX = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");

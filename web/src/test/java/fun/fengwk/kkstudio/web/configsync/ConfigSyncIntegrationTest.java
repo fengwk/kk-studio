@@ -30,6 +30,8 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
@@ -41,8 +43,6 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
@@ -499,13 +499,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         createAgent(
             agentA, model, List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentB));
     JsonNode agentBPage = findAgent(agentB);
-    AgentDefinitionUpdateDTO link = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO link = new AgentUpdateDTO();
     link.setDescription("agent " + agentB);
     link.setSystemPrompt("prompt " + agentB);
     link.setExecution(execution(model, "default"));
     link.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentA)));
     link.setExpectedVersion(agentBPage.path("version").asText());
-    putData("/api/agents/" + agentB, link);
+    putData("/api/platform/agents/" + agentB, link);
 
     List<Map<String, String>> selection =
         List.of(
@@ -529,15 +529,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 删除全部已建资源，证明导入是真创建而不是 upsert 空操作。
     // Agent 互相引用形成循环：先把 A 的 subagents 清空，再依次删除 B、A。
-    AgentDefinitionUpdateDTO unlinkA = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO unlinkA = new AgentUpdateDTO();
     unlinkA.setDescription("agent " + agentA);
     unlinkA.setSystemPrompt("prompt " + agentA);
     unlinkA.setExecution(execution(model, "default"));
     unlinkA.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of()));
     unlinkA.setExpectedVersion(agentADto.path("version").asText());
-    JsonNode unlinkedA = putData("/api/agents/" + agentA, unlinkA);
-    deleteOk("/api/agents/" + agentB, findAgent(agentB).path("version").asText());
-    deleteOk("/api/agents/" + agentA, unlinkedA.path("version").asText());
+    JsonNode unlinkedA = putData("/api/platform/agents/" + agentA, unlinkA);
+    deleteOk("/api/platform/agents/" + agentB, findAgent(agentB).path("version").asText());
+    deleteOk("/api/platform/agents/" + agentA, unlinkedA.path("version").asText());
     deleteOk("/api/platform/models/" + model, modelDto.path("version").asText());
     deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
     deleteOk("/api/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
@@ -1191,13 +1191,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       List<SkillRefDTO> skills,
       List<String> subagents)
       throws Exception {
-    AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
+    AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
     dto.setDescription("agent " + name);
     dto.setSystemPrompt("prompt " + name);
     dto.setExecution(execution(model, "default"));
     dto.setConfig(agentConfig(tools, skills, subagents));
-    return postData("/api/agents", dto);
+    return postData("/api/platform/agents", dto);
   }
 
   private JsonNode createSkill(GitFixture git, String pkg, String description) throws Exception {
@@ -1321,7 +1321,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode findAgent(String name) throws Exception {
-    return findByName(getData("/api/agents?pageNumber=1&pageSize=100").path("results"), name);
+    return findByName(getData("/api/platform/agents"), name);
   }
 
   private JsonNode findEnvironment(String name) throws Exception {
