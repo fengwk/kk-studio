@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
@@ -13,8 +14,6 @@ import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
@@ -71,7 +70,7 @@ public class IssueLifecycleService {
     // 允许读取已归档事实：当前版本的重复归档必须能回到「归档已是当前事实」的分支，而不是被归档门禁拒绝。
     IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, true);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue", "Cannot archive an issue while it has an active run; stop or settle it first");
     }
     if (locked.issue().isArchived()) {
@@ -150,7 +149,7 @@ public class IssueLifecycleService {
     mutationSupport.requireVersion(locked, expectedVersion);
     Issue issue = locked.issue();
     if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
-      throw new ProjectValidationException("issue", "Issue is not blocked");
+      throw DomainException.validation("issue", "Issue is not blocked");
     }
     ProjectStateCode recovered =
         ProjectValidationUtils.resolve(
@@ -301,7 +300,7 @@ public class IssueLifecycleService {
     Objects.requireNonNull(issueId, "issueId");
     IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, true);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue", "Cannot delete an issue while it has an active run; stop or settle it first");
     }
     issueEvidenceService.releaseAll(issueId);
@@ -315,7 +314,7 @@ public class IssueLifecycleService {
           ProjectSessionOwnership.owner(issueId, binding.agentName()));
     }
     if (!issueRepository.deleteById(issueId, expectedVersion)) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
     }
   }
@@ -340,12 +339,12 @@ public class IssueLifecycleService {
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue",
           "Cannot transition an issue while it has an active run; stop or settle it first");
     }
     if (locked.issue().isPaused()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue", "Cannot transition a paused issue; resume it first");
     }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
@@ -379,12 +378,11 @@ public class IssueLifecycleService {
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue", "Cannot reopen an issue while it has an active run; stop or settle it first");
     }
     if (locked.issue().isPaused()) {
-      throw new ProjectValidationException(
-          "issue", "Cannot reopen a paused issue; resume it first");
+      throw DomainException.validation("issue", "Cannot reopen a paused issue; resume it first");
     }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectStateCode to =

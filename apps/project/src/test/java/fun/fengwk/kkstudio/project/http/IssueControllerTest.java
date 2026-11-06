@@ -21,7 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
@@ -38,8 +38,6 @@ import fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
@@ -107,7 +105,7 @@ class IssueControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProjectErrorAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProjectControllerTestAdvice())
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
@@ -499,7 +497,7 @@ class IssueControllerTest {
     when(issueEditingService.appendActivity(
             issueId, 1L, "COMMENT", "k1", "Different content reusing key"))
         .thenThrow(
-            new ProjectDuplicateException(
+            DomainException.duplicate(
                 "issue_activity", "Request key was reused with a different request payload"));
 
     mockMvc
@@ -619,7 +617,7 @@ class IssueControllerTest {
     UpdateIssueRequestDTO req =
         UpdateIssueRequestDTO.builder().expectedVersion("1").title("T").build();
     when(issueEditingService.updateIssue(eq(issueId), eq(1L), any(), any()))
-        .thenThrow(new ProjectVersionConflictException("issue", "1", "2"));
+        .thenThrow(DomainException.versionConflict("issue", "1", "2"));
 
     mockMvc
         .perform(
@@ -627,6 +625,6 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("PROJECT_VERSION_CONFLICT"));
+        .andExpect(jsonPath("$.code").value("version_conflict"));
   }
 }

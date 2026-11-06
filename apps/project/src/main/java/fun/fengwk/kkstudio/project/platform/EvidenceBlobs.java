@@ -11,8 +11,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -38,8 +36,7 @@ public class EvidenceBlobs {
   /**
    * 事务内锁定 READY 人工上传并返回权威消费事实（blobId 与权威文件名，文件名绝不信任客户端消息）。
    *
-   * @throws ProjectNotFoundException 上传不存在
-   * @throws ProjectValidationException 上传不可消费
+   * @throws DomainException 上传不存在或不可消费
    */
   public ReadyUpload lockReadyUpload(UUID uploadId) {
     try {
@@ -49,10 +46,9 @@ public class EvidenceBlobs {
       if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
         throw error;
       }
-      throw new ProjectNotFoundException("storage_upload");
+      throw DomainException.notFound("storage_upload");
     } catch (StorageVerificationException error) {
-      throw new ProjectValidationException(
-          "upload", "Upload is not ready to be published as evidence");
+      throw DomainException.validation("upload", "Upload is not ready to be published as evidence");
     }
   }
 
@@ -64,7 +60,7 @@ public class EvidenceBlobs {
   /**
    * 事务内 retain 一次全局 Blob 引用。
    *
-   * @throws ProjectValidationException blob 不存在或已进入删除终态
+   * @throws DomainException blob 不存在或已进入删除终态
    */
   public void retainBlob(UUID blobId) {
     try {
@@ -73,7 +69,7 @@ public class EvidenceBlobs {
       if (error.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(error.resource())) {
         throw error;
       }
-      throw new ProjectValidationException("issue_evidence", EVIDENCE_BLOB_UNAVAILABLE);
+      throw DomainException.validation("issue_evidence", EVIDENCE_BLOB_UNAVAILABLE);
     }
   }
 

@@ -5,10 +5,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
@@ -55,7 +53,7 @@ public class IssueStageBudgetService {
         ProjectValidationUtils.resolve(
             "stage_budget", () -> StageBudgetView.authorize(locked.workflow(), code, maxRuns));
     if (stageBudgetRepository.get(issueId, state) != null) {
-      throw new ProjectDuplicateException("stage_budget", "Stage budget is already authorized");
+      throw DomainException.duplicate("stage_budget", "Stage budget is already authorized");
     }
     if (!stageBudgetRepository.insert(issueId, authorized)) {
       throw new IllegalStateException("failed to insert stage budget");
@@ -89,7 +87,7 @@ public class IssueStageBudgetService {
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "stage_budget", "Cannot reset stage budget while an active run exists");
     }
     ProjectStateCode code = ProjectStateCode.of(state);
@@ -132,7 +130,7 @@ public class IssueStageBudgetService {
     Objects.requireNonNull(state, "state");
     StageBudgetView budget = stageBudgetRepository.get(issueId, state);
     if (budget == null) {
-      throw new ProjectNotFoundException("stage_budget");
+      throw DomainException.notFound("stage_budget");
     }
     return budget;
   }

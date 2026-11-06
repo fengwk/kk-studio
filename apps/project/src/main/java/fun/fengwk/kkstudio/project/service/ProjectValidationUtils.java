@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.project.service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -39,16 +39,16 @@ public final class ProjectValidationUtils {
   /** 显示名：非空白、无首尾空白、不超过 {@code maxLength} 个码点。 */
   public static String requireDisplayName(String value, String field, int maxLength) {
     if (value == null) {
-      throw new ProjectValidationException(field, field + " must not be blank");
+      throw DomainException.validation(field, field + " must not be blank");
     }
     if (value.isBlank()) {
-      throw new ProjectValidationException(field, field + " must not be blank");
+      throw DomainException.validation(field, field + " must not be blank");
     }
     if (!value.equals(value.strip())) {
-      throw new ProjectValidationException(field, field + " must not have surrounding whitespace");
+      throw DomainException.validation(field, field + " must not have surrounding whitespace");
     }
     if (value.codePointCount(0, value.length()) > maxLength) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           field, field + " exceeds maximum allowed length of " + maxLength + " characters");
     }
     return value;
@@ -58,7 +58,7 @@ public final class ProjectValidationUtils {
   public static String requireCanonicalName(String value, String field) {
     String name = requireDisplayName(value, field, MAX_CANONICAL_NAME_LENGTH);
     if (name.indexOf('/') >= 0) {
-      throw new ProjectValidationException(field, field + " must not contain '/'");
+      throw DomainException.validation(field, field + " must not contain '/'");
     }
     return name;
   }
@@ -77,10 +77,10 @@ public final class ProjectValidationUtils {
     try {
       encoded = encoder.encode(CharBuffer.wrap(value));
     } catch (CharacterCodingException error) {
-      throw new ProjectValidationException(field, field + " contains invalid UTF-8 encoding");
+      throw DomainException.validation(field, field + " contains invalid UTF-8 encoding");
     }
     if (encoded.remaining() > maxBytes) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           field, field + " exceeds maximum allowed UTF-8 size of " + maxBytes + " bytes");
     }
     return value;
@@ -89,7 +89,7 @@ public final class ProjectValidationUtils {
   /** 正文：不可空且不足空白。 */
   public static String requireUtf8Text(String value, String field, int maxBytes) {
     if (value == null || value.isBlank()) {
-      throw new ProjectValidationException(field, field + " must not be blank");
+      throw DomainException.validation(field, field + " must not be blank");
     }
     return optionalUtf8Text(value, field, maxBytes);
   }
@@ -118,9 +118,8 @@ public final class ProjectValidationUtils {
   }
 
   /** 把领域层确定性拒绝（{@link IllegalArgumentException}）翻译为平台校验错误，避免领域拒绝泄漏为内部错误。 */
-  public static ProjectValidationException validation(
-      String resource, IllegalArgumentException error) {
-    return new ProjectValidationException(resource, error.getMessage());
+  public static DomainException validation(String resource, IllegalArgumentException error) {
+    return DomainException.validation(resource, error.getMessage());
   }
 
   /** 请求正文指纹：SHA-256 小写十六进制，用于 Activity 的幂等去重。 */

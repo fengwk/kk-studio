@@ -4,12 +4,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
@@ -59,7 +59,7 @@ public class ProjectSnapshotAssembler {
 
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     if (!project.getId().equals(projectId)) {
       throw new IllegalStateException("Foreign project returned for snapshot");

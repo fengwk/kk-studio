@@ -21,7 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -32,8 +32,6 @@ import fun.fengwk.kkstudio.project.dto.ProjectWorkflowStateDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
@@ -67,7 +65,7 @@ class ProjectControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProjectErrorAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProjectControllerTestAdvice())
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
@@ -192,7 +190,7 @@ class ProjectControllerTest {
             .description("Updated Desc")
             .build();
     when(projectService.updateConfiguration(projectId, 1L, "Updated Title", "Updated Desc"))
-        .thenThrow(new ProjectVersionConflictException("project", "1", "2"));
+        .thenThrow(DomainException.versionConflict("project", "1", "2"));
 
     mockMvc
         .perform(
@@ -200,7 +198,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("PROJECT_VERSION_CONFLICT"));
+        .andExpect(jsonPath("$.code").value("version_conflict"));
   }
 
   @Test
@@ -332,7 +330,7 @@ class ProjectControllerTest {
 
   @Test
   void testResourceNotFoundAdvice() throws Exception {
-    when(projectService.getProject(projectId)).thenThrow(new ProjectNotFoundException("project"));
+    when(projectService.getProject(projectId)).thenThrow(DomainException.notFound("project"));
 
     mockMvc.perform(get("/api/projects/" + projectId)).andExpect(status().isNotFound());
   }

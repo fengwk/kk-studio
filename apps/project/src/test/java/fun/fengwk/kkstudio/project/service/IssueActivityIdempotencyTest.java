@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.project.service;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertDuplicate;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -66,8 +65,7 @@ class IssueActivityIdempotencyTest {
     assertNull(result.activity());
     when(repository.findByIdempotencyKey(lockedId, identity.key()))
         .thenReturn(IssueActivity.builder().requestHash("different").build());
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             IssueActivityIdempotency.lockUnlessReplayed(
                 repository, issueId, identity, () -> lockedId, id -> id));

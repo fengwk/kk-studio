@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -30,9 +31,6 @@ import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
@@ -113,7 +111,7 @@ public class IssueRunService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.RUN, "ACCEPT_RUN", acceptKey, issueId);
     if (issueRepository.getById(issueId) == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     ReceiptLock<OwnerLock> receipt =
         IssueActivityIdempotency.lockUnlessReplayed(
@@ -128,29 +126,29 @@ public class IssueRunService {
     Project project = receipt.locked().project();
     Issue issue = receipt.locked().issue();
     if (project.isArchived()) {
-      throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
+      throw DomainException.validation("project", "Cannot accept a run in an archived project");
     }
     if (issue.isArchived()) {
-      throw new ProjectValidationException("issue", "Cannot accept a run for an archived issue");
+      throw DomainException.validation("issue", "Cannot accept a run for an archived issue");
     }
     if (issue.isGateClosed()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue", "Cannot accept a run while the issue gate is closed");
     }
     ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
     ProjectStateCode stateCode = ProjectStateCode.of(issue.getState());
     if (ProjectWorkflowReservedState.isReserved(stateCode)) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Issue is not in an executable work stage: " + issue.getState());
     }
     ProjectWorkflowState stage = workflow.require(stateCode);
     if (!stage.enabled() || !stage.hasAgent()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Stage " + issue.getState() + " has no enabled agent");
     }
     String agentName = stage.agent();
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw new ProjectValidationException("issue_run", "Issue already has an active run");
+      throw DomainException.validation("issue_run", "Issue already has an active run");
     }
 
     StageBudgetView budgetRow = stageBudgetRepository.get(issueId, issue.getState());
@@ -161,7 +159,7 @@ public class IssueRunService {
       }
     }
     if (budgetRow.usedRuns() >= budgetRow.maxRuns()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Stage budget is exhausted; a human must authorize more runs");
     }
 
@@ -245,7 +243,7 @@ public class IssueRunService {
         objectMapper.createObjectNode());
     issue.setNextRunOrdinal(ordinal + 1);
     if (!issueRepository.updateById(issue, issue.getVersion())) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
     }
     issueWorkQueue.request(issueId, Duration.ZERO);
@@ -280,7 +278,7 @@ public class IssueRunService {
     requireActive(run);
     requireVersion(run, expectedVersion);
     if (run.getRemainingExecutionMs() <= 0) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Cannot wait: run has no execution budget left");
     }
     run.setStatus(IssueRunStatus.WAITING);
@@ -298,15 +296,15 @@ public class IssueRunService {
       return issueRunRepository.getById(runId);
     }
     if (run.getStatus() != IssueRunStatus.WAITING) {
-      throw new ProjectValidationException("issue_run", "Only a WAITING run can be resumed");
+      throw DomainException.validation("issue_run", "Only a WAITING run can be resumed");
     }
     requireVersion(run, expectedVersion);
     if (locked.issue().isGateClosed()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Cannot resume a run while the issue gate is closed");
     }
     if (run.getRemainingExecutionMs() <= 0) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Cannot resume: run has no execution budget left");
     }
     // 恢复消耗的是本次 Run 已接受的活动额度，不新建 Run、不重查阶段额度。
@@ -332,11 +330,11 @@ public class IssueRunService {
     if (status != IssueRunStatus.COMPLETED
         && status != IssueRunStatus.CANCELLED
         && status != IssueRunStatus.FAILED) {
-      throw new ProjectValidationException("issue_run", "A terminal status is required");
+      throw DomainException.validation("issue_run", "A terminal status is required");
     }
     if ((status != IssueRunStatus.COMPLETED && (finalAnswerEntryId != null || nextState != null))
         || (status != IssueRunStatus.FAILED && error != null)) {
-      throw new ProjectValidationException("issue_run", "Invalid terminal inputs");
+      throw DomainException.validation("issue_run", "Invalid terminal inputs");
     }
     String validError =
         status == IssueRunStatus.FAILED
@@ -456,27 +454,27 @@ public class IssueRunService {
 
   private void requireActive(IssueRun run) {
     if (!run.isActive()) {
-      throw new ProjectValidationException("issue_run", "Run is already terminal");
+      throw DomainException.validation("issue_run", "Run is already terminal");
     }
   }
 
   private void requireVersion(IssueRun run, long expectedVersion) {
     if (run.getVersion() != expectedVersion) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
     }
   }
 
   private void updateRun(IssueRun run, long expectedVersion) {
     if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
     }
   }
 
   private void persistIssue(Issue issue, long expectedVersion) {
     if (!issueRepository.updateById(issue, expectedVersion)) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
     }
   }
@@ -506,18 +504,18 @@ public class IssueRunService {
     List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
     int start = entryIds.indexOf(startEntryId);
     if (start < 0) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Run start entry is not on the bounded thread history path");
     }
     int end = entryIds.indexOf(endEntryId);
     if (end < start || (requireProgress && end == start)) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue_run", "Run end entry must be a descendant of the run start entry");
     }
     if (finalAnswerEntryId != null) {
       int answer = entryIds.indexOf(finalAnswerEntryId);
       if (answer <= start || answer > end) {
-        throw new ProjectValidationException(
+        throw DomainException.validation(
             "issue_run", "Run final answer must be inside the run interval (start, end]");
       }
     }
@@ -528,14 +526,14 @@ public class IssueRunService {
     // Session acceptance takes Project SHARE so it serializes with workflow and archive updates.
     Project project = projectRepository.lockForShare(initial.getProjectId());
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     if (!issue.getProjectId().equals(project.getId())) {
-      throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
+      throw DomainException.validation("issue", "Issue hierarchy is inconsistent");
     }
     return new OwnerLock(project, issue);
   }
@@ -544,19 +542,19 @@ public class IssueRunService {
     IssueRun peek = requireRun(runId);
     Issue peekIssue = issueRepository.getById(peek.getIssueId());
     if (peekIssue == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     Project project = projectRepository.lockForKeyShare(peekIssue.getProjectId());
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     Issue issue = issueRepository.lockById(peekIssue.getId());
     if (issue == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     IssueRun run = issueRunRepository.lockById(runId);
     if (run == null) {
-      throw new ProjectNotFoundException("issue_run");
+      throw DomainException.notFound("issue_run");
     }
     return new RunLock(run, issue, issue.getVersion(), project);
   }
@@ -569,7 +567,7 @@ public class IssueRunService {
   private IssueRun currentRun(UUID runId) {
     IssueRun run = issueRunRepository.getById(runId);
     if (run == null) {
-      throw new ProjectNotFoundException("issue_run");
+      throw DomainException.notFound("issue_run");
     }
     return run;
   }
@@ -577,7 +575,7 @@ public class IssueRunService {
   private IssueRun requireRun(UUID runId) {
     IssueRun run = issueRunRepository.getById(runId);
     if (run == null) {
-      throw new ProjectNotFoundException("issue_run");
+      throw DomainException.notFound("issue_run");
     }
     return run;
   }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project.service;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertNotFound;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
@@ -232,7 +232,7 @@ class ProjectSnapshotAssemblerTest {
   void testProjectNotFoundFails() {
     // 测试意图：项目不存在时抛出 404
     when(projectService.getProject(projectId)).thenReturn(null);
-    assertThrows(ProjectNotFoundException.class, () -> assembler.assemble(projectId));
+    assertNotFound(() -> assembler.assemble(projectId));
   }
 
   @Test

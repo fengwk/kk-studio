@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.project.service;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertNotFound;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,10 +21,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -53,12 +54,12 @@ class IssueMutationSupportTest {
   void missingOwnerFailsBeforeAnyWrite() {
     Issue initial = Issue.builder().id(issueId).projectId(projectId).build();
     when(issues.getById(issueId)).thenReturn(initial);
-    assertThrows(ProjectNotFoundException.class, () -> support.lockOwner(issueId));
+    assertNotFound(() -> support.lockOwner(issueId));
     verify(issues, never()).lockById(any());
 
     Project project = Project.builder().id(projectId).build();
     when(projects.lockForKeyShare(projectId)).thenReturn(project);
-    assertThrows(ProjectNotFoundException.class, () -> support.lockOwner(issueId));
+    assertNotFound(() -> support.lockOwner(issueId));
     InOrder order = inOrder(issues, projects);
     order.verify(issues).getById(issueId);
     order.verify(projects).lockForKeyShare(projectId);
@@ -78,8 +79,7 @@ class IssueMutationSupportTest {
     when(projects.lockForKeyShare(projectId)).thenReturn(Project.builder().id(projectId).build());
     when(issues.lockById(issueId)).thenReturn(moved);
 
-    ProjectValidationException error =
-        assertThrows(ProjectValidationException.class, () -> support.lockOwner(issueId));
+    DomainException error = assertValidation(() -> support.lockOwner(issueId));
     assertTrue(error.getMessage().contains("hierarchy"));
     InOrder order = inOrder(issues, projects);
     order.verify(issues).getById(issueId);
@@ -96,7 +96,7 @@ class IssueMutationSupportTest {
     IssueMutationSupport.Locked locked = new IssueMutationSupport.Locked(issue, null, null);
     when(issues.updateById(issue, 4)).thenReturn(false);
 
-    assertThrows(ProjectVersionConflictException.class, () -> support.persist(locked, 4));
+    assertVersionConflict(() -> support.persist(locked, 4));
     verify(issues).updateById(issue, 4);
     verify(issues, never()).getById(any());
   }

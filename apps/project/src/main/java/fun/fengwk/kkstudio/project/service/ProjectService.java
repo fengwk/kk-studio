@@ -4,15 +4,13 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -119,7 +117,7 @@ public class ProjectService {
     Objects.requireNonNull(projectId, "projectId");
     Project project = projectRepository.getById(projectId);
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     return project;
   }
@@ -208,7 +206,7 @@ public class ProjectService {
     List<Issue> issues = issueRepository.listByProjectId(projectId);
     for (Issue issue : issues) {
       if (issueRunRepository.lockActiveByIssueId(issue.getId()) != null) {
-        throw new ProjectValidationException(
+        throw DomainException.validation(
             "project",
             "Cannot delete a project while an issue has an active run; stop or settle it first");
       }
@@ -225,7 +223,7 @@ public class ProjectService {
             ProjectSessionOwnership.owner(issue.getId(), binding.agentName()));
       }
       if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
-        throw new ProjectVersionConflictException(
+        throw DomainException.versionConflict(
             "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
       }
     }
@@ -255,7 +253,7 @@ public class ProjectService {
   private Project lockProject(UUID projectId) {
     Project locked = projectRepository.lockById(projectId);
     if (locked == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     return locked;
   }
@@ -269,7 +267,7 @@ public class ProjectService {
   /** 归档项目禁止任何配置修改；先恢复归档再编辑，避免归档状态下的隐式改动。 */
   private static void requireEditable(Project locked) {
     if (locked.isArchived()) {
-      throw new ProjectValidationException("project", "Cannot modify an archived project");
+      throw DomainException.validation("project", "Cannot modify an archived project");
     }
   }
 
@@ -290,7 +288,7 @@ public class ProjectService {
   private static void requireDeclaredState(
       ProjectWorkflow workflow, String code, String reference) {
     if (workflow.find(ProjectStateCode.of(code)).isEmpty()) {
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "workflow", "Cannot remove " + reference + " " + code + " while an issue still uses it");
     }
   }
@@ -300,13 +298,13 @@ public class ProjectService {
       if (issueRunRepository.lockActiveByIssueId(issue.getId()) == null) {
         continue;
       }
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "project", "Cannot change project configuration while an issue has an active run");
     }
   }
 
-  private static ProjectVersionConflictException conflict(Project locked, long expectedVersion) {
-    return new ProjectVersionConflictException(
+  private static DomainException conflict(Project locked, long expectedVersion) {
+    return DomainException.versionConflict(
         "project", Long.toString(expectedVersion), Long.toString(locked.getVersion()));
   }
 }
