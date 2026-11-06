@@ -192,7 +192,7 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 - `operatingSystem` 必填，取值为 `linux` / `macos` / `windows`。
 - `studioUrl` 必填，只能是 HTTP(S) origin：允许一个结尾 `/`（保存时去掉），拒绝 userinfo、
   path、query、fragment 与非法端口。Daemon 由它派生统一连接入口
-  `ws(s)://<authority>/api/harness/environment-daemon`。单条物理连接通过 HTTP/2 复用 Protobuf 控制流，
+  `ws(s)://<authority>/ws/daemon`。单条物理连接通过 HTTP/2 复用 Protobuf 控制流，
   IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。Studio 与受管环境在可信浏览器边界
   （非沙箱）内协作，不需独立 IDE 域名。
 - `note` 可选，trim 后单行、最长 512 字符、不含控制字符；空值保存为省略/null。
@@ -444,7 +444,7 @@ HOME 也不是默认工作目录。
 | 输入文件名或目录不符 | 必须使用 Web 生成的暂存文件，且是私有同目录的 `daemon.json` / `daemon.token` |
 | `environment registration is rejected` 或安装器提示本次启动令牌被拒绝 | 回目标 Environment 重新生成安装命令并执行；不要重复使用旧 code 或恢复备份中的旧 token |
 | Linux 报 `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
-| WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/api/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
+| WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/ws/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
 | 服务存活但未 READY | 核对 studioUrl、token、网络与压缩；Linux 看 journal，macOS 看日志，Windows 用前台复现 |
 | LSP 显示未安装或查询失败 | 检查弹窗 JSON、服务进程可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 

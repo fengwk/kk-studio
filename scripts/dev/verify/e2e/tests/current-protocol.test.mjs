@@ -16,7 +16,7 @@ async function heartbeat(t, frames) {
     readyState = 1
     constructor(url) {
       super()
-      assert.equal(new URL(url).pathname, '/api/events')
+      assert.equal(new URL(url).pathname, '/ws/events')
       queueMicrotask(() => {
         for (const frame of frames) {
           this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(frame) }))

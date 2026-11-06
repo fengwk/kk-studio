@@ -100,7 +100,7 @@ L1          │ common │◀───│ work │   │ share │   │ schema 
 Maven 之外的连接：
 
 ```text
-frontend ──REST 与 /api/events WebSocket──▶ web
+frontend ──REST 与 /ws/events WebSocket──▶ web
 daemon ──每台主机一条 WSS，承载 HTTP/2 的控制流与 IDE 数据流──▶ platform/daemon-server
 daemon ──托管──▶ code-server（版本与摘要由 daemon/runtime-manifest.json 固定）
 ```
@@ -386,7 +386,7 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 后向全部在线 Daemon 重新下发，Daemon 侧行为见下文。
 
 跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领、排空本机执行、向 Daemon
-发送 GOAWAY 并释放路由租约、移交在途远端工具，最后反注册。`/api/events` 的跨节点载荷与 IDE 集群接口走内部路径。
+发送 GOAWAY 并释放路由租约、移交在途远端工具，最后反注册。`/ws/events` 的跨节点载荷与 IDE 集群接口走内部路径。
 
 ### 控制面与主机能力
 

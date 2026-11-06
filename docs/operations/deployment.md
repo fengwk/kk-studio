@@ -240,16 +240,19 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 | 流量 | 端点 | 要求 |
 | --- | --- | --- |
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
-| Environment Daemon gateway | `/api/harness/environment-daemon` | 透传 WebSocket；承载 Daemon 准入、控制流与环境隧道数据面 |
-| 浏览器 Application Event WebSocket | `/api/events` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步，并以新连接身份登记 IDE 使用证明 |
-| 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
+| Environment Daemon gateway | `/ws/daemon` | 透传 WebSocket；承载 Daemon 准入、控制流与环境隧道数据面 |
+| 浏览器 Application Event WebSocket | `/ws/events` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步，并以新连接身份登记 IDE 使用证明 |
+| 同源 IDE 数据面与固定入口 | `/ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
+
+按路径单独放行 WebSocket 的代理只需放行 `/ws/` 与 `/ide/`；其余 `/api/`、`/actuator/`
+与 SPA 深层路径都走普通 HTTP。
 
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。
 
 预签名 URL 与 WebSocket 是部署时最容易出错的两处：前者要求浏览器可访问实际预签名地址（若配置了
 `KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 则使用该 origin，缺省时回退到 `KK_STUDIO_STORAGE_S3_ENDPOINT`）；后者要求终止浏览器侧 WebSocket
-（`/api/events` 与 IDE 视图）的代理层启用 `permessage-deflate` 压缩扩展，而 Daemon 与 Studio 之间的
+（`/ws/events` 与 IDE 视图）的代理层启用 `permessage-deflate` 压缩扩展，而 Daemon 与 Studio 之间的
 WSS 传输不协商压缩扩展（见 [Environment Daemon 安装与运行](environment-daemon.md)）。
 
 ## 隔离栈与可靠性栈
@@ -331,7 +334,7 @@ distributed.sh 提供受控命令集：`disconnect-db-a` / `reconnect-db-a` 注�
 ./scripts/dev/verify/reliability/stack.sh down --volumes
 ```
 
-Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon` 连接 App。
+Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 
 容器入口在启动前按与产品相同的布局物化配置与凭证：把注入的注册凭证写为
 `/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
@@ -532,7 +535,7 @@ tag 不同：
 
 Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机通过 Studio 的安装弹窗保存
 配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
-`wss://<studio-origin>/api/harness/environment-daemon`。安装机制、安装设置字段、注册 token
+`wss://<studio-origin>/ws/daemon`。安装机制、安装设置字段、注册 token
 文件、更新与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界
