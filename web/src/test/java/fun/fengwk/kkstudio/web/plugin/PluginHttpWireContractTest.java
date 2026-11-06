@@ -197,7 +197,7 @@ class PluginHttpWireContractTest {
     assertEquals(0, none.get("canvasFunctionNames").size());
   }
 
-  /** 测试意图：Instant 元数据是 epoch 秒数值 token 而不是 ISO 文本，坐标是 canonical 十进制字符串 token。 */
+  /** 测试意图：Instant 元数据是 epoch 毫秒整数 token，坐标是 canonical 十进制字符串 token。 */
   @Test
   void instantMetadataAndCoordinatesKeepTheirWireTokenTypes() throws Exception {
     when(pluginManagementService.getPlugin("beta-deep-connected"))
@@ -444,12 +444,12 @@ class PluginHttpWireContractTest {
     }
   }
 
-  /** 生产 profile 把 Instant 写成 epoch 秒的数值 token（零纳秒即 9 位小数 scale），绝不是 ISO 文本。 */
+  /** 生产 profile 把 Instant 写成 epoch 毫秒整数 token，绝不是 ISO 文本。 */
   private static void assertInstantToken(JsonNode token, Instant instant) {
     assertEquals(JsonNodeType.NUMBER, token.getNodeType());
-    assertTrue(token.isFloatingPointNumber());
-    assertEquals(instant.getEpochSecond(), token.longValue());
-    assertEquals(instant.getEpochSecond() + ".000000000", token.toString());
+    assertTrue(token.isIntegralNumber());
+    assertEquals(instant.toEpochMilli(), token.longValue());
+    assertEquals(Long.toString(instant.toEpochMilli()), token.toString());
   }
 
   private static Map<String, SchemaElement> configProperties() {

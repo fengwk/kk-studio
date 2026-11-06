@@ -16,10 +16,10 @@ describe('retryCountdownSeconds', () => {
     expect(retryCountdownSeconds([Number.NaN, 1, 2], NOW)).toBe(0)
   })
 
-  it('accepts numeric seconds (under 1e11) and millisecond timestamps', () => {
+  it('accepts millisecond timestamps without guessing by magnitude', () => {
     const retryAt = NOW + 5_000
-    expect(retryCountdownSeconds(retryAt / 1000, NOW)).toBe(5)
     expect(retryCountdownSeconds(retryAt, NOW)).toBe(5)
+    expect(retryCountdownSeconds(5_000, 0)).toBe(5)
   })
 
   it('parses string timestamps and full/first-of-day UTC arrays', () => {
