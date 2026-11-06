@@ -478,7 +478,7 @@ registerCase({
         if (String(entry?.entryType || '').toUpperCase() !== 'MESSAGE') {
           return false
         }
-        const payload = JSON.parse(entry.payloadJson || '{}')
+        const payload = entry.payload ?? {}
         return JSON.stringify(payload).includes(pending.toolInvocationId)
       })
       assert(
@@ -488,7 +488,7 @@ registerCase({
       // 历史请求预览：以真实模型输出为锚点复现「该输出之前的请求前缀」，必须恒为只读且声明是重建而非原始字节。
       const assistantOutput = entries
         .filter((entry) => String(entry?.entryType || '').toUpperCase() === 'MESSAGE')
-        .map((entry) => ({ entry, payload: JSON.parse(entry.payloadJson || '{}') }))
+        .map((entry) => ({ entry, payload: entry.payload ?? {} }))
         .find(({ payload }) => payload?.message?.role === 'ASSISTANT' && payload?.assistantMetadata)
       assert(
         assistantOutput,

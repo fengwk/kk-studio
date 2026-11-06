@@ -218,7 +218,7 @@ async function createStubCatalog({ jsonCall }) {
   })
 }
 
-const entryPayload = (entry) => JSON.parse(entry.payloadJson)
+const entryPayload = (entry) => entry.payload
 const isMessage = (entry, role) =>
   entry.entryType.toUpperCase() === 'MESSAGE' && entryPayload(entry).message.role === role
 

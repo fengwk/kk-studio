@@ -20,7 +20,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
   let snapshotReads = 0
   const response = (json, status = 200) => ({ status, json })
   const entry = (entryType, payload) => ({
-    entryId: randomUUID(), entryType, payloadJson: JSON.stringify(payload),
+    entryId: randomUUID(), entryType, payload,
   })
   return {
     artifacts,

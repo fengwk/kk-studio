@@ -731,11 +731,11 @@ function messageEntry(entryId, message, assistantMetadata = null, usageCost = nu
   return {
     entryId,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: {
       message,
       assistantMetadata,
       toolResultMetadata: null,
-    }),
+    },
     usageCost,
   }
 }

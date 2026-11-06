@@ -53,8 +53,8 @@ const ids = [
 ]
 const card = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,
-  userName: 'test', homeDirectory: '/home/test', statusExpiresAt: '2099-01-01T00:00:00Z',
-  version: '0', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  userName: 'test', homeDirectory: '/home/test', statusExpiresAt: Date.parse('2099-01-01T00:00:00Z'),
+  version: '0', createdAt: Date.parse('2026-01-01T00:00:00Z'), updatedAt: Date.parse('2026-01-01T00:00:00Z'),
   capabilities: ids.map((id) => ({ id })),
 }
 

@@ -197,9 +197,9 @@ export function extractDurableTrace(entries) {
     if (String(entry?.entryType || '').toUpperCase() !== 'MESSAGE') continue
     let payload
     try {
-      payload = JSON.parse(entry.payloadJson)
+      payload = entry.payload
     } catch {
-      throw new ReliabilityError('model', `invalid MESSAGE payloadJson at entry ${entry?.entryId}`)
+      throw new ReliabilityError('model', `invalid MESSAGE payload at entry ${entry?.entryId}`)
     }
     const message = payload?.message
     if (!message || !Array.isArray(message.contents)) continue

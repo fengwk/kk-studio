@@ -146,7 +146,7 @@ export async function runWorkspaceContractMatrix(ui) {
             queued.map((command) => command.type).join(',') === 'SET_EXECUTION,USER_MESSAGE',
             `settings and message were not queued in frozen order: ${JSON.stringify(queued)}`,
           )
-          const executionPayload = JSON.parse(queued[0].payloadJson)
+          const executionPayload = queued[0].payload
           assert(
             executionPayload.execution?.driver === 'builtin'
             && executionPayload.execution?.settings?.modelName === fixture.model.name
@@ -547,7 +547,7 @@ export async function runWorkspaceContractMatrix(ui) {
                   toolCallId: 'call-bash-1',
                   toolName: 'bash',
                   argumentsJson: '{"command":"echo approval"}',
-                  approvalJson: JSON.stringify({ required: true, decision: null, reason: 'Permission rules require approval' }),
+                  approval: { required: true, decision: null, reason: 'Permission rules require approval' },
                   createdAt: 1,
                 }],
                 nextCursor: null,
@@ -774,7 +774,7 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
       (left, right) => Number(BigInt(left.sequence) - BigInt(right.sequence)),
     )
     const userIndex = commands.findIndex((command) =>
-      command.type === 'USER_MESSAGE' && command.payloadJson.includes(marker),
+      command.type === 'USER_MESSAGE' && JSON.stringify(command.payload).includes(marker),
     )
     if (userIndex > 0 && commands[userIndex - 1]?.type === 'SET_EXECUTION') {
       // 只返回本次 batch：marker USER 与其紧邻的 preceding SET_EXECUTION，

@@ -143,7 +143,7 @@ function modelRequestDebugFixture() {
         status: 200,
         json: {
           kind: 'NEXT_REQUEST_PREVIEW',
-          generatedAt: '2026-10-02T00:00:00Z',
+          generatedAt: Date.parse('2026-10-02T00:00:00Z'),
           model: body.model,
           environmentName: body.environmentName ?? null,
           systemInstruction: '',

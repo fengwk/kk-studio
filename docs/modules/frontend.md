@@ -249,7 +249,7 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
 task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id：
-持久 Entry 的 detailsJson 与 live invocation 的 resultJson.details 使用同一投影。
+持久 Entry 的 detailsJson 与 live invocation 的 result.details 使用同一投影。
 续接参数中已有的 thread_id 链接原样保留；缺失或损坏 details 时完整展示正文，
 不从自然语言或正文 JSON 推断链接，错误原文仍保留。
 
@@ -266,13 +266,13 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 
 - **write 审查**：审批前展示目标路径与完整文件正文；参数中显式携带工作目录时一并展示，不补默认目录。采用有界滚动，不截断首尾，严格保留原始缩进与空白。
 - **edit 审查与真实 Diff**：模型流式生成参数阶段，展示传入的 `old_string` 与 `new_string`，明确标注为输入而非真实文件变更；
-  参数流结束后进入准备状态（preparing spinner），等待后端预检生成 `approvalJson.editReview`；
+  参数流结束后进入准备状态（preparing spinner），等待后端预检生成 `approval.editReview`；
   就绪后立即替换为真实文件 diff（包含 canonical 绝对路径、多 hunk 真实行号与变更行）。
   若缺失或无法解析有效 review，禁用“允许”按钮，保留“拒绝”。
 - **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
-- **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。
+- **来源优先级与持久化结构**：优先从持久化的 `approval.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `result.details` 对象读取）；决不从旧/新参数在前端伪造 diff。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
 RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
@@ -580,7 +580,7 @@ Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操
 
 用户操作围绕 thread、项目、Issue、画布、Agent 和环境，不暴露独立 branch 实体或内部绑定路径。名称、配置标识和用户正文原样保留；系统文案通过 i18n，中英文的语义、单位和占位符一致。不重复展示“中文标题 + 英文标题”，不以裸 UUID 代替可读名称。
 按钮、标题和菜单只描述操作，不用括号重复英文名称或补充解释；会影响判断的说明使用统一的 `?` 帮助提示（键盘可展开、读屏可获取），链接标签与 aria 名称同样不写括号旁白。单位、范围、计数、快捷键和真实数据对（如 `名称 (状态)`、模型与变体）保留括号，其余解释性括号改为自然语句或帮助提示。
-按钮描述结果，例如“创建并进入”“保存工作流”“返回项目”；错误说明当前阻塞与可采取的动作。诊断严格区分当前草稿预览、冻结调用输入与历史重建，不把重建内容称为实际 HTTP 原文。
+按钮描述结果，例如“创建并进入”“保存工作流”“返回项目”；错误说明当前阻塞与可采取的动作。诊断严格区分冻结调用输入与历史重建，不把重建内容称为实际 HTTP 原文。
 
 ## 共享 UI 与测试
 

@@ -253,8 +253,8 @@ HTTP JSON 的 `Instant` 以 epoch 毫秒整数读写。
   具体产品类型分支。Chat 的实现允许分叉与直写；Project 的实现不允许，删除前必须解除 Issue 与 Agent 的绑定。
 - Agent 引用检查同属这一类：`AgentReferenceCheck` 由 Project 实现（工作流阶段引用 Agent），平台删除 Agent 前
   逐实现询问，不用 SQL 读产品表。
-- 跨模块传输只携带不透明的 `{kind, id, title?, link?}`：`HarnessCommandOwnerDTO` 与 `InteractionOwnerDTO`
-  的 title 与 link 只用于展示，不参与授权。
+- 跨模块传输区分写入口与展示：命令接受的 `HarnessCommandOwnerDTO` 只携带不透明的 `{kind, id}`，不接收客户端
+  提供的展示字段；`InteractionOwnerDTO` 的 `title` 与 `link` 由服务端解析，只用于展示，不参与授权。
 
 ### Daemon 连接服务
 
