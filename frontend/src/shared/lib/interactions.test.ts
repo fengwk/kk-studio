@@ -17,8 +17,7 @@ const owner = {
 
 const input: InteractionDTO = {
   type: 'INPUT',
-  interactionId: 'inv-1',
-  status: 'WAITING_INPUT',
+  toolInvocationId: 'inv-1',
   threadId: 'th-1',
   sessionId: 'sess-1',
   rootThreadId: 'root-1',
@@ -26,17 +25,12 @@ const input: InteractionDTO = {
   toolCallId: 'call-1',
   toolName: 'ask_user',
   argumentsJson: '{}',
-  approvalJson: null,
-  environmentId: null,
-  environmentName: null,
-  waitingCount: null,
-  createTime: 1790503200,
+  createdAt: 1790503200000,
 }
 
 const approval: InteractionDTO = {
   ...input,
   type: 'APPROVAL',
-  status: 'WAITING_APPROVAL',
   approvalJson: '{}',
 }
 
@@ -44,15 +38,7 @@ const environmentWait = (rootThreadId: string, environmentId: string): Interacti
   type: 'ENVIRONMENT_WAIT',
   rootThreadId,
   owner,
-  createTime: 1790503200,
-  interactionId: null,
-  status: null,
-  threadId: null,
-  sessionId: null,
-  toolCallId: null,
-  toolName: null,
-  argumentsJson: null,
-  approvalJson: null,
+  createdAt: 1790503200000,
   environmentId,
   environmentName: 'archlinux',
   waitingCount: 2,

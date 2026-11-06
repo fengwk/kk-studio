@@ -17,7 +17,7 @@ export interface UseInteractionsControllerResult {
   hasMore: boolean
   refresh: () => Promise<void>
   loadMore: () => Promise<void>
-  removeItem: (interactionId: string) => void
+  removeItem: (toolInvocationId: string) => void
 }
 
 export function useInteractionsController(
@@ -189,9 +189,11 @@ export function useInteractionsController(
     }
   }, [scopedCursor, limit, rootThreadId])
 
-  // 某项交互完成后的乐观移除
-  const removeItem = useCallback((interactionId: string) => {
-    setAccumulatedItems((prev) => prev.filter((it) => it.interactionId !== interactionId))
+  // 某项交互完成后的乐观移除：环境等待没有可操作调用，不会被移除。
+  const removeItem = useCallback((toolInvocationId: string) => {
+    setAccumulatedItems((prev) =>
+      prev.filter((it) => it.type === 'ENVIRONMENT_WAIT' || it.toolInvocationId !== toolInvocationId),
+    )
   }, [])
 
   return {

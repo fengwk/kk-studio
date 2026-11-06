@@ -49,10 +49,10 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
   it('Scenario 1: 多题 custom — 支持单选、多选+custom、无选项纯custom并正确组装 answers', async () => {
     const submitSpy = vi.spyOn(interactionService, 'submitToolInput').mockResolvedValue({
       threadId: 'th-1',
-      interactionId: 'int-multi',
+      toolInvocationId: 'int-multi',
       submissionId: 'sub-1',
       actor: 'local-user',
-      acceptedAt: 1790467200,
+      acceptedAt: 1790467200000,
       materialized: false,
     })
 
@@ -96,15 +96,16 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       expect(submitSpy).toHaveBeenCalledTimes(1)
     })
 
-    const submittedBody = submitSpy.mock.calls[0][1]
-    expect(submittedBody.threadId).toBe('th-1')
-    expect(submittedBody.declined).toBe(false)
-    expect(submittedBody.submissionId).toBeDefined()
+    const [submittedThreadId, submittedInvocationId, submittedBody] = submitSpy.mock.calls[0]!
+    expect(submittedThreadId).toBe('th-1')
+    expect(submittedInvocationId).toBe('int-multi')
+    expect(submittedBody).toMatchObject({ type: 'ANSWER', submissionId: expect.any(String) })
     // 验证后端禁止的 actor 绝对不存在
     expect('actor' in submittedBody).toBe(false)
 
     // 验证 answers：按题目位置对应的一维数组，多选包含选项与自定义，第三题为纯自定义
-    expect(submittedBody.answers).toEqual([
+    const submittedAnswers = submittedBody.type === 'ANSWER' ? submittedBody.answers : null
+    expect(submittedAnswers).toEqual([
       ['1080P'],
       ['成片', '工程源文件'],
       ['需在国庆前完成交付'],
@@ -116,18 +117,18 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     let callCount = 0
     let firstSubmissionId = ''
     const submitSpy = vi.spyOn(interactionService, 'submitToolInput').mockImplementation(
-      async (_id, body) => {
+      async (threadId, toolInvocationId, body) => {
         callCount++
         if (callCount === 1) {
           firstSubmissionId = body.submissionId
           throw new Error('500 Internal Network Failure')
         }
         return {
-          threadId: body.threadId,
-          interactionId: 'int-freeze',
+          threadId,
+          toolInvocationId,
           submissionId: body.submissionId,
           actor: 'local-user',
-          acceptedAt: 1790467200,
+          acceptedAt: 1790467200000,
           materialized: false,
         }
       },
@@ -170,9 +171,9 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     })
 
     // 核心断言：第二次调用的 submissionId 与 answers 必须与第一次完全一致（冻结复用）
-    const secondCallBody = submitSpy.mock.calls[1][1]
+    const secondCallBody = submitSpy.mock.calls[1]![2]
     expect(secondCallBody.submissionId).toBe(firstSubmissionId)
-    expect(secondCallBody.answers).toEqual([['快速']])
+    expect(secondCallBody.type === 'ANSWER' ? secondCallBody.answers : null).toEqual([['快速']])
   })
 
   // 场景 3: 取消竞争 (409 冲突)
@@ -324,18 +325,18 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     let count = 0
     let firstSubId = ''
     const submitSpy = vi.spyOn(interactionService, 'submitToolInput').mockImplementation(
-      async (_id, body) => {
+      async (threadId, toolInvocationId, body) => {
         count++
         if (count === 1) {
           firstSubId = body.submissionId
           throw new Error('Connection reset')
         }
         return {
-          threadId: body.threadId,
-          interactionId: 'int-decline',
+          threadId,
+          toolInvocationId,
           submissionId: body.submissionId,
           actor: 'local-user',
-          acceptedAt: 1790467200,
+          acceptedAt: 1790467200000,
           materialized: false,
         }
       },
@@ -359,9 +360,9 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     })
     expect(firstSubId).toBeTruthy()
 
-    const firstCallBody = submitSpy.mock.calls[0][1]
-    expect(firstCallBody.declined).toBe(true)
-    expect(firstCallBody.answers).toBeUndefined()
+    const firstCallBody = submitSpy.mock.calls[0]![2]
+    expect(firstCallBody).toMatchObject({ type: 'DECLINE' })
+    expect('answers' in firstCallBody).toBe(false)
 
     // 点击重试
     const retryBtn = screen.getByRole('button', { name: '重试' })
@@ -371,9 +372,9 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       expect(submitSpy).toHaveBeenCalledTimes(2)
     })
 
-    const secondCallBody = submitSpy.mock.calls[1][1]
+    const secondCallBody = submitSpy.mock.calls[1]![2]
     expect(secondCallBody.submissionId).toBe(firstSubId)
-    expect(secondCallBody.declined).toBe(true)
-    expect(secondCallBody.answers).toBeUndefined()
+    expect(secondCallBody.type).toBe('DECLINE')
+    expect('answers' in secondCallBody).toBe(false)
   })
 })

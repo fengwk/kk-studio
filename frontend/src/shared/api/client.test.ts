@@ -126,8 +126,8 @@ describe('HTTP client', () => {
     expect(await request('GET /api/environments/uninstall/{operatingSystem}', {
       path: { operatingSystem: 'linux' },
     })).toBe('script')
-    const blob = await request('GET /api/sessions/{sessionId}/files/download', {
-      path: { sessionId: 's' }, query: { ownerId: '1', ownerKind: 'chat', path: 'x' },
+    const blob = await request('GET /api/harness/sessions/{sessionId}/files/download', {
+      path: { sessionId: 's' }, query: { path: 'x' },
     })
     expect(await blob.text()).toBe('bytes')
   })
@@ -148,8 +148,8 @@ describe('HTTP client', () => {
     await expect(request('GET /api/environments/uninstall/{operatingSystem}', {
       path: { operatingSystem: 'linux' },
     })).resolves.toBeUndefined()
-    await expect(request('GET /api/sessions/{sessionId}/files/download', {
-      path: { sessionId: 's' }, query: { ownerId: '1', ownerKind: 'chat', path: 'x' },
+    await expect(request('GET /api/harness/sessions/{sessionId}/files/download', {
+      path: { sessionId: 's' }, query: { path: 'x' },
     })).resolves.toBeUndefined()
     await expect(request('GET /api/canvases', {}))
       .rejects.toMatchObject({ status: 404, code: 'not_found' })

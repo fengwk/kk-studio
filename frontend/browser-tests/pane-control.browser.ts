@@ -130,8 +130,7 @@ function interactionItems() {
   return {
     items: [
       {
-        interactionId: 'pane-approval-1',
-        status: 'WAITING_APPROVAL',
+        toolInvocationId: 'pane-approval-1',
         threadId: CHILD_ID,
         rootThreadId: ROOT_ID,
         sessionId: 'b1000000-0000-4000-8000-0000000000b1',
@@ -144,10 +143,7 @@ function interactionItems() {
         toolName: 'bash',
         argumentsJson: JSON.stringify({ command: 'npm test' }),
         approvalJson: JSON.stringify({ required: true, reason: '需要确认' }),
-        environmentId: null,
-        environmentName: null,
-        waitingCount: null,
-        createTime: 1791194220,
+        createdAt: 1791194220000,
       },
     ],
     total: 1,
@@ -210,7 +206,7 @@ async function installPaneApi(
       await route.fulfill({ json: snapshot(childThread()) })
       return
     }
-    if (path === '/api/interactions' && method === 'GET') {
+    if (path === '/api/harness/interactions' && method === 'GET') {
       await route.fulfill({ json: interactionItems() })
       return
     }

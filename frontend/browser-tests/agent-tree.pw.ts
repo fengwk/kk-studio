@@ -143,7 +143,7 @@ async function installAgentTreeMock(page: Page) {
       })
       return
     }
-    if (path === '/api/interactions') {
+    if (path === '/api/harness/interactions') {
       await route.fulfill({
         json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
       })

@@ -79,8 +79,9 @@ describe('session file format helpers', () => {
     expect(parseSizeBytes('-1')).toBeNull()
     expect(parseSizeBytes(undefined)).toBeNull()
 
-    expect(formatSessionFileTime('1790812800000')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
-    expect(formatSessionFileTime('not-a-number')).toBeNull()
+    expect(formatSessionFileTime(1790812800000)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+    expect(formatSessionFileTime(-1)).toBeNull()
+    expect(formatSessionFileTime(Number.NaN)).toBeNull()
     expect(formatSessionFileTime(null)).toBeNull()
   })
 })

@@ -1,49 +1,39 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   HarnessToolInputDTO,
   HarnessToolInputResultDTO,
   InteractionPageDTO,
 } from '@/shared/api/generated/contracts'
 
-export class InteractionService {
-  private readonly client: HttpClient
-
-  constructor(client: HttpClient = apiClient) {
-    this.client = client
-  }
-
-  /** 查询一页待处理 Interaction（人工等待与环境等待合并）。 */
-  async listInteractions(
-    rootThreadId?: string | null,
-    cursor?: string | null,
-    limit?: number | null,
-  ): Promise<InteractionPageDTO> {
-    const params: Record<string, unknown> = {}
-    if (rootThreadId) {
-      params.rootThreadId = rootThreadId
-    }
-    if (cursor) {
-      params.cursor = cursor
-    }
-    if (limit != null) {
-      params.limit = limit
-    }
-    return this.client.get<InteractionPageDTO>('/interactions', { params })
-  }
-
-  /**
-   * 提交一次人工问卷回答（或明确拒答）。
-   * 请求体严禁携带 actor 字段（服务端从认证主体自动解析）。
-   */
-  async submitToolInput(
-    interactionId: string,
-    body: HarnessToolInputDTO,
-  ): Promise<HarnessToolInputResultDTO> {
-    return this.client.post<HarnessToolInputResultDTO>(
-      `/interactions/${encodeURIComponent(interactionId)}/input`,
-      body,
-    )
-  }
+/** 查询一页待处理 Interaction（问卷等待、审批等待与环境等待合并，按 createdAt 升序）。 */
+export function listInteractions(
+  rootThreadId: string | null,
+  cursor: string | null,
+  limit: number,
+): Promise<InteractionPageDTO> {
+  return request('GET /api/harness/interactions', {
+    query: {
+      rootThreadId: rootThreadId ?? undefined,
+      cursor: cursor ?? undefined,
+      limit,
+    },
+  })
 }
 
-export const interactionService = new InteractionService()
+/**
+ * 提交一次问卷回答（或明确拒答）。
+ * 目标 Thread 与 Tool invocation 都在路径中；请求体严禁携带 actor 字段，服务端从认证主体解析。
+ */
+export function submitToolInput(
+  threadId: string,
+  toolInvocationId: string,
+  body: HarnessToolInputDTO,
+): Promise<HarnessToolInputResultDTO> {
+  return request('POST /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input', {
+    path: { threadId, toolInvocationId },
+    body,
+  })
+}
+
+/** 交互面板与全局待处理页共用的调用入口。 */
+export const interactionService = { listInteractions, submitToolInput }

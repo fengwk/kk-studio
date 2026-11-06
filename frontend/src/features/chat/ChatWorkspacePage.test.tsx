@@ -805,12 +805,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.click(button)
     const dialog = await screen.findByRole('dialog', { name: '会话文件' })
     expect(await within(dialog).findByText('此目录为空')).toBeVisible()
-    // 只列出当前焦点 Session 的根目录，owner 固定为当前 Chat。
-    expect(sessionFileService.listSessionFiles).toHaveBeenCalledWith(
-      'session-1',
-      { kind: 'CHAT', id: CHAT_ID },
-      undefined,
-    )
+    // 只列出当前焦点 Session 的根目录；会话坐标来自路径，不再携带产品 owner。
+    expect(sessionFileService.listSessionFiles).toHaveBeenCalledWith('session-1', undefined)
 
     await user.click(within(dialog).getByTestId('session-files-close'))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '会话文件' })).toBeNull())

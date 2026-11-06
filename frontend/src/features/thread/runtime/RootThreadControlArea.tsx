@@ -151,7 +151,7 @@ function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
             </div>
           </header>
           <div className="interaction-item-body">
-            <InteractionCardBody item={item} onSuccess={() => removeItem(item.interactionId!)} />
+            <InteractionCardBody item={item} onSuccess={() => removeItem(item.toolInvocationId)} />
           </div>
         </div>
       ))}

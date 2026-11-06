@@ -542,7 +542,6 @@ function ChatWorkspaceContent({
         <SessionFilesDialog
           key={focusedSessionId}
           sessionId={focusedSessionId}
-          owner={{ kind: 'CHAT', id: chat.id }}
           onClose={() => setFilesOpen(false)}
         />
       ) : null}

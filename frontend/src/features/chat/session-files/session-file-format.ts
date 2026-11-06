@@ -86,14 +86,11 @@ export function parseSizeBytes(value: string | null | undefined): number | null 
   return Number.isSafeInteger(parsed) ? parsed : null
 }
 
-/** 更新时间为 epoch 毫秒，格式化为本地 `YYYY-MM-DD HH:mm`；非法值返回 null。 */
-export function formatSessionFileTime(value: string | null | undefined): string | null {
-  if (value == null || !/^(0|[1-9][0-9]*)$/.test(value)) {
+/** 更新时间是 epoch 毫秒整数，格式化为本地 `YYYY-MM-DD HH:mm`；非法值返回 null。 */
+export function formatSessionFileTime(value: number | null | undefined): string | null {
+  if (value == null || !Number.isSafeInteger(value) || value < 0) {
     return null
   }
-  const date = new Date(Number(value))
-  if (!Number.isFinite(date.getTime())) {
-    return null
-  }
+  const date = new Date(value)
   return formatLocalDateMinutes(date)
 }

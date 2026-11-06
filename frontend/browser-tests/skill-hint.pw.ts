@@ -140,7 +140,7 @@ async function installSkillHintApi(
       })
       return
     }
-    if (path === '/api/interactions') {
+    if (path === '/api/harness/interactions') {
       await route.fulfill({
         json: { items: [], total: 0, freshnessAt: 1790812800, nextCursor: null },
       })

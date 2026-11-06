@@ -589,8 +589,7 @@ function treeNode(
 function approvalInteraction(threadId: string): InteractionDTO {
   return {
     type: 'APPROVAL',
-    interactionId: `inv-${threadId}`,
-    status: 'WAITING_APPROVAL',
+    toolInvocationId: `inv-${threadId}`,
     threadId,
     rootThreadId: THREAD_ID,
     sessionId: 'session-1',
@@ -599,10 +598,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
-    environmentId: null,
-    environmentName: null,
-    waitingCount: null,
-    createTime: 1785232801,
+    createdAt: 1785232801000,
   }
 }
 

@@ -402,8 +402,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
       items: [
         {
           type: 'INPUT',
-          interactionId: 'int-1',
-          status: 'WAITING_INPUT',
+          toolInvocationId: 'int-1',
           threadId: 'th-1',
           rootThreadId: 'th-1',
           sessionId: 'sess-1',
@@ -411,11 +410,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
           toolCallId: 'call-1',
           toolName: 'ask_user',
           argumentsJson: '{}',
-          approvalJson: null,
-          environmentId: null,
-          environmentName: null,
-          waitingCount: null,
-          createTime: 1767225600,
+          createdAt: 1767225600000,
         },
       ],
       nextCursor: null,

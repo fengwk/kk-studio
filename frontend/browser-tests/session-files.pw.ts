@@ -3,8 +3,7 @@ import { expect, test, type Page } from './fixture'
 
 const HARNESS_URL = '/browser-tests/session-files-harness.html'
 const SESSION_ID = '11111111-2222-4333-8444-555555555555'
-const OWNER_ID = 'a1000000-0000-4000-8000-000000000009'
-const FILES_API = `/api/sessions/${SESSION_ID}/files`
+const FILES_API = `/api/harness/sessions/${SESSION_ID}/files`
 const SESSION_ROOT = `vfs:/sessions/${SESSION_ID}/`
 
 const IMAGE_SVG = [
@@ -21,7 +20,7 @@ interface FileEntry {
   directory: boolean
   sizeBytes?: string | null
   revision?: number | null
-  updatedAt?: string | null
+  updatedAt?: number | null
 }
 
 interface RecordedRequest {
@@ -39,14 +38,14 @@ function listing(path: string, entries: FileEntry[]) {
 
 const ROOT_LISTING = listing(SESSION_ROOT, [
   { name: 'docs/', path: 'docs/', directory: true },
-  { name: 'notes.txt', path: 'notes.txt', directory: false, sizeBytes: '42', revision: 1, updatedAt: '1790812800000' },
-  { name: 'diagram.svg', path: 'diagram.svg', directory: false, sizeBytes: '260', revision: 1, updatedAt: '1790812800000' },
-  { name: 'binary.bin', path: 'binary.bin', directory: false, sizeBytes: '4', revision: 1, updatedAt: '1790812800000' },
-  { name: 'missing.txt', path: 'missing.txt', directory: false, sizeBytes: '1', revision: 1, updatedAt: '1790812800000' },
+  { name: 'notes.txt', path: 'notes.txt', directory: false, sizeBytes: '42', revision: 1, updatedAt: 1790812800000 },
+  { name: 'diagram.svg', path: 'diagram.svg', directory: false, sizeBytes: '260', revision: 1, updatedAt: 1790812800000 },
+  { name: 'binary.bin', path: 'binary.bin', directory: false, sizeBytes: '4', revision: 1, updatedAt: 1790812800000 },
+  { name: 'missing.txt', path: 'missing.txt', directory: false, sizeBytes: '1', revision: 1, updatedAt: 1790812800000 },
 ])
 
 const DOCS_LISTING = listing(`${SESSION_ROOT}docs/`, [
-  { name: 'readme.md', path: 'docs/readme.md', directory: false, sizeBytes: '12', revision: 1, updatedAt: '1790812800000' },
+  { name: 'readme.md', path: 'docs/readme.md', directory: false, sizeBytes: '12', revision: 1, updatedAt: 1790812800000 },
 ])
 
 const FIRST_TEXT_WINDOW = {
@@ -54,7 +53,7 @@ const FIRST_TEXT_WINDOW = {
   path: `${SESSION_ROOT}notes.txt`,
   sizeBytes: '64',
   revision: 2,
-  updatedAt: '1790812800000',
+  updatedAt: 1790812800000,
   text: [
     `path: ${SESSION_ROOT}notes.txt`,
     'ends_with_newline: yes',
@@ -75,7 +74,7 @@ const SECOND_TEXT_WINDOW = {
   path: `${SESSION_ROOT}notes.txt`,
   sizeBytes: '64',
   revision: 2,
-  updatedAt: '1790812800000',
+  updatedAt: 1790812800000,
   text: [
     `path: ${SESSION_ROOT}notes.txt`,
     'ends_with_newline: no',
@@ -90,7 +89,7 @@ const README_WINDOW = {
   path: `${SESSION_ROOT}docs/readme.md`,
   sizeBytes: '12',
   revision: 1,
-  updatedAt: '1790812800000',
+  updatedAt: 1790812800000,
   text: [
     `path: ${SESSION_ROOT}docs/readme.md`,
     'ends_with_newline: yes',
@@ -209,11 +208,10 @@ test('browses directories and pages through a text window', async ({ page }, tes
   await expect(dialog.getByTitle('notes.txt')).toBeVisible()
   await expect(dialog.getByTitle('diagram.svg')).toBeVisible()
 
-  // 根目录省略 path，owner 参数来自当前对话。
+  // 根目录省略 path；会话坐标只在路径中，不再携带产品 owner。
   const rootList = requests.find((request) => request.endpoint === '')
-  expect(rootList?.params.get('ownerKind')).toBe('CHAT')
-  expect(rootList?.params.get('ownerId')).toBe(OWNER_ID)
   expect(rootList?.params.get('path')).toBeNull()
+  expect(rootList?.params.get('ownerKind')).toBeNull()
 
   await dialog.getByTitle('docs/').click()
   await expect(dialog.getByTitle('docs/readme.md')).toBeVisible()

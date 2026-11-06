@@ -8,7 +8,6 @@ import { setLocale } from '@/shared/i18n'
 setLocale('zh-CN')
 
 const SESSION_ID = '11111111-2222-4333-8444-555555555555'
-const OWNER_ID = 'a1000000-0000-4000-8000-000000000009'
 
 /**
  * 在真实浏览器中验证会话文件面板：目录浏览、文本窗口分页、图片预览、
@@ -29,7 +28,6 @@ export function SessionFilesHarnessApp() {
       {open ? (
         <SessionFilesDialog
           sessionId={SESSION_ID}
-          owner={{ kind: 'CHAT', id: OWNER_ID }}
           onClose={() => setOpen(false)}
         />
       ) : null}

@@ -1,6 +1,8 @@
 import { translate, type TranslationKey } from '@/shared/i18n'
 import type {
+  InteractionApproval,
   InteractionDTO,
+  InteractionInput,
   InteractionOwnerDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -55,13 +57,18 @@ export function interactionOwnerLink(owner: InteractionOwnerDTO): string | null 
 export function interactionIdentity(item: InteractionDTO): string {
   return item.type === 'ENVIRONMENT_WAIT'
     ? `environment:${item.rootThreadId}:${item.environmentId}`
-    : `invocation:${item.interactionId}`
+    : `invocation:${item.toolInvocationId}`
 }
 
 /**
  * 只保留可操作的人工等待。环境等待是 `(真实执行根, 所需环境)` 聚合，没有可回写的调用，
  * 只在全局待处理页与工具状态行呈现；根面板据此不再重复渲染第二张环境提醒卡。
  */
-export function manualInteractions(items: InteractionDTO[]): InteractionDTO[] {
-  return items.filter((item) => item.type !== 'ENVIRONMENT_WAIT')
+export function manualInteractions(
+  items: InteractionDTO[],
+): (InteractionInput | InteractionApproval)[] {
+  return items.filter(
+    (item): item is InteractionInput | InteractionApproval =>
+      item.type !== 'ENVIRONMENT_WAIT',
+  )
 }
