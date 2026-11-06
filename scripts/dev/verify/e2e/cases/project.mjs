@@ -163,7 +163,7 @@ export async function verifyIssueStopResume(ctx, issue) {
         requestKey: `e2e-transition-paused-${cid()}`,
         toState: 'DONE',
       }),
-    { status: 400 },
+    { status: 400, code: 'validation' },
   )
   const resumed = (
       await ctx.call('POST', `/api/project/issues/${issue.id}/resume`, {
@@ -206,7 +206,7 @@ registerCase({
       // UUID 与版本不得归一后进入业务服务。
       await expectHttpError(
         () => ctx.call('GET', '/api/project/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       await expectHttpError(
         () => ctx.call('PUT', `/api/project/projects/${project.id}`, {
@@ -214,7 +214,7 @@ registerCase({
           title: project.title,
           description: project.description,
         }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       // 默认 workflow 只有人工阶段：没有 Agent、Environment、instructions 或 Run 额度。
       for (const state of project.workflow.states) {
@@ -253,7 +253,7 @@ registerCase({
             },
             commands: [{ type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'TEXT', text: 'x' }] }],
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       assert(
         /Unknown or ambiguous session owner kind: PROJECT/.test(JSON.parse(projectOwnerBatch.body).detail),
@@ -272,7 +272,7 @@ registerCase({
             },
             commands: [{ type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'TEXT', text: 'x' }] }],
           }),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'DIRECT_COMMANDS_NOT_ALLOWED' },
       )
       assert(
         /Direct commands are not allowed for this session owner/.test(
@@ -287,7 +287,7 @@ registerCase({
             expectedVersion: '9',
             title: 'stale update',
           }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
       const unchanged = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
       assert(
@@ -365,7 +365,7 @@ registerCase({
               expectedVersion: project.version,
               workflow: { states },
             }),
-          { status: 400 },
+          { status: 400, code: 'validation' },
         )
       }
       const workflowUnchanged = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
@@ -471,7 +471,7 @@ registerCase({
             kind: 'INSTRUCTION',
             body: 'Keep the migration reversible.',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       // 形状非法与空白正文在触达领域前被拒绝。
       await expectHttpError(
@@ -481,7 +481,7 @@ registerCase({
             kind: 'COMMENT',
             body: 'missing expectedVersion',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       await expectHttpError(
         () =>
@@ -491,7 +491,7 @@ registerCase({
             kind: 'COMMENT',
             body: '   ',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
 
       // 正常边：INIT → WORK → DONE，每一步是显式转移并记录 STATE_CHANGE 事实。
@@ -513,7 +513,7 @@ registerCase({
               requestKey: `e2e-transition-invalid-${toState}-${cid()}`,
               toState,
             }),
-          { status: 400 },
+          { status: 400, code: 'validation' },
         )
       }
       const afterInvalid = await readIssueDetail(ctx, issue.id)
@@ -539,7 +539,7 @@ registerCase({
             requestKey: `e2e-block-done-${cid()}`,
             reason: 'cannot block a done issue',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       current = (
           await ctx.call('POST', `/api/project/issues/${issue.id}/reopen`, {
@@ -589,7 +589,7 @@ registerCase({
             requestKey: `e2e-block-again-${cid()}`,
             reason: 'double block',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       await expectHttpError(
         () =>
@@ -597,7 +597,7 @@ registerCase({
             expectedVersion: String(BigInt(current.version) - 1n),
             requestKey: `e2e-recover-stale-${cid()}`,
           }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
       current = (
           await ctx.call('POST', `/api/project/issues/${issue.id}/recover`, {
@@ -615,7 +615,7 @@ registerCase({
             expectedVersion: current.version,
             requestKey: `e2e-recover-unblocked-${cid()}`,
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
 
       // 人工终止：没有活动 Run 时只保留 USER 门禁，不伪造 Run 事实。
@@ -665,9 +665,13 @@ registerCase({
         stopFact?.actorType === 'HUMAN' && stopFact.data?.reason === 'USER',
         JSON.stringify(stopFact),
       )
-      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}?limit=0`), { status: 400 })
+      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}?limit=0`), {
+        status: 400,
+        code: 'validation',
+      })
       await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}?afterSequence=-1`), {
         status: 400,
+        code: 'validation',
       })
 
       // Snapshot 聚合 Project 与每个 Issue 的当前/最近 Run。
@@ -691,7 +695,10 @@ registerCase({
 
       // Issue 没有归档状态：删除是唯一移除方式，快照只展示现存 Issue。
       await ctx.call('DELETE', `/api/project/issues/${issue.id}?expectedVersion=${current.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}`), { status: 404 })
+      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}`), {
+        status: 404,
+        code: 'not_found',
+      })
       const remaining = (await ctx.call('GET', `/api/project/projects/${project.id}/snapshot`)).json
       assertExactFields(remaining, SNAPSHOT_FIELDS, 'remaining project snapshot')
       assert(
@@ -723,7 +730,7 @@ registerCase({
             title: 'cannot be created',
             description: 'archived project rejects new issues',
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       const activeProjects = (await ctx.call('GET', '/api/project/projects')).json
       assert(
@@ -747,7 +754,10 @@ registerCase({
       assert(project.archivedAt === null, JSON.stringify(project))
 
       await ctx.call('DELETE', `/api/project/projects/${project.id}?expectedVersion=${project.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
+      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), {
+        status: 404,
+        code: 'not_found',
+      })
       project = null
     } finally {
       if (activeProject?.id) {
@@ -843,6 +853,16 @@ async function deleteProjectIfPresent(ctx, projectId) {
     if (!(error instanceof HttpError && error.status === 404)) {
       throw error
     }
+    // 只容忍资源已不存在；404 仍必须是 not_found 信封，其它问题不静默。
+    let problem = null
+    try {
+      problem = JSON.parse(error.body)
+    } catch {
+      problem = null
+    }
+    if (problem?.code !== 'not_found') {
+      throw error
+    }
   }
 }
 
@@ -917,7 +937,7 @@ registerCase({
               state,
               maxRuns,
             }),
-          { status: 400 },
+          { status: 400, code: 'validation' },
         )
       }
 
@@ -962,7 +982,7 @@ registerCase({
             state: 'BUILD',
             maxRuns: 4,
           }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
 
       current = (await ctx.call('GET', `/api/project/issues/${issue.id}`)).json.issue
@@ -1013,7 +1033,10 @@ registerCase({
 
       await ctx.call('DELETE', `/api/project/issues/${issue.id}?expectedVersion=${current.version}`)
       await ctx.call('DELETE', `/api/project/projects/${project.id}?expectedVersion=${project.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
+      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), {
+        status: 404,
+        code: 'not_found',
+      })
       project = null
     } finally {
       if (project?.id) {
