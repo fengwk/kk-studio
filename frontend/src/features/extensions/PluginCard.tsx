@@ -6,12 +6,12 @@ import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/Resour
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
-/** 后端 Instant 的 wire 约定是 epoch seconds。 */
+/** 后端 Instant 的 wire 约定是 epoch 毫秒。 */
 function formatDateTime(value: number | null | undefined, locale: AppLocale): string {
   if (value == null) {
     return '—'
   }
-  return new Date(value * 1000).toLocaleString(locale)
+  return new Date(value).toLocaleString(locale)
 }
 
 const PLUGIN_STATUS_LABEL_KEYS = {

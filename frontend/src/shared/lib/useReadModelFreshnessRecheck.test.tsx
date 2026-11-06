@@ -22,10 +22,10 @@ function setup() {
 
 it('读取到服务端时效后只排一次回读：越过截止点即失效全部待处理视图，之后不再重复', () => {
   const { invalidate, wrapper } = setup()
-  const nowSeconds = Date.now() / 1000
+  const now = Date.now()
   renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
-    initialProps: { at: nowSeconds + 10 },
+    initialProps: { at: now + 10_000 },
   })
 
   // 截止点前（含 250ms 宽限）不读；这是时间对账，不是轮询。
@@ -39,7 +39,7 @@ it('读取到服务端时效后只排一次回读：越过截止点即失效全�
 
 it('同缓存两个消费者共享同一截止点，只失效一次', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper })
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper })
   act(() => vi.advanceTimersByTime(10250))
@@ -48,13 +48,13 @@ it('同缓存两个消费者共享同一截止点，只失效一次', () => {
 
 it('续租替换旧截止点：旧定时器被取消，只按新截止点回读一次', () => {
   const { invalidate, wrapper } = setup()
-  const nowSeconds = Date.now() / 1000
+  const now = Date.now()
   const hook = renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
-    initialProps: { at: nowSeconds + 10 },
+    initialProps: { at: now + 10_000 },
   })
 
-  hook.rerender({ at: nowSeconds + 20 })
+  hook.rerender({ at: now + 20_000 })
   act(() => vi.advanceTimersByTime(10250))
   expect(invalidate).not.toHaveBeenCalled()
 
@@ -72,8 +72,8 @@ it('没有未来变更时刻时不排任务（无租约即停止）', () => {
 
 it('卸载时清理定时器，不遗留失效动作', () => {
   const { invalidate, wrapper } = setup()
-  const nowSeconds = Date.now() / 1000
-  const hook = renderHook(() => useReadModelFreshnessRecheck(['interactions'], nowSeconds + 10), { wrapper })
+  const now = Date.now()
+  const hook = renderHook(() => useReadModelFreshnessRecheck(['interactions'], now + 10_000), { wrapper })
   hook.unmount()
   act(() => vi.advanceTimersByTime(60000))
   expect(invalidate).not.toHaveBeenCalled()
@@ -81,7 +81,7 @@ it('卸载时清理定时器，不遗留失效动作', () => {
 
 it('最后卸载释放计时器；后来加入已消费截止点不再回读', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   const first = renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper })
   act(() => vi.advanceTimersByTime(10250))
   first.unmount()
@@ -94,9 +94,9 @@ it('最后卸载释放计时器；后来加入已消费截止点不再回读', (
 
 it('不同截止点按绝对未来时刻重排，不从上次回读重新计算间隔', () => {
   const { invalidate, wrapper } = setup()
-  const nowSeconds = Date.now() / 1000
-  renderHook(() => useReadModelFreshnessRecheck(['interactions'], nowSeconds + 10), { wrapper })
-  renderHook(() => useReadModelFreshnessRecheck(['interactions'], nowSeconds + 20), { wrapper })
+  const now = Date.now()
+  renderHook(() => useReadModelFreshnessRecheck(['interactions'], now + 10_000), { wrapper })
+  renderHook(() => useReadModelFreshnessRecheck(['interactions'], now + 20_000), { wrapper })
   expect(vi.getTimerCount()).toBe(1)
   act(() => vi.advanceTimersByTime(10249))
   expect(invalidate).not.toHaveBeenCalled()
@@ -111,7 +111,7 @@ it('不同截止点按绝对未来时刻重排，不从上次回读重新计算�
 
 it('一个同截止点消费者卸载不影响另一个，最后卸载清理未触发任务', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   const first = renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper })
   const second = renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
@@ -121,7 +121,7 @@ it('一个同截止点消费者卸载不影响另一个，最后卸载清理未�
   expect(vi.getTimerCount()).toBe(1)
   act(() => vi.advanceTimersByTime(10250))
   expect(invalidate).toHaveBeenCalledTimes(1)
-  second.rerender({ at: at + 20 })
+  second.rerender({ at: at + 20_000 })
   expect(vi.getTimerCount()).toBe(1)
   second.unmount()
   expect(vi.getTimerCount()).toBe(0)
@@ -131,13 +131,13 @@ it('一个同截止点消费者卸载不影响另一个，最后卸载清理未�
 
 it('续租只注销自己的旧截止点，仍订阅旧截止点的消费者继续回读', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   const first = renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
     initialProps: { at },
   })
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper })
-  first.rerender({ at: at + 10 })
+  first.rerender({ at: at + 10_000 })
   act(() => vi.advanceTimersByTime(10250))
   expect(invalidate).toHaveBeenCalledTimes(1)
   act(() => vi.advanceTimersByTime(10000))
@@ -147,7 +147,7 @@ it('续租只注销自己的旧截止点，仍订阅旧截止点的消费者继�
 it('独立 QueryClient 不共享计时器或消费记录', () => {
   const first = setup()
   const second = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper: first.wrapper })
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], at), { wrapper: second.wrapper })
   expect(vi.getTimerCount()).toBe(2)
@@ -158,7 +158,7 @@ it('独立 QueryClient 不共享计时器或消费记录', () => {
 
 it('同一缓存的不同查询 scope 互不抑制，换绑取消旧 scope 的截止点', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 + 10
+  const at = Date.now() + 10_000
   const first = renderHook(({ id }) =>
     useReadModelFreshnessRecheck(['threads', id, 'snapshot'], at), {
     wrapper, initialProps: { id: 'a' },
@@ -176,14 +176,14 @@ it('同一缓存的不同查询 scope 互不抑制，换绑取消旧 scope 的�
 
 it('过去时刻只消费一次，切换后回到旧截止点也不重复', () => {
   const { invalidate, wrapper } = setup()
-  const at = Date.now() / 1000 - 10
+  const at = Date.now() - 10_000
   const hook = renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
     initialProps: { at },
   })
   act(() => vi.advanceTimersByTime(250))
   expect(invalidate).toHaveBeenCalledTimes(1)
-  hook.rerender({ at: at - 10 })
+  hook.rerender({ at: at - 10_000 })
   act(() => vi.advanceTimersByTime(250))
   expect(invalidate).toHaveBeenCalledTimes(2)
   hook.rerender({ at })
@@ -200,7 +200,7 @@ it('undefined 和非有限数字不排任务，清空截止点取消旧任务', 
   })
   hook.rerender({ at: Infinity })
   expect(vi.getTimerCount()).toBe(0)
-  hook.rerender({ at: Date.now() / 1000 + 10 })
+  hook.rerender({ at: Date.now() + 10_000 })
   expect(vi.getTimerCount()).toBe(1)
   hook.rerender({ at: undefined })
   expect(vi.getTimerCount()).toBe(0)
