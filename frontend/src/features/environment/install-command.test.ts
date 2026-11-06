@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { url } from '@/shared/api/client'
 import { detectInstallOS, generateInstallCommand, generateUninstallCommand, validateInstallConfig } from './install-command'
 import type { EnvironmentInstallConfigDTO } from '@/shared/api/generated/contracts'
 
@@ -74,15 +75,18 @@ describe('install command', () => {
     os => {
       const input = { ...config(), operatingSystem: os }
       const command = generateInstallCommand(origin, environmentId, os, installCode)
-      const expected = `https://studio.example.com/api/platform/environments/${encodeURIComponent(environmentId)}/install-script?code=${encodeURIComponent(installCode)}`
+      const expected = `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
+        path: { environmentId },
+        query: { code: installCode },
+      })}`
       expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
       expect(command).not.toContain('\n')
       expect(command).not.toContain(input.daemon.studioUrl)
       expect(command).not.toContain('registrationToken')
-      const { run, url } = execute(command, 'echo installed\n')
+      const { run, url: fetched } = execute(command, 'echo installed\n')
       expect(run.status).toBe(0)
       expect(run.stdout.trim()).toBe('installed')
-      expect(url).toBe(expected)
+      expect(fetched).toBe(expected)
       expect(existsSync(join(process.cwd(), 'NEVER'))).toBe(false)
     },
   )
@@ -115,12 +119,14 @@ describe('install command', () => {
     'runs a one-line %s uninstall against the saved operating system',
     os => {
       const command = generateUninstallCommand(os, origin)
-      expect(command).toBe(
-        `(set -o pipefail; curl -fsSL $'https://studio.example.com/api/platform/daemon-uninstall-scripts/${os}' | bash)`,
-      )
-      const { run, url } = execute(command, 'echo uninstalled\n')
+      const expected = `${origin}${url(
+        'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}',
+        { path: { operatingSystem: os } },
+      )}`
+      expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected}' | bash)`)
+      const { run, url: fetched } = execute(command, 'echo uninstalled\n')
       expect(run.status).toBe(0)
-      expect(url).toBe(`https://studio.example.com/api/platform/daemon-uninstall-scripts/${os}`)
+      expect(fetched).toBe(expected)
     },
   )
 
@@ -128,22 +134,26 @@ describe('install command', () => {
     const input = config()
     input.operatingSystem = 'windows'
     const command = generateInstallCommand(origin, environmentId, 'windows', installCode)
-    const encoded = encodeURIComponent(environmentId).replaceAll("'", "''")
-    const encodedCode = encodeURIComponent(installCode).replaceAll("'", "''")
+    const expected = `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
+      path: { environmentId },
+      query: { code: installCode },
+    })}`.replaceAll("'", "''")
     expect(command).not.toContain('\n')
     expect(command.startsWith('& { Set-PSDebug -Off; ')).toBe(true)
     expect(command.endsWith(' }')).toBe(true)
     expect(command).toContain('Invoke-WebRequest -UseBasicParsing')
     expect(command).toContain('-ErrorAction Stop')
     expect(command).toContain('[scriptblock]::Create($script)')
-    expect(command).toContain(`'https://studio.example.com/api/platform/environments/${encoded}/install-script?code=${encodedCode}'`)
+    expect(command).toContain(`'${expected}'`)
     expect(command).not.toContain('registrationToken')
     expect(command).not.toContain('WriteAllText')
     expect(command).not.toContain('Set-Acl')
     expect(command).not.toContain('-JavaHome')
     const uninstall = generateUninstallCommand('windows', origin)
     expect(uninstall).toContain(
-      "'https://studio.example.com/api/platform/daemon-uninstall-scripts/windows'",
+      `'${origin}${url('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
+        path: { operatingSystem: 'windows' },
+      })}'`,
     )
     expect(uninstall).not.toContain('registrationToken')
   })
@@ -283,8 +293,11 @@ describe('install command', () => {
     expect(() => generateInstallCommand(origin, 'env-1', 'wrong' as 'linux', 'code-1')).toThrow('operatingSystem')
     expect(() => generateUninstallCommand('wrong' as 'linux', origin)).toThrow('operatingSystem')
     const injected = generateInstallCommand(origin, "a'$(touch NEVER)b", 'linux', "c'$(touch NEVER)")
-    expect(injected).toContain(encodeURIComponent("a'$(touch NEVER)b").replaceAll("'", "\\'"))
-    expect(injected).toContain(`code=${encodeURIComponent("c'$(touch NEVER)").replaceAll("'", "\\'")}`)
+    const injectedUrl = `${origin}${url(
+      'GET /api/platform/environments/{environmentId}/install-script',
+      { path: { environmentId: "a'$(touch NEVER)b" }, query: { code: "c'$(touch NEVER)" } },
+    )}`
+    expect(injected).toContain(injectedUrl.replaceAll("'", "\\'"))
     expect(injected).not.toContain('$(touch NEVER)')
     expect(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
       .toBe(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
