@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.util.List;
 
@@ -51,8 +51,7 @@ class StudioCatalogPaginationContractTest {
                 new StudioAgentProviderController(agentProviderService),
                 new StudioMcpServerController(mcpServerService))
             .setControllerAdvice(
-                new ApiResponseStatusAdvice(),
-                new StudioDomainErrorAdvice(new StudioMessageService()))
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -85,8 +84,7 @@ class StudioCatalogPaginationContractTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("pageNumber"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString("pageNumber")));
+        .andExpect(jsonPath("$.detail").value(containsString("pageNumber")));
     verifyNoServiceCalls();
   }
 
@@ -118,7 +116,7 @@ class StudioCatalogPaginationContractTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString("pageSize")));
+        .andExpect(jsonPath("$.detail").value(containsString("pageSize")));
     verifyNoServiceCalls();
   }
 
@@ -128,8 +126,7 @@ class StudioCatalogPaginationContractTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("pagination"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString(parameter)));
+        .andExpect(jsonPath("$.detail").value(containsString(parameter)));
   }
 
   private void verifyNoServiceCalls() {

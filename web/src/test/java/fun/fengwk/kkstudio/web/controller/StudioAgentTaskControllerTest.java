@@ -35,7 +35,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import fun.fengwk.kkstudio.web.harness.AgentTaskSubmissionService;
 
 import java.util.Optional;
@@ -71,8 +71,7 @@ class StudioAgentTaskControllerTest {
                 new StudioAgentTaskController(
                     new AgentTaskSubmissionService(agentTasks, materializer)))
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

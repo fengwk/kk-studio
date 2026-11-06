@@ -52,8 +52,7 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Duration;
 import java.util.List;
@@ -87,9 +86,7 @@ class StudioEnvironmentIdeControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
-                new StudioDomainErrorAdvice(new StudioMessageService()),
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 
@@ -104,8 +101,8 @@ class StudioEnvironmentIdeControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/ide/directories").param("path", "/a b"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.path").value("/"))
-        .andExpect(jsonPath("$.data.parentPath").value(nullValue()));
+        .andExpect(jsonPath("$.path").value("/"))
+        .andExpect(jsonPath("$.parentPath").value(nullValue()));
     mockMvc
         .perform(
             post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/mobile-layout")
@@ -134,11 +131,11 @@ class StudioEnvironmentIdeControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW_ID + "\",\"directory\":\"/workspace\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.viewId").value(VIEW_ID))
-        .andExpect(jsonPath("$.data.environmentId").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.directory").value("/workspace"))
+        .andExpect(jsonPath("$.viewId").value(VIEW_ID))
+        .andExpect(jsonPath("$.environmentId").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.directory").value("/workspace"))
         .andExpect(
-            jsonPath("$.data.entryUrl")
+            jsonPath("$.entryUrl")
                 .value("http://" + ENV_ID + ".ide.browser.localhost:8080/ide/bootstrap?ticket=t"));
 
     ArgumentCaptor<EnvironmentIdeOpenViewDTO> request =
@@ -150,7 +147,7 @@ class StudioEnvironmentIdeControllerTest {
 
   /**
    * 真实浏览器验收的回归点：Daemon 拒绝 dirty 文档换目录必须保持 HTTP 400 与 {@code validation} code，且 Daemon 文案进入 {@code
-   * errors.detail}（浏览器据此确认拒绝原因就是未保存改动，而不是其它校验失败）。
+   * detail}（浏览器据此确认拒绝原因就是未保存改动，而不是其它校验失败）。
    */
   @Test
   void changeDirectoryKeepsDirtyRejectionAsBadRequestValidation() throws Exception {
@@ -166,9 +163,8 @@ class StudioEnvironmentIdeControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"))
-        .andExpect(jsonPath("$.errors.detail").value(DIRTY_REJECTION))
-        .andExpect(jsonPath("$.message").value("Invalid environment request."));
+        .andExpect(jsonPath("$.detail").value(DIRTY_REJECTION))
+        .andExpect(jsonPath("$.title").value("Invalid environment request."));
   }
 
   /** 意图：CHANGE_DIRECTORY 成功时返回 200 与更新后的目录，不伪造新的 bootstrap 入口。 */
@@ -187,9 +183,9 @@ class StudioEnvironmentIdeControllerTest {
                         + DOCUMENT_ID
                         + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.viewId").value(VIEW_ID))
-        .andExpect(jsonPath("$.data.directory").value("/workspace/subdir"))
-        .andExpect(jsonPath("$.data.entryUrl").doesNotExist());
+        .andExpect(jsonPath("$.viewId").value(VIEW_ID))
+        .andExpect(jsonPath("$.directory").value("/workspace/subdir"))
+        .andExpect(jsonPath("$.entryUrl").doesNotExist());
 
     ArgumentCaptor<EnvironmentIdeChangeDirectoryDTO> request =
         ArgumentCaptor.forClass(EnvironmentIdeChangeDirectoryDTO.class);
@@ -221,8 +217,9 @@ class StudioEnvironmentIdeControllerTest {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.status").value(409))
         .andExpect(jsonPath("$.code").value("unavailable"))
-        .andExpect(jsonPath("$.errors.detail").value("environment IDE command timed out"))
-        .andExpect(jsonPath("$.message").value(expectedMessage));
+        .andExpect(jsonPath("$.reason").value("IDE_UNAVAILABLE"))
+        .andExpect(jsonPath("$.detail").value("environment IDE command timed out"))
+        .andExpect(jsonPath("$.title").value(expectedMessage));
   }
 
   /** 意图：非法 environmentId 在进入服务之前即被拒绝为 400，且错误 resource 指向该参数。 */
@@ -236,7 +233,7 @@ class StudioEnvironmentIdeControllerTest {
                 .content("{\"viewId\":\"" + VIEW_ID + "\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("environmentId"));
+        .andExpect(jsonPath("$.detail").value(containsString("environmentId")));
 
     verifyNoInteractions(environmentIdeService);
   }
@@ -251,10 +248,10 @@ class StudioEnvironmentIdeControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{ invalid json"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.title").value("Bad Request"))
-        .andExpect(jsonPath("$.errors.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.title").value("The request is invalid."))
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
 
     verifyNoInteractions(environmentIdeService);
   }
@@ -305,8 +302,8 @@ class StudioEnvironmentIdeControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace\",\"unknown\":true}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString("Failed to read request")));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value(containsString("Failed to read request")));
 
     verifyNoInteractions(environmentIdeService);
   }
@@ -331,9 +328,7 @@ class StudioEnvironmentIdeControllerTest {
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new StudioEnvironmentIdeController(service))
             .setControllerAdvice(
-                new StudioDomainErrorAdvice(new StudioMessageService()),
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
@@ -352,8 +347,7 @@ class StudioEnvironmentIdeControllerTest {
                 .content(OBJECT_MAPPER.writeValueAsString(openRequest)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"))
-        .andExpect(jsonPath("$.errors.detail", containsString("directory")));
+        .andExpect(jsonPath("$.detail", containsString("directory")));
 
     EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
     changeRequest.setDocumentId(DOCUMENT_ID);
@@ -367,8 +361,7 @@ class StudioEnvironmentIdeControllerTest {
                 .content(OBJECT_MAPPER.writeValueAsString(changeRequest)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"))
-        .andExpect(jsonPath("$.errors.detail", containsString("directory")));
+        .andExpect(jsonPath("$.detail", containsString("directory")));
 
     assertNull(transport.command);
   }

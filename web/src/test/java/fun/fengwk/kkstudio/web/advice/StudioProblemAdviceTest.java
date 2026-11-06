@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
@@ -28,6 +31,7 @@ import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 class StudioProblemAdviceTest {
@@ -127,6 +131,45 @@ class StudioProblemAdviceTest {
     assertEquals(409, advice.domain(DomainException.inUse("x", "busy")).getStatusCode().value());
     assertEquals(
         502, advice.domain(DomainException.upstream("x", "failed")).getStatusCode().value());
+  }
+
+  /** Spring 自带错误保留状态；未预期错误的标题按请求语言翻译。 */
+  @Test
+  void springStatusAndInternalLocalization() {
+    var missing =
+        advice.unexpected(new NoResourceFoundException(HttpMethod.GET, "/missing", "missing"));
+    assertEquals(404, missing.getStatusCode().value());
+    assertEquals("not_found", missing.getBody().get("code"));
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    try {
+      var internal = advice.unexpected(new IllegalStateException("secret"));
+      assertEquals("服务器发生意外错误。", internal.getBody().get("title"));
+      assertNull(internal.getBody().get("detail"));
+    } finally {
+      LocaleContextHolder.resetLocaleContext();
+    }
+  }
+
+  /** 预览原因只能来自直接的 typed cause，不能从消息或嵌套异常猜测。 */
+  @Test
+  void previewReasonRequiresDirectCause() {
+    for (Reason reason : Reason.values()) {
+      var preview = new ProviderRequestPreviewUnavailableException(reason, "safe");
+      var body =
+          advice
+              .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview))
+              .getBody();
+      assertEquals(reason.name(), body.get("reason"));
+      assertEquals("safe", body.get("detail"));
+    }
+    var nested =
+        new RuntimeException(
+            new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, "secret"));
+    var body =
+        advice
+            .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", nested))
+            .getBody();
+    assertEquals("HTTP_CONFLICT", body.get("reason"));
   }
 
   /** 普通 parser 异常不回显正文，仅可信 Harness 格式异常可提供 detail。 */

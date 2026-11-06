@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.canvas.http;
+package fun.fengwk.kkstudio.web.canvas;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -12,20 +12,20 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
-import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.Map;
@@ -60,8 +60,10 @@ class CanvasResourceControllerTest {
         standaloneSetup(
                 new CanvasResourceController(
                     new CanvasResourceUrlService(queryService, blobManager)))
-            .setMessageConverters(CanvasHttpJsonTestSupport.converter())
-            .setControllerAdvice(new TestDomainAdvice())
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
     CanvasResource media =
         new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);
@@ -89,14 +91,14 @@ class CanvasResourceControllerTest {
     mockMvc
         .perform(post("/api/canvases/" + CANVAS + "/resources/" + MEDIA_RESOURCE + "/download-url"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.method").value("GET"))
-        .andExpect(jsonPath("$.data.url").value("https://s3.fengwk.fun/signed"))
-        .andExpect(jsonPath("$.data.key").doesNotExist())
-        .andExpect(jsonPath("$.data.bucket").doesNotExist());
+        .andExpect(jsonPath("$.method").value("GET"))
+        .andExpect(jsonPath("$.url").value("https://s3.fengwk.fun/signed"))
+        .andExpect(jsonPath("$.key").doesNotExist())
+        .andExpect(jsonPath("$.bucket").doesNotExist());
     mockMvc
         .perform(post("/api/canvases/" + CANVAS + "/resources/" + MEDIA_RESOURCE + "/preview-url"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.url").value("https://s3.fengwk.fun/signed"));
+        .andExpect(jsonPath("$.url").value("https://s3.fengwk.fun/signed"));
     verify(blobManager).presignOriginalUrl(BLOB);
     verify(blobManager).presignPreviewUrl(BLOB);
   }
@@ -124,14 +126,5 @@ class CanvasResourceControllerTest {
         .perform(post("/api/canvases/not-a-uuid/resources/" + MEDIA_RESOURCE + "/download-url"))
         .andExpect(status().isBadRequest());
     verify(blobManager, never()).presignOriginalUrl(any());
-  }
-
-  /** 模块单测模拟 Web 组合根的领域异常映射。 */
-  @RestControllerAdvice
-  static class TestDomainAdvice {
-    @ExceptionHandler(DomainException.class)
-    ResponseEntity<ApiResponse<Void>> handle(DomainException error) {
-      return DomainErrorResponses.of(error, "not found", error.getMessage());
-    }
   }
 }

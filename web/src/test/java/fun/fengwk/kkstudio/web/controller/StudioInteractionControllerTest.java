@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -61,8 +61,7 @@ class StudioInteractionControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

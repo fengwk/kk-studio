@@ -18,7 +18,6 @@ import org.springframework.http.server.ServerHttpResponse;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.lang.reflect.Method;
-import java.util.Map;
 
 class ApiResponseStatusAdviceTest {
 
@@ -59,16 +58,6 @@ class ApiResponseStatusAdviceTest {
     advice.beforeBodyWrite(null, null, null, null, null, response);
 
     verifyNoInteractions(response);
-  }
-
-  @Test
-  void leavesLegacyErrorResponseUntouchedUntilErrorHandlersAreMigrated() {
-    ApiResponse<Void> body =
-        ApiResponse.error(HttpStatus.CONFLICT, "conflict", "conflict", Map.of());
-    ServerHttpResponse response = mock(ServerHttpResponse.class);
-
-    assertSame(body, advice.beforeBodyWrite(body, null, null, null, null, response));
-    verify(response).setStatusCode(HttpStatus.CONFLICT);
   }
 
   private static MethodParameter parameter(String name) throws NoSuchMethodException {

@@ -43,7 +43,7 @@ import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -70,8 +70,7 @@ class StudioHarnessSessionControllerTest {
                 new StudioHarnessSessionController(
                     harnessQueryService, runtime, usageCostProjectionService))
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

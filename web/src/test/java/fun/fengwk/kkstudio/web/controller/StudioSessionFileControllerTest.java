@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileEntryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -44,8 +44,7 @@ class StudioSessionFileControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioSessionFileController(queryService))
             .setControllerAdvice(
-                new ApiResponseStatusAdvice(),
-                new StudioDomainErrorAdvice(new StudioMessageService()))
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 

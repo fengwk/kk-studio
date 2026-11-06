@@ -47,10 +47,6 @@ public class ApiResponseStatusAdvice implements ResponseBodyAdvice<Object> {
       ServerHttpResponse response) {
     if (body instanceof ApiResponse<?> envelope) {
       int status = envelope.getStatus();
-      if (!envelope.isSuccess()) {
-        response.setStatusCode(HttpStatusCode.valueOf(status));
-        return body;
-      }
       Object data = envelope.getData();
       response.setStatusCode(
           HttpStatusCode.valueOf(

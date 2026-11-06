@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreview
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -68,8 +68,7 @@ abstract class ProviderRequestPreviewContractTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller())
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

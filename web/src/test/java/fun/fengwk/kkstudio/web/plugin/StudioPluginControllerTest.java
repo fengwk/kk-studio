@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,11 +51,10 @@ class StudioPluginControllerTest {
     pluginManagementService = mock(PluginManagementService.class);
     StudioPluginController controller = new StudioPluginController(pluginManagementService);
     StudioMessageService messageService = new StudioMessageService();
-    StudioPluginErrorAdvice errorAdvice = new StudioPluginErrorAdvice(messageService);
-    StudioDomainErrorAdvice domainErrorAdvice = new StudioDomainErrorAdvice(messageService);
+    StudioProblemAdvice errorAdvice = new StudioProblemAdvice(messageService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice, domainErrorAdvice)
+            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice)
             .build();
   }
 
@@ -68,19 +67,19 @@ class StudioPluginControllerTest {
     mockMvc
         .perform(get("/api/plugins"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].pluginId").value("test-plugin"))
-        .andExpect(jsonPath("$.data[0].name").value("Test Plugin"))
-        .andExpect(jsonPath("$.data[0].version").value("1.0.0"))
-        .andExpect(jsonPath("$.data[0].status").value("CONNECTED"))
-        .andExpect(jsonPath("$.data[0].region").value("us-east-1"))
-        .andExpect(jsonPath("$.data[0].authKind.type").value("DEEP_LINK"))
-        .andExpect(jsonPath("$.data[0].authKind.regionCandidates[0]").value("us-east-1"))
-        .andExpect(jsonPath("$.data[0].token").doesNotExist())
-        .andExpect(jsonPath("$.data[0].credential").doesNotExist())
-        .andExpect(jsonPath("$.data[0].cipher").doesNotExist())
-        .andExpect(jsonPath("$.data[0].callback").doesNotExist())
-        .andExpect(jsonPath("$.data[0].lease").doesNotExist())
-        .andExpect(jsonPath("$.data[0].key").doesNotExist())
+        .andExpect(jsonPath("$[0].pluginId").value("test-plugin"))
+        .andExpect(jsonPath("$[0].name").value("Test Plugin"))
+        .andExpect(jsonPath("$[0].version").value("1.0.0"))
+        .andExpect(jsonPath("$[0].status").value("CONNECTED"))
+        .andExpect(jsonPath("$[0].region").value("us-east-1"))
+        .andExpect(jsonPath("$[0].authKind.type").value("DEEP_LINK"))
+        .andExpect(jsonPath("$[0].authKind.regionCandidates[0]").value("us-east-1"))
+        .andExpect(jsonPath("$[0].token").doesNotExist())
+        .andExpect(jsonPath("$[0].credential").doesNotExist())
+        .andExpect(jsonPath("$[0].cipher").doesNotExist())
+        .andExpect(jsonPath("$[0].callback").doesNotExist())
+        .andExpect(jsonPath("$[0].lease").doesNotExist())
+        .andExpect(jsonPath("$[0].key").doesNotExist())
         .andExpect(content().string(not(containsString("credential"))))
         .andExpect(content().string(not(containsString("cipher"))));
 
@@ -96,17 +95,17 @@ class StudioPluginControllerTest {
     mockMvc
         .perform(get("/api/plugins/my-plugin"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
-        .andExpect(jsonPath("$.data.name").value("Test Plugin"))
-        .andExpect(jsonPath("$.data.version").value("1.0.0"))
-        .andExpect(jsonPath("$.data.status").value("CONNECTED"))
-        .andExpect(jsonPath("$.data.region").value("us-east-1"))
-        .andExpect(jsonPath("$.data.token").doesNotExist())
-        .andExpect(jsonPath("$.data.credential").doesNotExist())
-        .andExpect(jsonPath("$.data.cipher").doesNotExist())
-        .andExpect(jsonPath("$.data.callback").doesNotExist())
-        .andExpect(jsonPath("$.data.lease").doesNotExist())
-        .andExpect(jsonPath("$.data.key").doesNotExist())
+        .andExpect(jsonPath("$.pluginId").value("my-plugin"))
+        .andExpect(jsonPath("$.name").value("Test Plugin"))
+        .andExpect(jsonPath("$.version").value("1.0.0"))
+        .andExpect(jsonPath("$.status").value("CONNECTED"))
+        .andExpect(jsonPath("$.region").value("us-east-1"))
+        .andExpect(jsonPath("$.token").doesNotExist())
+        .andExpect(jsonPath("$.credential").doesNotExist())
+        .andExpect(jsonPath("$.cipher").doesNotExist())
+        .andExpect(jsonPath("$.callback").doesNotExist())
+        .andExpect(jsonPath("$.lease").doesNotExist())
+        .andExpect(jsonPath("$.key").doesNotExist())
         .andExpect(content().string(not(containsString("credential"))))
         .andExpect(content().string(not(containsString("cipher"))));
 
@@ -123,7 +122,7 @@ class StudioPluginControllerTest {
         .perform(get("/api/plugins/unknown-plugin"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"))
-        .andExpect(jsonPath("$.errors.resource").value("plugin"));
+        .andExpect(jsonPath("$.detail").value("plugin not found"));
 
     verify(pluginManagementService).getPlugin("unknown-plugin");
   }
@@ -137,7 +136,7 @@ class StudioPluginControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"region\":\"us-east-1\",\"unknownField\":\"some-value\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     verifyNoInteractions(pluginManagementService);
   }
@@ -160,11 +159,10 @@ class StudioPluginControllerTest {
                 .content("{\"region\":\"us-east-1\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(
-            jsonPath("$.data.loginUrl").value("https://login.example.com/oauth?region=us-east-1"))
-        .andExpect(jsonPath("$.data.authAttemptId").value("attempt-handle-1"))
-        .andExpect(jsonPath("$.data.token").doesNotExist())
-        .andExpect(jsonPath("$.data.callbackUrl").doesNotExist());
+        .andExpect(jsonPath("$.loginUrl").value("https://login.example.com/oauth?region=us-east-1"))
+        .andExpect(jsonPath("$.authAttemptId").value("attempt-handle-1"))
+        .andExpect(jsonPath("$.token").doesNotExist())
+        .andExpect(jsonPath("$.callbackUrl").doesNotExist());
 
     verify(pluginManagementService).prepareAuth("my-plugin", "us-east-1");
   }
@@ -191,8 +189,8 @@ class StudioPluginControllerTest {
                         + "\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
-        .andExpect(jsonPath("$.data.status").value("CONNECTED"))
+        .andExpect(jsonPath("$.pluginId").value("my-plugin"))
+        .andExpect(jsonPath("$.status").value("CONNECTED"))
         .andExpect(content().string(not(containsString(callbackMarker))));
 
     verify(pluginManagementService).completeAuth("my-plugin", "attempt-handle-1", callbackUrl);
@@ -216,7 +214,7 @@ class StudioPluginControllerTest {
                         + "\"callbackUrl\":\"https://app.example.com/callback?code=bad\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("plugin"));
+        .andExpect(jsonPath("$.detail").value("plugin rejected the auth callback"));
 
     verify(pluginManagementService).completeAuth(eq("my-plugin"), eq("attempt-handle-1"), any());
   }
@@ -253,7 +251,8 @@ class StudioPluginControllerTest {
                         + "\"}}}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
-        .andExpect(jsonPath("$.errors.resource").value("plugin"))
+        .andExpect(jsonPath("$.errors.expectedVersion").value("revision=7"))
+        .andExpect(jsonPath("$.errors.actualVersion").value("revision=8"))
         .andExpect(content().string(not(containsString(secretMarker))));
 
     verify(pluginManagementService).updateConfiguration(eq("my-plugin"), eq(7L), any(), any());
@@ -297,7 +296,7 @@ class StudioPluginControllerTest {
         .andExpect(status().isAccepted())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(
-            jsonPath("$.data.applicationError")
+            jsonPath("$.applicationError")
                 .value("configuration is saved but this node has not applied it yet"));
 
     PluginDTO applied = samplePluginDTO("my-plugin");
@@ -312,7 +311,7 @@ class StudioPluginControllerTest {
                 .content(body))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.applicationError").doesNotExist());
+        .andExpect(jsonPath("$.applicationError").doesNotExist());
 
     verify(pluginManagementService, times(2))
         .updateConfiguration(eq("my-plugin"), eq(7L), any(), nullable(Map.class));
@@ -373,13 +372,13 @@ class StudioPluginControllerTest {
                 .content("{\"expectedRevision\":\"8\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
-        .andExpect(jsonPath("$.data.appliedRevision").value("8"))
-        .andExpect(jsonPath("$.data.reachability").value("REACHABLE"))
-        .andExpect(jsonPath("$.data.authentication").value("ACCEPTED"))
-        .andExpect(jsonPath("$.data.browserSession").value("UNKNOWN"))
-        .andExpect(jsonPath("$.data.url").doesNotExist())
-        .andExpect(jsonPath("$.data.detail").doesNotExist())
+        .andExpect(jsonPath("$.pluginId").value("my-plugin"))
+        .andExpect(jsonPath("$.appliedRevision").value("8"))
+        .andExpect(jsonPath("$.reachability").value("REACHABLE"))
+        .andExpect(jsonPath("$.authentication").value("ACCEPTED"))
+        .andExpect(jsonPath("$.browserSession").value("UNKNOWN"))
+        .andExpect(jsonPath("$.url").doesNotExist())
+        .andExpect(jsonPath("$.detail").doesNotExist())
         .andExpect(content().string(not(containsString("https://"))));
 
     verify(pluginManagementService).checkConnection("my-plugin", 8L);

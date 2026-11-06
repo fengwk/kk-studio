@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateProgressDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import fun.fengwk.kkstudio.web.environment.EnvironmentRuntimeRoutingService;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 
@@ -76,8 +76,7 @@ class StudioEnvironmentControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
-                new StudioDomainErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 
@@ -93,8 +92,8 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data[0].name").value("dev"));
+        .andExpect(jsonPath("$[0].id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$[0].name").value("dev"));
   }
 
   /** 意图：验证 GET /api/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
@@ -108,8 +107,8 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.name").value("dev"));
+        .andExpect(jsonPath("$.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.name").value("dev"));
   }
 
   /** 意图：缺失 Environment 映射为 404 not_found，而不是泄露为 500。 */
@@ -123,8 +122,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("not_found"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"))
-        .andExpect(jsonPath("$.errors.detail").value("environment not found"));
+        .andExpect(jsonPath("$.detail").value("environment not found"));
   }
 
   /** 意图：验证 POST /api/environments 创建环境成功返回 HTTP 201 Created，且携带凭据的响应禁止缓存。 */
@@ -143,8 +141,8 @@ class StudioEnvironmentControllerTest {
                 .content("{\"name\":\"new-env\"}"))
         .andExpect(status().isCreated())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.registrationToken").value("secret-token"));
+        .andExpect(jsonPath("$.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.registrationToken").value("secret-token"));
   }
 
   /** 意图：验证 GET /api/environments/{id}/events 按时间正序返回事件窗口。 */
@@ -166,11 +164,11 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/events"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].type").value("CONNECTING"))
-        .andExpect(jsonPath("$.data[0].level").value("INFO"))
-        .andExpect(jsonPath("$.data[1].type").value("SKILL_SYNC_FAILED"))
-        .andExpect(jsonPath("$.data[1].level").value("ERROR"));
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].type").value("CONNECTING"))
+        .andExpect(jsonPath("$[0].level").value("INFO"))
+        .andExpect(jsonPath("$[1].type").value("SKILL_SYNC_FAILED"))
+        .andExpect(jsonPath("$[1].level").value("ERROR"));
   }
 
   /** 意图：未知 Environment 的事件查询与详情查询一样映射为 404 资源不存在。 */
@@ -196,8 +194,8 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.registrationToken").doesNotExist());
+        .andExpect(jsonPath("$.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.registrationToken").doesNotExist());
   }
 
   /**
@@ -218,7 +216,7 @@ class StudioEnvironmentControllerTest {
                 .content("{\"expectedVersion\":\"0\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.registrationToken").value("new-secret-token"));
+        .andExpect(jsonPath("$.registrationToken").value("new-secret-token"));
 
     verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");
   }
@@ -252,11 +250,11 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.operatingSystem").value("linux"))
-        .andExpect(jsonPath("$.data.timeZone").value("UTC"))
-        .andExpect(jsonPath("$.data.note").value("Linux environment."))
-        .andExpect(jsonPath("$.data.userName").value("dev"))
-        .andExpect(jsonPath("$.data.homeDirectory").value("/home/dev"));
+        .andExpect(jsonPath("$.operatingSystem").value("linux"))
+        .andExpect(jsonPath("$.timeZone").value("UTC"))
+        .andExpect(jsonPath("$.note").value("Linux environment."))
+        .andExpect(jsonPath("$.userName").value("dev"))
+        .andExpect(jsonPath("$.homeDirectory").value("/home/dev"));
   }
 
   /** 意图：从未 READY 的 Environment 的宿主 metadata 字段为 null，而不是伪造默认值。 */
@@ -270,12 +268,12 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.operatingSystem").doesNotExist())
-        .andExpect(jsonPath("$.data.timeZone").doesNotExist())
-        .andExpect(jsonPath("$.data.note").doesNotExist());
+        .andExpect(jsonPath("$.operatingSystem").doesNotExist())
+        .andExpect(jsonPath("$.timeZone").doesNotExist())
+        .andExpect(jsonPath("$.note").doesNotExist());
   }
 
-  /** 签发响应保留 JSON 信封和 ISO 过期时间，不返回长期凭据。 */
+  /** 签发响应保留 ISO 过期时间，不返回长期凭据。 */
   @Test
   void installCodeResponseUsesNoStoreAndIsoExpiry() throws Exception {
     EnvironmentInstallCodeDTO issued = new EnvironmentInstallCodeDTO();
@@ -290,9 +288,9 @@ class StudioEnvironmentControllerTest {
                 .content("{\"expectedVersion\":\"4\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.code").value("short-code"))
-        .andExpect(jsonPath("$.data.expiresAt").value("2026-10-05T00:05:00Z"))
-        .andExpect(jsonPath("$.data.registrationToken").doesNotExist());
+        .andExpect(jsonPath("$.code").value("short-code"))
+        .andExpect(jsonPath("$.expiresAt").value("2026-10-05T00:05:00Z"))
+        .andExpect(jsonPath("$.registrationToken").doesNotExist());
     verify(environmentService).issueInstallCode(EnvironmentId.of(ENV_ID), "4");
   }
 
@@ -306,7 +304,8 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/install").param("code", "expired-code"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.resource").value("code"))
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("install code is missing, expired or invalid"))
         .andExpect(content().string(not(containsString("expired-code"))));
   }
 
@@ -352,11 +351,11 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/not-a-uuid/install").param("code", "x"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.resource").value("environmentId"));
+        .andExpect(jsonPath("$.detail").value(containsString("environmentId")));
     mockMvc
         .perform(get("/api/environments/uninstall/bad"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.resource").value("operatingSystem"));
+        .andExpect(jsonPath("$.detail").value(containsString("operatingSystem")));
   }
 
   /** 意图：local owner 直接返回内存 runtime 快照，revision/status 与显式 null update 都按 wire 输出。 */
@@ -368,9 +367,9 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value("7"))
-        .andExpect(jsonPath("$.data.status.daemonVersion").value("1.0.9"))
-        .andExpect(jsonPath("$.data.status.update").value(nullValue()));
+        .andExpect(jsonPath("$.revision").value("7"))
+        .andExpect(jsonPath("$.status.daemonVersion").value("1.0.9"))
+        .andExpect(jsonPath("$.status.update").value(nullValue()));
   }
 
   /** 意图：没有 READY owner 路由时明确返回 unavailable，不能伪造空 update 快照。 */
@@ -396,7 +395,7 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value("9"));
+        .andExpect(jsonPath("$.revision").value("9"));
     verify(environmentUpdateService, never()).runtimeStatus(any());
   }
 
@@ -411,8 +410,8 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(post("/api/environments/" + ENV_ID + "/update"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.commandStatus").value("SENT_UNCONFIRMED"))
-        .andExpect(jsonPath("$.data.runtimeStatus.status.daemonVersion").value("1.0.9"));
+        .andExpect(jsonPath("$.commandStatus").value("SENT_UNCONFIRMED"))
+        .andExpect(jsonPath("$.runtimeStatus.status.daemonVersion").value("1.0.9"));
   }
 
   /** 意图：非 owner 节点只做一次 HMAC 内部调用，不在本地执行更新。 */
@@ -429,7 +428,7 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(post("/api/environments/" + ENV_ID + "/update"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.commandStatus").value("SENT_UNCONFIRMED"));
+        .andExpect(jsonPath("$.commandStatus").value("SENT_UNCONFIRMED"));
     verify(environmentUpdateService, never()).startUpdate(any());
   }
 

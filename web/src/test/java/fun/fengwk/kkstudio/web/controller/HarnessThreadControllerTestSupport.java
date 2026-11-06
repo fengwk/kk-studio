@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionServ
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
@@ -57,8 +57,7 @@ abstract class HarnessThreadControllerTestSupport {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchu
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.util.UUID;
 
@@ -45,8 +45,7 @@ class StudioHarnessThreadStreamCatchupControllerTest {
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
   }
 

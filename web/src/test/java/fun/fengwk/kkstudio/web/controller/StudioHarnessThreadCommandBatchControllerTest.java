@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
@@ -74,8 +74,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
             .build();
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenReturn(

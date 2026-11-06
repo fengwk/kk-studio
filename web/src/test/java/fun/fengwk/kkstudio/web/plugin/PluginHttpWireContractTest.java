@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.share.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -62,7 +63,7 @@ import java.util.Set;
  * Instant} 的 token 形态、schema 派生文本的数字精度）都在这里被锁定。
  *
  * <p>golden 是与前端共用的同一份资源（{@code fun/fengwk/kkstudio/web/plugin/plugins-http.json}、{@code
- * .../auth-prepare-http.json}），内容就是真实响应体的 UTF-8 原文；测试只比对已提交的 golden，绝不在运行时改写资源。
+ * .../auth-prepare-http.json}）；测试对照其中的资源数据与真实响应体，绝不在运行时改写资源。
  */
 class PluginHttpWireContractTest {
 
@@ -123,7 +124,7 @@ class PluginHttpWireContractTest {
   void setUp() {
     pluginManagementService = mock(PluginManagementService.class);
     StudioPluginController controller = new StudioPluginController(pluginManagementService);
-    StudioPluginErrorAdvice errorAdvice = new StudioPluginErrorAdvice(new StudioMessageService());
+    StudioProblemAdvice errorAdvice = new StudioProblemAdvice(new StudioMessageService());
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             // 只注册生产 mapper 的 converter：MVC 没有机会回退到构件自建或 Jackson 2 的副本。
@@ -150,7 +151,7 @@ class PluginHttpWireContractTest {
     List<PluginDTO> catalogue = pluginCatalogue();
     when(pluginManagementService.listPlugins()).thenReturn(catalogue);
 
-    JsonNode data = responseBody(listPlugins()).get("data");
+    JsonNode data = responseBody(listPlugins());
 
     assertEquals(JsonValues.readTree(HTTP_MAPPER.writeValueAsString(catalogue)), data);
   }
@@ -175,7 +176,7 @@ class PluginHttpWireContractTest {
   void nonePluginOmitsNullAuthStatusAndTokenMetadata() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
 
-    JsonNode none = responseBody(listPlugins()).get("data").get(0);
+    JsonNode none = responseBody(listPlugins()).get(0);
 
     assertEquals("alpha-none", none.get("pluginId").asString());
     for (String omitted :
@@ -202,7 +203,7 @@ class PluginHttpWireContractTest {
     when(pluginManagementService.getPlugin("beta-deep-connected"))
         .thenReturn(deepLinkConnectedPlugin());
 
-    JsonNode connected = responseBody(getPlugin("beta-deep-connected")).get("data");
+    JsonNode connected = responseBody(getPlugin("beta-deep-connected"));
 
     assertInstantToken(connected.get("expiresAt"), DEEP_CONNECTED_EXPIRES_AT);
     assertInstantToken(connected.get("nextRefreshAt"), DEEP_CONNECTED_NEXT_REFRESH_AT);
@@ -218,7 +219,7 @@ class PluginHttpWireContractTest {
   void deepLinkPendingPluginSeparatesDesiredAndAppliedCoordinates() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
 
-    JsonNode pending = responseBody(listPlugins()).get("data").get(3);
+    JsonNode pending = responseBody(listPlugins()).get(3);
 
     assertEquals("beta-deep-pending", pending.get("pluginId").asString());
     assertEquals("2", pending.get("desiredRevision").asString());
@@ -234,8 +235,7 @@ class PluginHttpWireContractTest {
     when(pluginManagementService.getPlugin("beta-deep-connected"))
         .thenReturn(deepLinkConnectedPlugin());
 
-    JsonNode configuration =
-        responseBody(getPlugin("beta-deep-connected")).get("data").get("configuration");
+    JsonNode configuration = responseBody(getPlugin("beta-deep-connected")).get("configuration");
 
     assertEquals("8", configuration.get("revision").asString());
 
@@ -290,7 +290,7 @@ class PluginHttpWireContractTest {
     PluginDTO none = nonePlugin();
     when(pluginManagementService.getPlugin("alpha-none")).thenReturn(none);
 
-    JsonNode configuration = responseBody(getPlugin("alpha-none")).get("data").get("configuration");
+    JsonNode configuration = responseBody(getPlugin("alpha-none")).get("configuration");
 
     assertEquals(
         none.getConfiguration().getValuesJson(), configuration.get("valuesJson").asString());
@@ -309,7 +309,7 @@ class PluginHttpWireContractTest {
   void connectionCheckSupportIsProjectedAsARealBoolean() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
 
-    JsonNode catalogue = responseBody(listPlugins()).get("data");
+    JsonNode catalogue = responseBody(listPlugins());
 
     for (JsonNode plugin : catalogue) {
       assertTrue(plugin.has("connectionCheckSupported"), "capability flag must not be omitted");
@@ -359,7 +359,7 @@ class PluginHttpWireContractTest {
         List.of("http://", "https://", "Bearer", "apiKey", "instanceId", "credential")) {
       assertFalse(body.contains(forbidden), "connection check body must never expose " + forbidden);
     }
-    JsonNode data = JsonValues.readTree(body).get("data");
+    JsonNode data = JsonValues.readTree(body);
     assertEquals("REACHABLE", data.get("reachability").asString());
     assertEquals("ACCEPTED", data.get("authentication").asString());
     assertEquals("UNKNOWN", data.get("browserSession").asString());
@@ -427,10 +427,10 @@ class PluginHttpWireContractTest {
     return new String(response.getContentAsByteArray(), UTF_8);
   }
 
-  /** 真实响应体与共用 golden 按 JSON 值比对：{@link JsonValues} 严格读树保留 BigDecimal scale，属性顺序无关。 */
+  /** 真实资源体与共用 golden 的资源数据按 JSON 值比对，保留 BigDecimal scale。 */
   private static void assertWireMatchesGolden(String goldenName, MockHttpServletResponse response) {
     assertEquals(
-        JsonValues.readTree(golden(goldenName)),
+        JsonValues.readTree(golden(goldenName)).get("data"),
         JsonValues.readTree(bodyText(response)),
         goldenName + " must match the live HTTP body");
   }
