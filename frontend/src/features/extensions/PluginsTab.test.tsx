@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginConnectionCheckDTO,
@@ -160,9 +161,8 @@ describe('PluginsTab', () => {
       }),
     ])
     renderTab()
-    expect(await screen.findByText(new Date(1777574730000).toLocaleString('zh-CN')))
-      .toBeInTheDocument()
-    expect(screen.getByText(new Date(0).toLocaleString('zh-CN'))).toBeInTheDocument()
+    expect(await screen.findByText(formatBackendDate(1777574730000))).toBeInTheDocument()
+    expect(screen.getByText(formatBackendDate(0))).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('provider rejected the stored static key')
   })
 
@@ -662,7 +662,7 @@ describe('PluginsTab', () => {
       '未知；本检查不核验浏览器登录态',
     )
     expect(within(dialog).getByTestId('plugin-check-checked-at')).toHaveTextContent(
-      new Date(1772366400000).toLocaleString('zh-CN'),
+      formatBackendDate(1772366400000),
     )
     // 三个维度各自独立呈现，绝不把认证结论说成浏览器登录。
     expect(within(dialog).getByTestId('plugin-check-authentication')).not.toHaveTextContent('浏览器')

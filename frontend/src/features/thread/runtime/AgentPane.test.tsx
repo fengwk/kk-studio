@@ -3165,11 +3165,11 @@ describe('branchDraftFromEntry environment replay', () => {
   })
 
   /**
-   * 测试意图：验证 unbound footer 按 activeDraft.environmentName 匹配卡片，
+   * 测试意图：验证 unbound footer 按 activeDraft.environmentName 匹配环境，
    * 未知 name 显示 unavailable 而不是 none。
    */
   it('projects unbound environment status from the active draft', async () => {
-    const envCard: EnvironmentDTO = {
+    const environment: EnvironmentDTO = {
       id: 'uuid-env-ready',
       name: 'cluster-ready',
       status: 'READY',
@@ -3195,7 +3195,7 @@ describe('branchDraftFromEntry environment replay', () => {
           paneId: 'p1',
           initialTarget: { kind: 'NEW_SESSION_DRAFT' },
           agents,
-          environments: [envCard],
+          environments: [environment],
           defaults: {},
           focused: true,
         }),
@@ -4498,7 +4498,7 @@ describe('AgentPane root control and child observation', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
-  function environmentCard(name: string): EnvironmentDTO {
+  function environmentFixture(name: string): EnvironmentDTO {
     return {
       id: 'f1000000-0000-4000-8000-0000000000e1',
       name,
@@ -4524,7 +4524,7 @@ describe('AgentPane root control and child observation', () => {
       treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
     ])
     bindPaneToRoot()
-    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentCard('NAS')])
+    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentFixture('NAS')])
 
     const trigger = await screen.findByRole('button', { name: '环境' })
     await user.click(trigger)
@@ -4542,7 +4542,7 @@ describe('AgentPane root control and child observation', () => {
       treeNode(THREAD_ID, null, 'root thread', false),
     ])
     bindPaneToRoot()
-    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentCard('NAS')])
+    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentFixture('NAS')])
 
     await user.click(await screen.findByRole('button', { name: '环境' }))
     expect(screen.getByRole('option', { name: 'NAS' })).toBeInTheDocument()
@@ -5215,7 +5215,7 @@ describe('AgentPane root control mounting', () => {
   it('routes the typed /files command to the global IDE panel with the resolved environment', async () => {
     // 测试意图：pane 只把显式 /files 动作交给全局面板，不再自行创建 view 或拥有 IDE 生命周期。
     const user = userEvent.setup()
-    const envCard: EnvironmentDTO = {
+    const environment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
       ready: true,
@@ -5238,7 +5238,7 @@ describe('AgentPane root control mounting', () => {
               owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
-              environments={[envCard]}
+              environments={[environment]}
               defaults={{ environmentName: 'local-node' }}
               focused
             />
@@ -5256,7 +5256,7 @@ describe('AgentPane root control mounting', () => {
     expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(openEnvironment).toHaveBeenCalledWith({
-        environment: { id: envCard.id, name: 'local-node', ready: true },
+        environment: { id: environment.id, name: 'local-node', ready: true },
         mode: 'files',
       })
     })
@@ -5266,7 +5266,7 @@ describe('AgentPane root control mounting', () => {
   it('passes /shell and command-menu actions to the panel using the environment active at action time', async () => {
     // 测试意图：pane 不缓存 IDE view；shell 动作与新环境下的 files 动作分别显式携带当时解析到的环境。
     const user = userEvent.setup()
-    const envCard: EnvironmentDTO = {
+    const environment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
       ready: true,
@@ -5279,7 +5279,7 @@ describe('AgentPane root control mounting', () => {
       lastSeenAt: null,
       homeDirectory: '/home/user',
     }
-    const secondEnvCard: EnvironmentDTO = {
+    const secondEnvironment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000088',
       name: 'second-node',
       ready: true,
@@ -5302,7 +5302,7 @@ describe('AgentPane root control mounting', () => {
               owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
-              environments={[envCard, secondEnvCard]}
+              environments={[environment, secondEnvironment]}
               defaults={{ environmentName: 'local-node' }}
               focused
             />
@@ -5317,7 +5317,7 @@ describe('AgentPane root control mounting', () => {
     expect(composer).toHaveTextContent(/^$/)
     await waitFor(() => {
       expect(openEnvironment).toHaveBeenLastCalledWith({
-        environment: { id: envCard.id, name: 'local-node', ready: true },
+        environment: { id: environment.id, name: 'local-node', ready: true },
         mode: 'shell',
       })
     })
@@ -5330,7 +5330,7 @@ describe('AgentPane root control mounting', () => {
               owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
-              environments={[envCard, secondEnvCard]}
+              environments={[environment, secondEnvironment]}
               defaults={{ environmentName: 'second-node' }}
               focused
             />
@@ -5345,7 +5345,7 @@ describe('AgentPane root control mounting', () => {
 
     await waitFor(() => {
       expect(openEnvironment).toHaveBeenLastCalledWith({
-        environment: { id: secondEnvCard.id, name: 'second-node', ready: true },
+        environment: { id: secondEnvironment.id, name: 'second-node', ready: true },
         mode: 'files',
       })
     })

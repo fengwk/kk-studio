@@ -225,11 +225,17 @@ async function installPaneApi(
       recorded.uploadCalls.push('reserve')
       await route.fulfill({
         json: {
+          type: 'PENDING',
           id: 'c1000000-0000-4000-8000-0000000000c1',
-          state: 'PENDING',
-          blobId: null,
-          presignedPut: { method: 'PUT', url: 'https://storage.test/pane-put', headers: {} },
-          expiresAt: null,
+          presignedPut: {
+            method: 'PUT',
+            url: 'https://storage.test/pane-put',
+            headers: {},
+            expiresAt: 1786492800000,
+            mediaType: null,
+            sizeBytes: null,
+          },
+          expiresAt: 1786492800000,
         },
       })
       return
@@ -238,11 +244,10 @@ async function installPaneApi(
       recorded.uploadCalls.push('complete')
       await route.fulfill({
         json: {
+          type: 'READY',
           id: 'c1000000-0000-4000-8000-0000000000c1',
-          state: 'READY',
           blobId: 'blob-pane-1',
-          presignedPut: null,
-          expiresAt: null,
+          expiresAt: 1786492800000,
         },
       })
       return

@@ -11,6 +11,7 @@ import type {
   ApplicationEventRevision,
   ApplicationEventServerMessage,
 } from '@/shared/app-events/protocol'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 export interface ApplicationEventListener {
   /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
@@ -48,7 +49,6 @@ interface PendingUsage {
   reject: (error: Error) => void
 }
 
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 const MAX_SIGNED_LONG_DECIMAL = '9223372036854775807'
 const MAX_IDE_USE_VIEWS = 64
@@ -334,10 +334,7 @@ function resourceKey(resource: ApplicationEventResource): string {
 
 /** 校验并规范化 ide-use：固定排序保证同 revision 的集合内容与顺序无关。 */
 function normalizeUsage(usage: ApplicationEventIdeUse): ApplicationEventIdeUse {
-  if (
-    typeof usage.documentId !== 'string'
-    || !CANONICAL_UUID.test(usage.documentId)
-  ) {
+  if (!isCanonicalUuid(usage.documentId)) {
     throw new Error('documentId must be a canonical UUID')
   }
   const revision = parseRevision(usage.revision)
@@ -361,16 +358,13 @@ function normalizeView(
   view: ApplicationEventIdeUseView,
   viewIds: Set<string>,
 ): ApplicationEventIdeUseView {
-  if (
-    typeof view.environmentId !== 'string'
-    || !CANONICAL_UUID.test(view.environmentId)
-  ) {
+  if (!isCanonicalUuid(view.environmentId)) {
     throw new Error('view.environmentId must be a canonical UUID')
   }
-  if (typeof view.viewId !== 'string' || !CANONICAL_UUID.test(view.viewId)) {
+  if (!isCanonicalUuid(view.viewId)) {
     throw new Error('view.viewId must be a canonical UUID')
   }
-  if (typeof view.claimId !== 'string' || !CANONICAL_UUID.test(view.claimId)) {
+  if (!isCanonicalUuid(view.claimId)) {
     throw new Error('view.claimId must be a canonical UUID')
   }
   if (viewIds.has(view.viewId)) {

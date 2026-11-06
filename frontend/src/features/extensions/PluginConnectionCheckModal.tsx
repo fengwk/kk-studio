@@ -1,6 +1,7 @@
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { useI18n, type AppLocale } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import {
   pluginConnectionCheckExpected,
   pluginConnectionCheckIsStale,
@@ -16,12 +17,6 @@ interface PluginConnectionCheckModalProps {
   onClose: () => void
 }
 
-/** 后端 Instant 的 wire 约定是 epoch 毫秒。 */
-function formatCheckedAt(value: number, locale: AppLocale): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(locale)
-}
-
 /**
  * 显式连接检查结果：只呈现本次检查时刻与三个类型化维度，并把结果与当前配置的坐标关系讲清楚。
  * 认证维度只陈述本次凭据是否被接受，浏览器会话恒为未知——绝不含糊成“已登录”或远端健康。
@@ -31,7 +26,7 @@ export function PluginConnectionCheckModal({
   run,
   onClose,
 }: PluginConnectionCheckModalProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const pending = run.phase === 'pending'
   // 结果只在仍与调用方当前所见已应用坐标一致时才作为当前结果展示。
   const stale = pluginConnectionCheckIsStale(run, pluginConnectionCheckExpected(plugin))
@@ -62,7 +57,7 @@ export function PluginConnectionCheckModal({
                 {t('plugins.connectionCheck.checkedAt')}
               </span>
               <span className="plugin-check-fact-value" data-testid="plugin-check-checked-at">
-                {formatCheckedAt(result.checkedAt, locale)}
+                {formatBackendDate(result.checkedAt)}
               </span>
             </div>
           ) : null}

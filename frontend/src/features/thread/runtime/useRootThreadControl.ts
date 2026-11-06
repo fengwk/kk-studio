@@ -675,20 +675,20 @@ export function useRootThreadControl({
     }
   }, [focusIntent, focused, target, composerDisabled, covered, interaction, boundViews.mode, setFocusIntent])
   const activeDraftEnvironmentName = activeDraft?.environmentName ?? null
-  const boundEnvCard = activeDraftEnvironmentName
+  const matchedEnvironment = activeDraftEnvironmentName
     ? environments.find((env) => env.name === activeDraftEnvironmentName) ?? null
     : null
   const boundEnvironment = activeDraftEnvironmentName
     ? {
-        id: boundEnvCard?.id ?? activeDraftEnvironmentName,
+        id: matchedEnvironment?.id ?? activeDraftEnvironmentName,
         name: activeDraftEnvironmentName,
       }
     : null
   const environmentReady =
     activeDraftEnvironmentName == null
       ? undefined
-      : boundEnvCard != null
-        ? boundEnvCard.ready
+      : matchedEnvironment != null
+        ? matchedEnvironment.ready
         : false
   const error = actionError
     ?? (isBoundTarget(target)

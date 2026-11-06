@@ -365,7 +365,7 @@ type RecordBase = Pick<ThreadEventRecord, 'id' | 'source' | 'entryId' | 'turnSta
 function withTime(details: ThreadEventDetailRow[], createdAt: DialogueTimestamp): ThreadEventDetailRow[] {
   return [
     ...details,
-    { label: translate('ai.runtime.event.detail.createTime'), value: String(createdAt) },
+    { label: translate('ai.runtime.event.detail.createdAt'), value: String(createdAt) },
   ]
 }
 
