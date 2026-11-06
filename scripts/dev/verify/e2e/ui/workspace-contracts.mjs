@@ -817,8 +817,8 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
       credential: `e2e-ui-usage-${suffix}`,
-      modelCallTimeoutMillis: 30_000,
-      modelCallIdleTimeoutMillis: 10_000,
+      modelCallTimeoutMillis: '30000',
+      modelCallIdleTimeoutMillis: '10000',
     })
     assert(providerResponse.status === 201, `create usage provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json
@@ -960,8 +960,8 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
       credential: `e2e-ui-task-${suffix}`,
-      modelCallTimeoutMillis: 60_000,
-      modelCallIdleTimeoutMillis: 60_000,
+      modelCallTimeoutMillis: '60000',
+      modelCallIdleTimeoutMillis: '60000',
     })
     assert(providerResponse.status === 201, `create task provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json
@@ -1124,8 +1124,8 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
       credential: `e2e-ui-tool-card-${suffix}`,
-      modelCallTimeoutMillis: 60_000,
-      modelCallIdleTimeoutMillis: 60_000,
+      modelCallTimeoutMillis: '60000',
+      modelCallIdleTimeoutMillis: '60000',
     })
     assert(providerResponse.status === 201, `create tool-card provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json

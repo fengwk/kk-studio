@@ -12,8 +12,8 @@
 
 import { isValidPort, splitUrl } from './url-split.mjs'
 
-export const DEFAULT_MODEL_CALL_TIMEOUT_MILLIS = 1800000
-export const DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS = 120000
+export const DEFAULT_MODEL_CALL_TIMEOUT_MILLIS = '1800000'
+export const DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS = '120000'
 
 /** A caller supplied an invalid credential pair or base URL. */
 export class ValidationError extends Error {
@@ -141,10 +141,8 @@ export function buildPayload(baseUrl, apiKey, current, spec = null) {
     baseUrl,
     credential: { operation: 'SET', value: apiKey },
     expectedVersion: String(current.version),
-    modelCallTimeoutMillis: Math.trunc(Number(current.modelCallTimeoutMillis || DEFAULT_MODEL_CALL_TIMEOUT_MILLIS)),
-    modelCallIdleTimeoutMillis: Math.trunc(
-      Number(current.modelCallIdleTimeoutMillis || DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS),
-    ),
+    modelCallTimeoutMillis: current.modelCallTimeoutMillis ?? DEFAULT_MODEL_CALL_TIMEOUT_MILLIS,
+    modelCallIdleTimeoutMillis: current.modelCallIdleTimeoutMillis ?? DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS,
   }
 }
 

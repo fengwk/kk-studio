@@ -1357,8 +1357,8 @@ async function createHoldingQueueFixture(
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
         credential: `e2e-ui-hold-${suffix}`,
-        modelCallTimeoutMillis: 60_000,
-        modelCallIdleTimeoutMillis: 60_000,
+        modelCallTimeoutMillis: '60000',
+        modelCallIdleTimeoutMillis: '60000',
       },
     )
     assert(

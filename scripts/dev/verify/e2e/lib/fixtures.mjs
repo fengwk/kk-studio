@@ -479,8 +479,8 @@ export function providerCreateBody(suffix) {
     providerType: 'openai',
     baseUrl: 'https://example.com/v1',
     credential: 'sk-e2e-test',
-    modelCallTimeoutMillis: 1_800_000,
-    modelCallIdleTimeoutMillis: 120_000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   }
 }
 
@@ -493,8 +493,8 @@ export function providerUpdateBody(overrides = {}) {
     description: 'e2e provider updated',
     baseUrl: 'https://example.com/v1',
     credential: { operation: 'KEEP' },
-    modelCallTimeoutMillis: 1_800_000,
-    modelCallIdleTimeoutMillis: 120_000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
     ...overrides,
   }
 }

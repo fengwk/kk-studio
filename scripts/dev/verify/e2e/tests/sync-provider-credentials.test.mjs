@@ -26,8 +26,8 @@ function seedRows(overrides = {}) {
     providerType,
     baseUrl: null,
     version: '0',
-    modelCallTimeoutMillis: 1800000,
-    modelCallIdleTimeoutMillis: 120000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   })
   const defaults = {
     google: row('google', 'Google Gemini.', 'google'),
@@ -187,7 +187,7 @@ test('test intent: a seeded row without a version fails before any PUT', async (
 
 test('test intent: a rerun inherits the existing timeouts and version', async () => {
   const rows = seedRows({
-    deepseek: { version: '42', modelCallTimeoutMillis: 999999, modelCallIdleTimeoutMillis: 88888 },
+    deepseek: { version: '42', modelCallTimeoutMillis: '999999', modelCallIdleTimeoutMillis: '88888' },
   })
   const { request, calls } = makeMockHttp({ rows })
   const env = { [TEST_OPENAI_BASE_URL]: 'https://api.deepseek.com', [TEST_OPENAI_API_KEY]: 'secret-deepseek' }
@@ -197,8 +197,8 @@ test('test intent: a rerun inherits the existing timeouts and version', async ()
   assert.equal(calls.length, 2)
   const payload = calls[1][1]
   assert.equal(payload.expectedVersion, '42')
-  assert.equal(payload.modelCallTimeoutMillis, 999999)
-  assert.equal(payload.modelCallIdleTimeoutMillis, 88888)
+  assert.equal(payload.modelCallTimeoutMillis, '999999')
+  assert.equal(payload.modelCallIdleTimeoutMillis, '88888')
 })
 
 test('test intent: status output never contains the secret or the endpoint', async () => {

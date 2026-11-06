@@ -63,7 +63,7 @@ registerCase({
     const { json: reserveJson } = await ctx.call('POST', '/api/platform/storage/uploads', {
       filename: 'e2e-attachment.txt',
       mediaType: 'text/plain',
-      sizeBytes: content.length,
+      sizeBytes: String(content.length),
       sha256,
     })
     const pending = reserveJson
@@ -236,7 +236,7 @@ registerCase({
     const { json: pendingReserveJson } = await ctx.call('POST', '/api/platform/storage/uploads', {
       filename: 'pending.bin',
       mediaType: 'application/octet-stream',
-      sizeBytes: 1,
+      sizeBytes: '1',
       sha256: createHash('sha256').update(Buffer.from([1])).digest('hex'),
     })
     const pendingUploadId = String(pendingReserveJson.id)
@@ -284,8 +284,8 @@ registerCase({
             providerType: 'openai_responses',
             baseUrl: mock.baseUrl,
             credential: `e2e-image-${suffix}`,
-            modelCallTimeoutMillis: 30_000,
-            modelCallIdleTimeoutMillis: 10_000,
+            modelCallTimeoutMillis: '30000',
+            modelCallIdleTimeoutMillis: '10000',
           })
         ).json
       model = (
@@ -515,7 +515,7 @@ async function uploadReadyFile(ctx, { filename, mediaType, content }) {
       await ctx.call('POST', '/api/platform/storage/uploads', {
         filename,
         mediaType,
-        sizeBytes: content.length,
+        sizeBytes: String(content.length),
         sha256,
       })
     ).json
