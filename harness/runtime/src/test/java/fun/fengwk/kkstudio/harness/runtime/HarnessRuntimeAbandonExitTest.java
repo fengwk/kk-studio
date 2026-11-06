@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -38,14 +38,14 @@ class HarnessRuntimeAbandonExitTest {
     long runningVersion = runtime.getThreadSnapshot(first.threadId()).thread().version();
     ExecutionExitFact runningFact = register(store, first.threadId(), TestIds.id(1), T0);
 
-    HarnessRuntimeConflictException notStopped =
+    DomainException notStopped =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.abandonExecution(
                     first.threadId(), runningFact.executionId(), runningVersion));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE, notStopped.reason());
+    assertEquals(DomainErrorCode.CONFLICT, notStopped.code());
+    assertEquals(HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE.name(), notStopped.reason());
 
     long stoppedVersion =
         runtime
@@ -53,20 +53,21 @@ class HarnessRuntimeAbandonExitTest {
             .thread()
             .version();
     UUID foreignExecutionId = register(store, other.threadId(), TestIds.id(3), T0).executionId();
-    HarnessRuntimeConflictException foreign =
+    DomainException foreign =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.abandonExecution(first.threadId(), foreignExecutionId, stoppedVersion));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE, foreign.reason());
+    assertEquals(DomainErrorCode.CONFLICT, foreign.code());
+    assertEquals(HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE.name(), foreign.reason());
 
-    HarnessRuntimeConflictException stale =
+    DomainException stale =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.abandonExecution(
                     first.threadId(), runningFact.executionId(), stoppedVersion - 1));
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, stale.reason());
+    assertEquals(DomainErrorCode.CONFLICT, stale.code());
+    assertEquals(HarnessConflictReason.STALE_VERSION.name(), stale.reason());
     assertEquals(
         ExecutionExitState.UNCONFIRMED,
         store.transaction(tx -> tx.exits().find(runningFact.executionId()).orElseThrow().state()));
