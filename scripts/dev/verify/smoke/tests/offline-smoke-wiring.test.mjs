@@ -74,7 +74,7 @@ class CreateAndRunHarness {
     this.responses = [
       functionDefinitions([functionName]),
       { document: documentDto(0), nodes: [], groups: [], references: [] },
-      patchDto('1', [{ op: 'UPSERT', node: { ...this.node, resources: [], run: null } }]),
+      patchDto('1', [{ type: 'UPSERT', node: { ...this.node, resources: [], run: null } }]),
       runDto(this.nodeId, this.requestId, { status: 'READY' }),
       this.completed,
       this.snapshot(settled),

@@ -54,7 +54,7 @@ function header(headers, name) {
 }
 
 function upsertedNode(patch, nodeId) {
-  const item = patch.nodes.find((candidate) => candidate.op === 'UPSERT' && candidate.node.id === nodeId)
+  const item = patch.nodes.find((candidate) => candidate.type === 'UPSERT' && candidate.node.id === nodeId)
   assert.ok(item, `no upserted node ${nodeId}`)
   return item.node
 }

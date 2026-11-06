@@ -102,7 +102,7 @@ export function useCanvasController(initialCanvasId?: string) {
     enabled: state.view === 'editor' && Boolean(state.canvasId),
   })
   const modelsQuery = useQuery({
-    queryKey: queryKeys.studio.canvasModels,
+    queryKey: queryKeys.studio.canvasFunctions,
     queryFn: ({ signal }) => listCanvasFunctions({ signal }),
     enabled: state.view === 'editor',
   })

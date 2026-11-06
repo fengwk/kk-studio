@@ -106,7 +106,7 @@ function nodeById(snapshot, nodeId) {
 }
 
 function upsertedNode(patch, nodeId) {
-  return patch.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
+  return patch.nodes.find((item) => item.type === 'UPSERT' && item.node.id === nodeId)
 }
 
 registerCase({
@@ -129,21 +129,21 @@ registerCase({
           nodeId,
           name: 'note',
           transform: transform(1, 2),
-          resources: [{ kind: 'TEXT', name: 'body', textContent: 'hello' }],
+          resources: [{ type: 'TEXT', name: 'body', textContent: 'hello' }],
         },
         {
           type: 'CREATE_NODE',
           nodeId: secondNodeId,
           name: 'second',
           transform: transform(120, 2),
-          resources: [{ kind: 'TEXT', name: 'body', textContent: 'second node' }],
+          resources: [{ type: 'TEXT', name: 'body', textContent: 'second node' }],
         },
       ],
     })
     assert(createPatch.revision === '1', JSON.stringify(createPatch))
     assert(createPatch.groups.length === 0, JSON.stringify(createPatch))
     assert(
-      createPatch.nodes.length === 2 && createPatch.nodes.every((item) => item.op === 'UPSERT'),
+      createPatch.nodes.length === 2 && createPatch.nodes.every((item) => item.type === 'UPSERT'),
       JSON.stringify(createPatch.nodes),
     )
     const createdNode = upsertedNode(createPatch, nodeId)?.node
@@ -196,7 +196,7 @@ registerCase({
           type: 'SET_NODE_RESOURCES',
           nodeId,
           expectedResourceIds: [textResource.id],
-          resources: [{ kind: 'KEEP', resourceId: textResource.id }],
+          resources: [{ type: 'KEEP', resourceId: textResource.id }],
         },
       ],
     })
@@ -241,7 +241,7 @@ registerCase({
       staleBody.detail === 'command prerequisites are stale; no write was applied'
         && Array.isArray(staleBody.errors?.conflicts)
         && staleBody.errors.conflicts.length === 1
-        && staleBody.errors.conflicts[0].kind === 'STALE_NODE'
+        && staleBody.errors.conflicts[0].type === 'STALE_NODE'
         && staleBody.errors.conflicts[0].nodeId === nodeId
         && staleBody.errors.conflicts[0].group === 'NAME'
         && staleBody.errors.conflicts[0].current.name === 'note',
@@ -302,7 +302,7 @@ registerCase({
     assert(createdGroup.revision === '4' && createdGroup.nodes.length === 0, JSON.stringify(createdGroup))
     assert(
       createdGroup.groups.length === 1
-        && createdGroup.groups[0].op === 'UPSERT'
+        && createdGroup.groups[0].type === 'UPSERT'
         && createdGroup.groups[0].group.title === 'Group A'
         && createdGroup.groups[0].group.canvasId === canvas.id,
       JSON.stringify(createdGroup.groups),
@@ -394,11 +394,11 @@ registerCase({
     })
     assert(cleared.revision === '8', JSON.stringify(cleared))
     assert(
-      cleared.nodes.length === 2 && cleared.nodes.every((item) => item.op === 'REMOVE'),
+      cleared.nodes.length === 2 && cleared.nodes.every((item) => item.type === 'REMOVE'),
       JSON.stringify(cleared.nodes),
     )
     assert(
-      cleared.groups.length === 1 && cleared.groups[0].op === 'REMOVE' && cleared.groups[0].groupId === groupId,
+      cleared.groups.length === 1 && cleared.groups[0].type === 'REMOVE' && cleared.groups[0].groupId === groupId,
       JSON.stringify(cleared.groups),
     )
 
@@ -430,7 +430,7 @@ registerCase({
           nodeId: upstreamNodeId,
           name: 'upstream',
           transform: transform(0, 0),
-          resources: [{ kind: 'TEXT', name: 'body', textContent: 'source' }],
+          resources: [{ type: 'TEXT', name: 'body', textContent: 'source' }],
         },
       ],
     })
@@ -444,7 +444,7 @@ registerCase({
           nodeId: consumerNodeId,
           name: 'consumer',
           transform: transform(200, 0),
-          resources: [{ kind: 'TEXT', name: 'body', textContent: 'consumer' }],
+          resources: [{ type: 'TEXT', name: 'body', textContent: 'consumer' }],
         },
         { type: 'CREATE_GROUP', groupId, title: 'Conflict Group', transform: transform(0, 0, 400, 300) },
         { type: 'SET_NODE_GROUP', nodeId: consumerNodeId, expectedGroupId: null, groupId },
@@ -482,7 +482,7 @@ registerCase({
     assert(
       missingConflicts.every(
         (conflict) =>
-          (conflict.kind === 'TARGET_MISSING' && ['NODE', 'GROUP'].includes(conflict.target)),
+          (conflict.type === 'TARGET_MISSING' && ['NODE', 'GROUP'].includes(conflict.target)),
       ),
       JSON.stringify(missingConflicts),
     )
@@ -493,7 +493,7 @@ registerCase({
         nodeId: upstreamNodeId,
         name: 'duplicate',
         transform: transform(0, 0),
-        resources: [{ kind: 'TEXT', name: 'body', textContent: 'duplicate' }],
+        resources: [{ type: 'TEXT', name: 'body', textContent: 'duplicate' }],
       },
       { type: 'CREATE_GROUP', groupId, title: 'duplicate group', transform: transform(0, 0, 10, 10) },
     ])
@@ -501,7 +501,7 @@ registerCase({
       presentConflicts.length === 2
         && presentConflicts.every(
           (conflict) =>
-            conflict.kind === 'TARGET_PRESENT' && ['NODE', 'GROUP'].includes(conflict.target),
+            conflict.type === 'TARGET_PRESENT' && ['NODE', 'GROUP'].includes(conflict.target),
         ),
       JSON.stringify(presentConflicts),
     )
@@ -517,7 +517,7 @@ registerCase({
     assert(
       membershipConflicts.some(
         (conflict) =>
-          conflict.kind === 'STALE_NODE'
+          conflict.type === 'STALE_NODE'
           && conflict.nodeId === consumerNodeId
           && conflict.group === 'MEMBERSHIP',
       ),
@@ -534,7 +534,7 @@ registerCase({
       },
     ])
     assert(
-      staleGroupConflicts.every((conflict) => conflict.kind === 'STALE_GROUP' && conflict.groupId === groupId),
+      staleGroupConflicts.every((conflict) => conflict.type === 'STALE_GROUP' && conflict.groupId === groupId),
       JSON.stringify(staleGroupConflicts),
     )
     assertExactFields(
@@ -578,7 +578,7 @@ registerCase({
     ])
     assert(
       referencedConflicts.length === 1
-        && referencedConflicts[0].kind === 'NODE_REFERENCED'
+        && referencedConflicts[0].type === 'NODE_REFERENCED'
         && referencedConflicts[0].nodeId === upstreamNodeId
         && referencedConflicts[0].referencingNodeIds.length === 1
         && referencedConflicts[0].referencingNodeIds[0] === consumerNodeId,
@@ -602,7 +602,7 @@ registerCase({
       ],
     })
     assert(
-      released.nodes.some((item) => item.op === 'REMOVE' && item.nodeId === upstreamNodeId)
+      released.nodes.some((item) => item.type === 'REMOVE' && item.nodeId === upstreamNodeId)
         && upsertedNode(released, consumerNodeId)?.node.function === null,
       JSON.stringify(released.nodes),
     )
@@ -655,7 +655,7 @@ registerCase({
             nodeId: cid(),
             name: 'n',
             transform: transform(0, 0, 1, 1),
-            resources: [{ kind: 'INVALID_RESOURCE_KIND', name: 'invalid.png', uploadId: cid() }],
+            resources: [{ type: 'INVALID_RESOURCE_KIND', name: 'invalid.png', uploadId: cid() }],
           },
         ],
       },

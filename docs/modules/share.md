@@ -11,10 +11,10 @@ HTTP 请求由消息转换器统一严格解码，拒绝未知字段、标量强
 `ModelVariantDTO.protocolOptionsJson` 只要求 JSON string token，share 不解析其内容；严格 object、64 KiB UTF-8 上限与 canonical 化由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行。
 
 ```json
-{ "type": "CREATE_NODE", "nodeId": "...", "name": "说明", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "function": null, "resources": [{ "kind": "TEXT", "name": "说明.txt", "textContent": "内容" }] }
+{ "type": "CREATE_NODE", "nodeId": "...", "name": "说明", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "function": null, "resources": [{ "type": "TEXT", "name": "说明.txt", "textContent": "内容" }] }
 ```
 
-[`CanvasCommandDTO`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/CanvasCommandDTO.java) 的 11 个子类型与 [Canvas](canvas.md#typed-command-与并发语义) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
+[`CanvasCommandDTO`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/CanvasCommandDTO.java) 的 11 个子类型与 [Canvas](canvas.md#typed-command-与并发语义) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 与其他多形态 DTO 一样用 `type` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
 
 字符串到 UUID 与数字的解析属于 HTTP 边界，并且都是严格 canonical：请求体的 UUID 以及 UUID 类型的路径和查询参数统一使用 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java)，必须与 `UUID.toString()` 往返一致，拒绝大写、前后空白和其它非 canonical 形状；非负与正数十进制只使用 [`DecimalLongs`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java)（`0|[1-9]\d*` 与 `[1-9]\d*`，且必须放进 `long`），同样拒绝前后空白、符号和前导零。Project、Harness 与 Environment 路径都直接复用这两个算法，严格校验大小写与空白，拒绝非规范输入；可选字段缺省仍表示未提供，不把缺省本身当非法。共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 

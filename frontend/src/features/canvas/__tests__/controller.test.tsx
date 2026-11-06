@@ -27,6 +27,7 @@ import type {
   CanvasPatchDTO,
   CanvasResourceDTO,
   CanvasResourceInputDTO,
+  CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -262,8 +263,8 @@ function nextRevision(revision: string): string {
 function diffPatch(snapshotValue: CanvasSnapshotDTO): CanvasPatchDTO {
   return {
     revision: snapshotValue.document.revision,
-    groups: snapshotValue.groups.map((group) => ({ op: 'UPSERT', group })),
-    nodes: snapshotValue.nodes.map((node) => ({ op: 'UPSERT', node })),
+    groups: snapshotValue.groups.map((group) => ({ type: 'UPSERT', group })),
+    nodes: snapshotValue.nodes.map((node) => ({ type: 'UPSERT', node })),
   }
 }
 
@@ -273,7 +274,7 @@ function materializeResource(
   input: CanvasResourceInputDTO,
   index: number,
 ): CanvasResourceDTO {
-  if (input.kind === 'KEEP') {
+  if (input.type === 'KEEP') {
     const existing = current.nodes.flatMap((node) => node.resources)
       .find((resource) => resource.id === input.resourceId)
     if (!existing) {
@@ -288,7 +289,7 @@ function materializeResource(
     name: input.name,
     createdAt: 1786291200000,
   }
-  if (input.kind === 'TEXT') {
+  if (input.type === 'TEXT') {
     return {
       ...base,
       type: 'TEXT',
@@ -583,15 +584,15 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
     expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_NODE'
-      && request.commands[0]?.resources?.[0]?.kind === 'BLOB'
+      && request.commands[0]?.resources?.[0]?.type === 'BLOB'
     ))).toBe(true)
     const uploadedNode = commands
       .flatMap((request) => request.commands)
-      .find((command) => command.type === 'CREATE_NODE' && command.resources?.[0]?.kind === 'BLOB')
+      .find((command) => command.type === 'CREATE_NODE' && command.resources?.[0]?.type === 'BLOB')
     expect(uploadedNode).toMatchObject({
       transform: { width: 320, height: 246 },
       resources: [{
-        kind: 'BLOB',
+        type: 'BLOB',
         name: 'upload.png',
         blobId: 'blob-upload',
       }],
@@ -832,7 +833,7 @@ describe('useCanvasController real snapshot runtime', () => {
         type: 'SET_NODE_RESOURCES',
         nodeId: NODE_NOTE,
         expectedResourceIds: [RES_NOTE],
-        resources: [{ kind: 'TEXT', name: 'text', textContent: 'updated' }],
+        resources: [{ type: 'TEXT', name: 'text', textContent: 'updated' }],
       },
       { type: 'RENAME_NODE', nodeId: NODE_NOTE, expectedName: 'Note', name: 'Note v2' },
     ])
@@ -851,7 +852,7 @@ describe('useCanvasController real snapshot runtime', () => {
         type: 'SET_NODE_RESOURCES',
         nodeId: NODE_NOTE,
         expectedResourceIds: expect.any(Array),
-        resources: [{ kind: 'TEXT', name: 'text', textContent: 'again' }],
+        resources: [{ type: 'TEXT', name: 'text', textContent: 'again' }],
       },
     ])
   })
@@ -1552,11 +1553,10 @@ describe('useCanvasController real snapshot runtime', () => {
 
     const conflictError = new ApiError('Conflict', 409, 'CANVAS_CONFLICT', {
       conflicts: [{
-        kind: 'STALE_NODE',
+        type: 'STALE_NODE',
         nodeId: NODE_NOTE,
-        group: 'CONTENT',
-        expected: 'old',
-        current: 'remote modified text',
+        group: 'RESOURCES',
+        current: result.current.snapshot?.nodes[0] as CanvasResourceNodeDTO,
       }],
     })
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(conflictError)
@@ -1591,11 +1591,10 @@ describe('useCanvasController real snapshot runtime', () => {
 
     const conflictError = new ApiError('Conflict', 409, 'CANVAS_CONFLICT', {
       conflicts: [{
-        kind: 'STALE_NODE',
+        type: 'STALE_NODE',
         nodeId: NODE_NOTE,
-        group: 'CONTENT',
-        expected: 'old',
-        current: 'remote',
+        group: 'RESOURCES',
+        current: result.current.snapshot?.nodes[0] as CanvasResourceNodeDTO,
       }],
     })
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(conflictError)

@@ -39,7 +39,7 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 ## 元数据服务与浏览器入口
 
-[`EnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/EnvironmentIdeService.java) 把 Studio API 的视图请求翻译为 IDE 命令。目录能否访问、文档是否 dirty 由 Daemon 给出标准失败回执，服务端不伪造结果。
+[`EnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/EnvironmentIdeService.java) 把 Studio API 的视图请求翻译为 IDE 命令。目录能否访问、文档是否 dirty 由 Daemon 给出标准失败回执，服务端不伪造结果。打开 `mode`、视图 `state` 与关闭 `discard` 都是类型化契约：`mode` 与 `state` 是枚举，`discard` 是必填布尔值，缺失在 HTTP 边界即被拒绝。
 
 ### 管理 API
 

@@ -127,7 +127,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
           name: alias,
           transform: nextTransform(),
           resources: [{
-            kind: 'BLOB',
+            type: 'BLOB',
             name: file.name,
             blobId,
           }],

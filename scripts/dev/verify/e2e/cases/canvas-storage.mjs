@@ -129,14 +129,14 @@ registerCase({
             nodeId,
             name: 'tiny',
             transform: { x: 0, y: 0, width: 100, height: 100 },
-            resources: [{ kind: 'BLOB', name: 'tiny.png', blobId: upload.blobId }],
+            resources: [{ type: 'BLOB', name: 'tiny.png', blobId: upload.blobId }],
           },
         ],
       },
     )
     const patch = commandJson
     assert(patch.revision === '1', JSON.stringify(patch))
-    const upsert = patch.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
+    const upsert = patch.nodes.find((item) => item.type === 'UPSERT' && item.node.id === nodeId)
     assert(upsert, JSON.stringify(patch.nodes))
     const resource = upsert.node.resources[0]
     assert(
@@ -166,7 +166,7 @@ registerCase({
           type: 'SET_NODE_RESOURCES',
           nodeId,
           expectedResourceIds: [resource.id],
-          resources: [{ kind: 'KEEP', resourceId: resource.id }],
+          resources: [{ type: 'KEEP', resourceId: resource.id }],
         },
       ],
     })
@@ -204,7 +204,7 @@ registerCase({
           nodeId: textNodeId,
           name: 'note',
           transform: { x: 0, y: 0, width: 100, height: 100 },
-          resources: [{ kind: 'TEXT', name: 'body', textContent: 'hello' }],
+          resources: [{ type: 'TEXT', name: 'body', textContent: 'hello' }],
         },
       ],
     })

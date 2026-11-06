@@ -123,13 +123,13 @@ registerCase({
               nodeId: dataNodeId,
               name: 'plain',
               transform: { x: 0, y: 0, width: 100, height: 100 },
-              resources: [{ kind: 'TEXT', name: 'body', textContent: 'plain node' }],
+              resources: [{ type: 'TEXT', name: 'body', textContent: 'plain node' }],
             },
           ],
         })
       ).json
     const functionNode = declared.nodes.find(
-      (item) => item.op === 'UPSERT' && item.node.id === functionNodeId,
+      (item) => item.type === 'UPSERT' && item.node.id === functionNodeId,
     )?.node
     assert(
       functionNode?.function?.name === imageFunction.name

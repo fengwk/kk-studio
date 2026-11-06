@@ -11,6 +11,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type {
   CanvasFunctionRunDTO,
+  CanvasFunctionUnknownResolution,
   CanvasFunctionRunRequestDTO,
   CanvasFunctionVersionDTO,
   CanvasSnapshotDTO,
@@ -306,7 +307,7 @@ export interface FunctionRunActions {
   resolveFunctionRun: (
     nodeId: string,
     requestId: string,
-    resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
+    resolution: CanvasFunctionUnknownResolution,
     verification: string,
   ) => Promise<void>
   discardPendingRun: (nodeId: string, expectedRaw: string) => boolean
@@ -515,7 +516,7 @@ export function useCanvasFunctionRun(options: {
         // 由用户重新确认，绝不自动重提、绝不换 requestId / 换版本。
         if (error instanceof ApiError && error.status === 409) {
           clearPendingFunctionRun(canvasId, nodeId, requestId)
-          void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvasModels })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvasFunctions })
           setToast('本次运行未启动：请求被拒绝（函数目录或运行状态可能已变化）。请刷新函数目录后重新确认运行。')
           return
         }
@@ -565,7 +566,7 @@ export function useCanvasFunctionRun(options: {
   const resolveFunctionRun = useCallback(async (
     nodeId: string,
     requestId: string,
-    resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
+    resolution: CanvasFunctionUnknownResolution,
     verification: string,
   ) => {
     if (!canvasId || !requestId || inFlightNodesRef.current.has(nodeId)) {

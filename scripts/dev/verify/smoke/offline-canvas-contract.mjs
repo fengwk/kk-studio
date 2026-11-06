@@ -40,7 +40,7 @@ export function resourceBatch(nodeId, blobId, idempotencyKey) {
         nodeId,
         name: 'uploaded',
         transform: { x: 0, y: 0, width: 320, height: 260 },
-        resources: [{ kind: 'BLOB', name: 'tiny.png', blobId }],
+        resources: [{ type: 'BLOB', name: 'tiny.png', blobId }],
       },
     ],
   }

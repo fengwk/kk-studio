@@ -227,7 +227,7 @@ export function useCanvasNodeActions({
       nodeId: newId,
       name: draft.text?.name ?? suggestNodeAlias('新节点'),
       transform: nextTransform(),
-      resources: text ? [{ kind: 'TEXT', name: 'text', textContent: text }] : [],
+      resources: text ? [{ type: 'TEXT', name: 'text', textContent: text }] : [],
     }]
     if (draft.function) {
       commands.push({ type: 'SET_NODE_FUNCTION', nodeId: newId, expectedFunction: null, function: draft.function })
@@ -257,7 +257,7 @@ export function useCanvasNodeActions({
         type: 'SET_NODE_RESOURCES',
         nodeId: nodeId,
         expectedResourceIds: remoteNode.resources.map((r) => r.id),
-        resources: [{ kind: 'TEXT', name: 'text', textContent: draft.text.markdown }],
+        resources: [{ type: 'TEXT', name: 'text', textContent: draft.text.markdown }],
       })
       if (draft.text.name && draft.text.name !== remoteNode.name) {
         commands.push({

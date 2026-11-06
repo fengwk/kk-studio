@@ -205,21 +205,21 @@ function markConflicts(
     nextDrafts[nodeId] = { ...existing, conflict }
   }
   for (const conf of conflicts) {
-    if (conf.kind === 'STALE_NODE') {
+    if (conf.type === 'STALE_NODE') {
       withConflict(conf.nodeId, {
         kind: 'STALE_NODE',
         message: `节点在远端已被修改（${conf.group}），请对比后决定。`,
         remoteValue: conf.current,
         conflicts,
       })
-    } else if (conf.kind === 'TARGET_MISSING') {
+    } else if (conf.type === 'TARGET_MISSING') {
       withConflict(conf.targetId, {
         kind: 'TARGET_MISSING',
         type: 'remote_deleted',
         message: '目标在远端已被删除',
         conflicts,
       })
-    } else if (conf.kind === 'NODE_REFERENCED') {
+    } else if (conf.type === 'NODE_REFERENCED') {
       withConflict(conf.nodeId, {
         kind: 'NODE_REFERENCED',
         message: `节点被其他节点引用 (${conf.referencingNodeIds.join(', ')})，请先解除引用`,
