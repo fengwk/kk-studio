@@ -354,8 +354,8 @@ vfs:/
 **Chat**：控制器以 `/api/chats` 提供列表、创建、详情、更新、删除与会话列表，DTO 在模块内，删除按预期版本校验。
 会话归属允许分叉与通用直写，`chat_session` 记录 Chat 与 Session 的关联。
 
-**Project**：领域含可配置工作流与阶段、Issue、Run、Activity、阶段预算与证据，HTTP 面覆盖 `/api/projects`、
-`/api/issues` 与项目下的 Issue 创建。Run 接受只使用通用命令提交 Agent、执行方式与环境，加一条项目模板渲染的任务
+**Project**：领域含可配置工作流与阶段、Issue、Run、Activity、阶段预算与证据，HTTP 面覆盖 `/api/project/projects`、
+`/api/project/issues` 与项目下的 Issue 创建。Run 接受只使用通用命令提交 Agent、执行方式与环境，加一条项目模板渲染的任务
 消息，不写产品专属的 harness 状态；`issue_transition` 是 SELECTABLE 工具，由 Issue Agent 的配置显式声明，工具按
 调用线程查询项目自己的 Run 记录并在业务锁内复核身份、阶段、版本与合法交接边。Issue 对账以 `ISSUE` Work 认领，只
 认本次 Run 冻结的终态收尾。归属实现按 Project 再 Issue 的锁序序列化，证据引用 `vfs:/resources/…`。

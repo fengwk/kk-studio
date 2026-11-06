@@ -5,7 +5,6 @@ import {
   assertExactFields,
   cid,
   expectHttpError,
-  pageResults,
 } from '../lib/http.mjs'
 import { branchSettingsOf, canonicalUuid } from '../lib/harness.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
@@ -53,7 +52,6 @@ const ISSUE_FIELDS = [
   'pauseReason',
   'pauseDetail',
   'version',
-  'archivedAt',
   'createdAt',
   'updatedAt',
 ]
@@ -135,7 +133,7 @@ function assertHumanActivity(activity, { issueId, kind, body }) {
       && activity.actorAgentName === null
       && activity.runId === null
       && activity.body === body
-      && typeof activity.createdAt === 'string',
+      && typeof activity.createdAt === 'number',
     JSON.stringify(activity),
   )
   return activity
@@ -145,7 +143,7 @@ function assertHumanActivity(activity, { issueId, kind, body }) {
 export async function verifyIssueStopResume(ctx, issue) {
   const stopDetail = 'stopped by the operator'
   const stopped = (
-      await ctx.call('POST', `/api/issues/${issue.id}/stop`, {
+      await ctx.call('POST', `/api/project/issues/${issue.id}/stop`, {
         expectedVersion: issue.version,
         requestKey: `e2e-stop-${cid()}`,
         detail: stopDetail,
@@ -160,7 +158,7 @@ export async function verifyIssueStopResume(ctx, issue) {
   // WORK → DONE 在工作流中合法，拒绝说明暂停门禁生效，而不是目标状态本身非法。
   await expectHttpError(
     () =>
-      ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+      ctx.call('POST', `/api/project/issues/${issue.id}/transition`, {
         expectedVersion: stopped.version,
         requestKey: `e2e-transition-paused-${cid()}`,
         toState: 'DONE',
@@ -168,7 +166,7 @@ export async function verifyIssueStopResume(ctx, issue) {
     { status: 400 },
   )
   const resumed = (
-      await ctx.call('POST', `/api/issues/${issue.id}/resume`, {
+      await ctx.call('POST', `/api/project/issues/${issue.id}/resume`, {
         expectedVersion: stopped.version,
         requestKey: `e2e-resume-after-stop-${cid()}`,
       })
@@ -182,12 +180,12 @@ registerCase({
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、空闲 STOP 产生 USER 暂停门禁并阻止流转，显式 resume 解除；无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）',
+    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、空闲 STOP 产生 USER 暂停门禁并阻止流转，显式 resume 解除；无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部 Issue 的当前状态与阻塞恢复目标）；Project 归档保留并可列出',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
     try {
-      const createdProject = await ctx.call('POST', '/api/projects', {
+      const createdProject = await ctx.call('POST', '/api/project/projects', {
         title: `E2E Project ${suffix}`,
         description: 'Project workflow lifecycle',
       })
@@ -206,11 +204,11 @@ registerCase({
       assertWorkflow(project.workflow, DEFAULT_WORKFLOW_STATES)
       // UUID 与版本不得归一后进入业务服务。
       await expectHttpError(
-        () => ctx.call('GET', '/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'),
+        () => ctx.call('GET', '/api/project/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'),
         { status: 400 },
       )
       await expectHttpError(
-        () => ctx.call('PUT', `/api/projects/${project.id}`, {
+        () => ctx.call('PUT', `/api/project/projects/${project.id}`, {
           expectedVersion: ` ${project.version}`,
           title: project.title,
           description: project.description,
@@ -229,7 +227,7 @@ registerCase({
         JSON.stringify(project.workflow.states),
       )
 
-      const listed = pageResults((await ctx.call('GET', '/api/projects')).json)
+      const listed = (await ctx.call('GET', '/api/project/projects')).json
       assert(listed.some((candidate) => candidate.id === project.id), 'created Project not listed')
 
       // 公共 batch 端点只服务直接持有 Session 的 Chat owner：Project 不是 owner 形态，
@@ -277,20 +275,20 @@ registerCase({
 
       await expectHttpError(
         () =>
-          ctx.call('PUT', `/api/projects/${project.id}`, {
+          ctx.call('PUT', `/api/project/projects/${project.id}`, {
             expectedVersion: '9',
             title: 'stale update',
           }),
         { status: 409 },
       )
-      const unchanged = (await ctx.call('GET', `/api/projects/${project.id}`)).json
+      const unchanged = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
       assert(
         unchanged.title === project.title && unchanged.version === '0' && unchanged.yoloEnabled === true,
         JSON.stringify(unchanged),
       )
 
       project = (
-          await ctx.call('PUT', `/api/projects/${project.id}`, {
+          await ctx.call('PUT', `/api/project/projects/${project.id}`, {
             expectedVersion: project.version,
             title: `E2E Project Updated ${suffix}`,
             description: 'Updated through the public REST contract',
@@ -300,7 +298,7 @@ registerCase({
 
       // YOLO 启动策略是独立 CAS 面：配置更新不触碰它，它也不触碰配置版本以外的字段。
       project = (
-          await ctx.call('PUT', `/api/projects/${project.id}/yolo`, {
+          await ctx.call('PUT', `/api/project/projects/${project.id}/yolo`, {
             expectedVersion: project.version,
             yoloEnabled: false,
           })
@@ -319,7 +317,7 @@ registerCase({
         ['DONE', '完成', []],
       ]
       project = (
-          await ctx.call('PUT', `/api/projects/${project.id}/workflow`, {
+          await ctx.call('PUT', `/api/project/projects/${project.id}/workflow`, {
             expectedVersion: project.version,
             workflow: {
               states: renamedStages.map(([state, name, next]) =>
@@ -355,14 +353,14 @@ registerCase({
       ]) {
         await expectHttpError(
           () =>
-            ctx.call('PUT', `/api/projects/${project.id}/workflow`, {
+            ctx.call('PUT', `/api/project/projects/${project.id}/workflow`, {
               expectedVersion: project.version,
               workflow: { states },
             }),
           { status: 400 },
         )
       }
-      const workflowUnchanged = (await ctx.call('GET', `/api/projects/${project.id}`)).json
+      const workflowUnchanged = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
       assertWorkflow(workflowUnchanged.workflow, renamedStages)
       assert(workflowUnchanged.version === '3', JSON.stringify(workflowUnchanged))
 
@@ -384,13 +382,12 @@ registerCase({
           && issue.blockReason === null
           && issue.pauseReason === null
           && issue.pauseDetail === null
-          && issue.archivedAt === null
           && secondaryIssue.number === '1',
         JSON.stringify({ issue, secondaryIssue }),
       )
 
       // 编号由 Project 单调分配且不改 Project CAS 版本。
-      const numbered = (await ctx.call('GET', `/api/projects/${project.id}`)).json
+      const numbered = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
       assert(
         numbered.nextIssueNumber === '3' && numbered.version === '3',
         JSON.stringify(numbered),
@@ -412,7 +409,7 @@ registerCase({
       )
 
       current = (
-          await ctx.call('PUT', `/api/issues/${issue.id}`, {
+          await ctx.call('PUT', `/api/project/issues/${issue.id}`, {
             expectedVersion: current.version,
             title: 'Primary task updated',
             description: 'Updated requirement',
@@ -428,7 +425,7 @@ registerCase({
         kind: 'COMMENT',
         body: 'Please preserve the public contract.',
       }
-      const appendedComment = await ctx.call('POST', `/api/issues/${issue.id}/activities`, commentRequest)
+      const appendedComment = await ctx.call('POST', `/api/project/issues/${issue.id}/activities`, commentRequest)
       assert(appendedComment.status === 201, `append comment status ${appendedComment.status}`)
       const comment = assertHumanActivity(appendedComment.json, {
         issueId: issue.id,
@@ -436,20 +433,20 @@ registerCase({
         body: commentRequest.body,
       })
       assert(comment.sequence === '1', JSON.stringify(comment))
-      current = (await ctx.call('GET', `/api/issues/${issue.id}`)).json.issue
+      current = (await ctx.call('GET', `/api/project/issues/${issue.id}`)).json.issue
       assert(
         current.version === String(BigInt(commentRequest.expectedVersion) + 1n),
         JSON.stringify(current),
       )
 
-      const replayedComment = (await ctx.call('POST', `/api/issues/${issue.id}/activities`, commentRequest)).json
+      const replayedComment = (await ctx.call('POST', `/api/project/issues/${issue.id}/activities`, commentRequest)).json
       assert(replayedComment.sequence === comment.sequence, JSON.stringify(replayedComment))
-      const afterReplay = (await ctx.call('GET', `/api/issues/${issue.id}`)).json.issue
+      const afterReplay = (await ctx.call('GET', `/api/project/issues/${issue.id}`)).json.issue
       assert(afterReplay.version === current.version, JSON.stringify(afterReplay))
       const afterComment = (
           await ctx.call(
             'GET',
-            `/api/issues/${issue.id}?afterSequence=${encodeURIComponent(comment.sequence)}&limit=50`,
+            `/api/project/issues/${issue.id}?afterSequence=${encodeURIComponent(comment.sequence)}&limit=50`,
           )
         ).json
       assert(
@@ -460,7 +457,7 @@ registerCase({
       // 定向指示必须投递给明确的当前 Run：没有活动 Run 时明确拒绝，绝不构造未来阶段队列。
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/activities`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/activities`, {
             expectedVersion: current.version,
             requestKey: `e2e-instruction-${cid()}`,
             kind: 'INSTRUCTION',
@@ -471,7 +468,7 @@ registerCase({
       // 形状非法与空白正文在触达领域前被拒绝。
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/activities`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/activities`, {
             requestKey: `e2e-missing-version-${cid()}`,
             kind: 'COMMENT',
             body: 'missing expectedVersion',
@@ -480,7 +477,7 @@ registerCase({
       )
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/activities`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/activities`, {
             expectedVersion: current.version,
             requestKey: `e2e-blank-body-${cid()}`,
             kind: 'COMMENT',
@@ -491,7 +488,7 @@ registerCase({
 
       // 正常边：INIT → WORK → DONE，每一步是显式转移并记录 STATE_CHANGE 事实。
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/transition`, {
             expectedVersion: current.version,
             requestKey: `e2e-transition-work-${cid()}`,
             toState: 'WORK',
@@ -503,7 +500,7 @@ registerCase({
       for (const toState of ['NOPE', 'BLOCKED', 'INIT', 'DONE_EXTRA']) {
         await expectHttpError(
           () =>
-            ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+            ctx.call('POST', `/api/project/issues/${issue.id}/transition`, {
               expectedVersion: current.version,
               requestKey: `e2e-transition-invalid-${toState}-${cid()}`,
               toState,
@@ -518,7 +515,7 @@ registerCase({
       )
 
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/transition`, {
             expectedVersion: current.version,
             requestKey: `e2e-transition-done-${cid()}`,
             toState: 'DONE',
@@ -529,7 +526,7 @@ registerCase({
       // DONE 不能被阻塞，只能由显式 reopen 回到 INIT。
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/block`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/block`, {
             expectedVersion: current.version,
             requestKey: `e2e-block-done-${cid()}`,
             reason: 'cannot block a done issue',
@@ -537,7 +534,7 @@ registerCase({
         { status: 400 },
       )
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/reopen`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/reopen`, {
             expectedVersion: current.version,
             requestKey: `e2e-reopen-${cid()}`,
           })
@@ -545,7 +542,7 @@ registerCase({
       assert(current.state === 'INIT' && current.version === '5', JSON.stringify(current))
 
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/transition`, {
             expectedVersion: current.version,
             requestKey: `e2e-transition-work-2-${cid()}`,
             toState: 'WORK',
@@ -556,7 +553,7 @@ registerCase({
       // 业务阻塞：记录原阶段与原因，已在 BLOCKED 时再次阻塞被拒绝。
       const blockReason = 'Waiting for the business decision on scope'
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/block`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/block`, {
             expectedVersion: current.version,
             requestKey: `e2e-block-${cid()}`,
             reason: blockReason,
@@ -570,7 +567,7 @@ registerCase({
         JSON.stringify(current),
       )
       // 阻塞期间快照 refs：全部 Issue 的当前状态与阻塞恢复目标去重自然排序（primary BLOCKED from WORK + secondary INIT）。
-      const blockedSnapshot = (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json
+      const blockedSnapshot = (await ctx.call('GET', `/api/project/projects/${project.id}/snapshot`)).json
       assertExactFields(blockedSnapshot, SNAPSHOT_FIELDS, 'blocked project snapshot')
       assert(
         JSON.stringify(blockedSnapshot.referencedStateCodes)
@@ -579,7 +576,7 @@ registerCase({
       )
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/block`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/block`, {
             expectedVersion: current.version,
             requestKey: `e2e-block-again-${cid()}`,
             reason: 'double block',
@@ -588,14 +585,14 @@ registerCase({
       )
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/recover`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/recover`, {
             expectedVersion: String(BigInt(current.version) - 1n),
             requestKey: `e2e-recover-stale-${cid()}`,
           }),
         { status: 409 },
       )
       current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/recover`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/recover`, {
             expectedVersion: current.version,
             requestKey: `e2e-recover-${cid()}`,
           })
@@ -606,7 +603,7 @@ registerCase({
       )
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/recover`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/recover`, {
             expectedVersion: current.version,
             requestKey: `e2e-recover-unblocked-${cid()}`,
           }),
@@ -660,13 +657,13 @@ registerCase({
         stopFact?.actorType === 'HUMAN' && stopFact.data?.reason === 'USER',
         JSON.stringify(stopFact),
       )
-      await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?limit=0`), { status: 400 })
-      await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?afterSequence=-1`), {
+      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}?limit=0`), { status: 400 })
+      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}?afterSequence=-1`), {
         status: 400,
       })
 
       // Snapshot 聚合 Project 与每个 Issue 的当前/最近 Run。
-      const snapshot = (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json
+      const snapshot = (await ctx.call('GET', `/api/project/projects/${project.id}/snapshot`)).json
       assertExactFields(snapshot, SNAPSHOT_FIELDS, 'project snapshot')
       const snapshotIssue = snapshot.issues.find((candidate) => candidate.issue.id === issue.id)
       assertExactFields(snapshotIssue, SNAPSHOT_ISSUE_FIELDS, 'project snapshot issue')
@@ -684,35 +681,10 @@ registerCase({
         JSON.stringify(snapshot.referencedStateCodes),
       )
 
-      // 归档保留历史与状态引用，快照只展示未归档 Issue。
-      current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/archive`, {
-            expectedVersion: current.version,
-          })
-        ).json
-      assert(current.archivedAt != null, JSON.stringify(current))
-      // 归档不是删除：归档 Issue 仍贡献状态引用，快照不得丢失 WORK。
-      const archivedSnapshot = (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json
-      assertExactFields(archivedSnapshot, SNAPSHOT_FIELDS, 'archived project snapshot')
-      assert(
-        archivedSnapshot.issues.length === 1
-          && archivedSnapshot.issues[0].issue.id === secondaryIssue.id,
-        JSON.stringify(archivedSnapshot.issues),
-      )
-      assert(
-        JSON.stringify(archivedSnapshot.referencedStateCodes) === JSON.stringify(['INIT', 'WORK']),
-        JSON.stringify(archivedSnapshot.referencedStateCodes),
-      )
-      current = (
-          await ctx.call('POST', `/api/issues/${issue.id}/unarchive`, {
-            expectedVersion: current.version,
-          })
-        ).json
-      assert(current.archivedAt === null, JSON.stringify(current))
-
-      await ctx.call('DELETE', `/api/issues/${issue.id}?expectedVersion=${current.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}`), { status: 404 })
-      const remaining = (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json
+      // Issue 没有归档状态：删除是唯一移除方式，快照只展示现存 Issue。
+      await ctx.call('DELETE', `/api/project/issues/${issue.id}?expectedVersion=${current.version}`)
+      await expectHttpError(() => ctx.call('GET', `/api/project/issues/${issue.id}`), { status: 404 })
+      const remaining = (await ctx.call('GET', `/api/project/projects/${project.id}/snapshot`)).json
       assertExactFields(remaining, SNAPSHOT_FIELDS, 'remaining project snapshot')
       assert(
         remaining.issues.length === 1 && remaining.issues[0].issue.id === secondaryIssue.id,
@@ -725,40 +697,40 @@ registerCase({
       )
 
       project = (
-          await ctx.call('POST', `/api/projects/${project.id}/archive`, {
+          await ctx.call('POST', `/api/project/projects/${project.id}/archive`, {
             expectedVersion: project.version,
           })
         ).json
       assert(project.archivedAt != null, JSON.stringify(project))
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/projects/${project.id}/issues`, {
+          ctx.call('POST', `/api/project/projects/${project.id}/issues`, {
             title: 'cannot be created',
             description: 'archived project rejects new issues',
           }),
         { status: 400 },
       )
-      const activeProjects = pageResults((await ctx.call('GET', '/api/projects')).json)
+      const activeProjects = (await ctx.call('GET', '/api/project/projects')).json
       assert(
         !activeProjects.some((candidate) => candidate.id === project.id),
         'archived Project must not appear in the default list',
       )
-      const archivedProjects = pageResults(
-        (await ctx.call('GET', '/api/projects?includeArchived=true')).json,
-      )
+      const archivedProjects = (
+        await ctx.call('GET', '/api/project/projects?includeArchived=true')
+      ).json
       assert(
         archivedProjects.some((candidate) => candidate.id === project.id),
         'archived Project must appear with includeArchived=true',
       )
       project = (
-          await ctx.call('POST', `/api/projects/${project.id}/unarchive`, {
+          await ctx.call('POST', `/api/project/projects/${project.id}/unarchive`, {
             expectedVersion: project.version,
           })
         ).json
       assert(project.archivedAt === null, JSON.stringify(project))
 
-      await ctx.call('DELETE', `/api/projects/${project.id}?expectedVersion=${project.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/projects/${project.id}`), { status: 404 })
+      await ctx.call('DELETE', `/api/project/projects/${project.id}?expectedVersion=${project.version}`)
+      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
       project = null
     } finally {
       if (project?.id) {
@@ -769,7 +741,7 @@ registerCase({
 })
 
 async function createIssue(ctx, projectId, { title, description }) {
-  const created = await ctx.call('POST', `/api/projects/${projectId}/issues`, {
+  const created = await ctx.call('POST', `/api/project/projects/${projectId}/issues`, {
     title,
     description,
   })
@@ -783,7 +755,7 @@ async function createIssue(ctx, projectId, { title, description }) {
 }
 
 async function readIssueDetail(ctx, issueId) {
-  return (await ctx.call('GET', `/api/issues/${issueId}`)).json
+  return (await ctx.call('GET', `/api/project/issues/${issueId}`)).json
 }
 
 /**
@@ -801,7 +773,7 @@ async function readActivityPages(ctx, issueId, pageSize = 2) {
     const window = (
         await ctx.call(
           'GET',
-          `/api/issues/${issueId}?afterSequence=${encodeURIComponent(cursor)}&limit=${pageSize}`,
+          `/api/project/issues/${issueId}?afterSequence=${encodeURIComponent(cursor)}&limit=${pageSize}`,
         )
       ).json
     assertExactFields(window, ISSUE_DETAIL_FIELDS, 'issue detail window')
@@ -830,7 +802,7 @@ async function readActivityPages(ctx, issueId, pageSize = 2) {
     pages += 1
   }
 
-  const flat = (await ctx.call('GET', `/api/issues/${issueId}?limit=200`)).json
+  const flat = (await ctx.call('GET', `/api/project/issues/${issueId}?limit=200`)).json
   assert(Array.isArray(flat.activities), JSON.stringify(flat))
   assert(
     flat.activities.map((activity) => activity.sequence).join(',')
@@ -842,10 +814,10 @@ async function readActivityPages(ctx, issueId, pageSize = 2) {
 
 async function deleteProjectIfPresent(ctx, projectId) {
   try {
-    const project = (await ctx.call('GET', `/api/projects/${projectId}`)).json
+    const project = (await ctx.call('GET', `/api/project/projects/${projectId}`)).json
     await ctx.call(
       'DELETE',
-      `/api/projects/${projectId}?expectedVersion=${encodeURIComponent(project.version)}`,
+      `/api/project/projects/${projectId}?expectedVersion=${encodeURIComponent(project.version)}`,
     )
   } catch (error) {
     if (!(error instanceof HttpError && error.status === 404)) {
@@ -859,14 +831,14 @@ registerCase({
   level: 'L1',
   title: 'Issue 阶段额度：仅启用 Agent 阶段可授权与重置',
   docs:
-    '免费 L1：阶段额度只属于 workflow 中「启用且有 Agent」的工作阶段，人工阶段与保留状态（INIT/BLOCKED/DONE）明确拒绝（400）、maxRuns 必须 > 0、CAS 过期 409；首次 budget-reset 即授权（高水位 0）并写入 CONTROL 事实，同 requestKey 精确重放返回同一额度；Issue 详情的 stageBudgets 只列出已授权阶段且携带 state/maxRuns/budgetAfterOrdinal/usedRuns/remainingRuns；提高 maxRuns 的重新授权不回退高水位',
+    '免费 L1：阶段额度只属于 workflow 中「启用且有 Agent」的工作阶段，人工阶段与保留状态（INIT/BLOCKED/DONE）明确拒绝（400）、maxRuns 必须 > 0、CAS 过期 409；首次 reset-budget 即授权（高水位 0）并写入 CONTROL 事实，同 requestKey 精确重放返回同一额度；Issue 详情的 stageBudgets 只列出已授权阶段且携带 state/maxRuns/budgetAfterOrdinal/usedRuns/remainingRuns；提高 maxRuns 的重新授权不回退高水位',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const agentName = `e2e-agent-budget-${suffix}`
     let project = null
     try {
       project = (
-          await ctx.call('POST', '/api/projects', {
+          await ctx.call('POST', '/api/project/projects', {
             title: `E2E Budget Project ${suffix}`,
             description: 'Stage budget contract',
           })
@@ -880,7 +852,7 @@ registerCase({
         ['DONE', '完成', []],
       ]
       project = (
-          await ctx.call('PUT', `/api/projects/${project.id}/workflow`, {
+          await ctx.call('PUT', `/api/project/projects/${project.id}/workflow`, {
             expectedVersion: project.version,
             workflow: {
               states: stages.map(([state, name, next]) =>
@@ -919,7 +891,7 @@ registerCase({
       ]) {
         await expectHttpError(
           () =>
-            ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, {
+            ctx.call('POST', `/api/project/issues/${issue.id}/reset-budget`, {
               expectedVersion: current.version,
               requestKey: `e2e-budget-invalid-${state}-${maxRuns}-${cid()}`,
               state,
@@ -937,7 +909,7 @@ registerCase({
         state: 'BUILD',
         maxRuns: 3,
       }
-      const authorized = (await ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, resetRequest)).json
+      const authorized = (await ctx.call('POST', `/api/project/issues/${issue.id}/reset-budget`, resetRequest)).json
       assertExactFields(
         authorized,
         ['state', 'maxRuns', 'budgetAfterOrdinal', 'usedRuns', 'remainingRuns'],
@@ -951,7 +923,7 @@ registerCase({
           && authorized.remainingRuns === '3',
         JSON.stringify(authorized),
       )
-      const replayed = (await ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, resetRequest)).json
+      const replayed = (await ctx.call('POST', `/api/project/issues/${issue.id}/reset-budget`, resetRequest)).json
       assert(JSON.stringify(replayed) === JSON.stringify(authorized), JSON.stringify(replayed))
       const afterReplay = await readIssueDetail(ctx, issue.id)
       assert(
@@ -964,7 +936,7 @@ registerCase({
       // 新 requestKey 必须仍用重置前的版本验证真正的 CAS 过期，而非误用 +1 的当前版本。
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, {
+          ctx.call('POST', `/api/project/issues/${issue.id}/reset-budget`, {
             expectedVersion: resetRequest.expectedVersion,
             requestKey: `e2e-budget-stale-${cid()}`,
             state: 'BUILD',
@@ -973,7 +945,7 @@ registerCase({
         { status: 409 },
       )
 
-      current = (await ctx.call('GET', `/api/issues/${issue.id}`)).json.issue
+      current = (await ctx.call('GET', `/api/project/issues/${issue.id}`)).json.issue
       assert(current.version === afterReplay.issue.version, JSON.stringify(current))
       const withBudget = await readIssueDetail(ctx, issue.id)
       assert(
@@ -985,7 +957,7 @@ registerCase({
 
       // 提高额度：高水位取服务端当前 nextRunOrdinal - 1，绝不回退重新授权历史 Run。
       const raised = (
-          await ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, {
+          await ctx.call('POST', `/api/project/issues/${issue.id}/reset-budget`, {
             expectedVersion: current.version,
             requestKey: `e2e-budget-raised-${cid()}`,
             state: 'BUILD',
@@ -1019,9 +991,9 @@ registerCase({
         JSON.stringify(budgetFacts.map((activity) => activity.data)),
       )
 
-      await ctx.call('DELETE', `/api/issues/${issue.id}?expectedVersion=${current.version}`)
-      await ctx.call('DELETE', `/api/projects/${project.id}?expectedVersion=${project.version}`)
-      await expectHttpError(() => ctx.call('GET', `/api/projects/${project.id}`), { status: 404 })
+      await ctx.call('DELETE', `/api/project/issues/${issue.id}?expectedVersion=${current.version}`)
+      await ctx.call('DELETE', `/api/project/projects/${project.id}?expectedVersion=${project.version}`)
+      await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
       project = null
     } finally {
       if (project?.id) {

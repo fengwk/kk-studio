@@ -68,7 +68,7 @@ registerCase({
       assertGlobalSubscriptionAck(projectsAck, 'projects')
 
       project = (
-          await ctx.call('POST', '/api/projects', {
+          await ctx.call('POST', '/api/project/projects', {
             title: `Event Project ${cid().slice(0, 8)}`,
             description: 'Database notification E2E',
           })
@@ -94,10 +94,10 @@ registerCase({
       socket.removeEventListener('message', collect)
       socket.close(1000, 'E2E complete')
       if (project?.id) {
-        const current = (await ctx.call('GET', `/api/projects/${project.id}`)).json
+        const current = (await ctx.call('GET', `/api/project/projects/${project.id}`)).json
         await ctx.call(
           'DELETE',
-          `/api/projects/${project.id}?expectedVersion=${encodeURIComponent(current.version)}`,
+          `/api/project/projects/${project.id}?expectedVersion=${encodeURIComponent(current.version)}`,
         )
       }
     }

@@ -19,18 +19,18 @@ function issueFixture({ allowTransition = false } = {}) {
     assert.equal(method, 'POST')
     assert.equal(body.expectedVersion, issue.version)
     assert.ok(body.requestKey)
-    if (path === `/api/issues/${issue.id}/stop`) {
+    if (path === `/api/project/issues/${issue.id}/stop`) {
       issue = {
         ...issue,
         version: String(BigInt(issue.version) + 1n),
         pauseReason: 'USER',
         pauseDetail: body.detail,
       }
-    } else if (path === `/api/issues/${issue.id}/transition`) {
+    } else if (path === `/api/project/issues/${issue.id}/transition`) {
       assert.equal(body.toState, 'DONE')
       if (issue.pauseReason && !allowTransition) throw problemError(400, 'validation', 'paused', path)
       return { status: 200, json: issue }
-    } else if (path === `/api/issues/${issue.id}/resume`) {
+    } else if (path === `/api/project/issues/${issue.id}/resume`) {
       issue = {
         ...issue,
         version: String(BigInt(issue.version) + 1n),
