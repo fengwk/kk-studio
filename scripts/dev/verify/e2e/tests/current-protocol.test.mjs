@@ -51,7 +51,7 @@ const ids = [
   'fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview', 'process.exec', 'fs.grep', 'fs.find',
   'lsp.goto-definition', 'lsp.workspace-symbols', 'lsp.java-decompile',
 ]
-const card = {
+const environment = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,
   userName: 'test', homeDirectory: '/home/test', statusExpiresAt: '2099-01-01T00:00:00Z',
   version: '0', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
@@ -63,11 +63,11 @@ test('daemon.ready accepts valid capability catalog including internal preview a
     daemonEnv: 'fixture', vars: {},
     call: async () => ({ json: [environment] }),
   })
-  await run(card)
+  await run(environment)
   await assert.rejects(run({
-    ...card, capabilities: ids.filter((id) => id !== 'fs.read').map((id) => ({ id })),
+    ...environment, capabilities: ids.filter((id) => id !== 'fs.read').map((id) => ({ id })),
   }))
-  await assert.rejects(run({ ...card, unexpected: true }), /environment card fields/)
+  await assert.rejects(run({ ...environment, unexpected: true }), /environment fields/)
 })
 
 test('tool.read_turn executes the daemon.ready prerequisite', async () => {
@@ -101,7 +101,7 @@ test('distributed lease projection requires complete capability catalog across b
   const run = (caps) => getCase('distributed.lease_routing').run({
     baseUrls: { a: 'http://127.0.0.1:1', b: 'http://127.0.0.1:2' },
     callNode: async (_node, _method, path) => ({
-      json: { ...card, id: path.split('/').at(-1), capabilities: caps },
+      json: { ...environment, id: path.split('/').at(-1), capabilities: caps },
     }),
     writeArtifact() {},
   })
