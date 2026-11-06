@@ -181,7 +181,7 @@ class StudioHarnessProviderRequestPreviewControllerTest extends ProviderRequestP
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(unknownFieldShape))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown thread command batch field: extra"));
+        .andExpect(jsonPath("$.detail").value("unknown thread command batch field: extra"));
 
     verify(previewService, never()).preview(any(UUID.class), any());
   }

@@ -87,16 +87,15 @@ abstract class ProviderRequestPreviewContractTest {
     String response =
         performPreview()
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.kind").value("DRAFT_REQUEST_PREVIEW"))
-            .andExpect(jsonPath("$.data.providerType").value("OPENAI"))
-            .andExpect(jsonPath("$.data.modelName").value("acceptance-stub"))
-            .andExpect(jsonPath("$.data.bodyByteSize").value(dto.getBodyByteSize()))
-            .andExpect(jsonPath("$.data.bodyJson").value(body))
-            .andExpect(jsonPath("$.data.sourceHeadEntryId").value(sourceHeadEntryId()))
-            .andExpect(jsonPath("$.data.generatedAt").value("2026-01-01T00:00:00Z"))
-            .andExpect(
-                jsonPath("$.data.notice").value(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE))
-            .andExpect(jsonPath("$.data.snapshotNotice").doesNotExist())
+            .andExpect(jsonPath("$.kind").value("DRAFT_REQUEST_PREVIEW"))
+            .andExpect(jsonPath("$.providerType").value("OPENAI"))
+            .andExpect(jsonPath("$.modelName").value("acceptance-stub"))
+            .andExpect(jsonPath("$.bodyByteSize").value(dto.getBodyByteSize()))
+            .andExpect(jsonPath("$.bodyJson").value(body))
+            .andExpect(jsonPath("$.sourceHeadEntryId").value(sourceHeadEntryId()))
+            .andExpect(jsonPath("$.generatedAt").value("2026-01-01T00:00:00Z"))
+            .andExpect(jsonPath("$.notice").value(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE))
+            .andExpect(jsonPath("$.snapshotNotice").doesNotExist())
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -117,9 +116,10 @@ abstract class ProviderRequestPreviewContractTest {
     String response =
         performPreview()
             .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.errors.reason").value(reason.name()))
-            .andExpect(jsonPath("$.errors.detail").value("safe preview detail"))
-            .andExpect(jsonPath("$.errors.cause").doesNotExist())
+            .andExpect(jsonPath("$.code").value("conflict"))
+            .andExpect(jsonPath("$.reason").value(reason.name()))
+            .andExpect(jsonPath("$.detail").value("safe preview detail"))
+            .andExpect(jsonPath("$.cause").doesNotExist())
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -133,7 +133,7 @@ abstract class ProviderRequestPreviewContractTest {
 
     performPreview()
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.errors.detail").value("target not found"));
+        .andExpect(jsonPath("$.detail").value("target not found"));
   }
 
   /** 服务自身的请求边界拒绝经统一翻译为 400，并保留安全 detail。 */
@@ -143,7 +143,7 @@ abstract class ProviderRequestPreviewContractTest {
 
     performPreview()
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("preview shape is not acceptable"));
+        .andExpect(jsonPath("$.detail").value("preview shape is not acceptable"));
   }
 
   /** 两个入口共用同一命令映射：SET_EXECUTION 前缀 + 一条 USER_MESSAGE，且携带 canonical hash 与客户端幂等键。 */

@@ -160,11 +160,10 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest
                     + OUTPUT_ENTRY_ID
                     + "/provider-request-preview"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.kind").value("HISTORICAL_REQUEST_PREVIEW"))
-        .andExpect(
-            jsonPath("$.data.notice").value(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE))
-        .andExpect(jsonPath("$.data.sourceHeadEntryId").value(START_ENTRY_ID))
-        .andExpect(jsonPath("$.data.bodyJson").value(body));
+        .andExpect(jsonPath("$.kind").value("HISTORICAL_REQUEST_PREVIEW"))
+        .andExpect(jsonPath("$.notice").value(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE))
+        .andExpect(jsonPath("$.sourceHeadEntryId").value(START_ENTRY_ID))
+        .andExpect(jsonPath("$.bodyJson").value(body));
 
     verify(previewService)
         .previewHistorical(eq(UUID.fromString(SESSION_ID)), eq(UUID.fromString(OUTPUT_ENTRY_ID)));
@@ -193,7 +192,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest
                     """
                         .formatted(START_ENTRY_ID, draftCommands())))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown draft preview field: threadName"));
+        .andExpect(jsonPath("$.detail").value("unknown draft preview field: threadName"));
     // 命令顺序与终止输入必须与正式接受一致：SET_* 前缀 + 恰好一条末尾 USER_MESSAGE。
     mockMvc
         .perform(
@@ -231,7 +230,8 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest
                         + OUTPUT_ENTRY_ID
                         + "/provider-request-preview"))
             .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.errors.reason").value("PREVIEW_UNSUPPORTED"))
+            .andExpect(jsonPath("$.code").value("conflict"))
+            .andExpect(jsonPath("$.reason").value("PREVIEW_UNSUPPORTED"))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -255,7 +255,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest
                     + "/provider-request-preview"))
         .andExpect(status().isBadRequest())
         .andExpect(
-            jsonPath("$.errors.detail")
+            jsonPath("$.detail")
                 .value("start entry does not belong to the session: " + OUTPUT_ENTRY_ID));
   }
 
