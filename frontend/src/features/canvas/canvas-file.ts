@@ -1,4 +1,4 @@
-import type { CanvasResourceKind } from '@/shared/api/contracts/studio'
+import type { CanvasResourceKind } from '@/shared/api/generated/contracts'
 
 export interface CanvasFileDescriptor {
   kind: Exclude<CanvasResourceKind, 'TEXT'>

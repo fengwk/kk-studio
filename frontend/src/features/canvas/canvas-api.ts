@@ -22,15 +22,15 @@ export interface CanvasRequestOptions {
 }
 
 export function listCanvases(options?: CanvasRequestOptions): Promise<CanvasDocumentDTO[]> {
-  return request('GET /api/canvases', {}, { signal: options?.signal })
+  return request('GET /api/canvas/canvases', {}, { signal: options?.signal })
 }
 
 export function createCanvas(
-  title?: string,
+  title: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasDocumentDTO> {
-  const body: CreateCanvasRequestDTO = title === undefined ? {} : { title }
-  return request('POST /api/canvases', { body }, { signal: options?.signal })
+  const body: CreateCanvasRequestDTO = { title }
+  return request('POST /api/canvas/canvases', { body }, { signal: options?.signal })
 }
 
 export function getCanvas(
@@ -38,7 +38,7 @@ export function getCanvas(
   options?: CanvasRequestOptions,
 ): Promise<CanvasSnapshotDTO> {
   return request(
-    'GET /api/canvases/{canvasId}',
+    'GET /api/canvas/canvases/{canvasId}',
     { path: { canvasId } },
     { signal: options?.signal },
   )
@@ -54,7 +54,7 @@ export function postCanvasCommands(
   options?: CanvasRequestOptions,
 ): Promise<CanvasPatchDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/commands',
+    'POST /api/canvas/canvases/{canvasId}/commands',
     { path: { canvasId }, body },
     { signal: options?.signal },
   )
@@ -63,7 +63,7 @@ export function postCanvasCommands(
 export function listCanvasFunctions(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionDefinitionDTO[]> {
-  return request('GET /api/canvas-functions', {}, { signal: options?.signal })
+  return request('GET /api/canvas/functions', {}, { signal: options?.signal })
 }
 
 export function getCanvasResourceOriginalUrl(
@@ -72,7 +72,7 @@ export function getCanvasResourceOriginalUrl(
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/resources/{resourceId}/download-url',
+    'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url',
     { path: { canvasId, resourceId } },
     { signal: options?.signal },
   )
@@ -84,7 +84,7 @@ export function getCanvasResourcePreviewUrl(
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/resources/{resourceId}/preview-url',
+    'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/preview-url',
     { path: { canvasId, resourceId } },
     { signal: options?.signal },
   )
@@ -97,7 +97,7 @@ export function startCanvasFunctionRun(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run',
+    'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run',
     { path: { canvasId, nodeId }, body },
     { signal: options?.signal },
   )
@@ -109,7 +109,7 @@ export function getCanvasFunctionRun(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return request(
-    'GET /api/canvases/{canvasId}/nodes/{nodeId}/function-run',
+    'GET /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run',
     { path: { canvasId, nodeId } },
     { signal: options?.signal },
   )
@@ -122,7 +122,7 @@ export function cancelCanvasFunctionRun(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel',
+    'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel',
     { path: { canvasId, nodeId }, body },
     { signal: options?.signal },
   )
@@ -135,7 +135,7 @@ export function resolveCanvasFunctionRun(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return request(
-    'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve',
+    'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve',
     { path: { canvasId, nodeId }, body },
     { signal: options?.signal },
   )

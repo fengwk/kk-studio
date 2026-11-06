@@ -32,8 +32,8 @@ const documentFixture: CanvasDocumentDTO = {
   id: CANVAS_ID,
   title: 'Research board',
   revision: '3',
-  createdAt: '2026-08-10T00:00:00Z',
-  updatedAt: '2026-08-10T00:00:00Z',
+  createdAt: 1786291200000,
+  updatedAt: 1786291200000,
 }
 
 const snapshotFixture: CanvasSnapshotDTO = {

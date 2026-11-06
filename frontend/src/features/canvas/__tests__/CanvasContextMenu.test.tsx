@@ -52,7 +52,7 @@ function resource(overrides: Partial<Resource> = {}): Resource {
     width: null,
     height: null,
     durationMs: null,
-    createdAt: '2026-08-10T00:00:00Z',
+    createdAt: 1786291200000,
     ...overrides,
   }
 }
@@ -257,7 +257,7 @@ describe('CanvasContextMenu resource target', () => {
           status: 'RUNNING',
           stage: 'RUNNING',
           error: null,
-          updatedAt: '2026-08-10T00:00:00Z',
+          updatedAt: 1786291200000,
         },
       }),
       model,
@@ -279,9 +279,7 @@ describe('CanvasContextMenu resource target', () => {
         id: 'eeeeeeee-0000-4000-8000-0000000000cc',
         kind: 'TEXT',
         name: 'note.md',
-        blobId: null,
         textContent: 'hello',
-        mediaType: 'text/markdown',
       })],
     })
     const { view } = renderMenu({
@@ -501,7 +499,7 @@ describe('CanvasContextMenu resource original actions', () => {
       method: 'GET',
       url: 'https://s3.example/original',
       headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320900000,
     })
     const onClose = vi.fn()
     const { view } = renderMenu({

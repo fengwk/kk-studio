@@ -44,8 +44,8 @@ function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       revision: '4',
-      createdAt: '2026-08-10T00:00:00Z',
-      updatedAt: '2026-08-10T00:00:00Z',
+      createdAt: 1786291200000,
+      updatedAt: 1786291200000,
     },
     nodes: [{
       id: NODE_FN,
@@ -72,7 +72,7 @@ function run(requestId: string, status: CanvasFunctionRunDTO['status'], stage: s
     status,
     stage,
     error: null,
-    updatedAt: '2026-08-10T00:00:01Z',
+    updatedAt: 1786291201000,
   }
 }
 

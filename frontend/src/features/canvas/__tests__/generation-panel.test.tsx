@@ -135,7 +135,7 @@ function resourceNode(
       width: null,
       height: null,
       durationMs: null,
-      createdAt: '2026-08-10T00:00:00Z',
+      createdAt: 1786291200000,
     }],
     function: null,
     run: null,
@@ -171,8 +171,8 @@ function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b
       id: CANVAS_ID,
       title: 'Board',
       revision: '0',
-      createdAt: '2026-08-10T00:00:00Z',
-      updatedAt: '2026-08-10T00:00:00Z',
+      createdAt: 1786291200000,
+      updatedAt: 1786291200000,
     },
     resourceNodes: [
       resourceNode(NODE_SINGLE, 'single', 'IMAGE'),
@@ -384,7 +384,7 @@ describe('Canvas generic generation panel', () => {
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
     expect(screen.getByText('GENERATING')).toBeInTheDocument()
@@ -396,7 +396,7 @@ describe('Canvas generic generation panel', () => {
       status: 'FAILED',
       stage: 'FAILED',
       error: 'provider failed',
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     expect(screen.getByRole('alert')).toHaveTextContent('provider failed')
   })
@@ -416,7 +416,7 @@ describe('Canvas generic generation panel', () => {
       status: 'READY',
       stage: 'QUEUED',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     expect(within(ready.container.querySelector('.generation-panel-head') as HTMLElement)
       .getByText('就绪')).toHaveClass('generation-node-status', 'ready')
@@ -429,7 +429,7 @@ describe('Canvas generic generation panel', () => {
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     expect(within(running.container.querySelector('.generation-panel-head') as HTMLElement)
       .getByText('运行中')).toHaveClass('generation-node-status', 'running')
@@ -441,7 +441,7 @@ describe('Canvas generic generation panel', () => {
       status: 'FAILED',
       stage: 'FAILED',
       error: 'boom',
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     expect(within(failed.container.querySelector('.generation-panel-head') as HTMLElement)
       .getByText('失败')).toHaveClass('generation-node-status', 'failed')
@@ -453,7 +453,7 @@ describe('Canvas generic generation panel', () => {
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,
-      updatedAt: '2026-08-10T00:00:02Z',
+      updatedAt: 1786291202000,
     })
     expect(within(cancelled.container.querySelector('.generation-panel-head') as HTMLElement)
       .getByText('已取消')).toHaveClass('generation-node-status', 'cancelled')
@@ -581,7 +581,7 @@ describe('Canvas generic generation panel', () => {
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     expect(screen.getByLabelText('模型')).toBeDisabled()
     expect(screen.getByLabelText('比例')).toBeDisabled()
@@ -597,7 +597,7 @@ describe('Canvas generic generation panel', () => {
       status: 'SUCCEEDED',
       stage: 'GENERATING',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     const header = view.container.querySelector('.generation-panel-head') as HTMLElement
     expect(within(header).getByText('成功')).toHaveClass('generation-node-status', 'succeeded')
@@ -612,7 +612,7 @@ describe('Canvas generic generation panel', () => {
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     const header = view.container.querySelector('.generation-panel-head') as HTMLElement
     expect(within(header).getByText('成功')).toHaveClass('generation-node-status', 'succeeded')

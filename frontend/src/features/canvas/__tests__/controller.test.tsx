@@ -158,8 +158,8 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       revision: String(revision),
-      createdAt: '2026-08-10T00:00:00Z',
-      updatedAt: '2026-08-10T00:00:00Z',
+      createdAt: 1786291200000,
+      updatedAt: 1786291200000,
     },
     nodes: [{
       id: NODE_NOTE,
@@ -168,20 +168,15 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
       transform: { x: 20, y: 30, width: 320, height: 260 },
       groupId: null,
       resources: [{
+        type: 'TEXT',
         id: RES_NOTE,
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_NOTE,
         resourceIndex: 0,
-        blobId: null,
         name: 'note.md',
         textContent: 'note',
         kind: 'TEXT',
-        mediaType: 'text/markdown',
-        sizeBytes: '4',
-        width: null,
-        height: null,
-        durationMs: null,
-        createdAt: '2026-08-10T00:00:00Z',
+        createdAt: 1786291200000,
       }],
       function: null,
       run: null,
@@ -192,20 +187,20 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
       transform: { x: 400, y: 30, width: 320, height: 260 },
       groupId: GROUP_A,
       resources: [{
+        type: 'BLOB',
         id: RES_OUTPUT,
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_FN,
         resourceIndex: 0,
         blobId: BLOB_OUTPUT,
         name: 'old-output.png',
-        textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
         sizeBytes: '3',
         width: null,
         height: null,
         durationMs: null,
-        createdAt: '2026-08-10T00:00:00Z',
+        createdAt: 1786291200000,
       }],
       function: {
         name: 'fake-image',
@@ -223,20 +218,20 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
       transform: { x: 60, y: 360, width: 320, height: 260 },
       groupId: GROUP_A,
       resources: [{
+        type: 'BLOB',
         id: RES_IMG,
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_IMG,
         resourceIndex: 0,
         blobId: BLOB_IMAGE,
         name: 'image.png',
-        textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
         sizeBytes: '3',
         width: null,
         height: null,
         durationMs: null,
-        createdAt: '2026-08-10T00:00:00Z',
+        createdAt: 1786291200000,
       }],
       function: null,
       run: null,
@@ -286,21 +281,33 @@ function materializeResource(
     }
     return { ...existing, ownerNodeId: nodeId, resourceIndex: index }
   }
-  return {
-    id: input.kind === 'BLOB' ? input.blobId : `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+  const base = {
     canvasId: current.document.id,
     ownerNodeId: nodeId,
     resourceIndex: index,
-    blobId: input.kind === 'BLOB' ? input.blobId : null,
     name: input.name,
-    textContent: input.kind === 'TEXT' ? input.textContent : null,
-    kind: input.kind === 'BLOB' ? 'IMAGE' : 'TEXT',
-    mediaType: input.kind === 'BLOB' ? 'image/png' : 'text/plain',
+    createdAt: 1786291200000,
+  }
+  if (input.kind === 'TEXT') {
+    return {
+      ...base,
+      type: 'TEXT',
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      textContent: input.textContent,
+      kind: 'TEXT',
+    }
+  }
+  return {
+    ...base,
+    type: 'BLOB',
+    id: input.blobId,
+    blobId: input.blobId,
+    kind: 'IMAGE',
+    mediaType: 'image/png',
     sizeBytes: '100',
     width: null,
     height: null,
     durationMs: null,
-    createdAt: '2026-08-10T00:00:00Z',
   }
 }
 
@@ -442,7 +449,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
-      updatedAt: '2026-08-10T00:00:00Z',
+      updatedAt: 1786291200000,
     })
     vi.mocked(getCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -450,7 +457,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'FAILED',
       stage: 'FAILED',
       error: 'fake failure',
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     vi.mocked(cancelCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -458,7 +465,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,
-      updatedAt: '2026-08-10T00:00:02Z',
+      updatedAt: 1786291202000,
     })
   })
 
@@ -506,11 +513,11 @@ describe('useCanvasController real snapshot runtime', () => {
           textContent: 'note',
           kind: 'TEXT',
           mediaType: 'text/markdown',
-          sizeBytes: 4,
+          sizeBytes: null,
           width: null,
           height: null,
           durationMs: null,
-          createdAt: '2026-08-10T00:00:00Z',
+          createdAt: 1786291200000,
         }],
         function: null,
         run: null,
@@ -966,7 +973,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status: 'RUNNING',
         stage: 'QUEUED',
         error: null,
-        updatedAt: '2026-08-10T00:00:01Z',
+        updatedAt: 1786291201000,
       },
       '2': {
         nodeId: NODE_FN,
@@ -974,7 +981,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status: 'RUNNING',
         stage: 'CHECKPOINTED',
         error: null,
-        updatedAt: '2026-08-10T00:00:02Z',
+        updatedAt: 1786291202000,
       },
       '3': {
         nodeId: NODE_FN,
@@ -982,7 +989,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status: 'FAILED',
         stage: 'FAILED',
         error: 'fake failure',
-        updatedAt: '2026-08-10T00:00:03Z',
+        updatedAt: 1786291203000,
       },
     }
 
@@ -1136,7 +1143,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
@@ -1166,25 +1173,25 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
-      updatedAt: '2026-08-10T00:00:03Z',
+      updatedAt: 1786291203000,
     })
     terminal.nodes = terminal.nodes.map((node) => node.id === NODE_FN ? {
       ...node,
       resources: [{
+        type: 'BLOB',
         id: 'ffffffff-0000-4000-8000-000000000031',
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_FN,
         resourceIndex: 0,
         blobId: 'blob-new-output',
         name: 'new-output.png',
-        textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
         sizeBytes: '4',
         width: null,
         height: null,
         durationMs: null,
-        createdAt: '2026-08-10T00:00:03Z',
+        createdAt: 1786291203000,
       }],
     } : node)
 
@@ -1205,7 +1212,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     const cancelDeferred = deferred<CanvasFunctionRunDTO>()
     vi.mocked(cancelCanvasFunctionRun).mockImplementationOnce(() => cancelDeferred.promise)
@@ -1224,7 +1231,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status: 'CANCELLED',
         stage: 'CANCELLED',
         error: null,
-        updatedAt: '2026-08-10T00:00:00Z',
+        updatedAt: 1786291200000,
       })
     })
 
@@ -1241,7 +1248,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     }))
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -1249,7 +1256,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
-      updatedAt: '2026-08-10T00:00:04Z',
+      updatedAt: 1786291204000,
     })
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
@@ -1275,7 +1282,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
-      updatedAt: '2026-08-10T00:00:01Z',
+      updatedAt: 1786291201000,
     })
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
@@ -1291,7 +1298,7 @@ describe('useCanvasController real snapshot runtime', () => {
       status: 'RUNNING',
       stage: 'CHECKPOINTED',
       error: null,
-      updatedAt: '2026-08-10T00:00:05Z',
+      updatedAt: 1786291205000,
     })
     emitCanvasRevision('2')
     await waitFor(() => {
@@ -1306,7 +1313,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status: 'RUNNING',
         stage: 'QUEUED',
         error: null,
-        updatedAt: '2026-08-10T00:04:00Z',
+        updatedAt: 1786291440000,
       })
     })
 
@@ -1499,7 +1506,7 @@ describe('useCanvasController real snapshot runtime', () => {
         status,
         stage: status === 'RUNNING' ? 'QUEUED' : 'FAILED',
         error: status === 'RUNNING' ? null : 'safe failure',
-        updatedAt: '2026-08-10T00:00:01Z',
+        updatedAt: 1786291201000,
       }))
       const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
       act(() => result.current.openEditor(CANVAS_ID))
