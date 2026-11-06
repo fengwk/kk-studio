@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -35,6 +36,8 @@ import fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -65,7 +68,8 @@ class ProjectControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProjectControllerTestAdvice())
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
@@ -78,7 +82,7 @@ class ProjectControllerTest {
     mockMvc
         .perform(get("/api/projects"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].title").value("P1"));
+        .andExpect(jsonPath("$[0].title").value("P1"));
   }
 
   @Test
@@ -101,9 +105,9 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.title").value("New Project"))
-        .andExpect(jsonPath("$.data.yoloEnabled").value(true));
+        .andExpect(jsonPath("$.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.title").value("New Project"))
+        .andExpect(jsonPath("$.yoloEnabled").value(true));
 
     verify(projectService).createProject("New Project", "Desc", true);
   }
@@ -132,9 +136,9 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.title").value("Custom Project"))
-        .andExpect(jsonPath("$.data.yoloEnabled").value(false));
+        .andExpect(jsonPath("$.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.title").value("Custom Project"))
+        .andExpect(jsonPath("$.yoloEnabled").value(false));
 
     verify(projectService).createProject("Custom Project", "Desc", false);
   }
@@ -148,8 +152,8 @@ class ProjectControllerTest {
     mockMvc
         .perform(get("/api/projects/" + projectId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.title").value("Existing"));
+        .andExpect(jsonPath("$.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.title").value("Existing"));
   }
 
   @Test
@@ -176,7 +180,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"));
+        .andExpect(jsonPath("$.version").value("2"));
 
     verify(projectService).updateConfiguration(projectId, 1L, "Updated Title", "Updated Desc");
   }
@@ -239,7 +243,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"));
+        .andExpect(jsonPath("$.version").value("2"));
   }
 
   @Test
@@ -255,7 +259,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.yoloEnabled").value(true));
+        .andExpect(jsonPath("$.yoloEnabled").value(true));
   }
 
   @Test
@@ -279,7 +283,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.archivedAt").isNotEmpty());
+        .andExpect(jsonPath("$.archivedAt").isNotEmpty());
   }
 
   @Test
@@ -294,7 +298,7 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.archivedAt").isEmpty());
+        .andExpect(jsonPath("$.archivedAt").isEmpty());
   }
 
   @Test
@@ -310,10 +314,10 @@ class ProjectControllerTest {
     mockMvc
         .perform(get("/api/projects/" + projectId + "/snapshot"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.project.id").value(projectId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.referencedStateCodes").isArray())
-        .andExpect(jsonPath("$.data.referencedStateCodes[0]").value("INIT"))
-        .andExpect(jsonPath("$.data.referencedStateCodes[1]").value("WORK"));
+        .andExpect(jsonPath("$.project.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.referencedStateCodes").isArray())
+        .andExpect(jsonPath("$.referencedStateCodes[0]").value("INIT"))
+        .andExpect(jsonPath("$.referencedStateCodes[1]").value("WORK"));
   }
 
   @Test
@@ -321,10 +325,14 @@ class ProjectControllerTest {
     // 测试意图：HTTP UUID 与 version 都是严格 canonical，不接受大写和前后空白。
     mockMvc
         .perform(get("/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("projectId must be a canonical UUID"));
     mockMvc
         .perform(delete("/api/projects/" + projectId).param("expectedVersion", " 1"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.detail").value("expectedVersion must be a canonical non-negative decimal"));
     verifyNoInteractions(projectService);
   }
 

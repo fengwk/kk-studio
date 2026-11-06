@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
@@ -54,6 +55,8 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -105,7 +108,8 @@ class IssueControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProjectControllerTestAdvice())
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
@@ -135,9 +139,9 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.id").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.number").value("1"))
-        .andExpect(jsonPath("$.data.state").value("INIT"));
+        .andExpect(jsonPath("$.id").value(issueId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.number").value("1"))
+        .andExpect(jsonPath("$.state").value("INIT"));
   }
 
   @Test
@@ -175,9 +179,9 @@ class IssueControllerTest {
     mockMvc
         .perform(get("/api/issues/" + issueId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.issue.id").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.currentRun.agentName").value("coder"))
-        .andExpect(jsonPath("$.data.agentThreads[0].agentName").value("coder"));
+        .andExpect(jsonPath("$.issue.id").value(issueId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.currentRun.agentName").value("coder"))
+        .andExpect(jsonPath("$.agentThreads[0].agentName").value("coder"));
   }
 
   /** 无 Run 的 Issue 详情仍可读取，缺失的 Run 投影保持 null，不调用精确查询接口。 */
@@ -202,10 +206,10 @@ class IssueControllerTest {
     mockMvc
         .perform(get("/api/issues/" + issueId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.issue.id").value(issueId.toString()))
-        .andExpect(jsonPath("$.data.runs").isEmpty())
-        .andExpect(jsonPath("$.data.currentRun").value(nullValue()))
-        .andExpect(jsonPath("$.data.latestRun").value(nullValue()));
+        .andExpect(jsonPath("$.issue.id").value(issueId.toString()))
+        .andExpect(jsonPath("$.runs").isEmpty())
+        .andExpect(jsonPath("$.currentRun").value(nullValue()))
+        .andExpect(jsonPath("$.latestRun").value(nullValue()));
   }
 
   @Test
@@ -236,9 +240,9 @@ class IssueControllerTest {
     mockMvc
         .perform(get("/api/issues/" + issueId).param("limit", "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.activities[0].sequence").value("1"))
-        .andExpect(jsonPath("$.data.activities[0].body").value("Hello"))
-        .andExpect(jsonPath("$.data.nextActivityCursor").value("1"));
+        .andExpect(jsonPath("$.activities[0].sequence").value("1"))
+        .andExpect(jsonPath("$.activities[0].body").value("Hello"))
+        .andExpect(jsonPath("$.nextActivityCursor").value("1"));
     mockMvc
         .perform(get("/api/issues/" + issueId + "/activities"))
         .andExpect(status().isMethodNotAllowed());
@@ -262,8 +266,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"))
-        .andExpect(jsonPath("$.data.title").value("New Title"));
+        .andExpect(jsonPath("$.version").value("2"))
+        .andExpect(jsonPath("$.title").value("New Title"));
   }
 
   @Test
@@ -283,7 +287,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("DONE"));
+        .andExpect(jsonPath("$.state").value("DONE"));
   }
 
   @Test
@@ -310,8 +314,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("BLOCKED"))
-        .andExpect(jsonPath("$.data.blockReason").value("need review"));
+        .andExpect(jsonPath("$.state").value("BLOCKED"))
+        .andExpect(jsonPath("$.blockReason").value("need review"));
   }
 
   @Test
@@ -327,7 +331,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("WORK"));
+        .andExpect(jsonPath("$.state").value("WORK"));
   }
 
   @Test
@@ -343,7 +347,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"));
+        .andExpect(jsonPath("$.version").value("2"));
   }
 
   @Test
@@ -359,7 +363,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("INIT"));
+        .andExpect(jsonPath("$.state").value("INIT"));
   }
 
   @Test
@@ -380,9 +384,9 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("WORK"))
-        .andExpect(jsonPath("$.data.maxRuns").value(10))
-        .andExpect(jsonPath("$.data.remainingRuns").value("10"));
+        .andExpect(jsonPath("$.state").value("WORK"))
+        .andExpect(jsonPath("$.maxRuns").value(10))
+        .andExpect(jsonPath("$.remainingRuns").value("10"));
   }
 
   @Test
@@ -397,7 +401,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.archivedAt").isNotEmpty());
+        .andExpect(jsonPath("$.archivedAt").isNotEmpty());
   }
 
   @Test
@@ -412,7 +416,7 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.archivedAt").isEmpty());
+        .andExpect(jsonPath("$.archivedAt").isEmpty());
   }
 
   @Test
@@ -443,8 +447,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.body").value("A human comment"))
-        .andExpect(jsonPath("$.data.kind").value("COMMENT"));
+        .andExpect(jsonPath("$.body").value("A human comment"))
+        .andExpect(jsonPath("$.kind").value("COMMENT"));
 
     verify(issueEditingService).appendActivity(issueId, 1L, "COMMENT", "k1", "A human comment");
   }
@@ -478,8 +482,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.body").value("A human instruction"))
-        .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"));
+        .andExpect(jsonPath("$.body").value("A human instruction"))
+        .andExpect(jsonPath("$.kind").value("INSTRUCTION"));
 
     verify(issueEditingService)
         .appendActivity(issueId, 1L, "INSTRUCTION", "k2", "A human instruction");
@@ -512,7 +516,9 @@ class IssueControllerTest {
   void testGetIssueInvalidLimitReturns400() throws Exception {
     mockMvc
         .perform(get("/api/issues/" + issueId).param("limit", "abc"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("limit must be within [1, 200]"));
     mockMvc
         .perform(get("/api/issues/" + issueId).param("limit", "0"))
         .andExpect(status().isBadRequest());
@@ -542,8 +548,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.blobId").value(blobId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.name").value("upload.png"));
+        .andExpect(jsonPath("$.blobId").value(blobId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.name").value("upload.png"));
   }
 
   /** 刷新详情后仍能读取持久证据，而不是只显示本页刚上传的内容。 */
@@ -562,8 +568,8 @@ class IssueControllerTest {
     mockMvc
         .perform(get("/api/issues/" + issueId + "/evidence"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].blobId").value(blobId.toString()))
-        .andExpect(jsonPath("$.data[0].name").value("deliverable.txt"));
+        .andExpect(jsonPath("$[0].blobId").value(blobId.toString()))
+        .andExpect(jsonPath("$[0].name").value("deliverable.txt"));
     verify(issueEvidenceService).listEvidence(issueId);
   }
 
@@ -597,8 +603,8 @@ class IssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.pauseReason").value("USER"))
-        .andExpect(jsonPath("$.data.pauseDetail").value("Manual stop"));
+        .andExpect(jsonPath("$.pauseReason").value("USER"))
+        .andExpect(jsonPath("$.pauseDetail").value("Manual stop"));
 
     verify(issueLifecycleService).stopIssue(issueId, 1L, "stop-1", "Manual stop");
   }

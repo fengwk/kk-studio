@@ -347,7 +347,7 @@ vfs:/
 | 产品 | 模块 | 拥有 | 实现的平台 SPI |
 | --- | --- | --- | --- |
 | Chat | [`apps/chat`](../apps/chat/pom.xml) | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
-| Project | [`apps/project`](../apps/project/pom.xml) | `project_*`；`ProjectController`、`IssueController`、`ProjectErrorAdvice` 与模块内 DTO | 会话归属 `ISSUE_AGENT`、Agent 引用检查 |
+| Project | [`apps/project`](../apps/project/pom.xml) | `project_*`；`ProjectController`、`IssueController` 与模块内 DTO | 会话归属 `ISSUE_AGENT`、Agent 引用检查 |
 | Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 

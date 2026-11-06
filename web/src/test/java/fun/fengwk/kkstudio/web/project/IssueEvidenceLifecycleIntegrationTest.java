@@ -129,9 +129,9 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(body))
           .andExpect(status().isCreated())
-          .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"))
-          .andExpect(jsonPath("$.data.body").value("Please review"))
-          .andExpect(jsonPath("$.data.runId").value(run.getId().toString()));
+          .andExpect(jsonPath("$.kind").value("INSTRUCTION"))
+          .andExpect(jsonPath("$.body").value("Please review"))
+          .andExpect(jsonPath("$.runId").value(run.getId().toString()));
     }
 
     assertEquals(
@@ -156,8 +156,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
                         + commentKey
                         + "\",\"kind\":\"COMMENT\",\"body\":\"A comment\"}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.kind").value("COMMENT"))
-        .andExpect(jsonPath("$.data.body").value("A comment"));
+        .andExpect(jsonPath("$.kind").value("COMMENT"))
+        .andExpect(jsonPath("$.body").value("A comment"));
     assertEquals(
         1L,
         jdbc.queryForObject(

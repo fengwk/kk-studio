@@ -279,13 +279,10 @@ Harness 的调度时间域见 [Platform](platform.md#work-的-claim--lease--wake
 
 ## 错误映射
 
-模块内的 `ProjectValidationException`、`ProjectNotFoundException`、
-`ProjectVersionConflictException`、`ProjectDuplicateException` 在本模块的 HTTP 边界由
-[`ProjectErrorAdvice`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http/ProjectErrorAdvice.java)
-统一映射：validation 400、not found 404、version/duplicate/runtime conflict 409、
-`IllegalStateException` 500，并输出稳定的 `PROJECT_*` 错误码。在 Agent 工具边界由
-[`tool`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) 包译成
-`DomainException` 的 validation / version conflict 等错误码。
+Project 与 Issue 使用 common 的
+[`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
+表达校验、缺失与并发冲突；Web 统一将它们翻译为 problem 响应，具体字段与状态见
+[HTTP 契约](../system-design.md#http-契约)。Agent 工具边界同样使用领域错误类别。
 
 ## 测试与验证
 
