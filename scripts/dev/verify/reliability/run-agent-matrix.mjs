@@ -596,7 +596,7 @@ export function assertThreadSettings(accepted, testCase, agentName) {
     `Thread nextCommandSequence must be 2: ${JSON.stringify(thread)}`,
   )
   assert(
-    Number(thread.version) >= 1,
+    BigInt(thread.version) >= 1n,
     `Thread version must be at least 1: ${JSON.stringify(thread)}`,
   )
   assertRootYoloEnabled(thread, true)

@@ -125,7 +125,7 @@ export function IssueStageBudgetList({ stageBudgets }: { stageBudgets: IssueDeta
             </div>
             <div>
               <span>{t('projects.issue.remainingRunsLabel')}</span>
-              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--accent)' : 'var(--danger)' }}>
+              <strong style={{ color: b.remainingRuns === '0' ? 'var(--danger)' : 'var(--accent)' }}>
                 {b.remainingRuns}
               </strong>
             </div>

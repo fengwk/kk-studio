@@ -246,7 +246,7 @@ registerCase({
 
     // 成功发布按输出槽位替换 Resource：Function node 现在只持有 1 个 IMAGE Resource。
     const snapshot = (await ctx.call('GET', `/api/canvas/canvases/${canvas.id}`)).json
-    assert(Number(snapshot.document.revision) > Number(revisionAfterDeclare), JSON.stringify(snapshot.document))
+    assert(BigInt(snapshot.document.revision) > BigInt(revisionAfterDeclare), JSON.stringify(snapshot.document))
     const published = snapshot.nodes.find((node) => node.id === functionNodeId)
     assert(
       published.resources.length === 1

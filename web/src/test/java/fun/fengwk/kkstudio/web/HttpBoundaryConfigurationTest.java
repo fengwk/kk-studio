@@ -55,7 +55,9 @@ class HttpBoundaryConfigurationTest {
         MockMvcBuilders.standaloneSetup(new Probe())
             .setMessageConverters(converters.toArray(HttpMessageConverter[]::new))
             .setConversionService(conversionService)
-            .setControllerAdvice(new HttpBoundaryConfiguration.CanonicalUuidBinding())
+            .setControllerAdvice(
+                new HttpBoundaryConfiguration.CanonicalUuidBinding(),
+                new ProblemAdvice(new MessageService()))
             .build();
   }
 
@@ -169,9 +171,13 @@ class HttpBoundaryConfigurationTest {
           () ->
               mapper.readValue(
                   "{\"expectedVersion\":\"" + value + "\",\"other\":\"0\"}", LongBody.class));
-      mvc.perform(get("/long/1").param("value", value)).andExpect(status().isBadRequest());
+      mvc.perform(get("/long/1").param("value", value))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"));
       if (!value.isEmpty() && !value.contains(" ")) {
-        mvc.perform(get("/long/" + value).param("value", "1")).andExpect(status().isBadRequest());
+        mvc.perform(get("/long/" + value).param("value", "1"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation"));
       }
     }
     for (String token : List.of("1", "1.0", "true", "[]", "{}")) {

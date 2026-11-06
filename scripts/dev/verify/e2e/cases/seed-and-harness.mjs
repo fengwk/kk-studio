@@ -262,7 +262,7 @@ registerCase({
       `nextCommandSequence must be 2 after accepting the first command: ${JSON.stringify(thread)}`,
     )
     assert(
-      Number(thread.version) >= 1,
+      BigInt(thread.version) >= 1n,
       `version must be at least 1 after accepting the first command: ${JSON.stringify(thread)}`,
     )
     threadIdOf(thread)
@@ -1402,7 +1402,7 @@ registerCase({
     assert(firstReceipt.cancelledCommandCount === 0, JSON.stringify(firstReceipt))
     assert(firstReceipt.cancelledInputs.length === 0, JSON.stringify(firstReceipt))
     assert(
-      Number(first.thread.version) === Number(thread.version) + 1,
+      BigInt(first.thread.version) === BigInt(thread.version) + 1n,
       `idle stop must bump version by one: ${JSON.stringify({ thread, first })}`,
     )
     assert(
@@ -1605,7 +1605,7 @@ registerCase({
       assert(String(renamedThread.sessionId) === String(beforeThread.sessionId), JSON.stringify(renamedThread))
       assert(String(renamedThread.headEntryId) === String(beforeThread.headEntryId), JSON.stringify(renamedThread))
       assert(
-        String(Number(renamedThread.version)) === String(Number(beforeThread.version) + 1),
+        BigInt(renamedThread.version) === BigInt(beforeThread.version) + 1n,
         JSON.stringify({ before: beforeThread.version, after: renamedThread.version }),
       )
       const afterSnapshot = await getThreadSnapshot(ctx, threadId)
@@ -1700,7 +1700,7 @@ registerCase({
     )
     for (let i = 1; i < dto.length; i++) {
       assert(
-        Number(dto[i].sequence) === Number(dto[i - 1].sequence) + 1,
+        BigInt(dto[i].sequence) === BigInt(dto[i - 1].sequence) + 1n,
         `sequences must be contiguous: ${JSON.stringify(dto)}`,
       )
     }
@@ -1933,7 +1933,7 @@ registerCase({
     const enabled = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
     assertRootYoloEnabled(enabled, true)
     assert(
-      String(Number(enabled.version)) === String(Number(thread.version) + 1),
+      BigInt(enabled.version) === BigInt(thread.version) + 1n,
       JSON.stringify({ before: thread.version, after: enabled.version }),
     )
     assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
@@ -1947,7 +1947,7 @@ registerCase({
     const disabled = await setThreadYolo(ctx, threadId, { yoloEnabled: false })
     assertRootYoloEnabled(disabled, false)
     assert(
-      String(Number(disabled.version)) === String(Number(enabled.version) + 1),
+      BigInt(disabled.version) === BigInt(enabled.version) + 1n,
       JSON.stringify({ before: enabled.version, after: disabled.version }),
     )
     const fresh = await getThreadSnapshot(ctx, threadId)

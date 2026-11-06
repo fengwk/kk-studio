@@ -211,7 +211,14 @@ export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
   }
 }
 
-/** Java Long 以十进制字符串传输；解码器已保证它在安全整数范围内。 */
+/** Java Long 以十进制字符串传输；视图模型只接受安全整数范围内的值，越界时显式报错而不是静默丢失精度。 */
 function decimalLong(value: string | null): number | null {
-  return value === null ? null : Number(value)
+  if (value === null) {
+    return null
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`canvas long value is outside the safe integer range: ${value}`)
+  }
+  return parsed
 }

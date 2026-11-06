@@ -173,7 +173,7 @@ registerCase({
       const queued = [...firstQueued.acceptedCommands, ...secondQueued.acceptedCommands]
       assert(queued.length === 2, JSON.stringify(queued))
       assert(
-        Number(queued[1].sequence) === Number(queued[0].sequence) + 1,
+        BigInt(queued[1].sequence) === BigInt(queued[0].sequence) + 1n,
         `queued sequences must be contiguous: ${JSON.stringify(queued)}`,
       )
       // 轮询确认两条命令同时处于 QUEUED（未开始消费、未产生 assistant）。
