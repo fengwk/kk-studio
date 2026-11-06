@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 
@@ -220,6 +222,15 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
 
   private JsonNode create(String name) throws Exception {
     return postData("/api/platform/environments", Map.of("name", name));
+  }
+
+  /** Environment 与已迁移的配置同步端点直接返回资源，没有 {@code data} 包装。 */
+  @Override
+  protected JsonNode data(MvcResult result) throws Exception {
+    return objectMapper
+        .reader()
+        .with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .readTree(result.getResponse().getContentAsString());
   }
 
   private static Map<String, Object> update(String version, Object config) {
