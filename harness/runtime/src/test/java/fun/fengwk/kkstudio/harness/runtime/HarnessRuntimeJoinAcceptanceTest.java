@@ -17,11 +17,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -245,12 +246,12 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptCommandsCommand originalReplay =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), batch);
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(originalReplay, AcceptancePreflight.IDENTITY));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH.name(), conflict.reason());
   }
 
   /** 该 Thread 当前 head 所在历史路径上是否已物化系统通知（STOPPED 父线程的 Join 交付直接固化到历史）。 */
@@ -299,17 +300,25 @@ class HarnessRuntimeJoinAcceptanceTest {
     // allPrecedingWereDeliveries = false -> 拒绝。
     AcceptCommandsCommand nonDeliveryPreceding =
         new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId, head, 1L), batch2);
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () -> runtime.acceptCommands(nonDeliveryPreceding, AcceptancePreflight.IDENTITY));
+    DomainException precedingError =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.acceptCommands(nonDeliveryPreceding, AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.CONFLICT, precedingError.code());
+    assertEquals(
+        HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH.name(), precedingError.reason());
 
     // 尝试重放不连续的命令批次：[cmd2, cmd3]
     AcceptCommandsCommand nonContiguousBatch =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2, cmd3));
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () -> runtime.acceptCommands(nonContiguousBatch, AcceptancePreflight.IDENTITY));
+    DomainException sequenceError =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.acceptCommands(nonContiguousBatch, AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.CONFLICT, sequenceError.code());
+    assertEquals(
+        HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH.name(), sequenceError.reason());
   }
 
   @Test
@@ -729,18 +738,21 @@ class HarnessRuntimeJoinAcceptanceTest {
         runtime.acceptCommands(session(130, 131, null), AcceptancePreflight.IDENTITY);
     UUID sessionId = root.session().id();
 
-    // 1. acceptNewThread 指定不存在的 startEntryId -> HarnessRuntimeNotFoundException
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () ->
-            runtime.acceptCommands(
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewThread(
-                        sessionId, TestIds.id(999), TestIds.id(132), "fork", false),
-                    List.of(userMessageCommand(TestIds.id(133), "fork"))),
-                AcceptancePreflight.IDENTITY));
+    // 1. acceptNewThread 指定不存在的 startEntryId -> not_found
+    DomainException missing =
+        assertThrows(
+            DomainException.class,
+            () ->
+                runtime.acceptCommands(
+                    new AcceptCommandsCommand(
+                        new AcceptCommandsTarget.NewThread(
+                            sessionId, TestIds.id(999), TestIds.id(132), "fork", false),
+                        List.of(userMessageCommand(TestIds.id(133), "fork"))),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.NOT_FOUND, missing.code());
+    assertEquals("entry", missing.resource());
 
-    // 2. replayInitial idempotencyKey 重用但 requestHash 不一致 -> IDEMPOTENCY_KEY_REUSED
+    // 2. 初始请求 hash 不同首先触发创建身份冲突。
     NewThreadCommand initCmd = userMessageCommand(TestIds.id(134), "initial message");
     runtime.acceptCommands(
         new AcceptCommandsCommand(
@@ -751,26 +763,32 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     NewThreadCommand tamperedHashCmd =
         new NewThreadCommand(initCmd.payload(), TestIds.id(134), "b".repeat(64));
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () ->
-            runtime.acceptCommands(
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewRootSession(
-                        TestIds.id(135), TestIds.id(136), settings(), false),
-                    List.of(tamperedHashCmd)),
-                AcceptancePreflight.IDENTITY));
+    DomainException hashError =
+        assertThrows(
+            DomainException.class,
+            () ->
+                runtime.acceptCommands(
+                    new AcceptCommandsCommand(
+                        new AcceptCommandsTarget.NewRootSession(
+                            TestIds.id(135), TestIds.id(136), settings(), false),
+                        List.of(tamperedHashCmd)),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.CONFLICT, hashError.code());
+    assertEquals(HarnessConflictReason.THREAD_ID_REUSED.name(), hashError.reason());
 
     // 3. replayInitial 不同的 creationRequestHash (不同 sessionId) -> THREAD_ID_REUSED
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () ->
-            runtime.acceptCommands(
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewRootSession(
-                        TestIds.id(999), TestIds.id(136), settings(), false),
-                    List.of(initCmd)),
-                AcceptancePreflight.IDENTITY));
+    DomainException reuseError =
+        assertThrows(
+            DomainException.class,
+            () ->
+                runtime.acceptCommands(
+                    new AcceptCommandsCommand(
+                        new AcceptCommandsTarget.NewRootSession(
+                            TestIds.id(999), TestIds.id(136), settings(), false),
+                        List.of(initCmd)),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.CONFLICT, reuseError.code());
+    assertEquals(HarnessConflictReason.THREAD_ID_REUSED.name(), reuseError.reason());
   }
 
   /**

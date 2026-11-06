@@ -23,11 +23,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
@@ -277,16 +276,14 @@ class StudioHarnessThreadCommandBatchControllerTest {
         .andExpect(jsonPath("$.detail").value("thread command batch rejected"));
 
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread not found"));
+        .thenThrow(DomainException.notFound("thread", "thread not found"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.detail").value("thread not found"));
 
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
-                "client command id was reused"));
+            DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "client command id was reused"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))

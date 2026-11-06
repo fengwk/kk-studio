@@ -22,7 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -158,7 +158,7 @@ class StudioHarnessSessionControllerTest {
         .andExpect(status().isBadRequest());
 
     when(runtime.renameSession(any(RenameSessionCommand.class)))
-        .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
+        .thenThrow(DomainException.notFound("session", "session is missing"));
     mockMvc
         .perform(
             put("/api/sessions/" + SESSION_ID + "/name")
@@ -304,7 +304,7 @@ class StudioHarnessSessionControllerTest {
   @Test
   void translatesMissingSessionToNotFound() throws Exception {
     when(harnessQueryService.listThreadSummaries(SESSION_ID))
-        .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
+        .thenThrow(DomainException.notFound("session", "session is missing"));
 
     mockMvc
         .perform(get("/api/sessions/" + SESSION_ID + "/threads"))

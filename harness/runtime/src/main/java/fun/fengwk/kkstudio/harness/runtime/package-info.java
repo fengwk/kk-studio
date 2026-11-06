@@ -7,11 +7,12 @@
  * getThreadSnapshot / listThreadsBySession / getSessionEntries）。名称由服务端在创建时派生、经 rename 控制面
  * 独立更新，不进入创建请求或 creation request hash。普通持久化写入在一个 {@code HarnessStore} 事务内按 Session -&gt; Thread
  * -&gt; Commands -&gt; Model -&gt; Tool siblings -&gt; Work 规范锁序执行；手动压缩的 version 校验、candidate 构造、同库
- * resolve 与 COMPACTION 提交也在同一短事务内完成。Stop 持久化提交后才 best-effort 取消本 JVM execution。冲突以 {@link
- * fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException} typed reason 表达。Subagent 派生与恢复通过
- * Subagent Session 契约复用同一命令与持久化循环；Work 环境亲和性仅在 TOOL Work 携带路由要求，由基础设施层完成所有权围栏。Model/Provider 契约位于
- * {@code harness.model} 包，Tool Invocation 值契约位于 {@code harness.api.tool}，权限策略属于平台；通过 typed
- * HarnessStore transaction 与 feature-local port 反转外部能力。模块依赖 common、harness-environment、
+ * resolve 与 COMPACTION 提交也在同一短事务内完成。Stop 持久化提交后才 best-effort 取消本 JVM execution。业务失败以 {@link
+ * fun.fengwk.kkstudio.common.error.DomainException} 表达，冲突的 reason 来源于 {@link
+ * fun.fengwk.kkstudio.harness.api.HarnessConflictReason}。Subagent 派生与恢复通过 Subagent Session
+ * 契约复用同一命令与持久化循环；Work 环境亲和性仅在 TOOL Work 携带路由要求，由基础设施层完成所有权围栏。Model/Provider 契约位于 {@code
+ * harness.model} 包，Tool Invocation 值契约位于 {@code harness.api.tool}，权限策略属于平台；通过 typed HarnessStore
+ * transaction 与 feature-local port 反转外部能力。模块依赖 common、harness-environment、
  * harness-model、Jackson、JMustache 与 SLF4J，不依赖 Provider SDK、Spring、MyBatis、JGit 或 HTTP adapter。
  */
 package fun.fengwk.kkstudio.harness.runtime;

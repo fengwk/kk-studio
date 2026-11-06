@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -43,7 +43,7 @@ final class AcceptCommandsReplay {
     long present = existing.stream().filter(Optional::isPresent).count();
     if (present > 0 && present < existing.size()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.PARTIAL_COMMAND_REPLAY,
+          HarnessConflictReason.PARTIAL_COMMAND_REPLAY,
           "batch on thread "
               + target.threadId()
               + " replays only "
@@ -77,7 +77,7 @@ final class AcceptCommandsReplay {
     if (!immutable.sessionId().equals(sessionId)
         || !immutable.creationRequestHash().equals(creationRequestHash)) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
+          HarnessConflictReason.THREAD_ID_REUSED,
           "thread "
               + threadId
               + " is already associated with a different initial creation request (session "
@@ -89,12 +89,11 @@ final class AcceptCommandsReplay {
         tx.threads()
             .lock(threadId)
             .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+                () -> DomainException.notFound("thread", "thread " + threadId + " does not exist"));
     if (!thread.sessionId().equals(sessionId)
         || !thread.creationRequestHash().equals(creationRequestHash)) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
+          HarnessConflictReason.THREAD_ID_REUSED,
           "thread "
               + threadId
               + " is already associated with a different initial creation request (session "
@@ -109,14 +108,14 @@ final class AcceptCommandsReplay {
               .orElseThrow(
                   () ->
                       conflict(
-                          HarnessRuntimeConflictException.Reason.PARTIAL_COMMAND_REPLAY,
+                          HarnessConflictReason.PARTIAL_COMMAND_REPLAY,
                           "initial batch on thread "
                               + threadId
                               + " is missing idempotencyKey "
                               + request.idempotencyKey()));
       if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+            HarnessConflictReason.IDEMPOTENCY_KEY_REUSED,
             "idempotencyKey "
                 + request.idempotencyKey()
                 + " is reused with a different request hash on thread "
@@ -127,7 +126,7 @@ final class AcceptCommandsReplay {
     for (int i = 0; i < ordered.size(); i++) {
       if (ordered.get(i).sequence() != i + 1L) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+            HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH,
             "initial commands on thread "
                 + threadId
                 + " must start at sequence 1 and be contiguous in the request order");
@@ -160,7 +159,7 @@ final class AcceptCommandsReplay {
       NewThreadCommand request = commands.get(i);
       if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+            HarnessConflictReason.IDEMPOTENCY_KEY_REUSED,
             "idempotencyKey "
                 + request.idempotencyKey()
                 + " is reused with a different request hash on thread "
@@ -171,7 +170,7 @@ final class AcceptCommandsReplay {
     long firstSequence = ordered.getFirst().sequence();
     if (!cursorFreeBatch && firstSequence != target.expectedNextCommandSequence()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+          HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH,
           "existing commands on thread "
               + target.threadId()
               + " start at sequence "
@@ -182,7 +181,7 @@ final class AcceptCommandsReplay {
     for (int i = 0; i < ordered.size(); i++) {
       if (ordered.get(i).sequence() != Math.addExact(firstSequence, (long) i)) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+            HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH,
             "existing commands on thread "
                 + target.threadId()
                 + " are not contiguous in the request order");
@@ -198,8 +197,7 @@ final class AcceptCommandsReplay {
         false);
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 }

@@ -19,9 +19,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -1093,12 +1095,13 @@ class PostgresqlCompactionChildTest {
       AcceptCommandsCommand resumeRequest =
           new AcceptCommandsCommand(
               new AcceptCommandsTarget.Thread(ownerThreadId), List.of(resumeCommand));
-      HarnessRuntimeConflictException.Reason resumeReason = null;
+      String resumeReason = null;
       boolean resumeAcceptedWhileHeld = false;
       try {
         stoppingRuntime.acceptCommands(resumeRequest, AcceptancePreflight.IDENTITY);
         resumeAcceptedWhileHeld = true;
-      } catch (HarnessRuntimeConflictException conflict) {
+      } catch (DomainException conflict) {
+        assertEquals(DomainErrorCode.CONFLICT, conflict.code());
         resumeReason = conflict.reason();
       }
 
@@ -1159,7 +1162,7 @@ class PostgresqlCompactionChildTest {
         resumeAfterExitFailure = failure;
       }
 
-      HarnessRuntimeConflictException.Reason observedResumeReason = resumeReason;
+      String observedResumeReason = resumeReason;
       boolean observedResumeAcceptedWhileHeld = resumeAcceptedWhileHeld;
       boolean observedSettingsAccepted = settingsAccepted;
       boolean observedResumeAcceptedAfterExit = resumeAcceptedAfterExit;
@@ -1187,9 +1190,7 @@ class PostgresqlCompactionChildTest {
                   "outer NOTIFY_PARENT must stay unmatched while the summary body is held"),
           () -> assertEquals(0, outerNotificationsHeld),
           () -> assertEquals(0, incompleteChildJoinsHeld),
-          () ->
-              assertEquals(
-                  HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, observedResumeReason),
+          () -> assertEquals(HarnessConflictReason.EXIT_UNCONFIRMED.name(), observedResumeReason),
           () -> assertFalse(observedResumeAcceptedWhileHeld),
           () -> assertTrue(observedSettingsAccepted),
           () ->

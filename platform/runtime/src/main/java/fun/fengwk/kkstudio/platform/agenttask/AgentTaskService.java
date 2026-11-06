@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
@@ -83,14 +82,9 @@ public class AgentTaskService {
 
     try {
       return submitToRuntime(runtime, request).threadId();
-    } catch (RuntimeException conflict) {
-      if ((conflict instanceof HarnessRuntimeConflictException legacy
-              && legacy.reason() == HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED)
-          || (conflict instanceof DomainException domain
-              && domain.code() == DomainErrorCode.CONFLICT
-              && HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED
-                  .name()
-                  .equals(domain.reason()))) {
+    } catch (DomainException conflict) {
+      if (conflict.code() == DomainErrorCode.CONFLICT
+          && HarnessConflictReason.THREAD_ID_REUSED.name().equals(conflict.reason())) {
         Optional<ThreadJoin> ticket = runtime.findJoin(ticketId);
         if (ticket.isPresent()) {
           if (!ticket.get().requestHash().equals(requestHash)) {

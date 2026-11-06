@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
@@ -129,7 +129,7 @@ abstract class ProviderRequestPreviewContractTest {
   /** 缺失目标与其它运行时查询一致是 404（不因为「预览」而变成 409 或 200）。 */
   @Test
   void translatesMissingTargetToNotFound() throws Exception {
-    stubPreviewFailure(new HarnessRuntimeNotFoundException("target not found"));
+    stubPreviewFailure(DomainException.notFound("thread", "target not found"));
 
     performPreview()
         .andExpect(status().isNotFound())

@@ -12,10 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
@@ -68,11 +70,12 @@ class ExecutionExitResumeTest {
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(4), "resume")));
-    HarnessRuntimeConflictException rejected =
+    DomainException rejected =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals(HarnessConflictReason.EXIT_UNCONFIRMED.name(), rejected.reason());
 
     store.transaction(
         tx -> {
@@ -196,10 +199,11 @@ class ExecutionExitResumeTest {
   }
 
   private static void assertExitUnconfirmed(HarnessRuntime runtime, AcceptCommandsCommand command) {
-    HarnessRuntimeConflictException rejected =
+    DomainException rejected =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(command, AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals(HarnessConflictReason.EXIT_UNCONFIRMED.name(), rejected.reason());
   }
 }

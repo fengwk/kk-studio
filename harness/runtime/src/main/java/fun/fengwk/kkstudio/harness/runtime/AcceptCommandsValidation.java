@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -131,7 +132,7 @@ final class AcceptCommandsValidation {
     if (!thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR,
+          HarnessConflictReason.STALE_COMMAND_CURSOR,
           "thread "
               + thread.id()
               + " head/next command sequence does not match the batch expectation");
@@ -261,8 +262,7 @@ final class AcceptCommandsValidation {
     return new IllegalArgumentException(targetLabel + " batch: " + message);
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 }
