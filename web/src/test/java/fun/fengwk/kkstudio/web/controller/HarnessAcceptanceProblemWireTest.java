@@ -158,6 +158,26 @@ class HarnessAcceptanceProblemWireTest {
     postFork("CHAT", root.rootEntry().id()).andExpect(status().isAccepted());
   }
 
+  /** 缺省 environmentName 进入同一清除命令，实际收割清除由 reducer 单测覆盖。 */
+  @Test
+  void omittedEnvironmentNameQueuesClear() throws Exception {
+    mvc.perform(
+            post("/api/harness/threads/{threadId}/command-batches", thread)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedHeadEntryId":"%s","expectedNextCommandSequence":"%s",
+                    "commands":[{"type":"SET_ENVIRONMENT","idempotencyKey":"%s"}]}
+                    """
+                        .formatted(
+                            root.thread().headEntryId(),
+                            root.thread().nextCommandSequence(),
+                            UUID.randomUUID())))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.acceptedCommands[0].type").value("SET_ENVIRONMENT"))
+        .andExpect(jsonPath("$.acceptedCommands[0].payload.environmentName").doesNotExist());
+  }
+
   private ResultActions postMessage(String content) throws Exception {
     return mvc.perform(
         post("/api/harness/threads/{threadId}/command-batches", thread)

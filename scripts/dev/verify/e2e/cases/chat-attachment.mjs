@@ -32,14 +32,14 @@ const getCase = (id) => findCase(seedCases, id)
  * ATTACHMENT(uploadId) 消费：入队响应携带 durable payload、
  * resource(blobId,name,preview)；同 batch 整批重放返回既有命令且不二次消费；同 Session 可用 RESOURCE
  * 重新提交该 blob 且不要求 upload handle，跨/新 Session RESOURCE 确定性拒绝；upload 行消费后再次提交同一
- * uploadId 确定性 400；IMAGE/AUDIO/VIDEO 内容类型与 PENDING upload 均 400。
+ * uploadId 因清理时序可能是 400 或 409；IMAGE/AUDIO/VIDEO 为 400，PENDING upload 为 409。
  */
 registerCase({
   id: 'chat.attachment_upload_contract',
   level: 'L1',
   requires: ['canvas-storage'],
   title: 'USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；durable payload 为 resource(blobId,name,preview,imageTier) 且不含 Base64，非图片媒体不携带档位；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；durable payload 为 resource(blobId,name,preview,imageTier) 且不含 Base64，非图片媒体不携带档位；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费 upload 随清理时序返回 400 或 409，未 READY 返回 409 STORAGE_VERIFICATION，IMAGE/AUDIO/VIDEO 内容类型返回 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -196,8 +196,8 @@ registerCase({
       { status: 404 },
     )
 
-    // 8. upload 行已消费：同一 uploadId 的 NEW 命令确定性 400。
-    await expectHttpError(
+    // 8. 已消费的行可能正在等待清理，也可能已清理完成。
+    const consumed = await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
           owner: chatOwner(chat.id),
@@ -208,7 +208,13 @@ registerCase({
             { type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
           ],
         }),
-      { status: 400 },
+    )
+    const consumedProblem = JSON.parse(consumed.body)
+    assert(
+      (consumed.status === 400 && consumedProblem.code === 'validation')
+        || (consumed.status === 409 && consumedProblem.code === 'conflict'
+          && consumedProblem.reason === 'STORAGE_VERIFICATION'),
+      JSON.stringify(consumedProblem),
     )
 
     // 9. IMAGE/AUDIO/VIDEO 结构化内容类型全部 400。
@@ -232,7 +238,7 @@ registerCase({
       )
     }
 
-    // 10. PENDING（未 complete）upload 同样确定性 400。
+    // 10. PENDING（未 complete）upload 保留存储验证冲突。
     const { json: pendingReserveJson } = await ctx.call('POST', '/api/platform/storage/uploads', {
       filename: 'pending.bin',
       mediaType: 'application/octet-stream',
@@ -255,7 +261,7 @@ registerCase({
             },
           ],
         }),
-      { status: 400 },
+      { status: 409, code: 'conflict', reason: 'STORAGE_VERIFICATION' },
     )
   },
 })

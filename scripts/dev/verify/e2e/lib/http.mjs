@@ -103,13 +103,23 @@ export function cid() {
   return crypto.randomUUID()
 }
 
-export async function expectHttpError(fn, { status, messageIncludes } = {}) {
+export async function expectHttpError(fn, { status, code, reason, messageIncludes } = {}) {
   try {
     await fn()
     throw new Error('expected HTTP error, but call succeeded')
   } catch (err) {
     assert(err instanceof HttpError, `expected HttpError, got ${err}`)
     if (status != null) assert(err.status === status, `expected status ${status}, got ${err.status}: ${err.body}`)
+    if ([400, 404, 409].includes(status)) {
+      const problem = JSON.parse(err.body)
+      const expectedCode = code ?? (status === 400 ? 'validation' : status === 404 ? 'not_found' : null)
+      if (expectedCode) assert(problem.code === expectedCode, `expected code ${expectedCode}: ${err.body}`)
+      else assert(typeof problem.code === 'string' && problem.code.length > 0, `missing problem code: ${err.body}`)
+      if (reason) assert(problem.reason === reason, `expected reason ${reason}: ${err.body}`)
+      else if (problem.code === 'conflict') {
+        assert(typeof problem.reason === 'string' && problem.reason.length > 0, `missing conflict reason: ${err.body}`)
+      }
+    }
     if (messageIncludes) {
       const re = messageIncludes instanceof RegExp ? messageIncludes : new RegExp(messageIncludes)
       assert(re.test(String(err.body)), `body not match ${re}: ${err.body}`)
