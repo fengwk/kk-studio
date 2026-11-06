@@ -30,7 +30,7 @@ class StorageControllerProblemWireTest {
 
   private static final String RESERVE_BODY =
       """
-      {"filename":"a.txt","mediaType":"text/plain","sizeBytes":1,
+      {"filename":"a.txt","mediaType":"text/plain","sizeBytes":"1",
       "sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
       """;
 
@@ -67,7 +67,7 @@ class StorageControllerProblemWireTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"filename":"a.txt","mediaType":"text/plain","sizeBytes":1,
+                    {"filename":"a.txt","mediaType":"text/plain","sizeBytes":"1",
                     "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
                     "unknown":true}
                     """))
