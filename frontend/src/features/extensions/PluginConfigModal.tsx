@@ -48,7 +48,7 @@ export function PluginConfigModal({
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const version = plugin.configuration.version
 
-  // 配置值在 wire 上是用户编辑的 JSON 原文；编辑器全程按原文承载，绝不 JSON.parse/stringify。
+  // 编辑器按文本处理以保留数值；服务端校验后存储和返回补默认值、压缩空白的规范文本。
   const [valuesJson, setValuesJson] = useState(plugin.configuration.valuesJson)
   const [secretOperations, setSecretOperations] = useState<
     Record<string, SecretUpdateOperation>
@@ -472,7 +472,7 @@ export function PluginConfigModal({
         <section className="plugin-config-section">
           <div className="plugin-config-section-title">
             <span>{t('plugins.configDialog.generalSettings')}</span>
-            <Badge tone="neutral">v{version}</Badge>
+             <Badge tone="neutral">{t('plugins.configDialog.configurationVersion', { version })}</Badge>
           </div>
 
           {editorMode === 'form' && schemaResult.ok && parseResult.ok ? (

@@ -54,7 +54,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     renderModal()
 
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
-    expect(screen.getByText(`v${opencliPluginFixture.configuration.version}`)).toBeInTheDocument()
+    expect(screen.getByText(`配置版本 ${opencliPluginFixture.configuration.version}`)).toBeInTheDocument()
 
     // 连接设置可编辑。
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')

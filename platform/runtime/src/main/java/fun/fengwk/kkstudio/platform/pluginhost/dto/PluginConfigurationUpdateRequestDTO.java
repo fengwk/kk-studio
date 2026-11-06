@@ -11,9 +11,9 @@ import java.util.Map;
 /**
  * {@code PUT /api/platform/plugins/{pluginId}/configuration} 请求体：期望版本 + 普通值原文 + 秘密补丁。
  *
- * <p>{@code expectedVersion} 是该插件的当前配置版本，canonical 非负十进制字符串，不匹配即 409。{@code valuesJson} 是用户编辑的 严格
- * JSON object 原文，按提交文本逐字节保留大整数、精确小数与超范围指数；64 KiB UTF-8 预算也按提交原文计。服务端只做 schema 归一化与校验。{@code
- * secretPatch} 的键必须是被 schema 声明的秘密字段，省略即 KEEP。
+ * <p>{@code expectedVersion} 是该插件的当前配置版本，canonical 非负十进制字符串，不匹配即 409。{@code valuesJson} 是用户编辑的严格
+ * JSON object；数值逐值保真，存储与返回的是校验后的规范文本，包括补默认值和压缩空白。64 KiB UTF-8 预算按提交文本计。{@code secretPatch} 的键必须是被
+ * schema 声明的秘密字段，省略即 KEEP。
  */
 @Data
 public class PluginConfigurationUpdateRequestDTO {

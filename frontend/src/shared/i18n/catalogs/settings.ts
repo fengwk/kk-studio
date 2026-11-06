@@ -165,6 +165,10 @@ export const settingsCatalog = {
     'en-US': 'Configuration',
     'zh-CN': '普通配置',
   },
+  'plugins.configDialog.configurationVersion': {
+    'en-US': 'Configuration version {{version}}',
+    'zh-CN': '配置版本 {{version}}',
+  },
   'plugins.configDialog.secrets': {
     'en-US': 'Secrets',
     'zh-CN': '秘密配置',
