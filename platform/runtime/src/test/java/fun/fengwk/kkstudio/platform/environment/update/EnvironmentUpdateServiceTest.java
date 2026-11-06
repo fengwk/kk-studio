@@ -37,6 +37,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
@@ -44,7 +46,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -107,7 +108,7 @@ class EnvironmentUpdateServiceTest {
   void sendsFixedTargetWithoutPersistingAndMarksDeliveryUnconfirmed() {
     EnvironmentUpdateStartDTO result = service.startUpdate(ENV);
 
-    assertEquals(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, result.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, result.getCommandStatus());
     assertEquals(CURRENT, result.getRuntimeStatus().getStatus().getDaemonVersion());
     ArgumentCaptor<DaemonUpdateCommand> command =
         ArgumentCaptor.forClass(DaemonUpdateCommand.class);
@@ -125,7 +126,7 @@ class EnvironmentUpdateServiceTest {
 
     EnvironmentUpdateStartDTO result = service.startUpdate(ENV);
 
-    assertEquals(EnvironmentUpdateStartDTO.CURRENT, result.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.CURRENT, result.getCommandStatus());
     assertEquals(TARGET, result.getRuntimeStatus().getStatus().getDaemonVersion());
     verify(server, never()).beginUpdate(any(), any());
     verify(server, never()).sendUpdate(any(), any());
@@ -138,7 +139,7 @@ class EnvironmentUpdateServiceTest {
 
     EnvironmentUpdateStartDTO result = service.startUpdate(ENV);
 
-    assertEquals(EnvironmentUpdateStartDTO.IN_PROGRESS, result.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.IN_PROGRESS, result.getCommandStatus());
     assertEquals(TARGET, result.getRuntimeStatus().getStatus().getUpdate().getTargetVersion());
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -230,7 +231,7 @@ class EnvironmentUpdateServiceTest {
   @Test
   void failedReceiptRecordsOneBoundedOperationalEventAndDoesNotAdvanceTaskState() {
     EnvironmentUpdateStartDTO started = service.startUpdate(ENV);
-    assertEquals(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, started.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, started.getCommandStatus());
 
     service.onUpdateResult(
         ENV, DaemonUpdateResult.failed(UUID.randomUUID().toString(), "checksum mismatch"));

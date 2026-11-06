@@ -16,7 +16,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -102,7 +103,7 @@ class EnvironmentRuntimeOwnerClientTest {
     EnvironmentUpdateStartDTO result = client.startUpdate(remote(), ENV);
 
     assertEquals("POST", method.get());
-    assertEquals(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, result.getCommandStatus());
+    assertEquals(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, result.getCommandStatus());
     assertEquals(8L, Long.parseLong(result.getRuntimeStatus().getRevision()));
     assertEquals(12L, result.getRuntimeStatus().getStatus().getUpdate().getDownloadedBytes());
   }

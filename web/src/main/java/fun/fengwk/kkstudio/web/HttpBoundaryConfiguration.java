@@ -26,6 +26,7 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
@@ -42,6 +43,17 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
 
   private static final Converter<String, UUID> UUID_CONVERTER =
       value -> Uuids.parseCanonical(value, "UUID");
+
+  /** Daemon 操作系统族的 HTTP 词汇是小写 wire 值，不是枚举常量名。 */
+  private static final Converter<String, DaemonOperatingSystem> OPERATING_SYSTEM_CONVERTER =
+      value -> {
+        try {
+          return DaemonOperatingSystem.fromWireValue(value);
+        } catch (IllegalArgumentException error) {
+          throw new IllegalArgumentException(
+              "operatingSystem must be windows, wsl, linux or macos");
+        }
+      };
 
   private final JsonMapper mapper;
 
@@ -220,6 +232,7 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
   @Override
   public void addFormatters(FormatterRegistry registry) {
     registry.addConverter(String.class, UUID.class, UUID_CONVERTER);
+    registry.addConverter(String.class, DaemonOperatingSystem.class, OPERATING_SYSTEM_CONVERTER);
   }
 
   /** 防止 Spring 在转换器拒绝后回退到宽松的默认 UUID 属性编辑器。 */

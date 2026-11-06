@@ -19,15 +19,16 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentUpdateListener;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateProgressDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateProgressDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -126,12 +127,12 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
                         RESOURCE, "the official daemon release is not available"));
 
     if (target.targetVersion().equals(current.getStatus().getDaemonVersion())) {
-      return startResult(EnvironmentUpdateStartDTO.CURRENT, current);
+      return startResult(EnvironmentUpdateCommandStatus.CURRENT, current);
     }
     DaemonUpdateProgress progress = toProgress(current.getStatus().getUpdate());
     if (progress != null) {
       if (target.targetVersion().equals(progress.targetVersion())) {
-        return startResult(EnvironmentUpdateStartDTO.IN_PROGRESS, current);
+        return startResult(EnvironmentUpdateCommandStatus.IN_PROGRESS, current);
       }
       throw DomainException.inUse(
           RESOURCE, "an update to " + progress.targetVersion() + " is already in progress");
@@ -158,7 +159,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
           .server()
           .sendUpdate(environmentId, new DaemonUpdateCommand(operationId, target.targetVersion()));
       return startResult(
-          EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, runtimeStatusOr(environmentId, current));
+          EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, runtimeStatusOr(environmentId, current));
     } catch (EnvironmentCapabilityBusyException error) {
       recordUpdateFailure(environmentId);
       throw DomainException.inUse(RESOURCE, "daemon is not ready to accept the update command");
@@ -237,7 +238,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
   }
 
   private static EnvironmentUpdateStartDTO startResult(
-      String commandStatus, EnvironmentRuntimeStatusDTO runtimeStatus) {
+      EnvironmentUpdateCommandStatus commandStatus, EnvironmentRuntimeStatusDTO runtimeStatus) {
     EnvironmentUpdateStartDTO dto = new EnvironmentUpdateStartDTO();
     dto.setCommandStatus(commandStatus);
     dto.setRuntimeStatus(runtimeStatus);

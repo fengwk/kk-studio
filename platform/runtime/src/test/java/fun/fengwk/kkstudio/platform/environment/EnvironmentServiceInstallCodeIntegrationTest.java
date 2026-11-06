@@ -18,15 +18,16 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -236,7 +237,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isZero();
 
     // 第一个实例观察到版本已递增
-    EnvironmentCardDTO card = serviceInstance1.get(envId);
+    EnvironmentDTO card = serviceInstance1.get(envId);
     assertThat(card.getVersion()).isEqualTo("2");
 
     // 再次在第一个实例尝试兑换失败
@@ -295,7 +296,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(otherErrors.get()).isZero();
     assertThat(countInstallCodes(envId)).isZero();
 
-    EnvironmentCardDTO card = environmentService.get(envId);
+    EnvironmentDTO card = environmentService.get(envId);
     assertThat(card.getVersion()).isEqualTo("2");
   }
 
@@ -319,7 +320,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 事务回滚后：临时 code 未被删除，版本保持不变
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
-    EnvironmentCardDTO card = environmentService.get(envId);
+    EnvironmentDTO card = environmentService.get(envId);
     assertThat(card.getVersion()).isEqualTo("1");
 
     // 原 code 仍可成功兑换，且成功后版本推进为 2
@@ -361,7 +362,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 事务回滚后：code 仍然有效保留
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
-    EnvironmentCardDTO card = environmentService.get(envId);
+    EnvironmentDTO card = environmentService.get(envId);
     assertThat(card.getVersion()).isEqualTo("1");
 
     // 使用正常 service 重试兑换成功
@@ -374,11 +375,11 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   private EnvironmentId createTestEnvironment(String name) {
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName(name);
-    EnvironmentCardDTO card = environmentService.create(create);
+    EnvironmentDTO card = environmentService.create(create);
     EnvironmentInstallConfigUpdateDTO update = new EnvironmentInstallConfigUpdateDTO();
     update.setExpectedVersion(card.getVersion());
     update.setInstallConfig(validConfig());
-    EnvironmentCardDTO updated =
+    EnvironmentDTO updated =
         environmentService.updateInstallConfig(EnvironmentId.parse(card.getId()), update);
     return EnvironmentId.parse(updated.getId());
   }
@@ -387,7 +388,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     DaemonConfiguration daemon = new DaemonConfiguration();
     daemon.setStudioUrl("https://studio.example.com");
     EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
-    config.setOperatingSystem("linux");
+    config.setOperatingSystem(DaemonOperatingSystem.LINUX);
     config.setDaemon(daemon);
     return config;
   }

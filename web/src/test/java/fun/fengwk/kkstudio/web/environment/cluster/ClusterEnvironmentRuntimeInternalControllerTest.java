@@ -18,11 +18,12 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.net.URI;
@@ -68,7 +69,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
   @Test
   void forwardsUpdateToLocalServiceAndReturnsCommandStatus() throws Exception {
     EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
-    started.setCommandStatus(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED);
+    started.setCommandStatus(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED);
     started.setRuntimeStatus(runtimeStatus("4"));
     when(updateService.startUpdate(any())).thenReturn(started);
 

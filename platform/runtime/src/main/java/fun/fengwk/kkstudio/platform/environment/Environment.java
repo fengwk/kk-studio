@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.environment;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 
 import java.time.Instant;
 import java.util.UUID;

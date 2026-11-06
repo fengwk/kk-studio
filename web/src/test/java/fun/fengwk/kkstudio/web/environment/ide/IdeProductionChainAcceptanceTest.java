@@ -631,7 +631,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private String startEnvironmentAndDaemon() throws Exception {
     Path release = explicitCodeServerRelease();
     JsonNode created =
-        postJson("/api/environments", "{\"name\":\"ide-acceptance-" + suffix() + "\"}");
+        postJson("/api/platform/environments", "{\"name\":\"ide-acceptance-" + suffix() + "\"}");
     JsonNode card = created.path("data");
     String environmentId = card.path("id").asText();
     String registrationToken = card.path("registrationToken").asText();
@@ -664,7 +664,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     while (System.nanoTime() < deadline) {
       assertTrue(
           daemon.alive(), "the daemon process exited before READY; see " + daemon.stderrLog());
-      JsonNode card = getJson("/api/environments/" + environmentId).path("data");
+      JsonNode card = getJson("/api/platform/environments/" + environmentId).path("data");
       lastStatus = card.path("status").asText("unknown");
       if ("READY".equals(lastStatus)) {
         return;

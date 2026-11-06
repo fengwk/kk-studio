@@ -28,17 +28,18 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   void saveReadListStaleCasNoOpRotateAndDelete() throws Exception {
     JsonNode created = create("install-env");
     String id = created.path("id").asText();
-    String path = "/api/environments/" + id;
+    String path = "/api/platform/environments/" + id;
     String token = created.path("registrationToken").asText();
     assertFalse(created.hasNonNull("installConfig"));
-    JsonNode saved = putData(path + "/install-config", update("0", config()));
+    JsonNode saved = putData(path + "/install-settings", update("0", config()));
     assertEquals("1", saved.path("version").asText());
     assertFalse(saved.has("registrationToken"));
     assertEquals(
         "https://studio.example.com", saved.at("/installConfig/daemon/studioUrl").asText());
     assertEquals(saved.path("installConfig"), getData(path).path("installConfig"));
     assertEquals(
-        saved.path("installConfig"), getData("/api/environments").get(0).path("installConfig"));
+        saved.path("installConfig"),
+        getData("/api/platform/environments").get(0).path("installConfig"));
     assertEquals(
         "linux",
         jdbc.queryForObject(
@@ -49,14 +50,14 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(RegistrationTokens.hash(token), storedTokenHash(id));
 
     perform(
-        put(path + "/install-config")
+        put(path + "/install-settings")
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(update("0", config()))),
         409);
-    JsonNode unchanged = putData(path + "/install-config", update("1", config()));
+    JsonNode unchanged = putData(path + "/install-settings", update("1", config()));
     assertEquals(saved.path("version"), unchanged.path("version"));
-    assertEquals(saved.path("updateTime"), unchanged.path("updateTime"));
-    JsonNode rotated = postData(path + "/registration-token", Map.of("expectedVersion", "1"));
+    assertEquals(saved.path("updatedAt"), unchanged.path("updatedAt"));
+    JsonNode rotated = postData(path + "/rotate-token", Map.of("expectedVersion", "1"));
     assertEquals(saved.path("installConfig"), rotated.path("installConfig"));
     assertEquals("2", rotated.path("version").asText());
     // 轮换只在本次响应中返回新明文，库内摘要随之替换。
@@ -70,7 +71,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   @Test
   void invalidKnownFieldsAndTypesFailWithoutMutation() throws Exception {
     String id = create("invalid-env").path("id").asText();
-    String path = "/api/environments/" + id + "/install-config";
+    String path = "/api/platform/environments/" + id + "/install-settings";
     for (String json :
         List.of(
             "{\"expectedVersion\":0,\"installConfig\":{}}",
@@ -94,8 +95,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   void configSyncRoundtripCreateAtomicUpdateIdempotencyAndAbsentClears() throws Exception {
     JsonNode created = create("roundtrip-env");
     String id = created.path("id").asText();
-    String path = "/api/environments/" + id;
-    JsonNode saved = putData(path + "/install-config", update("0", config()));
+    String path = "/api/platform/environments/" + id;
+    JsonNode saved = putData(path + "/install-settings", update("0", config()));
     String yaml =
         postData(
                 "/api/settings/sync/export",
@@ -110,9 +111,9 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(saved.path("version"), getData(path).path("version"));
     perform(delete(path).param("expectedVersion", "1"), 204);
     postData("/api/settings/sync/import", Map.of("yaml", yaml));
-    JsonNode imported = getData("/api/environments").get(0);
+    JsonNode imported = getData("/api/platform/environments").get(0);
     assertEquals(saved.path("installConfig"), imported.path("installConfig"));
-    String importedPath = "/api/environments/" + imported.path("id").asText();
+    String importedPath = "/api/platform/environments/" + imported.path("id").asText();
     String changed =
         mutateYaml(
             yaml,
@@ -177,8 +178,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   void failureAfterFirstEnvironmentUpdateRollsBackTokenConfigAndVersion() throws Exception {
     JsonNode first = create("first");
     create("second");
-    String firstPath = "/api/environments/" + first.path("id").asText();
-    putData(firstPath + "/install-config", update("0", config()));
+    String firstPath = "/api/platform/environments/" + first.path("id").asText();
+    putData(firstPath + "/install-settings", update("0", config()));
     jdbc.execute(
         """
         create function reject_second_install() returns trigger language plpgsql as $$
@@ -218,7 +219,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode create(String name) throws Exception {
-    return postData("/api/environments", Map.of("name", name));
+    return postData("/api/platform/environments", Map.of("name", name));
   }
 
   private static Map<String, Object> update(String version, Object config) {

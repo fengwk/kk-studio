@@ -9,18 +9,23 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.LiveEnvironmentCapabilityDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentEventDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
-import fun.fengwk.kkstudio.share.environment.LiveEnvironmentCapabilityDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -38,16 +43,13 @@ public class EnvironmentService {
 
   private static final String RESOURCE = "environment";
 
-  /** 无有效连接（从未连接或连接已失效）时对外派生的状态。 */
-  private static final String OFFLINE = "OFFLINE";
-
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
 
   @Transactional
-  public EnvironmentCardDTO create(EnvironmentCreateDTO dto) {
+  public EnvironmentDTO create(EnvironmentCreateDTO dto) {
     if (dto == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
@@ -68,16 +70,16 @@ public class EnvironmentService {
       throw DomainException.duplicate(RESOURCE, "environment name already exists: " + name, error);
     }
     Environment created = environmentRepository.getById(env.getId());
-    return toCardDto(created, token);
+    return toDto(created, token);
   }
 
-  public EnvironmentCardDTO get(EnvironmentId id) {
+  public EnvironmentDTO get(EnvironmentId id) {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.getById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    return toCardDto(env, null);
+    return toDto(env, null);
   }
 
   /** Work 路由使用数据库时间判定 READY 租约，不使用展示卡片的 JVM 时钟。 */
@@ -95,17 +97,17 @@ public class EnvironmentService {
     return environment.getName();
   }
 
-  public List<EnvironmentCardDTO> list() {
+  public List<EnvironmentDTO> list() {
     List<Environment> envs = environmentRepository.listNewestFirst();
-    List<EnvironmentCardDTO> results = new ArrayList<>(envs.size());
+    List<EnvironmentDTO> results = new ArrayList<>(envs.size());
     for (Environment env : envs) {
-      results.add(toCardDto(env, null));
+      results.add(toDto(env, null));
     }
     return List.copyOf(results);
   }
 
   @Transactional
-  public EnvironmentCardDTO importEnvironment(
+  public EnvironmentDTO importEnvironment(
       String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {
     String canonicalName = validateName(name);
     String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
@@ -132,11 +134,11 @@ public class EnvironmentService {
           RESOURCE, "environment name or registrationToken already exists", error);
     }
     Environment created = environmentRepository.getById(env.getId());
-    return toCardDto(created, null);
+    return toDto(created, null);
   }
 
   @Transactional
-  public EnvironmentCardDTO updateImportedEnvironment(
+  public EnvironmentDTO updateImportedEnvironment(
       EnvironmentId id,
       String registrationTokenHash,
       EnvironmentInstallConfigDTO installConfig,
@@ -156,7 +158,7 @@ public class EnvironmentService {
     }
     if (tokenHash.equals(env.getRegistrationTokenHash())
         && Objects.equals(config, env.getInstallConfig())) {
-      return toCardDto(env, null);
+      return toDto(env, null);
     }
     env.setRegistrationTokenHash(tokenHash);
     env.setInstallConfig(config);
@@ -174,11 +176,11 @@ public class EnvironmentService {
           RESOURCE, "environment registrationToken already in use", error);
     }
     Environment updated = environmentRepository.getById(id.value());
-    return toCardDto(updated, null);
+    return toDto(updated, null);
   }
 
   @Transactional
-  public EnvironmentCardDTO updateInstallConfig(
+  public EnvironmentDTO updateInstallConfig(
       EnvironmentId id, EnvironmentInstallConfigUpdateDTO request) {
     Objects.requireNonNull(id, "id");
     if (request == null) {
@@ -196,7 +198,7 @@ public class EnvironmentService {
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(env.getVersion()));
     }
     if (Objects.equals(config, env.getInstallConfig())) {
-      return toCardDto(env, null);
+      return toDto(env, null);
     }
     env.setInstallConfig(config);
     if (!environmentRepository.updateById(env, expected)) {
@@ -207,7 +209,7 @@ public class EnvironmentService {
       throw DomainException.versionConflict(
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(reread.getVersion()));
     }
-    return toCardDto(environmentRepository.getById(id.value()), null);
+    return toDto(environmentRepository.getById(id.value()), null);
   }
 
   public List<EnvironmentEventDTO> listEvents(EnvironmentId id) {
@@ -283,12 +285,12 @@ public class EnvironmentService {
     return env;
   }
 
-  public String uninstallationScript(String operatingSystem) {
+  public String uninstallationScript(DaemonOperatingSystem operatingSystem) {
     return EnvironmentInstallScripts.uninstall(operatingSystem, snapshot.get().network());
   }
 
   @Transactional
-  public EnvironmentCardDTO rotateToken(EnvironmentId id, String expectedVersion) {
+  public EnvironmentDTO rotateToken(EnvironmentId id, String expectedVersion) {
     Objects.requireNonNull(id, "id");
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
@@ -310,7 +312,7 @@ public class EnvironmentService {
           RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
     Environment updated = environmentRepository.getById(id.value());
-    return toCardDto(updated, token);
+    return toDto(updated, token);
   }
 
   @Transactional
@@ -354,9 +356,9 @@ public class EnvironmentService {
 
   private static EnvironmentEventDTO toEventDto(EnvironmentEvent event) {
     EnvironmentEventDTO dto = new EnvironmentEventDTO();
-    dto.setTime(event.time());
-    dto.setLevel(event.level());
-    dto.setType(event.type());
+    dto.setOccurredAt(event.time());
+    dto.setLevel(EnvironmentEventLevel.valueOf(event.level()));
+    dto.setType(EnvironmentEventType.valueOf(event.type()));
     dto.setMessage(event.message());
     return dto;
   }
@@ -393,21 +395,21 @@ public class EnvironmentService {
   }
 
   /** {@code token} 只在刚签发明文凭证的响应中非空。 */
-  private EnvironmentCardDTO toCardDto(Environment env, String token) {
-    EnvironmentCardDTO dto = new EnvironmentCardDTO();
+  private EnvironmentDTO toDto(Environment env, String token) {
+    EnvironmentDTO dto = new EnvironmentDTO();
     dto.setId(env.getId().toString());
     dto.setName(env.getName());
     dto.setInstallConfig(env.getInstallConfig());
     dto.setRegistrationToken(token);
     dto.setVersion(CatalogVersions.format(env.getVersion()));
-    dto.setCreateTime(env.getCreateTime());
-    dto.setUpdateTime(env.getUpdateTime());
+    dto.setCreatedAt(env.getCreateTime());
+    dto.setUpdatedAt(env.getUpdateTime());
 
     EnvironmentId envId = EnvironmentId.of(env.getId());
     Optional<EnvironmentConnection> connOpt = environmentRegistry.find(envId);
     if (connOpt.isEmpty()) {
       // 无连接行：从未连接过，无任何已保留的宿主 metadata。
-      dto.setStatus(OFFLINE);
+      dto.setStatus(EnvironmentStatus.OFFLINE);
       dto.setReady(false);
       dto.setCapabilities(List.of());
       return dto;
@@ -421,15 +423,20 @@ public class EnvironmentService {
         statusDeadline(
             conn, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis()));
     boolean statusValid = statusDeadline.isAfter(now);
-    dto.setStatus(statusValid ? conn.status().name() : OFFLINE);
+    dto.setStatus(
+        statusValid
+            ? (conn.status() == LiveEnvironmentStatus.READY
+                ? EnvironmentStatus.READY
+                : EnvironmentStatus.CONNECTING)
+            : EnvironmentStatus.OFFLINE);
     dto.setStatusExpiresAt(statusValid ? statusDeadline : null);
     dto.setReady(
         conn.isReady(
             now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
-    dto.setLastSeen(conn.lastSeenAt());
+    dto.setLastSeenAt(conn.lastSeenAt());
     DaemonEnvironmentInfo host =
         conn.daemonCapabilities() == null ? null : conn.daemonCapabilities().environment();
-    dto.setOperatingSystem(host == null ? null : host.operatingSystem().wireValue());
+    dto.setOperatingSystem(host == null ? null : host.operatingSystem());
     dto.setTimeZone(host == null ? null : host.timeZone());
     dto.setNote(host == null ? null : host.note());
     dto.setUserName(host == null ? null : host.userName());

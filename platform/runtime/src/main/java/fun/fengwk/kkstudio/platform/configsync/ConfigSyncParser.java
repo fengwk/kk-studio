@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 

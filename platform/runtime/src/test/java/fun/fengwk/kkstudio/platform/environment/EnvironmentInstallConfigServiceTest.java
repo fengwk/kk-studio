@@ -14,11 +14,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -103,7 +104,7 @@ class EnvironmentInstallConfigServiceTest {
     DaemonConfiguration daemon = new DaemonConfiguration();
     daemon.setStudioUrl("https://studio.example.com");
     EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
-    config.setOperatingSystem("linux");
+    config.setOperatingSystem(DaemonOperatingSystem.LINUX);
     config.setDaemon(daemon);
     EnvironmentInstallConfigUpdateDTO request = new EnvironmentInstallConfigUpdateDTO();
     request.setExpectedVersion("0");
