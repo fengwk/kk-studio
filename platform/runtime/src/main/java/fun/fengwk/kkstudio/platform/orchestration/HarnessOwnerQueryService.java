@@ -21,9 +21,9 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -129,8 +129,8 @@ public class HarnessOwnerQueryService {
     dto.setUpdatedAt(thread.updatedAt());
     // 本地执行状态直接复用 Thread 快照三态投影，全部暴露 executionControl，删 processing。
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
-    dto.setStatus(status.name());
-    dto.setExecutionControl(thread.executionControl().name());
+    dto.setStatus(status);
+    dto.setExecutionControl(thread.executionControl());
     ExecutionSelection execution = snapshot.entryState().baseSettings().execution();
     if (execution != null) {
       HarnessExecutionSelectionDTO executionDto = new HarnessExecutionSelectionDTO();

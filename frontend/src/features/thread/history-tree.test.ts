@@ -25,7 +25,7 @@ function entry(
     parentEntryId: options.parentEntryId ?? null,
     entryType,
     payloadJson: JSON.stringify(options.payload ?? {}),
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
 }

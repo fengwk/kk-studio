@@ -154,7 +154,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
       const method = request.method()
       // 决策只写原始调用；任何容器/目标 Thread 写入（包括未 mock 的请求）都必须失败。
       if (method !== 'GET'
-        && !(method === 'PUT' && requestPath === '/api/threads/thread-approval/tool-invocations/int-approval/approval')
+        && !(method === 'PUT' && requestPath === '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval')
         && !(method === 'POST' && requestPath === '/api/interactions/int-questionnaire/input')) {
         targetWrites.push(`${method} ${requestPath}`)
       }
@@ -528,7 +528,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
-      '/api/threads/thread-approval/tool-invocations/int-approval/approval',
+      '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval',
     )
     expect(approvals[0].body).toMatchObject({ decision: 'ALLOW', reason: null })
     expect(String(approvals[0].body.decisionId)).not.toHaveLength(0)
@@ -550,7 +550,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
-      '/api/threads/thread-approval/tool-invocations/int-approval/approval',
+      '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval',
     )
     expect(approvals[0].body).toMatchObject({ decision: 'DENY', reason: null })
     expect(String(approvals[0].body.decisionId)).not.toHaveLength(0)

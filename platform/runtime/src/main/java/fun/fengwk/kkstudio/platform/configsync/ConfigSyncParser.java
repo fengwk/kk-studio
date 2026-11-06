@@ -25,10 +25,10 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.math.BigDecimal;

@@ -4,8 +4,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-
 import java.time.Instant;
 
 /** 全局 Agent definition 的公开表示。 */

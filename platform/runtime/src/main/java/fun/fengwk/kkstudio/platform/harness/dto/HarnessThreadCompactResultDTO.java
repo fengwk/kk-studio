@@ -1,0 +1,20 @@
+package fun.fengwk.kkstudio.platform.harness.dto;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Data;
+import org.jspecify.annotations.Nullable;
+
+/** 手动压缩提交结果。 */
+@Data
+public class HarnessThreadCompactResultDTO {
+
+  /** 提交后的权威 Thread projection。 */
+  private HarnessThreadDTO thread;
+
+  /** 本次压缩 Turn 的 start Entry。 */
+  private String turnStartEntryId;
+
+  /** 创建的独立压缩子 Thread ID；Resolver 业务拒绝时为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable String childThreadId;
+}

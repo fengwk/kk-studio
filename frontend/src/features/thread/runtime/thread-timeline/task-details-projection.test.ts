@@ -21,7 +21,7 @@ function entry(
     payloadJson: JSON.stringify({
       message: { role, contents },
     }),
-    createTime: 1785232800,
+    createdAt: 1785232800,
     usageCost: null,
   }
 }
@@ -54,8 +54,8 @@ function toolInvocation(
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: 1785232800,
-    updateTime: 1785232801,
+    createdAt: 1785232800,
+    updatedAt: 1785232801,
     ...overrides,
   }
 }
@@ -206,7 +206,7 @@ describe('durable tool result status after invocation deletion', () => {
     // HistoryPayloadMapper 写入 toolResultMetadata.status；不需要仍存在 live invocation。
     const entry: HarnessSessionEntryDTO = {
       entryId: 'result', sessionId: 'session', parentEntryId: null,
-      entryType: 'MESSAGE', createTime: 1, usageCost: null,
+      entryType: 'MESSAGE', createdAt: 1, usageCost: null,
       payloadJson: JSON.stringify({
         message: { role: 'TOOL', contents: [{
           type: 'tool_result', toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',

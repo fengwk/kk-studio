@@ -630,8 +630,8 @@ describe('useHarnessThreadRealtime', () => {
       ...activeAssistantOutput(),
       sequence: '2',
       contents: [
-        { type: 'text', text: 'safe' },
-        { type: 'thinking', text: 'plan' },
+        { type: 'text' as const, text: 'safe' },
+        { type: 'thinking' as const, text: 'plan' },
       ],
     }
     const { result, sockets } = renderRealtime(client, { activeAssistantOutput: restored })
@@ -1934,8 +1934,8 @@ function activeAssistantOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createTime: 1767225600,
-    updateTime: 1767225600,
+    createdAt: 1767225600,
+    updatedAt: 1767225600,
     ...overrides,
   }
 }
@@ -1961,8 +1961,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: 1767225600,
-    updateTime: 1767225600,
+    createdAt: 1767225600,
+    updatedAt: 1767225600,
     ...overrides,
   }
 }

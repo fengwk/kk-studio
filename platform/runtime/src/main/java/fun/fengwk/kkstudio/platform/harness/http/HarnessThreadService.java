@@ -12,13 +12,13 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.util.Map;
 import java.util.UUID;

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
+import org.jspecify.annotations.Nullable;
+
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.json.StrictJson;
@@ -33,24 +35,25 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessImageInputTier;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugRequestDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadYoloUpdateDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionAbandonDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugRequestDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessNameUpdateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadYoloUpdateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessToolApprovalDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUserMessageContentDTO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -137,13 +140,10 @@ public final class HarnessRuntimeRequestMapper {
   public static ToolApprovalCommand toToolApprovalCommand(
       String threadId, String toolInvocationId, HarnessToolApprovalDTO dto, String actor) {
     requireNonNull(dto, "approvalDTO");
-    String decision = requireText(dto.getDecision(), "decision");
     ToolApprovalDecision parsed =
-        switch (decision) {
-          case "ALLOW" -> ToolApprovalDecision.ALLOWED;
-          case "DENY" -> ToolApprovalDecision.DENIED;
-          default -> throw new IllegalArgumentException(
-              "decision must be ALLOW or DENY: " + decision);
+        switch (requireNonNull(dto.getDecision(), "decision")) {
+          case ALLOW -> ToolApprovalDecision.ALLOWED;
+          case DENY -> ToolApprovalDecision.DENIED;
         };
     return new ToolApprovalCommand(
         Uuids.parseCanonical(threadId, "threadId"),
@@ -183,41 +183,25 @@ public final class HarnessRuntimeRequestMapper {
 
   private static AcceptCommandsTarget toTarget(HarnessCommandTargetDTO dto) {
     requireNonNull(dto, "target");
-    String type = requireText(dto.getType(), "target.type");
-    return switch (type) {
-      case "NEW_SESSION" -> {
-        requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
-        requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
-        requireForbidden(
-            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
-        yield new AcceptCommandsTarget.NewRootSession(
-            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
-            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
-            toBranchSettings(requireNonNull(dto.getRootSettings(), "target.rootSettings")),
-            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
-      }
-      case "NEW_THREAD" -> {
-        requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
-        requireForbidden(
-            dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
-        yield new AcceptCommandsTarget.NewThread(
-            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
-            Uuids.parseCanonical(dto.getStartEntryId(), "target.startEntryId"),
-            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
-            requireText(dto.getThreadName(), "target.threadName"),
-            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
-      }
-      case "NEW_FORKED_SESSION" -> {
-        requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
-        requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
-        yield new AcceptCommandsTarget.NewForkedSession(
-            Uuids.parseCanonical(dto.getSourceThreadId(), "target.sourceThreadId"),
-            Uuids.parseCanonical(dto.getStartEntryId(), "target.startEntryId"),
-            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
-            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
-            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
-      }
-      default -> throw new IllegalArgumentException("unknown target type: " + type);
+    return switch (dto) {
+      case HarnessCommandTargetDTO.NewSessionDTO target -> new AcceptCommandsTarget.NewRootSession(
+          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
+          Uuids.parseCanonical(target.threadId(), "target.threadId"),
+          toBranchSettings(requireNonNull(target.rootSettings(), "target.rootSettings")),
+          target.yoloEnabled());
+      case HarnessCommandTargetDTO.NewThreadDTO target -> new AcceptCommandsTarget.NewThread(
+          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
+          Uuids.parseCanonical(target.startEntryId(), "target.startEntryId"),
+          Uuids.parseCanonical(target.threadId(), "target.threadId"),
+          requireText(target.threadName(), "target.threadName"),
+          target.yoloEnabled());
+      case HarnessCommandTargetDTO.NewForkedSessionDTO target -> new AcceptCommandsTarget
+          .NewForkedSession(
+          Uuids.parseCanonical(target.sourceThreadId(), "target.sourceThreadId"),
+          Uuids.parseCanonical(target.startEntryId(), "target.startEntryId"),
+          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
+          Uuids.parseCanonical(target.threadId(), "target.threadId"),
+          target.yoloEnabled());
     };
   }
 
@@ -228,12 +212,6 @@ public final class HarnessRuntimeRequestMapper {
   public static AcceptCommandsCommand toAcceptThreadCommandsCommand(
       String threadId, HarnessThreadCommandBatchDTO dto) {
     return toThreadCommandsCommand(threadId, dto, false);
-  }
-
-  /** 映射发送前预览批：预览依赖当前 head / next-sequence 快照，因此即使只有一条 USER_MESSAGE 也必须携带精确 cursor。 */
-  public static AcceptCommandsCommand toPreviewThreadCommandsCommand(
-      String threadId, HarnessThreadCommandBatchDTO dto) {
-    return toThreadCommandsCommand(threadId, dto, true);
   }
 
   private static AcceptCommandsCommand toThreadCommandsCommand(
@@ -264,22 +242,9 @@ public final class HarnessRuntimeRequestMapper {
     return new AcceptCommandsCommand(target, commands);
   }
 
-  /**
-   * 映射本地分支草稿预览的命令批：与正式创建完全同一套严格校验（固定 SET_AGENT/SET_MODEL/SET_ENVIRONMENT 顺序 + 恰好一条终止 USER_MESSAGE /
-   * GOAL），因此预览不会接受任何正式创建会拒绝的形状；草稿尚无 Thread，故这里只返回 domain 命令而不构造 target。
-   */
-  public static List<NewThreadCommand> toNewThreadCommands(
-      List<HarnessCommandCreateDTO> commands, String field) {
-    return toHttpCommands(commands, field, true);
-  }
-
   /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
-    if (!dto.hasEnvironmentNameField()) {
-      throw new IllegalArgumentException(
-          "branchSettings requires an explicit nullable environmentName field");
-    }
     if (dto.getGoal() != null) {
       throw new IllegalArgumentException(
           "branchSettings must not carry a goal; goals are set through a GOAL command");
@@ -324,64 +289,21 @@ public final class HarnessRuntimeRequestMapper {
     ThreadCommandPayload payload = toPayload(dto);
     return new NewThreadCommand(
         payload,
-        Uuids.parseCanonical(dto.getIdempotencyKey(), "command.idempotencyKey"),
+        Uuids.parseCanonical(dto.idempotencyKey(), "command.idempotencyKey"),
         ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   private static ThreadCommandPayload toPayload(HarnessCommandCreateDTO dto) {
-    String type = requireText(dto.getType(), "command.type");
-    return switch (type) {
-      case "USER_MESSAGE" -> {
-        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
-        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
-        requireForbidden(dto.hasTextField(), "text", "command type " + type);
-        yield new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
-      }
-      case "GOAL" -> {
-        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
-        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
-        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
-        // GOAL 必须显式携带 text（显式 null 表示清除），与「字段缺失」严格区分。
-        if (!dto.hasTextField()) {
-          throw new IllegalArgumentException("GOAL requires an explicit nullable text field");
-        }
-        yield new GoalCommandPayload(dto.getText());
-      }
-      case "SET_AGENT" -> {
-        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
-        requireForbidden(dto.hasTextField(), "text", "command type " + type);
-        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
-        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
-        yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
-      }
-      case "SET_EXECUTION" -> {
-        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
-        requireForbidden(dto.hasTextField(), "text", "command type " + type);
-        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
-        yield new SetExecutionCommandPayload(
-            toExecutionSelection(requireNonNull(dto.getExecution(), "execution")));
-      }
-      case "SET_ENVIRONMENT" -> {
-        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
-        requireForbidden(dto.hasTextField(), "text", "command type " + type);
-        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
-        // SET_ENVIRONMENT 必须显式携带 environmentName（显式 null 表示解除选择），与「字段缺失」严格区分。
-        if (!dto.hasEnvironmentNameField()) {
-          throw new IllegalArgumentException(
-              "SET_ENVIRONMENT requires an explicit nullable environmentName field");
-        }
-        yield new SetEnvironmentCommandPayload(dto.getEnvironmentName());
-      }
-      case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
-          "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
-      case "NOTIFICATION" -> throw new IllegalArgumentException(
-          "NOTIFICATION is internal-only and not allowed on the product HTTP surface");
-      default -> throw new IllegalArgumentException("unknown command type: " + type);
+    return switch (dto) {
+      case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
+          new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
+      case HarnessCommandCreateDTO.GoalDTO command -> new GoalCommandPayload(command.text());
+      case HarnessCommandCreateDTO.SetAgentDTO command -> new SetAgentCommandPayload(
+          requireText(command.agentName(), "command.agentName"));
+      case HarnessCommandCreateDTO.SetExecutionDTO command -> new SetExecutionCommandPayload(
+          toExecutionSelection(requireNonNull(command.execution(), "command.execution")));
+      case HarnessCommandCreateDTO.SetEnvironmentDTO command -> new SetEnvironmentCommandPayload(
+          command.environmentName());
     };
   }
 
@@ -405,10 +327,10 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 产品 HTTP 命令批的 shape admission：SET_* 必须按固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
+   * 产品 HTTP 命令批的 shape admission：SET_* 必须按固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt;
    * SET_ENVIRONMENT）出现，每种至多一次且位于消息之前；user-like 输入（USER_MESSAGE / GOAL）至多一条且必须位于末尾。
    *
-   * <p>创建型 target（NEW_SESSION / NEW_THREAD）与本地分支草稿预览要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
+   * <p>创建型 target（NEW_SESSION / NEW_THREAD）要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
    * user-like），额外保证由 Core 在应用边界完成。
    */
   private static void validateHttpCommandShape(
@@ -434,7 +356,7 @@ public final class HarnessRuntimeRequestMapper {
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
         throw new IllegalArgumentException(
-            "HTTP commands must use SET_AGENT, SET_MODEL, SET_ENVIRONMENT order");
+            "HTTP commands must use SET_AGENT, SET_EXECUTION, SET_ENVIRONMENT order");
       }
       lastSetOrder = order;
     }
@@ -446,13 +368,9 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  private static List<AgentMessageContent> toUserMessageContents(HarnessCommandCreateDTO dto) {
-    if (!dto.hasContentsField()) {
-      throw new IllegalArgumentException(
-          "USER_MESSAGE must contain exactly one non-empty contents list of "
-              + "TEXT/ATTACHMENT/RESOURCE");
-    }
-    List<HarnessUserMessageContentDTO> required = requireList(dto.getContents(), "contents");
+  private static List<AgentMessageContent> toUserMessageContents(
+      HarnessCommandCreateDTO.UserMessageDTO command) {
+    List<HarnessUserMessageContentDTO> required = requireList(command.contents(), "contents");
     if (required.isEmpty()) {
       throw new IllegalArgumentException("contents must not be empty");
     }
@@ -466,60 +384,34 @@ public final class HarnessRuntimeRequestMapper {
   private static AgentMessageContent toUserMessageContent(
       HarnessUserMessageContentDTO dto, int index) {
     String context = "contents[" + index + "]";
-    String type = requireText(dto.getType(), context + ".type");
-    return switch (type) {
-      case "TEXT" -> {
-        requireForbidden(dto.hasUploadIdField(), context + ".uploadId", "content type " + type);
-        requireForbidden(dto.hasBlobIdField(), context + ".blobId", "content type " + type);
-        requireForbidden(dto.hasNameField(), context + ".name", "content type " + type);
-        requireForbidden(dto.hasPreviewField(), context + ".preview", "content type " + type);
-        requireForbidden(dto.hasImageTierField(), context + ".imageTier", "content type " + type);
-        yield new TextMessageContent(requireText(dto.getText(), context + ".text"));
-      }
-      case "ATTACHMENT" -> {
-        requireForbidden(dto.hasTextField(), context + ".text", "content type " + type);
-        requireForbidden(dto.hasBlobIdField(), context + ".blobId", "content type " + type);
-        requireForbidden(dto.hasNameField(), context + ".name", "content type " + type);
-        requireForbidden(dto.hasPreviewField(), context + ".preview", "content type " + type);
-        yield new AttachmentMessageContent(
-            Uuids.parseCanonical(dto.getUploadId(), context + ".uploadId"),
-            toImageTier(dto, context));
-      }
-      case "RESOURCE" -> {
-        requireForbidden(dto.hasTextField(), context + ".text", "content type " + type);
-        requireForbidden(dto.hasUploadIdField(), context + ".uploadId", "content type " + type);
-        yield ResourceMessageContent.media(
-            Uuids.parseCanonical(dto.getBlobId(), context + ".blobId"),
-            requireText(dto.getName(), context + ".name"),
-            dto.getPreview(),
-            toImageTier(dto, context));
-      }
-      default -> throw new IllegalArgumentException(
-          context + ".type must be one of TEXT, ATTACHMENT, RESOURCE: " + type);
+    return switch (dto) {
+      case HarnessUserMessageContentDTO.TextDTO content -> new TextMessageContent(
+          requireText(content.text(), context + ".text"));
+      case HarnessUserMessageContentDTO.AttachmentDTO content -> new AttachmentMessageContent(
+          Uuids.parseCanonical(content.uploadId(), context + ".uploadId"),
+          toImageTier(content.imageTier(), context));
+      case HarnessUserMessageContentDTO.ResourceDTO content -> ResourceMessageContent.media(
+          Uuids.parseCanonical(content.blobId(), context + ".blobId"),
+          requireText(content.name(), context + ".name"),
+          content.preview(),
+          toImageTier(content.imageTier(), context));
     };
   }
 
   /**
-   * 解析 ATTACHMENT / RESOURCE 的图片输入档位：字段缺省时使用平台默认 720P，显式提供时必须是受支持的档位名（非图片媒体由 Platform 在权威 MIME 上收敛为
+   * 解析 ATTACHMENT / RESOURCE 的图片输入档位：缺省使用平台默认 720P，显式提供时必须是受支持的档位名（非图片媒体由 Platform 在权威 MIME 上收敛为
    * null）。
    */
-  private static ImageInputTier toImageTier(HarnessUserMessageContentDTO dto, String context) {
-    if (!dto.hasImageTierField()) {
+  private static ImageInputTier toImageTier(
+      @Nullable HarnessImageInputTier imageTier, String context) {
+    if (imageTier == null) {
       return ImageInputTier.P720;
     }
-    String value = requireText(dto.getImageTier(), context + ".imageTier");
-    try {
-      return ImageInputTier.fromWireName(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context + ".imageTier must be one of 720P, 1080P, ORIGINAL: " + value, error);
-    }
-  }
-
-  private static void requireForbidden(boolean present, String field, String context) {
-    if (present) {
-      throw new IllegalArgumentException("field " + field + " is forbidden for " + context);
-    }
+    return switch (imageTier) {
+      case P720 -> ImageInputTier.P720;
+      case P1080 -> ImageInputTier.P1080;
+      case ORIGINAL -> ImageInputTier.ORIGINAL;
+    };
   }
 
   private static String requireText(String value, String field) {

@@ -13,12 +13,8 @@ import {
   createBuiltinExecution,
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
-import type {
-  AgentDefinitionDTO,
-  AgentModelDTO,
-  HarnessBranchSettingsDTO,
-  HarnessThreadCommandDTO,
-} from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, AgentModelDTO, HarnessBranchSettingsDTO, HarnessThreadCommandDTO } from '@/shared/api/generated/contracts'
+import type { ThreadCommandType } from '@/shared/api/generated/contracts'
 
 const model: AgentModelDTO = {
   providerName: 'provider',
@@ -97,7 +93,7 @@ function draftWith(
 
 function queuedSettingCommand(
   sequence: string,
-  type: string,
+  type: ThreadCommandType,
   payload: Record<string, unknown>,
 ): HarnessThreadCommandDTO {
   return {
@@ -108,7 +104,7 @@ function queuedSettingCommand(
     idempotencyKey: `queued-${sequence}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: 0,
+    createdAt: 0,
   }
 }
 
@@ -547,7 +543,7 @@ describe('projectPendingTarget setting projection', () => {
   it('treats an unknown command type as a no-op', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_UNKNOWN', { agentName: 'coder' }),
+      queuedSettingCommand('1', 'SET_UNKNOWN' as ThreadCommandType, { agentName: 'coder' }),
     ])
     expect(projected).toEqual(base)
   })

@@ -4,8 +4,6 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-
 /**
  * 完整的 Agent Definition create/PUT 请求体；可空文本字段用于显式清除对应值。
  *

@@ -40,8 +40,8 @@ function rootThread(overrides: Record<string, unknown> = {}) {
       environmentName: null,
       goal: null,
     },
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
     ...overrides,
   }
 }
@@ -72,8 +72,8 @@ function environmentCards() {
     userName: null,
     homeDirectory: null,
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
   }]
 }
 
@@ -107,7 +107,7 @@ function treeNodes() {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
     {
       threadId: CHILD_ID,
@@ -120,7 +120,7 @@ function treeNodes() {
       turnCount: 2,
       toolCallCount: 1,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
   ]
 }
@@ -147,7 +147,7 @@ function interactionItems() {
         environmentId: null,
         environmentName: null,
         waitingCount: null,
-        createTime: 1791194220,
+        createdAt: 1791194220,
       },
     ],
     total: 1,
@@ -176,7 +176,7 @@ async function installPaneApi(
     const path = new URL(request.url()).pathname
     const method = request.method()
 
-    if (path === `/api/threads/${ROOT_ID}/stop` && method === 'POST') {
+    if (path === `/api/harness/threads/${ROOT_ID}/stop` && method === 'POST') {
       recorded.stopRequests.push(request.postDataJSON())
       await route.fulfill({
         json: {
@@ -187,16 +187,16 @@ async function installPaneApi(
       })
       return
     }
-    if (path === `/api/threads/${ROOT_ID}/command-batches` && method === 'POST') {
+    if (path === `/api/harness/threads/${ROOT_ID}/command-batches` && method === 'POST') {
       recorded.commandRequests.push(request.postDataJSON())
       await route.fulfill({ json: { accepted: true, thread: rootThread() } })
       return
     }
-    if (path === `/api/threads/${ROOT_ID}/tree`) {
+    if (path === `/api/harness/threads/${ROOT_ID}/tree`) {
       await route.fulfill({ json: treeNodes() })
       return
     }
-    if (path === `/api/threads/${ROOT_ID}`) {
+    if (path === `/api/harness/threads/${ROOT_ID}`) {
       const thread = rootThread(options.rootThreadOverrides)
       const data = {
         ...snapshot(thread),
@@ -206,7 +206,7 @@ async function installPaneApi(
       await route.fulfill({ json: data })
       return
     }
-    if (path === `/api/threads/${CHILD_ID}`) {
+    if (path === `/api/harness/threads/${CHILD_ID}`) {
       await route.fulfill({ json: snapshot(childThread()) })
       return
     }
@@ -538,7 +538,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({ settings: rootSettings }),
-      createTime: 1790812800,
+      createdAt: 1790812800,
     },
     {
       entryId: 'entry-turn-1',
@@ -546,7 +546,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: 'entry-root',
       entryType: 'TURN_START',
       payloadJson: JSON.stringify({ reason: 'INPUT', settings: rootSettings }),
-      createTime: 1790812801,
+      createdAt: 1790812801,
     },
     {
       entryId: 'entry-user-1',
@@ -556,7 +556,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       payloadJson: JSON.stringify({
         message: { role: 'USER', contents: [{ type: 'text', text: 'hi' }] },
       }),
-      createTime: 1790812802,
+      createdAt: 1790812802,
     },
     {
       entryId: 'entry-turn-end-1',
@@ -564,7 +564,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: 'entry-user-1',
       entryType: 'TURN_END',
       payloadJson: JSON.stringify({ outcome: 'COMPLETED', turnStartEntryId: 'entry-turn-1' }),
-      createTime: 1790812803,
+      createdAt: 1790812803,
     },
     {
       entryId: 'entry-settings-head',
@@ -575,7 +575,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
         settings: changedSettings,
         ownerThreadId: ROOT_ID,
       }),
-      createTime: 1790812804,
+      createdAt: 1790812804,
     },
   ]
 
@@ -613,7 +613,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
     parentEntryId: 'entry-settings-head',
     entryType: 'TURN_START',
     payloadJson: JSON.stringify({ reason: 'INPUT', settings: changedSettings }),
-    createTime: 1790812805,
+    createdAt: 1790812805,
   })
   threadOverrides.headEntryId = 'entry-next-turn'
   threadOverrides.version = '2'
@@ -641,7 +641,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   expect(waitingAnim).toBe('none')
 
   // 2. RUNNING 且无 active model/tool：展示“运行中”，绝不直接显示生成，且无动画
-  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+  await page.route(`/api/harness/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
     await route.fulfill({ json: snapshot(thread) })
   })
@@ -657,7 +657,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   expect(runningAnim).toBe('none')
 
   // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool：优先展示“执行中”，且带生成动画
-  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+  await page.route(`/api/harness/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'STOPPED' })
     const data = {
       ...snapshot(thread),
@@ -681,8 +681,8 @@ test('thread status three-state and execution facts in real browser', async ({ p
         approvalJson: null,
         resultJson: null,
         errorJson: null,
-        createTime: 1790812800,
-        updateTime: 1790812800,
+        createdAt: 1790812800,
+        updatedAt: 1790812800,
       }],
     }
     await route.fulfill({ json: data })
@@ -699,7 +699,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   expect(activeAnim).toContain('thread-pulse')
 
   // 4. 审批阻塞准确展示文字且无动画
-  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+  await page.route(`/api/harness/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
     const data = {
       ...snapshot(thread),
@@ -723,8 +723,8 @@ test('thread status three-state and execution facts in real browser', async ({ p
         approvalJson: null,
         resultJson: null,
         errorJson: null,
-        createTime: 1790812800,
-        updateTime: 1790812800,
+        createdAt: 1790812800,
+        updatedAt: 1790812800,
       }],
     }
     await route.fulfill({ json: data })

@@ -460,7 +460,7 @@ function projectInvocationOverlays(
         toolCallId: projected.toolCallId,
         toolName: projected.toolName,
         rendererKey: projected.rendererKey,
-        createdAt: invocation.updateTime,
+        createdAt: invocation.updatedAt,
         invocationId: invocation.id,
         threadId: projected.threadId,
         status: failed ? 'error' : terminalResult.status,

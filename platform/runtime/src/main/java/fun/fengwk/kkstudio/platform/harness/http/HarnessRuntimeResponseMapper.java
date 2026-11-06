@@ -30,29 +30,29 @@ import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessActiveAssistantOutputDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessAgentMessageContentDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessAssistantErrorDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCancelledInputDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionExitDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessGenerationFailureDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessGoalSettingDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessStoppedThreadReceiptDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.interaction.HarnessToolInputResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessAssistantErrorDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCancelledInputDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionExitDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessGenerationFailureDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessGoalSettingDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadTreeNodeDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -92,12 +92,12 @@ public final class HarnessRuntimeResponseMapper {
     dto.setName(node.thread().name());
     dto.setAgentName(node.branchSettings().agentName());
     dto.setExecution(toExecutionSelectionDto(node.branchSettings().execution()));
-    dto.setStatus(node.status().name());
-    dto.setExecutionControl(node.thread().executionControl().name());
+    dto.setStatus(node.status());
+    dto.setExecutionControl(node.thread().executionControl());
     dto.setTurnCount(node.metrics().turnCount());
     dto.setToolCallCount(node.metrics().toolCallCount());
-    dto.setOutcome(node.outcome() == null ? null : node.outcome().name());
-    dto.setUpdateTime(node.thread().updatedAt());
+    dto.setOutcome(node.outcome());
+    dto.setUpdatedAt(node.thread().updatedAt());
     return dto;
   }
 
@@ -123,11 +123,11 @@ public final class HarnessRuntimeResponseMapper {
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
     dto.setVersion(Long.toString(snapshot.thread().version()));
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
-    dto.setStatus(status.name());
-    dto.setExecutionControl(snapshot.thread().executionControl().name());
+    dto.setStatus(status);
+    dto.setExecutionControl(snapshot.thread().executionControl());
     dto.setBranchSettings(toBranchSettingsDto(snapshot.entryState().baseSettings()));
-    dto.setCreateTime(snapshot.thread().createdAt());
-    dto.setUpdateTime(snapshot.thread().updatedAt());
+    dto.setCreatedAt(snapshot.thread().createdAt());
+    dto.setUpdatedAt(snapshot.thread().updatedAt());
     return dto;
   }
 
@@ -170,9 +170,9 @@ public final class HarnessRuntimeResponseMapper {
     dto.setEntryId(entry.id().toString());
     dto.setSessionId(entry.sessionId().toString());
     dto.setParentEntryId(entry.parentEntryId() == null ? null : entry.parentEntryId().toString());
-    dto.setEntryType(entry.payload().type().name());
+    dto.setEntryType(entry.payload().type());
     dto.setPayloadJson(ENTRY_PAYLOADS.encode(entry.payload()));
-    dto.setCreateTime(entry.createdAt());
+    dto.setCreatedAt(entry.createdAt());
     dto.setUsageCost(usageCost);
     return dto;
   }
@@ -182,12 +182,12 @@ public final class HarnessRuntimeResponseMapper {
     HarnessThreadCommandDTO dto = new HarnessThreadCommandDTO();
     dto.setThreadId(command.threadId().toString());
     dto.setSequence(Long.toString(command.sequence()));
-    dto.setType(command.type().name());
-    dto.setState(command.state().name());
+    dto.setType(command.type());
+    dto.setState(command.state());
     dto.setIdempotencyKey(command.idempotencyKey().toString());
     dto.setPayloadJson(COMMAND_PAYLOADS.encode(command.payload()));
     dto.setCancelledAt(command.cancelledAt());
-    dto.setCreateTime(command.createdAt());
+    dto.setCreatedAt(command.createdAt());
     return dto;
   }
 
@@ -198,7 +198,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setGenerationId(generation.generationId().toString());
     dto.setTurnStartEntryId(generation.turnStartEntryId().toString());
     dto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
-    dto.setStatus(generation.status().name());
+    dto.setStatus(generation.status());
     dto.setAttempt(generation.attempt());
     dto.setSequence(Long.toString(generation.sequence()));
     dto.setContents(
@@ -211,8 +211,8 @@ public final class HarnessRuntimeResponseMapper {
     }
     dto.setResultEntryId(
         generation.resultEntryId() == null ? null : generation.resultEntryId().toString());
-    dto.setCreateTime(generation.createdAt());
-    dto.setUpdateTime(generation.updatedAt());
+    dto.setCreatedAt(generation.createdAt());
+    dto.setUpdatedAt(generation.updatedAt());
     return dto;
   }
 
@@ -236,7 +236,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
     dto.setAssistantEntryId(invocation.assistantEntryId().toString());
     dto.setCallIndex(invocation.callIndex());
-    dto.setStatus(invocation.status().name());
+    dto.setStatus(invocation.status());
     dto.setAttempt(invocation.attempt());
     dto.setToolCallId(invocation.call().id());
     dto.setToolName(invocation.call().toolName());
@@ -256,8 +256,8 @@ public final class HarnessRuntimeResponseMapper {
         invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result()));
     dto.setErrorJson(
         invocation.error() == null ? null : JSON.write(invocation.error(), "toolInvocationError"));
-    dto.setCreateTime(invocation.createdAt());
-    dto.setUpdateTime(invocation.updatedAt());
+    dto.setCreatedAt(invocation.createdAt());
+    dto.setUpdatedAt(invocation.updatedAt());
     return dto;
   }
 
@@ -365,7 +365,10 @@ public final class HarnessRuntimeResponseMapper {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
-    dto.setStatus(result.replayed() ? "REPLAYED" : "STOPPED");
+    dto.setStatus(
+        result.replayed()
+            ? HarnessThreadStopResultDTO.Status.REPLAYED
+            : HarnessThreadStopResultDTO.Status.STOPPED);
     dto.setThread(toThreadDto(postStopSnapshot));
     dto.setStoppedThreads(toStopReceiptDtos(result.stoppedThreads()));
     return dto;
@@ -375,11 +378,11 @@ public final class HarnessRuntimeResponseMapper {
     HarnessAgentMessageContentDTO contentDto = new HarnessAgentMessageContentDTO();
     switch (content) {
       case TextMessageContent text -> {
-        contentDto.setType("text");
+        contentDto.setType(HarnessAgentMessageContentDTO.Type.TEXT);
         contentDto.setText(text.text());
       }
       case ThinkingMessageContent thinking -> {
-        contentDto.setType("thinking");
+        contentDto.setType(HarnessAgentMessageContentDTO.Type.THINKING);
         contentDto.setText(thinking.text());
       }
       default -> throw new IllegalStateException(
@@ -413,7 +416,7 @@ public final class HarnessRuntimeResponseMapper {
     execution.setExecutionId(fact.executionId().toString());
     execution.setInvocationId(fact.invocationId().toString());
     execution.setAttempt(fact.attempt());
-    execution.setKind(fact.kind().name());
+    execution.setKind(fact.kind());
     execution.setRegisteredAt(fact.registeredAt());
     return execution;
   }
@@ -422,7 +425,7 @@ public final class HarnessRuntimeResponseMapper {
     HarnessCancelledInputDTO inputDto = new HarnessCancelledInputDTO();
     inputDto.setSequence(Long.toString(input.sequence()));
     inputDto.setIdempotencyKey(input.idempotencyKey().toString());
-    inputDto.setType(input.payload().type().name());
+    inputDto.setType(input.payload().type());
     inputDto.setPayloadJson(COMMAND_PAYLOADS.encode(input.payload()));
     return inputDto;
   }

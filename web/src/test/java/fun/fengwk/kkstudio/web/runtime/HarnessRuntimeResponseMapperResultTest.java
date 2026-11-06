@@ -19,20 +19,22 @@ import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessStoppedThreadReceiptDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
-import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -70,7 +72,7 @@ class HarnessRuntimeResponseMapperResultTest {
     assertEquals(idText(1), dto.getSession().getSessionId());
     assertEquals("session", dto.getSession().getName());
     assertEquals(NOW, dto.getSession().getCreatedAt());
-    assertEquals("ROOT", dto.getRootEntry().getEntryType());
+    assertEquals(EntryType.ROOT, dto.getRootEntry().getEntryType());
     assertEquals(idText(1), dto.getThread().getThreadId());
     assertEquals("thread", dto.getThread().getName());
     assertEquals(idText(50), dto.getAcceptedCommands().getFirst().getIdempotencyKey());
@@ -133,7 +135,7 @@ class HarnessRuntimeResponseMapperResultTest {
         HarnessRuntimeResponseMapper.toStopResultDto(
             stopped, HarnessRuntimeTestFixtures.idleSnapshot());
 
-    assertEquals("STOPPED", stoppedDto.getStatus());
+    assertEquals(HarnessThreadStopResultDTO.Status.STOPPED, stoppedDto.getStatus());
     assertEquals(1, stoppedDto.getStoppedThreads().size());
     HarnessStoppedThreadReceiptDTO receiptDto = stoppedDto.getStoppedThreads().getFirst();
     assertEquals(idText(1), receiptDto.getThreadId());
@@ -141,7 +143,8 @@ class HarnessRuntimeResponseMapperResultTest {
     assertEquals(idText(6), receiptDto.getStoppedTurnEndEntryId());
     assertEquals(3, receiptDto.getCancelledCommandCount());
     assertEquals(2, receiptDto.getCancelledInputs().size());
-    assertEquals("USER_MESSAGE", receiptDto.getCancelledInputs().getFirst().getType());
+    assertEquals(
+        ThreadCommandType.USER_MESSAGE, receiptDto.getCancelledInputs().getFirst().getType());
     assertTrue(receiptDto.getCancelledInputs().getFirst().getPayloadJson().contains("first"));
     assertTrue(receiptDto.getCancelledInputs().get(1).getPayloadJson().contains(idText(70)));
 
@@ -149,7 +152,7 @@ class HarnessRuntimeResponseMapperResultTest {
     HarnessThreadStopResultDTO replayDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
             replay, HarnessRuntimeTestFixtures.idleSnapshot());
-    assertEquals("REPLAYED", replayDto.getStatus());
+    assertEquals(HarnessThreadStopResultDTO.Status.REPLAYED, replayDto.getStatus());
     assertEquals(1, replayDto.getStoppedThreads().size());
   }
 

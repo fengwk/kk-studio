@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -30,10 +31,11 @@ import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
@@ -45,7 +47,7 @@ import java.util.UUID;
  * 既有 Thread 的唯一通用命令写入口 HTTP 契约：path 定位 Thread、请求体只携带精确 cursor 与有序命令，不携带 owner/target；202 只表示
  * durable acceptance 已提交，响应回读接受后的权威 Thread snapshot。
  */
-class StudioHarnessThreadCommandBatchControllerTest {
+class HarnessThreadCommandBatchControllerTest {
 
   /** 请求 path 的 Thread（客户端预分配身份）。 */
   private static final String THREAD_ID = "00000000-0000-0000-0000-000000000012";
@@ -67,13 +69,14 @@ class StudioHarnessThreadCommandBatchControllerTest {
   void setUp() {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
-    StudioHarnessThreadCommandBatchController controller =
-        new StudioHarnessThreadCommandBatchController(
+    HarnessThreadCommandBatchController controller =
+        new HarnessThreadCommandBatchController(
             new HarnessCommandBatchService(acceptanceService, runtime));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenReturn(
@@ -314,7 +317,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
 
   private ResultActions postBatch(String threadId, String body) throws Exception {
     return mockMvc.perform(
-        post("/api/threads/" + threadId + "/command-batches")
+        post("/api/harness/threads/" + threadId + "/command-batches")
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
   }

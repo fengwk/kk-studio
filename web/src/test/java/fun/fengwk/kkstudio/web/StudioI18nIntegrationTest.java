@@ -43,9 +43,9 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
     String chatId =
         objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asText();
 
-    assertResponseStatusMessage(chatId, "zh-CN", "请求无效。");
-    assertResponseStatusMessage(chatId, "en-US", "The request is invalid.");
-    assertResponseStatusMessage(chatId, "fr-FR", "The request is invalid.");
+    assertResponseStatusMessage(chatId, "zh-CN", "sessionId 参数的值无效。");
+    assertResponseStatusMessage(chatId, "en-US", "The sessionId parameter has an invalid value.");
+    assertResponseStatusMessage(chatId, "fr-FR", "The sessionId parameter has an invalid value.");
   }
 
   private void assertDomainMessage(String language, String expectedMessage) throws Exception {
@@ -67,13 +67,13 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
       throws Exception {
     mockMvc
         .perform(
-            get("/api/sessions/{sessionId}/threads", "not-a-number")
+            get("/api/harness/sessions/{sessionId}/threads", "not-a-number")
                 .header(HttpHeaders.ACCEPT_LANGUAGE, language))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.title").value(expectedMessage))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.detail").value("sessionId must be a canonical UUID: not-a-number"));
+        .andExpect(jsonPath("$.detail").value("sessionId has an invalid value"));
   }
 }

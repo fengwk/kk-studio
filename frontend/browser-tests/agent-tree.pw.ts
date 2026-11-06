@@ -22,7 +22,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 1,
       toolCallCount: 0,
       outcome: 'STOPPED',
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
     {
       threadId: GRAND_ID,
@@ -35,7 +35,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 4,
       toolCallCount: 5,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
     {
       threadId: CHILD_ID,
@@ -49,7 +49,7 @@ function treeNodes(turnCount = 3) {
       turnCount,
       toolCallCount: 2,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
     {
       threadId: THREAD_ID,
@@ -63,7 +63,7 @@ function treeNodes(turnCount = 3) {
       turnCount: 6,
       toolCallCount: 3,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     },
   ]
 }
@@ -92,8 +92,8 @@ function threadDto(
       environmentName: 'dev-node',
       goal: null,
     },
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
   }
 }
 
@@ -120,24 +120,24 @@ async function installAgentTreeMock(page: Page) {
   await page.routeWebSocket(/\/api\/events$/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === `/api/threads/${THREAD_ID}/tree`) {
+    if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
       treeCalls.push(path)
       await route.fulfill({ json: nodes })
       return
     }
-    if (path === `/api/threads/${THREAD_ID}`) {
+    if (path === `/api/harness/threads/${THREAD_ID}`) {
       await route.fulfill({
         json: snapshot(THREAD_ID, null, 'Preview Thread', 'IDLE'),
       })
       return
     }
-    if (path === `/api/threads/${CHILD_ID}`) {
+    if (path === `/api/harness/threads/${CHILD_ID}`) {
       await route.fulfill({
         json: snapshot(CHILD_ID, THREAD_ID, 'Child Planner', 'WAITING'),
       })
       return
     }
-    if (path === `/api/threads/${GRAND_ID}`) {
+    if (path === `/api/harness/threads/${GRAND_ID}`) {
       await route.fulfill({
         json: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'RUNNING'),
       })

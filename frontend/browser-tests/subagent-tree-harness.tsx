@@ -7,6 +7,7 @@ import { SubagentTreePanel } from '@/features/thread/runtime/SubagentTreePanel'
 import { ActiveThreadTree } from '@/features/thread/runtime/ActiveThreadTree'
 import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/thread/runtime/thread-panel/active-thread-tree'
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import type { TurnEndOutcome } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 const node = (
@@ -15,7 +16,7 @@ const node = (
   agentName: string,
   status: 'RUNNING' | 'WAITING' | 'IDLE' = 'IDLE',
   executionControl: 'RUNNABLE' | 'STOPPED' = 'RUNNABLE',
-  outcome: string | null = null,
+  outcome: TurnEndOutcome | null = null,
 ): ActiveThreadTreeNode => ({
   threadId,
   parentThreadId,
@@ -23,7 +24,7 @@ const node = (
   name: 'main',
   executionControl,
   outcome,
-  updateTime: 1774958400,
+  updatedAt: 1774958400,
   status,
   execution: { driver: 'builtin', settings: { modelName: 'Known-model', variant: 'default' } },
   turnCount: 7,

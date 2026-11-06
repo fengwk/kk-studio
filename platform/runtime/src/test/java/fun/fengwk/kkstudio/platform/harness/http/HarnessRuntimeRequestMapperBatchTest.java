@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.THREAD_ID;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.command;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.cursorBatch;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.executionSelection;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setAgent;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setEnvironment;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.setExecution;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.threadBatch;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.userCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,15 +16,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
 
 import java.util.List;
 
@@ -31,8 +32,7 @@ class HarnessRuntimeRequestMapperBatchTest {
   @Test
   void requiresAtMostOneTrailingUserLikeAndOrderedSetPrefixOnExistingThreads() {
     // 既有 Thread 的 batch 使用单调 SET_* 前缀；user-like 至多一条且必须以它收尾。
-    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
-    agent.setAgentName("default-assistant");
+    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -50,16 +50,14 @@ class HarnessRuntimeRequestMapperBatchTest {
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(userCommand("one"), userCommand("two"))));
 
-    HarnessCommandCreateDTO duplicateAgent = command("SET_AGENT", "duplicate-agent");
-    duplicateAgent.setAgentName("other-assistant");
+    HarnessCommandCreateDTO duplicateAgent = setAgent("duplicate-agent", "other-assistant");
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(agent, duplicateAgent, userCommand("user"))));
 
-    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "execution");
-    execution.setExecution(executionSelection());
+    HarnessCommandCreateDTO execution = setExecution("execution", executionSelection());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -73,18 +71,12 @@ class HarnessRuntimeRequestMapperBatchTest {
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, empty));
   }
 
-  /**
-   * 测试意图：纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持 SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT
-   * 固定顺序；创建型 target 与本地草稿预览仍要求恰一条末尾 user-like 输入。
-   */
+  /** 纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持固定 SET_* 顺序；创建型 target 仍要求末尾 user-like 输入。 */
   @Test
   void acceptsSettingsOnlyBatchOnExistingThreadButNotOnCreationTargets() {
-    HarnessCommandCreateDTO agent = command("SET_AGENT", "settings-agent");
-    agent.setAgentName("coder");
-    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "settings-execution");
-    execution.setExecution(executionSelection());
-    HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "settings-environment");
-    environment.setEnvironmentName(null);
+    HarnessCommandCreateDTO agent = setAgent("settings-agent", "coder");
+    HarnessCommandCreateDTO execution = setExecution("settings-execution", executionSelection());
+    HarnessCommandCreateDTO environment = setEnvironment("settings-environment", null);
 
     AcceptCommandsCommand mapped =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
@@ -96,24 +88,17 @@ class HarnessRuntimeRequestMapperBatchTest {
             ThreadCommandType.SET_ENVIRONMENT),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
 
-    // 创建型 target 不接受纯设置批次：必须恰有一条末尾 user-like 输入。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(newSessionTarget(), agent, execution)));
-    // 本地分支草稿预览沿用创建契约，同样拒绝纯设置批次。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toNewThreadCommands(List.of(agent, execution), "commands"));
   }
 
-  /** 测试意图：既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
+  /** 既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
   @Test
   void mapsThreadBatchCursorAndRequiresCommands() {
-    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
-    agent.setAgentName("default-assistant");
+    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
     AcceptCommandsTarget.Thread target =
         (AcceptCommandsTarget.Thread)
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
@@ -143,8 +128,7 @@ class HarnessRuntimeRequestMapperBatchTest {
     assertNull(target.expectedHeadEntryId());
     assertNull(target.expectedNextCommandSequence());
 
-    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
-    agent.setAgentName("default-assistant");
+    HarnessCommandCreateDTO agent = setAgent("agent", "default-assistant");
     HarnessThreadCommandBatchDTO mixedWithoutCursor = new HarnessThreadCommandBatchDTO();
     mixedWithoutCursor.setCommands(List.of(agent, userCommand("mixed")));
     assertThrows(
@@ -180,16 +164,5 @@ class HarnessRuntimeRequestMapperBatchTest {
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, malformedCursor));
-
-    // 预览依赖当前视图，即使纯消息也必须提供精确 cursor。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(THREAD_ID, cursorless));
-    assertTrue(
-        ((AcceptCommandsTarget.Thread)
-                HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(
-                        THREAD_ID, cursorBatch(userCommand("preview")))
-                    .target())
-            .hasCursor());
   }
 }

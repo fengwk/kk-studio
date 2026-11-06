@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 
 import java.util.List;
 import java.util.Map;

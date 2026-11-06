@@ -70,6 +70,6 @@ class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSup
   }
 
   private static String approvalPath() {
-    return "/api/threads/" + THREAD + "/tool-invocations/" + INVOCATION + "/approval";
+    return "/api/harness/threads/" + THREAD + "/tool-invocations/" + INVOCATION + "/approval";
   }
 }

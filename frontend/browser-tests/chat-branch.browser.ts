@@ -2,7 +2,7 @@ import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
 import type { ChatLayout, ChatPaneState, ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
-import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
+import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
@@ -41,7 +41,7 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
     // 已关闭回合的真实 usage 事实：ASSISTANT 的 assistantMetadata + 读取投影 usageCost，
     // 后面紧跟 TURN_END，使 conversation 渲染出带 turnUsage 的回合 footer。
     return [
-      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: 1790812800, usageCost: null },
+      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createdAt: 1790812800, usageCost: null },
       {
         entryId: 'entry-assistant',
         sessionId: SESSION_ID,
@@ -62,7 +62,7 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
           },
         }),
         usageCost: { currency: 'USD', amount: '0.0012' },
-        createTime: 1790812860,
+        createdAt: 1790812860,
       },
       {
         entryId: 'entry-turn',
@@ -70,33 +70,33 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
         parentEntryId: 'entry-assistant',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-        createTime: 1790812920,
+        createdAt: 1790812920,
         usageCost: null,
       },
     ]
   }
   return [
-    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: 1790812800, usageCost: null },
+    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createdAt: 1790812800, usageCost: null },
     {
       entryId: 'entry-ancestor', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Real selected ancestor' }] } }),
-      createTime: 1790812830,
+      createdAt: 1790812830,
       usageCost: null,
     },
-    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: 1790812860, usageCost: null },
+    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createdAt: 1790812860, usageCost: null },
     {
       entryId: 'entry-3',
       sessionId: SESSION_ID,
       parentEntryId: 'entry-2',
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] } }),
-      createTime: 1790812920,
+      createdAt: 1790812920,
       usageCost: null,
     },
     {
       entryId: 'entry-sibling', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling must stay hidden' }] } }),
-      createTime: 1790812950,
+      createdAt: 1790812950,
       usageCost: null,
     },
   ]
@@ -121,8 +121,8 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
       environmentName: null,
       goal: null,
     },
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
   }
 }
 
@@ -142,11 +142,11 @@ async function installChatApi(
   if (options.longHistory) {
     entryList.push(...Array.from({ length: 24 }, (_, index) => ({
       entryId: `scroll-${index}`, sessionId: SESSION_ID,
-      parentEntryId: index === 0 ? 'entry-3' : `scroll-${index - 1}`, entryType: 'MESSAGE',
+      parentEntryId: index === 0 ? 'entry-3' : `scroll-${index - 1}`, entryType: 'MESSAGE' as EntryType,
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{
         type: 'text', text: `Scroll marker ${index}\n${Array(12).fill('Reading position is retained.').join('\n')}`,
       }] } }),
-      createTime: Date.parse('2026-10-01T00:03:00Z') / 1000 + index,
+      createdAt: Date.parse('2026-10-01T00:03:00Z') / 1000 + index,
       usageCost: null,
     })))
   }
@@ -226,8 +226,8 @@ async function installChatApi(
               execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
               config: { tools: [], skills: [], subagents: [] },
               version: '1',
-              createTime: null,
-              updateTime: null,
+              createdAt: null,
+              updatedAt: null,
             }],
         },
       })
@@ -258,8 +258,8 @@ async function installChatApi(
     },
                 },
                 version: '1',
-                createTime: null,
-                updateTime: null,
+                createdAt: null,
+                updatedAt: null,
               },
               {
                 // 单 variant 模型：一次点击即完成选择（无需进入二级 variant 菜单）。
@@ -280,8 +280,8 @@ async function installChatApi(
     },
                 },
                 version: '1',
-                createTime: null,
-                updateTime: null,
+                createdAt: null,
+                updatedAt: null,
               },
             ],
         },
@@ -317,32 +317,12 @@ async function installChatApi(
     if (path === `/api/harness/sessions/${SESSION_ID}/threads`) {
       await route.fulfill({ json: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
-        createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
+        createdAt: boundThread.createdAt, updatedAt: boundThread.updatedAt, status: 'IDLE',
         executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: 'hello',
       }] })
       return
     }
-    if (path === `/api/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
-      // 本地分支草稿预检：只读会话前缀 + 命令，回包是最终请求体预览。
-      const body = request.postDataJSON() as {
-        startEntryId: string
-        commands: Array<Record<string, unknown>>
-      }
-      recorded.branchPreviews.push(body)
-      await route.fulfill({
-        json: {
-            kind: 'DRAFT_REQUEST_PREVIEW',
-            providerType: 'openai-compatible',
-            modelName: 'MiniMax',
-            bodyByteSize: 128,
-            bodyJson: JSON.stringify({ model: 'MiniMax', draft: 'branch draft preview' }, null, 2),
-            sourceHeadEntryId: body.startEntryId,
-            generatedAt: '2026-10-01T00:03:00Z',
-        },
-      })
-      return
-    }
-    if (path === `/api/threads/${CHILD_ID}` || path === `/api/threads/${GRANDCHILD_ID}`) {
+    if (path === `/api/harness/threads/${CHILD_ID}` || path === `/api/harness/threads/${GRANDCHILD_ID}`) {
       const grandchild = path.endsWith(GRANDCHILD_ID)
       await route.fulfill({ json: {
         version: grandchild && grandCompleted ? '1' : '0',
@@ -361,7 +341,7 @@ async function installChatApi(
           ...(grandchild && grandCompleted ? [{
             entryId: 'entry-background', sessionId: SESSION_ID, parentEntryId: boundThread.headEntryId, entryType: 'MESSAGE',
             payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } }),
-            createTime: 1790813040,
+            createdAt: 1790813040,
             usageCost: null,
           }] : []),
         ], baseEntryId: null, queuedCommands: [], executionStatus: grandchild && !grandCompleted ? 'RUNNING' : 'IDLE',
@@ -370,7 +350,7 @@ async function installChatApi(
       } })
       return
     }
-    if (path === `/api/threads/${THREAD_ID}` || (createdThread != null && path === `/api/threads/${createdThread.threadId}`)) {
+    if (path === `/api/harness/threads/${THREAD_ID}` || (createdThread != null && path === `/api/harness/threads/${createdThread.threadId}`)) {
       const isCreated = createdThread != null && path.endsWith(createdThread.threadId)
       const currentThread = isCreated ? createdThread! : { ...boundThread, version: String(boundVersion) }
       await route.fulfill({
@@ -390,19 +370,19 @@ async function installChatApi(
       })
       return
     }
-    if (path === `/api/threads/${THREAD_ID}/tree`) {
+    if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
       recorded.treeReads += 1
       await route.fulfill({ json: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
           model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
-          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: 1790812800 },
+          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updatedAt: 1790812800 },
         { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
           model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
-          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: 1790812860 },
+          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updatedAt: 1790812860 },
         { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
           model: { modelName: 'MiniMax', variant: 'deep' },
           status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE',
-          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: 1790812920 },
+          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updatedAt: 1790812920 },
       ] })
       return
     }
@@ -435,7 +415,7 @@ async function installChatApi(
             idempotencyKey: command.idempotencyKey,
             payloadJson: JSON.stringify(payload),
             cancelledAt: null,
-            createTime: 1790813100,
+            createdAt: 1790813100,
           }
         })
         queuedCommands = [...queuedCommands, ...accepted]
@@ -822,7 +802,7 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
   let release!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })
   let requested = false
-  await page.route(`**/api/threads/${THREAD_ID}`, async (route) => {
+  await page.route(`**/api/harness/threads/${THREAD_ID}`, async (route) => {
     requested = true
     await gate
     await route.fallback()

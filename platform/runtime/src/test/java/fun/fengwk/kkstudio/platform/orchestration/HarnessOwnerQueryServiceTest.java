@@ -37,12 +37,13 @@ import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -205,7 +206,7 @@ class HarnessOwnerQueryServiceTest {
     HarnessThreadSummaryDTO summary = summaries.getFirst();
     assertEquals(threadId.toString(), summary.getThreadId());
     assertEquals("thread", summary.getName());
-    assertEquals("IDLE", summary.getStatus());
+    assertEquals(ThreadRuntimeStatus.IDLE, summary.getStatus());
     assertEquals("builtin", summary.getExecution().getDriver());
     assertEquals("turn-model", summary.getExecution().getSettings().get("modelName"));
     assertEquals("fast", summary.getExecution().getSettings().get("variant"));
@@ -282,8 +283,8 @@ class HarnessOwnerQueryServiceTest {
         .thenReturn(snapshot(thread, new EntryPath(List.of(root))));
 
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
-    assertEquals("IDLE", idle.getStatus());
-    assertEquals("RUNNABLE", idle.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.IDLE, idle.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, idle.getExecutionControl());
   }
 
   @Test

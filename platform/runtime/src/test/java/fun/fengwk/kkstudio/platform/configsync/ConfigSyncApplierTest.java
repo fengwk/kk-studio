@@ -51,7 +51,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 

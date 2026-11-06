@@ -89,9 +89,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
@@ -100,7 +100,6 @@ import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -515,19 +514,14 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             .createdAt()
             .isBefore(toolInvocation(secondInvocationId).createdAt()));
 
-    StudioHarnessThreadController threadController =
-        new StudioHarnessThreadController(
+    HarnessThreadController threadController =
+        new HarnessThreadController(
             runtime,
             new HarnessThreadService(
                 runtime, mock(UsageCostProjectionService.class), environmentWaitProjectionService),
-            mock(ModelRequestDebugService.class),
             interactionService);
     var waitingTool =
-        threadController
-            .getSnapshot(second.threadId().toString(), null)
-            .getData()
-            .getToolInvocations()
-            .getFirst();
+        threadController.getSnapshot(second.threadId(), null).getToolInvocations().getFirst();
     assertEquals(firstEnvironmentId.toString(), waitingTool.getRequiredEnvironmentId());
     assertTrue(waitingTool.isWaitingForEnvironment());
 
@@ -587,8 +581,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     markEnvironmentReady(firstEnvironmentId, UUID.randomUUID());
     assertFalse(
         threadController
-            .getSnapshot(second.threadId().toString(), null)
-            .getData()
+            .getSnapshot(second.threadId(), null)
             .getToolInvocations()
             .getFirst()
             .isWaitingForEnvironment());
@@ -781,7 +774,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private JsonNode snapshotHttp(MockMvc mvc, UUID threadId) throws Exception {
-    var response = mvc.perform(get("/api/threads/" + threadId)).andReturn().getResponse();
+    var response = mvc.perform(get("/api/harness/threads/" + threadId)).andReturn().getResponse();
     assertEquals(200, response.getStatus());
     return jsonMapper.readTree(response.getContentAsString()).path("data");
   }

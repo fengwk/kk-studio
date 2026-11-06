@@ -255,14 +255,14 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             .formatted(chatId, sessionId, threadId, idempotencyKey);
     HttpResponse<String> threadResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/command-batches"))
+            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(202, threadResponse.statusCode(), threadResponse.body());
-    JsonNode created = MAPPER.readTree(threadResponse.body()).path("data");
+    JsonNode created = MAPPER.readTree(threadResponse.body());
     assertEquals(threadId, created.path("thread").path("threadId").asText());
     String version = created.path("thread").path("version").asText();
 

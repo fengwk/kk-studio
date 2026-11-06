@@ -145,8 +145,8 @@ function threadFixture(
     status: 'IDLE',
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...rest,
   }
 }
@@ -180,7 +180,7 @@ function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedComma
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     },
     thread: currentThread,
@@ -196,7 +196,7 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     turnStartEntryId: 'turn-1',
     assistantEntryId: 'a1',
     callIndex: 0,
-    status: 'APPROVED',
+    status: 'READY',
     attempt: 1,
     toolCallId: 'call-1',
     toolName: 'demo',
@@ -210,8 +210,8 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     approvalJson: '{}',
     resultJson: null,
     errorJson: null,
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }
@@ -1337,7 +1337,7 @@ describe('useAgentThreadController', () => {
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(

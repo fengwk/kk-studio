@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
@@ -52,7 +53,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelPricingRequestBodyConditionDT
 import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.math.BigDecimal;
 import java.time.Instant;

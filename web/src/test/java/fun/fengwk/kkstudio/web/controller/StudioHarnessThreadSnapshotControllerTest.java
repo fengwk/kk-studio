@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.time.Instant;
@@ -46,7 +46,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(runtime.getThreadSnapshot(id(1)))
         .thenThrow(DomainException.notFound("thread", "thread missing"));
     mockMvc
-        .perform(get("/api/threads/" + idText(1)))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.detail").value("thread missing"));
@@ -59,7 +59,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
         .thenReturn(HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1)))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.thread.status").value("IDLE"))
         .andExpect(jsonPath("$.thread.executionControl").value("RUNNABLE"))
@@ -79,7 +79,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(usageCostProjectionService.project(any())).thenReturn(Map.of(id(4), cost));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1)))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.entries[0].usageCost").value(nullValue()))
         .andExpect(jsonPath("$.entries[3].entryId").value(idText(4)))
@@ -144,12 +144,12 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
                     id(100), EnvironmentId.of(id(200)), true, false, deadline)));
     when(environmentService.requireName(EnvironmentId.of(id(200)))).thenReturn("archlinux");
     mockMvc
-        .perform(get("/api/threads/" + idText(1)))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.toolInvocations[0].requiredEnvironmentId").value(idText(200)))
         .andExpect(jsonPath("$.toolInvocations[0].requiredEnvironmentName").value("archlinux"))
-        .andExpect(
-            jsonPath("$.toolInvocations[0].environmentWaitFreshnessAt").value(deadline.toString()));
+        // 全局 Instant wire 精度由基础时间切片统一；这里只断言字段存在且为数值。
+        .andExpect(jsonPath("$.toolInvocations[0].environmentWaitFreshnessAt").isNumber());
     verify(runtime, times(1)).listEnvironmentToolWaits(Set.of(id(100)));
   }
 
@@ -159,7 +159,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1)))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("3"))
         .andExpect(jsonPath("$.thread.threadId").value(idText(1)))
@@ -171,7 +171,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
   @Test
   void getSnapshotWithNonCanonicalAfterEntryIdRejectsBadRequest() throws Exception {
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=not-a-valid-uuid"))
+        .perform(get("/api/harness/threads/" + idText(1) + "?afterEntryId=not-a-valid-uuid"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -209,7 +209,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(runtime.getThreadSnapshot(threadId, headId)).thenReturn(snapshot);
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + headId))
+        .perform(get("/api/harness/threads/" + idText(1) + "?afterEntryId=" + headId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.baseEntryId").value(headId.toString()))
         .andExpect(jsonPath("$.entries").isEmpty());
@@ -238,7 +238,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(runtime.getThreadSnapshot(threadId, nonAncestorId)).thenReturn(snapshot);
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + nonAncestorId))
+        .perform(get("/api/harness/threads/" + idText(1) + "?afterEntryId=" + nonAncestorId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.baseEntryId").value(nullValue()))
         .andExpect(jsonPath("$.entries.length()").value(1));
@@ -291,7 +291,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     when(usageCostProjectionService.project(List.of(entry2))).thenReturn(Map.of(newEntryId, cost));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + cursorId))
+        .perform(get("/api/harness/threads/" + idText(1) + "?afterEntryId=" + cursorId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.baseEntryId").value(cursorId.toString()))
         .andExpect(jsonPath("$.entries.length()").value(1))

@@ -72,11 +72,11 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
 | Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
-| Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
+| Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）与 name |
 | Session files | `/api/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；按 `ownerKind` + `ownerId` 校验归属 |
-| Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
-| Builtin 追帧 | `/api/harness/builtin/threads/{threadId}/stream-catchup` | 为活动模型请求 best-effort checkpoint |
+| Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、compact、yolo、stop、tool approval |
+| Builtin | `/api/harness/builtin/...` | Model Request Debug、历史 Provider 请求重建与活动模型请求追帧 |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
@@ -101,22 +101,21 @@ Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platfo
 `GET .../files/download?path` 返回完整字节并带附件文件名。`path` 使用 `vfs:/sessions/<sessionId>/...` 坐标且必须属于该 Session；
 未知 owner、越权与不存在的文件都返回 404，二进制或不可作为文本返回的内容返回 422。写操作只由文件工具发起，不在此开放。
 
-Session 的 `GET /api/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
+Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
-Session 的 `GET /api/sessions/{sessionId}/entries?cursor&limit` 按存储追加顺序（创建顺序）返回一页 Entry，
+Session 的 `GET /api/harness/sessions/{sessionId}/entries?cursor&limit` 按存储追加顺序（创建顺序）返回一页 Entry，
 同一 Session 内父节点必先于子节点出现；`cursor` 是上一页最后一条 Entry 的 canonical UUID，
 `limit` 默认 100、最大 200，响应为 `{items, nextCursor}`，`nextCursor` 为 null 表示末页。
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
-`/api/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
-`ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/threads/{threadId}/command-batches`
+`/api/harness/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
+`ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/harness/threads/{threadId}/command-batches`
 服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
-Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
-以及创建型 target 各自互斥字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
-`NEW_FORKED_SESSION` 必填 `sourceThreadId` 且禁止 `rootSettings`/`threadName`）与续写面的精确 cursor。
+Harness 命令、target 与消息内容都是 sealed union：每个 variant 只携带自己的字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
+`NEW_FORKED_SESSION` 携带 `sourceThreadId`），未知 variant/字段由严格 HTTP mapper 拒绝，续写面仍校验精确 cursor。
 产品命令批为 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
 `CUSTOM_MESSAGE` 与 `NOTIFICATION` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
@@ -124,44 +123,37 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 完整执行语义见 [Harness Runtime](harness-runtime.md)。
 
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
-`GET /api/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
+`GET /api/harness/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
 派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
 `unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）。
 可选的 `afterEntryId`（canonical UUID，否则 400）请求增量历史：游标是当前 head 的祖先时，`baseEntryId` 等于游标，
 `entries` 只含游标之后的 Entry（游标即 head 时为空）；游标未知、位于其它分支或 Session 时返回完整历史，`baseEntryId` 为 null。
 无论完整还是增量，Thread、队列、当前输出、工具与退出事实都是同一事务的完整当前值，`usageCost` 只投影本次返回的 Entry。
-Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compaction-availability` 按需返回 `available` 与可空的
-`disabledReason`，按完整历史判断 token 阈值、ownership 与模型。它只是提示；`POST /api/threads/{threadId}/compact`
+Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/compaction-availability` 按需返回 `available` 与可空的
+`disabledReason`，按完整历史判断 token 阈值、ownership 与模型。它只是提示；`POST /api/harness/threads/{threadId}/compact`
 仍以 `expectedVersion` 与服务端判断为准。
-`POST /api/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
+`POST /api/harness/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
 仅含 `USER_MESSAGE` / `GOAL` 的 `cancelledInputs`）。
-`POST /api/threads/{threadId}/executions/{executionId}/abandon` 接受 `{"expectedVersion":"<bigint>"}`，显式放弃一个具体执行代次并返回最新 Snapshot；
+`POST /api/harness/threads/{threadId}/executions/{executionId}/abandon` 接受 `{"expectedVersion":"<bigint>"}`，显式放弃一个具体执行代次并返回最新 Snapshot；
 它与 Snapshot 使用相同的认证与资源读取边界，子 Thread 也可放弃，首次放弃要求 `STOPPED` 与精确 version，重复放弃或已确认真实退出是安全 replay。
 
 ### 请求诊断与预览
 
-`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updateTime` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updatedAt` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
-`POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
+`POST /api/harness/builtin/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
-请求预览有三个只读入口：`POST /api/threads/{threadId}/provider-request-preview`（owner-free 续写面，
-带精确 head/sequence）、`POST /api/sessions/{sessionId}/provider-request-preview`（本地分支草稿，
-`{startEntryId,commands}`）与 `GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview`
-（历史模型输出，按该输出记录时间重建）。它们只读检查 READY 附件、复用正式规划/物化/编码器，
-不消费上传、不推进游标、不调用 transport；历史入口接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用，结果不等于原始发送字节。
-`kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
-不等于原始发送字节。当前事实不允许精确预览时返回 409，客户端只按稳定的 `errors.reason` 恢复，不解析描述文本：
+历史请求重建只有一个只读入口：`GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request`，
+按该模型输出记录时间重建当时的请求前缀。它复用正式规划/物化/编码器，不推进游标、不调用 transport；
+接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用。
+`kind` 恒为 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表当前 catalog / Provider 定义下的重建结果，不等于原始发送字节。
+当前事实不允许精确重建时返回 409，客户端只按稳定的 `errors.reason` 恢复，不解析描述文本：
 
 | `errors.reason` | 拒绝事实 |
 | --- | --- |
-| `PREVIEW_STALE_CURSOR` | head 或命令序号与当前快照不一致；重新读取快照后用新游标请求 |
-| `PREVIEW_QUEUED_COMMANDS` | 尚有排队命令 |
-| `PREVIEW_THREAD_BUSY` | 当前上下文不是空闲输入边界 |
-| `PREVIEW_COMPACTION_REQUIRED` | 下一步必定为自动压缩 |
-| `PREVIEW_ATTACHMENT_NOT_READY` | 附件上传未就绪或不可用 |
-| `PREVIEW_PLANNING_FAILED` | 草稿无法规划 |
+| `PREVIEW_PLANNING_FAILED` | 历史前缀无法规划 |
 | `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
 | `PREVIEW_UNSUPPORTED` | 冻结压缩子执行无法可靠定位，或 adapter 无请求体预览能力 |
 | `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |

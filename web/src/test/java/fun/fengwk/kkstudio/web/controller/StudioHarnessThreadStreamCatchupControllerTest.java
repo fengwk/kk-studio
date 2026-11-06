@@ -140,7 +140,7 @@ class StudioHarnessThreadStreamCatchupControllerTest {
   void legacyPathIsNotMapped() throws Exception {
     mockMvc
         .perform(
-            post("/api/threads/{threadId}/stream-catchup", THREAD_TEXT)
+            post("/api/harness/threads/{threadId}/stream-catchup", THREAD_TEXT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(validBody()))
         .andExpect(status().isNotFound());

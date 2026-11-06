@@ -27,7 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;

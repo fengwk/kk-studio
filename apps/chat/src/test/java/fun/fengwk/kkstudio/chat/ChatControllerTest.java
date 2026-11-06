@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 
 import java.util.List;
 import java.util.UUID;

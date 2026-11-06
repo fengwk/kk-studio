@@ -38,8 +38,8 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
         environmentName: null,
         goal: null,
       },
-      createTime: 1774958400,
-      updateTime: 1774958400,
+      createdAt: 1774958400,
+      updatedAt: 1774958400,
     },
     entries: [
       {
@@ -53,7 +53,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
             contents: [{ type: 'text', text: '历史初始任务' }],
           },
         }),
-        createTime: 1774958400,
+        createdAt: 1774958400,
         usageCost: null,
       },
     ],
@@ -71,7 +71,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
           },
         }),
         cancelledAt: null,
-        createTime: 1774958450,
+        createdAt: 1774958450,
       },
     ],
     baseEntryId: null,
@@ -232,7 +232,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
             },
           }),
           cancelledAt: null,
-          createTime: 1774958450,
+          createdAt: 1774958450,
         },
       ],
       entries: [
@@ -248,7 +248,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
               contents: [{ type: 'text', text: '请优先补充边界测试用例' }],
             },
           }),
-          createTime: 1774958490,
+          createdAt: 1774958490,
           usageCost: null,
         },
       ],
@@ -275,7 +275,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     // 放弃请求使用子 Thread 身份与它自己的 expectedVersion，而不是根或展示层猜测。
     const user = userEvent.setup()
     const base = mockChildSnapshot()
-    const stopped = {
+    const stopped: HarnessThreadSnapshotDTO = {
       ...base,
       version: '7',
       thread: {

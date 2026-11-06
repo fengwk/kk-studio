@@ -14,13 +14,13 @@ import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.OperatorResolver;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
-import fun.fengwk.kkstudio.web.api.OperatorResolver;
 
 import java.util.Objects;
 import java.util.UUID;

@@ -41,7 +41,7 @@ function treeNode(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
-    updateTime: 1774958400,
+    updatedAt: 1774958400,
   }
 }
 
@@ -500,7 +500,7 @@ describe('ActiveThreadTree', () => {
   it('suppresses false COMPLETED outcome on active non-IDLE nodes', async () => {
     const falseCompletedNode = {
       ...treeNode(WORKER_ID, ROOT_ID, true, 'worker', 'RUNNING'),
-      outcome: 'COMPLETED', // 不信旧 fixture，非 IDLE 不暴露 COMPLETED
+      outcome: 'COMPLETED' as const, // 不信旧 fixture，非 IDLE 不暴露 COMPLETED
     }
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'),

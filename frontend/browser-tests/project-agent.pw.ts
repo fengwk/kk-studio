@@ -103,8 +103,8 @@ function createThreadSnapshot() {
           environmentName: null,
           goal: null,
         },
-        createTime: 1789862400,
-        updateTime: 1789862400,
+        createdAt: 1789862400,
+        updatedAt: 1789862400,
       },
       entries: [
         {
@@ -121,7 +121,7 @@ function createThreadSnapshot() {
               goal: null,
             },
           }),
-          createTime: 1789862400,
+          createdAt: 1789862400,
         },
         {
           entryId: 'e1',
@@ -131,7 +131,7 @@ function createThreadSnapshot() {
           payloadJson: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: '梳理鉴权模块的现有边界' }] },
           }),
-          createTime: 1789862401,
+          createdAt: 1789862401,
         },
       ],
       baseEntryId: null,
@@ -166,12 +166,12 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         const method = route.request().method()
         const path = new URL(url).pathname
 
-        if (path === `/api/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
           commandBatches.push(route.request().postDataJSON())
           await route.fulfill({ json: { accepted: true, thread: createThreadSnapshot().thread } })
           return
         }
-        if (path === `/api/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
           const body = route.request().postDataJSON()
           stopRequests.push(body)
           stopCount += 1
@@ -206,11 +206,11 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           })
           return
         }
-        if (path === `/api/threads/${VALID_THREAD_ID}`) {
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}`) {
           await route.fulfill({ json: createThreadSnapshot() })
           return
         }
-        if (path === `/api/threads/${VALID_THREAD_ID}/tree`) {
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/tree`) {
           await route.fulfill({ json: [] })
           return
         }

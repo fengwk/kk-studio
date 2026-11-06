@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import type {
-  HarnessSessionEntryDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-} from '@/shared/api/generated/contracts'
+import type { HarnessActiveAssistantOutputDTO, HarnessSessionEntryDTO, HarnessThreadDTO, HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
@@ -25,15 +21,15 @@ function makeThread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO
     nextCommandSequence: '1',
     version: '1',
     status: 'IDLE',
-    executionControl: 'AUTONOMOUS',
+    executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'test-model', variant: 'default' } },
       environmentName: null,
       goal: null,
     },
-    createTime: 1000,
-    updateTime: 1000,
+    createdAt: 1000,
+    updatedAt: 1000,
     ...overrides,
   }
 }
@@ -43,9 +39,9 @@ function makeEntry(id: string, parentId: string | null = null): HarnessSessionEn
     entryId: id,
     sessionId: 's-1',
     parentEntryId: parentId,
-    entryType: 'USER_INPUT',
+    entryType: 'MESSAGE',
     payloadJson: JSON.stringify({ text: `message-${id}` }),
-    createTime: 1000,
+    createdAt: 1000,
     usageCost: null,
   }
 }
@@ -195,18 +191,18 @@ describe('thread-snapshot-cache', () => {
         executionStatus: 'RUNNING',
         activeAssistantOutput: null,
       })
-      const activeOutput = {
+      const activeOutput: HarnessActiveAssistantOutputDTO = {
         generationId: 'gen-1',
         turnStartEntryId: 'entry-1',
         requestHeadEntryId: 'entry-1',
         status: 'RUNNING',
         attempt: 1,
         sequence: '1',
-        contents: [{ type: 'TEXT', text: 'streaming...' }],
+        contents: [{ type: 'text', text: 'streaming...' }],
         error: null,
         resultEntryId: null,
-        createTime: 1000,
-        updateTime: 1000,
+        createdAt: 1000,
+        updatedAt: 1000,
       }
       const incomingDelta = makeSnapshot({
         version: '5',

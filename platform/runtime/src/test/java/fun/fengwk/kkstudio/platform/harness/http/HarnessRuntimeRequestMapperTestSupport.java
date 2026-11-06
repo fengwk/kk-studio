@@ -5,15 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
-import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -26,8 +26,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   private HarnessRuntimeRequestMapperTestSupport() {}
 
   static AgentMessageContent mapContent(HarnessUserMessageContentDTO content) {
-    HarnessCommandCreateDTO command = command("USER_MESSAGE", "user-content");
-    command.setContents(List.of(content));
+    HarnessCommandCreateDTO command = userCommand("user-content", List.of(content));
     UserMessageCommandPayload payload =
         assertInstanceOf(
             UserMessageCommandPayload.class,
@@ -40,8 +39,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   }
 
   static void assertRejectedUserContent(HarnessUserMessageContentDTO content, String why) {
-    HarnessCommandCreateDTO command = command("USER_MESSAGE", "rejected-user-content");
-    command.setContents(List.of(content));
+    HarnessCommandCreateDTO command = userCommand("rejected-user-content", List.of(content));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -58,17 +56,9 @@ final class HarnessRuntimeRequestMapperTestSupport {
                 THREAD_ID, threadBatch(command, userCommand("tail"))));
   }
 
-  static void assertTargetRejected(HarnessCommandTargetDTO target) {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(target, userCommand("user"))));
-  }
-
   /** 发送批次：单条纯 USER_MESSAGE 不带 cursor，其余批次带精确 cursor。 */
   static HarnessThreadCommandBatchDTO threadBatch(HarnessCommandCreateDTO... commands) {
-    if (commands.length == 1 && "USER_MESSAGE".equals(commands[0].getType())) {
+    if (commands.length == 1 && commands[0] instanceof HarnessCommandCreateDTO.UserMessageDTO) {
       HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
       batch.setCommands(List.of(commands));
       return batch;
@@ -96,56 +86,52 @@ final class HarnessRuntimeRequestMapperTestSupport {
     return request;
   }
 
-  static HarnessCommandCreateDTO command(String type, String suffix) {
-    HarnessCommandCreateDTO command = new HarnessCommandCreateDTO();
-    command.setType(type);
-    command.setIdempotencyKey(idText(Math.abs(suffix.hashCode()) + 100));
-    return command;
+  static String idempotencyKey(String suffix) {
+    return idText(Math.abs(suffix.hashCode()) + 100);
+  }
+
+  static HarnessCommandCreateDTO goal(String suffix, String text) {
+    return new HarnessCommandCreateDTO.GoalDTO(idempotencyKey(suffix), text);
+  }
+
+  static HarnessCommandCreateDTO setAgent(String suffix, String agentName) {
+    return new HarnessCommandCreateDTO.SetAgentDTO(idempotencyKey(suffix), agentName);
+  }
+
+  static HarnessCommandCreateDTO setExecution(
+      String suffix, HarnessExecutionSelectionDTO execution) {
+    return new HarnessCommandCreateDTO.SetExecutionDTO(idempotencyKey(suffix), execution);
+  }
+
+  static HarnessCommandCreateDTO setEnvironment(String suffix, String environmentName) {
+    return new HarnessCommandCreateDTO.SetEnvironmentDTO(idempotencyKey(suffix), environmentName);
   }
 
   static HarnessCommandCreateDTO userCommand(String suffix) {
-    HarnessCommandCreateDTO command = command("USER_MESSAGE", suffix);
-    command.setContents(List.of(userContent()));
-    return command;
+    return userCommand(suffix, List.of(userContent()));
+  }
+
+  static HarnessCommandCreateDTO userCommand(
+      String suffix, List<HarnessUserMessageContentDTO> contents) {
+    return new HarnessCommandCreateDTO.UserMessageDTO(idempotencyKey(suffix), contents);
   }
 
   static HarnessUserMessageContentDTO userContent() {
-    HarnessUserMessageContentDTO content = new HarnessUserMessageContentDTO();
-    content.setType("TEXT");
-    content.setText("hello");
-    return content;
+    return new HarnessUserMessageContentDTO.TextDTO("hello");
   }
 
   static HarnessCommandTargetDTO newSessionTarget() {
-    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("NEW_SESSION");
-    target.setSessionId(idText(2));
-    target.setThreadId(idText(1));
-    target.setRootSettings(branchSettings());
-    target.setYoloEnabled(true);
-    return target;
+    return new HarnessCommandTargetDTO.NewSessionDTO(idText(2), idText(1), branchSettings(), true);
   }
 
   static HarnessCommandTargetDTO newThreadTarget() {
-    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("NEW_THREAD");
-    target.setSessionId(idText(2));
-    target.setStartEntryId(idText(3));
-    target.setThreadId(idText(1));
-    target.setThreadName("branch");
-    target.setYoloEnabled(false);
-    return target;
+    return new HarnessCommandTargetDTO.NewThreadDTO(
+        idText(2), idText(3), idText(1), "branch", false);
   }
 
   static HarnessCommandTargetDTO newForkedSessionTarget() {
-    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("NEW_FORKED_SESSION");
-    target.setSourceThreadId(idText(1));
-    target.setStartEntryId(idText(2));
-    target.setSessionId(idText(3));
-    target.setThreadId(idText(4));
-    target.setYoloEnabled(false);
-    return target;
+    return new HarnessCommandTargetDTO.NewForkedSessionDTO(
+        idText(1), idText(2), idText(3), idText(4), false);
   }
 
   static HarnessBranchSettingsDTO branchSettings() {

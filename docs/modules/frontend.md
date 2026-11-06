@@ -85,7 +85,7 @@ Thread Snapshot 只有一份 query 缓存，所有读取都经
 较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
 增量永远不会被当作完整缓存写入。resync 与重连只重新执行同一查询，服务端对非祖先游标返回完整历史。
 手动压缩可用性不在 Snapshot 内：根控制区只在命令面板显示时按需查询
-`/api/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
+`/api/harness/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
 它只影响命令提示，压缩提交仍由服务端按 `expectedVersion` 判断。
 
 执行树按执行根订阅，服务端聚合后代写入后推送 changed，只回读该根，根本地空闲也保持订阅。

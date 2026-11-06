@@ -73,6 +73,10 @@ import type {
   HarnessSessionEntryDTO,
   HarnessSessionSummaryDTO,
   HarnessThreadDTO,
+  ToolInvocationStatus,
+  HarnessThreadTreeNodeDTO,
+  HarnessThreadSummaryDTO,
+  HarnessExecutionExitDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
   ToolInvocationDTO,
@@ -371,8 +375,8 @@ function thread(
       environmentName: null,
       goal: null,
     },
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...rest,
   }
 }
@@ -404,7 +408,7 @@ function pendingInvocation(): ToolInvocationDTO {
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
     requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
-    createTime: 0, updateTime: 0,
+    createdAt: 0, updatedAt: 0,
   }
 }
 
@@ -415,7 +419,7 @@ function acceptedResponse(currentThread = thread()) {
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
   return {
@@ -569,7 +573,7 @@ function treeNode(
   parentThreadId: string | null,
   name: string,
   active: boolean,
-) {
+): HarnessThreadTreeNodeDTO {
   return {
     threadId,
     parentThreadId,
@@ -581,7 +585,7 @@ function treeNode(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
-    updateTime: 1774958400,
+    updatedAt: 1774958400,
   }
 }
 
@@ -611,7 +615,7 @@ describe('AgentPane orchestration', () => {
     entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
     payloadJson: JSON.stringify({ settings: {
       agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' }, environmentName: null,
-    } }), createTime: 0,
+    } }), createdAt: 0,
     usageCost: null,
   }
   const historyMessage: HarnessSessionEntryDTO = {
@@ -816,7 +820,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
-      entryType: 'ROOT', payloadJson: '{}', createTime: 0,
+      entryType: 'ROOT', payloadJson: '{}', createdAt: 0,
       usageCost: null,
     }]))
     localStorage.setItem(
@@ -1109,7 +1113,7 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
@@ -1222,7 +1226,7 @@ describe('AgentPane orchestration', () => {
         parentEntryId: null,
         entryType: 'ROOT',
         payloadJson: '{}',
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
       {
@@ -1231,7 +1235,7 @@ describe('AgentPane orchestration', () => {
         parentEntryId: 'entry-1',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
       {
@@ -1240,7 +1244,7 @@ describe('AgentPane orchestration', () => {
         parentEntryId: 'entry-2',
         entryType: 'MESSAGE',
         payloadJson: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
     ]))
@@ -1362,7 +1366,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     const threadA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const threadB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-    const summary = (threadId: string, name: string) => ({
+    const summary = (threadId: string, name: string): HarnessThreadSummaryDTO => ({
       threadId,
       parentThreadId: null,
       name,
@@ -1494,7 +1498,7 @@ describe('AgentPane orchestration', () => {
           model: { modelName: 'MiniMax', variant: 'default' },
         },
       }),
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }))
     expect(hook.result.current.target).toEqual(targetBeforeFork)
@@ -1504,7 +1508,7 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({ settings: {} }),
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }))
     await hook.result.current.refreshPaneProjection()
@@ -1791,7 +1795,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
       {
         threadId: workerId,
@@ -1804,7 +1808,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
     ])
     const bound = renderPane({ kind: 'CHAT', id: CHAT_ID })
@@ -1827,7 +1831,7 @@ describe('AgentPane orchestration', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
     ])
     const idle = renderPane({ kind: 'CHAT', id: 'chat-idle' })
@@ -1862,7 +1866,7 @@ describe('AgentPane orchestration', () => {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     }, {
       threadId: threadId === THREAD_ID ? childA : childB,
       parentThreadId: threadId,
@@ -1874,7 +1878,7 @@ describe('AgentPane orchestration', () => {
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
-      updateTime: 1774958400,
+      updatedAt: 1774958400,
     }])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
       snapshot(thread({ threadId, name: threadId === THREAD_ID ? 'thread A' : 'thread B' })),
@@ -1978,7 +1982,7 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }]))
     loadSessionsMock.mockResolvedValue([{
@@ -2224,7 +2228,7 @@ describe('AgentPane orchestration', () => {
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
           }),
           cancelledAt: null,
-          createTime: 0,
+          createdAt: 0,
         }],
       },
     ))
@@ -2309,7 +2313,7 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }))
   })
@@ -2384,14 +2388,14 @@ describe('AgentPane orchestration', () => {
     // 测试意图：STOPPED + 非空事实才展示逐项入口；取消不发请求，确认只发送所选 executionId
     // 与当前 expectedVersion。成功以返回快照更新投影并刷新执行树，另一项仍保留。
     const user = userEvent.setup()
-    const firstExecution = {
+    const firstExecution: HarnessExecutionExitDTO = {
       executionId: 'execution-model-1',
       invocationId: 'invocation-1',
       attempt: 1,
-      kind: 'MODEL',
+      kind: 'DRIVER',
       registeredAt: 1767225600000,
     }
-    const secondExecution = {
+    const secondExecution: HarnessExecutionExitDTO = {
       executionId: 'execution-tool-2',
       invocationId: 'invocation-2',
       attempt: 2,
@@ -2417,14 +2421,14 @@ describe('AgentPane orchestration', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
-    expect(screen.getByText('类型 MODEL')).toBeInTheDocument()
+    expect(screen.getByText('类型 DRIVER')).toBeInTheDocument()
     expect(screen.getByText('第 1 次尝试')).toBeInTheDocument()
     expect(screen.getByText('执行 execution-model-1')).toBeInTheDocument()
     expect(screen.getByText('类型 TOOL')).toBeInTheDocument()
     expect(screen.getByText('执行 execution-tool-2')).toBeInTheDocument()
 
     const firstAbandon = screen.getByRole('button', {
-      name: '放弃等待 MODEL 第 1 次尝试',
+      name: '放弃等待 DRIVER 第 1 次尝试',
     })
     await user.click(firstAbandon)
     const dialog = await screen.findByRole('alertdialog')
@@ -2439,7 +2443,7 @@ describe('AgentPane orchestration', () => {
     const snapshotCallsBefore = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
     const treeCallsBefore = vi.mocked(harnessService.getThreadTree).mock.calls.length
     await user.click(screen.getByRole('button', {
-      name: '放弃等待 MODEL 第 1 次尝试',
+      name: '放弃等待 DRIVER 第 1 次尝试',
     }))
     const confirmDialog = await screen.findByRole('alertdialog')
     await user.click(within(confirmDialog).getByRole('button', { name: '放弃等待' }))
@@ -2463,7 +2467,7 @@ describe('AgentPane orchestration', () => {
   it('hides unconfirmed executions on a runnable thread or when a stopped thread has no facts', async () => {
     // 测试意图：未确认退出列表只在 executionControl=STOPPED 且事实非空时出现，
     // 不把 RUNNABLE 的未知/活跃执行混入。
-    const execution = {
+    const execution: HarnessExecutionExitDTO = {
       executionId: 'execution-runnable',
       invocationId: 'invocation-runnable',
       attempt: 1,
@@ -2497,7 +2501,7 @@ describe('AgentPane orchestration', () => {
   it('keeps the unconfirmed execution list and a friendly error when abandoning fails', async () => {
     // 测试意图：失败不得让事实从界面消失，也不得自动重试危险操作。
     const user = userEvent.setup()
-    const execution = {
+    const execution: HarnessExecutionExitDTO = {
       executionId: 'execution-failed',
       invocationId: 'invocation-failed',
       attempt: 3,
@@ -2531,11 +2535,11 @@ describe('AgentPane orchestration', () => {
     // 测试意图：409 只回读最新快照与执行树，明确提示用户按新列表重选；
     // 同一危险操作不得自动重发。
     const user = userEvent.setup()
-    const execution = {
+    const execution: HarnessExecutionExitDTO = {
       executionId: 'execution-stale',
       invocationId: 'invocation-stale',
       attempt: 1,
-      kind: 'MODEL',
+      kind: 'DRIVER',
       registeredAt: 1767225600000,
     }
     vi.mocked(harnessService.getThreadSnapshot)
@@ -2557,7 +2561,7 @@ describe('AgentPane orchestration', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await user.click(await screen.findByRole('button', {
-      name: '放弃等待 MODEL 第 1 次尝试',
+      name: '放弃等待 DRIVER 第 1 次尝试',
     }))
     const dialog = await screen.findByRole('alertdialog')
     await user.click(within(dialog).getByRole('button', { name: '放弃等待' }))
@@ -2741,8 +2745,8 @@ describe('AgentPane orchestration', () => {
             contents: [],
             error: null,
             resultEntryId: null,
-            createTime: 0,
-            updateTime: 0,
+            createdAt: 0,
+            updatedAt: 0,
           },
         },
       ),
@@ -2958,7 +2962,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
       parentEntryId: 'entry-1',
       entryType: 'TURN_END',
       payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }))
     // 关键契约：传下去的是 TURN_END Entry id（sourceLabel 是绑定分支名，身份未加载时为 null）。
@@ -2989,7 +2993,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
             environmentName: null,
           },
         }),
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
       {
@@ -3000,7 +3004,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         payloadJson: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: 'first prompt' }] },
         }),
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
       {
@@ -3009,7 +3013,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         parentEntryId: 'entry-user-1',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
     ]))
@@ -3128,7 +3132,7 @@ describe('branchDraftFromEntry environment replay', () => {
       parentEntryId,
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify(payload),
-      createTime: 1767225600,
+      createdAt: 1767225600,
       usageCost: null,
     }
   }
@@ -3271,7 +3275,9 @@ describe('branchDraftFromEntry environment replay', () => {
     const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(threadId).toBe(THREAD_ID)
     expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
-    const contents = (request.commands[0] as { contents: Array<Record<string, unknown>> }).contents
+    const contents = (request.commands[0] as unknown as {
+      contents: Array<Record<string, unknown>>
+    }).contents
     expect(contents.find((content) => content.type === 'ATTACHMENT')).toMatchObject({
       type: 'ATTACHMENT',
       uploadId: 'up-123',
@@ -3304,13 +3310,14 @@ describe('branchDraftFromEntry environment replay', () => {
 
 function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = {}): HarnessProviderRequestPreviewDTO {
   return {
-    kind: 'DRAFT_REQUEST_PREVIEW',
+    kind: 'HISTORICAL_REQUEST_PREVIEW',
     providerType: 'OPENAI',
     modelName: 'MiniMax',
     bodyByteSize: 120,
     bodyJson: '{"messages":[{"role":"user","content":"draft"}]}',
     sourceHeadEntryId: 'head-1',
     generatedAt: 1790485200,
+    notice: 'Preview is reconstructed from the current catalog, provider configuration and model selection against the recorded history before this output.',
     ...overrides,
   }
 }
@@ -3327,7 +3334,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           parentEntryId: null,
           entryType: 'ROOT',
           payloadJson: '{}',
-          createTime: 0,
+          createdAt: 0,
           usageCost: null,
         },
         {
@@ -3336,7 +3343,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           parentEntryId: 'entry-root',
           entryType: 'TURN_END',
           payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-          createTime: 0,
+          createdAt: 0,
           usageCost: null,
         },
       ]
@@ -3592,7 +3599,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           parentEntryId: null,
           entryType: 'MESSAGE',
           payloadJson: '{}',
-          createTime: 0,
+          createdAt: 0,
           usageCost: null,
         })
       })
@@ -4603,7 +4610,7 @@ describe('AgentPane root control mounting', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
       thread({ status: 'RUNNING', executionControl: 'RUNNABLE' }),
       { toolInvocations: [{
-        ...pendingInvocation(), status, waitingForEnvironment: waiting,
+        ...pendingInvocation(), status: status as ToolInvocationStatus, waitingForEnvironment: waiting,
         requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
       }] },
     ))
@@ -4918,7 +4925,7 @@ describe('AgentPane root control mounting', () => {
           ],
         },
       }),
-      createTime: 1785232800,
+      createdAt: 1785232800,
       usageCost: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread(), {
@@ -4976,7 +4983,7 @@ describe('AgentPane root control mounting', () => {
           message: { role: 'USER', contents: [{ type: 'text', text: '排队中的输入' }] },
         }),
         cancelledAt: null,
-        createTime: 1785232800,
+        createdAt: 1785232800,
       }],
     }))
 
@@ -5078,7 +5085,7 @@ describe('AgentPane root control mounting', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     }]))
     vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
@@ -5158,7 +5165,7 @@ describe('AgentPane root control mounting', () => {
         payloadJson: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: '已有历史' }] },
         }),
-        createTime: 1785229200,
+        createdAt: 1785229200,
         usageCost: null,
       }],
     })

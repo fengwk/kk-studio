@@ -64,12 +64,12 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -175,7 +175,7 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
-    assertEquals("PLATFORM", skill.getDelivery());
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, skill.getDelivery());
     assertEquals("vfs:/skills/test-package/dev/SKILL.md", skill.getPath());
     assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
     assertNull(skill.getInstalledSha256());
@@ -195,7 +195,7 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO debug =
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV);
 
-    assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
+    assertEquals(HarnessModelRequestDebugDTO.Kind.NEXT_REQUEST_PREVIEW, debug.getKind());
     assertEquals(NOW, debug.getGeneratedAt());
     // model / environment 只来自草稿选择；没有活动 Invocation 时冻结视图为 null。
     assertEquals("draft-model", debug.getModel().getModelName());
@@ -210,21 +210,21 @@ class ModelRequestDebugServiceTest {
         List.of("read", "bash"),
         debug.getTools().stream().map(HarnessModelRequestDebugDTO.ToolDTO::getName).toList());
     HarnessModelRequestDebugDTO.ToolDTO sent = debug.getTools().getFirst();
-    assertEquals("SENT", sent.getState());
+    assertEquals(LiveTurnPlan.ToolState.SENT, sent.getState());
     assertNull(sent.getFilterReason());
     assertEquals(EnvironmentSupportDTO.ROUTED, sent.getEnvironmentSupport());
     assertEquals("builtin:read", sent.getProvenance());
     assertEquals("{\"type\":\"object\"}", sent.getInputSchemaJson());
     HarnessModelRequestDebugDTO.ToolDTO filtered = debug.getTools().get(1);
-    assertEquals("FILTERED", filtered.getState());
-    assertEquals("ENVIRONMENT_NOT_SELECTED", filtered.getFilterReason());
+    assertEquals(LiveTurnPlan.ToolState.FILTERED, filtered.getState());
+    assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.getFilterReason());
     assertEquals(EnvironmentSupportDTO.REQUIRED, filtered.getEnvironmentSupport());
 
     // Skill 交付事实与 promptXml：只复用 compose 的同一渲染入口，XML 不可能漂移。
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
-    assertEquals("LOCAL", skill.getDelivery());
+    assertEquals(SkillPromptResolution.Delivery.LOCAL, skill.getDelivery());
     assertEquals(CURRENT_COMMIT, skill.getPackageVersion());
     assertEquals("observed-head", skill.getHeadCommit());
     assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
@@ -245,7 +245,9 @@ class ModelRequestDebugServiceTest {
     assertEquals(List.of("nested"), subagent.getSubagents());
     assertEquals(CODER_CONFIG_JSON, subagent.getConfigurationJson());
 
-    assertEquals("SHORT", debug.getCacheControl().getRetention());
+    assertEquals(
+        HarnessModelRequestDebugDTO.CacheControlDTO.Retention.SHORT,
+        debug.getCacheControl().getRetention());
     // key 直接就是 session UUID 文本：读取投影绝不哈希、也不重新派生 affinity。
     assertEquals(SESSION_ID.toString(), debug.getCacheControl().getKey());
   }
@@ -361,7 +363,7 @@ class ModelRequestDebugServiceTest {
             branchSettings()
                 .withExecution(BuiltinExecution.of(DRAFT_MODEL))
                 .withEnvironmentName("root-env"));
-    assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
+    assertEquals(HarnessModelRequestDebugDTO.Kind.NEXT_REQUEST_PREVIEW, debug.getKind());
     assertEquals("draft-model", debug.getModel().getModelName());
     assertEquals("draft-variant", debug.getModel().getVariant());
     assertEquals("root-env", debug.getEnvironmentName());
@@ -449,7 +451,9 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.FrozenInvocationDTO frozen =
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV).getFrozenInvocation();
 
-    assertEquals("FROZEN_INVOCATION", frozen.getKind());
+    assertEquals(
+        HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind.FROZEN_INVOCATION,
+        frozen.getKind());
     assertEquals(BUILTIN_GENERATION_ID.toString(), frozen.getGenerationId());
     assertEquals(2, frozen.getAttempt());
     ModelRequestSpec frozenSpec = new ModelRequestSpecJsonCodec().decode(frozen.getRequestJson());
@@ -497,7 +501,9 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO rejected =
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV);
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.getPlanningError());
-    assertEquals("FROZEN_INVOCATION", rejected.getFrozenInvocation().getKind());
+    assertEquals(
+        HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind.FROZEN_INVOCATION,
+        rejected.getFrozenInvocation().getKind());
 
     // 没有 Builtin 当前 generation：冻结视图必须缺席。
     ThreadSnapshot idle = idleSnapshot();
@@ -585,7 +591,9 @@ class ModelRequestDebugServiceTest {
 
     HarnessModelRequestDebugDTO.FrozenInvocationDTO frozen =
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV).getFrozenInvocation();
-    assertEquals("FROZEN_INVOCATION", frozen.getKind());
+    assertEquals(
+        HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind.FROZEN_INVOCATION,
+        frozen.getKind());
     assertEquals(queriedGenerationId.toString(), frozen.getGenerationId());
     assertEquals(3, frozen.getAttempt());
     assertEquals(frozenRequestSpecJson(), frozen.getRequestJson());

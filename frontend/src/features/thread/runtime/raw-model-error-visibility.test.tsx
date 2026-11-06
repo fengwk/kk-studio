@@ -61,7 +61,7 @@ function sessionEntry(
     sessionId: 'session-1',
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: 1789473600,
+    createdAt: 1789473600,
     usageCost: null,
     ...overrides,
   }
@@ -324,8 +324,8 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
           message: RAW_VENDOR_ERROR_BODY,
         },
         resultEntryId: null,
-        createTime: 1789473600,
-        updateTime: 1789473601,
+        createdAt: 1789473600,
+        updatedAt: 1789473601,
       }
 
       const records = buildThreadEventTimeline({

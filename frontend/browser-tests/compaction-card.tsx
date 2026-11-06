@@ -33,7 +33,7 @@ function entry(
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: 1767225600,
+    createdAt: 1767225600,
     usageCost: null,
   }
 }

@@ -53,7 +53,7 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
                     new EntryPathMetrics(0, 0))));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "/tree"))
+        .perform(get("/api/harness/threads/" + idText(1) + "/tree"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].threadId").value(idText(2)))
@@ -80,13 +80,13 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
   /** 非 canonical UUID 在进入 Runtime 前拒绝；未知节点沿用快照的 404 语义。 */
   @Test
   void treeRejectsInvalidUuidAndReturnsNotFoundForMissingThread() throws Exception {
-    mockMvc.perform(get("/api/threads/1-1-1-1-1/tree")).andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/harness/threads/not-a-uuid/tree")).andExpect(status().isBadRequest());
     verifyNoInteractions(runtime);
     when(runtime.getThreadTree(id(999)))
         .thenThrow(DomainException.notFound("thread", "thread " + idText(999) + " does not exist"));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(999) + "/tree"))
+        .perform(get("/api/harness/threads/" + idText(999) + "/tree"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.detail").value("thread " + idText(999) + " does not exist"));
   }
@@ -100,7 +100,7 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
                 ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
 
     mockMvc
-        .perform(get("/api/threads/" + idText(1) + "/compaction-availability"))
+        .perform(get("/api/harness/threads/" + idText(1) + "/compaction-availability"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.available").value(false))
         .andExpect(jsonPath("$.disabledReason").value("BELOW_MINIMUM"));
@@ -108,13 +108,13 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     verify(runtime, never()).getThreadSnapshot(any());
 
     mockMvc
-        .perform(get("/api/threads/1-1-1-1-1/compaction-availability"))
+        .perform(get("/api/harness/threads/not-a-uuid/compaction-availability"))
         .andExpect(status().isBadRequest());
 
     when(runtime.manualCompactionAvailability(id(999)))
         .thenThrow(DomainException.notFound("thread", "thread " + idText(999) + " does not exist"));
     mockMvc
-        .perform(get("/api/threads/" + idText(999) + "/compaction-availability"))
+        .perform(get("/api/harness/threads/" + idText(999) + "/compaction-availability"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.detail").value("thread " + idText(999) + " does not exist"));
   }

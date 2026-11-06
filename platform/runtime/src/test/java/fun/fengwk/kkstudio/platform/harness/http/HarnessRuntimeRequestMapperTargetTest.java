@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.assertTargetRejected;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.id;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newForkedSessionTarget;
@@ -18,10 +16,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactDTO;
 
 class HarnessRuntimeRequestMapperTargetTest {
 
@@ -63,16 +61,6 @@ class HarnessRuntimeRequestMapperTargetTest {
     assertEquals(id(4), forked.threadId());
     assertFalse(forked.yoloEnabled());
 
-    // 既有 Thread 不经由 target union 承载：type "THREAD" 按未知 target 类型拒绝。
-    HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
-    thread.setType("THREAD");
-    thread.setThreadId(idText(1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(thread, userCommand("thread"))));
-
     assertThrows(
         IllegalArgumentException.class,
         () -> {
@@ -90,76 +78,29 @@ class HarnessRuntimeRequestMapperTargetTest {
   }
 
   @Test
-  void rejectsTargetUnionViolationsAndUnknownType() {
-    // NEW_SESSION/NEW_THREAD 的字段集合互斥；THREAD 与未知 target 类型一律拒绝。
-    HarnessCommandTargetDTO newSession = newSessionTarget();
-    newSession.setStartEntryId(idText(8));
-    assertTargetRejected(newSession);
+  void rejectsUnrepresentableTargetValues() {
+    // 联合类型已保证字段集合；仍为空必填项与空白名称必须 fail closed。
+    assertTargetRejected(
+        new HarnessCommandTargetDTO.NewThreadDTO(idText(2), idText(3), idText(1), null, false));
+    assertTargetRejected(
+        new HarnessCommandTargetDTO.NewThreadDTO(idText(2), idText(3), idText(1), "   ", false));
+    assertTargetRejected(
+        new HarnessCommandTargetDTO.NewForkedSessionDTO(
+            null, idText(2), idText(3), idText(4), false));
+    assertTargetRejected(new HarnessCommandTargetDTO.NewSessionDTO(null, idText(1), null, true));
+  }
 
-    HarnessCommandTargetDTO newThread = newThreadTarget();
-    newThread.setRootSettings(branchSettings());
-    assertTargetRejected(newThread);
-
-    // threadName 是 NEW_THREAD 必填：缺失或空白都拒绝；且 NEW_SESSION 不得携带 threadName。
-    HarnessCommandTargetDTO missingThreadName = newThreadTarget();
-    missingThreadName.setThreadName(null);
-    assertTargetRejected(missingThreadName);
-    HarnessCommandTargetDTO blankThreadName = newThreadTarget();
-    blankThreadName.setThreadName("   ");
-    assertTargetRejected(blankThreadName);
-    HarnessCommandTargetDTO sessionWithThreadName = newSessionTarget();
-    sessionWithThreadName.setThreadName("branch");
-    assertTargetRejected(sessionWithThreadName);
-
-    // NEW_FORKED_SESSION 的字段集合互斥：rootSettings / threadName 禁用，sourceThreadId 必填。
-    HarnessCommandTargetDTO forkedWithRootSettings = newForkedSessionTarget();
-    forkedWithRootSettings.setRootSettings(branchSettings());
-    assertTargetRejected(forkedWithRootSettings);
-
-    HarnessCommandTargetDTO forkedWithThreadName = newForkedSessionTarget();
-    forkedWithThreadName.setThreadName("branch");
-    assertTargetRejected(forkedWithThreadName);
-
-    HarnessCommandTargetDTO missingSourceThreadId = newForkedSessionTarget();
-    missingSourceThreadId.setSourceThreadId(null);
-    assertTargetRejected(missingSourceThreadId);
-
-    // sourceThreadId 只属于 NEW_FORKED_SESSION。
-    HarnessCommandTargetDTO newSessionWithSource = newSessionTarget();
-    newSessionWithSource.setSourceThreadId(idText(7));
-    assertTargetRejected(newSessionWithSource);
-    HarnessCommandTargetDTO newThreadWithSource = newThreadTarget();
-    newThreadWithSource.setSourceThreadId(idText(7));
-    assertTargetRejected(newThreadWithSource);
-    // 显式 null 也按 presence 拒绝：不能靠 null 绕过禁用字段校验。
-    HarnessCommandTargetDTO newSessionWithNullSource = newSessionTarget();
-    newSessionWithNullSource.setSourceThreadId(null);
-    assertTargetRejected(newSessionWithNullSource);
-
-    HarnessCommandTargetDTO forkedMissingYolo = newForkedSessionTarget();
-    forkedMissingYolo.setYoloEnabled(null);
-    assertTargetRejected(forkedMissingYolo);
-
-    HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
-    thread.setType("THREAD");
-    thread.setThreadId(idText(1));
-    assertTargetRejected(thread);
-
-    HarnessCommandTargetDTO unknown = new HarnessCommandTargetDTO();
-    unknown.setType("UNKNOWN");
-    assertTargetRejected(unknown);
-
-    HarnessCommandTargetDTO missingYolo = new HarnessCommandTargetDTO();
-    missingYolo.setType("NEW_SESSION");
-    missingYolo.setSessionId(idText(2));
-    missingYolo.setThreadId(idText(1));
-    missingYolo.setRootSettings(branchSettings());
-    assertTargetRejected(missingYolo);
+  private static void assertTargetRejected(HarnessCommandTargetDTO target) {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(target, userCommand("user"))));
   }
 
   @Test
   void mapperRejectsNonCanonicalIdentityAndVersion() {
-    // 测试意图：真实 DTO 映射必须把大写 UUID 与越界版本交给共同解析器，而不是只重复测试解析器本身。
+    // 真实 DTO 映射必须把大写 UUID 与越界版本交给共同解析器，而不是只重复测试解析器本身。
     HarnessThreadCompactDTO uppercase = new HarnessThreadCompactDTO();
     uppercase.setExpectedVersion("1");
     assertThrows(

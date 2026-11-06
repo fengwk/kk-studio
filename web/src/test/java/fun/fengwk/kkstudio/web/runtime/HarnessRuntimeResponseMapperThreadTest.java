@@ -20,14 +20,15 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadTreeNodeDTO;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,9 +61,9 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertEquals("default", dto.getBranchSettings().getExecution().getSettings().get("variant"));
     // Environment 引用投影为 nullable name（该 fixture 未选择环境）。
     assertNull(dto.getBranchSettings().getEnvironmentName());
-    assertEquals(NOW, dto.getCreateTime());
-    assertEquals(NOW, dto.getUpdateTime());
-    assertEquals("RUNNABLE", dto.getExecutionControl());
+    assertEquals(NOW, dto.getCreatedAt());
+    assertEquals(NOW, dto.getUpdatedAt());
+    assertEquals(ThreadExecutionControl.RUNNABLE, dto.getExecutionControl());
   }
 
   /** 测试意图：branch settings 的 goal 投影必须显式 nullable：已设置时输出 {id,text}，未设置或已清除时输出 null。 */
@@ -109,14 +110,14 @@ class HarnessRuntimeResponseMapperThreadTest {
 
     for (Map.Entry<ThreadRuntimeStatus, ThreadSnapshot> entry : cases.entrySet()) {
       HarnessThreadDTO dto = HarnessRuntimeResponseMapper.toThreadDto(entry.getValue());
-      assertEquals(entry.getKey().name(), dto.getStatus());
-      assertEquals("RUNNABLE", dto.getExecutionControl());
+      assertEquals(entry.getKey(), dto.getStatus());
+      assertEquals(ThreadExecutionControl.RUNNABLE, dto.getExecutionControl());
     }
 
     HarnessThreadDTO terminalTool =
         HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED));
-    assertEquals(ThreadRuntimeStatus.RUNNING.name(), terminalTool.getStatus());
-    assertEquals("RUNNABLE", terminalTool.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.RUNNING, terminalTool.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, terminalTool.getExecutionControl());
   }
 
   @Test
@@ -124,16 +125,16 @@ class HarnessRuntimeResponseMapperThreadTest {
     // 无本地工作和未完成直接委派时为 IDLE；执行父关系本身不代表仍有任务。
     ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
     HarnessThreadDTO parentDto = HarnessRuntimeResponseMapper.toThreadDto(parent);
-    assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
-    assertEquals("RUNNABLE", parentDto.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.IDLE, parentDto.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, parentDto.getExecutionControl());
     // 同一快照必须同时暴露不可变执行父关系，供前端展示执行树而不混入 Session 对话历史。
     assertEquals(idText(2), parentDto.getParentThreadId());
 
     // 已有接受但尚未被消费的命令同样是"工作尚未结束"：待启动 RUNNING，且不是 IDLE。
     ThreadSnapshot queued = HarnessRuntimeTestFixtures.queuedSnapshot();
     HarnessThreadDTO queuedDto = HarnessRuntimeResponseMapper.toThreadDto(queued);
-    assertEquals(ThreadRuntimeStatus.RUNNING.name(), queuedDto.getStatus());
-    assertEquals("RUNNABLE", queuedDto.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.RUNNING, queuedDto.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, queuedDto.getExecutionControl());
     // 根 Thread 的父关系必须显式 null（不是空串），前端据此判断执行树根。
     assertNull(queuedDto.getParentThreadId());
   }
@@ -169,17 +170,17 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertEquals("builtin", node.getExecution().getDriver());
     assertEquals("gpt-5", node.getExecution().getSettings().get("modelName"));
     assertEquals("default", node.getExecution().getSettings().get("variant"));
-    assertEquals("IDLE", node.getStatus());
-    assertEquals("RUNNABLE", node.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.IDLE, node.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, node.getExecutionControl());
     assertEquals(0, node.getTurnCount());
     assertEquals(0, node.getToolCallCount());
     assertNull(node.getOutcome());
-    assertEquals(parent.thread().updatedAt(), node.getUpdateTime());
-    assertEquals("RUNNING", nodes.get(1).getStatus());
-    assertEquals("RUNNABLE", nodes.get(1).getExecutionControl());
+    assertEquals(parent.thread().updatedAt(), node.getUpdatedAt());
+    assertEquals(ThreadRuntimeStatus.RUNNING, nodes.get(1).getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, nodes.get(1).getExecutionControl());
     assertEquals(1, nodes.get(1).getTurnCount());
     assertNull(nodes.get(1).getOutcome());
-    assertEquals(continuing.thread().updatedAt(), nodes.get(1).getUpdateTime());
+    assertEquals(continuing.thread().updatedAt(), nodes.get(1).getUpdatedAt());
   }
 
   @Test
@@ -195,7 +196,7 @@ class HarnessRuntimeResponseMapperThreadTest {
             new EntryPathMetrics(1, 0));
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waitingWithTurnEnd));
-    assertEquals("WAITING", nodes.getFirst().getStatus());
+    assertEquals(ThreadRuntimeStatus.WAITING, nodes.getFirst().getStatus());
     assertNull(nodes.getFirst().getOutcome());
   }
 }

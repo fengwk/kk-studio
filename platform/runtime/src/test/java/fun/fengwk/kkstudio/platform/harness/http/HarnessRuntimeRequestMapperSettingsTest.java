@@ -14,21 +14,18 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugRequestDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugRequestDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 
 class HarnessRuntimeRequestMapperSettingsTest {
 
-  /**
-   * 测试意图：rootSettings 的 environmentName 是 required-nullable 字段——显式 null 与 canonical 文本都要精确保留，字段缺失必须
-   * fail closed。
-   */
+  /** rootSettings 的 environmentName 是 nullable 字段：null 与 canonical 文本都精确保留，非法值 fail closed。 */
   @Test
   void mapsNullableEnvironmentNameFromRootSettings() {
-    HarnessCommandTargetDTO target = newSessionTarget();
-    target.getRootSettings().setEnvironmentName("local");
+    HarnessCommandTargetDTO.NewSessionDTO target =
+        (HarnessCommandTargetDTO.NewSessionDTO) newSessionTarget();
+    target.rootSettings().setEnvironmentName("local");
     AcceptCommandsCommand withEnvironment =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(target, userCommand("env")));
     AcceptCommandsTarget.NewRootSession newSession =
@@ -42,19 +39,18 @@ class HarnessRuntimeRequestMapperSettingsTest {
         assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, withoutEnvironment.target());
     assertNull(cleared.rootSettings().environmentName());
 
-    HarnessCommandTargetDTO missing = newSessionTarget();
-    HarnessBranchSettingsDTO missingSettings = new HarnessBranchSettingsDTO();
-    missingSettings.setAgentName(missing.getRootSettings().getAgentName());
-    missingSettings.setExecution(missing.getRootSettings().getExecution());
-    missing.setRootSettings(missingSettings);
+    HarnessCommandTargetDTO missingSettings =
+        new HarnessCommandTargetDTO.NewSessionDTO(
+            target.sessionId(), target.threadId(), null, target.yoloEnabled());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(missing, userCommand("missing"))));
+                request(missingSettings, userCommand("missing"))));
 
-    HarnessCommandTargetDTO invalid = newSessionTarget();
-    invalid.getRootSettings().setEnvironmentName("a/b");
+    HarnessCommandTargetDTO.NewSessionDTO invalid =
+        (HarnessCommandTargetDTO.NewSessionDTO) newSessionTarget();
+    invalid.rootSettings().setEnvironmentName("a/b");
     assertThrows(
         IllegalArgumentException.class,
         () ->

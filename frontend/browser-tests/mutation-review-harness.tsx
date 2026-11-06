@@ -500,7 +500,7 @@ const mutationReviewHarness = {
           ],
         },
       }),
-      createTime: 1792368000,
+      createdAt: 1792368000,
       usageCost: null,
     }
 
@@ -535,7 +535,7 @@ const mutationReviewHarness = {
           callIndex: 0,
         },
       }),
-      createTime: 1792368001,
+      createdAt: 1792368001,
       usageCost: null,
     }
 

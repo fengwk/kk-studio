@@ -397,7 +397,7 @@ function projectEntryRecord(
     entryId: entry.entryId,
     turnStartEntryId: turn.turnStartEntryId,
     turnNumber: turn.turnNumber,
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     rawJson: entry.payloadJson || '{}',
     details: baseDetails,
   }
@@ -410,7 +410,7 @@ function projectEntryRecord(
         status: 'completed',
         title: 'ROOT',
         summary: translate('ai.runtime.entry.rootText'),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     case 'TURN_START':
       return {
@@ -419,7 +419,7 @@ function projectEntryRecord(
         status: 'completed',
         title: 'TURN_START',
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     case 'SETTINGS':
       return {
@@ -428,7 +428,7 @@ function projectEntryRecord(
         status: 'completed',
         title: 'SETTINGS',
         summary: '',
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     case 'COMPACTION':
       return {
@@ -439,7 +439,7 @@ function projectEntryRecord(
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
         // 只有真实模型输出（携带 canonical metadata）才可读取历史请求预览；纯摘要无请求可重建。
         historicalPreviewEligible: hasAssistantMetadata(payload),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     case 'TURN_END': {
       const outcome = getString(payload.outcome)
@@ -507,7 +507,7 @@ function projectEntryRecord(
         details: withTime([
           ...details,
           { label: translate('ai.runtime.event.detail.outcome'), value: outcome },
-        ], entry.createTime),
+        ], entry.createdAt),
       }
     }
     case 'MODEL_ATTEMPT_FAILURE': {
@@ -531,7 +531,7 @@ function projectEntryRecord(
             label: translate('ai.runtime.event.detail.errorMessage'),
             value: getString(error.message),
           },
-        ], entry.createTime),
+        ], entry.createdAt),
       }
     }
     case 'ASSISTANT_ERROR': {
@@ -551,7 +551,7 @@ function projectEntryRecord(
             label: translate('ai.runtime.event.detail.errorMessage'),
             value: getString(error.message),
           },
-        ], entry.createTime),
+        ], entry.createdAt),
       }
     }
     case 'ASSISTANT_ABORTED':
@@ -561,7 +561,7 @@ function projectEntryRecord(
         status: 'stopped',
         title: 'ASSISTANT_ABORTED',
         summary: translate('ai.runtime.event.abortedText'),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     case 'CUSTOM': {
       const customType = getString(payload.customType)
@@ -572,7 +572,7 @@ function projectEntryRecord(
         status: 'completed',
         title: 'CUSTOM',
         summary: summarizeField(customType || contributorId, translate('ai.runtime.event.emptyText')),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
     }
     case 'CUSTOM_MESSAGE':
@@ -594,7 +594,7 @@ function projectEntryRecord(
               value: getString(payload.sourceThreadId),
             }]
             : []),
-        ], entry.createTime),
+        ], entry.createdAt),
       }
     }
     case 'FORK': {
@@ -618,7 +618,7 @@ function projectEntryRecord(
           ...(sourceThreadId
             ? [{ label: translate('ai.runtime.notification.entry.source'), value: sourceThreadId }]
             : []),
-        ], entry.createTime),
+        ], entry.createdAt),
       }
     }
     case 'MESSAGE': {
@@ -651,7 +651,7 @@ function projectEntryRecord(
         status: 'completed',
         title: translate('ai.runtime.event.unknownType', { type: entry.entryType }),
         summary: translate('ai.runtime.event.emptyText'),
-        details: withTime(base.details, entry.createTime),
+        details: withTime(base.details, entry.createdAt),
       }
   }
 }
@@ -826,8 +826,8 @@ function projectActiveModelRecord(
     status,
     title: 'ACTIVE_MODEL_INVOCATION',
     summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${activeOutput.attempt}`,
-    createdAt: activeOutput.createTime,
-    details: withTime(details, activeOutput.createTime),
+    createdAt: activeOutput.createdAt,
+    details: withTime(details, activeOutput.createdAt),
     rawJson: formatDisplayJson(rawPayload),
   }
 }
@@ -896,8 +896,8 @@ function projectActiveToolRecord(
     status,
     title: 'ACTIVE_TOOL_INVOCATION',
     summary: `${invocation.toolName || translate('ai.runtime.event.unknownTool')} · ${eventStatusText(status)}`,
-    createdAt: invocation.createTime,
-    details: withTime(details, invocation.createTime),
+    createdAt: invocation.createdAt,
+    details: withTime(details, invocation.createdAt),
     rawJson: formatDisplayJson(rawPayload),
   }
 }

@@ -14,7 +14,7 @@ const CHILD = '00000000-0000-4000-8000-000000000002'
 function node(threadId: string, parentThreadId: string | null) {
   return {
     threadId, parentThreadId, name: 'main', agentName: 'Explorer',
-    updateTime: 1774958400.125,
+    updatedAt: 1774958400.125,
     model: { modelName: 'm', variant: 'default' },
     executionControl: 'RUNNABLE', status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
   }
@@ -51,7 +51,7 @@ describe('execution tree HTTP Instant contract', () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderPanel()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
-    expect(transport.mock.calls[0][0]).toBe(`/api/threads/${CHILD}/tree`)
+    expect(transport.mock.calls[0][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
@@ -62,9 +62,9 @@ describe('execution tree HTTP Instant contract', () => {
   it.each([
     ['empty', []],
     ['foreign', [node(ROOT, null)]],
-    ['missing time', [node(ROOT, null), { ...node(CHILD, ROOT), updateTime: undefined }]],
-    ['null time', [node(ROOT, null), { ...node(CHILD, ROOT), updateTime: null }]],
-    ['array time', [node(ROOT, null), { ...node(CHILD, ROOT), updateTime: [2026, 3, 31] }]],
+    ['missing time', [node(ROOT, null), { ...node(CHILD, ROOT), updatedAt: undefined }]],
+    ['null time', [node(ROOT, null), { ...node(CHILD, ROOT), updatedAt: null }]],
+    ['array time', [node(ROOT, null), { ...node(CHILD, ROOT), updatedAt: [2026, 3, 31] }]],
   ])('rejects %s HTTP tree without caching or subscribing', async (_, nodes) => {
     reply(nodes as unknown[])
     const { client, sockets } = renderPanel()

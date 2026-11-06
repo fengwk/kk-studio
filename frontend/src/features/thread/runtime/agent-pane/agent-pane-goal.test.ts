@@ -41,8 +41,8 @@ const mockThread: HarnessThreadDTO = {
     environmentName: null,
     goal: { id: 'existing-goal-id', text: 'Existing goal text' },
   },
-  createTime: 1790244000,
-  updateTime: 1790244000,
+  createdAt: 1790244000,
+  updatedAt: 1790244000,
 }
 
 describe('AgentPane Goal pipeline and owner-free command availability', () => {
