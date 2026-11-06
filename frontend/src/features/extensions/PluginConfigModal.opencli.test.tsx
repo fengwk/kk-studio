@@ -6,13 +6,16 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { pluginsService } from '@/features/extensions/plugins-service'
-import { ApiError } from '@/shared/api/client'
-import type { PluginDTO } from '@/shared/api/generated/contracts'
+import { ApiError, request } from '@/shared/api/client'
+import type {
+  PluginConfigurationUpdateRequestDTO,
+  PluginDTO,
+} from '@/shared/api/generated/contracts'
 
-vi.mock('@/features/extensions/plugins-service', () => ({
-  pluginsService: { updateConfiguration: vi.fn() },
-}))
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
 
 const opencliPluginFixture = JSON.parse(readFileSync(resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -31,6 +34,14 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     })
   })
 
+  /** 最近一次配置保存的请求体。 */
+  function savedPayload(): PluginConfigurationUpdateRequestDTO {
+    const args = vi.mocked(request).mock.calls[0][1] as {
+      body: PluginConfigurationUpdateRequestDTO
+    }
+    return args.body
+  }
+
   function renderModal(plugin: PluginDTO = opencliPluginFixture) {
     return render(
       <QueryClientProvider client={queryClient}>
@@ -43,7 +54,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     renderModal()
 
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
-    expect(screen.getByText(`Rev ${opencliPluginFixture.configuration.revision}`)).toBeInTheDocument()
+    expect(screen.getByText(`v${opencliPluginFixture.configuration.version}`)).toBeInTheDocument()
 
     // 连接设置可编辑。
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')
@@ -82,7 +93,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
   it('edits nested schema properties and saves with expected coordinates and KEEP secret operations', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
+    vi.mocked(request).mockResolvedValue(opencliPluginFixture)
     renderModal()
 
     // 编辑顶层 baseUrl
@@ -106,20 +117,26 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
-        'opencli',
+      expect(request).toHaveBeenCalledWith(
+        'PUT /api/platform/plugins/{pluginId}/configuration',
         expect.objectContaining({
-          expectedRevision: opencliPluginFixture.configuration.revision,
-          secretPatch: {
-            apiKey: { operation: 'KEEP' },
-            instanceId: { operation: 'KEEP' },
-          },
+          path: { pluginId: 'opencli' },
+          body: expect.objectContaining({
+            expectedVersion: opencliPluginFixture.configuration.version,
+            secretPatch: {
+              apiKey: { operation: 'KEEP' },
+              instanceId: { operation: 'KEEP' },
+            },
+          }),
         }),
       )
     })
 
-    const callPayload = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
-    const parsedValues = JSON.parse(callPayload.valuesJson)
+    const parsedValues = savedPayload().values as {
+      baseUrl: string
+      gptImage2: { paidEnabled: boolean }
+      seedance: { retry: number }
+    }
     expect(parsedValues.baseUrl).toBe('https://hub.example.com')
     expect(parsedValues.gptImage2.paidEnabled).toBe(true)
     expect(parsedValues.seedance.retry).toBe(3)
@@ -129,7 +146,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
   it('sets the authentication key and private identity without adding either to ordinary values', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
+    vi.mocked(request).mockResolvedValue(opencliPluginFixture)
     renderModal()
 
     // 设置 apiKey
@@ -158,20 +175,23 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
-        'opencli',
+      expect(request).toHaveBeenCalledWith(
+        'PUT /api/platform/plugins/{pluginId}/configuration',
         expect.objectContaining({
-          expectedRevision: opencliPluginFixture.configuration.revision,
-          secretPatch: {
-            apiKey: {
-              operation: 'SET',
-              value: testApiKey,
+          path: { pluginId: 'opencli' },
+          body: expect.objectContaining({
+            expectedVersion: opencliPluginFixture.configuration.version,
+            secretPatch: {
+              apiKey: {
+                operation: 'SET',
+                value: testApiKey,
+              },
+              instanceId: {
+                operation: 'SET',
+                value: testInstanceId,
+              },
             },
-            instanceId: {
-              operation: 'SET',
-              value: testInstanceId,
-            },
-          },
+          }),
         }),
       )
     })
@@ -181,16 +201,15 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     })
     expect(apiKeyInput).toHaveValue('')
     expect(instInput).toHaveValue('')
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson)
-      .not.toContain(testInstanceId)
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson)
-      .not.toContain(testApiKey)
+    const submittedValues = JSON.stringify(savedPayload().values)
+    expect(submittedValues).not.toContain(testInstanceId)
+    expect(submittedValues).not.toContain(testApiKey)
   })
 
   it('preserves padded secret input for server rejection instead of silently changing the value', async () => {
     const user = userEvent.setup()
     const message = 'SET value must not have surrounding whitespace'
-    vi.mocked(pluginsService.updateConfiguration).mockRejectedValue(new ApiError(message, 400))
+    vi.mocked(request).mockRejectedValue(new ApiError(message, 400))
     renderModal()
     const secretItem = screen.getByTestId('secret-item-apiKey')
     await user.click(within(secretItem).getByRole('button', { name: /Operation for apiKey/i }))
@@ -201,13 +220,16 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.click(screen.getByRole('button', { name: '保存配置' }))
 
     await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument())
-    expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
-      'opencli',
+    expect(request).toHaveBeenCalledWith(
+      'PUT /api/platform/plugins/{pluginId}/configuration',
       expect.objectContaining({
-        secretPatch: {
-          apiKey: { operation: 'SET', value: raw },
-          instanceId: { operation: 'KEEP' },
-        },
+        path: { pluginId: 'opencli' },
+        body: expect.objectContaining({
+          secretPatch: {
+            apiKey: { operation: 'SET', value: raw },
+            instanceId: { operation: 'KEEP' },
+          },
+        }),
       }),
     )
     expect(onSuccess).not.toHaveBeenCalled()
@@ -217,7 +239,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
   it('manages CLEAR operation independently on protected instanceId with confirmation safeguard', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
+    vi.mocked(request).mockResolvedValue(opencliPluginFixture)
     renderModal()
 
     // 仅清除受保护的 instanceId，apiKey 维持 KEEP
@@ -230,7 +252,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
     // 未确认前：保存按钮禁用
     expect(saveBtn).toBeDisabled()
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
 
     // 勾选确认复选框
     const confirmCheckbox = within(secretItemInst).getByRole('checkbox', {
@@ -243,14 +265,17 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     // 提交保存：instanceId CLEAR，apiKey KEEP
     await user.click(saveBtn)
     await waitFor(() => {
-      expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
-        'opencli',
+      expect(request).toHaveBeenCalledWith(
+        'PUT /api/platform/plugins/{pluginId}/configuration',
         expect.objectContaining({
-          expectedRevision: opencliPluginFixture.configuration.revision,
-          secretPatch: {
-            apiKey: { operation: 'KEEP' },
-            instanceId: { operation: 'CLEAR' },
-          },
+          path: { pluginId: 'opencli' },
+          body: expect.objectContaining({
+            expectedVersion: opencliPluginFixture.configuration.version,
+            secretPatch: {
+              apiKey: { operation: 'KEEP' },
+              instanceId: { operation: 'CLEAR' },
+            },
+          }),
         }),
       )
     })
@@ -258,7 +283,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
   it('handles optimistic locking 409 conflict and presents notification banner', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.updateConfiguration).mockRejectedValue(
+    vi.mocked(request).mockRejectedValue(
       new ApiError('conflict', 409, 'Conflict', { code: 'CONFLICT' }),
     )
     renderModal()

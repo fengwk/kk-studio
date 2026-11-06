@@ -19,14 +19,14 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
     lastRefreshedAt: null,
     lastRefreshError: null,
     configuration: {
-      revision: '8',
-      valuesJson: '{}',
-      valuesSchema: '{"type":"object","properties":{}}',
-      defaultsJson: '{}',
+      version: '8',
+      values: {},
+      valuesSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      defaults: {},
       secrets: {},
     },
-    desiredRevision: '8',
-    appliedRevision: '8',
+    desiredVersion: '8',
+    appliedVersion: '8',
     connectionCheckSupported: true,
     harnessToolNames: [],
     canvasFunctionNames: [],
@@ -38,8 +38,8 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
 function result(overrides: Partial<PluginConnectionCheckDTO> = {}): PluginConnectionCheckDTO {
   return {
     pluginId: 'opencli',
-    appliedRevision: '8',
-    checkedAt: 1772366400,
+    appliedVersion: '8',
+    checkedAt: 1772366400000,
     reachability: 'REACHABLE',
     authentication: 'ACCEPTED',
     browserSession: 'UNKNOWN',
@@ -50,7 +50,7 @@ function result(overrides: Partial<PluginConnectionCheckDTO> = {}): PluginConnec
 function doneRun(overrides: Partial<PluginConnectionCheckRun> = {}): PluginConnectionCheckRun {
   return {
     pluginId: 'opencli',
-    expectedRevision: '8',
+    expectedVersion: '8',
     phase: 'done',
     result: result(),
     errorMessage: null,
@@ -62,7 +62,7 @@ describe('pluginConnectionCheckExpected', () => {
   // 只提交用户当前所见的已应用坐标；能力必须来自实例 metadata。
   it('returns the applied coordinates only when the instance declares the capability and is applied', () => {
     expect(pluginConnectionCheckExpected(plugin())).toEqual({
-      expectedRevision: '8',
+      expectedVersion: '8',
     })
   })
 
@@ -71,7 +71,7 @@ describe('pluginConnectionCheckExpected', () => {
   })
 
   it('never submits null coordinates for a plugin that is not applied', () => {
-    expect(pluginConnectionCheckExpected(plugin({ appliedRevision: null }))).toBeNull()
+    expect(pluginConnectionCheckExpected(plugin({ appliedVersion: null }))).toBeNull()
   })
 
   it('never submits a zero applied revision', () => {
@@ -79,16 +79,16 @@ describe('pluginConnectionCheckExpected', () => {
     expect(
       pluginConnectionCheckExpected(
         plugin({
-          appliedRevision: '0',
-          desiredRevision: '0',
-          configuration: { ...plugin().configuration, revision: '0' },
+          appliedVersion: '0',
+          desiredVersion: '0',
+          configuration: { ...plugin().configuration, version: '0' },
         }),
       ),
     ).toBeNull()
   })
 
   it('refuses the entry while the local applied coordinates are behind desired', () => {
-    expect(pluginConnectionCheckExpected(plugin({ desiredRevision: '9' }))).toBeNull()
+    expect(pluginConnectionCheckExpected(plugin({ desiredVersion: '9' }))).toBeNull()
   })
 })
 
@@ -99,7 +99,7 @@ describe('pluginConnectionCheckIsStale', () => {
 
   it('marks a late result stale once the applied coordinates changed', () => {
     const revisionChanged = pluginConnectionCheckExpected(
-      plugin({ appliedRevision: '9', desiredRevision: '9' }),
+      plugin({ appliedVersion: '9', desiredVersion: '9' }),
     )
     expect(pluginConnectionCheckIsStale(doneRun(), revisionChanged)).toBe(true)
   })
@@ -107,7 +107,7 @@ describe('pluginConnectionCheckIsStale', () => {
   it('marks a result stale when the plugin is no longer checkable or has disappeared', () => {
     expect(pluginConnectionCheckIsStale(doneRun(), null)).toBe(true)
     // 列表换版后本节点又变成待应用：结果不再对应当前配置。
-    const pendingAgain = pluginConnectionCheckExpected(plugin({ desiredRevision: '9' }))
+    const pendingAgain = pluginConnectionCheckExpected(plugin({ desiredVersion: '9' }))
     expect(pendingAgain).toBeNull()
     expect(pluginConnectionCheckIsStale(doneRun(), pendingAgain)).toBe(true)
   })

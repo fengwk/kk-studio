@@ -3,13 +3,28 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConnectModal } from './PluginConnectModal'
-import { pluginsService } from '@/features/extensions/plugins-service'
 import { setLocale } from '@/shared/i18n'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/features/extensions/plugins-service', () => ({
-  pluginsService: { prepareAuth: vi.fn(), completeAuth: vi.fn() },
-}))
+/** 认证端点的替身：路由参数按业务动作还原，断言不依赖 URL 拼接。 */
+const api = vi.hoisted(() => ({ prepareAuth: vi.fn(), completeAuth: vi.fn() }))
+
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return {
+    ...actual,
+    request: (route: string, args: { path?: Record<string, string>; body?: unknown }): unknown => {
+      switch (route) {
+        case 'POST /api/platform/plugins/{pluginId}/auth/prepare':
+          return api.prepareAuth(args.path?.pluginId, args.body)
+        case 'POST /api/platform/plugins/{pluginId}/auth/complete':
+          return api.completeAuth(args.path?.pluginId, args.body)
+        default:
+          throw new Error(`unexpected plugin route: ${route}`)
+      }
+    },
+  }
+})
 
 const plugin: PluginDTO = {
   pluginId: 'demo',
@@ -23,14 +38,14 @@ const plugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '1',
-    valuesJson: '{}',
-    valuesSchema: '{"type":"object","properties":{}}',
-    defaultsJson: '{}',
+    version: '1',
+    values: {},
+    valuesSchema: { type: 'object', properties: {} },
+    defaults: {},
     secrets: {},
   },
-  desiredRevision: '1',
-  appliedRevision: '1',
+  desiredVersion: '1',
+  appliedVersion: '1',
   connectionCheckSupported: false,
   harnessToolNames: [],
   canvasFunctionNames: [],
@@ -85,8 +100,8 @@ describe('PluginConnectModal lifecycle', () => {
       const user = userEvent.setup()
       const prepare = deferred<{ authAttemptId: string; loginUrl: string }>()
       const finish = deferred<PluginDTO>()
-      vi.mocked(pluginsService.prepareAuth).mockReturnValue(prepare.promise)
-      vi.mocked(pluginsService.completeAuth).mockReturnValue(finish.promise)
+      vi.mocked(api.prepareAuth).mockReturnValue(prepare.promise)
+      vi.mocked(api.completeAuth).mockReturnValue(finish.promise)
 
       render(view())
       const form = input().closest('form')!
@@ -98,7 +113,7 @@ describe('PluginConnectModal lifecycle', () => {
         fireEvent.click(loginButton)
       } else {
         // Complete stage requires an attemptId obtained from prepare first
-        vi.mocked(pluginsService.prepareAuth).mockResolvedValueOnce({
+        vi.mocked(api.prepareAuth).mockResolvedValueOnce({
           authAttemptId: 'attempt-nonce-1',
           loginUrl: 'https://auth.example.com',
         })
@@ -129,7 +144,7 @@ describe('PluginConnectModal lifecycle', () => {
 
       await waitFor(() =>
         expect(
-          stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth,
+          stage === 'prepare' ? api.prepareAuth : api.completeAuth,
         ).toHaveBeenCalledTimes(1),
       )
 
@@ -160,20 +175,20 @@ describe('PluginConnectModal lifecycle', () => {
   it.each(['prepare', 'complete'] as const)(
     'never retries a failed %s request and permits an explicit retry',
     async (stage) => {
-      vi.mocked(pluginsService.prepareAuth).mockRejectedValue(new Error('Prepare failed'))
-      vi.mocked(pluginsService.completeAuth).mockRejectedValue(new Error('Complete failed'))
+      vi.mocked(api.prepareAuth).mockRejectedValue(new Error('Prepare failed'))
+      vi.mocked(api.completeAuth).mockRejectedValue(new Error('Complete failed'))
       render(view())
 
       if (stage === 'prepare') {
         fireEvent.click(login())
       } else {
         // Prepare must succeed before complete can be attempted
-        vi.mocked(pluginsService.prepareAuth).mockResolvedValueOnce({
+        vi.mocked(api.prepareAuth).mockResolvedValueOnce({
           authAttemptId: 'attempt-1',
           loginUrl: 'https://example.com',
         })
         fireEvent.click(login())
-        await waitFor(() => expect(pluginsService.prepareAuth).toHaveBeenCalledTimes(1))
+        await waitFor(() => expect(api.prepareAuth).toHaveBeenCalledTimes(1))
         fireEvent.change(input(), { target: { value: 'callback' } })
         fireEvent.submit(input().closest('form')!)
       }
@@ -182,7 +197,7 @@ describe('PluginConnectModal lifecycle', () => {
         stage === 'prepare' ? 'Prepare failed' : 'Complete failed',
       )
       const service =
-        stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth
+        stage === 'prepare' ? api.prepareAuth : api.completeAuth
       expect(service).toHaveBeenCalledTimes(1)
 
       if (stage === 'prepare') {
@@ -203,13 +218,13 @@ describe('PluginConnectModal lifecycle', () => {
     fireEvent.change(input(), { target: { value: 'callback-url' } })
     expect(complete()).toBeDisabled()
     fireEvent.submit(input().closest('form')!)
-    expect(pluginsService.completeAuth).not.toHaveBeenCalled()
+    expect(api.completeAuth).not.toHaveBeenCalled()
   })
 
   it('uses shared secure input, trims callback, clears immediately and sends attempt handle with callback', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.completeAuth).mockResolvedValue(plugin)
-    vi.mocked(pluginsService.prepareAuth).mockResolvedValue({
+    vi.mocked(api.completeAuth).mockResolvedValue(plugin)
+    vi.mocked(api.prepareAuth).mockResolvedValue({
       authAttemptId: 'nonce-handle-xyz',
       loginUrl: 'https://example.invalid',
     })
@@ -231,7 +246,7 @@ describe('PluginConnectModal lifecycle', () => {
         'noopener,noreferrer',
       ),
     )
-    expect(pluginsService.prepareAuth).toHaveBeenCalledWith('demo', { region: 'EN' })
+    expect(api.prepareAuth).toHaveBeenCalledWith('demo', { region: 'EN' })
 
     // Step 2: complete with attemptId and callback
     await waitFor(() => expect(input()).not.toBeDisabled())
@@ -241,7 +256,7 @@ describe('PluginConnectModal lifecycle', () => {
 
     expect(input()).toHaveValue('')
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
-    expect(pluginsService.completeAuth).toHaveBeenCalledWith('demo', {
+    expect(api.completeAuth).toHaveBeenCalledWith('demo', {
       authAttemptId: 'nonce-handle-xyz',
       callbackUrl: 'callback',
     })
@@ -261,6 +276,6 @@ describe('PluginConnectModal lifecycle', () => {
     expect(screen.getByText('No regions available for this plugin')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
     fireEvent.submit(input().closest('form')!)
-    expect(pluginsService.completeAuth).not.toHaveBeenCalled()
+    expect(api.completeAuth).not.toHaveBeenCalled()
   })
 })

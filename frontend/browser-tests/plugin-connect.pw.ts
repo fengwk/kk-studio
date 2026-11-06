@@ -13,22 +13,18 @@ const deepLinkPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '1',
-    valuesJson:
-      '{"enabled":true,"bigInt":9007199254740993123456789,"decimal":1.230000,"exp":1e1000}',
-    valuesSchema: JSON.stringify({
+    version: '1',
+    values: { enabled: true },
+    valuesSchema: {
       type: 'object',
       description: 'Plugin configuration schema',
       properties: {
         enabled: { type: 'boolean', description: 'Enable plugin' },
-        bigInt: { type: 'integer', description: 'Large integer' },
-        decimal: { type: 'number', description: 'Precision decimal' },
-        exp: { type: 'number', description: 'Scientific notation' },
       },
       required: ['enabled'],
       additionalProperties: false,
-    }),
-    defaultsJson: '{"enabled":true}',
+    },
+    defaults: { enabled: true },
     secrets: {
       apiSecret: {
         description: 'DeepLink API Secret',
@@ -36,8 +32,8 @@ const deepLinkPlugin: PluginDTO = {
       },
     },
   },
-  desiredRevision: '1',
-  appliedRevision: '1',
+  desiredVersion: '1',
+  appliedVersion: '1',
   connectionCheckSupported: false,
   harnessToolNames: ['search_tool'],
   canvasFunctionNames: ['draw_func'],
@@ -56,17 +52,17 @@ const staticKeyPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '2',
-    valuesJson: '{"timeout":30}',
-    valuesSchema: JSON.stringify({
+    version: '2',
+    values: { timeout: 30 },
+    valuesSchema: {
       type: 'object',
       properties: {
         timeout: { type: 'integer' },
       },
       required: [],
       additionalProperties: false,
-    }),
-    defaultsJson: '{"timeout":30}',
+    },
+    defaults: { timeout: 30 },
     secrets: {
       token: {
         description: 'Static Access Token',
@@ -74,8 +70,8 @@ const staticKeyPlugin: PluginDTO = {
       },
     },
   },
-  desiredRevision: '2',
-  appliedRevision: '2',
+  desiredVersion: '2',
+  appliedVersion: '2',
   connectionCheckSupported: false,
   harnessToolNames: ['static_tool'],
   canvasFunctionNames: [],
@@ -94,21 +90,21 @@ const noAuthPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '0',
-    valuesJson: '{"debug":false}',
-    valuesSchema: JSON.stringify({
+    version: '0',
+    values: { debug: false },
+    valuesSchema: {
       type: 'object',
       properties: {
         debug: { type: 'boolean' },
       },
       required: [],
       additionalProperties: false,
-    }),
-    defaultsJson: '{"debug":false}',
+    },
+    defaults: { debug: false },
     secrets: {},
   },
-  desiredRevision: '0',
-  appliedRevision: null,
+  desiredVersion: '0',
+  appliedVersion: null,
   connectionCheckSupported: false,
   harnessToolNames: [],
   canvasFunctionNames: [],
@@ -127,17 +123,17 @@ const checkPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '3',
-    valuesJson: '{"timeout":30}',
-    valuesSchema: JSON.stringify({
+    version: '3',
+    values: { timeout: 30 },
+    valuesSchema: {
       type: 'object',
       properties: {
         timeout: { type: 'integer' },
       },
       required: [],
       additionalProperties: false,
-    }),
-    defaultsJson: '{"timeout":30}',
+    },
+    defaults: { timeout: 30 },
     secrets: {
       token: {
         description: 'Static Access Token',
@@ -145,8 +141,8 @@ const checkPlugin: PluginDTO = {
       },
     },
   },
-  desiredRevision: '3',
-  appliedRevision: '3',
+  desiredVersion: '3',
+  appliedVersion: '3',
   connectionCheckSupported: true,
   harnessToolNames: [],
   canvasFunctionNames: [],
@@ -168,24 +164,24 @@ async function transport(
     const url = new URL(route.request().url())
     const path = url.pathname
 
-    if (path === '/api/plugins') {
+    if (path === '/api/platform/plugins') {
       await route.fulfill({ json: pluginsList })
-    } else if (path.endsWith('/connection-check') && route.request().method() === 'POST') {
+    } else if (path.endsWith('/check-connection') && route.request().method() === 'POST') {
       requests.push(path)
       if (blockStage === 'check') {
         await gate
       }
       const postData = route.request().postDataJSON() as {
-        expectedRevision: string
+        expectedVersion: string
       }
-      if (!postData || typeof postData.expectedRevision !== 'string') {
+      if (!postData || typeof postData.expectedVersion !== 'string') {
         throw new Error(`Connection check must submit the applied coordinates: ${path}`)
       }
       await route.fulfill({
         json: {
           pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
-          appliedRevision: postData.expectedRevision,
-          checkedAt: 1772366400,
+          appliedVersion: postData.expectedVersion,
+          checkedAt: 1772366400000,
           reachability: 'REACHABLE',
           authentication: 'ACCEPTED',
           browserSession: 'UNKNOWN',
@@ -214,14 +210,14 @@ async function transport(
       })
     } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
       requests.push(path)
-      const postData = route.request().postDataJSON() as { valuesJson: string }
+      const postData = route.request().postDataJSON() as { values: unknown }
       await route.fulfill({
         status: 200,
         json: {
           ...deepLinkPlugin,
           configuration: {
             ...deepLinkPlugin.configuration,
-            valuesJson: postData.valuesJson,
+            values: postData.values,
           },
         },
       })
@@ -354,9 +350,6 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   const configDialog = page.getByRole('dialog')
   await expect(configDialog).toBeVisible()
   await expect(configDialog.getByText('配置插件：Offline DeepLink Plugin')).toBeVisible()
-  await expect(configDialog.locator('input[value="9007199254740993123456789"]')).toBeVisible()
-  await expect(configDialog.locator('input[value="1.230000"]')).toBeVisible()
-  await expect(configDialog.locator('input[value="1e1000"]')).toBeVisible()
   const save = configDialog.getByRole('button', { name: '保存配置', exact: true })
   await expect(save).toBeInViewport()
   await expect(configDialog.getByRole('button', { name: '取消', exact: true })).toBeInViewport()
@@ -411,7 +404,7 @@ test('connection check runs only on explicit click and reports the three typed d
   await expect(dialog.getByTestId('plugin-check-browser-session')).toHaveText(
     '未知；本检查不核验浏览器登录态',
   )
-  await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Rev 3')
+  await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('v3')
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   await page.screenshot({ path: info.outputPath('connection-check-result-320.png') })
 

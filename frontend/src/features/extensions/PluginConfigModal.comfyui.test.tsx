@@ -6,15 +6,16 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { pluginsService } from '@/features/extensions/plugins-service'
+import { request } from '@/shared/api/client'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/features/extensions/plugins-service', () => ({
-  pluginsService: { updateConfiguration: vi.fn() },
-}))
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
 
 /**
  * 真实 ComfyUI 插件配置的 HTTP golden，由 Java 侧运行时测试用生产 mapper 产出并提交在同一 worktree。
@@ -33,8 +34,7 @@ function comfyuiHttpGolden(): PluginDTO {
 
 /** 与 Java 侧共用同一份真实 schema，用来推导可选/必需属性，避免测试里再手写一份结构。 */
 function comfyuiSchema(): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(comfyuiHttpGolden().configuration.valuesSchema)
-  return parsed as Record<string, unknown>
+  return comfyuiHttpGolden().configuration.valuesSchema as Record<string, unknown>
 }
 
 function workflowItemSchema(): Record<string, unknown> {
@@ -67,13 +67,14 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
 
   /** 保存一次并返回这一次提交的请求体：断言直接落在真实提交内容上。 */
   async function save(): Promise<PluginConfigurationUpdateRequestDTO> {
-    const updateConfiguration = vi.mocked(pluginsService.updateConfiguration)
-    const calls = updateConfiguration.mock.calls.length
+    const saveRequest = vi.mocked(request)
+    const calls = saveRequest.mock.calls.length
     await userEvent.setup().click(screen.getByRole('button', { name: '保存配置' }))
     await waitFor(() => {
-      expect(updateConfiguration.mock.calls.length).toBe(calls + 1)
+      expect(saveRequest.mock.calls.length).toBe(calls + 1)
     })
-    return updateConfiguration.mock.calls[calls][1]
+    return (saveRequest.mock.calls[calls][1] as { body: PluginConfigurationUpdateRequestDTO })
+      .body
   }
 
   it('renders the real H3 preset workflow straight from the plugin schema', () => {
@@ -110,7 +111,7 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
 
   it('shows the real ComfyUI API graph unescaped in the multiline editor', async () => {
     const plugin = comfyuiHttpGolden()
-    const values = JSON.parse(plugin.configuration.valuesJson) as {
+    const values = plugin.configuration.values as {
       workflows: { workflowJson: string; argsSchemaJson: string }[]
     }
     renderModal(plugin)
@@ -128,17 +129,17 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
 
   it('saves the untouched real configuration byte-identically', async () => {
     const plugin = comfyuiHttpGolden()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(plugin)
+    vi.mocked(request).mockResolvedValue(plugin)
     renderModal(plugin)
 
     const payload = await save()
-    expect(payload.valuesJson).toBe(plugin.configuration.valuesJson)
+    expect(payload.values).toEqual(plugin.configuration.values)
   })
 
   it('keeps the preset graph byte-identical while editing sibling fields', async () => {
     const plugin = comfyuiHttpGolden()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(plugin)
-    const original = JSON.parse(plugin.configuration.valuesJson) as {
+    vi.mocked(request).mockResolvedValue(plugin)
+    const original = plugin.configuration.values as {
       workflows: { id: string; workflowJson: string; parameterBindings: unknown[] }[]
     }
     renderModal(plugin)
@@ -149,15 +150,15 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
     })
     const payload = await save()
 
-    const edited = JSON.parse(payload.valuesJson) as typeof original
+    const edited = payload.values as typeof original
     expect(edited.workflows[0].id).toBe('h3-edited')
-    expect(payload.valuesJson).toContain(JSON.stringify(original.workflows[0].workflowJson))
+    expect(JSON.stringify(edited)).toContain(JSON.stringify(original.workflows[0].workflowJson))
     expect(edited.workflows[0].parameterBindings).toEqual(original.workflows[0].parameterBindings)
   })
 
   it('appends and removes a workflow from the real schema using only required placeholders', async () => {
     const plugin = comfyuiHttpGolden()
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(plugin)
+    vi.mocked(request).mockResolvedValue(plugin)
     renderModal(plugin)
     const user = userEvent.setup()
 
@@ -166,17 +167,16 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
     expect(within(added).getByRole('textbox', { name: 'id' })).toHaveValue('')
 
     let payload = await save()
-    let workflows = (JSON.parse(payload.valuesJson) as { workflows: Record<string, unknown>[] })
-      .workflows
+    let workflows = (payload.values as { workflows: Record<string, unknown>[] }).workflows
     expect(workflows).toHaveLength(2)
     // 占位只包含 schema 声明的必需属性，绝不为可选属性发明值。
     expect(Object.keys(workflows[1]).sort()).toEqual(requiredKeysOf(workflowItemSchema()))
     expect(workflows[1].outputs).toEqual([])
     expect(workflows[1].mediaBindings).toEqual([])
     // 真实预置工作流逐字节保留，没有被重新格式化。
-    expect(payload.valuesJson).toContain(JSON.stringify(
-      (JSON.parse(plugin.configuration.valuesJson) as { workflows: { workflowJson: string }[] })
-        .workflows[0].workflowJson,
+    expect(JSON.stringify(payload.values)).toContain(JSON.stringify(
+      (plugin.configuration.values as { workflows: { workflowJson: string }[] }).workflows[0]
+        .workflowJson,
     ))
 
     await user.click(
@@ -185,8 +185,8 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
       }),
     )
     payload = await save()
-    workflows = (JSON.parse(payload.valuesJson) as { workflows: Record<string, unknown>[] }).workflows
+    workflows = (payload.values as { workflows: Record<string, unknown>[] }).workflows
     expect(workflows).toHaveLength(1)
-    expect(payload.valuesJson).toBe(plugin.configuration.valuesJson)
+    expect(payload.values).toEqual(plugin.configuration.values)
   })
 })

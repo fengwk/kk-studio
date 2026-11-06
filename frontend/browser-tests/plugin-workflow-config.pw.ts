@@ -22,7 +22,7 @@ function comfyuiPluginFromGolden(): PluginDTO {
 
 const comfyuiPlugin = comfyuiPluginFromGolden()
 const originalWorkflowJson = (
-  JSON.parse(comfyuiPlugin.configuration.valuesJson) as {
+  comfyuiPlugin.configuration.values as {
     workflows: { workflowJson: string }[]
   }
 ).workflows[0].workflowJson
@@ -36,17 +36,17 @@ async function transport(page: Page, plugin: PluginDTO = comfyuiPlugin): Promise
   const recorded: Recorded = { puts: [] }
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === '/api/plugins') {
+    if (path === '/api/platform/plugins') {
       await route.fulfill({ json: [plugin] })
       return
     }
-    if (path === `/api/plugins/${plugin.pluginId}/configuration` && route.request().method() === 'PUT') {
+    if (path === `/api/platform/plugins/${plugin.pluginId}/configuration` && route.request().method() === 'PUT') {
       const body = route.request().postDataJSON() as Record<string, unknown>
       recorded.puts.push(body)
       await route.fulfill({
         json: {
             ...plugin,
-            configuration: { ...plugin.configuration, valuesJson: body.valuesJson as string },
+            configuration: { ...plugin.configuration, values: body.values },
         },
       })
       return
@@ -193,9 +193,8 @@ test('desktop: edits the real H3 preset workflow, imports a graph file and saves
     await expect.poll(() => recorded.puts.length).toBe(1)
 
     const payload = recorded.puts[0]
-    const valuesJson = payload.valuesJson as string
     expect(payload.secretPatch).toEqual({ apiKey: { operation: 'KEEP' } })
-    const values = JSON.parse(valuesJson) as {
+    const values = payload.values as {
       workflows: {
         id: string
         workflowJson: string
@@ -208,10 +207,9 @@ test('desktop: edits the real H3 preset workflow, imports a graph file and saves
       '{"3":{"class_type":"ImportedNode","inputs":{"seed":9007199254740993,"exact":1.230000}}}',
     )
     expect(values.workflows[0].argsSchemaJson).toContain('9007199254740993')
-    // 长整数与精确小数以原文进入 valuesJson（在 valuesJson 里表现为转义后的片段），
-    // 没有被 JSON.parse/stringify 往返改写。
-    expect(valuesJson).toContain('\\"seed\\":9007199254740993')
-    expect(valuesJson).toContain('\\"exact\\":1.230000')
+    // 工作流原文是字符串值，仍保留长整数与精确小数的原始拼写。
+    expect(values.workflows[0].workflowJson).toContain('"seed":9007199254740993')
+    expect(values.workflows[0].workflowJson).toContain('"exact":1.230000')
     // 单一匿名输出仍然没有 name 键；新增条目也没有被发明出可选名字。
     expect(Object.keys(values.workflows[0].outputs[0])).not.toContain('name')
     expect(Object.keys(values.workflows[0].outputs[1]).sort()).toEqual([

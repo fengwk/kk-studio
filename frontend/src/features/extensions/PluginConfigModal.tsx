@@ -8,11 +8,9 @@ import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { pluginsService } from '@/features/extensions/plugins-service'
-import { isConflictError } from '@/shared/api/client'
+import { isConflictError, request } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
 import { utf8ByteLength } from '@/shared/lib/value'
-import type { PluginSecretPatchOperation } from '@/shared/api/contracts/ai-plugin'
 import {
   appendStrictJsonArrayItem,
   isValidJsonIntegerLiteral,
@@ -31,7 +29,8 @@ import './plugin-config.css'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginDTO,
-  PluginSecretPatchDTO,
+  SecretUpdate,
+  SecretUpdateOperation,
 } from '@/shared/api/generated/contracts'
 
 interface PluginConfigModalProps {
@@ -47,13 +46,16 @@ export function PluginConfigModal({
 }: PluginConfigModalProps) {
   const { t } = useI18n()
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
-  const hasRevision = Boolean(plugin.configuration.revision)
+  const version = plugin.configuration.version
 
-  const [valuesJson, setValuesJson] = useState(plugin.configuration.valuesJson)
+  // 配置值由插件 schema 决定，wire 上是 JSON 节点；编辑器内部仍用严格 JSON 文本承载用户输入。
+  const [valuesJson, setValuesJson] = useState(() =>
+    JSON.stringify(plugin.configuration.values ?? {}, null, 2),
+  )
   const [secretOperations, setSecretOperations] = useState<
-    Record<string, PluginSecretPatchOperation>
+    Record<string, SecretUpdateOperation>
   >(() => {
-    const initial: Record<string, PluginSecretPatchOperation> = Object.create(null)
+    const initial: Record<string, SecretUpdateOperation> = Object.create(null)
     for (const key of Object.keys(plugin.configuration.secrets)) {
       initial[key] = 'KEEP'
     }
@@ -114,11 +116,6 @@ export function PluginConfigModal({
   async function handleSave() {
     if (pending || busyRef.current || readingFiles) return
 
-    if (!hasRevision) {
-      setSaveError(t('plugins.configDialog.missingRevision'))
-      return
-    }
-
     if (hasFieldErrors) {
       const firstErr = Object.values(fieldErrors)[0]
       setSaveError(firstErr)
@@ -138,7 +135,7 @@ export function PluginConfigModal({
     }
 
     // 组装 secretPatch
-    const secretPatch: Record<string, PluginSecretPatchDTO> = Object.create(null)
+    const secretPatch: Record<string, SecretUpdate> = Object.create(null)
     for (const [key, op] of Object.entries(secretOperations)) {
       if (isDeepLink || op === 'KEEP') {
         secretPatch[key] = { operation: 'KEEP' }
@@ -161,8 +158,8 @@ export function PluginConfigModal({
     }
 
     const payload: PluginConfigurationUpdateRequestDTO = {
-      expectedRevision: plugin.configuration.revision!,
-      valuesJson,
+      expectedVersion: version,
+      values: JSON.parse(valuesJson) as unknown,
       secretPatch: Object.keys(secretPatch).length > 0 ? secretPatch : undefined,
     }
 
@@ -173,7 +170,10 @@ export function PluginConfigModal({
     setConflictError(false)
 
     try {
-      const updated = await pluginsService.updateConfiguration(plugin.pluginId, payload)
+      const updated = await request(
+        'PUT /api/platform/plugins/{pluginId}/configuration',
+        { path: { pluginId: plugin.pluginId }, body: payload },
+      )
       if (!mountedRef.current) return
       setSecretValues({})
       onSuccess(updated)
@@ -413,12 +413,6 @@ export function PluginConfigModal({
           </div>
         ) : null}
 
-        {!hasRevision ? (
-          <div className="form-error-banner" role="alert">
-            {t('plugins.configDialog.missingRevision')}
-          </div>
-        ) : null}
-
         {!schemaResult.ok ? (
           <div className="plugin-config-warning-banner" role="alert">
             {t('plugins.configDialog.unsupportedSchema', {
@@ -480,9 +474,7 @@ export function PluginConfigModal({
         <section className="plugin-config-section">
           <div className="plugin-config-section-title">
             <span>{t('plugins.configDialog.generalSettings')}</span>
-            <Badge tone="neutral">
-              Rev {plugin.configuration.revision ?? ''}
-            </Badge>
+            <Badge tone="neutral">v{version}</Badge>
           </div>
 
           {editorMode === 'form' && schemaResult.ok && parseResult.ok ? (
@@ -599,7 +591,7 @@ export function PluginConfigModal({
                               onChange={(next) => {
                                 setSecretOperations((prev) => ({
                                   ...prev,
-                                  [secretField]: next as PluginSecretPatchOperation,
+                                  [secretField]: next as SecretUpdateOperation,
                                 }))
                                 setSecretValues((prev) => {
                                   const remaining = { ...prev }
@@ -688,7 +680,6 @@ export function PluginConfigModal({
           disabled={
             pending ||
             readingFiles ||
-            !hasRevision ||
             hasFieldErrors ||
             !parseResult.ok ||
             valuesTooLarge ||

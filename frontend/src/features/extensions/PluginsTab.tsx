@@ -4,8 +4,7 @@ import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
-import { isConflictError } from '@/shared/api/client'
-import { pluginsService } from '@/features/extensions/plugins-service'
+import { isConflictError, request } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { PluginCard } from '@/features/extensions/PluginCard'
@@ -46,7 +45,7 @@ export function PluginsTab() {
 
   const pluginsQuery = useQuery({
     queryKey: queryKeys.plugins.list,
-    queryFn: () => pluginsService.listPlugins(),
+    queryFn: () => request('GET /api/platform/plugins', {}),
   })
 
   const startConnectionCheck = (plugin: PluginDTO) => {
@@ -71,8 +70,10 @@ export function PluginsTab() {
       markCheckInFlight(plugin.pluginId, false)
     }
 
-    pluginsService
-      .checkConnection(plugin.pluginId, expected)
+    request('POST /api/platform/plugins/{pluginId}/check-connection', {
+      path: { pluginId: plugin.pluginId },
+      body: expected,
+    })
       .then((result) => {
         settle()
         if (checkRunRef.current !== runId) {
@@ -81,7 +82,7 @@ export function PluginsTab() {
         // 结果必须与本次请求的安装身份和坐标完全一致，跨 ID/跨坐标结果一律拒绝。
         const matches =
           result.pluginId === plugin.pluginId
-          && result.appliedRevision === expected.expectedRevision
+          && result.appliedVersion === expected.expectedVersion
         setConnectionCheck({
           pluginId: plugin.pluginId,
           ...expected,
@@ -118,7 +119,8 @@ export function PluginsTab() {
   }
 
   const disconnectMutation = useMutation({
-    mutationFn: (pluginId: string) => pluginsService.disconnectAuth(pluginId),
+    mutationFn: (pluginId: string) =>
+      request('DELETE /api/platform/plugins/{pluginId}/auth', { path: { pluginId } }),
     onSuccess: () => {
       setDisconnectTarget(null)
       setDisconnectError(null)

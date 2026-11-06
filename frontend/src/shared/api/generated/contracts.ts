@@ -1739,57 +1739,57 @@ export interface Page<T> {
   totalCount: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string
   callbackUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.DeepLink */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO.DeepLink */
 export interface PluginAuthKindDeepLink {
   type: 'DEEP_LINK'
   regionCandidates: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.StaticKey */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO.StaticKey */
 export interface PluginAuthKindStaticKey {
   type: 'STATIC_KEY'
   secretField: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO */
 export type PluginAuthKindDTO =
   | PluginAuthKindDeepLink
   | PluginAuthKindStaticKey
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO */
 export interface PluginAuthPrepareDTO {
   authAttemptId: string
   loginUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareRequestDTO */
 export interface PluginAuthPrepareRequestDTO {
   region: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO */
 export interface PluginConfigurationDTO {
-  revision?: string | null
-  valuesJson: string
-  valuesSchema: string
-  defaultsJson: string
+  version: string
+  values: unknown
+  valuesSchema: unknown
+  defaults: unknown
   secrets: Record<string, PluginSecretProjectionDTO>
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationUpdateRequestDTO */
 export interface PluginConfigurationUpdateRequestDTO {
-  expectedRevision: string
-  valuesJson: string
-  secretPatch?: Record<string, PluginSecretPatchDTO> | null
+  expectedVersion: string
+  values: unknown
+  secretPatch?: Record<string, SecretUpdate> | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Authentication */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Authentication */
 export type PluginConnectionCheckAuthentication =
   | 'ACCEPTED'
   | 'REJECTED'
@@ -1803,24 +1803,24 @@ export const PLUGIN_CONNECTION_CHECK_AUTHENTICATION_VALUES: readonly PluginConne
   'NOT_CHECKED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.BrowserSession */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.BrowserSession */
 export type PluginConnectionCheckBrowserSession = 'UNKNOWN'
 
 export const PLUGIN_CONNECTION_CHECK_BROWSER_SESSION_VALUES: readonly PluginConnectionCheckBrowserSession[] = [
   'UNKNOWN',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO */
 export interface PluginConnectionCheckDTO {
   pluginId: string
-  appliedRevision: string
+  appliedVersion: string
   checkedAt: number
   reachability: PluginConnectionCheckReachability
   authentication: PluginConnectionCheckAuthentication
   browserSession: PluginConnectionCheckBrowserSession
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Reachability */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Reachability */
 export type PluginConnectionCheckReachability =
   | 'REACHABLE'
   | 'UNREACHABLE'
@@ -1834,39 +1834,49 @@ export const PLUGIN_CONNECTION_CHECK_REACHABILITY_VALUES: readonly PluginConnect
   'INDETERMINATE',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckRequestDTO */
 export interface PluginConnectionCheckRequestDTO {
-  expectedRevision: string
+  expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginDTO */
+/** Java：fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus */
+export type PluginCredentialStatus =
+  | 'NOT_CONNECTED'
+  | 'CONNECTED'
+  | 'REFRESH_FAILED'
+  | 'REFRESH_UNCERTAIN'
+  | 'REAUTH_REQUIRED'
+
+export const PLUGIN_CREDENTIAL_STATUS_VALUES: readonly PluginCredentialStatus[] = [
+  'NOT_CONNECTED',
+  'CONNECTED',
+  'REFRESH_FAILED',
+  'REFRESH_UNCERTAIN',
+  'REAUTH_REQUIRED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO */
 export interface PluginDTO {
   pluginId: string
   name: string
   version: string
   authKind?: PluginAuthKindDTO | null
-  status?: string | null
+  status?: PluginCredentialStatus | null
   region?: string | null
   expiresAt?: number | null
   nextRefreshAt?: number | null
   lastRefreshedAt?: number | null
   lastRefreshError?: string | null
   configuration: PluginConfigurationDTO
-  desiredRevision: string
-  appliedRevision?: string | null
+  desiredVersion: string
+  appliedVersion?: string | null
   connectionCheckSupported: boolean
   harnessToolNames: string[]
   canvasFunctionNames: string[]
   applicationError?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO */
-export interface PluginSecretPatchDTO {
-  operation: string
-  value?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO */
 export interface PluginSecretProjectionDTO {
   description: string
   configured: boolean
@@ -1958,6 +1968,24 @@ export interface ResumeIssueRequestDTO {
   expectedVersion: string
   requestKey: string
 }
+
+/** Java：fun.fengwk.kkstudio.platform.secret.SecretUpdate */
+export interface SecretUpdate {
+  operation: SecretUpdateOperation
+  value?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.secret.SecretUpdate.Operation */
+export type SecretUpdateOperation =
+  | 'KEEP'
+  | 'SET'
+  | 'CLEAR'
+
+export const SECRET_UPDATE_OPERATION_VALUES: readonly SecretUpdateOperation[] = [
+  'KEEP',
+  'SET',
+  'CLEAR',
+]
 
 /** Java：fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO */
 export interface SkillArchiveDownloadDTO {
@@ -2410,7 +2438,7 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/plugins/{pluginId}/auth': {
+  'DELETE /api/platform/plugins/{pluginId}/auth': {
     path: { pluginId: string }
     response: void
   }
@@ -2536,10 +2564,10 @@ export interface ApiRoutes {
     query: { pageNumber?: number; pageSize?: number }
     response: Page<AgentModelDTO>
   }
-  'GET /api/plugins': {
+  'GET /api/platform/plugins': {
     response: PluginDTO[]
   }
-  'GET /api/plugins/{pluginId}': {
+  'GET /api/platform/plugins/{pluginId}': {
     path: { pluginId: string }
     response: PluginDTO
   }
@@ -2797,17 +2825,17 @@ export interface ApiRoutes {
     body: AgentModelCreateDTO
     response: AgentModelDTO
   }
-  'POST /api/plugins/{pluginId}/auth/complete': {
+  'POST /api/platform/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }
     body: PluginAuthCompleteRequestDTO
     response: PluginDTO
   }
-  'POST /api/plugins/{pluginId}/auth/prepare': {
+  'POST /api/platform/plugins/{pluginId}/auth/prepare': {
     path: { pluginId: string }
     body: PluginAuthPrepareRequestDTO
     response: PluginAuthPrepareDTO
   }
-  'POST /api/plugins/{pluginId}/connection-check': {
+  'POST /api/platform/plugins/{pluginId}/check-connection': {
     path: { pluginId: string }
     body: PluginConnectionCheckRequestDTO
     response: PluginConnectionCheckDTO
@@ -2968,7 +2996,7 @@ export interface ApiRoutes {
     body: AgentModelUpdateDTO
     response: AgentModelDTO
   }
-  'PUT /api/plugins/{pluginId}/configuration': {
+  'PUT /api/platform/plugins/{pluginId}/configuration': {
     path: { pluginId: string }
     body: PluginConfigurationUpdateRequestDTO
     response: PluginDTO
