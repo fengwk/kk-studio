@@ -16,8 +16,11 @@ public class EnvironmentDTO {
   private String name;
   private @Nullable EnvironmentInstallConfigDTO installConfig;
 
-  /** 仅在 create 与 rotate-token 响应返回新值；列表和详情始终为 null。安装通过一次性 code 兑换脚本，不读取现有 token。 */
-  @JsonInclude(JsonInclude.Include.NON_NULL)
+  /**
+   * 仅在 create 与 rotate-token 响应返回新值；列表和详情省略该字段。安装通过一次性 code 兑换脚本，不读取现有 token。
+   *
+   * <p>缺省表示本次响应没有下发新 token；不存在「已下发但值为 null」的形态。
+   */
   private @Nullable String registrationToken;
 
   /** 当前连接状态；租约或心跳窗口已过期的连接派生为 OFFLINE。 */
@@ -30,6 +33,9 @@ public class EnvironmentDTO {
    * 当前状态仍然成立的截止时间：有效连接取 {@code min(leaseUntil, lastSeenAt + heartbeatTimeout)}；无连接或已失效时为 null。
    *
    * <p>它是同一连接行事实的只读时间投影（不是被持久化的过期状态）：服务端读取时用同一时钟派生，浏览器只按它安排一次回读。
+   *
+   * <p>这是本 DTO 唯一显式输出 null 的可空字段：null 本身就是「当前没有截止时间」的权威值，缺省视为契约违规；其余可空字段按全局 NON_NULL 策略在值为 null
+   * 时省略。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable Instant statusExpiresAt;

@@ -41,7 +41,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   @Autowired private EnvironmentRegistry environmentRegistry;
   @Autowired private EnvironmentChangeNotifier notifier;
 
-  /** 测试意图：Card 行写入只在事务提交后投递一次；未提交与回滚都不投递，CAS 更新与删除同样投递。 */
+  /** 测试意图：Environment 行写入只在事务提交后投递一次；未提交与回滚都不投递，CAS 更新与删除同样投递。 */
   @Test
   void environmentRowWritesNotifyOnlyAfterCommit() throws Exception {
     try (EnvironmentChannelListener listener = listen()) {

@@ -49,7 +49,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
-| [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
+| [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值和 problem 解析，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
@@ -547,11 +547,11 @@ HTTP 契约见 [Web](web.md)。
 
 ## Environment
 
-Card 的 name 不可变，UUID 用于路由；`environment_connection` 以
+Environment 的 name 不可变，UUID 用于路由；`environment_connection` 以
 `environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。
 READY 更新宿主 OS、时区、进程用户、HOME、note 与**实际 daemon 构建版本**（`daemonVersion`，取自运行中
 JAR manifest，未打包时为 `development`），断线保留最后已接受的 metadata；`daemonVersion`
-与 Card 的 CAS 配置版本是两个不同事实。
+与 Environment 的 CAS 配置版本是两个不同事实。
 Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
 
 ### 安装 Code 与授权兑换

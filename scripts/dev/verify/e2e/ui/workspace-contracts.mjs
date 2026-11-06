@@ -239,7 +239,7 @@ export async function runWorkspaceContractMatrix(ui) {
           const line = footer.locator('.thread-status-line')
           assert(await line.count() === 1, `Footer must render exactly one status line: ${await footer.innerText()}`)
           const environmentText = `${fixture.otherEnvironment.name} · 不可用`
-          // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
+          // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Environment，
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable）。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
           const expectedPrefix = `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · W0 · $0.000034 · cache 46.67% · `
@@ -1079,7 +1079,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     edit: `edit tool card ${stamp} ${suffix}`,
     write: `write tool card ${stamp} ${suffix}`,
   }
-  // 工具 arguments 必须显式携带目标 Daemon 上已存在的绝对 workdir；Card 保留的 homeDirectory 就是该 Daemon 上的绝对宿主目录。
+  // 工具 arguments 必须显式携带目标 Daemon 上已存在的绝对 workdir；Environment 保留的 homeDirectory 就是该 Daemon 上的绝对宿主目录。
   const environments = await listEnvironments(apiCtx)
   const matchedEnv = environments.find((e) => e.name === daemonEnv)
   assert(matchedEnv, `daemonEnv missing: ${daemonEnv}`)

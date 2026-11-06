@@ -43,7 +43,7 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateIssueRequestDTO.java) 的可空字段、[`StopIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/StopIssueRequestDTO.java) 的 `detail` 与 [`AppendIssueActivityRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
 
-Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`ProviderCreateDTO`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/dto/ProviderCreateDTO.java) 的 `credential` 只在创建请求携带；公开响应用 `SecretConfiguredDTO` 的 `{configured}` 投影）；Environment 注册令牌只在创建与轮换的 Card 响应中携带一次明文（列表与详情始终为空），服务端只保存摘要，响应禁止缓存。
+Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`ProviderCreateDTO`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/dto/ProviderCreateDTO.java) 的 `credential` 只在创建请求携带；公开响应用 `SecretConfiguredDTO` 的 `{configured}` 投影）；Environment 注册令牌只在创建与轮换的 Environment 响应中携带一次明文（列表与详情始终为空），服务端只保存摘要，响应禁止缓存。
 
 [`SystemSettingsDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/settings/dto/SystemSettingsDtoContractTest.java) 用反射扫描 settings DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；以 `tokens` 结尾的预算计数字段（如 `compactionKeepRecentTokens`）不受 `token` 规则约束。
 
@@ -57,7 +57,7 @@ Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `ur
 | --- | --- |
 | [catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
 | [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | 仅保留嵌入 Agent 配置的 `SkillRef`（`packageName` + `name`）；技能包与 MCP 的 HTTP DTO 由 `platform.catalog.dto` 拥有 |
-| [platform/environment/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/dto/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影、有界运维事件、当前运行快照与受管更新投影 |
+| [platform/environment/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/dto/) | Environment CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影、有界运维事件、当前运行快照与受管更新投影 |
 | [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
 | [canvas.dto](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project/dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
@@ -113,7 +113,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Catalog | [catalog/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/) | [`ModelPricingDtoJsonTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ToolCatalogDtoContractTest.java)：工具目录契约 |
 | Settings | [settings/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/settings/dto/) | [`SystemSettingsDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/settings/dto/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | Chat wire 的必填、可空与字段集合由统一 HTTP 边界与控制器测试覆盖，不逐 DTO 建契约测试 |
-| Environment | [platform/environment/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/) | [`EnvironmentDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/EnvironmentDtoContractTest.java)：Card、运维事件、安装设置、运行快照与受管更新投影的严格字段和闭集枚举 |
+| Environment | [platform/environment/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/) | [`EnvironmentDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/EnvironmentDtoContractTest.java)：Environment、运维事件、安装设置、运行快照与受管更新投影的严格字段和闭集枚举 |
 
 ---
 

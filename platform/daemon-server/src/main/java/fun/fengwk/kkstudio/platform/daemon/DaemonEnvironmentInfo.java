@@ -8,9 +8,9 @@ import java.util.Objects;
  * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与操作系统临时目录。
  *
  * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
- * escape 不能替代这一信任边界。{@code architecture}、{@code userName} 与 {@code homeDirectory} 只用于 Card 和当前
- * Environment Prompt 展示；{@code tempDirectory} 只用于当前 Environment Prompt 展示与工具指引，不构成 cwd、默认 workdir
- * 或沙箱。
+ * escape 不能替代这一信任边界。{@code architecture}、{@code userName} 与 {@code homeDirectory} 只用于 Environment
+ * 和当前 Environment Prompt 展示；{@code tempDirectory} 只用于当前 Environment Prompt 展示与工具指引，不构成 cwd、默认
+ * workdir 或沙箱。
  */
 public record DaemonEnvironmentInfo(
     DaemonOperatingSystem operatingSystem,

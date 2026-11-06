@@ -284,8 +284,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   /**
-   * 测试意图：断开连接只回退 status 并保留宽限租约，最近一次被接受的宿主 metadata 仍随连接行保留，Card 与 Prompt 据此可继续投影 OS、时区、备注与 root
-   * path。
+   * 测试意图：断开连接只回退 status 并保留宽限租约，最近一次被接受的宿主 metadata 仍随连接行保留，Environment 与 Prompt 据此可继续投影 OS、时区、备注与
+   * root path。
    */
   @Test
   void disconnectPreservesConnectingWithGracePeriodAndRetainsHostMetadata() {

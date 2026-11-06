@@ -21,7 +21,7 @@ import {
  * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
  * - PUT  /api/harness/threads/{id}/name  {name}（200 权威 HarnessThreadDTO）
  * - WS   /ws/events                        应用级 Thread/Canvas 事件订阅
- * - GET  /api/platform/environments      只读 Environment 注册表（Card UUID id = canonical 路由身份）
+ * - GET  /api/platform/environments      只读 Environment 注册表（Environment UUID id = canonical 路由身份）
  *
  * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
@@ -765,7 +765,7 @@ export async function snapshotEntries(ctx, threadId) {
 }
 
 /**
- * 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。
+ * 只读 Environment 注册表；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。
  *
  * {@code statusExpiresAt} 是当前状态的只读时间投影（有效连接取 min(lease, lastSeen+heartbeat)）：
  * 无连接或失效时显式为 null，只提示浏览器按权威数据回读一次，不是固定轮询。

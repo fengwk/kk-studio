@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import java.time.Instant;
 import java.util.UUID;
 
-/** 稳定 Environment Card 领域模型。 */
+/** 稳定 Environment 领域模型。 */
 @Data
 public class Environment {
   private UUID id;

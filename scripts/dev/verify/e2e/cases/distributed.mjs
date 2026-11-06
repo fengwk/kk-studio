@@ -83,7 +83,7 @@ registerCase({
   level: 'L5',
   title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -92,7 +92,7 @@ registerCase({
     let latestVersion = null
 
     try {
-      // 1. 在 node A 创建临时 Environment Card
+      // 1. 在 node A 创建临时 Environment
       const createRes = await ctx.callNode('a', 'POST', '/api/platform/environments', { name: envName })
       const created = createRes.json
       assert(created?.id, 'expected created environment id')
@@ -206,7 +206,7 @@ registerCase({
       )
       createdId = null
     } finally {
-      // 尽力清理临时环境卡片
+      // 尽力清理临时 Environment
       if (createdId) {
         try {
           const probe = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)

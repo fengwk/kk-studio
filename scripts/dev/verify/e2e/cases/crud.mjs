@@ -1184,20 +1184,20 @@ async function deleteChat(ctx, chat) {
   )
 }
 
-/** 创建一次性 Environment Card（dedicated 资源，随 case 清理），返回权威 Card。 */
+/** 创建一次性 Environment（dedicated 资源，随 case 清理），返回权威资源。 */
 async function createEnvironment(ctx, name) {
   const environment = (await ctx.call('POST', '/api/platform/environments', { name })).json
   assert(
     environment?.id && environment?.name === name && environment?.version != null,
-    `invalid Environment Card: ${JSON.stringify(environment)}`,
+    `invalid Environment: ${JSON.stringify(environment)}`,
   )
   return environment
 }
 
-/** 删除一次性 Environment Card：先读回权威版本，再用它做 CAS 删除（GET 失败直接失败，不静默回退陈旧版本）。 */
+/** 删除一次性 Environment：先读回权威版本，再用它做 CAS 删除（GET 失败直接失败，不静默回退陈旧版本）。 */
 async function deleteEnvironment(ctx, environment) {
-  const card = (await ctx.call('GET', `/api/platform/environments/${encodeURIComponent(environment.id)}`)).json
-  const version = String(card.version)
+  const current = (await ctx.call('GET', `/api/platform/environments/${encodeURIComponent(environment.id)}`)).json
+  const version = String(current.version)
   await ctx.call(
     'DELETE',
     `/api/platform/environments/${encodeURIComponent(environment.id)}?expectedVersion=${encodeURIComponent(version)}`,

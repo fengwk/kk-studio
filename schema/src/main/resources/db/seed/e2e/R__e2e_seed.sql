@@ -141,7 +141,7 @@ insert into agent (
 );
 
 -- -----------------------------------------------------------------------------
--- Disposable e2e Environment Cards.
+-- Disposable e2e Environments.
 -- Canonical UUIDs and the hashes of deterministic registration tokens are pre-seeded for
 -- host (tool-e2e), reliability (docker-reliability), and distributed (distributed-a / distributed-b).
 -- Repeatable migration must be re-runnable without deleting existing environments with FK/lease.

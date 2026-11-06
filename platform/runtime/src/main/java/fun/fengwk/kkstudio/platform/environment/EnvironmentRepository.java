@@ -15,9 +15,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code environment} 的 JdbcClient 仓库：Card 读取、两种行锁、CAS 写与硬删除；token 变更在同一 CAS 语句中清空安装 code。
+ * {@code environment} 的 JdbcClient 仓库：Environment 读取、两种行锁、CAS 写与硬删除；token 变更在同一 CAS 语句中清空安装 code。
  *
- * <p>所有写方法都要求调用方已开启真实外层事务。稳定 Card 的 create/update/delete 在写入成功后于同一事务连接发布 {@code
+ * <p>所有写方法都要求调用方已开启真实外层事务。稳定 Environment 的 create/update/delete 在写入成功后于同一事务连接发布 {@code
  * environment_changed}，通知失败会连同写入一起回滚；安装 code 只写入 Environment 行，签发不推进版本，兑换在同一语句中清空 code、轮换 token
  * 并递增版本。
  */

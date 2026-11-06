@@ -1715,7 +1715,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY（控制 wire 7、READY 6）；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 10 项 capability（9 项模型可见 + 内部 fs.edit.preview），并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
+  docs: 'Environment READY（控制 wire 7、READY 6）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 10 项 capability（9 项模型可见 + 内部 fs.edit.preview），并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1756,7 +1756,7 @@ registerCase({
     )
     assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
-    // Card 只投影公开字段；nullable 字段按 NON_NULL 规则可省略，凭据绝不属于读取结果。
+    // Environment 只投影公开字段；nullable 字段按 NON_NULL 规则可省略，凭据绝不属于读取结果。
     const optionalFields = [
       'installConfig', 'lastSeenAt', 'operatingSystem', 'timeZone', 'userName',
       'homeDirectory', 'note', 'daemonVersion',
@@ -1869,7 +1869,7 @@ registerCase({
       })
       tid = accepted.thread.threadId
       // Environment 绑定的真实证据：ROOT branchSettings 携带 canonical daemon name，read 该轮解析后
-      // 冻结为 daemon Environment Card 的路由身份。
+      // 冻结为 daemon Environment 的路由身份。
       assert(
         accepted.thread.branchSettings.environmentName === ctx.daemonEnv,
         `ROOT branchSettings must bind the canonical daemon Environment name: ${safeDiagnosticJson(

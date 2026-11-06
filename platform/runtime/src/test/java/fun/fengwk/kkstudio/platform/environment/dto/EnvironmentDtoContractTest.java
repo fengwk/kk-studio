@@ -20,7 +20,7 @@ class EnvironmentDtoContractTest {
 
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
-  /** 无连接时仍显式给出 null 截止时间，客户端不以缺失字段猜测连接状态。 */
+  /** 无连接时仍显式给出 null 截止时间；其余可空字段与未下发的 token 按 NON_NULL 策略省略。 */
   @Test
   void offlineEnvironmentKeepsNullStatusDeadlineUnderNonNullWirePolicy() throws Exception {
     EnvironmentDTO environment = new EnvironmentDTO();
@@ -33,6 +33,9 @@ class EnvironmentDtoContractTest {
     JsonNode json = mapper.readTree(mapper.writeValueAsString(environment));
     assertTrue(json.has("statusExpiresAt"));
     assertTrue(json.get("statusExpiresAt").isNull());
+    assertTrue(!json.has("registrationToken"));
+    assertTrue(!json.has("lastSeenAt"));
+    assertTrue(!json.has("operatingSystem"));
   }
 
   /** 时间字段统一 *At：createdAt/updatedAt/lastSeenAt/occurredAt 是唯一 wire 名称。 */

@@ -281,7 +281,7 @@ registerCase({
   id: 'config_sync.environment_install_config_roundtrip',
   level: 'L1',
   title: '配置同步 Environment installConfig 导出导入往返、原子更新与清除',
-  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Card 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
+  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Environment 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
