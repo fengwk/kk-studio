@@ -64,8 +64,7 @@ public class ProjectDtoMapper {
         if (stateDto.getMaxRuns() != null) {
           long parsed = stateDto.getMaxRuns();
           if (parsed < 1 || parsed > Integer.MAX_VALUE) {
-            throw DomainException.validation(
-                "maxRuns", "maxRuns must be in range [1, 2147483647]");
+            throw DomainException.validation("maxRuns", "maxRuns must be in range [1, 2147483647]");
           }
           maxRuns = (int) parsed;
         }
