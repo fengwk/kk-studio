@@ -71,19 +71,10 @@ export interface RealtimeModelStream {
  * 其他 payload 仍会触发 snapshot 刷新，但不在 transcript 中保留瞬态表示。
  */
 export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | null {
-  if (typeof data !== 'string') {
+  if (!isRecord(data)) {
     return null
   }
-  let envelope: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(data)
-    if (!isRecord(parsed)) {
-      return null
-    }
-    envelope = parsed
-  } catch {
-    return null
-  }
+  const envelope = data
   if (
     envelope.type !== 'MODEL_DELTA'
     || envelope.subjectKind !== 'MODEL_INVOCATION'
@@ -149,19 +140,10 @@ const MODEL_CHECKPOINT_FIELDS = [
  * 显式携带 payload（包括 null）或任何额外字段都视为格式错误。
  */
 export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckpoint | null {
-  if (typeof data !== 'string') {
+  if (!isRecord(data)) {
     return null
   }
-  let envelope: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(data)
-    if (!isRecord(parsed)) {
-      return null
-    }
-    envelope = parsed
-  } catch {
-    return null
-  }
+  const envelope = data
   if (
     envelope.type !== 'MODEL_CHECKPOINT'
     || envelope.subjectKind !== 'MODEL_INVOCATION'

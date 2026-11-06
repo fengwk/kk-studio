@@ -7,6 +7,7 @@ import {
   calculateDecodeTokensPerSecond,
   contentText,
   formatCompactTokens,
+  formatJsonContent,
   formatTurnUsageText,
   formatUsageCost,
   mergeTurnUsage,
@@ -33,6 +34,12 @@ describe('contentText', () => {
     circular.self = circular
     expect(contentText({ type: 'json', json: circular })).toBe('')
   })
+})
+
+it('formats JSON nodes without reinterpreting string scalars as nested JSON', () => {
+  // A string node that looks like an object must remain a string, unlike an object node.
+  expect(formatJsonContent('{"ok":true}')).toBe('"{\\"ok\\":true}"')
+  expect(formatJsonContent({ ok: true })).toBe('{\n  "ok": true\n}')
 })
 
 describe('toResourceAttachment', () => {

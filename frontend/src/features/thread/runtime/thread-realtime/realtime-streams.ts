@@ -257,10 +257,9 @@ export function createRealtimeEventHandler(
     clearModelRecovery,
   } = ctx
   const { refetchSnapshot, requestCatchup } = deps
-  // 协议 data 是 envelope 的 JSON 对象；回序列化为同一文本后，reducer 的严格解析保持不变。
+  // 协议 data 是 envelope 的 JSON 对象，直接校验和投影节点。
   return (data: unknown) => {
-    const raw = JSON.stringify(data)
-    const checkpoint = parseRealtimeModelCheckpoint(raw)
+    const checkpoint = parseRealtimeModelCheckpoint(data)
     if (checkpoint != null && checkpoint.threadId === threadId) {
       const durable = activeOutputRef.current
       if (
@@ -334,7 +333,7 @@ export function createRealtimeEventHandler(
       }
       return
     }
-    const delta = parseRealtimeModelDelta(raw)
+    const delta = parseRealtimeModelDelta(data)
     if (delta != null && delta.threadId === threadId) {
       // 持久化终态 fence：终态 activeAssistantOutput（resultEntryId 已挂接或
       // SUCCEEDED/FAILED/CANCELLED/BLOCKED）拒绝所有迟到的 MODEL_DELTA。冻结的
@@ -395,7 +394,7 @@ export function createRealtimeEventHandler(
       scheduler.notifyModelDirty()
       return
     }
-    const partial = parseRealtimeToolPartial(raw)
+    const partial = parseRealtimeToolPartial(data)
     if (partial == null || partial.threadId !== threadId) {
       return
     }

@@ -68,19 +68,10 @@ const TOOL_RESULT_ERROR_KEY = 'error'
 
 /** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape，含 canonical eventId identity）。 */
 export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | null {
-  if (typeof data !== 'string') {
+  if (!isRecord(data)) {
     return null
   }
-  let envelope: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(data)
-    if (!isRecord(parsed)) {
-      return null
-    }
-    envelope = parsed
-  } catch {
-    return null
-  }
+  const envelope = data
   if (
     envelope.type !== 'TOOL_PARTIAL'
     || envelope.subjectKind !== 'TOOL_INVOCATION'

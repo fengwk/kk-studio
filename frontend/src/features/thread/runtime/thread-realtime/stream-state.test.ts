@@ -58,8 +58,7 @@ describe('thread realtime state', () => {
       type: 'MODEL_CHECKPOINT',
       createdAt: '2026-07-28T10:00:00Z',
     }
-    const checkpoint = JSON.stringify(value)
-    expect(parseRealtimeModelCheckpoint(checkpoint)).toEqual({
+    expect(parseRealtimeModelCheckpoint(value)).toEqual({
       threadId: '7',
       invocationId: '9',
       attempt: 2,
@@ -67,21 +66,22 @@ describe('thread realtime state', () => {
       createdAt: '2026-07-28T10:00:00Z',
     })
     // attempt / sequence 必须为正；subject kind 与 type 必须精确匹配。
-    expect(parseRealtimeModelCheckpoint(checkpoint.replace('"attempt":2', '"attempt":0'))).toBeNull()
-    expect(parseRealtimeModelCheckpoint(checkpoint.replace('"sequence":5', '"sequence":0'))).toBeNull()
-    expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_INVOCATION', 'TOOL_INVOCATION'))).toBeNull()
-    expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_CHECKPOINT', 'MODEL_DELTA'))).toBeNull()
+    expect(parseRealtimeModelCheckpoint({ ...value, attempt: 0 })).toBeNull()
+    expect(parseRealtimeModelCheckpoint({ ...value, sequence: 0 })).toBeNull()
+    expect(parseRealtimeModelCheckpoint({ ...value, subjectKind: 'TOOL_INVOCATION' })).toBeNull()
+    expect(parseRealtimeModelCheckpoint({ ...value, type: 'MODEL_DELTA' })).toBeNull()
+    expect(parseRealtimeModelCheckpoint(JSON.stringify(value))).toBeNull()
     expect(parseRealtimeModelCheckpoint('not-json')).toBeNull()
     // 显式携带 payload（包括 null）不是 canonical checkpoint。
     expect(
-      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: null })),
+      parseRealtimeModelCheckpoint({ ...value, payload: null }),
     ).toBeNull()
     expect(
-      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: {} })),
+      parseRealtimeModelCheckpoint({ ...value, payload: {} }),
     ).toBeNull()
     // canonical 字段集合之外的任何字段都必须拒绝。
     expect(
-      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, extra: true })),
+      parseRealtimeModelCheckpoint({ ...value, extra: true }),
     ).toBeNull()
   })
 
@@ -215,7 +215,7 @@ describe('thread realtime state', () => {
       createdAt: '2026-07-28T10:00:00Z',
     })
 
-    // 非字符串输入与非法 JSON 不产生 partial。
+    // 非对象节点或序列化文本不产生 partial。
     expect(parseRealtimeToolPartial(123)).toBeNull()
     expect(parseRealtimeToolPartial('not-json')).toBeNull()
     expect(parseRealtimeToolPartial('[1]')).toBeNull()
@@ -231,28 +231,29 @@ describe('thread realtime state', () => {
       payload: { toolCallId: 'call-1', contents: [] },
       createdAt: '2026-07-28T10:00:00Z',
     }
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, type: 'MODEL_DELTA' }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify(base))).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, type: 'MODEL_DELTA' })).toBeNull()
     expect(
-      parseRealtimeToolPartial(JSON.stringify({ ...base, subjectKind: 'MODEL_INVOCATION' })),
+      parseRealtimeToolPartial({ ...base, subjectKind: 'MODEL_INVOCATION' }),
     ).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, threadId: '' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, subjectId: ' ' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, attempt: 0 }))).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, threadId: '' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, subjectId: ' ' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, attempt: 0 })).toBeNull()
     // createdAt 只要求非空字符串（MODEL_DELTA 才有日期解析校验）。
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, createdAt: '  ' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, payload: 'nope' }))).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, createdAt: '  ' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, payload: 'nope' })).toBeNull()
     // eventId 必须是 canonical UUID：缺失、空串、非字符串、非法文本与非 canonical 变体全部拒绝。
     const withoutEventId: Record<string, unknown> = { ...base }
     delete withoutEventId.eventId
-    expect(parseRealtimeToolPartial(JSON.stringify(withoutEventId))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 7 }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'not-a-uuid' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '1-2-3-4-5' }))).toBeNull()
+    expect(parseRealtimeToolPartial(withoutEventId)).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: '' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: 7 })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: 'not-a-uuid' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: '1-2-3-4-5' })).toBeNull()
     // H09: eventId 必须是规范全小写 canonical UUID：大写或大小写混合变体必须严格拒绝。
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: DEFAULT_PARTIAL_EVENT_ID.toUpperCase() }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '00000000-0000-4000-8000-0000000000E1' }))).toBeNull()
-    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'A0000000-0000-4000-8000-000000000001' }))).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: DEFAULT_PARTIAL_EVENT_ID.toUpperCase() })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: '00000000-0000-4000-8000-0000000000E1' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, eventId: 'A0000000-0000-4000-8000-000000000001' })).toBeNull()
   })
 
   it('projects terminal tool result/error while the durable result Entry is pending', () => {
@@ -540,7 +541,7 @@ describe('thread realtime state', () => {
       name: 'read',
       argumentsJson: '{}',
     }))).toBeNull()
-    expect(parseRealtimeModelDelta(JSON.stringify({
+    expect(parseRealtimeModelDelta({
       threadId: '7',
       subjectKind: 'MODEL_INVOCATION',
       subjectId: '9',
@@ -549,10 +550,10 @@ describe('thread realtime state', () => {
       type: 'MODEL_DELTA',
       payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: '', name: 'read', argumentsJson: '{}' },
       createdAt: '2026-07-28T10:00:00Z',
-    }))).toBeNull()
+    })).toBeNull()
 
     // 未知 kind 的 payload 被拒绝。
-    expect(parseRealtimeModelDelta(JSON.stringify({
+    expect(parseRealtimeModelDelta({
       threadId: '7',
       subjectKind: 'MODEL_INVOCATION',
       subjectId: '9',
@@ -561,7 +562,7 @@ describe('thread realtime state', () => {
       type: 'MODEL_DELTA',
       payload: { kind: 'OTHER', text: 'x' },
       createdAt: '2026-07-28T10:00:00Z',
-    }))).toBeNull()
+    })).toBeNull()
   })
 
   it('reconciles cumulative tool-call identities: prefixes, grow-only, and sibling ordering', () => {
@@ -707,51 +708,51 @@ describe('thread realtime state', () => {
     expect(appended).toMatchObject({ text: 'first-more' })
   })
 
-  it('rejects non-string, non-record, and non-text deltas and tool partials at the parse boundary', () => {
-    // 非字符串输入、顶层非 record 的 JSON、TEXT_DELTA 但 text 不是字符串，
+  it('rejects non-record and non-text deltas and tool partials at the parse boundary', () => {
+    // 顶层非 record 的节点、TEXT_DELTA 但 text 不是字符串，
     // 以及 TOOL_CALL_DELTA 的 id/name/arguments 类型不合法 —— 全部拒绝整个事件。
     expect(parseRealtimeModelDelta(123)).toBeNull()
     expect(parseRealtimeModelDelta('[1]')).toBeNull()
     expect(
-      parseRealtimeModelDelta(JSON.stringify({
-        ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+      parseRealtimeModelDelta({
+        ...event(1, 'TEXT_DELTA', 'x'),
         payload: { kind: 'TEXT_DELTA', text: 5 },
-      })),
+      }),
     ).toBeNull()
     expect(
-      parseRealtimeModelDelta(JSON.stringify({
-        ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+      parseRealtimeModelDelta({
+        ...event(1, 'TEXT_DELTA', 'x'),
         payload: { kind: 'TEXT_DELTA' },
-      })),
+      }),
     ).toBeNull()
     expect(
-      parseRealtimeModelDelta(JSON.stringify({
-        ...JSON.parse(toolCallEvent(1, { index: 0, id: 'c', name: 'r', argumentsJson: '{}' })),
+      parseRealtimeModelDelta({
+        ...toolCallEvent(1, { index: 0, id: 'c', name: 'r', argumentsJson: '{}' }),
         payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: 7, name: 'r', argumentsJson: '{}' },
-      })),
+      }),
     ).toBeNull()
     // TOOL_PARTIAL 的 createdAt 只要求非空字符串（非日期字符串也接受）；
     // 非字符串 createdAt 与非法 JSON 同样拒绝。
-    expect(parseRealtimeToolPartial(JSON.stringify({
-      ...JSON.parse(toolPartialEvent({ payload: { contents: [] } })),
+    expect(parseRealtimeToolPartial({
+      ...toolPartialEvent({ payload: { contents: [] } }),
       createdAt: 123,
-    }))).toBeNull()
+    })).toBeNull()
     expect(parseRealtimeToolPartial('not-json')).toBeNull()
     // createdAt 为空白字符串：isNonBlankString 直接拒绝（不进入 Date.parse）。
-    expect(parseRealtimeModelDelta(JSON.stringify({
-      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+    expect(parseRealtimeModelDelta({
+      ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: '  ',
-    }))).toBeNull()
+    })).toBeNull()
     // createdAt 是非空字符串但 Date.parse 无法解析：toEpochMillis 返回 null → 拒绝。
-    expect(parseRealtimeModelDelta(JSON.stringify({
-      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+    expect(parseRealtimeModelDelta({
+      ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: 'not-a-date',
-    }))).toBeNull()
+    })).toBeNull()
     // createdAt 为非字符串（数字）也拒绝 —— toEpochMillis 的非字符串分支（L706）。
-    expect(parseRealtimeModelDelta(JSON.stringify({
-      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+    expect(parseRealtimeModelDelta({
+      ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: 42,
-    }))).toBeNull()
+    })).toBeNull()
     // 顶层是数组 JSON：非 record 拒绝（L97）。
     expect(parseRealtimeModelDelta('[{"a":1}]')).toBeNull()
   })
@@ -1621,8 +1622,8 @@ function event(
   sequence: number,
   kind: 'TEXT_DELTA' | 'THINKING_DELTA' | 'TOOL_CALL_DELTA',
   text: string,
-): string {
-  return JSON.stringify({
+) {
+  return {
     threadId: '7',
     subjectKind: 'MODEL_INVOCATION',
     subjectId: '9',
@@ -1633,14 +1634,14 @@ function event(
       ? { kind, index: 0, id: null, name: null, argumentsJson: null }
       : { kind, text },
     createdAt: '2026-07-28T10:00:00Z',
-  })
+  }
 }
 
 function toolCallEvent(
   sequence: number,
   payload: { index: number; id: string | null; name: string | null; argumentsJson: string | null },
-): string {
-  return JSON.stringify({
+) {
+  return {
     threadId: '7',
     subjectKind: 'MODEL_INVOCATION',
     subjectId: '9',
@@ -1649,7 +1650,7 @@ function toolCallEvent(
     type: 'MODEL_DELTA',
     payload: { kind: 'TOOL_CALL_DELTA', ...payload },
     createdAt: '2026-07-28T10:00:00Z',
-  })
+  }
 }
 
 /** 夹具默认 eventId：满足 canonical UUID 校验；需要精确控制 identity 的用例显式覆盖。 */
@@ -1667,8 +1668,8 @@ function toolPartialEvent({
   attempt?: number
   eventId?: unknown
   payload: Record<string, unknown>
-}): string {
-  return JSON.stringify({
+}) {
+  return {
     threadId,
     subjectKind: 'TOOL_INVOCATION',
     subjectId,
@@ -1677,7 +1678,7 @@ function toolPartialEvent({
     type: 'TOOL_PARTIAL',
     payload,
     createdAt: '2026-07-28T10:00:00Z',
-  })
+  }
 }
 
 function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
