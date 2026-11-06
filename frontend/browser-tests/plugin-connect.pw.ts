@@ -179,7 +179,7 @@ async function transport(
       }
       await route.fulfill({
         json: {
-          pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
+          pluginId: decodeURIComponent(path.split('/')[4] ?? ''),
           appliedVersion: postData.expectedVersion,
           checkedAt: 1772366400000,
           reachability: 'REACHABLE',
