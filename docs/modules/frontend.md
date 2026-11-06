@@ -15,7 +15,7 @@ QueryClient → ApplicationContributions → BrowserPreferences → ApplicationE
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
-[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批（Chat / Issue 来源可跳转，独立 Agent 任务只标明来源），
+[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批并提供来源导航，
 其余交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
 AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 [`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
@@ -49,13 +49,14 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
-字段、可空性与枚举值跟随 Java DTO，Java long 在响应中是十进制字符串，`Instant` 是 epoch 毫秒整数。
+字段、可空性与枚举值跟随各领域模块的 Java DTO，Java long 在请求和响应中都是规范十进制字符串，
+`Instant` 是 epoch 毫秒整数。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
 （`mvn verify` 内执行同一测试）拦截，更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
-[`contracts`](../../frontend/src/shared/api/contracts) 只保留生成契约无法表达的封闭取值与前端细化
-（Harness 命令、上传、技能与 Canvas 资源/运行状态等）；Interaction、Plugin、Project 与 Canvas 的 HTTP 响应直接消费生成契约，在使用点做 `type` 分支。
+[`contracts`](../../frontend/src/shared/api/contracts) 保留前端细化、便捷类型和选择逻辑；
+HTTP 的命令、上传与资源等联合类型消费生成契约，在使用点按 `type` 分支。
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
@@ -139,8 +140,8 @@ Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，�
 
 运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
 复制或延长任何持久事实。事件详情可按需重建某个历史模型输出的请求：
-它只接受模型输出 Entry，请求前缀严格截断在该输出的 parent，展示的是用当前 catalog 与配置重建的结果，
-不是原始网络快照，压缩回合不支持重建。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
+普通模型输出的请求前缀严格截断在该输出的 parent，压缩结果使用冻结的子执行重建；
+展示的是用当前 catalog 与配置重建的结果，不是原始网络快照。本地新建分支草稿进入 Debug 可只读检查已有事件与历史请求，
 绝不为此预创建 Thread。
 
 ## Chat 提交与控制
@@ -257,7 +258,7 @@ task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id�
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
 归属统一显示为“<类型> · <标题>”（Chat、Issue、Agent 任务）：类型与标题都来自会话归属 SPI 的 `owner`，
 标题缺失时只显示类型，不逐卡获取 Snapshot，也不用来源 Thread 的 UUID 或名称冒充归属。有产品页面的归属
-点击后携带执行根 `thread` 参数跳转；`AGENT_TASK` 没有产品页面，即使服务端给了 link 也只显示文本。
+点击后携带执行根 `thread` 参数跳转。
 审批与问卷的写回仍使用原始 Thread 与 invocation 身份，来源导航不改变它。
 
 ### 文件变更审查与工具卡片
@@ -272,7 +273,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 - **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
-- **来源优先级与持久化结构**：优先从持久化的 `approval.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `result.details` 对象读取）；决不从旧/新参数在前端伪造 diff。
+- **来源优先级与持久化结构**：优先从持久化的 `approval.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更；不从旧/新参数在前端伪造 diff。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
 RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
@@ -460,7 +461,7 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 
 文本预览按服务端 `read` 同源的窗口格式展示：解析 `range`、`truncated` 与 `next` 后逐页回看，
 不把截断标记混入正文；图片按扩展名直接读取下载字节生成本地预览 URL。下载使用响应中的附件文件名，
-不经过 JSON 信封。后端 404 统一提示“文件不存在或无权访问”，`validation` 且 reason 为
+后端 404 统一提示“文件不存在或无权访问”，`validation` 且 reason 为
 `SESSION_FILE_NOT_TEXT` 时提示“此文件不能作为文本预览”并保留下载动作，
 两种错误都单独展示后端原因，不用括号拼接。面板使用共享 `Dialog` 与 `modal-body`/`modal-footer`；
 窄屏全屏覆盖、操作区不小于 44px，并处理安全区域。
@@ -507,7 +508,7 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 重新读取安全状态。callback 不写浏览器 storage，同一请求保持单次提交。
 generation fence 隔离关闭/重开的弹窗。
 REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认。
-新增认证形态须同步静态组件、Share/TypeScript contract、i18n 与测试；
+新增认证形态须同步静态组件、领域 DTO、生成契约、i18n 与测试；
 后端 authKind:null 的管理形态需要先定义对应前端状态。
 
 ## 视觉与交互语言
