@@ -31,7 +31,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [catalog](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog) | Provider/Model/Agent、Git Skill Package、MCP Server/Tool 的名称寻址与 CAS；每个实体一个包，以 record、`JdbcClient` Repository（SQL、行锁与 CAS）和 Service（校验、引用保护与 DTO 投影）为主；`catalog/model` 另含模型配置的严格 codec、组配置与其能力派生、Variant 解析 |
 | [harness/model](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
 | [harness/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto) | Harness HTTP 请求/响应 DTO：command、target 与用户消息均为 `type` discriminator 的 sealed union；固定取值使用最终枚举，时间字段统一为 `createdAt` / `updatedAt` |
-| [harness/http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http) | Harness HTTP 边界：`/api/harness` 下的命令、Thread、模型请求调试与历史 Provider 请求；UUID/枚举参数直接类型化，命令接受返回 202，错误统一翻译为 `DomainException` |
+| [harness/http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http) | Harness HTTP 边界：`/api/harness` 下的命令、Thread、模型请求调试与历史 Provider 请求；UUID/枚举参数类型化，命令接受返回 202 |
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
 | [harness/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
@@ -45,7 +45,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
-| [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
+| [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止 |
 | [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
@@ -55,12 +55,17 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：路径与查询参数的共同翻译 `RequestParameters`；不含 advice、MVC 装配或容器 |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | HTTP 请求参数的共享适配；不含 advice 或 MVC 装配 |
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `MessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 Harness HTTP DTO 的 wire 契约由
 [`HarnessHttpDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessHttpDtoContractTest.java)
 锁定：sealed union 的 discriminator 与 explicit null、固定枚举、最终字段名，以及请求未知字段的 fail-closed 行为。
+HTTP 上 Entry、命令与取消输入的 `payload`、工具调用的 `result` / `error` / `approval`、
+交互的 `approval`、Debug 的 `inputSchema` / `configuration` 均为 JSON 节点，结构由 Harness 的
+canonical codec 定义；模型产生的 `argumentsJson` 与 Provider 的 `requestJson` 保持字符串原文。
+64 位整数字段在请求和响应中使用规范十进制字符串，客户端输入错误由产生处抛出
+`DomainException`，Web 统一映射为 problem 响应。
 
 ## Harness 持久化与调度
 
@@ -476,9 +481,8 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝；Daemon 侧的本地实现是 [`daemon/src/coding/text.ts`](../../daemon/src/coding/text.ts)。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
-与 Base64 正文。请求预览有三个只读入口（既有 Thread 续写、本地分支草稿、历史模型输出），
-都在同一条正式规划、物化与编码路径上生成点击瞬间的请求体（可能含内联媒体），
-以只读方式检查附件，不写任何内部事实、不消费附件、不调用 transport；
+与 Base64 正文。公开的只读入口为 Thread 模型请求调试与历史 Provider 请求重建，
+复用正式规划、物化与编码路径，不消费附件或调用 transport；
 历史入口按该输出记录的显式时间重建普通模型输出；父 COMPACTION 输出按冻结 child Thread / join 的 `finalAnswerEntryId` 定位压缩子最后一次调用并重建其前缀，结果仍是历史重建、不等于原始发送字节。
 预览与 Turn 规划读取的规划事实都来自 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 门面：
 未落库命令 batch 的 candidate 路径、按结果 Entry 定位的压缩 turn 冻结元数据与请求输入 token 估算，
@@ -508,6 +512,8 @@ DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fen
 
 上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
 内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
+上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
+稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
 登记耐久对象 key，再在事务外删除，避免与 complete/stage 的对象写入交错。
 
@@ -589,8 +595,9 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 
 每个已安装 Plugin 在 `plugin_configuration` 中有一行当前普通配置（`version` + `values_json`）。
 普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
-不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。HTTP 请求与响应都以 `valuesJson` 原文字符串承载普通值，
-64 KiB 预算按提交原文计；`defaults` 与 `valuesSchema` 仍是 JSON 节点。秘密不进入普通配置。
+HTTP 请求与响应以 `valuesJson` 字符串承载普通值。提交时以精确整数与十进制解析，补默认并校验后
+保存和返回规范 JSON 文本：数值逐值保真，但不保证原始空白、scale 或指数 token 不变。
+提交与归一化文本分别受 64 KiB UTF-8 预算约束；`defaults` 与 `valuesSchema` 是 JSON 节点。秘密不进入普通配置。
 启动时为新安装的 Plugin 写入 Schema 默认值（version 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
 [`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
