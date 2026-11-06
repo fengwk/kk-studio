@@ -155,8 +155,8 @@ test('precheck case enforces read-only checking and explicit partial import befo
   const ctx = {
     async call(method, path, body) {
       if (method === 'GET') {
-        assert.equal(path, '/api/providers?pageNumber=1&pageSize=100')
-        return { json: { results: provider ? [provider] : [] } }
+        assert.equal(path, '/api/platform/providers')
+        return { json: provider ? [provider] : [] }
       }
       if (method === 'DELETE') {
         assert.ok(path.includes(encodeURIComponent(provider.name)))

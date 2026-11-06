@@ -83,7 +83,7 @@ registerCase({
     }
     try {
       await mock.start()
-      const providerResponse = await ctx.call('POST', '/api/providers', {
+      const providerResponse = await ctx.call('POST', '/api/platform/providers', {
         name: `e2e-provider-queue-${suffix}`,
         description: 'Local controlled hold mock for queued command batch E2E.',
         providerType: 'openai',
@@ -94,8 +94,8 @@ registerCase({
       })
       provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
-      const modelResponse = await ctx.call('POST', '/api/models', {
-        kind: 'MODEL',
+      const modelResponse = await ctx.call('POST', '/api/platform/models', {
+        type: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-queue-${suffix}`,
         modelId: `wire-queue-${suffix}`,
@@ -343,7 +343,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )
@@ -353,7 +353,7 @@ registerCase({
         if (provider?.name) {
           await ctx.call(
             'DELETE',
-            `/api/providers/${encodeURIComponent(
+            `/api/platform/providers/${encodeURIComponent(
               provider.name,
             )}?expectedVersion=${encodeURIComponent(provider.version)}`,
           )

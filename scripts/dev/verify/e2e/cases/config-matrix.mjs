@@ -26,7 +26,7 @@ registerCase({
   title: '配置矩阵前置：创建临时 Provider',
   docs: '供 config.model.* 复用，避免每行都建 provider',
   async run(ctx) {
-    const { json } = await ctx.call('POST', '/api/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
+    const { json } = await ctx.call('POST', '/api/platform/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
     const provider = json
     sharedProviderName = String(provider.name)
     sharedProviderExpectedVersion = String(provider.version)
@@ -44,14 +44,14 @@ for (const row of modelConfigMatrix()) {
       assert(sharedProviderName, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
       const body = row.rawBody
         ? {
-            kind: 'MODEL',
+            type: 'MODEL',
             providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
             modelId: `wire-${row.id}`,
             description: row.title,
           }
         : {
-            kind: 'MODEL',
+            type: 'MODEL',
             providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
             modelId: `wire-${row.id}`,
@@ -59,7 +59,7 @@ for (const row of modelConfigMatrix()) {
             config: row.build(),
           }
       if (row.ok) {
-        const { status, json } = await ctx.call('POST', '/api/models', body)
+        const { status, json } = await ctx.call('POST', '/api/platform/models', body)
         assert([200, 201].includes(status), `status ${status}`)
         const model = json
         assert(model?.name, JSON.stringify(json))
@@ -67,10 +67,10 @@ for (const row of modelConfigMatrix()) {
         // cleanup model immediately to keep list small
         await ctx.call(
           'DELETE',
-          `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } else {
-        const err = await expectHttpError(() => ctx.call('POST', '/api/models', body), {
+        const err = await expectHttpError(() => ctx.call('POST', '/api/platform/models', body), {
           status: row.expectStatus || 400,
           messageIncludes: row.messageIncludes,
         })
@@ -89,7 +89,7 @@ registerCase({
     if (sharedProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderExpectedVersion)}`,
+        `/api/platform/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderExpectedVersion)}`,
       )
       sharedProviderName = null
       sharedProviderExpectedVersion = null
@@ -105,15 +105,15 @@ registerCase({
   async run(ctx) {
     const { json: pCreate } = await ctx.call(
       'POST',
-      '/api/providers',
+      '/api/platform/providers',
       providerCreateBody(`ag-${cid().slice(0, 6)}`),
     )
     const provider = pCreate
     const providerName = String(provider.name)
     ctx.vars.agentMatrixProviderName = providerName
     ctx.vars.agentMatrixProviderExpectedVersion = String(provider.version)
-    const { json: mCreate } = await ctx.call('POST', '/api/models', {
-      kind: 'MODEL',
+    const { json: mCreate } = await ctx.call('POST', '/api/platform/models', {
+      type: 'MODEL',
       providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
       modelId: 'wire-agent-matrix',
@@ -193,7 +193,7 @@ registerCase({
     if (sharedModelRefForAgent) {
       await ctx.call(
         'DELETE',
-        `/api/models/${encodePathTail(sharedModelRefForAgent)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/platform/models/${encodePathTail(sharedModelRefForAgent)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
       sharedModelRefForAgent = null
       sharedModelVersionForAgent = null
@@ -201,7 +201,7 @@ registerCase({
     if (ctx.vars.agentMatrixProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
+        `/api/platform/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
           ctx.vars.agentMatrixProviderExpectedVersion,
         )}`,
       )

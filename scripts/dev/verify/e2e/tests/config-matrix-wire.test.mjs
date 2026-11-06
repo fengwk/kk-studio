@@ -18,10 +18,10 @@ test('model matrix consumes resource bodies and cleans up with their versions', 
     writeArtifact: (name, contents) => artifacts.push([name, JSON.parse(contents)]),
     async call(method, path, body) {
       calls.push([method, path, body])
-      if (method === 'POST' && path === '/api/providers') {
+      if (method === 'POST' && path === '/api/platform/providers') {
         return { status: 201, json: { name: 'matrix-provider', version: '3' } }
       }
-      if (method === 'POST' && path === '/api/models') {
+      if (method === 'POST' && path === '/api/platform/models') {
         assert.equal(body.providerName, 'matrix-provider')
         return { status: 201, json: { name: 'matrix-model', version: '4' } }
       }
@@ -35,8 +35,8 @@ test('model matrix consumes resource bodies and cleans up with their versions', 
   assert.equal(ctx.vars.matrixProviderName, 'matrix-provider')
   assert.equal(artifacts[0][1].name, 'matrix-model')
   assert.deepEqual(calls.filter(([method]) => method === 'DELETE').map(([, path]) => path), [
-    '/api/models/matrix-model?expectedVersion=4',
-    '/api/providers/matrix-provider?expectedVersion=3',
+    '/api/platform/models/matrix-model?expectedVersion=4',
+    '/api/platform/providers/matrix-provider?expectedVersion=3',
   ])
 })
 
@@ -47,10 +47,10 @@ test('agent matrix consumes resource and page bodies for setup and cleanup', asy
     vars: {},
     writeArtifact: () => {},
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/providers') {
+      if (method === 'POST' && path === '/api/platform/providers') {
         return { status: 201, json: { name: 'provider', version: '1' } }
       }
-      if (method === 'POST' && path === '/api/models') {
+      if (method === 'POST' && path === '/api/platform/models') {
         assert.equal(body.providerName, 'provider')
         return { status: 201, json: { name: 'model', version: '2' } }
       }
@@ -73,7 +73,7 @@ test('agent matrix consumes resource and page bodies for setup and cleanup', asy
   assert.match(deletes[0], /^\/api\/agents\/ag-valid\.empty_lists-.*\?expectedVersion=3$/)
   assert.deepEqual(deletes.slice(1), [
     '/api/agents/ag-leftover?expectedVersion=4',
-    '/api/models/model?expectedVersion=2',
-    '/api/providers/provider?expectedVersion=1',
+    '/api/platform/models/model?expectedVersion=2',
+    '/api/platform/providers/provider?expectedVersion=1',
   ])
 })

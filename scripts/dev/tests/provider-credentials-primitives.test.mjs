@@ -70,7 +70,7 @@ test('test intent: invalid URLs are rejected and the error never leaks the URL, 
   }
 })
 
-test('test intent: an update payload inherits the backend description, type, version and custom timeouts', () => {
+test('test intent: an update payload inherits the backend description, version and custom timeouts', () => {
   const payload = buildPayload('https://api.example.com/v1', 'test-secret', {
     description: 'Custom Description',
     providerType: 'openai_responses',
@@ -80,12 +80,11 @@ test('test intent: an update payload inherits the backend description, type, ver
   })
 
   assert.equal(payload.description, 'Custom Description')
-  assert.equal(payload.providerType, 'openai_responses')
   assert.equal(payload.expectedVersion, '7')
   assert.equal(payload.modelCallTimeoutMillis, 600000)
   assert.equal(payload.modelCallIdleTimeoutMillis, 50000)
   assert.equal(payload.baseUrl, 'https://api.example.com/v1')
-  assert.equal(payload.credential, 'test-secret')
+  assert.deepEqual(payload.credential, { operation: 'SET', value: 'test-secret' })
 })
 
 test('test intent: missing timeouts and description fall back to platform defaults and the spec metadata', () => {
@@ -100,21 +99,20 @@ test('test intent: missing timeouts and description fall back to platform defaul
   const payload = buildPayload('https://api.example.com', 'test-secret', { version: 3 }, spec)
 
   assert.equal(payload.expectedVersion, '3')
-  assert.equal(payload.providerType, 'google')
   assert.equal(payload.description, 'Default Mock Description.')
   assert.equal(payload.modelCallTimeoutMillis, DEFAULT_MODEL_CALL_TIMEOUT_MILLIS)
   assert.equal(payload.modelCallIdleTimeoutMillis, DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS)
 })
 
-test('test intent: getProviders issues a GET against the paged catalog endpoint', async () => {
+test('test intent: getProviders issues a GET against the array catalog endpoint', async () => {
   const { request, calls } = makeMockHttp({ rows: [{ name: 'test-p' }] })
   const result = await getProviders('http://backend:18080/', request)
 
   assert.equal(calls.length, 1)
   const [url, data] = calls[0]
-  assert.ok(url.startsWith('http://backend:18080/api/providers?'))
+  assert.equal(url, 'http://backend:18080/api/platform/providers')
   assert.equal(data, null)
-  assert.deepEqual(result.results, [{ name: 'test-p' }])
+  assert.deepEqual(result, [{ name: 'test-p' }])
 })
 
 test('test intent: getProviders wraps network failures without exposing internals', async () => {
@@ -130,7 +128,7 @@ test('test intent: putProvider URL-encodes the provider name so slashes cannot b
 
   assert.equal(calls.length, 1)
   const [url, payload, headers] = calls[0]
-  assert.equal(url, 'http://backend:18080/api/providers/custom%2Fprovider%3Av1')
+  assert.equal(url, 'http://backend:18080/api/platform/providers/custom%2Fprovider%3Av1')
   assert.equal(headers['Content-Type'], 'application/json')
   assert.equal(payload.baseUrl, 'https://api.example.com')
 })

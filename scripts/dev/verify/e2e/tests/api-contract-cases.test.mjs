@@ -148,10 +148,9 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
     'description',
     'modelCallIdleTimeoutMillis',
     'modelCallTimeoutMillis',
-    'providerType',
   ])
   assert.equal(Object.hasOwn(base, 'modelHttpRetryStatusCodes'), false, 'omitted override must be absent')
-  assert.equal(base.credential, '', 'empty credential must preserve the stored secret')
+  assert.deepEqual(base.credential, { operation: 'KEEP' }, 'KEEP must preserve the stored secret')
 
   assert.deepEqual(providerUpdateBody({ modelHttpRetryStatusCodes: [500, 503] }).modelHttpRetryStatusCodes, [
     500,

@@ -51,7 +51,7 @@ export const SCENARIOS = Object.freeze([
     id: 'catalog',
     name: 'Catalog models',
     concurrency: 16,
-    path: '/api/models?pageNumber=1&pageSize=20',
+    path: '/api/platform/models',
   }),
   Object.freeze({
     id: 'canvas',
@@ -282,18 +282,17 @@ export function validateHealthResponse(response) {
 export function validateCatalogResponse(response) {
   requireStatus(response, 200, 'catalog')
   const data = response.json
-  requireObject(data, 'catalog data')
-  if (!Array.isArray(data.results)) {
-    throw new BenchmarkError('catalog data.results must be an array')
+  if (!Array.isArray(data)) {
+    throw new BenchmarkError('catalog data must be an array')
   }
-  if (data.results.length === 0) {
-    throw new BenchmarkError('catalog data.results must not be empty')
+  if (data.length === 0) {
+    throw new BenchmarkError('catalog data must not be empty')
   }
-  if (data.results.length > 20) {
-    throw new BenchmarkError(`catalog data.results exceeds requested page size: ${data.results.length}`)
+  if (data.length > 20) {
+    throw new BenchmarkError(`catalog data exceeds the 20-model benchmark bound: ${data.length}`)
   }
 
-  for (const [index, model] of data.results.entries()) {
+  for (const [index, model] of data.entries()) {
     requireObject(model, `catalog result ${index}`)
     requireText(model.providerName, `catalog result ${index}.providerName`)
     requireText(model.name, `catalog result ${index}.name`)
@@ -320,7 +319,7 @@ export function validateCatalogResponse(response) {
       }
     }
   }
-  return data.results
+  return data
 }
 
 export function validateCanvasCreateResponse(response) {
@@ -814,7 +813,7 @@ function operationFor(scenarioId, manager, state) {
   if (scenarioId === 'catalog') {
     return async () => {
       validateCatalogResponse(
-        await manager.request('GET', '/api/models?pageNumber=1&pageSize=20'),
+        await manager.request('GET', '/api/platform/models'),
       )
     }
   }

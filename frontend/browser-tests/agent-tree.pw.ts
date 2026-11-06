@@ -149,10 +149,14 @@ async function installAgentTreeMock(page: Page) {
       })
       return
     }
-    if (path === '/api/agents' || path === '/api/models') {
+    if (path === '/api/agents') {
       await route.fulfill({
         json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
       })
+      return
+    }
+    if (path === '/api/platform/models') {
+      await route.fulfill({ json: [] })
       return
     }
     await route.fulfill({ json: {} })

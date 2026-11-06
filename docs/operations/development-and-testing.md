@@ -634,7 +634,7 @@ Daemon。
 | 场景 | 并发 | 请求 | error | p95 | throughput RPS | 最少样本 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
-| `catalog` | 16 | `GET /api/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
+| `catalog` | 16 | `GET /api/platform/models`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
 | `canvas` | 4 | `POST /api/canvases`，验证创建结果，测量创建事务 | 0 | `<=1500ms` | `>=5` | 20 |
 
 阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。

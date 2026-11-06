@@ -187,7 +187,7 @@ async function assertWebpPreview(url) {
 
 /** The stack starts with an empty catalog, so the smoke creates a stub provider/model/agent. */
 async function createStubCatalog({ jsonCall }) {
-  const stub = await jsonCall('POST', '/api/providers', {
+  const stub = await jsonCall('POST', '/api/platform/providers', {
     name: 'stub',
     description: 'offline smoke stub',
     providerType: 'openai',
@@ -196,10 +196,10 @@ async function createStubCatalog({ jsonCall }) {
     modelCallTimeoutMillis: 1_800_000,
     modelCallIdleTimeoutMillis: 120_000,
   })
-  assert.equal(stub.configured, true, JSON.stringify(stub))
+  assert.equal(stub.credential?.configured, true, JSON.stringify(stub))
   // 缺省 pricing 由服务端归一为完整零价格定义。
-  await jsonCall('POST', '/api/models', {
-    kind: 'MODEL',
+  await jsonCall('POST', '/api/platform/models', {
+    type: 'MODEL',
     providerName: 'stub',
     name: 'acceptance-stub',
     modelId: 'acceptance-stub',

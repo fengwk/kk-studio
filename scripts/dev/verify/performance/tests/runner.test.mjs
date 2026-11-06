@@ -131,8 +131,7 @@ test('response validators enforce health, catalog page, and canvas DTO contracts
 
   const catalogResponse = {
     status: 200,
-    json: {
-      results: [
+    json: [
         {
           providerName: 'offline',
           name: 'acceptance-stub',
@@ -143,25 +142,28 @@ test('response validators enforce health, catalog page, and canvas DTO contracts
             limit: { context: 4096 },
           },
         },
-      ],
-    },
+  ]
   }
   assert.equal(validateCatalogResponse(catalogResponse).length, 1)
   // modelId 是上游模型名称，必须存在，不能被误当作数据库身份字段拒绝。
   for (const modelId of [undefined, null, '', 123]) {
     const invalid = structuredClone(catalogResponse)
-    invalid.json.results[0].modelId = modelId
+    invalid.json[0].modelId = modelId
     assert.throws(() => validateCatalogResponse(invalid), /modelId/)
   }
   assert.throws(
+    () => validateCatalogResponse({ status: 200, json: {} }),
+    /catalog data must be an array/,
+  )
+  assert.throws(
     () => validateCatalogResponse({ status: 200, json: [] }),
-    /catalog data must be an object/,
+    /catalog data must not be empty/,
   )
   assert.throws(
     () =>
       validateCatalogResponse({
         status: 200,
-        json: { results: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }] },
+        json: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }],
       }),
     /defaultVariant/,
   )
@@ -329,13 +331,8 @@ test(
         sendJson(response, 200, { status: 'UP' })
         return
       }
-      if (
-        request.method === 'GET' &&
-        requestUrl.pathname === '/api/models' &&
-        requestUrl.search === '?pageNumber=1&pageSize=20'
-      ) {
-        sendJson(response, 200, {
-          results: [
+      if (request.method === 'GET' && requestUrl.pathname === '/api/platform/models') {
+        sendJson(response, 200, [
             {
               providerName: 'offline',
               name: 'acceptance-stub',
@@ -346,8 +343,7 @@ test(
                 limit: { context: 4096 },
               },
             },
-          ],
-        })
+        ])
         return
       }
       if (request.method === 'POST' && requestUrl.pathname === '/api/canvases') {

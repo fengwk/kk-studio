@@ -240,7 +240,7 @@ registerCase({
 
     try {
       await mock.start()
-      const providerResponse = await ctx.call('POST', '/api/providers', {
+      const providerResponse = await ctx.call('POST', '/api/platform/providers', {
         name: `e2e-provider-interaction-${suffix}`,
         description: 'Local OpenAI-compatible SSE mock for the pending input contract.',
         providerType: 'openai',
@@ -252,8 +252,8 @@ registerCase({
       provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
-      const modelResponse = await ctx.call('POST', '/api/models', {
-        kind: 'MODEL',
+      const modelResponse = await ctx.call('POST', '/api/platform/models', {
+        type: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-interaction-${suffix}`,
         modelId: `wire-interaction-${suffix}`,
@@ -535,7 +535,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+            `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
           )
         }
       })
@@ -543,7 +543,7 @@ registerCase({
         if (provider?.name) {
           await ctx.call(
             'DELETE',
-            `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+            `/api/platform/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
           )
         }
       })

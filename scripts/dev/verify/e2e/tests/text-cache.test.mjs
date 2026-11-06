@@ -34,13 +34,13 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         deleted.push(url)
         return response(null, 204)
       }
-      if (url.startsWith('/api/providers?')) {
-        return response({ results: [{ name: def.providerName, providerType: def.providerType,
-          configured: true, baseUrl: 'https://mock.invalid', config: { private: 'excluded' } }] })
+      if (url === '/api/platform/providers') {
+        return response([{ name: def.providerName, providerType: def.providerType,
+          credential: { configured: true }, baseUrl: 'https://mock.invalid' }])
       }
-      if (url.startsWith('/api/models?')) {
-        return response({ results: [{ providerName: def.providerName, name: def.modelName,
-          config: { variants: def.variants.map((id) => ({ id })), private: 'excluded' } }] })
+      if (url === '/api/platform/models') {
+        return response([{ providerName: def.providerName, name: def.modelName,
+          config: { variants: def.variants.map((id) => ({ id })) } }])
       }
       if (method === 'POST' && url === '/api/agents') {
         assert.deepEqual(body.config.tools, [])

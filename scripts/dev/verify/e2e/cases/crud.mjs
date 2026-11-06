@@ -21,7 +21,7 @@ registerCase({
   id: 'crud.provider.invalid_name',
   level: 'L1',
   title: 'Provider 非法 name 拒绝',
-  docs: 'POST /api/providers name 空白或包含 / => 400',
+  docs: 'POST /api/platform/providers name 空白或包含 / => 400',
   async run(ctx) {
     for (const [name, messageIncludes] of [
       ['', /name must not be blank/i],
@@ -29,7 +29,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/providers', {
+          ctx.call('POST', '/api/platform/providers', {
             name,
             description: 'x',
             providerType: 'openai',
@@ -48,11 +48,11 @@ registerCase({
   id: 'crud.provider.invalid_missing_type',
   level: 'L1',
   title: 'Provider 缺少 providerType 拒绝',
-  docs: 'POST /api/providers 无 providerType => 400',
+  docs: 'POST /api/platform/providers 无 providerType => 400',
   async run(ctx) {
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/providers', {
+        ctx.call('POST', '/api/platform/providers', {
           name: `e2e-missing-type-${cid().slice(0, 6)}`,
           description: 'x',
           baseUrl: 'https://example.com/v1',
@@ -72,11 +72,11 @@ registerCase({
   docs: 'path 以全局逻辑名定位既有 Model；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名）；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
+    const provider = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
     const modelName = `e2e-model-invupd-${suffix}`
     const model = (
-        await ctx.call('POST', '/api/models', {
-          kind: 'MODEL',
+        await ctx.call('POST', '/api/platform/models', {
+          type: 'MODEL',
           providerName: provider.name,
           name: modelName,
           modelId: `wire-invupd-${suffix}`,
@@ -90,7 +90,7 @@ registerCase({
           'PUT',
           modelPath(modelName),
           {
-            kind: 'MODEL',
+            type: 'MODEL',
             name: modelName,
             providerName: provider.name,
             modelId: model.modelId,
@@ -167,22 +167,21 @@ registerCase({
   docs: '记录存续期间 name 不可修改；PUT 仅更新 editable properties；DELETE 带 expectedVersion 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const created = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
+    const created = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
     assert(created?.name && !('id' in created), JSON.stringify(created))
     const listed = pageResults(
-      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(listed.some((provider) => provider.name === created.name), 'created Provider not listed')
 
     const updated = (
         await ctx.call(
           'PUT',
-          `/api/providers/${encodeURIComponent(created.name)}`,
+          `/api/platform/providers/${encodeURIComponent(created.name)}`,
           {
             description: 'e2e provider updated',
-            providerType: 'openai',
             baseUrl: 'https://example.com/v2',
-            credential: '',
+            credential: { operation: 'KEEP' },
             modelCallTimeoutMillis: 1_800_000,
             modelCallIdleTimeoutMillis: 120_000,
             expectedVersion: created.version,
@@ -191,16 +190,16 @@ registerCase({
       ).json
     assert(updated.name === created.name, JSON.stringify(updated))
     assert(updated.baseUrl === 'https://example.com/v2', JSON.stringify(updated))
-    assert(updated.configured === true, 'empty credential should keep configured')
+    assert(updated.credential?.configured === true, 'empty credential should keep configured')
     await deleteProvider(ctx, updated)
     const after = pageResults(
-      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体属性。
     const recreated = (
-        await ctx.call('POST', '/api/providers', {
+        await ctx.call('POST', '/api/platform/providers', {
           ...providerCreateBody(suffix),
           description: 'e2e provider recreated',
           baseUrl: 'https://example.com/v3',
@@ -214,7 +213,7 @@ registerCase({
       JSON.stringify(recreated),
     )
     const relisted = pageResults(
-      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(
       relisted.some((provider) => provider.name === created.name),
@@ -231,14 +230,14 @@ registerCase({
   docs: 'path 以全局逻辑名定位；PUT 不改 providerName；protocolOptionsJson 在创建/读取/更新时保留数值文本；DELETE 后同名可重建且 version 从 0 开始；Provider 最后删除',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
+    const provider = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
     const name = `vendor/e2e-model-${suffix}`
     // 文本必须跨 HTTP/持久化往返不变，不能被 JS 的 Number 舍入。
     const originalOptions = '{"large":9007199254740993,"ratio":0.12345678901234567890123456789}'
     const updatedOptions = '{"large":9223372036854775808,"nested":{"ratio":1.234567890123456789e+45}}'
     const model = (
-        await ctx.call('POST', '/api/models', {
-          kind: 'MODEL',
+        await ctx.call('POST', '/api/platform/models', {
+          type: 'MODEL',
           providerName: provider.name,
           name,
           modelId: `wire-lifecycle-${suffix}`,
@@ -266,7 +265,7 @@ registerCase({
     })
     const updated = (
         await ctx.call('PUT', modelPath(name), {
-          kind: 'MODEL',
+          type: 'MODEL',
           name,
           providerName: provider.name,
           modelId: model.modelId,
@@ -285,8 +284,8 @@ registerCase({
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体配置。
     const recreated = (
-        await ctx.call('POST', '/api/models', {
-          kind: 'MODEL',
+        await ctx.call('POST', '/api/platform/models', {
+          type: 'MODEL',
           providerName: provider.name,
           name,
           modelId: `wire-recreated-${suffix}`,
@@ -321,11 +320,11 @@ registerCase({
     const models = []
     let group = null
     try {
-      provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
+      provider = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
       for (const [index, variant] of ['default', 'review'].entries()) {
         const model = (
-            await ctx.call('POST', '/api/models', {
-              kind: 'MODEL',
+            await ctx.call('POST', '/api/platform/models', {
+              type: 'MODEL',
               providerName: provider.name,
               name: `e2e-group-member-${index}-${suffix}`,
               modelId: `wire-group-member-${index}-${suffix}`,
@@ -342,8 +341,8 @@ registerCase({
 
       const groupName = `e2e-model-group-${suffix}`
       group = (
-          await ctx.call('POST', '/api/models', {
-            kind: 'GROUP',
+          await ctx.call('POST', '/api/platform/models', {
+            type: 'GROUP',
             name: groupName,
             description: 'fill first group',
             group: {
@@ -357,7 +356,7 @@ registerCase({
           })
         ).json
       assert(
-        group.kind === 'GROUP'
+        group.type === 'GROUP'
           && group.name === groupName
           && group.providerName == null
           && group.modelId == null
@@ -372,8 +371,8 @@ registerCase({
       )
       assertExactFields(
         group,
-        ['name', 'kind', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
-        'AgentModelDTO(GROUP)',
+        ['name', 'type', 'description', 'config', 'group', 'version', 'createdAt', 'updatedAt'],
+        'ModelDTO(GROUP)',
       )
       assert(
         group.config?.limit?.context === 4096
@@ -383,11 +382,11 @@ registerCase({
           && JSON.stringify(group.config?.variants) === JSON.stringify([]),
         `group config must be a derived capability summary: ${JSON.stringify(group.config)}`,
       )
-      assert((await findModel(ctx, groupName))?.kind === 'GROUP', 'group missing from list')
+      assert((await findModel(ctx, groupName))?.type === 'GROUP', 'group missing from list')
 
       const updated = (
           await ctx.call('PUT', modelPath(groupName), {
-            kind: 'GROUP',
+            type: 'GROUP',
             name: groupName,
             description: 'updated group',
             group: {
@@ -778,7 +777,7 @@ registerCase({
       () =>
         ctx.call(
           'DELETE',
-          '/api/models/missing-model?expectedVersion=0',
+          '/api/platform/models/missing-model?expectedVersion=0',
         ),
       { status: 404, messageIncludes: /not found|unknown|model/i },
     )
@@ -951,7 +950,7 @@ registerCase({
 /** 列出全部 Provider（分页足够大），用于读回持久化事实。 */
 async function listProviders(ctx) {
   return pageResults(
-    (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
+    (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
   )
 }
 
@@ -959,13 +958,13 @@ registerCase({
   id: 'crud.provider.http_retry_override',
   level: 'L1',
   title: 'Provider HTTP 重试白名单三态覆盖与严格整数校验',
-  docs: 'POST/PUT /api/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；数组完全替代系统名单；显式 null 清除覆盖；空数组禁用；省略字段保留既有覆盖；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
+  docs: 'POST/PUT /api/platform/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；PUT 整体替换，省略即写 null；数组完全替代系统名单；空数组禁用；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const created = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
+    const created = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
     let current = created
     const put = (overrides) =>
-      ctx.call('PUT', `/api/providers/${encodeURIComponent(created.name)}`, {
+      ctx.call('PUT', `/api/platform/providers/${encodeURIComponent(created.name)}`, {
         ...providerUpdateBody(overrides),
         expectedVersion: String(current.version),
       })
@@ -990,6 +989,12 @@ registerCase({
         JSON.stringify(listed?.modelHttpRetryStatusCodes) === JSON.stringify([500, 503]),
         JSON.stringify(listed),
       )
+      // 整体替换语义：省略字段即写 null，恢复继承系统名单。
+      current = (await put({})).json
+      assert(
+        current.modelHttpRetryStatusCodes === null,
+        `omitted override must reset to inherited null: ${JSON.stringify(current)}`,
+      )
       // 空数组表示禁用自动重试，必须与继承(null)区分。
       current = (await put({ modelHttpRetryStatusCodes: [] })).json
       assert(
@@ -997,14 +1002,7 @@ registerCase({
           current.modelHttpRetryStatusCodes.length === 0,
         JSON.stringify(current),
       )
-      // 省略字段保留既有覆盖（仍为空数组）。
-      current = (await put({})).json
-      assert(
-        Array.isArray(current.modelHttpRetryStatusCodes) &&
-          current.modelHttpRetryStatusCodes.length === 0,
-        `omitted override must preserve the existing list: ${JSON.stringify(current)}`,
-      )
-      // 显式 null 清除覆盖，恢复继承系统名单。
+      // 显式 null 同样清除覆盖。
       current = (await put({ modelHttpRetryStatusCodes: null })).json
       assert(
         current.modelHttpRetryStatusCodes === null,
@@ -1103,7 +1101,7 @@ function modelSelectionFor(agent) {
 
 async function firstModel(ctx) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=10')).json,
   )
   assert(models[0]?.providerName && models[0]?.name, 'need seeded Model')
   return models[0]
@@ -1111,7 +1109,7 @@ async function firstModel(ctx) {
 
 async function firstTwoModels(ctx) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=10')).json,
   )
   assert(
     models[0]?.providerName
@@ -1134,7 +1132,7 @@ async function firstAgent(ctx) {
 
 async function findModel(ctx, name) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=100')).json,
+    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=100')).json,
   )
   return models.find((model) => model.name === name)
 }
@@ -1144,7 +1142,7 @@ function modelRef(model) {
 }
 
 function modelPath(name) {
-  return `/api/models/${encodePathTail(name)}`
+  return `/api/platform/models/${encodePathTail(name)}`
 }
 
 async function deleteModel(ctx, model) {
@@ -1157,7 +1155,7 @@ async function deleteModel(ctx, model) {
 async function deleteProvider(ctx, provider) {
   await ctx.call(
     'DELETE',
-    `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+    `/api/platform/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
   )
 }
 

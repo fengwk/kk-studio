@@ -91,7 +91,7 @@ test('test intent: four complete pairs issue one GET and four PUTs with normaliz
 
   assert.equal(calls.length, 5)
   const [getUrl, getPayload] = calls[0]
-  assert.ok(getUrl.endsWith('/api/providers?pageNumber=1&pageSize=50'))
+  assert.ok(getUrl.endsWith('/api/platform/providers'))
   assert.equal(getPayload, null)
 
   const expectedPuts = [
@@ -102,11 +102,10 @@ test('test intent: four complete pairs issue one GET and four PUTs with normaliz
   ]
   expectedPuts.forEach(([name, providerType, base, secret], index) => {
     const [url, payload, headers] = calls[index + 1]
-    assert.equal(url, `http://backend/api/providers/${name}`)
+    assert.equal(url, `http://backend/api/platform/providers/${name}`)
     assert.equal(headers['Content-Type'], 'application/json')
-    assert.equal(payload.providerType, providerType)
     assert.equal(payload.baseUrl, base)
-    assert.equal(payload.credential, secret)
+    assert.deepEqual(payload.credential, { operation: 'SET', value: secret })
     assert.equal(payload.expectedVersion, '0')
   })
 
@@ -137,15 +136,15 @@ test('test intent: a shared CPA gateway keeps each protocol base path without du
 
   assert.equal(calls.length, 5)
   assert.deepEqual(
-    calls.slice(1).map(([url, payload]) => [url.split('/').pop(), payload.providerType, payload.baseUrl]),
+    calls.slice(1).map(([url, payload]) => [url.split('/').pop(), payload.baseUrl]),
     [
-      ['google', 'google', `${base}/v1beta`],
-      ['openai', 'openai_responses', `${base}/v1`],
-      ['minimax-anthropic', 'anthropic', base],
-      ['deepseek', 'openai', `${base}/v1`],
+      ['google', `${base}/v1beta`],
+      ['openai', `${base}/v1`],
+      ['minimax-anthropic', base],
+      ['deepseek', `${base}/v1`],
     ],
   )
-  assert.ok(calls.slice(1).every(([, payload]) => payload.credential === key))
+  assert.ok(calls.slice(1).every(([, payload]) => payload.credential?.value === key && payload.credential.operation === 'SET'))
 })
 
 test('test intent: a missing seeded provider fails before any PUT', async () => {

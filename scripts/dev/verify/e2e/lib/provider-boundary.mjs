@@ -19,7 +19,7 @@ export function assertProviderExecutionBoundary({ real, providers }) {
         || typeof provider !== 'object'
         || typeof provider.name !== 'string'
         || provider.name.length === 0
-        || provider.configured !== false
+        || provider.credential?.configured !== false
         || (provider.baseUrl !== null && provider.baseUrl !== undefined),
     )
   ) {

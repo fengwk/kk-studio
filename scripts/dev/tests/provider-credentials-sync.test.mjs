@@ -100,10 +100,10 @@ test('test intent: partially configured specs skip the rest and report in determ
 
   assert.equal(calls.length, 2)
   assert.equal(calls[0][1], null) // GET
-  assert.equal(calls[1][0], 'http://backend:18080/api/providers/prov-b')
+  assert.equal(calls[1][0], 'http://backend:18080/api/platform/providers/prov-b')
   const putPayload = calls[1][1]
   assert.equal(putPayload.baseUrl, 'https://api.b.example')
-  assert.equal(putPayload.credential, 'key-b')
+  assert.deepEqual(putPayload.credential, { operation: 'SET', value: 'key-b' })
   assert.equal(putPayload.expectedVersion, '5')
   assert.equal(putPayload.description, 'Seeded B')
 

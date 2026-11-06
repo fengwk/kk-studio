@@ -20,7 +20,7 @@ test('seed case reads the execution contract, including a null builtin variant',
     deepseek: 'openai', google: 'google', anthropic: 'anthropic', zai: 'openai',
     'minimax-anthropic': 'anthropic',
   }).map(([name, providerType]) => ({
-    name, description: 'fixture', providerType, configured: false,
+    name, description: 'fixture', providerType, credential: { configured: false },
     modelCallTimeoutMillis: null, modelCallIdleTimeoutMillis: null, modelHttpRetryStatusCodes: null,
     version: '0', createTime: 0, updateTime: 0,
   }))
@@ -138,14 +138,14 @@ test('readonly preview builds its local model config and cleans up a failed fixt
   let deleted = false
   const ctx = {
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/providers') {
+      if (method === 'POST' && path === '/api/platform/providers') {
         return { json: { name: body.name, version: '1' } }
       }
-      if (method === 'POST' && path === '/api/models') {
+      if (method === 'POST' && path === '/api/platform/models') {
         config = body.config
         throw stopped
       }
-      if (method === 'DELETE' && path.startsWith('/api/providers/')) {
+      if (method === 'DELETE' && path.startsWith('/api/platform/providers/')) {
         deleted = true
         return { json: null }
       }
@@ -187,7 +187,7 @@ function modelRequestDebugFixture() {
     if (method === 'GET' && pathname === '/api/agents') {
       return { status: 200, json: { results: [agent] } }
     }
-    if (method === 'GET' && pathname === '/api/models') {
+    if (method === 'GET' && pathname === '/api/platform/models') {
       return { status: 200, json: { results: [model] } }
     }
     if (method === 'POST' && pathname === '/api/chats') {

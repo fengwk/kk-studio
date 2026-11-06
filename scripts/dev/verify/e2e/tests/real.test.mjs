@@ -408,14 +408,14 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
     {
       name: 'google',
       providerType: 'google',
-      configured: true,
+      credential: { configured: true },
       baseUrl: 'https://generativelanguage.googleapis.com',
       version: '1',
     },
     {
       name: 'openai',
       providerType: 'openai_responses',
-      configured: false, // 未配置
+      credential: { configured: false }, // 未配置
       baseUrl: 'https://api.openai.com/v1',
       version: '1',
     },
@@ -439,10 +439,10 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
 
   const fakeCtx = {
     async call(method, url) {
-      if (url.startsWith('/api/providers')) {
+      if (url.startsWith('/api/platform/providers')) {
         return { json: { results: mockProviders, totalCount: mockProviders.length } }
       }
-      if (url.startsWith('/api/models')) {
+      if (url.startsWith('/api/platform/models')) {
         return { json: { results: mockModels, totalCount: mockModels.length } }
       }
       throw new Error(`unexpected url: ${url}`)

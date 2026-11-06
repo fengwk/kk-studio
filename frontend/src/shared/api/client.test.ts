@@ -45,7 +45,7 @@ describe('HTTP client', () => {
     })
     await expect(apiClient.delete('/models/a', { params: { v: 1 }, data: { x: 2 } }))
       .resolves.toBeUndefined()
-    expect(fetchMock.mock.calls[1]![0]).toBe('/api/models/a?v=1')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/platform/models/a?v=1')
     expect(fetchMock.mock.calls[1]![1].body).toBe('{"x":2}')
   })
 
@@ -60,7 +60,7 @@ describe('HTTP client', () => {
       headers: { 'Cache-Control': 'no-store' },
       jsonParser: parser,
     })).toBe('{"n":9007199254740993}')
-    expect(transport.mock.calls[0]![0]).toBe('/api/models?existing=1&q=a+b&enabled=false')
+    expect(transport.mock.calls[0]![0]).toBe('/api/platform/models?existing=1&q=a+b&enabled=false')
     expect(transport.mock.calls[0]![1].headers).toMatchObject({ 'Cache-Control': 'no-store' })
     expect(parser).toHaveBeenCalledOnce()
     await apiClient.post('/models', { name: 'x' }, { timeout: 0 })

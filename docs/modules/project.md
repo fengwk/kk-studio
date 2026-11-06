@@ -28,7 +28,6 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具 |
 | [dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto) | Project/Issue wire DTO 与领域模型双向映射 |
 | [http](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http) | Project/Issue REST 控制器与统一错误映射；只做 HTTP 适配，领域行为在 `service` |
-| [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Project 错误映射 |
 
 ## 平台能力与 owner 归属
 

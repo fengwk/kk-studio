@@ -232,29 +232,25 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         deleted.push(url)
         return { status: 204, json: null }
       }
-      if (method === 'GET' && url.startsWith('/api/providers?')) {
+      if (method === 'GET' && url === '/api/platform/providers') {
         return {
           status: 200,
-          json: {
-            results: [{
-              name: MODEL.providerName,
-              providerType: MODEL.providerType,
-              configured: true,
-              baseUrl: 'https://mock.invalid',
-            }],
-          },
+          json: [{
+            name: MODEL.providerName,
+            providerType: MODEL.providerType,
+            credential: { configured: true },
+            baseUrl: 'https://mock.invalid',
+          }],
         }
       }
-      if (method === 'GET' && url.startsWith('/api/models?')) {
+      if (method === 'GET' && url === '/api/platform/models') {
         return {
           status: 200,
-          json: {
-            results: [{
-              name: MODEL.modelName,
-              providerName: MODEL.providerName,
-              config: { variants: MODEL.variants.map((id) => ({ id })) },
-            }],
-          },
+          json: [{
+            name: MODEL.modelName,
+            providerName: MODEL.providerName,
+            config: { variants: MODEL.variants.map((id) => ({ id })) },
+          }],
         }
       }
       if (method === 'POST' && url === '/api/agents') {
