@@ -196,9 +196,12 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 校验不同的数据
 1. 在运行中的部署“设置 → 同步”导出配置 YAML，另存 App/Daemon 镜像、运行配置与密钥文件、
    全库 dump 与 S3 业务对象；确认备份可恢复后保留原库。
 2. 在安全边界新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用当前发行物初始化当前 Schema。
-3. 部署对应版本 App 与同版本 Daemon 并指向新库。在每台主机通过 Environment 安装弹窗执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。通过产品导入校验写入配置 YAML，注意核对导入预检报错与跳过项处置；Provider 凭据、Environment 注册令牌与
-   安装设置逐项核对。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
-4. 验收健康、关键业务操作、Environment `READY` 与 Daemon 重连后再切换入口；原库、备份与镜像
+3. 部署 App 并指向新库，通过产品导入校验写入配置 YAML，核对导入预检报错与跳过项处置、
+   Provider 凭据、Environment 注册令牌摘要和安装设置。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
+4. 启动已安装的 Daemon 并验收重连；需要安装时通过 Environment 安装弹窗生成命令并在主机执行。
+   运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`，Daemon 据此执行本机受管更新；
+   无法受管更新时需重新覆盖安装。
+5. 验收健康、关键业务操作、Environment `READY` 与 Daemon 重连后再切换入口；原库、备份与镜像
    按保留策略冻结，便于回退。
 
 ## 恢复与重建

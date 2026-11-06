@@ -132,9 +132,10 @@ JSON 成功响应直接返回资源：通常读取、更新和动作使用 200�
   `{items, nextCursor}`，末页的 `nextCursor` 为 null。按资源语义返回的树形聚合直接使用数组。
 - 需要乐观并发控制的资源响应 `version`，写入请求提供 `expectedVersion`；DELETE 放在查询参数中，
   其他写入放在请求体中。Canvas 的 `revision` 表示内容修订。
-- 密钥使用 `SecretUpdate`：`{operation: "KEEP" | "SET" | "CLEAR", value?}`。更新时字段必填，
-  保留需显式 `KEEP`；创建时可不提供，提供时只接受 `SET`。插件的 `secretPatch` 是逐键补丁，
-  缺省的键保持不变。读取投影只返回配置状态，不返回秘密值。
+- 密钥更新使用 `SecretUpdate`：`{operation: "KEEP" | "SET" | "CLEAR", value?}`。更新时字段必填，
+  保留需显式 `KEEP`；MCP 和 Git 技能包创建时可不提供，提供时只接受 `SET`。Provider 创建的
+  `credential` 是可空字符串。插件的 `secretPatch` 是逐键补丁，缺省的键保持不变。
+  读取投影只返回配置状态，不返回秘密值。
 
 HTTP 解析拒绝未知字段、重复键、错误标量类型和尾随内容；必填性由 DTO 的可空声明确定。
 客户端输入错误在产生处抛 `DomainException`，按语义归类为校验、未找到或冲突；
