@@ -188,7 +188,7 @@ public class AgentProviderService {
     }
   }
 
-  /** 应用编辑并在协议、凭据或协议配置变化（或缺失世代）时轮换连接世代。 */
+  /** 应用编辑并在协议、地址或凭据变化（或缺失世代）时轮换连接世代。 */
   private AgentProvider applyEdits(
       AgentProvider provider,
       AgentProviderEditablePropertiesDTO properties,

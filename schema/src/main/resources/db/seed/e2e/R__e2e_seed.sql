@@ -58,7 +58,7 @@ insert into agent_provider (
 -- MiniMax-M3, deepseek-v4.1-flash).
 -- `minimax-responses` is mapped to provider `minimax`; all other provider names match.
 -- `model_id` is the real upstream wire model identity (independent from the logical
--- `name`); only minimax-anthropic/MiniMax-M3 differs from its logical name.
+-- `name`); the two MiniMax-M3 rows differ from their logical names.
 -- Variants carry a prompt cache retention plus either normalized reasoning effort
 -- or native thinking options where the provider requires them.
 with model_seed (

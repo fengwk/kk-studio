@@ -17,7 +17,7 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
   private final JdkHttpSseTransport transport;
   private final String apiKey;
 
-  /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 configuration 的请求编码器，供无网络预览复用。 */
+  /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用相同编码规则，供无网络预览复用。 */
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
 
   public AnthropicProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
