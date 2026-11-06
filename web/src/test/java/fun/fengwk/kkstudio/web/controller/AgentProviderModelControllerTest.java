@@ -843,7 +843,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
   }
 
   private static boolean hasResult(JsonNode page, String name) {
-    for (JsonNode result : results(page)) {
+    for (JsonNode result : page) {
       if (name.equals(result.path("name").asText())) {
         return true;
       }
@@ -861,17 +861,12 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
   }
 
   private static JsonNode findResult(JsonNode page, String name) {
-    for (JsonNode result : results(page)) {
+    for (JsonNode result : page) {
       if (name.equals(result.path("name").asText())) {
         return result;
       }
     }
     throw new AssertionError("missing page result: " + name);
-  }
-
-  /** Catalog 列表现在直接返回数组；Agent 列表仍为分页信封，两者共用同一查找助手。 */
-  private static JsonNode results(JsonNode page) {
-    return page.isArray() ? page : page.path("results");
   }
 
   private static URI modelPath(String providerName, String modelName) {
