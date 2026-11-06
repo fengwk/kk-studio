@@ -22,9 +22,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -79,6 +77,11 @@ import java.util.UUID;
  * shape 与前缀 SYSTEM steering 规则。
  */
 class HarnessRuntimeAcceptInitialTest {
+
+  private static void assertConflict(HarnessConflictReason reason, DomainException error) {
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(reason.name(), error.reason());
+  }
 
   private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
@@ -312,14 +315,14 @@ class HarnessRuntimeAcceptInitialTest {
     runtime.acceptCommands(
         newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
         AcceptancePreflight.IDENTITY);
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     newSession(List.of(userMessageCommand(TestIds.id(1), "different"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.THREAD_ID_REUSED, error.reason());
+    assertConflict(HarnessConflictReason.THREAD_ID_REUSED, error);
   }
 
   /** 同 threadId + 不同 Session → 仍属 ID reuse，绝不静默重建。 */
@@ -333,11 +336,11 @@ class HarnessRuntimeAcceptInitialTest {
             new AcceptCommandsTarget.NewRootSession(
                 TestIds.id(105), TestIds.id(102), settings(), false),
             List.of(userMessageCommand(TestIds.id(1), "hello")));
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(otherSession, AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.THREAD_ID_REUSED, error.reason());
+    assertConflict(HarnessConflictReason.THREAD_ID_REUSED, error);
   }
 
   /**
@@ -351,11 +354,11 @@ class HarnessRuntimeAcceptInitialTest {
 
     AcceptCommandsCommand partial = newSession(TestIds.id(160), TestIds.id(161), requests);
     seedInitialThread(partial, List.of(durable(TestIds.id(161), 1, requests.getFirst())));
-    HarnessRuntimeConflictException missing =
+    DomainException missing =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(partial, AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.PARTIAL_COMMAND_REPLAY, missing.reason());
+    assertConflict(HarnessConflictReason.PARTIAL_COMMAND_REPLAY, missing);
 
     AcceptCommandsCommand mismatched = newSession(TestIds.id(162), TestIds.id(163), requests);
     seedInitialThread(
@@ -363,11 +366,11 @@ class HarnessRuntimeAcceptInitialTest {
         List.of(
             durable(TestIds.id(163), 1, requests.getFirst()),
             durable(TestIds.id(163), 2, requests.getLast(), "f".repeat(64))));
-    HarnessRuntimeConflictException hash =
+    DomainException hash =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(mismatched, AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.IDEMPOTENCY_KEY_REUSED, hash.reason());
+    assertConflict(HarnessConflictReason.IDEMPOTENCY_KEY_REUSED, hash);
 
     AcceptCommandsCommand nonContiguous = newSession(TestIds.id(164), TestIds.id(165), requests);
     seedInitialThread(
@@ -375,11 +378,11 @@ class HarnessRuntimeAcceptInitialTest {
         List.of(
             durable(TestIds.id(165), 2, requests.getFirst()),
             durable(TestIds.id(165), 3, requests.getLast())));
-    HarnessRuntimeConflictException order =
+    DomainException order =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(nonContiguous, AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, order.reason());
+    assertConflict(HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH, order);
   }
 
   /** 测试意图：fork 只允许来源 Driver 支持 fork 且保持同一 Driver；同 Driver 的 SET_EXECUTION 仍被接受。 */
@@ -707,9 +710,9 @@ class HarnessRuntimeAcceptInitialTest {
   void entryRejectsMissingSessionWithoutCreatingThread() {
     // ENTRY 必须锚定现存 Session；缺失时在创建 Thread/Command/Work 前确定性失败。
     UUID missingSessionId = TestIds.id(210);
-    HarnessRuntimeNotFoundException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeNotFoundException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     entry(
@@ -717,6 +720,8 @@ class HarnessRuntimeAcceptInitialTest {
                         TestIds.id(211),
                         List.of(userMessageCommand(TestIds.id(1), "hello"))),
                     AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("session", error.resource());
     assertEquals("session " + missingSessionId + " does not exist", error.getMessage());
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(TestIds.id(203)).isEmpty()));
   }

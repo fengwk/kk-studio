@@ -13,9 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
@@ -375,11 +377,12 @@ class ExecutionExitSettlementTest {
               List.of(
                   new NewThreadCommand(
                       new UserMessageCommandPayload(AgentMessage.user("resume")), TestIds.id(91))));
-      HarnessRuntimeConflictException rejected =
+      DomainException rejected =
           assertThrows(
-              HarnessRuntimeConflictException.class,
+              DomainException.class,
               () -> runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY));
-      assertEquals(HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, rejected.reason());
+      assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+      assertEquals(HarnessConflictReason.EXIT_UNCONFIRMED.name(), rejected.reason());
       ThreadState current = runtime.getThreadSnapshot(parentId).thread();
       runtime.acceptCommands(
           new AcceptCommandsCommand(

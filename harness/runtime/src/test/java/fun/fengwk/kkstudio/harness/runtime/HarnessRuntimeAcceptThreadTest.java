@@ -19,11 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
@@ -62,6 +63,11 @@ import java.util.UUID;
  * SET_AGENT 静止 admission 与 batch shape（steering vs user batch）。
  */
 class HarnessRuntimeAcceptThreadTest {
+
+  private static void assertConflict(HarnessConflictReason reason, DomainException error) {
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(reason.name(), error.reason());
+  }
 
   private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
@@ -143,9 +149,9 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(2L, advanced.nextCommandSequence());
 
     // SET 前缀混合批次仍是 cursor-bound：stale sequence 确定性拒绝且零写入。
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(
@@ -156,7 +162,7 @@ class HarnessRuntimeAcceptThreadTest {
                             setAgentCommand(TestIds.id(2)),
                             userMessageCommand(TestIds.id(3), "next"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.STALE_COMMAND_CURSOR, error.reason());
+    assertConflict(HarnessConflictReason.STALE_COMMAND_CURSOR, error);
     assertEquals(
         1, store.<Integer>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).size()));
   }
@@ -274,14 +280,14 @@ class HarnessRuntimeAcceptThreadTest {
     runtime.acceptCommands(
         thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
         AcceptancePreflight.IDENTITY);
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(baseline.threadId(), baseline.rootEntryId(), 2, batch),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
+    assertConflict(HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH, error);
   }
 
   /** 部分 id 已存在 → PARTIAL_COMMAND_REPLAY；同 id 不同 hash → IDEMPOTENCY_KEY_REUSED。 */
@@ -296,9 +302,9 @@ class HarnessRuntimeAcceptThreadTest {
             List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"))),
         AcceptancePreflight.IDENTITY);
 
-    HarnessRuntimeConflictException partial =
+    DomainException partial =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(
@@ -310,11 +316,11 @@ class HarnessRuntimeAcceptThreadTest {
                             userMessageCommand(TestIds.id(1), "a"),
                             userMessageCommand(TestIds.id(2), "b"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.PARTIAL_COMMAND_REPLAY, partial.reason());
+    assertConflict(HarnessConflictReason.PARTIAL_COMMAND_REPLAY, partial);
 
-    HarnessRuntimeConflictException reused =
+    DomainException reused =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(
@@ -325,7 +331,7 @@ class HarnessRuntimeAcceptThreadTest {
                             setAgentCommand(TestIds.id(9)),
                             userMessageCommand(TestIds.id(1), "DIFFERENT"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.IDEMPOTENCY_KEY_REUSED, reused.reason());
+    assertConflict(HarnessConflictReason.IDEMPOTENCY_KEY_REUSED, reused);
   }
 
   /**
@@ -623,14 +629,14 @@ class HarnessRuntimeAcceptThreadTest {
                       durable(baseline.threadId(), 3, second)));
           return null;
         });
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(first, second)),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
+    assertConflict(HarnessConflictReason.COMMAND_REPLAY_ORDER_MISMATCH, error);
     assertTrue(error.getMessage().contains("not contiguous"));
   }
 

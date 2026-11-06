@@ -22,7 +22,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -524,9 +523,7 @@ class AgentTaskServiceTest {
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(join(ticketId, threadId, false, false, hash)));
     when(runtime.spawn(any(SpawnRequest.class), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
+        .thenThrow(DomainException.conflict("THREAD_ID_REUSED", "conflict"));
 
     UUID result = service.submitExternal(ticketId, hash, () -> req);
     assertEquals(threadId, result);
@@ -600,9 +597,7 @@ class AgentTaskServiceTest {
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(join(ticketId, threadId, false, false, differentHash)));
     when(runtime.spawn(any(SpawnRequest.class), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
+        .thenThrow(DomainException.conflict("THREAD_ID_REUSED", "conflict"));
 
     IllegalArgumentException ex =
         assertThrows(
@@ -636,15 +631,13 @@ class AgentTaskServiceTest {
 
     when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
     when(runtime.spawn(any(SpawnRequest.class), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"));
+        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"));
 
-    HarnessRuntimeConflictException ex =
+    DomainException ex =
         assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> service.submitExternal(ticketId, hash, () -> req));
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, ex.reason());
+            DomainException.class, () -> service.submitExternal(ticketId, hash, () -> req));
+    assertEquals(DomainErrorCode.CONFLICT, ex.code());
+    assertEquals("STALE_VERSION", ex.reason());
   }
 
   @Test

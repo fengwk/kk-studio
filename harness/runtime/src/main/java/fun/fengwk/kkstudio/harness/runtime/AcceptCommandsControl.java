@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.Names;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -211,15 +211,15 @@ final class AcceptCommandsControl {
               .lockForKeyShare(target.sessionId())
               .orElseThrow(
                   () ->
-                      new HarnessRuntimeNotFoundException(
-                          "session " + target.sessionId() + " does not exist"));
+                      DomainException.notFound(
+                          "session", "session " + target.sessionId() + " does not exist"));
           Entry startEntry =
               tx.entries()
                   .find(target.startEntryId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "entry " + target.startEntryId() + " does not exist"));
+                          DomainException.notFound(
+                              "entry", "entry " + target.startEntryId() + " does not exist"));
           if (!startEntry.sessionId().equals(target.sessionId())) {
             throw new IllegalArgumentException(
                 "start entry "
@@ -308,7 +308,8 @@ final class AcceptCommandsControl {
                   .find(target.sourceThreadId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
+                          DomainException.notFound(
+                              "thread",
                               "source thread " + target.sourceThreadId() + " does not exist"));
           if (sourceThread.parentThreadId() != null) {
             throw new IllegalArgumentException(
@@ -319,15 +320,15 @@ final class AcceptCommandsControl {
               .lockForKeyShare(sourceSessionId)
               .orElseThrow(
                   () ->
-                      new HarnessRuntimeNotFoundException(
-                          "source session " + sourceSessionId + " does not exist"));
+                      DomainException.notFound(
+                          "session", "source session " + sourceSessionId + " does not exist"));
           Entry startEntry =
               tx.entries()
                   .find(target.startEntryId())
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "entry " + target.startEntryId() + " does not exist"));
+                          DomainException.notFound(
+                              "entry", "entry " + target.startEntryId() + " does not exist"));
           if (!startEntry.sessionId().equals(sourceSessionId)) {
             throw new IllegalArgumentException(
                 "start entry "
@@ -402,8 +403,8 @@ final class AcceptCommandsControl {
           LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState thread = locked.threads.get(target.threadId());
           if (thread == null) {
-            throw new HarnessRuntimeNotFoundException(
-                "thread " + target.threadId() + " does not exist");
+            throw DomainException.notFound(
+                "thread", "thread " + target.threadId() + " does not exist");
           }
           return acceptOnLockedThread(
               tx, thread, target, commands, preflight, null, driverRegistry);
@@ -451,7 +452,7 @@ final class AcceptCommandsControl {
     if (AcceptCommandsValidation.resumeStoppedTarget(thread, genuineUserInput)
         && !AcceptCommandsValidation.resumeConverged(tx, thread)) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED,
+          HarnessConflictReason.EXIT_UNCONFIRMED,
           "thread " + thread.id() + " is stopped and its exit or child joins are not converged");
     }
     AcceptCommandsValidation.validateThreadBatchAdmission(target, thread, cursorFreeBatch);
@@ -519,7 +520,7 @@ final class AcceptCommandsControl {
     tx.threads().lockTree(anchor == null ? anchorThreadId : anchor.rootThreadId());
     List<UUID> chain = tx.threads().findAncestorChain(anchorThreadId);
     if (anchorIsParent && chain.isEmpty()) {
-      throw new HarnessRuntimeNotFoundException("join parent no longer exists");
+      throw DomainException.notFound("thread", "join parent no longer exists");
     }
     Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
     if (additionalThreadIds != null) {
@@ -528,7 +529,7 @@ final class AcceptCommandsControl {
         if (existing != null) {
           if (!Objects.equals(existing.parentThreadId(), anchorThreadId)) {
             throw conflict(
-                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
+                HarnessConflictReason.THREAD_ID_REUSED,
                 "thread " + id + " already belongs to another execution parent");
           }
           allThreadIds.add(id);
@@ -545,8 +546,7 @@ final class AcceptCommandsControl {
                   () ->
                       anchorIsParent && chain.contains(id)
                           ? new IllegalArgumentException("join parent does not exist")
-                          : new HarnessRuntimeNotFoundException(
-                              "thread " + id + " does not exist"));
+                          : DomainException.notFound("thread", "thread " + id + " does not exist"));
       sessionIds.add(state.sessionId());
     }
     List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
@@ -563,8 +563,7 @@ final class AcceptCommandsControl {
                   () ->
                       anchorIsParent && chain.contains(id)
                           ? new IllegalArgumentException("join parent does not exist")
-                          : new HarnessRuntimeNotFoundException(
-                              "thread " + id + " does not exist"));
+                          : DomainException.notFound("thread", "thread " + id + " does not exist"));
       lockedThreads.put(id, locked);
     }
     return new LockedAncestors(chain, lockedThreads);
@@ -650,8 +649,7 @@ final class AcceptCommandsControl {
     return ((CustomMessageCommandPayload) command.payload()).message();
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 }

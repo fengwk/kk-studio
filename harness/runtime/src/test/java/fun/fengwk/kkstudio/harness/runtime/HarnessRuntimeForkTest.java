@@ -28,11 +28,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -474,9 +475,12 @@ class HarnessRuntimeForkTest {
   void sessionForkRejectsMissingSourceThread() {
     UUID newSessionId = TestIds.id(962);
     UUID newThreadId = TestIds.id(963);
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> acceptSessionFork(TestIds.id(964), TestIds.id(965), newSessionId, newThreadId));
+    DomainException missing =
+        assertThrows(
+            DomainException.class,
+            () -> acceptSessionFork(TestIds.id(964), TestIds.id(965), newSessionId, newThreadId));
+    assertEquals(DomainErrorCode.NOT_FOUND, missing.code());
+    assertEquals("thread", missing.resource());
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
@@ -568,9 +572,9 @@ class HarnessRuntimeForkTest {
         entriesAfterFirst,
         store.transaction(tx -> tx.entries().loadBySession(newSessionId)).size());
 
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     sessionForkCommand(
@@ -580,7 +584,8 @@ class HarnessRuntimeForkTest {
                         newThreadId,
                         "different-command"),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.THREAD_ID_REUSED.name(), conflict.reason());
     assertEquals(
         entriesAfterFirst,
         store.transaction(tx -> tx.entries().loadBySession(newSessionId)).size());

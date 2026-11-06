@@ -21,8 +21,6 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -399,9 +397,7 @@ class SubagentTaskRunnerTest {
     AcceptedCommands accepted = accepted(UUID.randomUUID(), childThreadId, false);
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(staleChild).thenReturn(freshChild);
     when(runtime.spawn(any(), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale"))
+        .thenThrow(DomainException.conflict("STALE_COMMAND_CURSOR", "stale"))
         .thenReturn(accepted);
 
     SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
@@ -485,10 +481,7 @@ class SubagentTaskRunnerTest {
     // 明确业务冲突没有匹配票据时立即拒绝。
     stubParent(List.of(AGENT));
     when(runtime.spawn(any(), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
-                "different request"));
+        .thenThrow(DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "different request"));
 
     assertThrows(
         SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
@@ -502,9 +495,7 @@ class SubagentTaskRunnerTest {
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
     when(runtime.spawn(any(), any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED, "winner"));
+        .thenThrow(DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "winner"));
     // 竞争者先提交成功：本进程第一次提交冲突，随后的重读才看到胜者的 join。
     when(runtime.findJoin(invocationId))
         .thenReturn(Optional.empty())
@@ -779,7 +770,7 @@ class SubagentTaskRunnerTest {
     assertTrue(quota.getMessage().contains("quota exceeded"), quota.getMessage());
 
     // 父线程在提交前消失同样收敛为 typed 失败。
-    doThrow(new HarnessRuntimeNotFoundException("parent gone")).when(runtime).spawn(any(), any());
+    doThrow(DomainException.notFound("thread", "parent gone")).when(runtime).spawn(any(), any());
     assertThrows(
         SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
   }

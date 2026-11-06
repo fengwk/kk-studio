@@ -11,10 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -242,11 +244,12 @@ class HarnessNamesTest {
             new AcceptCommandsTarget.NewThread(
                 baseline.sessionId(), baseline.rootEntryId(), branchThreadId, "另一个分支", false),
             List.of(message));
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(renamed, AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, error.reason());
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(HarnessConflictReason.THREAD_ID_REUSED.name(), error.reason());
 
     // seedBaseline 的根 Thread + 新建分支 = 2，且分支只有初始一条 Command / 一份 Work。
     assertEquals(

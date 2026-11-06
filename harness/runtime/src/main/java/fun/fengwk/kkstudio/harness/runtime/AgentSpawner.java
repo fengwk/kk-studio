@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
@@ -124,8 +124,8 @@ public final class AgentSpawner {
             .lock(request.threadId())
             .orElseThrow(
                 () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + request.threadId() + " does not exist"));
+                    DomainException.notFound(
+                        "thread", "thread " + request.threadId() + " does not exist"));
     if (!Objects.equals(request.parentThreadId(), thread.parentThreadId())) {
       throw new IllegalArgumentException("join parent differs from immutable child parent");
     }

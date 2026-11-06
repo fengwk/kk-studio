@@ -4,8 +4,7 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -133,15 +132,13 @@ public class SubagentTaskRunner implements SubagentRunner {
             accepted.thread().id(),
             accepted.replayed(),
             accepted.joinReplaced());
-      } catch (HarnessRuntimeNotFoundException notFound) {
-        throw reject("subagent task parent thread no longer exists", notFound);
       } catch (RuntimeException failure) {
         if (failure instanceof DomainException domain) {
           if (domain.code() == DomainErrorCode.NOT_FOUND) {
             throw reject("subagent task parent thread no longer exists", domain);
           }
           if (domain.code() != DomainErrorCode.CONFLICT
-              || Arrays.stream(HarnessRuntimeConflictException.Reason.values())
+              || Arrays.stream(HarnessConflictReason.values())
                   .noneMatch(reason -> reason.name().equals(domain.reason()))) {
             throw domain;
           }
@@ -159,14 +156,9 @@ public class SubagentTaskRunner implements SubagentRunner {
           return concurrent;
         }
         boolean staleCursor =
-            (failure instanceof HarnessRuntimeConflictException conflict
-                    && conflict.reason()
-                        == HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR)
-                || (failure instanceof DomainException domain
-                    && domain.code() == DomainErrorCode.CONFLICT
-                    && HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR
-                        .name()
-                        .equals(domain.reason()));
+            failure instanceof DomainException domain
+                && domain.code() == DomainErrorCode.CONFLICT
+                && HarnessConflictReason.STALE_COMMAND_CURSOR.name().equals(domain.reason());
         if (!staleCursor) {
           throw reject(message(failure), failure);
         }

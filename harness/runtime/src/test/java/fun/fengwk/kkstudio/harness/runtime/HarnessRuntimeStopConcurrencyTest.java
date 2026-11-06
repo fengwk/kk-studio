@@ -16,8 +16,7 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -64,7 +63,7 @@ class HarnessRuntimeStopConcurrencyTest {
     DomainException replayError =
         assertThrows(DomainException.class, () -> runtime.decideToolApproval(approval));
     assertEquals(DomainErrorCode.CONFLICT, replayError.code());
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), replayError.reason());
+    assertEquals(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), replayError.reason());
   }
 
   @Test
@@ -79,7 +78,7 @@ class HarnessRuntimeStopConcurrencyTest {
         assertThrows(DomainException.class, () -> runtime.decideToolApproval(allow(baseline)));
 
     assertEquals(DomainErrorCode.CONFLICT, error.code());
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), error.reason());
+    assertEquals(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), error.reason());
     // Stop 已删除 tool 行；decision 不再能 undecided WAITING_APPROVAL → READY 转换。
     assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
   }
@@ -111,12 +110,12 @@ class HarnessRuntimeStopConcurrencyTest {
         assertTrue(approvalAttempt.error() instanceof DomainException);
         DomainException conflict = (DomainException) approvalAttempt.error();
         assertEquals(DomainErrorCode.CONFLICT, conflict.code());
-        assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), conflict.reason());
+        assertEquals(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), conflict.reason());
       } else {
         assertTrue(stopAttempt.error() instanceof DomainException);
         DomainException conflict = (DomainException) stopAttempt.error();
         assertEquals(DomainErrorCode.CONFLICT, conflict.code());
-        assertEquals(Reason.STALE_VERSION.name(), conflict.reason());
+        assertEquals(HarnessConflictReason.STALE_VERSION.name(), conflict.reason());
         ToolInvocation tool =
             store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
         assertEquals(ToolInvocationStatus.READY, tool.status());
@@ -213,7 +212,7 @@ class HarnessRuntimeStopConcurrencyTest {
       Attempt two = second.get();
       assertEquals(1, successCount(one, two));
       Attempt loser = one.error() == null ? two : one;
-      assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
+      assertConflict(loser, HarnessConflictReason.STALE_COMMAND_CURSOR);
       ThreadState thread =
           store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
       assertEquals(3L, thread.nextCommandSequence());
@@ -256,9 +255,11 @@ class HarnessRuntimeStopConcurrencyTest {
     return (first.error() == null ? 1 : 0) + (second.error() == null ? 1 : 0);
   }
 
-  private static void assertConflict(Attempt attempt, Reason reason) {
-    assertTrue(attempt.error() instanceof HarnessRuntimeConflictException);
-    assertEquals(reason, ((HarnessRuntimeConflictException) attempt.error()).reason());
+  private static void assertConflict(Attempt attempt, HarnessConflictReason reason) {
+    assertTrue(attempt.error() instanceof DomainException);
+    DomainException error = (DomainException) attempt.error();
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(reason.name(), error.reason());
   }
 
   private record Attempt(Object value, Throwable error) {}
