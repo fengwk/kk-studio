@@ -589,7 +589,8 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 
 每个已安装 Plugin 在 `plugin_configuration` 中有一行当前普通配置（`version` + `values_json`）。
 普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
-不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置。
+不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。HTTP 请求与响应都以 `valuesJson` 原文字符串承载普通值，
+64 KiB 预算按提交原文计；`defaults` 与 `valuesSchema` 仍是 JSON 节点。秘密不进入普通配置。
 启动时为新安装的 Plugin 写入 Schema 默认值（version 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
 [`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
@@ -602,7 +603,8 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 持有本节点当前快照。刷新回读全部配置，配置版本有变化时构建新快照并原子替换；构建失败保留旧快照，
 并暴露固定的 `applicationError`。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，
 因此在途调用继续使用自己租到的实例完成。Web 合并通知、重连提示与每 5 秒的回读。
-管理面投影把数据库中的 desired 版本与本节点快照的 applied 版本一起报告，二者不一致时附带应用说明；
+管理面投影以配置投影的 `version` 报告数据库中的 desired 版本，并单独报告本节点快照的 `appliedVersion`；
+二者不一致时附带应用说明。`PUT` 配置在保存成功但本节点尚未应用时返回 202，已应用时返回 200，两者都带 no-store；
 数据库提交提示不代表所有节点已经应用。
 
 产品目录投影由持有该目录的应用提供：Canvas 在每次快照构建时把内置 adapter 与插件贡献合并校验成唯一目录并冻结，
@@ -620,7 +622,8 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
 
 管理协议为 `/api/platform/plugins` 的列表/详情、配置写入和认证操作。
-配置 Schema 与安全秘密投影由插件声明派生；秘密仅支持 KEEP、SET、CLEAR，不回读明文。
+配置 Schema 与安全秘密投影由插件声明派生；每个秘密字段只投影 `{description, configured}`，绝不回读明文。
+秘密更新仅支持 KEEP、SET、CLEAR。
 无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
 DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId；
 complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配置版本未变、region 一致的未过期尝试。
@@ -711,12 +714,12 @@ MCP 发现由计划阶段执行；Git Skill 在导入执行时解析分支当前
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 导入复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
 配置导入具备全文件事务原子性（包含 Git 技能包）：Git 远端网络拉取与归档准备在写事务前执行，发布在同一数据库事务内完成；写入失败时整体回滚。准备阶段生成的暂存归档尽力清理，未清理的暂存对象由存储过期机制回收。
-插件是第八类：条目只含 `pluginId` 与普通值文本，秘密与配置修订都不进入文件。
+插件是第八类：条目只含 `pluginId` 与普通值文本，秘密与配置版本都不进入文件。
 导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出，
 内置 Agent 只满足依赖、从不作为条目导出；导入时未安装的 id 按条目级跳过，已安装插件按本插件的
 configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
 导入后仍需在 Plugin Secret API 或登录流程录入。
-插件写入复用唯一写入口：计划期的各插件修订作为导入事务内的 CAS 坐标，
+插件写入复用唯一写入口：计划期的各插件版本作为导入事务内的 CAS 坐标，
 秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；插件写入参与外层导入事务。
 系统设置按当前完整六节契约直接校验，不合并局部字段；文件里的未知设置字段
 被移除并作为跳过项列出，不做别名或双读，其余六节按 `allowPartial` 语义导入；以执行准备时版本 CAS，
