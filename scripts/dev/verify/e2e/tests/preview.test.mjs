@@ -20,7 +20,7 @@ test('seed case reads the execution contract, including a null builtin variant',
   }).map(([name, providerType]) => ({
     name, description: 'fixture', providerType, credential: { configured: false },
     modelCallTimeoutMillis: null, modelCallIdleTimeoutMillis: null, modelHttpRetryStatusCodes: null,
-    version: '0', createTime: 0, updateTime: 0,
+    promptCacheRetentions: ['NONE', 'SHORT'], version: '0', createdAt: 0, updatedAt: 0,
   }))
   const ctx = {
     vars: {},
