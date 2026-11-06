@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 
@@ -116,10 +118,14 @@ class EnvironmentDtoContractTest {
     status.setDaemonVersion("1.0.9");
     status.setUpdate(null);
     EnvironmentRuntimeStatusDTO snapshot = new EnvironmentRuntimeStatusDTO();
-    snapshot.setRevision("1");
+    snapshot.setRevision(1L);
     snapshot.setStatus(status);
 
-    JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(snapshot));
+    SimpleModule longs = new SimpleModule("http-longs");
+    longs.addSerializer(Long.class, new ToStringSerializer(Long.class));
+    longs.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
+    JsonMapper httpMapper = MAPPER.rebuild().addModule(longs).build();
+    JsonNode json = httpMapper.readTree(httpMapper.writeValueAsString(snapshot));
 
     assertEquals("1", json.get("revision").stringValue());
     assertEquals("1.0.9", json.get("status").get("daemonVersion").stringValue());
@@ -131,7 +137,7 @@ class EnvironmentDtoContractTest {
     progress.setDownloadedBytes(12L);
     progress.setTotalBytes(null);
     status.setUpdate(progress);
-    JsonNode withProgress = MAPPER.readTree(MAPPER.writeValueAsString(snapshot));
+    JsonNode withProgress = httpMapper.readTree(httpMapper.writeValueAsString(snapshot));
     assertTrue(withProgress.get("status").get("update").has("totalBytes"));
     assertTrue(withProgress.get("status").get("update").get("totalBytes").isNull());
   }

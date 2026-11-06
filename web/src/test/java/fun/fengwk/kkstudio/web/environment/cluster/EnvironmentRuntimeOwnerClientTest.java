@@ -80,7 +80,7 @@ class EnvironmentRuntimeOwnerClientTest {
     assertEquals("GET", method.get());
     assertEquals("/internal/platform/environments/" + ENV + "/runtime", path.get());
     assertEquals("ok", auth.get());
-    assertEquals("7", snapshot.getRevision());
+    assertEquals(7L, snapshot.getRevision());
     assertEquals("1.0.9", snapshot.getStatus().getDaemonVersion());
   }
 
@@ -104,7 +104,7 @@ class EnvironmentRuntimeOwnerClientTest {
 
     assertEquals("POST", method.get());
     assertEquals(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED, result.getCommandStatus());
-    assertEquals(8L, Long.parseLong(result.getRuntimeStatus().getRevision()));
+    assertEquals(8L, result.getRuntimeStatus().getRevision());
     assertEquals(12L, result.getRuntimeStatus().getStatus().getUpdate().getDownloadedBytes());
   }
 

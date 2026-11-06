@@ -232,7 +232,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     status.setDaemonVersion(snapshot.status().daemonVersion());
     status.setUpdate(toProgressDto(snapshot.status().update()));
     EnvironmentRuntimeStatusDTO dto = new EnvironmentRuntimeStatusDTO();
-    dto.setRevision(Long.toString(snapshot.revision()));
+    dto.setRevision(snapshot.revision());
     dto.setStatus(status);
     return dto;
   }
