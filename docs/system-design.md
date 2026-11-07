@@ -130,7 +130,7 @@ JSON 成功响应直接返回资源：通常读取、更新和动作使用 200�
 - 结构由运行时决定的自由格式 JSON 使用 JSON 节点；多形态 DTO 使用 `type` 区分各变体。
   Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Issue Activity 的 `data`
   都是节点，必须保留原始文本的内容按对应字段契约传输。Harness Entry 的 `payload` 是历史 codec 的 JSON 节点，
-  节点内时间为毫秒精度 ISO-8601 文本，不套用 DTO 的时间规则。
+  `/ws/events` 的 realtime 事件由 realtime codec 编码，二者的时间都是毫秒精度 ISO-8601 文本，不套用 DTO 的时间规则。
 - 有界配置集合直接返回数组；无界集合通过 `cursor`、`limit` 读取，响应提供
   `{items, nextCursor}`，末页的 `nextCursor` 为 null。按资源语义返回的树形聚合直接使用数组。
 - 需要乐观并发控制的资源响应 `version`，写入请求提供 `expectedVersion`；DELETE 放在查询参数中，

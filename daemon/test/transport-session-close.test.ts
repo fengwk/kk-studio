@@ -7,7 +7,7 @@ import {
   abortControlSession,
   closeControlSession,
   guardControlStream,
-} from '../src/transport/index.js'
+} from '../src/transport/control-session.js'
 
 interface FakeWebSocket extends EventEmitter {
   close: ReturnType<typeof vi.fn>

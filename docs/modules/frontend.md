@@ -51,8 +51,13 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 HTTP 路由与传输类型由领域控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
 字段、可空性与枚举值跟随各领域模块的 Java DTO，Java long 在请求和响应中都是规范非负十进制字符串，
-`Instant` 是 epoch 毫秒整数。Provider、MCP 与 Git 技能包的创建请求把密钥放在可空 `SecretUpdate` 中，
+`Instant` 是 epoch 毫秒整数。Harness Entry payload 与 realtime 事件是 Harness codec 的 JSON，
+其中的时间是毫秒精度 ISO-8601 文本，只在投影与解码处由
+[`parseCodecInstantMillis`](../../frontend/src/shared/lib/date-format.ts) 转为毫秒，其他形态按无效数据处理；
+时间线与视图模型中的时间统一是 epoch 毫秒数字。
+Provider、MCP 与 Git 技能包的创建请求把密钥放在可空 `SecretUpdate` 中，
 非空时只接受 `SET`；编辑请求的密钥字段必填，`KEEP` / `CLEAR` 必须显式提交。
+编辑已配置凭据的 Provider 时，表单提供清除已保存凭据的选项，选中后提交 `CLEAR`。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
 （`mvn verify` 内执行同一测试）拦截，更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
@@ -410,7 +415,7 @@ Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准�
 带分支或令牌的请求由服务端拒绝。删除使用确认弹窗，包仍被 Agent 引用时展示后端 `detail`
 并保留包本身。
 
-失败时优先展示后端 `detail`，缺失时展示错误消息；wire 上的 `Instant` 是 epoch 毫秒整数，展示时按本地时间格式化。
+失败时优先展示后端 `detail`，缺失时展示错误消息。
 文案键集中在 `ai.skillPackages.*`，按钮与标题不使用括号补充说明。
 
 ### tab 全局 IDE 面板
@@ -535,6 +540,8 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 - 卡片图标框沿用 AI 区域的 40px。资源卡不强制固定高度；同一栅格行自然拉齐，不用空白占位字段撑高。
 - 资源栅格根据可用宽度自适应，间距 16px。窄窗口先减少列数，再让内容自然换行，不缩小文字或挤掉操作。
 - 长标题可截断并提供完整名称；正文、工具参数、错误和任务报告可自然换行，展开后必须完整。
+- 针对具体对象的弹窗标题写作“动作或对象：名称”（中文全角冒号，英文 `: `），由带名称占位符的文案键生成。
+- 时间统一按本地时间以固定格式 `YYYY-MM-DD HH:mm` 显示（[`formatBackendDate`](../../frontend/src/shared/lib/date-format.ts)）；Environment 事件、Thread 调试详情这类诊断时间线使用同一格式并精确到秒，不随 locale 改变格式。
 
 ### Token 分层与门禁
 
@@ -543,7 +550,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 `features/thread/runtime/interactions` 的待办），`styles.css` 只保留 reset、通用控件与跨功能共享样式。
 
 1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。
-2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。
+2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。承载文字列表的弹层（下拉、菜单、popover）使用不透明的 `--surface-overlay`，半透明的 `--surface-glass` 只用于叠在画布媒体上的资源序号、播放按钮与小地图遮罩。
 3. **组件层**：只在多处规则共享同一取值时才有，例如 `--topbar-bg`。
 
 标尺同样是 token：间距 `--space-1..6` 与 `--space-8`（4px 步进）、字号 `--font-size-xs/sm/md/lg/xl`（12 / 13 / 15 / 20 / 24px）、圆角 `--radius-*`、动效 `--duration-fast/base`、层级 `--z-raised/sticky/dropdown/modal/popover/toast`（局部堆叠只用 0–10 的整数）。字体 `--font` 与 `--mono`：标识符、id、版本号和数据值使用等宽，正文使用无衬线。
