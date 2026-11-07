@@ -111,7 +111,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         count("select count(*) from project_issue_agent_thread where issue_id = ?", issue.getId()));
   }
 
-  /** 额度耗尽后拒绝新建 Run，并只展示待人工授权；历史 Run 仍保留。 */
+  /** 额度耗尽后拒绝新建 Run，并只展示待人工重置；历史 Run 仍保留。 */
   @Test
   void exhaustedBudgetRejectsNewRun() {
     String agent = createAgent();

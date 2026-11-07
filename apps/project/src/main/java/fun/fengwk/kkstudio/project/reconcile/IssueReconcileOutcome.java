@@ -8,7 +8,7 @@ public enum IssueReconcileOutcome {
   /** 当前阶段是保留阶段、停用阶段或人工阶段：不产生 Run，结束本次 claim。 */
   CONVERGED_NO_AGENT,
 
-  /** 阶段额度已用尽：只展示待人工授权，不继续调用模型，结束本次 claim。 */
+  /** 阶段额度已用尽：只展示待人工重置，不继续调用模型，结束本次 claim。 */
   CONVERGED_BUDGET_EXHAUSTED,
 
   /** 存在无法派发的确定性拒绝（暂停门禁、缺失 Agent 等）：结束本次 claim，等待显式恢复。 */
@@ -48,8 +48,5 @@ public enum IssueReconcileOutcome {
   STALE_RUN_CLOSED,
 
   /** 执行静止但仍未产出可收尾区间：按 activeDelay 重新检查。 */
-  DEFERRED_IDLE,
-
-  /** Run 终态且门禁打开但阶段额度已用尽：以 blockedDelay 重新检查，保留最后一次恢复能力。 */
-  DEFERRED_AWAITING_AUTHORIZATION
+  DEFERRED_IDLE
 }

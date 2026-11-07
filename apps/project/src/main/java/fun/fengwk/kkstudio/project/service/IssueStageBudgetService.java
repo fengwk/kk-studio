@@ -18,7 +18,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issue 阶段预算用例：授权、重置与查询。
+ * Issue 阶段预算用例：读取与人工重置。
  *
  * <p>写路径复用 {@link IssueMutationSupport} 的 owner 锁与幂等 receipt，不在本类或平台层复制额度 推导。
  */

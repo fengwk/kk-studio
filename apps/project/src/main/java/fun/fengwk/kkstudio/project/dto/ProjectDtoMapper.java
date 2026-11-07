@@ -220,10 +220,6 @@ public class ProjectDtoMapper {
         .build();
   }
 
-  public IssueRunDTO toDto(IssueRun run) {
-    return toDto(run, null);
-  }
-
   public IssueRunDTO toDto(IssueRun run, String agentName) {
     if (run == null) {
       return null;

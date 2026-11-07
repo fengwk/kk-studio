@@ -370,7 +370,7 @@ class ProjectDtoMapperTest {
   void testRunMapping() {
     // 测试意图：验证 IssueRunSummaryDTO 与 IssueRunDTO 映射
     assertNull(mapper.toSummaryDto((IssueRun) null, null));
-    assertNull(mapper.toDto((IssueRun) null));
+    assertNull(mapper.toDto((IssueRun) null, null));
 
     UUID runId = UUID.randomUUID();
     UUID issueId = UUID.randomUUID();
