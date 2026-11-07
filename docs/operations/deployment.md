@@ -336,8 +336,8 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 `/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
 生成兄弟 `daemon.json`，最后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
 凭证文本既不进入 argv（`ps` 不可见），也不残留在 `/proc/<pid>/environ`；Daemon 由配置的
-`studioUrl` 自行派生上述 gateway。容器配置不含 `--gateway-uri`、`--data-dir` 或 `--lsp-config`
-等第二入口。
+`studioUrl` 自行派生上述 gateway。`--config` 是 Daemon 唯一的运行参数：数据目录取配置文件的
+父目录，LSP 配置与备注也在该文件中。
 
 [daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 Node 24.21.0 builder 编译 Daemon，
 并通过 [`prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存目标架构的真实发行归档，runtime 使用

@@ -94,7 +94,7 @@ V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.t
 
 实体 UUID 和业务版本由应用生成。复合外键保持 Entry 父链、Thread head、
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
-Agent、Environment 等目录名称的 canonical 规则只在应用写入路径校验，数据库不复刻。
+Agent、Environment 等目录名称的 canonical 化只在应用写入路径完成，数据库只兜底长度、首尾空白与 `/` 等形状约束。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
 Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：

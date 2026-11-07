@@ -33,9 +33,9 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 - `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
 - `readTree` / `write` 提供同一套严格性的树读写；空白文本产生的 MissingNode 被拒绝，JSON 字面量 `null` 仍是合法 NullNode。
 
-[`ToolArguments`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的字段渲染函数应用到指定字段。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
+[`ToolArguments`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的渲染函数应用到解析结果（可能为 `null`）。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 
-[`BoundedJsonWriter`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。Jackson 3 将输出流异常包装为 `JacksonException`，调用方只沿 cause 链识别专属超限异常；其它编码或 I/O 失败明确抛出，不能误报为超限。[Harness Runtime](harness-runtime.md#tool-契约) 里 Tool 结果的字节预算判定与它复用同一实现。
+[`BoundedJsonWriter`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，供「先判断能否放下、再决定是否序列化」的判定直接使用（例如 Tool 结果的 canonical JSON 字节预算）；`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本。累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。Jackson 3 将输出流异常包装为 `JacksonException`，调用方只沿 cause 链识别专属超限异常；其它编码或 I/O 失败明确抛出，不能误报为超限。[Harness Runtime](harness-runtime.md#tool-契约) 里 Tool 结果的字节预算判定与它复用同一实现。
 
 ## URL 编码
 
