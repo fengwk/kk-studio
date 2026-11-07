@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.storage;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;

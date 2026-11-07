@@ -227,12 +227,6 @@ public class SessionFileStore {
     }
   }
 
-  /** 获取指定 Session 内文件占用的总内容字节数。 */
-  public long totalBytes(UUID sessionId) {
-    Objects.requireNonNull(sessionId, "sessionId must not be null");
-    return sessionFileRepository.sumSizeBySession(sessionId);
-  }
-
   /** 读取文件原始内容字节（若文件不存在返回空 Optional）。 */
   public Optional<byte[]> read(UUID sessionId, String path) {
     return find(sessionId, path)

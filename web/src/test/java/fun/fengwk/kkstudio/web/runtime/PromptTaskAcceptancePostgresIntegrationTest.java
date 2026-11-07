@@ -38,8 +38,8 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.io.ByteArrayInputStream;

@@ -57,17 +57,6 @@ public class SessionBlobRefManager {
     }
   }
 
-  /**
-   * 事务内只插入 ref 行（不 retain），返回是否新插入。仅供创建时已把该引用计入 {@code ref_count} 的新 blob 行配对使用，调用方必须保证与恰好一个 ref
-   * 行同事务提交。
-   */
-  @Transactional(propagation = Propagation.MANDATORY)
-  public boolean insertRefIfAbsent(UUID sessionId, UUID blobId) {
-    Objects.requireNonNull(sessionId, "sessionId");
-    Objects.requireNonNull(blobId, "blobId");
-    return refRepository.insertIfAbsent(sessionId, blobId);
-  }
-
   /** 该 Session 是否已引用指定 blob。 */
   public boolean contains(UUID sessionId, UUID blobId) {
     Objects.requireNonNull(sessionId, "sessionId");
