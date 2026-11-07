@@ -138,7 +138,7 @@ RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 }
 ```
 
-答案按问题位置提交，例如 `{"answers":[["PDF"],["图片","源文件"]]}`。单选默认，每题提供自定义输入；推荐仅做标记，等待用户选择。答案须覆盖所有题，单选恰好一个，多选去重并允许一项自定义文本；题数、选项数与长度有界。模型只提供问题与选项，问卷由接受路径冻结。同题选项标签唯一，单选至多一个推荐，多选允许多个；选项为空时使用自定义回答。
+答案按问题位置提交，例如 `{"answers":[["PDF"],["图片","源文件"]]}`。单选默认，每题提供自定义输入；推荐仅做标记，等待用户选择。答案须覆盖所有题，单选恰好一个，多选去重并允许一项自定义文本；问卷至少一题，题数、选项数与文本长度不设业务上限。模型只提供问题与选项，问卷由接受路径冻结。同题选项标签唯一，单选至多一个推荐，多选允许多个；选项为空时使用自定义回答。
 
 用户明确提交回答或拒答。拒答形成 `{"declined":true}` 工具结果；Stop 取消等待，迟到回复被拒绝。委派子 Thread 也可等待回答，祖先按自身状态与执行树对账恢复，不递归投影子树等待。
 
@@ -225,7 +225,7 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 
 ### 私有持久化与锁序
 
-Driver 私有状态经 Driver 自己的 Store 视图读写，视图只投影调用方已有的事务，不开启事务。Builtin 的 `BuiltinStore` 由 Infra 的 PostgreSQL 实现，与 Runtime 共享连接、数据库时间与锁序跟踪。所有事务遵守同一锁阶梯：
+Driver 私有状态经 Driver 自己的 Store 视图读写，视图只投影调用方已有的事务，不开启事务。Builtin 的 `BuiltinStore` 由 Platform Runtime 的 PostgreSQL 实现，与 Runtime 共享连接、数据库时间与锁序跟踪。所有事务遵守同一锁阶梯：
 
 ```text
 Session -> Thread -> Commands -> Driver 私有行 -> ToolInvocation -> Work

@@ -6,7 +6,7 @@
 
 [`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是规范 UUID 路由身份：构造与解析只接受 `UUID#toString()` 的小写 canonical 文本，空白、大小写变体与其它形状一律拒绝，`toString()` 也只输出该形式。
 
-Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个 UUID。产品展示名与历史名称的冻结由 [Platform](platform.md)维护；调用目录在具体 capability arguments 中显式给出。Studio 保存的安装设置（`installConfig`）属于产品侧持久状态，不进入 wire；Daemon 只从 `--config` 指向的 `daemon.json` 消费其中的 `daemon` 对象（studioUrl、note、bashExecutable、内联 LSP servers）。
+Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个 UUID。产品展示名与历史名称的冻结由 [Platform](platform.md)维护；调用目录在具体 capability arguments 中显式给出。Studio 保存的安装设置（`installConfig`）属于产品侧持久状态，不进入 wire；Daemon 只从 `--config` 指向的 `daemon.json` 消费顶层字段 `studioUrl`、`note`、`bashExecutable` 与内联 `lsp.servers`。
 
 ## 原子能力目录
 
@@ -43,7 +43,9 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
 `workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
-接受目标主机上的绝对路径或 `vfs:` 会话路径，相对路径直接拒绝，且不接受 `workdir`；三个 `lsp.*` 能力的本地 `path`
+接受目标主机上的绝对路径或 `vfs:` 路径，相对路径直接拒绝，且不接受 `workdir`。其中 `fs.write`、`fs.edit`、
+`fs.edit.preview`、`fs.grep` 与 `fs.find` 只接受 `vfs:/sessions/<sessionId>/...` 会话路径；`fs.read`
+还接受只读的 `vfs:/resources/<blobId>` 与 `vfs:/skills/<package>/<skill>/...`。三个 `lsp.*` 能力的本地 `path`
 必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
@@ -61,7 +63,7 @@ EnvironmentCapabilityExecutionHandle execute(
     EnvironmentCapabilityExecutionListener listener);
 ```
 
-[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
+[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）、timeout 与可选 `ExpectedFile`（仅 `fs.edit`，携带路径与原始字节 SHA-256），构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：
 
@@ -262,7 +264,7 @@ close(connectionId)
   -> leaseStore.disconnect                               # 幂等，保留重连宽限
 ```
 
-[`DaemonLeaseStore`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 表达围栏返回值，[`LeaseBindResult`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。心跳只续租；心跳或独立 `RUNTIME_STATUS` 携带更高 revision 且状态内容实际变化时，核心先更新会话快照，再通过 `runtimeStatusChanged` 在有效 READY 租约围栏下发布失效提示。重复、旧快照及仅 revision 变化不发布。发布异常或围栏失守时核心关闭连接，不尝试自行修复路由。
+[`DaemonLeaseStore`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 表达围栏返回值，[`LeaseBindResult`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。心跳只续租；心跳或独立 `RUNTIME_STATUS` 携带更高 revision 时，核心先替换会话快照；仅状态内容实际变化时，再通过 `runtimeStatusChanged` 在有效 READY 租约围栏下发布失效提示。重复、旧快照及仅 revision 变化不发布。发布异常或围栏失守时核心关闭连接，不尝试自行修复路由。
 
 准入阶段在升级前裁决：`Rejected` 映射为 HTTP 401（注册凭据无效），`RetryLater` 映射为 HTTP 503 与 Retry-After 响应头（暂不可准入）。存储运行时异常使连接 fail closed，错误响应给出独立说明文本。[`DaemonRegistrationDirectory`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
 
@@ -272,7 +274,7 @@ close(connectionId)
 
 1. 校验 capability descriptor 与 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 完全一致，并要求 `call.id` 是 canonical UUID；
 2. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
-3. arguments 携带 `workdir` 时，按该连接 READY 时冻结的目标 OS 做词法校验；是否必填由各能力 input schema 决定；
+3. 能力 input schema 要求 `workdir` 时（当前仅 `process.exec`），按该连接 READY 时冻结的目标 OS 做词法校验；
 4. 在核心锁外调用 `leaseStore.holdsReadyLease` 复核归属，存储不可用同样判定环境不可用；
 5. 在连接状态锁内二次复核 READY 与围栏代次，登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonOfferResult.java) 的三态映射为调用结果。
 
@@ -320,14 +322,14 @@ COMPLETED
 - `endUpdate(environmentId, operationId)`：只有与当前登记一致的 operationId 才释放准入，旧 operation 不能释放新 operation。
 - `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
 
-「一个 Environment 同一时刻至多一次更新」由核心内存准入保证：`UPDATE` / `UPDATE_RESULT` 不落任务表，Server 只保留当前命令的有界回执，不提供更新历史查询。更新期间对旧二进制的
+「一个 Environment 同一时刻至多一次更新」由核心内存准入保证：`UPDATE` / `UPDATE_RESULT` 不落任务表，Server 只保留各 Environment 当前 operationId 的内存准入标记，不保存命令正文或更新历史，也不提供历史查询。更新期间对旧二进制的
 任何替换都由独立 OS 作业调用官方安装器完成，核心只负责准入、下发与回执转发。
 
 ### 终态唯一与迟到帧
 
 `COMPLETED`/`FAILED`/`CANCELLED` 回调、实例接管与显式 `expire` 竞争时只有一个赢家；已终结 invocation 的标识由 `MAX_INVOCATION_TOMBSTONES = 1024` 的有界 tombstone 记录，超限时优先淘汰退出确认已交付的最旧条目，只有全部条目都仍在等待退出确认时才淘汰最旧条目。
 
-- `expire(handle)` 由调用方在自身 deadline 上判定超时：它至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出活动恢复集合，之后到达的 daemon 终态被 tombstone 静默丢弃。同一有界 tombstone 保留原 listener 与发起调用时的 daemon 身份：随后真正到来的空 `EXECUTION_EXITED` 仍调用 `onExitConfirmed()` 一次。其它 daemon 身份、重复帧和非空 payload 都不确认。条目被容量淘汰后不再保留 listener 或 daemon 身份，迟到确认不再交付；此时该帧与未知 invocation 一样按协议违规关闭连接，关闭本身不是退出证据。退出确认与结果终态无关，取消、超时和断连本身不产生它。若终态或 `expire` 已移除活动调用而退出确认尚未交付，同一 daemon 实例重新 READY 时只为该 tombstone 重发一次 `CANCEL`，让 Daemon 从 journal 重放既有终态/退出事实或停止仍运行的执行范围；绝不重发 `INVOKE`，不重新执行。未知 `CANCEL` 不产生确认，已交付或已被淘汰的条目、以及不同 daemon 身份都不触发重发。
+- `expire(handle)` 由调用方在自身 deadline 上判定超时：它至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出活动恢复集合，之后到达的 daemon 终态被 tombstone 静默丢弃。同一有界 tombstone 保留原 listener 与发起调用时的 daemon 身份：随后真正到来的 `EXECUTION_EXITED` 仍调用 `onExitConfirmed()` 一次；其它 daemon 身份与重复帧都不确认。条目被容量淘汰后不再保留 listener 或 daemon 身份，迟到确认不再交付；该帧与未知 invocation 一样被安全忽略并记录 DEBUG 日志，连接保持打开，关闭本身不是退出证据。退出确认与结果终态无关，取消、超时和断连本身不产生它。若终态或 `expire` 已移除活动调用而退出确认尚未交付，同一 daemon 实例重新 READY 时只为该 tombstone 重发一次 `CANCEL`，让 Daemon 从 journal 重放既有终态/退出事实或停止仍运行的执行范围；绝不重发 `INVOKE`，不重新执行。未知 `CANCEL` 不产生确认，已交付或已被淘汰的条目、以及不同 daemon 身份都不触发重发。
 - `onExitConfirmed()` 的回调交付不等于退出账本已提交。回调失败只记录固定阶段与异常类名，不记录原始异常正文或凭据，也不阻断后续回调；重复 ACK 不重试失败写入，不补造持久退出事实。
 - 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后，旧代际或初次递交结果不确定的调用以相同 `invocationId` 发送 `RECOVER`，绝不重发 `INVOKE`；Daemon 命中 journal 时回放 STARTED 并继续执行，或重放既有终态/退出事实；只有调用方已表达取消意图的调用才重放 `CANCEL` 并停止 scope。控制连接的一次抖动因此不会停止仍在运行的命令，调用仍由原 listener 收敛。
 - 身份不同的新 Daemon 接管 Environment 时，旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放其上传；新进程从自己的实例事实开始接受调用。旧主机副作用的停止或回滚仍需独立核查。
@@ -344,7 +346,7 @@ COMPLETED
 
 #### 回调顺序与背压上界
 
-`DaemonEndpoint.receive` 不要求调用方串行化同一连接的多帧。核心的保证是：状态推进在 `gate` 内按到达顺序完成，回调批次在该顺序下入队，再由单一 drainer 在锁外同步执行，因此并发 `receive` 不会让同一连接上的 `PARTIAL*` 越过其后的 terminal。批次的执行不走任何异步 executor，drain 就发生在投递该帧的调用线程上：回调耗时直接构成该调用方的背压，而不是转嫁给另一个线程池形成无界积压。
+`DaemonSession.receive` 不要求调用方串行化同一连接的多帧。核心的保证是：状态推进在 `gate` 内按到达顺序完成，回调批次在该顺序下入队，再由单一 drainer 在锁外同步执行，因此并发 `receive` 不会让同一连接上的 `PARTIAL*` 越过其后的 terminal。批次的执行不走任何异步 executor，drain 就发生在投递该帧的调用线程上：回调耗时直接构成该调用方的背压，而不是转嫁给另一个线程池形成无界积压。
 
 等待执行的批次以每连接固定上界 `MAX_PENDING_CALLBACK_BATCHES = 64` 约束（入站排队本身由传输适配器拥有，核心不感知其容量）。达到上界即 fail-closed：丢弃该帧、关闭连接，并把该 Environment 仍在途的调用一次性回收为 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java)，与实例接管同语义（回收回调追加在同一队列尾部，因此不会迟到于已入队的 partial）。
 
@@ -376,9 +378,10 @@ COMPLETED
 [`EnvironmentServerSettings`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentServerSettings.java)
 携带心跳超时（同时用作租约期限）、资源字节上限与临时资源 TTL/扫描间隔，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
 生效，核心不缓存配置；临时资源策略在同一连接的心跳通道按需推送 `TEMPORARY_RESOURCE_POLICY`，只对尚未回收的 workspace 生效。[`EnvironmentSessionListener`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentSessionListener.java)
-在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
-异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。另一个 Daemon 实例在本节点接管某个 Environment 时，
-listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关闭旧实例的 IDE 代际；同一实例断线重连不触发该回调。
+在每次 READY 后于锁外唤醒宿主；生产组合 listener 依次唤醒 Harness Work dispatcher、异步
+Skill Package 对账与远端退出对账，三者失败彼此隔离，也不回滚已经成立的 READY 会话。另一个 Daemon 实例在本节点接管某个 Environment 时，
+连接服务关闭该 Environment 的旧会话，使旧连接上的全部隧道子流失败；绑定旧代际的 IDE ticket 与 cookie 在下一次使用时由
+[`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 判定为 `REPLACED` 并返回 409。同一实例断线重连不触发该接管路径。
 生产组合 listener 的 READY、心跳与 Skill 状态宿主动作独立隔离失败；失败时以 WARN 记录 Environment ID、
 动作名与异常类型，不输出异常正文。租约断开与释放的数据库写入失败按未成功处理，同时记录操作与 Environment ID。
 
