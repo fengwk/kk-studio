@@ -155,7 +155,10 @@ public class ProjectService {
     ProjectWorkflow workflow = decodeWorkflow(workflowJson);
     requireReferencedStatesRetained(projectId, workflow);
     locked.setWorkflowJson(workflowCodec.encode(workflow));
-    return applyConfiguration(locked, expectedVersion);
+    Project updated = applyConfiguration(locked, expectedVersion);
+    // 阶段 enabled/agent 变化后，此前已收敛的 Issue 可能重新可执行；按持久化后的 workflow 重新登记 Work。
+    wakeExecutableIssues(updated);
+    return updated;
   }
 
   @Transactional
@@ -197,11 +200,8 @@ public class ProjectService {
       throw conflict(locked, expectedVersion);
     }
     Project unarchived = projectRepository.getById(projectId);
-    ProjectWorkflow workflow = workflowCodec.decode(unarchived.getWorkflowJson());
     // 归档期间调谐只收敛并删除 Work；恢复后必须按当前 workflow 重新登记，空闲 Issue 才能继续执行。
-    for (Issue issue : issueRepository.listByProjectId(projectId)) {
-      mutationSupport.wakeIfExecutable(issue, workflow);
-    }
+    wakeExecutableIssues(unarchived);
     return unarchived;
   }
 
@@ -254,6 +254,14 @@ public class ProjectService {
       throw conflict(locked, expectedVersion);
     }
     return projectRepository.getById(locked.getId());
+  }
+
+  /** 配置写入成功后，按项目当前 workflow 为未暂停且当前阶段可执行的 Issue 重新登记 Work。 */
+  private void wakeExecutableIssues(Project project) {
+    ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
+    for (Issue issue : issueRepository.listByProjectId(project.getId())) {
+      mutationSupport.wakeIfExecutable(issue, workflow);
+    }
   }
 
   private Project lockProject(UUID projectId) {
