@@ -13,7 +13,7 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
 - `--check-config <绝对路径>` 只读取并校验配置、同目录凭证与配置的 bash 可执行文件，不打开数据目录、不抢锁、不建立连接也不启动任何进程；校验通过输出固定信息并退出，校验失败在 stderr 输出单行安全诊断（带有稳定前缀 `Invalid daemon configuration:`，不回显输入敏感值或堆栈）。
 - `--config <绝对路径>` 加载指定配置并启动长驻服务。未知或多余参数一律失败关闭。
 
-[`DaemonConfig`](../../daemon/src/config.ts) 只消费唯一的 `--config <绝对路径>`：配置文件固定为 `daemon.json`（包含 `studioUrl`、可选的 `note`、`bashExecutable`、`lsp`），其父目录即为运行数据目录，同目录的 `daemon.token` 是属主独占的注册凭证文件（POSIX 0600 普通文件，非符号链接）。gateway 地址由配置中的 `studioUrl` 派生为 `ws(s)://<authority>/ws/daemon`，心跳与重连间隔固定为 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本参数，也不接受命令行传入的 gateway 或第二配置来源。
+[`DaemonConfig`](../../daemon/src/config.ts) 只消费唯一的 `--config <绝对路径>`：它指向一个只含 `studioUrl`、可选的 `note`、`bashExecutable` 与 `lsp` 的 JSON 文件（受管安装固定为同目录的 `daemon.json`），其父目录即为运行数据目录，同目录的 `daemon.token` 是属主独占的注册凭证文件（POSIX 0600 普通文件，非符号链接）。gateway 地址由配置中的 `studioUrl` 派生为 `ws(s)://<authority>/ws/daemon`，心跳与重连间隔固定为 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本参数，也不接受命令行传入的 gateway 或第二配置来源。
 
 数据目录在启动时由 [`lock.ts`](../../daemon/src/native/lock.ts) 获取目录级独占内核建议锁 `daemon.lock`（POSIX `flock(LOCK_EX | LOCK_NB)`，Windows `LockFileEx`），同一目录上的第二个进程立即失败退出。锁随打开的文件描述符存活，进程异常崩溃时由操作系统内核自动释放，不残留陈旧锁。目录布局如下：
 
