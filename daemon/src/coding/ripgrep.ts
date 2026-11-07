@@ -12,6 +12,13 @@ import { rgPath } from '@vscode/ripgrep'
 export interface RipgrepCommand {
   binary: string
   prefixArgs?: readonly string[]
+  /**
+   * 子进程环境覆盖：显式给出的键覆盖父进程同名变量，其余变量照常继承。
+   *
+   * <p>只服务于测试夹具。任何值都可以写成 `undefined`，从而把继承来的同名变量从子进程环境中移除；Node 无条件把父进程的
+   * `NODE_V8_COVERAGE` 传播给子进程，夹具在退出过程中被强杀时会留下写了一半的覆盖率文件，Vitest 解析它就会让整个运行失败。
+   */
+  env?: Readonly<Record<string, string | undefined>>
 }
 
 export type RipgrepStop = 'abort' | 'limit' | null
@@ -48,10 +55,13 @@ export function runRipgrep(
   onChunk: (chunk: Buffer) => boolean | void,
 ): Promise<RipgrepResult> {
   const prefix = command.prefixArgs ?? []
+  // 未显式覆盖时不传 env：交给 spawn 的 undefined 与默认继承等价。
+  const env = command.env === undefined ? undefined : { ...process.env, ...command.env }
   let child
   try {
     child = spawn(command.binary, [...prefix, ...args], {
       cwd,
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
