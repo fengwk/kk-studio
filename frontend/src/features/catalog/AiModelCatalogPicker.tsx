@@ -49,8 +49,10 @@ export function ModelCatalogPicker({
     const epoch = requestEpoch.current + 1
     requestEpoch.current = epoch
     if (!append) {
-      // 首页请求确立当前筛选词；load-more 游标只对产生它的搜索词有效。
+      // 首页请求确立当前筛选词；旧游标属于上一个搜索词，首页一开始就作废，
+      // 否则首页失败后仍会把旧游标拼到新搜索词上。
       currentQuery.current = search
+      setNextCursor(null)
       setError(null)
     }
     setLoading(true)

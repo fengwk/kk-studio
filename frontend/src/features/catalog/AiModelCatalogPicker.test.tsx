@@ -227,6 +227,28 @@ describe('ModelCatalogPicker request fencing', () => {
     expect(agentService.listModelCatalog).toHaveBeenLastCalledWith('alpha', 'cursor-alpha-2', 20)
   })
 
+  it('drops the previous cursor when a new search first page fails', async () => {
+    setLocale('zh-CN')
+    vi.mocked(agentService.listModelCatalog)
+      .mockResolvedValueOnce(page('gen-1', [candidate('m1')]))
+      .mockResolvedValueOnce({ ...page('gen-1', [candidate('alpha')]), nextCursor: 'cursor-alpha' })
+      .mockRejectedValueOnce(new Error('catalog unavailable'))
+
+    render(<ModelCatalogPicker onApply={vi.fn()} />)
+    expect(await screen.findByText('catalog-provider / m1')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alpha' } })
+    expect(await screen.findByText('catalog-provider / alpha')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
+
+    // 首页失败时错误可见，但 alpha 的游标必须已经作废：不会再被拼到 beta 上。
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'beta' } })
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
+    expect(agentService.listModelCatalog).toHaveBeenCalledTimes(3)
+    expect(agentService.listModelCatalog).not.toHaveBeenCalledWith('beta', 'cursor-alpha', 20)
+  })
+
   it('keeps the newer search result when the refresh response arrives after it started', async () => {
     setLocale('zh-CN')
     const refreshResponse = deferred<ModelCatalogPageDTO>()
