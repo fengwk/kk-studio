@@ -1167,7 +1167,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "baseUrl",
             "https://example.com/v1",
             "credential",
-            "sk-configsync-" + name,
+            Map.of("operation", "SET", "value", "sk-configsync-" + name),
             "modelCallTimeoutMillis",
             120000,
             "modelCallIdleTimeoutMillis",

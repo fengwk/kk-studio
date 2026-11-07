@@ -37,12 +37,14 @@ export function toProviderDraft(provider: ProviderDTO): ProviderDraft {
 }
 
 export function toEditableProvider(draft: ProviderDraft): ProviderCreateDTO {
+  const credential = trimToNull(draft.credential)
   return {
     name: draft.name.trim(),
     description: trimToNull(draft.description),
     providerType: draft.providerType,
     baseUrl: trimToNull(draft.baseUrl),
-    credential: trimToNull(draft.credential),
+    // 创建只接受 SET：空凭据就是“不配置”，不存在需要保留或清除的既有值。
+    credential: credential === null ? null : { operation: 'SET', value: credential },
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
     modelHttpRetryStatusCodes:

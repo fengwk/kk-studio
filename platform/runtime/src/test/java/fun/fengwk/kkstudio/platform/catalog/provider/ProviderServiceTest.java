@@ -153,7 +153,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     dto.setName(name);
     dto.setProviderType(ProviderType.OPENAI);
     dto.setBaseUrl("https://example.invalid/v1");
-    dto.setCredential(credential);
+    dto.setCredential(credential == null ? null : SecretUpdate.set(credential));
     return dto;
   }
 

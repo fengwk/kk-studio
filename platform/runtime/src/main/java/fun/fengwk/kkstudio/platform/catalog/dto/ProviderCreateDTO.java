@@ -4,6 +4,7 @@ import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.List;
 
@@ -27,8 +28,12 @@ public class ProviderCreateDTO {
   /** 可空模型 API base URL（≤512 字符）。 */
   private @Nullable String baseUrl;
 
-  /** 可空凭据（API key 等）：null 表示无凭据；永不通过公开 DTO 回读。 */
-  private @Nullable String credential;
+  /**
+   * 可空凭据（API key 等）：创建只接受 {@code SET}，null 表示无凭据；KEEP/CLEAR 是更新语义，创建时拒绝。
+   *
+   * <p>永不通过公开 DTO 回读；{@link SecretUpdate} 自身保证值不回显、有界且非遮罩占位符。
+   */
+  private @Nullable SecretUpdate credential;
 
   /** 可空模型调用总超时（毫秒，正数）；null 表示使用产品默认值。 */
   private @Nullable Long modelCallTimeoutMillis;

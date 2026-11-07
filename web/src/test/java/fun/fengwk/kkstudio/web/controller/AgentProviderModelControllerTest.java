@@ -113,7 +113,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("name", name);
     body.put("providerType", "openai");
-    body.put("credential", "k");
+    body.set("credential", objectMapper.valueToTree(Map.of("operation", "SET", "value", "k")));
     if (baseUrl != null) {
       body.put("baseUrl", baseUrl);
     }
@@ -136,11 +136,10 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     provider.setName(providerName);
     provider.setDescription("provider description");
     provider.setProviderType(ProviderType.OPENAI);
-    provider.setCredential("secret-value");
+    provider.setCredential(SecretUpdate.set("secret-value"));
     provider.setModelCallTimeoutMillis(120_000L);
     provider.setModelCallIdleTimeoutMillis(3_000L);
     ObjectNode providerBody = objectMapper.valueToTree(provider);
-    providerBody.put("credential", provider.getCredential());
     providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis());
     providerBody.put("modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis());
     JsonNode providerData =
@@ -877,6 +876,25 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
         .andExpect(
             jsonPath("$.detail")
                 .value("group.fallbackStatusCodes must not contain duplicate statuses"));
+  }
+
+  /** Provider 创建只接受 SET 凭据：KEEP/CLEAR 属于更新语义，按 validation 拒绝。 */
+  @Test
+  void shouldRejectNonSetCredentialOnProviderCreate() throws Exception {
+    for (String operation : List.of("KEEP", "CLEAR")) {
+      ObjectNode body = objectMapper.createObjectNode();
+      body.put("name", "provider-" + operation.toLowerCase() + "-" + System.nanoTime());
+      body.put("providerType", "openai");
+      body.set("credential", objectMapper.valueToTree(Map.of("operation", operation)));
+      mockMvc
+          .perform(
+              post("/api/platform/providers")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body.toString()))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"))
+          .andExpect(jsonPath("$.detail").value("credential must use the SET operation on create"));
+    }
   }
 
   private static HarnessExecutionSelectionDTO execution(String modelName) {

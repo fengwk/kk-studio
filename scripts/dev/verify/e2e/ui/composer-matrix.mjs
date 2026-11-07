@@ -1373,7 +1373,7 @@ async function createHoldingQueueFixture(
         description: 'Local hold provider for free UI queue tests.',
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
-        credential: `e2e-ui-hold-${suffix}`,
+        credential: { operation: 'SET', value: `e2e-ui-hold-${suffix}` },
         modelCallTimeoutMillis: 60_000,
         modelCallIdleTimeoutMillis: 60_000,
       },

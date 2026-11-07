@@ -819,7 +819,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       description: 'Local completion provider for free Footer usage tests.',
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
-      credential: `e2e-ui-usage-${suffix}`,
+      credential: { operation: 'SET', value: `e2e-ui-usage-${suffix}` },
       modelCallTimeoutMillis: 30_000,
       modelCallIdleTimeoutMillis: 10_000,
     })
@@ -962,7 +962,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       description: 'Local task provider for free TaskStatus UI tests.',
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
-      credential: `e2e-ui-task-${suffix}`,
+      credential: { operation: 'SET', value: `e2e-ui-task-${suffix}` },
       modelCallTimeoutMillis: 60_000,
       modelCallIdleTimeoutMillis: 60_000,
     })
@@ -1126,7 +1126,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       description: 'Local streaming provider for Tool card browser contracts.',
       providerType: 'openai',
       baseUrl: mock.baseUrl('/v1'),
-      credential: `e2e-ui-tool-card-${suffix}`,
+      credential: { operation: 'SET', value: `e2e-ui-tool-card-${suffix}` },
       modelCallTimeoutMillis: 60_000,
       modelCallIdleTimeoutMillis: 60_000,
     })

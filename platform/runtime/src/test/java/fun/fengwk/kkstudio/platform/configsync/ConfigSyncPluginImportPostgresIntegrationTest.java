@@ -301,7 +301,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     properties.setName(name);
     properties.setProviderType(ProviderType.OPENAI);
     properties.setBaseUrl("https://api.example.com");
-    properties.setCredential("synthetic");
+    properties.setCredential(SecretUpdate.set("synthetic"));
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 

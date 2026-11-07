@@ -160,6 +160,11 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
 
   const created = providerCreateBody('suffix')
   assert.equal(created.name, 'e2e-provider-suffix')
+  assert.deepEqual(
+    created.credential,
+    { operation: 'SET', value: 'sk-e2e-test' },
+    'provider create only accepts SET credentials',
+  )
   assert.equal(Object.hasOwn(created, 'modelHttpRetryStatusCodes'), false)
 })
 

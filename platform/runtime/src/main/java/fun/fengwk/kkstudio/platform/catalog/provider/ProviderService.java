@@ -60,7 +60,7 @@ public class ProviderService {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     Mutation mutation = mutation(createDTO, null);
-    return insertProvider(mutation, createDTO.getCredential());
+    return insertProvider(mutation, createCredential(createDTO.getCredential()));
   }
 
   /** 基于 (name, {@code updateDTO.expectedVersion}) 的原子 CAS 整体替换；凭据按 {@link SecretUpdate} 三态处理。 */
@@ -95,7 +95,7 @@ public class ProviderService {
     String name = requireName(spec.getName());
     Provider existing = repository.getByName(name);
     if (existing == null) {
-      return insertProvider(mutation(spec, null), spec.getCredential());
+      return insertProvider(mutation(spec, null), importCredential(spec.getCredential()));
     }
     if (existing.providerType() != spec.getProviderType()) {
       throw typeConflict(name, existing.providerType(), spec.getProviderType());
@@ -234,9 +234,27 @@ public class ProviderService {
     };
   }
 
-  /** 配置导入按文件事实写入凭据：null 表示无凭据，非空值即新凭据。 */
-  private static String importCredential(String fileValue) {
-    return fileValue == null || fileValue.isBlank() ? null : fileValue;
+  /** 创建只接受 SET：KEEP/CLEAR 需要已有凭据，属于更新语义，在创建请求中拒绝。 */
+  private static String createCredential(SecretUpdate update) {
+    if (update == null) {
+      return null;
+    }
+    if (update.operation() != SecretUpdate.Operation.SET) {
+      throw DomainException.validation(RESOURCE, "credential must use the SET operation on create");
+    }
+    return update.value();
+  }
+
+  /** 配置导入按文件事实写入凭据：null 表示无凭据，SET 即新凭据。 */
+  private static String importCredential(SecretUpdate update) {
+    if (update == null) {
+      return null;
+    }
+    if (update.operation() != SecretUpdate.Operation.SET) {
+      throw DomainException.validation(
+          RESOURCE, "credential must use the SET operation in config imports");
+    }
+    return update.value();
   }
 
   private static DomainException typeConflict(
