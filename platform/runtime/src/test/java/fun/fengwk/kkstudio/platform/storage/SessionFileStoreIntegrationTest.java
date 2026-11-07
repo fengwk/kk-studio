@@ -327,7 +327,7 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
 
     assertEquals(4, successes.get(), "64 bytes of quota fits exactly four 16-byte files");
     assertEquals(threadCount - 4, quotaFailures.get(), "every extra writer must be refused");
-    assertEquals(64L, limited.totalBytes(SESSION_A));
+    assertEquals(64L, sessionFileRepository.sumSizeBySession(SESSION_A));
   }
 
   private SessionFileStore limitedStore(SessionFileLimits limits) {
@@ -449,7 +449,7 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  void listByPrefixAndTotalBytes() {
+  void listByPrefix() {
     sessionFileStore.write(SESSION_A, "src/main/App.java", "class App {}".getBytes(UTF_8), null);
     sessionFileStore.write(SESSION_A, "src/main/Util.java", "class Util {}".getBytes(UTF_8), null);
     sessionFileStore.write(
@@ -467,14 +467,6 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
     List<SessionFile> pomFile = sessionFileStore.list(SESSION_A, "pom");
     assertEquals(1, pomFile.size());
     assertEquals("pom.xml", pomFile.get(0).path());
-
-    long totalBytes = sessionFileStore.totalBytes(SESSION_A);
-    assertEquals(
-        "class App {}".length()
-            + "class Util {}".length()
-            + "class AppTest {}".length()
-            + "<project/>".length(),
-        totalBytes);
   }
 
   @Test

@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -47,7 +48,6 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.util.UUID;

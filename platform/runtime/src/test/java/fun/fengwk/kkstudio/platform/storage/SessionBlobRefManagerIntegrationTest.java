@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -251,33 +250,5 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
     assertThrows(
         IllegalTransactionStateException.class,
         () -> refManager.releaseRef(SESSION_A, UUID.randomUUID()));
-    assertThrows(
-        IllegalTransactionStateException.class,
-        () -> refManager.insertRefIfAbsent(SESSION_A, UUID.randomUUID()));
-  }
-
-  @Test
-  void insertRefIfAbsentPairsWithNewBlobRowWithoutDoubleRetain() {
-    byte[] content = "paired".getBytes(StandardCharsets.UTF_8);
-    StorageUploadDTO pending =
-        storage.reserve(
-            "paired.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
-    storage.putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadReadyDTO ready =
-        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobUuid = UUID.fromString(ready.getBlobId());
-    assertEquals(1L, storage.blobRefCount(ready.getBlobId()));
-
-    boolean inserted = tx.execute(status -> refManager.insertRefIfAbsent(SESSION_A, blobUuid));
-    assertTrue(inserted);
-    assertEquals(
-        1L,
-        storage.blobRefCount(ready.getBlobId()),
-        "insertRefIfAbsent must not touch ref_count (new blob row already carries the ref)");
-
-    boolean second = tx.execute(status -> refManager.insertRefIfAbsent(SESSION_A, blobUuid));
-    assertFalse(second, "repeat insert must be idempotent false");
-    assertEquals(1L, storage.blobRefCount(ready.getBlobId()));
-    assertEquals(List.of(blobUuid), refManager.listBlobIds(SESSION_A));
   }
 }

@@ -47,10 +47,10 @@ import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.StorageUploadTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 

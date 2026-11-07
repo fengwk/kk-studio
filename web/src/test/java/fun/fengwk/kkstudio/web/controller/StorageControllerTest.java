@@ -26,14 +26,14 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.platform.storage.RecordingS3PresignService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
-import fun.fengwk.kkstudio.web.storage.RecordingS3PresignService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
