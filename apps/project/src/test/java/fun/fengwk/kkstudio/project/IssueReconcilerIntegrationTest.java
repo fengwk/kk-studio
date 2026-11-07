@@ -167,6 +167,20 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         .orElseThrow(() -> new IllegalStateException("Failed to claim work for issue " + issueId));
   }
 
+  /** 同一人工阶段在无 Agent / 有 Agent 间的 workflow：用于验证阶段能力变化后的调度恢复。 */
+  private String manualWorkflowJson(String agent) {
+    String stageConfig = agent == null ? "" : "\"agent\":\"" + agent + "\",\"maxRuns\":3,";
+    return "{"
+        + "\"states\":["
+        + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"MANUAL\"]},"
+        + "{\"state\":\"MANUAL\",\"name\":\"人工处理\","
+        + stageConfig
+        + "\"next\":[\"DONE\"]},"
+        + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+        + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+        + "]}";
+  }
+
   private void insertStorageBlob(UUID blobId) {
     String sha256 =
         UUID.randomUUID().toString().replace("-", "")
@@ -1753,6 +1767,41 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         1L,
         count(
             "select count(*) from project_issue_run where issue_id = ? and status = 'RUNNING'",
+            issue.getId()));
+  }
+
+  /** 测试意图：Issue 在无 Agent 的人工阶段收敛并删除 Work 后，把该阶段改为启用且有 Agent 会重新登记 Work，下一次调谐继续接受 Run。 */
+  @Test
+  void updateWorkflowReregistersWorkForNewlyExecutableStage() {
+    String agent = createAgent();
+    Project project = projectService.createProject("人工阶段启用", "描述", true);
+    projectService.updateWorkflow(project.getId(), project.getVersion(), manualWorkflowJson(null));
+    Issue issue = createIssue(project.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
+
+    assertEquals(
+        IssueReconcileOutcome.CONVERGED_NO_AGENT, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
+
+    Project current = projectService.getProject(project.getId());
+    projectService.updateWorkflow(current.getId(), current.getVersion(), manualWorkflowJson(agent));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
+
+    assertEquals(
+        IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where issue_id = ? and state = 'MANUAL'"
+                + " and status = 'RUNNING'",
             issue.getId()));
   }
 
