@@ -30,7 +30,7 @@ import java.util.Optional;
  *
  * <p>目录区分两个入口：{@link #selectableTools()} 是 UI/配置选择面，只选拔 {@code enabled=true} 且 {@code AVAILABLE} 的
  * server 行下的工具；{@link #findTool(String)} 是规划/查找面，只要求 {@code mcp_tool} 行与其所属 {@code mcp_server}
- * 行存在，不按 enabled 或发现状态过滤。因此 server 的可用性不改变已持久化定义的可解析性：被禁用或发现失败的 server 只让自身工具的调用在 {@code
+ * 行存在，不按 enabled 或发现状态过滤。因此 server 的可用性不改变已持久化定义的可解析性：被禁用或未验证的 server 只让自身工具的调用在 {@code
  * RemoteMcpExecutableTool} 处 fail closed，绝不把调用期可用性提前变成 planning 期的 tool-not-found。
  *
  * <p>工具身份就是模型可见工具名（{@code mcp_tool.name}）。该名含 {@code _} 分隔段，而 ContributionId.localName 要求 canonical

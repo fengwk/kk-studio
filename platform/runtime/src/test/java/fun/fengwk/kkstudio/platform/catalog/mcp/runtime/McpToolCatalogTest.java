@@ -79,18 +79,19 @@ class McpToolCatalogTest {
 
   @Test
   void selectableToolsExcludesDisabledOrNonAvailableServers() {
-    // 意图：可选面（UI/配置选择）只包含 enabled 且 AVAILABLE 的 server 下的工具；三种不可用形态都不进入该面
+    // 意图：可选面（UI/配置选择）只包含 enabled 且 AVAILABLE 的 server 下的工具；禁用或未验证的 server 都不进入该面
     McpServer disabled = server("disabled", McpDiscoveryStatus.AVAILABLE, false);
     McpServer unverified = server("unverified", McpDiscoveryStatus.UNVERIFIED, true);
-    McpServer failed = server("failed", McpDiscoveryStatus.FAILED, true);
+    McpServer unverifiedDisabled =
+        server("unverified_disabled", McpDiscoveryStatus.UNVERIFIED, false);
 
-    when(repository.listAllServers()).thenReturn(List.of(disabled, unverified, failed));
+    when(repository.listAllServers()).thenReturn(List.of(disabled, unverified, unverifiedDisabled));
     assertTrue(catalog.selectableTools().isEmpty());
   }
 
   @Test
-  void findToolResolvesPersistedDefinitionOfDisabledUnverifiedAndFailedServers() {
-    // 意图：规划/查找面只要求持久化定义存在。server 被禁用、未验证或发现失败时不让已持久化工具变成 tool-not-found，
+  void findToolResolvesPersistedDefinitionOfDisabledAndUnverifiedServers() {
+    // 意图：规划/查找面只要求持久化定义存在。server 被禁用或未验证时不让已持久化工具变成 tool-not-found，
     // 可用性由调用期的 RemoteMcpExecutableTool 按同一 DB 行 fail closed。
     for (McpDiscoveryStatus status : McpDiscoveryStatus.values()) {
       for (boolean enabled : List.of(true, false)) {
@@ -127,7 +128,7 @@ class McpToolCatalogTest {
         catalog.findTool("mcp_srv_sibling").orElseThrow().definition().descriptor().name());
 
     // 定义与可用性解耦：同一工具行在可用与不可用 server 下解析出的贡献身份与冻结定义完全一致，
-    // 因此 planning 期冻结的绑定不会因 server 后来被禁用或发现失败而在调用期 preflight 漂移，
+    // 因此 planning 期冻结的绑定不会因 server 后来被禁用或未验证而在调用期 preflight 漂移，
     // 且定义中的 timeout 始终取自 server 行，不因可用性被改写。
     McpTool defined = tool("mcp_srv_defined", "srv", "defined", "Defined");
     when(repository.listTools("srv")).thenReturn(List.of(defined));
@@ -135,7 +136,7 @@ class McpToolCatalogTest {
         .thenReturn(List.of(server("srv", McpDiscoveryStatus.AVAILABLE, true)));
     ToolContribution availableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
     when(repository.listAllServers())
-        .thenReturn(List.of(server("srv", McpDiscoveryStatus.FAILED, false)));
+        .thenReturn(List.of(server("srv", McpDiscoveryStatus.UNVERIFIED, false)));
     ToolContribution unavailableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
     assertEquals(availableFace.id(), unavailableFace.id());
     assertEquals(availableFace.definition(), unavailableFace.definition());

@@ -382,7 +382,8 @@ Server 以不可变 name 寻址。列表是有界配置集合，直接返回全�
 工具数与版本）；详情额外返回 URL，headers 只以 `{configured}` 事实出现，变量占位符在服务端解析前保持原样。
 headers 作为整体秘密：创建时省略即无 header，只接受 `SET`；更新时字段必填，`KEEP` 保留、`SET` 整体替换、`CLEAR` 清空，`SET` 的值是 header 映射的 JSON 对象文本。
 列表在一次语句中读取全部 Server，工具数另以一次分组查询获取，未发现工具的 Server 计数为零。
-发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
+`discovery_status` 只有 `UNVERIFIED` 与 `AVAILABLE`：创建/更新重置为 `UNVERIFIED`，成功发现置为 `AVAILABLE`；
+发现失败只抛错并保留既有状态与工具行。发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
 [`RuntimeToolCatalogConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)

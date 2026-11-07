@@ -160,7 +160,7 @@ class RemoteMcpExecutableToolTest {
     when(repository.getTool(TOOL_NAME)).thenReturn(Optional.of(tool(TOOL_NAME, "echo")));
     ToolResult missingServer = execute(tool, descriptor, "call_missing", "{}");
     assertTrue(missingServer.error());
-    // 失败必须是本次调用自己的终态结果：call id 对齐且文本脱敏，绝不泄漏 endpoint；后续 2-5 走同一分支。
+    // 失败必须是本次调用自己的终态结果：call id 对齐且文本脱敏，绝不泄漏 endpoint；后续 2-4 走同一分支。
     assertEquals("call_missing", missingServer.toolCallId());
     assertFalse(missingServer.toString().contains(fakeServer.endpointUrl()));
 
@@ -177,15 +177,7 @@ class RemoteMcpExecutableToolTest {
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(unverified));
     assertTrue(execute(tool, descriptor, "call_unverified", "{}").error());
 
-    // 4. server 发现失败
-    McpServer failed =
-        server(fakeServer.endpointUrl()).toBuilder()
-            .discoveryStatus(McpDiscoveryStatus.FAILED)
-            .build();
-    when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(failed));
-    assertTrue(execute(tool, descriptor, "call_failed", "{}").error());
-
-    // 5. 工具行缺失
+    // 4. 工具行缺失
     when(repository.getByName(SERVER_NAME))
         .thenReturn(Optional.of(server(fakeServer.endpointUrl())));
     when(repository.getTool(TOOL_NAME)).thenReturn(Optional.empty());
