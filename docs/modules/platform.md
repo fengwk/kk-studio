@@ -558,7 +558,8 @@ HTTP 契约见 [Web](web.md)。
 ## Environment
 
 Environment 的 name 不可变，UUID 用于路由；`environment_connection` 以
-`environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。
+`environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。主动释放与零宽限期断线把
+`lease_until` 截断到语句时刻的毫秒边界，重复操作立即被围栏拒绝，其他节点可立即接管。
 READY 更新宿主 OS、时区、进程用户、HOME、note 与 Daemon 上报的 `daemonVersion`
 （生产进程取自 [`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`），断线保留最后已接受的 metadata；`daemonVersion`
 与 Environment 的 CAS 配置版本是两个不同事实。
