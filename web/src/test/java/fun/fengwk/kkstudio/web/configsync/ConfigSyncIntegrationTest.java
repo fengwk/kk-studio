@@ -62,7 +62,7 @@ import java.util.UUID;
  *
  * <p>真实隔离 PostgreSQL（{@link ConfigSyncTestSupport} 的进程级 disposable 容器）、真实 JGit 本地 {@code file://}
  * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/{@code ${VAR}} 原值、exact commit 恢复、同名
- * upsert、完整七节 settings 校验、显式 {@code allowPartial} 部分导入、预检查零写入、skip、事务回滚与 {@code no-store}。
+ * upsert、完整六节 settings 校验、显式 {@code allowPartial} 部分导入、预检查零写入、skip、事务回滚与 {@code no-store}。
  */
 @Import(WebStorageS3TestConfiguration.class)
 class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
@@ -839,7 +839,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "concurrent values and version must remain intact");
   }
 
-  /** settings 必须完整七节：完整导入生效，未知字段剔除并报告，局部 patch 与空对象硬拒绝。 */
+  /** settings 必须完整六节：完整导入生效，未知字段剔除并报告，局部 patch 与空对象硬拒绝。 */
   @Test
   void fullSettingsImportAndUnknownSectionIsReported() throws Exception {
     String settingsYaml = exportedSettingsYaml();
@@ -861,7 +861,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         after.path("aiRuntime").path("retryMaxRetries").asInt(),
         "the full snapshot carries unchanged sections as-is");
 
-    // 完整七节 + 未知 section：可支持 section 仍生效，未知 section 只作为 settings skip 报告。
+    // 完整六节 + 未知 section：可支持 section 仍生效，未知 section 只作为 settings skip 报告。
     String mixed =
         mutateYaml(
             changed, document -> settingsMap(document).put("unknownSection", Map.of("x", 1)));
@@ -874,7 +874,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         getData("/api/platform/settings").path("aiRuntime").path("retryBaseDelayMillis").asText(),
         "supported settings sections must apply when another section is unknown");
 
-    // 局部 settings 与空对象都不满足完整七节契约：硬拒绝且不改变现值或版本。
+    // 局部 settings 与空对象都不满足完整六节契约：硬拒绝且不改变现值或版本。
     JsonNode held = getData("/api/platform/settings");
     importRejected("settings:\n  aiRuntime:\n    retryBaseDelayMillis: 8888\n");
     importRejected("settings: {}\n");

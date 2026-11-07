@@ -19,7 +19,7 @@ import java.util.Map;
 
 /**
  * 测试意图：锁定 Parser 的条目级决策——不支持协议 skip、未知字段/嵌套 config 未知字段在通过 known 校验后才整体 skip、已知非法值或缺必填即使伴随未知字段
- * 也硬错、settings 完整七节校验且未知叶剔除并保留受支持 section、重复名（含被 skip 条目）硬错、present-but-null 与 absent
+ * 也硬错、settings 完整六节校验且未知叶剔除并保留受支持 section、重复名（含被 skip 条目）硬错、present-but-null 与 absent
  * 区分；插件条目先严格校验字段与 未知字段，再判未安装 skip，已安装按插件 schema 解析。
  */
 class ConfigSyncParserTest {

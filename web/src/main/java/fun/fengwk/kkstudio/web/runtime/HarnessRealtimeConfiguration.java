@@ -66,7 +66,7 @@ public class HarnessRealtimeConfiguration {
     return new RealtimeBus(
         nodeInstanceId,
         notificationCodec,
-        new PostgresqlRealtimeEventSource(notificationCodec),
+        new PostgresqlRealtimeEventSource(),
         new PostgresqlRealtimeEventSink(
             jdbcTemplate, notificationCodec, nodeInstanceId, realtimePayloadBuffer),
         realtimeSubscriptions::hasRemoteSubscription,

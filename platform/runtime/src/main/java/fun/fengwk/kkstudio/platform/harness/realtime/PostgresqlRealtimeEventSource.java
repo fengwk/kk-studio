@@ -16,9 +16,9 @@ import java.util.function.Consumer;
 /**
  * PostgreSQL realtime notification 的本地订阅与分发器。
  *
- * <p>本类不创建线程或连接。统一 LISTEN loop 把 payload 交给 {@link #onNotification(String)}，连接建立或重建后调用 {@link
- * #onResync()}。malformed/unknown payload 触发全部本地订阅 resync；合法 envelope 仅分发到对应 Thread。全局生命周期锁只保护
- * closed/map 与 subscriber 快照，用户回调由每个 subscriber 的独立关闭围栏管理并始终在全局锁外执行。
+ * <p>本类不创建线程或连接。统一 LISTEN loop 在 {@link RealtimeBus} 解码后把 envelope 交给 {@link
+ * #onEnvelope}，连接建立或重建后调用 {@link #onResync()}；本地产生的事件直接交给 {@link #onEvent}。合法 envelope 仅分发到对应
+ * Thread。全局生命周期锁只保护 closed/map 与 subscriber 快照，用户回调由每个 subscriber 的独立关闭围栏管理并始终在全局锁外执行。
  */
 public final class PostgresqlRealtimeEventSource implements RealtimeEventSource {
 
@@ -26,7 +26,6 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
 
   private static final Logger log = LoggerFactory.getLogger(PostgresqlRealtimeEventSource.class);
 
-  private final RealtimeNotificationCodec notificationCodec;
   private final Map<UUID, List<Subscriber>> subscribersByThread = new HashMap<>();
   private final Object lifecycleFence = new Object();
 
@@ -42,10 +41,6 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
   private int activeSourceCallbacks;
   private boolean subscriberFencesClosed;
 
-  public PostgresqlRealtimeEventSource(RealtimeNotificationCodec notificationCodec) {
-    this.notificationCodec = Objects.requireNonNull(notificationCodec, "notificationCodec");
-  }
-
   @Override
   public AutoCloseable subscribe(
       UUID threadId, Consumer<RealtimeEvent> onEvent, Runnable onResync) {
@@ -60,21 +55,6 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
       subscribersByThread.computeIfAbsent(threadId, ignored -> new ArrayList<>()).add(subscriber);
     }
     return subscriber::close;
-  }
-
-  /** 由统一 PostgreSQL listener 交付一条 {@link #CHANNEL} notification。 */
-  public void onNotification(String payload) {
-    RealtimeNotificationCodec.Envelope envelope;
-    try {
-      envelope = notificationCodec.decode(payload);
-    } catch (RuntimeException error) {
-      log.warn(
-          "cannot decode realtime PostgreSQL notification; requesting resync errorType={}",
-          error.getClass().getSimpleName());
-      onResync();
-      return;
-    }
-    onEnvelope(envelope);
   }
 
   /** 分发已解码 envelope；调用方负责跨节点 origin 过滤。 */

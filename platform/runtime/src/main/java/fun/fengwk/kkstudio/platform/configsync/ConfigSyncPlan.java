@@ -59,6 +59,6 @@ public record ConfigSyncPlan(
    */
   public record PluginImport(String pluginId, long expectedVersion, String valuesJson) {}
 
-  /** 已在解析期按完整七节契约校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
+  /** 已在解析期按完整六节契约校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
   public record SettingsUpdate(SystemSettingsSectionsDTO sections, long expectedVersion) {}
 }
