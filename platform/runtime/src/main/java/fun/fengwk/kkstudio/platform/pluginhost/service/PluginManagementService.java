@@ -231,7 +231,10 @@ public final class PluginManagementService {
     requirePlugin(pluginId);
     try (PluginCatalogRuntime.Lease lease = catalogRuntime.get().acquire()) {
       PluginCatalogSnapshot.ConfiguredPlugin configured =
-          applied(lease.snapshot(), pluginId).orElseThrow();
+          applied(lease.snapshot(), pluginId)
+              .orElseThrow(
+                  () ->
+                      DomainException.unavailable("PLUGIN_NOT_APPLIED", PENDING_APPLICATION_ERROR));
       long appliedVersion = configured.config().revision();
       if (expectedVersion != appliedVersion) {
         throw DomainException.versionConflict(RESOURCE, expectedVersion, appliedVersion);

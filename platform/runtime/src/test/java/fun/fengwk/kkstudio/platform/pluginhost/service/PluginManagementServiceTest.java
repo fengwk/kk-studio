@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
@@ -333,6 +334,46 @@ class PluginManagementServiceTest {
     assertEquals(PluginConnectionCheckDTO.Reachability.REACHABLE, result.getReachability());
     assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, 1L));
     assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, 1L));
+  }
+
+  /** 已安装但尚未进入本节点应用快照的 Plugin 报稳定 unavailable reason，而不是泄漏 NoSuchElementException。 */
+  @Test
+  void checkConnectionRejectsPluginThatHasNotBeenAppliedOnThisNode() {
+    PluginRegistry installed = new PluginRegistry(List.of(new StaticKeyPlugin()));
+    PluginCatalogRuntime notApplied =
+        new PluginCatalogRuntime(
+            new PluginRegistry(List.of()),
+            configurations,
+            pluginId ->
+                new PluginContext(
+                    mock(PluginCredentialAccess.class),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty()),
+            List.of(),
+            snapshot -> new Object());
+    try {
+      PluginManagementService notAppliedService =
+          new PluginManagementService(
+              installed,
+              () -> notApplied,
+              configurations,
+              credentials,
+              configurationService,
+              FUNCTION_NAMES,
+              authAttempts,
+              Duration.ofMinutes(10),
+              Clock.fixed(NOW, ZoneOffset.UTC));
+
+      DomainException error =
+          assertThrows(
+              DomainException.class, () -> notAppliedService.checkConnection(STATIC_ID, 2L));
+
+      assertEquals(DomainErrorCode.UNAVAILABLE, error.code());
+      assertEquals("PLUGIN_NOT_APPLIED", error.reason());
+    } finally {
+      notApplied.close();
+    }
   }
 
   private void stored(String pluginId, long revision) {
