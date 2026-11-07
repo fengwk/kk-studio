@@ -134,7 +134,7 @@ class RealtimePayloadClusterRoundTripTest {
         new RealtimeBus(
             RECEIVER,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             ignored -> {
               throw new AssertionError("fetched payload must not be re-published");
             },
@@ -164,7 +164,7 @@ class RealtimePayloadClusterRoundTripTest {
         new RealtimeBus(
             RECEIVER,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             ignored -> {
               throw new AssertionError("must not echo");
             },
@@ -194,7 +194,7 @@ class RealtimePayloadClusterRoundTripTest {
         new RealtimeBus(
             RECEIVER,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             ignored -> {
               throw new AssertionError("must not echo");
             },

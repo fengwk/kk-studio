@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeNotificationCodec.Envelope;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,12 +22,11 @@ class PostgresqlRealtimeEventSourceTest {
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
   private static final UUID ORIGIN = id(900L);
 
-  private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
-  private final PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+  private final PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
 
-  /** EVENT 只进入对应 Thread，且同 Thread 的多个本地订阅都收到同一个完整事件。 */
+  /** 本地事件只进入对应 Thread，且同 Thread 的多个本地订阅都收到同一个完整事件。 */
   @Test
-  void eventDispatchIsThreadIsolatedAndSharedByMultipleSubscribers() {
+  void localEventDispatchIsThreadIsolatedAndSharedByMultipleSubscribers() {
     RealtimeEvent.ModelDelta event = modelDelta(1L, "one");
     List<RealtimeEvent> first = new ArrayList<>();
     List<RealtimeEvent> second = new ArrayList<>();
@@ -35,10 +35,25 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), second::add, () -> {});
     source.subscribe(id(2L), otherThread::add, () -> {});
 
-    source.onNotification(codec.encodeEvent(ORIGIN, event));
+    source.onEvent(event);
 
     assertEquals(List.of(event), first);
     assertEquals(List.of(event), second);
+    assertEquals(List.of(), otherThread);
+  }
+
+  /** 已解码 EVENT envelope 只进入其 Thread，不触达其他本地 Thread。 */
+  @Test
+  void envelopeEventDispatchTargetsItsThread() {
+    RealtimeEvent.ModelDelta event = modelDelta(1L, "one");
+    List<RealtimeEvent> target = new ArrayList<>();
+    List<RealtimeEvent> otherThread = new ArrayList<>();
+    source.subscribe(id(1L), target::add, () -> {});
+    source.subscribe(id(2L), otherThread::add, () -> {});
+
+    source.onEnvelope(new Envelope.Event(ORIGIN, event));
+
+    assertEquals(List.of(event), target);
     assertEquals(List.of(), otherThread);
   }
 
@@ -56,7 +71,7 @@ class PostgresqlRealtimeEventSourceTest {
         resyncs::incrementAndGet);
     source.subscribe(id(1L), received::add, resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(ORIGIN, event));
+    source.onEvent(event);
 
     assertEquals(List.of(event), received);
     assertEquals(0, resyncs.get());
@@ -70,25 +85,10 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
     source.subscribe(id(2L), ignored -> {}, second::incrementAndGet);
 
-    source.onNotification(codec.encodeResync(ORIGIN, id(1L), "EVENT_TOO_LARGE"));
+    source.onEnvelope(new Envelope.Resync(ORIGIN, id(1L), "EVENT_TOO_LARGE"));
 
     assertEquals(1, first.get());
     assertEquals(0, second.get());
-  }
-
-  /** malformed 与 unknown notification 都无法安全定位 Thread，因此每次都触发所有本地订阅 resync。 */
-  @Test
-  void malformedAndUnknownPayloadsResyncAllLocalSubscribers() {
-    AtomicInteger first = new AtomicInteger();
-    AtomicInteger second = new AtomicInteger();
-    source.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
-    source.subscribe(id(2L), ignored -> {}, second::incrementAndGet);
-
-    source.onNotification("{not-json");
-    source.onNotification("{\"kind\":\"UNKNOWN\"}");
-
-    assertEquals(2, first.get());
-    assertEquals(2, second.get());
   }
 
   /** 统一 listener 显式报告 startup/reconnect 时，所有当前本地订阅都必须恢复，异常回调不阻断其他订阅。 */
@@ -122,13 +122,13 @@ class PostgresqlRealtimeEventSourceTest {
 
     firstSubscription.close();
     firstSubscription.close();
-    source.onNotification(codec.encodeEvent(ORIGIN, event));
+    source.onEvent(event);
 
     assertEquals(List.of(), first);
     assertEquals(List.of(event), second);
   }
 
-  /** 最后一个订阅关闭后移除 Thread 状态，后续该 Thread 的 EVENT/RESYNC 都是 no-op。 */
+  /** 最后一个订阅关闭后移除 Thread 状态，后续该 Thread 的本地事件与 RESYNC 都是 no-op。 */
   @Test
   void lastSubscriptionCloseRemovesThreadState() throws Exception {
     AtomicInteger events = new AtomicInteger();
@@ -137,8 +137,8 @@ class PostgresqlRealtimeEventSourceTest {
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
     subscription.close();
-    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
-    source.onNotification(codec.encodeResync(ORIGIN, id(1L), "test"));
+    source.onEvent(modelDelta(1L, "dropped"));
+    source.onEnvelope(new Envelope.Resync(ORIGIN, id(1L), "test"));
 
     assertEquals(0, events.get());
     assertEquals(0, resyncs.get());
@@ -154,7 +154,7 @@ class PostgresqlRealtimeEventSourceTest {
     later[0] =
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one")));
+    source.onEnvelope(new Envelope.Event(ORIGIN, modelDelta(1L, "one")));
     assertEquals(0, events.get());
 
     later[0] =
@@ -172,8 +172,8 @@ class PostgresqlRealtimeEventSourceTest {
 
     source.close();
     source.close();
-    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
-    source.onNotification("{not-json");
+    source.onEvent(modelDelta(1L, "dropped"));
+    source.onEnvelope(new Envelope.Event(ORIGIN, modelDelta(1L, "dropped-envelope")));
     source.onResync();
 
     assertEquals(0, events.get());

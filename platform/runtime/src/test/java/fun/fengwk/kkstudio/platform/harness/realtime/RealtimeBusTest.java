@@ -149,7 +149,7 @@ class RealtimeBusTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             event1 -> {
               throw new AssertionError("must not echo");
             },
@@ -337,7 +337,7 @@ class RealtimeBusTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             remote,
             thread -> true,
             (origin, thread, id) -> {
@@ -488,7 +488,7 @@ class RealtimeBusTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             new RecordingSink(),
             thread -> false,
             (origin, thread, id) -> {
@@ -530,7 +530,7 @@ class RealtimeBusTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             new RecordingSink(),
             thread -> false,
             (origin, thread, id) -> {
@@ -573,7 +573,7 @@ class RealtimeBusTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             new RecordingSink(),
             thread -> false,
             (origin, thread, id) -> {
@@ -670,7 +670,7 @@ class RealtimeBusTest {
     return new RealtimeBus(
         LOCAL,
         codec,
-        new PostgresqlRealtimeEventSource(codec),
+        new PostgresqlRealtimeEventSource(),
         remote,
         remoteThreadSubscription,
         payloadFetcher,

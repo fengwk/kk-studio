@@ -47,10 +47,6 @@ final class PostgresqlHarnessLocks {
     return locked.contains(key);
   }
 
-  boolean isLockedTree(UUID rootThreadId) {
-    return lockedTrees.contains(rootThreadId);
-  }
-
   boolean hasLockedTrees() {
     return !lockedTrees.isEmpty();
   }

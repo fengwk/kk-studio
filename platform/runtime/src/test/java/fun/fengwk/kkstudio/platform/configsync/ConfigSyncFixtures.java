@@ -524,7 +524,7 @@ final class ConfigSyncFixtures {
     return "providers:\n  - name: p\n    providerType: openai\n" + resourceYaml("model-entry.yaml");
   }
 
-  /** 当前七节 settings 的完整 DTO，便于测试按需改值后重新序列化。 */
+  /** 当前六节 settings 的完整 DTO，便于测试按需改值后重新序列化。 */
   static SystemSettingsSectionsDTO defaultSettings() {
     return new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
   }

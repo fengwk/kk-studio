@@ -52,7 +52,7 @@ class RealtimeNotificationLoopWiringTest {
         new RealtimeBus(
             LOCAL,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             event -> {
               throw new AssertionError("remote event must not be re-published");
             },
@@ -118,7 +118,7 @@ class RealtimeNotificationLoopWiringTest {
         new RealtimeBus(
             LOCAL,
             realtimeCodec,
-            new PostgresqlRealtimeEventSource(realtimeCodec),
+            new PostgresqlRealtimeEventSource(),
             event -> {
               throw new AssertionError("remote event must not be re-published");
             },

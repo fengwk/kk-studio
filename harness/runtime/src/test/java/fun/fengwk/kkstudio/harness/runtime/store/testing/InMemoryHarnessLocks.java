@@ -198,10 +198,6 @@ final class InMemoryHarnessLocks {
     return locked.contains(key);
   }
 
-  boolean isLockedTree(UUID rootThreadId) {
-    return lockedTrees.contains(rootThreadId);
-  }
-
   boolean hasLockedTrees() {
     return !lockedTrees.isEmpty();
   }

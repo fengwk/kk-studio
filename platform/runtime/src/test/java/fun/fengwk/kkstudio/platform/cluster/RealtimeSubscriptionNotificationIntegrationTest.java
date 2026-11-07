@@ -91,7 +91,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
         new RealtimeBus(
             NODE_A,
             codec,
-            new PostgresqlRealtimeEventSource(codec),
+            new PostgresqlRealtimeEventSource(),
             new PostgresqlRealtimeEventSink(jdbcTemplate, codec, NODE_A, payloadBuffer),
             threadId -> publisher.get().hasRemoteSubscription(threadId),
             (origin, threadId, payloadId) -> {

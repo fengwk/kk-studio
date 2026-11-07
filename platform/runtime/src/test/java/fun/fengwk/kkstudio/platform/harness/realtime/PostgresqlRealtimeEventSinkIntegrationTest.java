@@ -231,14 +231,14 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
     UUID threadId = id(1L);
     List<RealtimeEvent> received = new ArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();
-    try (PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec)) {
+    try (PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource()) {
       source.subscribe(threadId, received::add, resyncs::incrementAndGet);
       List<RealtimeEvent> events = modelDeltas(10);
 
       transactionTemplate.executeWithoutResult(status -> sink.appendAll(events));
 
       for (String payload : awaitPayloads(events.size())) {
-        source.onNotification(payload);
+        source.onEnvelope(codec.decode(payload));
       }
       assertEquals(events, received);
       assertEquals(0, resyncs.get(), "valid canonical notifications must not trigger resync");

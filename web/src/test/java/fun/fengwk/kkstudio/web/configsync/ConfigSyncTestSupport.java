@@ -135,7 +135,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return (Map<String, Object>) new Yaml(new SafeConstructor(options)).load(yaml);
   }
 
-  /** 导出当前完整 settings YAML，供必须完整七节的导入用例构造文件。 */
+  /** 导出当前完整 settings YAML，供必须完整六节的导入用例构造文件。 */
   protected String exportedSettingsYaml() throws Exception {
     return postData(
             "/api/platform/config-sync/export",
@@ -144,7 +144,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
         .asText();
   }
 
-  /** 解析 YAML 后按需改写再回写为纯结构文本；避免手写完整七节。 */
+  /** 解析 YAML 后按需改写再回写为纯结构文本；避免手写完整六节。 */
   protected static String mutateYaml(String yaml, Consumer<Map<String, Object>> mutator) {
     Map<String, Object> document = parseYaml(yaml);
     mutator.accept(document);

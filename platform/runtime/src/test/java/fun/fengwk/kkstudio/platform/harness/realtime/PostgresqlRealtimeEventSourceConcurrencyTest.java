@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 
 import java.time.Instant;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,17 +24,11 @@ import java.util.concurrent.atomic.AtomicReference;
 class PostgresqlRealtimeEventSourceConcurrencyTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
-  private static final UUID ORIGIN = id(900L);
 
-  private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
-
-  /**
-   * 阻塞中的用户回调不能持有全局 lifecycle lock：其他 Thread 仍可 subscribe/close，统一 listener 的另一条 notification
-   * 也能独立完成。
-   */
+  /** 阻塞中的用户回调不能持有全局 lifecycle lock：其他 Thread 仍可 subscribe/close，另一条本地事件也能独立完成。 */
   @Test
   void blockingCallbackDoesNotHoldGlobalLifecycleLock() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch otherDelivered = new CountDownLatch(1);
@@ -48,9 +41,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
             await(releaseCallback);
           },
           () -> {});
-      Future<?> blockedDispatch =
-          executor.submit(
-              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "blocked"))));
+      Future<?> blockedDispatch = executor.submit(() -> source.onEvent(modelDelta(1L, "blocked")));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
 
       AutoCloseable other =
@@ -58,9 +49,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
               .submit(
                   () -> source.subscribe(id(2L), ignored -> otherDelivered.countDown(), () -> {}))
               .get(1, TimeUnit.SECONDS);
-      executor
-          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(2L, "other"))))
-          .get(1, TimeUnit.SECONDS);
+      executor.submit(() -> source.onEvent(modelDelta(2L, "other"))).get(1, TimeUnit.SECONDS);
       assertTrue(otherDelivered.await(1, TimeUnit.SECONDS));
       executor.submit(() -> closeUnchecked(other)).get(1, TimeUnit.SECONDS);
 
@@ -73,10 +62,10 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
     }
   }
 
-  /** 订阅句柄 close 必须等待已开始的 callback；返回后旧快照与新 notification 都不能再次进入 callback。 */
+  /** 订阅句柄 close 必须等待已开始的 callback；返回后旧快照与新事件都不能再次进入 callback。 */
   @Test
   void subscriptionCloseWaitsForStartedCallbackAndFencesLaterCallbacks() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch closeStarted = new CountDownLatch(1);
@@ -92,9 +81,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
                 await(releaseCallback);
               },
               () -> {});
-      Future<?> dispatch =
-          executor.submit(
-              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
+      Future<?> dispatch = executor.submit(() -> source.onEvent(modelDelta(1L, "one")));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
       Future<?> close =
           executor.submit(
@@ -108,7 +95,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
       releaseCallback.countDown();
       close.get(5, TimeUnit.SECONDS);
       dispatch.get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
+      source.onEvent(modelDelta(1L, "dropped"));
 
       assertEquals(1, callbacks.get());
     } finally {
@@ -118,10 +105,10 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
     }
   }
 
-  /** Source close 同样等待全部已开始 callback；返回后 notification/resync 均无回调且拒绝新订阅。 */
+  /** Source close 同样等待全部已开始 callback；返回后事件/resync 均无回调且拒绝新订阅。 */
   @Test
   void sourceCloseWaitsForStartedCallbackAndFencesLaterCallbacks() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     CountDownLatch callbackEntered = new CountDownLatch(1);
     CountDownLatch releaseCallback = new CountDownLatch(1);
     CountDownLatch closeStarted = new CountDownLatch(2);
@@ -137,9 +124,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
             await(releaseCallback);
           },
           resyncs::incrementAndGet);
-      Future<?> dispatch =
-          executor.submit(
-              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
+      Future<?> dispatch = executor.submit(() -> source.onEvent(modelDelta(1L, "one")));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
       Future<?> firstClose =
           executor.submit(
@@ -161,7 +146,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
       firstClose.get(5, TimeUnit.SECONDS);
       secondClose.get(5, TimeUnit.SECONDS);
       dispatch.get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
+      source.onEvent(modelDelta(1L, "dropped"));
       source.onResync();
 
       assertEquals(1, callbacks.get());
@@ -178,7 +163,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
   /** onEvent 可以重入关闭自己的订阅，当前 callback 正常返回且后续 callback 被 fenced。 */
   @Test
   void callbackCanReenterSubscriptionClose() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     AtomicReference<AutoCloseable> subscription = new AtomicReference<>();
     AtomicInteger callbacks = new AtomicInteger();
     ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -192,10 +177,8 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
               },
               () -> {}));
 
-      executor
-          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))))
-          .get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
+      executor.submit(() -> source.onEvent(modelDelta(1L, "one"))).get(5, TimeUnit.SECONDS);
+      source.onEvent(modelDelta(1L, "dropped"));
 
       assertEquals(1, callbacks.get());
     } finally {
@@ -207,7 +190,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
   /** onEvent 可以重入 source.close；close 不自锁，回调返回后 source 保持完整关闭边界。 */
   @Test
   void callbackCanReenterSourceClose() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     AtomicInteger callbacks = new AtomicInteger();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -219,10 +202,8 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
           },
           () -> {});
 
-      executor
-          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))))
-          .get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
+      executor.submit(() -> source.onEvent(modelDelta(1L, "one"))).get(5, TimeUnit.SECONDS);
+      source.onEvent(modelDelta(1L, "dropped"));
 
       assertEquals(1, callbacks.get());
       assertThrows(
@@ -236,7 +217,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
   /** 两个并发 callback 同时重入 source.close 也不能形成互相等待的关闭环。 */
   @Test
   void concurrentCallbacksCanBothReenterSourceCloseWithoutDeadlock() throws Exception {
-    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
+    PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource();
     CountDownLatch callbacksEntered = new CountDownLatch(2);
     CountDownLatch startClose = new CountDownLatch(1);
     AtomicInteger closesReturned = new AtomicInteger();
@@ -254,12 +235,8 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
             () -> {});
       }
 
-      Future<?> first =
-          executor.submit(
-              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
-      Future<?> second =
-          executor.submit(
-              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(2L, "two"))));
+      Future<?> first = executor.submit(() -> source.onEvent(modelDelta(1L, "one")));
+      Future<?> second = executor.submit(() -> source.onEvent(modelDelta(2L, "two")));
       assertTrue(callbacksEntered.await(5, TimeUnit.SECONDS));
       startClose.countDown();
       first.get(5, TimeUnit.SECONDS);

@@ -156,10 +156,6 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
     return locks.isLocked(key);
   }
 
-  boolean isLockedTree(UUID rootThreadId) {
-    return locks.isLockedTree(rootThreadId);
-  }
-
   boolean hasLockedTrees() {
     return locks.hasLockedTrees();
   }
@@ -360,10 +356,6 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
       sql.append('?');
     }
     return sql.toString();
-  }
-
-  <T> Optional<T> writeOne(String sql, RowMapper<T> mapper, Object... arguments) {
-    return queryOne(sql, mapper, arguments);
   }
 
   /** 记录事务内发生的首个数据库异常（poisoning），以防止脏状态下的继续执行或掩盖初始错误。 */

@@ -1175,7 +1175,7 @@ create table mcp_server (
     ),
     constraint ck_mcp_server_timeout_positive check (timeout_millis > 0),
     constraint ck_mcp_server_discovery_status check (
-        discovery_status in ('UNVERIFIED', 'AVAILABLE', 'FAILED')
+        discovery_status in ('UNVERIFIED', 'AVAILABLE')
     ),
     constraint ck_mcp_server_version_nonneg check (version >= 0),
     constraint ck_mcp_server_time_order check (updated_at >= created_at)
@@ -1187,7 +1187,7 @@ comment on column mcp_server.url is 'Streamable HTTP endpoint URL（http/https �
 comment on column mcp_server.headers is '自定义请求 header JSON object；值支持环境变量整值占位符，由 Backend 从进程环境替换，绝不回显';
 comment on column mcp_server.enabled is '公共启用开关：默认 true；false 时即使 AVAILABLE 也不可被 Agent 选择';
 comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、发现与 tools/call 共用';
-comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）、FAILED（失败）；仅 enabled 且 AVAILABLE 进入运行时目录';
+comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）；仅 enabled 且 AVAILABLE 进入运行时目录';
 comment on column mcp_server.created_at is '创建时间（毫秒精度）';
 comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';

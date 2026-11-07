@@ -1185,7 +1185,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void plansPersistedMcpToolsOfUnavailableServersAndIsolatesOnlyThatServer() {
-    // 意图：MCP 持久化定义与 server 可用性解耦。server 被禁用、未验证或发现失败时，其已持久化工具仍必须
+    // 意图：MCP 持久化定义与 server 可用性解耦。server 被禁用或未验证时，其已持久化工具仍必须
     // 规划为冻结 ToolBinding（而不是 PLANNING_FAILED / tool-not-found）；可用性只留到调用期 fail closed。
     // 同一 Agent 的兄弟工具（同一不可用 server 下的另一个工具，以及静态工具 read）不受影响。
     HarnessCatalog staticCatalog =

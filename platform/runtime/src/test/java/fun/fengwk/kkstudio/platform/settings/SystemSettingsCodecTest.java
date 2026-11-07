@@ -409,7 +409,7 @@ class SystemSettingsCodecTest {
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
-  /** 反转顶层七个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
+  /** 反转顶层六个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
   private static String reverseTopLevelKeys(String json) throws Exception {
     ObjectMapper mapper = JsonMapper.builder().build();
     ObjectNode root = (ObjectNode) mapper.readTree(json);

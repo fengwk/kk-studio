@@ -165,7 +165,7 @@ public class SystemSettingsCodec {
     }
   }
 
-  /** 校验并转换 PUT 请求的七个 section 为领域聚合；缺失字段给出 field 级错误。 */
+  /** 校验并转换 PUT 请求的六个 section 为领域聚合；缺失字段给出 field 级错误。 */
   public SystemSettings fromDto(SystemSettingsSectionsDTO sections) {
     if (sections == null) {
       throw new IllegalArgumentException("system settings are required");

@@ -236,7 +236,8 @@ REFERENCE 只包含 origin、Thread 和 payload 标识；不可用时以 `PAYLOA
 单次数据库批处理按输入序发送各独立事件；JDBC Array 在成功与异常路径均释放。
 
 [`PostgresqlRealtimeEventSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime/PostgresqlRealtimeEventSource.java)
-按 Thread 分发合法事件，畸变、未知消息和重连触发重读；全局生命周期锁、source 完成围栏与
+只接收 `RealtimeBus` 已解码的 envelope 或本地事件，并按 Thread 分发；畸变、未知 notification 由 `RealtimeBus` 请求重读，
+重连仍触发全部订阅重读。全局生命周期锁、source 完成围栏与
 subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外运行。Realtime LISTEN 使用独立连接；
 跨节点订阅判断要求订阅和节点租约同时有效，并按 Thread 有界缓存一秒。通知丢失、乱序或重复
 不改变最终事实，重读、周期 poll 与租约过期后重领提供恢复路径。
@@ -381,7 +382,8 @@ Server 以不可变 name 寻址。列表是有界配置集合，直接返回全�
 工具数与版本）；详情额外返回 URL，headers 只以 `{configured}` 事实出现，变量占位符在服务端解析前保持原样。
 headers 作为整体秘密：创建时省略即无 header，只接受 `SET`；更新时字段必填，`KEEP` 保留、`SET` 整体替换、`CLEAR` 清空，`SET` 的值是 header 映射的 JSON 对象文本。
 列表在一次语句中读取全部 Server，工具数另以一次分组查询获取，未发现工具的 Server 计数为零。
-发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
+`discovery_status` 只有 `UNVERIFIED` 与 `AVAILABLE`：创建/更新重置为 `UNVERIFIED`，成功发现置为 `AVAILABLE`；
+发现失败只抛错并保留既有状态与工具行。发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
 [`RuntimeToolCatalogConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)
@@ -750,6 +752,7 @@ configurationSchema 归一化普通值，非法值整份拒绝。普通值可随
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
 storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
+`SystemSettingsToolSettingsProvider` 每次 preflight 读取同一内存快照，替换后立即生效，不重复读库。
 `SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
