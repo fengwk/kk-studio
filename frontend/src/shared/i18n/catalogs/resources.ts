@@ -578,6 +578,14 @@ export const resourcesCatalog = {
     'en-US': 'Leave blank to keep the current key',
     'zh-CN': '留空保留当前密钥',
   },
+  'ai.catalog.form.credentialCleared': {
+    'en-US': 'Removed when saved',
+    'zh-CN': '保存后移除',
+  },
+  'ai.catalog.form.clearCredential': {
+    'en-US': 'Clear saved credential',
+    'zh-CN': '清除已保存的凭据',
+  },
   'ai.catalog.form.credentialEditHint': {
     'en-US': 'Leave blank to keep the configured API Key; the secret is never echoed.',
     'zh-CN': '留空会保留已配置的 API Key；密钥不会回显。',

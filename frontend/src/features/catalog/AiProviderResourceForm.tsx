@@ -1,6 +1,7 @@
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import type { ProviderType } from '@/shared/api/generated/contracts'
 import { PROVIDER_TYPE_VALUES } from '@/shared/api/generated/contracts'
@@ -21,6 +22,8 @@ export function ProviderForm({
 }) {
   const { t } = useI18n()
   const isCustomRetry = draft.modelHttpRetryStatusCodes !== null && draft.modelHttpRetryStatusCodes !== undefined
+  // 只有编辑已配置密钥的 Provider 才需要 CLEAR：创建表单只接受 SET（可留空）。
+  const canClearCredential = mode === 'edit' && draft.credentialConfigured
   return (
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
@@ -41,11 +44,14 @@ export function ProviderForm({
           type="password"
           autoComplete="off"
           value={draft.credential}
+          disabled={draft.clearCredential}
           onChange={(event) => onChange({ ...draft, credential: event.target.value })}
           placeholder={
-            mode === 'edit'
-              ? t('ai.catalog.form.keepCredential')
-              : t('ai.catalog.form.optionalCredential')
+            draft.clearCredential
+              ? t('ai.catalog.form.credentialCleared')
+              : mode === 'edit'
+                ? t('ai.catalog.form.keepCredential')
+                : t('ai.catalog.form.optionalCredential')
           }
         />
         <small>
@@ -54,6 +60,21 @@ export function ProviderForm({
             : t('ai.catalog.form.credentialCreateHint')}
         </small>
       </label>
+      {canClearCredential ? (
+        <div className="form-group">
+          <Checkbox
+            checked={draft.clearCredential}
+            label={t('ai.catalog.form.clearCredential')}
+            onChange={(checked) =>
+              onChange({
+                ...draft,
+                clearCredential: checked,
+                credential: checked ? '' : draft.credential,
+              })
+            }
+          />
+        </div>
+      ) : null}
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
         <TextInput

@@ -15,7 +15,12 @@ export interface ProviderDraft {
   description: string
   providerType: ProviderType
   baseUrl: string
+  /** 新密钥原文；空串表示“不修改”，由 clearCredential 决定 KEEP 还是 CLEAR。 */
   credential: string
+  /** 服务端是否已配置密钥；创建表单没有既有密钥，恒为 false。 */
+  credentialConfigured: boolean
+  /** 编辑时显式清除已配置的密钥；与 credential 互斥。 */
+  clearCredential: boolean
   modelCallTimeoutMillis: string
   modelCallIdleTimeoutMillis: string
   modelHttpRetryStatusCodes: (number | string)[] | null

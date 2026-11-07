@@ -115,6 +115,8 @@ describe('AI domain utilities', () => {
       providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
       credential: '',
+      credentialConfigured: true,
+      clearCredential: false,
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
@@ -178,6 +180,8 @@ describe('AI domain utilities', () => {
       providerType: 'openai_responses',
       baseUrl: ' https://api.minimax.io/v1 ',
       credential: ' secret ',
+      credentialConfigured: true,
+      clearCredential: false,
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
@@ -201,6 +205,18 @@ describe('AI domain utilities', () => {
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
     })
+
+    // 更新契约的 credential 是必填 SecretUpdate：显式清除与保留都必须有明确操作。
+    expect(
+      toEditableProviderUpdate({ ...providerInput, credential: '', clearCredential: true }),
+    ).toMatchObject({ credential: { operation: 'CLEAR' } })
+    expect(
+      toEditableProviderUpdate({ ...providerInput, credential: '' }),
+    ).toMatchObject({ credential: { operation: 'KEEP' } })
+    // 创建只接受 SET：草稿上的 clear 标记不会变成创建请求里的 CLEAR。
+    expect(
+      toEditableProvider({ ...providerInput, clearCredential: true }).credential,
+    ).toEqual({ operation: 'SET', value: 'secret' })
 
     // Custom retry codes serialization
     expect(

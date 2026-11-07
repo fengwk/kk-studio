@@ -21,6 +21,8 @@ function provider(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
     providerType: 'openai',
     baseUrl: '',
     credential: '',
+    credentialConfigured: false,
+    clearCredential: false,
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     modelHttpRetryStatusCodes: null,

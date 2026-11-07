@@ -23,6 +23,8 @@ export function emptyProviderDraft(): ProviderDraft {
     providerType: 'openai',
     baseUrl: '',
     credential: '',
+    credentialConfigured: false,
+    clearCredential: false,
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     modelHttpRetryStatusCodes: null,
@@ -36,6 +38,8 @@ export function toProviderDraft(provider: ProviderDTO): ProviderDraft {
     providerType: provider.providerType,
     baseUrl: provider.baseUrl || '',
     credential: '',
+    credentialConfigured: provider.credential.configured,
+    clearCredential: false,
     modelCallTimeoutMillis: String(provider.modelCallTimeoutMillis),
     modelCallIdleTimeoutMillis: String(provider.modelCallIdleTimeoutMillis),
     modelHttpRetryStatusCodes:
@@ -77,8 +81,12 @@ export function toEditableProviderUpdate(
   return {
     description: trimToNull(draft.description),
     baseUrl: trimToNull(draft.baseUrl),
-    credential:
-      credential === null ? { operation: 'KEEP' } : { operation: 'SET', value: credential },
+    // 更新契约必填 SecretUpdate：显式清除、设置新值，或保留既有密钥。
+    credential: draft.clearCredential
+      ? { operation: 'CLEAR' }
+      : credential === null
+        ? { operation: 'KEEP' }
+        : { operation: 'SET', value: credential },
     modelCallTimeoutMillis,
     modelCallIdleTimeoutMillis,
     modelHttpRetryStatusCodes:
