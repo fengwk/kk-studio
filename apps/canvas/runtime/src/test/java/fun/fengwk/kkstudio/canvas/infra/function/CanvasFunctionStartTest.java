@@ -7,11 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.postgresql.PGNotification;
 import org.springframework.context.annotation.Import;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
@@ -82,6 +84,46 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
                     UUID.randomUUID(), UUID.randomUUID(), REQUEST_1, null, "verification"));
     assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertEquals("resolution is required", error.getMessage());
+  }
+
+  /** malformed/uppercase requestId 在真实运行入口先于 Run 状态判断失败为 validation。 */
+  @Test
+  void rejectsNonCanonicalRequestIdsAtRuntimeEntries() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    String uppercase = "C0FFEE00-0000-4000-8000-000000000001";
+
+    for (String invalid : new String[] {"not-a-uuid", uppercase}) {
+      assertValidation(() -> startRun(canvasId, nodeId, invalid));
+    }
+    startRun(canvasId, nodeId, REQUEST_1);
+    for (String invalid : new String[] {"not-a-uuid", uppercase}) {
+      assertValidation(() -> startRun(canvasId, nodeId, invalid));
+      assertValidation(
+          () ->
+              transactions.execute(
+                  status -> runtimeTransactions.cancel(canvasId, nodeId, invalid)));
+      assertValidation(
+          () ->
+              transactions.execute(
+                  status ->
+                      runtimeTransactions.resolve(
+                          canvasId,
+                          nodeId,
+                          invalid,
+                          CanvasFunctionUnknownResolution.RESUME,
+                          "verification")));
+    }
+
+    assertEquals(
+        CanvasFunctionRunStatus.READY, runRepository.findByNodeId(nodeId).orElseThrow().status());
+    assertEquals(1L, version(canvasId));
+  }
+
+  private static void assertValidation(Executable executable) {
+    DomainException error = assertThrows(DomainException.class, executable);
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
+    assertEquals("requestId", error.resource());
   }
 
   /** start 的目录租用保持到真实事务提交后才释放。 */
@@ -171,7 +213,7 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     // 持久 state 冻结的完整 binding 不随 current 漂移。
     assertEquals(frozen, decode(run).binding());
     try (PluginCanvasFunctionCatalogSource.Lease current = source.source().acquire()) {
-      assertEquals(drifted, current.bind(DEFINITION.name()).definition());
+      assertEquals(drifted, current.catalog().find(DEFINITION.name()).orElseThrow().function());
       // 同名函数定义已变：旧绑定被拒绝，不退回当前版本。
       assertThrows(IllegalStateException.class, () -> current.require(frozen));
     }

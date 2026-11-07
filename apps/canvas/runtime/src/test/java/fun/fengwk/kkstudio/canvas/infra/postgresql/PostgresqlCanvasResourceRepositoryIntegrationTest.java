@@ -77,24 +77,15 @@ class PostgresqlCanvasResourceRepositoryIntegrationTest extends PostgresCanvasIn
                 UUID.randomUUID(), canvasId, null, null, null, "text", null, Instant.now()));
   }
 
-  /** 删除按资源与节点两种粒度收敛，且不越出 canvas 作用域。 */
+  /** 删除按资源粒度收敛，且不越出 canvas 作用域。 */
   @Test
-  void deleteIsScopedToResourceAndNode() {
+  void deleteIsScopedToResource() {
     UUID canvasId = addDocument();
     NodeFixture node = addTextNode(canvasId, "body");
     CanvasResource resource = resources.findByOwnerNode(canvasId, node.nodeId).get(0);
 
     assertFalse(resources.delete(UUID.randomUUID(), resource.id()));
     assertTrue(resources.delete(canvasId, resource.id()));
-    assertTrue(resources.findByCanvasId(canvasId).isEmpty());
-
-    CanvasResource kept =
-        new CanvasResource(
-            UUID.randomUUID(), canvasId, null, null, null, "text", "kept", Instant.now());
-    resources.add(kept);
-    assertEquals(0, resources.deleteByOwnerNode(canvasId, node.nodeId));
-    assertEquals(1, resources.findByCanvasId(canvasId).size());
-    assertTrue(resources.delete(canvasId, kept.id()));
     assertTrue(resources.findByCanvasId(canvasId).isEmpty());
   }
 }

@@ -52,8 +52,8 @@ class CanvasFunctionCatalogTest {
     assertEquals(1, disabled.enabledCalls);
     assertEquals(1, disabled.reasonCalls);
 
-    CanvasFunctionCatalog.RegisteredFunction availableEntry = catalog.require("z.fn");
-    CanvasFunctionCatalog.RegisteredFunction disabledEntry = catalog.require("a.fn");
+    CanvasFunctionCatalog.RegisteredFunction availableEntry = catalog.find("z.fn").orElseThrow();
+    CanvasFunctionCatalog.RegisteredFunction disabledEntry = catalog.find("a.fn").orElseThrow();
     assertSame(available, availableEntry.adapter());
     assertSame(disabled, disabledEntry.adapter());
     assertTrue(availableEntry.enabled());
@@ -97,9 +97,7 @@ class CanvasFunctionCatalogTest {
     CanvasFunctionCatalog catalog =
         CanvasFunctionCatalog.from(
             List.of(new CountingAdapter(List.of(function("known")), true, null)));
-    IllegalArgumentException unknown =
-        assertThrows(IllegalArgumentException.class, () -> catalog.require("unknown"));
-    assertEquals("unknown Canvas Function: unknown", unknown.getMessage());
+    assertTrue(catalog.find("unknown").isEmpty());
   }
 
   /** 没有 adapter 时仍返回稳定的空 Catalog，避免把「单个 adapter 不得空 function」误作全局非空约束。 */

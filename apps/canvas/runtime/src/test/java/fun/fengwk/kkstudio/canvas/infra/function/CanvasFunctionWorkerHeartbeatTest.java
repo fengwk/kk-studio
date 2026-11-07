@@ -91,7 +91,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       verify(fixture.transactions)
           .markUnknown(
               fixture.claim.nodeId(),
-              fixture.claim.requestId().toString(),
+              fixture.claim.requestId(),
               fixture.claim.leaseToken(),
               "external submission outcome is unknown; manual verification required");
     } finally {
@@ -128,7 +128,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       verify(fixture.transactions)
           .markUnknown(
               fixture.claim.nodeId(),
-              fixture.claim.requestId().toString(),
+              fixture.claim.requestId(),
               fixture.claim.leaseToken(),
               "external task timeout");
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
@@ -194,7 +194,7 @@ class CanvasFunctionWorkerHeartbeatTest {
         future.get(5, TimeUnit.SECONDS);
       }
       verify(fixture.transactions, never())
-          .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
+          .checkpoint(any(), any(), any(UUID.class), any(UUID.class), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -231,7 +231,7 @@ class CanvasFunctionWorkerHeartbeatTest {
         future.get(5, TimeUnit.SECONDS);
       }
       verify(fixture.transactions, never())
-          .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
+          .checkpoint(any(), any(), any(UUID.class), any(UUID.class), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -251,7 +251,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       verify(fixture.transactions)
           .failIfRunning(
               fixture.claim.nodeId(),
-              fixture.claim.requestId().toString(),
+              fixture.claim.requestId(),
               fixture.claim.leaseToken(),
               "Function execution failed");
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());

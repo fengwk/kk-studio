@@ -12,22 +12,16 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasGraph;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
-import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -126,32 +120,11 @@ public class CanvasCommandService {
 
   /** 读取 document 行锁内的权威快照，作为命令前沿的判定基础。 */
   private CanvasGraph loadGraph(UUID canvasId) {
-    Map<UUID, List<CanvasResource>> owned = new HashMap<>();
-    for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
-      if (resource.ownerNodeId() == null) {
-        continue;
-      }
-      owned.computeIfAbsent(resource.ownerNodeId(), ignored -> new ArrayList<>()).add(resource);
-    }
-    Map<UUID, CanvasFunctionRun> runs = new HashMap<>();
-    for (CanvasFunctionRun run : runRepository.findByCanvasId(canvasId)) {
-      runs.put(run.nodeId(), run);
-    }
-    List<CanvasResourceNode> nodes = new ArrayList<>();
-    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
-      List<CanvasResource> resources = new ArrayList<>(owned.getOrDefault(node.id(), List.of()));
-      resources.sort(Comparator.comparingInt(CanvasResource::resourceIndex));
-      nodes.add(
-          new CanvasResourceNode(
-              node.id(),
-              node.canvasId(),
-              node.name(),
-              node.transform(),
-              node.groupId(),
-              resources,
-              node.function(),
-              runs.get(node.id())));
-    }
+    List<CanvasResourceNode> nodes =
+        CanvasNodeProjection.project(
+            canvasStore.listNodes(canvasId),
+            resourceRepository.findByCanvasId(canvasId),
+            runRepository.findByCanvasId(canvasId));
     Set<UUID> pinnedResourceIds = new LinkedHashSet<>();
     for (CanvasFunctionResourcePin pin : pinRepository.findByCanvas(canvasId)) {
       pinnedResourceIds.add(pin.resourceId());

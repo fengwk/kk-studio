@@ -196,7 +196,7 @@ abstract class CanvasFunctionRuntimeTestSupport extends PostgresCanvasInfraTestS
     try (PluginCanvasFunctionCatalogSource.Lease lease = catalogSource.source().acquire()) {
       return new CanvasFunctionVersion(
           CanvasFunctionCatalog.definitionFingerprint(
-              lease.catalog().require(functionName).function()));
+              lease.catalog().find(functionName).orElseThrow().function()));
     }
   }
 

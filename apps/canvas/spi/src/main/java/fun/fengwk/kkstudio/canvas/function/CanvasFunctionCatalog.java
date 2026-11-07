@@ -69,11 +69,6 @@ public final class CanvasFunctionCatalog {
     return Optional.ofNullable(byName.get(name));
   }
 
-  public RegisteredFunction require(String name) {
-    return find(name)
-        .orElseThrow(() -> new IllegalArgumentException("unknown Canvas Function: " + name));
-  }
-
   /**
    * 完整函数定义的 canonical 摘要：逐字段按固定顺序喂入 SHA-256。文本字段以 UTF-8 字节长度前缀消歧，argsSchema 递归按对象键字典序后取自身 canonical
    * 文本，最后输出 64 位小写 hex。

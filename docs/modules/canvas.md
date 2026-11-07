@@ -155,7 +155,7 @@ Canvas 负责 Run 的状态、调度、资源保护与人工决议；能力契�
 [`CanvasFunctionRunTransactions.start`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunTransactions.java) 的锁序固定为 document → node → run：
 
 ```text
-同 requestId：返回既有 Run（精确重放优先于版本与目录校验）
+同 requestId（canonical lowercase UUID）：返回既有 Run（精确重放优先于版本与目录校验）
 现有 Run 为 READY/RUNNING 或待核实的 UNKNOWN 且 requestId 不同：conflict
 租用目录 -> 按名找函数（已移除即 conflict）-> 比较完整定义指纹与 expectedVersion
 -> 严格解码 args -> 冻结引用 manifest（节点存在、index 在范围内且是 blob）与媒体事实
@@ -190,7 +190,7 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 
 依赖平台能力的适配集中在 [`platform`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/) 包，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 与 Canvas 运行时分开装配，因此 Canvas 模块测试可以只加载运行时本身：
 
-- [`PluginCanvasFunctionCatalogSource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalogSource.java) 是 Canvas Function 目录的唯一生产实现：每次租用当前插件快照，并读取其中已冻结的 [`PluginCanvasFunctionCatalog`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalog.java) 目录；租用期间 adapter 只随快照一起退役。它的嵌套 `Lease` 就是执行路径的资源约定：`catalog` 读取冻结目录，`bind` 冻结完整定义，`require(binding)` 要求定义完全一致，`close` 幂等释放快照租用。Web 组合根以插件运行时构造它。
+- [`PluginCanvasFunctionCatalogSource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalogSource.java) 是 Canvas Function 目录的唯一生产实现：每次租用当前插件快照，并读取其中已冻结的 [`PluginCanvasFunctionCatalog`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalog.java) 目录；租用期间 adapter 只随快照一起退役。它的嵌套 `Lease` 就是执行路径的资源约定：`catalog` 读取冻结目录，`require(binding)` 要求定义完全一致，`close` 幂等释放快照租用。Web 组合根以插件运行时构造它。
 - 同一个冻结视图也服务管理面：Web 把 `PluginCanvasFunctionCatalog::functionNames` 注册为平台的 `PluginFunctionNamesProjection`，插件详情只从目录投影名称。
 - [`PlatformCanvasFunctionBlobAccess`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PlatformCanvasFunctionBlobAccess.java) 提供媒体事实、原件流与短期 URL。
 - [`CanvasBlobResourceMaterializer`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobResourceMaterializer.java) 物化输出：媒体写入全局 Blob，TEXT 内联在 Resource 行。媒体 `stage` 前后各一个短事务，按 document → run 加锁并复验当前 RUNNING owner 与数据库时钟下的租约；读流与对象存储暂存不持有数据库锁；后置事务插入无 owner Resource、写 OUTPUT pin 并转移上传引用。Worker 通过可选 provider 获取该具体组件，创建 Function 执行上下文时要求它存在。Resource 删除时经 [`CanvasBlobReleaser`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobReleaser.java) 在同一事务释放 Blob 引用。媒体探针与预览属于平台存储（见 [Platform](platform.md#storageblob-与-resource)）。
@@ -211,7 +211,8 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 - [`CanvasResourceController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceController.java)：资源下载与预览 URL 直读，从不返回 bucket 或对象 key。
 
 控制器只声明路由与类型，直接返回资源：创建画布 201，启动 Function run 202，其余 200；路径与查询参数使用 `UUID`，
-请求体的必填、未知字段、标量强转与 canonical UUID 由宿主的严格 HTTP mapper 统一校验，客户端输入错误在产生处抛
+Function run 的 `requestId` 在 runtime 入口统一校验为 canonical lowercase UUID。请求体的必填、未知字段、标量强转与其它
+canonical UUID 由宿主的严格 HTTP mapper 统一校验，客户端输入错误在产生处抛
 `DomainException`（见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。
 
 读模型的固定取值是 wire 枚举：资源与 Function 输出的 `kind`（`IMAGE` / `VIDEO` / `AUDIO` / `TEXT`）、Function run 的

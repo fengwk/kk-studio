@@ -1,26 +1,20 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
-/** Function run requestId 的唯一公开校验。 */
+import java.util.UUID;
+
+/** Function run requestId 的唯一客户端校验：canonical lowercase UUID。 */
 final class CanvasFunctionRequestIds {
 
   private CanvasFunctionRequestIds() {}
 
-  static String validate(String requestId) {
-    if (requestId == null
-        || requestId.isEmpty()
-        || requestId.length() > 128
-        || !requestId.equals(requestId.strip())) {
-      throw DomainException.validation(
-          "requestId", "requestId must be non-empty, untrimmed, and at most 128 characters");
+  static UUID validate(String requestId) {
+    try {
+      return Uuids.parseCanonical(requestId, "requestId");
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("requestId", "requestId must be a canonical lowercase UUID");
     }
-    for (int index = 0; index < requestId.length(); index++) {
-      if (Character.isISOControl(requestId.charAt(index))) {
-        throw DomainException.validation(
-            "requestId", "requestId must not contain control characters");
-      }
-    }
-    return requestId;
   }
 }
