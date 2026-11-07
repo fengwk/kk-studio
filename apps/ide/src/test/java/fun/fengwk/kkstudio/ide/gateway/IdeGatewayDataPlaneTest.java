@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -40,10 +39,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 class IdeGatewayDataPlaneTest {
 
@@ -178,33 +180,24 @@ class IdeGatewayDataPlaneTest {
         };
     when(res.getOutputStream()).thenReturn(servletOut);
 
-    CountDownLatch serverCompleted = new CountDownLatch(1);
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                // Poll until exchange is created
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                exchange.respond(
-                    new TunnelExchange.Response(
-                        200, Map.of("Content-Type", List.of("text/plain"))));
-                exchange
-                    .fakeStream()
-                    .peer()
-                    .write(ByteBuffer.wrap("daemon-response".getBytes(StandardCharsets.UTF_8)))
-                    .toCompletableFuture()
-                    .join();
-                exchange.fakeStream().peer().endOutput().toCompletableFuture().join();
-                serverCompleted.countDown();
-              } catch (Exception ignored) {
-              }
+    CompletableFuture<Void> daemonSide =
+        startDaemonSide(
+            tunnel,
+            exchange -> {
+              exchange.respond(
+                  new TunnelExchange.Response(200, Map.of("Content-Type", List.of("text/plain"))));
+              exchange
+                  .fakeStream()
+                  .peer()
+                  .write(ByteBuffer.wrap("daemon-response".getBytes(StandardCharsets.UTF_8)))
+                  .toCompletableFuture()
+                  .join();
+              // 半关闭只负责让网关读到 EOF；网关随即关闭交换，不能等它的完成结果。
+              exchange.fakeStream().peer().endOutput();
             });
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/src/app.ts", req, res);
-    assertTrue(serverCompleted.await(5, TimeUnit.SECONDS));
+    awaitDaemonSide(daemonSide);
 
     verify(res).setStatus(200);
     verify(res).addHeader("content-type", "text/plain");
@@ -269,32 +262,28 @@ class IdeGatewayDataPlaneTest {
 
     int totalChunks = 50;
     int chunkSize = 16 * 1024; // 800 KB total
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                exchange.respond(
-                    new TunnelExchange.Response(
-                        200, Map.of("Content-Type", List.of("application/octet-stream"))));
-                byte[] chunk = new byte[chunkSize];
-                for (int i = 0; i < totalChunks; i++) {
-                  exchange
-                      .fakeStream()
-                      .peer()
-                      .write(ByteBuffer.wrap(chunk))
-                      .toCompletableFuture()
-                      .join();
-                }
-                exchange.fakeStream().peer().endOutput().toCompletableFuture().join();
-              } catch (Exception ignored) {
+    CompletableFuture<Void> daemonSide =
+        startDaemonSide(
+            tunnel,
+            exchange -> {
+              exchange.respond(
+                  new TunnelExchange.Response(
+                      200, Map.of("Content-Type", List.of("application/octet-stream"))));
+              byte[] chunk = new byte[chunkSize];
+              for (int i = 0; i < totalChunks; i++) {
+                exchange
+                    .fakeStream()
+                    .peer()
+                    .write(ByteBuffer.wrap(chunk))
+                    .toCompletableFuture()
+                    .join();
               }
+              // 半关闭只负责让网关读到 EOF，不能等它的完成结果。
+              exchange.fakeStream().peer().endOutput();
             });
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/large-file.bin", req, res);
+    awaitDaemonSide(daemonSide);
 
     assertEquals(totalChunks * chunkSize, bytesReceived.get());
   }
@@ -336,21 +325,14 @@ class IdeGatewayDataPlaneTest {
 
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                // Daemon rejects with 409 Conflict
-                exchange.respond(new TunnelExchange.Response(409, Map.of()));
-              } catch (Exception ignored) {
-              }
-            });
+    CompletableFuture<Void> daemonSide =
+        startDaemonSide(
+            tunnel,
+            // Daemon rejects with 409 Conflict
+            exchange -> exchange.respond(new TunnelExchange.Response(409, Map.of())));
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws", req, res);
+    awaitDaemonSide(daemonSide);
 
     verify(res).sendError(409);
   }
@@ -518,20 +500,12 @@ class IdeGatewayDataPlaneTest {
     when(headReq.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
     HttpServletResponse headRes = mock(HttpServletResponse.class);
 
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                exchange.respond(new TunnelExchange.Response(200, Map.of()));
-              } catch (Exception ignored) {
-              }
-            });
+    CompletableFuture<Void> headDaemonSide =
+        startDaemonSide(
+            tunnel, exchange -> exchange.respond(new TunnelExchange.Response(200, Map.of())));
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", headReq, headRes);
+    awaitDaemonSide(headDaemonSide);
     verify(headRes).setStatus(200);
 
     // 2. Local WS dispatch failure waiting for headers returns 502
@@ -549,20 +523,11 @@ class IdeGatewayDataPlaneTest {
     when(wsReq.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
     HttpServletResponse wsRes = mock(HttpServletResponse.class);
 
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(tunnel.exchanges().size() - 1);
-                exchange.failHeaders(new IOException("tunnel closed"));
-              } catch (Exception ignored) {
-              }
-            });
+    CompletableFuture<Void> wsDaemonSide =
+        startDaemonSide(tunnel, exchange -> exchange.failHeaders(new IOException("tunnel closed")));
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws-fail", wsReq, wsRes);
+    awaitDaemonSide(wsDaemonSide);
     verify(wsRes).sendError(HttpServletResponse.SC_BAD_GATEWAY);
   }
 
@@ -756,20 +721,11 @@ class IdeGatewayDataPlaneTest {
     when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                exchange.failHeaders(new IOException("headers error"));
-              } catch (Exception ignored) {
-              }
-            });
+    CompletableFuture<Void> daemonSide =
+        startDaemonSide(tunnel, exchange -> exchange.failHeaders(new IOException("headers error")));
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+    awaitDaemonSide(daemonSide);
 
     verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
   }
@@ -823,27 +779,64 @@ class IdeGatewayDataPlaneTest {
               }
             });
 
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try {
-                while (tunnel.exchanges().isEmpty()) {
-                  Thread.sleep(10);
-                }
-                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
-                exchange.respond(new TunnelExchange.Response(200, Map.of()));
-                exchange
-                    .fakeStream()
-                    .peer()
-                    .write(ByteBuffer.wrap(new byte[] {1, 2, 3}))
-                    .toCompletableFuture()
-                    .join();
-              } catch (Exception ignored) {
-              }
+    CompletableFuture<Void> daemonSide =
+        startDaemonSide(
+            tunnel,
+            exchange -> {
+              exchange.respond(new TunnelExchange.Response(200, Map.of()));
+              exchange
+                  .fakeStream()
+                  .peer()
+                  .write(ByteBuffer.wrap(new byte[] {1, 2, 3}))
+                  .toCompletableFuture()
+                  .join();
             });
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+    awaitDaemonSide(daemonSide);
 
     verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
+
+  /**
+   * 扮演 Daemon 侧：等到本次调用之后出现的新交换再执行动作，执行结果经返回的 future 交回测试线程。
+   *
+   * <p>后台失败不允许被吞掉，否则只会表现为等待超时。网关把响应体读到 EOF 后立即关闭交换，按隧道端口契约，尚未完成的半关闭观察会以 {@link
+   * CancellationException} 结束，因此动作只等待自己真正依赖的效果：响应头已提交、写入已被网关读取。
+   */
+  private static CompletableFuture<Void> startDaemonSide(
+      FakeEnvironmentTunnel tunnel, Consumer<FakeTunnelExchange> action) {
+    int known = tunnel.exchanges().size();
+    CompletableFuture<Void> finished = new CompletableFuture<>();
+    Thread.ofVirtual()
+        .name("fake-daemon")
+        .start(
+            () -> {
+              try {
+                List<FakeTunnelExchange> exchanges;
+                while ((exchanges = tunnel.exchanges()).size() <= known) {
+                  Thread.sleep(10);
+                }
+                action.accept(exchanges.get(known));
+                finished.complete(null);
+              } catch (Throwable error) {
+                finished.completeExceptionally(error);
+              }
+            });
+    return finished;
+  }
+
+  /** 等 Daemon 侧动作结束：失败以真实原因上报，超时说明动作依赖的效果始终没有出现。 */
+  private static void awaitDaemonSide(CompletableFuture<Void> daemonSide) {
+    try {
+      daemonSide.get(5, TimeUnit.SECONDS);
+    } catch (ExecutionException error) {
+      throw new AssertionError("fake daemon side failed", error.getCause());
+    } catch (TimeoutException error) {
+      throw new AssertionError("fake daemon side did not finish in 5s", error);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while waiting for the fake daemon side", error);
+    }
   }
 }
