@@ -14,7 +14,7 @@ function createRecord(overrides: Partial<ThreadEventRecord> = {}): ThreadEventRe
     status: 'completed',
     title: 'ACTIVE_TOOL_INVOCATION',
     summary: 'bash · 已完成',
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: 1785232800000,
     details: [
       { label: '状态', value: '已完成' },
       { label: '调用 ID', value: 'inv-123' },

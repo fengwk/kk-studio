@@ -23,21 +23,11 @@ import type {
 } from '@/features/thread/runtime/thread-timeline-types'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
+import { formatBackendDateSeconds } from '@/shared/lib/date-format'
 import './thread-conversation.css'
 
-function pad(value: number): string {
-  return value.toString().padStart(2, '0')
-}
-
 function formatRowTime(value: ThreadEventRecord['createdAt']): string {
-  if (value == null || Array.isArray(value)) {
-    return '--:--:--'
-  }
-  const date = value instanceof Date ? value : new Date(value as string | number)
-  if (Number.isNaN(date.getTime())) {
-    return '--:--:--'
-  }
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  return formatBackendDateSeconds(value)
 }
 
 export type DebugViewTab = 'preview' | 'events' | 'detail'

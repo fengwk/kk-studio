@@ -625,7 +625,7 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(await screen.findByText('seconds-box')).toBeInTheDocument()
-    expect(screen.getAllByText(/最近活动 · 2025\/06\/15/)).toHaveLength(2)
+    expect(screen.getAllByText(/最近活动 · 2025-06-15/)).toHaveLength(2)
   })
 
   it('truncates tag rows to three chips and shows the +N remainder', async () => {

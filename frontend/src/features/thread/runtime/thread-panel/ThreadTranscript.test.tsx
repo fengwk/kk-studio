@@ -14,7 +14,7 @@ describe('isVisibleDialogueMessage', () => {
       subjectEntryId: 'r1',
       text: '',
       thinking: 'plan',
-      createdAt: '2026-07-18T00:00:00',
+      createdAt: Date.parse('2026-07-18T00:00:00Z'),
       status: 'done',
     }
     expect(isVisibleDialogueMessage(message)).toBe(true)
@@ -26,7 +26,7 @@ describe('isVisibleDialogueMessage', () => {
       role: 'assistant',
       subjectEntryId: 'r1',
       text: '   ',
-      createdAt: '2026-07-18T00:00:00',
+      createdAt: Date.parse('2026-07-18T00:00:00Z'),
       status: 'done',
     }
     expect(isVisibleDialogueMessage(message)).toBe(true)
@@ -42,7 +42,7 @@ describe('AssistantMessageBlock', () => {
           role: 'assistant',
           subjectEntryId: '1',
           text: '\n\n第一段\n\n第二段\n',
-          createdAt: '2026-07-18T00:00:00',
+          createdAt: Date.parse('2026-07-18T00:00:00Z'),
           status: 'done',
         }}
       />,
@@ -61,7 +61,7 @@ describe('AssistantMessageBlock', () => {
           role: 'assistant',
           subjectEntryId: '2',
           text: '  ',
-          createdAt: '2026-07-18T00:00:00',
+          createdAt: Date.parse('2026-07-18T00:00:00Z'),
           status: 'done',
         }}
       />,
@@ -84,7 +84,7 @@ describe('ThreadTranscript', () => {
             title: '未知 Entry',
             text: '会话已创建。',
             subjectEntryId: 'root',
-            createdAt: null,
+            createdAt: 1785232800000,
             status: 'done',
           },
         ]}

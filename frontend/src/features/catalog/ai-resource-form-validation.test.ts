@@ -37,6 +37,8 @@ function providerDraft(): ProviderDraft {
     providerType: 'openai',
     baseUrl: '',
     credential: '',
+    credentialConfigured: false,
+    clearCredential: false,
     modelCallTimeoutMillis: '',
     modelCallIdleTimeoutMillis: '',
     modelHttpRetryStatusCodes: null,

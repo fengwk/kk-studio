@@ -67,6 +67,8 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment())
 
+    // 弹窗标题统一为“动作/对象：名称”，环境名称带在同一条标题里。
+    expect(screen.getByRole('dialog', { name: '管理环境：test-environment' })).toBeInTheDocument()
     expect(screen.getByText('linux')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
     // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。
@@ -76,8 +78,8 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
     expect(screen.getByText('Production host')).toBeInTheDocument()
-    // lastSeen 必须本地化展示，不直接铺 UTC 原文。
-    expect(screen.getByText(/2026\/07\/20 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
+    // lastSeen 使用共享固定格式（分钟精度），不直接铺 UTC 原文。
+    expect(screen.getByText(/2026-07-20 \d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
 
     // 绝不包含任何操作记录区域

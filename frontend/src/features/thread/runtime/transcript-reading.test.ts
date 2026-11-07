@@ -11,7 +11,7 @@ import type {
 } from '@/features/thread/runtime/thread-timeline-types'
 
 function assistant(id: string, text: string, status: DialogueMessage['status']): DialogueMessage {
-  return { id, role: 'assistant', subjectEntryId: id, text, createdAt: '2026-07-28T10:00:00Z', status }
+  return { id, role: 'assistant', subjectEntryId: id, text, createdAt: 1785232800000, status }
 }
 
 function tool(
@@ -30,7 +30,7 @@ function tool(
     arguments: '{}',
     contents: [],
     partialContents,
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: 1785232800000,
     status,
   }
 }

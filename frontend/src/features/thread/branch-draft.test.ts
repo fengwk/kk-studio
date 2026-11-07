@@ -41,8 +41,8 @@ const model: SingleModelDTO = {
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '1',
-  createdAt: 1786233600,
-  updatedAt: 1786233600,
+  createdAt: 1786233600000,
+  updatedAt: 1786233600000,
 }
 
 const modelWithoutDefaultVariant: SingleModelDTO = {
@@ -77,8 +77,8 @@ function agent(
       subagents,
     },
     version: '1',
-    createdAt: 1786233600,
-    updatedAt: 1786233600,
+    createdAt: 1786233600000,
+    updatedAt: 1786233600000,
   }
 }
 

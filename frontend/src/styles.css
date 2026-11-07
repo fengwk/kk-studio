@@ -46,7 +46,8 @@
   --surface-hover: var(--palette-ink-800);
   --surface-active: var(--palette-ink-750);
   --surface-raised: var(--palette-ink-750);
-  --surface-overlay: color-mix(in srgb, var(--palette-ink-900) 97%, transparent);
+  /* Floating surfaces (menus, popovers, panels): fully opaque so underlying text never shows through. */
+  --surface-overlay: var(--palette-ink-900);
   --surface-glass: color-mix(in srgb, var(--palette-ink-950) 70%, transparent);
   --wash-1: color-mix(in srgb, var(--palette-white) 2%, transparent);
   --wash-2: color-mix(in srgb, var(--palette-white) 4%, transparent);

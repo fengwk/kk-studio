@@ -135,6 +135,8 @@ describe('AiResourceForms', () => {
       providerType: 'openai',
       baseUrl: 'https://api.test/v1',
       credential: '',
+      credentialConfigured: false,
+      clearCredential: false,
       modelCallTimeoutMillis: '1800000',
       modelCallIdleTimeoutMillis: '120000',
       modelHttpRetryStatusCodes: null,
@@ -254,6 +256,60 @@ describe('AiResourceForms', () => {
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
     expect(labels[0]).toMatch(/^Name(?: \*)?$/)
     expect(labels[1]).toBe('API Key')
+    // 没有已配置密钥时没有可清除的对象。
+    expect(screen.queryByLabelText('清除已保存的凭据')).not.toBeInTheDocument()
+  })
+
+  it('offers an explicit CLEAR only when editing a configured credential', async () => {
+    const user = userEvent.setup()
+    const configuredDraft = (): ProviderDraft => ({
+      name: 'openai',
+      description: '',
+      providerType: 'openai',
+      baseUrl: '',
+      credential: '',
+      credentialConfigured: true,
+      clearCredential: false,
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+      modelHttpRetryStatusCodes: null,
+    })
+    let latest: ProviderDraft = configuredDraft()
+
+    function ConfiguredProviderEditHarness() {
+      const [draft, setDraft] = useState<ProviderDraft>(configuredDraft)
+      return (
+        <ProviderForm
+          draft={draft}
+          mode="edit"
+          onChange={(next) => {
+            latest = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<ConfiguredProviderEditHarness />)
+
+    // 未勾选时输入框可用，提交保持 KEEP。
+    const credentialInput = screen.getByPlaceholderText('留空保留当前密钥')
+    expect(credentialInput).toBeEnabled()
+    expect(toEditableProviderUpdate(latest)).toMatchObject({ credential: { operation: 'KEEP' } })
+
+    await user.click(screen.getByLabelText('清除已保存的凭据'))
+
+    // 勾选后输入框禁用、清空，提交为明确的 CLEAR。
+    const clearedInput = screen.getByPlaceholderText('保存后移除')
+    expect(clearedInput).toBeDisabled()
+    expect(clearedInput).toHaveValue('')
+    expect(latest.clearCredential).toBe(true)
+    expect(latest.credential).toBe('')
+    expect(toEditableProviderUpdate(latest)).toMatchObject({ credential: { operation: 'CLEAR' } })
+
+    await user.click(screen.getByLabelText('清除已保存的凭据'))
+    expect(screen.getByPlaceholderText('留空保留当前密钥')).toBeEnabled()
+    expect(toEditableProviderUpdate(latest)).toMatchObject({ credential: { operation: 'KEEP' } })
   })
 
   it('edits the new model abilities, pricing, variants, and wire modelId', async () => {
@@ -724,6 +780,8 @@ function ProviderFormHarness({ mode = 'create' }: { mode?: 'create' | 'edit' }) 
     providerType: 'openai',
     baseUrl: '',
     credential: '',
+    credentialConfigured: false,
+    clearCredential: false,
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     modelHttpRetryStatusCodes: null,

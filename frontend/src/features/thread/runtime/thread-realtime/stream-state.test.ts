@@ -63,7 +63,7 @@ describe('thread realtime state', () => {
       invocationId: '9',
       attempt: 2,
       sequence: 5,
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     })
     // attempt / sequence 必须为正；subject kind 与 type 必须精确匹配。
     expect(parseRealtimeModelCheckpoint({ ...value, attempt: 0 })).toBeNull()
@@ -212,7 +212,7 @@ describe('thread realtime state', () => {
       eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 2,
       payload: { toolCallId: 'call-1', contents: [{ type: 'text', text: 'one' }], error: false },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     })
 
     // 非对象节点或序列化文本不产生 partial。
@@ -239,8 +239,12 @@ describe('thread realtime state', () => {
     expect(parseRealtimeToolPartial({ ...base, threadId: '' })).toBeNull()
     expect(parseRealtimeToolPartial({ ...base, subjectId: ' ' })).toBeNull()
     expect(parseRealtimeToolPartial({ ...base, attempt: 0 })).toBeNull()
-    // createdAt 只要求非空字符串（MODEL_DELTA 才有日期解析校验）。
+    // createdAt 与 codec JSON 同源：非规范或非毫秒精度的文本一律拒绝。
     expect(parseRealtimeToolPartial({ ...base, createdAt: '  ' })).toBeNull()
+    // Java Instant.toString() 整秒时省略小数，显式 .000 属于非规范文本。
+    expect(parseRealtimeToolPartial({ ...base, createdAt: '2026-07-28T10:00:00.000Z' })).toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, createdAt: '2026-07-28T10:00:00.120Z' })).not.toBeNull()
+    expect(parseRealtimeToolPartial({ ...base, createdAt: '2026-07-28T10:00:00+00:00' })).toBeNull()
     expect(parseRealtimeToolPartial({ ...base, payload: 'nope' })).toBeNull()
     // eventId 必须是 canonical UUID：缺失、空串、非字符串、非法文本与非 canonical 变体全部拒绝。
     const withoutEventId: Record<string, unknown> = { ...base }
@@ -277,8 +281,8 @@ describe('thread realtime state', () => {
       approval: null,
       result: null,
       error: null,
-      createdAt: 1785232800,
-      updatedAt: 1785232800,
+      createdAt: 1785232800000,
+      updatedAt: 1785232800000,
     }
     // toolCallId 直接来自 invocation，绝不能从 argumentsJson 推测。
     const active = snapshotToolStream(base, '7')
@@ -348,8 +352,8 @@ describe('thread realtime state', () => {
       approval: null,
       result: null,
       error: null,
-      createdAt: 1785232800,
-      updatedAt: 1785232800,
+      createdAt: 1785232800000,
+      updatedAt: 1785232800000,
     }
     // 瞬时上传引用投影为 attachment；非对象节点不被当作 JSON 原文解析。
     const managed = snapshotToolStream(
@@ -407,7 +411,7 @@ describe('thread realtime state', () => {
         error: null,
         details: null,
       },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     }
     const stream = reduceRealtimeToolStream(null, partial)
     // text/json 分片会被聚合；resource 分片不会从 partial 中投影出来。
@@ -437,7 +441,7 @@ describe('thread realtime state', () => {
         // 公共快照不携带 Provider toolCalls：tool 调用只来自 realtime TOOL_CALL_DELTA。
         toolCalls: [],
         status: 'streaming',
-        createdAt: '',
+        createdAt: 1785232800000,
       })
     })
 
@@ -615,7 +619,7 @@ describe('thread realtime state', () => {
   })
 
   it('replaces the tool overlay when the invocation attempt changes (retry)', () => {
-    const partial = (attempt: number, text: string, createdAt: string) => ({
+    const partial = (attempt: number, text: string, createdAt: number) => ({
       threadId: '7',
       invocationId: 'inv-t',
       eventId: DEFAULT_PARTIAL_EVENT_ID,
@@ -628,13 +632,13 @@ describe('thread realtime state', () => {
       },
       createdAt,
     })
-    const first = reduceRealtimeToolStream(null, partial(1, 'old', '2026-07-28T10:00:00Z'))
+    const first = reduceRealtimeToolStream(null, partial(1, 'old', Date.parse('2026-07-28T10:00:00Z')))
     // 同 attempt 的后续分片正常追加；重试后整个 overlay 被替换，绝不混入旧 attempt 输出。
-    const appended = reduceRealtimeToolStream(first, partial(1, '-new', '2026-07-28T10:00:01Z'))
-    const retried = reduceRealtimeToolStream(appended, partial(2, 'fresh', '2026-07-28T10:00:02Z'))
+    const appended = reduceRealtimeToolStream(first, partial(1, '-new', Date.parse('2026-07-28T10:00:01Z')))
+    const retried = reduceRealtimeToolStream(appended, partial(2, 'fresh', Date.parse('2026-07-28T10:00:02Z')))
     expect(appended).toMatchObject({ attempt: 1, text: 'old-new' })
     expect(retried).toMatchObject({ attempt: 2, text: 'fresh' })
-    expect(retried.createdAt).toBe('2026-07-28T10:00:02Z')
+    expect(retried.createdAt).toBe(Date.parse('2026-07-28T10:00:02Z'))
   })
 
   it('joins text/json chunks and keeps error=true sticky across chunks', () => {
@@ -649,7 +653,7 @@ describe('thread realtime state', () => {
         error,
         details: null,
       },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     })
     // 字符串 json 原样输出、对象 json 序列化输出；text 分片必须本身是
     // 字符串（非字符串被丢弃），同一 chunk 内的分片以 \n 分隔。
@@ -671,7 +675,7 @@ describe('thread realtime state', () => {
       eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: { contents: [{ type: 'text', text: 'x' }], error: null, details: null },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     }
     expect(reduceRealtimeToolStream(null, partial)).toMatchObject({
       toolCallId: '',
@@ -691,7 +695,7 @@ describe('thread realtime state', () => {
         contents: [{ type: 'text', text: 'first' }],
         error: false,
       },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     })
     const appended = reduceRealtimeToolStream(first, {
       threadId: '7',
@@ -703,7 +707,7 @@ describe('thread realtime state', () => {
         contents: [{ type: 'text', text: '-more' }],
         error: false,
       },
-      createdAt: '2026-07-28T10:00:01Z',
+      createdAt: Date.parse('2026-07-28T10:00:01Z'),
     })
     expect(appended).toMatchObject({ text: 'first-more' })
   })
@@ -731,24 +735,23 @@ describe('thread realtime state', () => {
         payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: 7, name: 'r', argumentsJson: '{}' },
       }),
     ).toBeNull()
-    // TOOL_PARTIAL 的 createdAt 只要求非空字符串（非日期字符串也接受）；
-    // 非字符串 createdAt 与非法 JSON 同样拒绝。
+    // TOOL_PARTIAL 的 createdAt 与 codec JSON 同源：非文本或非规范 instant 文本一律拒绝。
     expect(parseRealtimeToolPartial({
       ...toolPartialEvent({ payload: { contents: [] } }),
       createdAt: 123,
     })).toBeNull()
     expect(parseRealtimeToolPartial('not-json')).toBeNull()
-    // createdAt 为空白字符串：isNonBlankString 直接拒绝（不进入 Date.parse）。
+    // createdAt 为空白字符串：parseCodecInstantMillis 直接拒绝。
     expect(parseRealtimeModelDelta({
       ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: '  ',
     })).toBeNull()
-    // createdAt 是非空字符串但 Date.parse 无法解析：toEpochMillis 返回 null → 拒绝。
+    // createdAt 是非空字符串但不是规范 instant：parseCodecInstantMillis 返回 null → 拒绝。
     expect(parseRealtimeModelDelta({
       ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: 'not-a-date',
     })).toBeNull()
-    // createdAt 为非字符串（数字）也拒绝 —— toEpochMillis 的非字符串分支（L706）。
+    // createdAt 为非字符串（数字）也拒绝。
     expect(parseRealtimeModelDelta({
       ...event(1, 'TEXT_DELTA', 'x'),
       createdAt: 42,
@@ -778,15 +781,15 @@ describe('thread realtime state', () => {
     ])
   })
 
-  it('projects the active attempt and leaves the HTTP snapshot free of stream event time', () => {
-    // HTTP 快照不携带流事件时间：createdAt 留空，由之后的实时事件按自身时间排序。
+  it('projects the active attempt and anchors the HTTP snapshot to its generation time', () => {
+    // HTTP 快照没有流事件时间，采用该 generation 的创建时间（epoch 毫秒）。
     expect(snapshotModelStream('7', activeOutput({ attempt: 3 }))).toMatchObject({
       invocationId: 'gen-1',
       attempt: 3,
       sequence: 0,
       text: '',
       thinking: '',
-      createdAt: '',
+      createdAt: 1785232800000,
     })
   })
 
@@ -826,7 +829,7 @@ describe('thread realtime state', () => {
       eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: { toolCallId: 'call-1', contents, error: null, details: null },
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     })
     expect(reduceRealtimeToolStream(null, partial([42, { type: 'text', text: 'a' }]))).toMatchObject({
       text: 'a',
@@ -843,8 +846,8 @@ describe('thread realtime state', () => {
     expect(reduceRealtimeToolStream(null, partial([{ type: 'json', json: cyclic }]))).toMatchObject({
       text: '',
     })
-    // HTTP 快照不携带流事件时间：createdAt 留空。
-    expect(snapshotToolStream(toolInvocation(), '7')).toMatchObject({ createdAt: '' })
+    // HTTP 快照没有流事件时间，采用该 invocation 的创建时间。
+    expect(snapshotToolStream(toolInvocation(), '7')).toMatchObject({ createdAt: 1785232800000 })
   })
 
   it('accepts a tool overlay only for the matching invocation attempt', () => {
@@ -868,8 +871,8 @@ describe('thread realtime state', () => {
       approval: null,
       result: null,
       error: null,
-      createdAt: 1785232800,
-      updatedAt: 1785232800,
+      createdAt: 1785232800000,
+      updatedAt: 1785232800000,
     })
     const overlay: RealtimeToolStream = {
       threadId: '7',
@@ -878,7 +881,7 @@ describe('thread realtime state', () => {
       toolCallId: 'call-1',
       text: 'partial',
       error: false,
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
     }
     expect(isRealtimeToolStreamActive(overlay, invocation(2))).toBe(true)
     expect(isRealtimeToolStreamActive(overlay, invocation(1))).toBe(false)
@@ -1078,7 +1081,7 @@ describe('thread realtime state', () => {
             observedBytes: 8,
           },
         },
-        createdAt: '2026-07-28T10:00:00Z',
+        createdAt: Date.parse('2026-07-28T10:00:00Z'),
       }
       const p2 = {
         threadId: '7',
@@ -1097,7 +1100,7 @@ describe('thread realtime state', () => {
             observedBytes: 16,
           },
         },
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }
 
       const s1 = reduceRealtimeToolStream(null, p1)
@@ -1135,7 +1138,7 @@ describe('thread realtime state', () => {
             observedBytes: 6,
           },
         },
-        createdAt: '2026-07-28T10:00:00Z',
+        createdAt: Date.parse('2026-07-28T10:00:00Z'),
       }
       const s1 = reduceRealtimeToolStream(null, p1)
 
@@ -1162,7 +1165,7 @@ describe('thread realtime state', () => {
             observedBytes: 11,
           },
         },
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }
       const sOverlap = reduceRealtimeToolStream(s1, pOverlap)
       expect(sOverlap).toBe(s1)
@@ -1187,7 +1190,7 @@ describe('thread realtime state', () => {
             observedBytes: 7,
           },
         },
-        createdAt: '2026-07-28T10:00:00Z',
+        createdAt: Date.parse('2026-07-28T10:00:00Z'),
       }
       const s1 = reduceRealtimeToolStream(null, p1)
 
@@ -1209,7 +1212,7 @@ describe('thread realtime state', () => {
             observedBytes: 27,
           },
         },
-        createdAt: '2026-07-28T10:00:02Z',
+        createdAt: Date.parse('2026-07-28T10:00:02Z'),
       }
       const sGap = reduceRealtimeToolStream(s1, pGap)
       expect(sGap.processOutput?.gapPending).toBe(true)
@@ -1234,7 +1237,7 @@ describe('thread realtime state', () => {
             observedBytes: 21,
           },
         },
-        createdAt: '2026-07-28T10:00:03Z',
+        createdAt: Date.parse('2026-07-28T10:00:03Z'),
       }
       const sRecovered = reduceRealtimeToolStream(sGap, pSnapshot)
       expect(sRecovered.processOutput?.gapPending).toBe(false)
@@ -1259,7 +1262,7 @@ describe('thread realtime state', () => {
             observedBytes: 28,
           },
         },
-        createdAt: '2026-07-28T10:00:04Z',
+        createdAt: Date.parse('2026-07-28T10:00:04Z'),
       }
       const sFinal = reduceRealtimeToolStream(sRecovered, p4)
       expect(sFinal.text).toBe('part 1\npart 2\npart 3\npart 4\n')
@@ -1270,14 +1273,14 @@ describe('thread realtime state', () => {
       // 验证时间戳早于当前快照的历史 SNAPSHOT 被安全忽略，不覆盖较新的文本和 endOffset。
       const newer = reduceRealtimeToolStream(
         null,
-        processOutputPartial('fresh tail', 'SNAPSHOT', 0, 11, 11, '2026-07-28T10:00:05Z'),
+        processOutputPartial('fresh tail', 'SNAPSHOT', 0, 11, 11, Date.parse('2026-07-28T10:00:05Z')),
       )
       expect(newer.text).toBe('fresh tail')
 
       // 乱序到达的旧快照（声明更小 endOffset 且时间戳更早）：必须被完整忽略。
       const stale = reduceRealtimeToolStream(
         newer,
-        processOutputPartial('stale tail', 'SNAPSHOT', 0, 4, 4, '2026-07-28T10:00:01Z'),
+        processOutputPartial('stale tail', 'SNAPSHOT', 0, 4, 4, Date.parse('2026-07-28T10:00:01Z')),
       )
       expect(stale).toBe(newer)
       expect(stale.text).toBe('fresh tail')
@@ -1288,13 +1291,13 @@ describe('thread realtime state', () => {
       // 验证当 APPEND 已推进流到较大偏移时，乱序到达的较早 SNAPSHOT 被正确识别为 STALE 并忽略。
       const appended = reduceRealtimeToolStream(
         null,
-        processOutputPartial('abcdefghij', 'APPEND', 0, 10, 10, '2026-07-28T10:00:05Z'),
+        processOutputPartial('abcdefghij', 'APPEND', 0, 10, 10, Date.parse('2026-07-28T10:00:05Z')),
       )
       expect(appended.text).toBe('abcdefghij')
 
       const stale = reduceRealtimeToolStream(
         appended,
-        processOutputPartial('abc', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:02Z'),
+        processOutputPartial('abc', 'SNAPSHOT', 0, 3, 3, Date.parse('2026-07-28T10:00:02Z')),
       )
       expect(stale).toBe(appended)
       expect(stale.text).toBe('abcdefghij')
@@ -1306,18 +1309,18 @@ describe('thread realtime state', () => {
       // 否则随后介于两者之间的旧 SNAPSHOT 会被误判为合法的新流 RESET。
       const initial = reduceRealtimeToolStream(
         null,
-        processOutputPartial('abcdefghij', 'SNAPSHOT', 0, 10, 10, '2026-07-28T10:00:05Z'),
+        processOutputPartial('abcdefghij', 'SNAPSHOT', 0, 10, 10, Date.parse('2026-07-28T10:00:05Z')),
       )
       const advanced = reduceRealtimeToolStream(
         initial,
-        processOutputPartial('klmnopqrst', 'APPEND', 10, 20, 20, '2026-07-28T10:00:01Z'),
+        processOutputPartial('klmnopqrst', 'APPEND', 10, 20, 20, Date.parse('2026-07-28T10:00:01Z')),
       )
       expect(advanced.text).toBe('abcdefghijklmnopqrst')
-      expect(advanced.createdAt).toBe('2026-07-28T10:00:05Z')
+      expect(advanced.createdAt).toBe(Date.parse('2026-07-28T10:00:05Z'))
 
       const stale = reduceRealtimeToolStream(
         advanced,
-        processOutputPartial('old', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:03Z'),
+        processOutputPartial('old', 'SNAPSHOT', 0, 3, 3, Date.parse('2026-07-28T10:00:03Z')),
       )
       expect(stale).toBe(advanced)
       expect(stale.text).toBe('abcdefghijklmnopqrst')
@@ -1328,13 +1331,13 @@ describe('thread realtime state', () => {
       // 验证同时间戳（或无更晚时间戳保证）下偏移更小的 SNAPSHOT 属于流内历史乱序帧，按 STALE 丢弃，绝不误判为 RESET。
       const newer = reduceRealtimeToolStream(
         null,
-        processOutputPartial('complete content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:05Z'),
+        processOutputPartial('complete content', 'SNAPSHOT', 0, 16, 16, Date.parse('2026-07-28T10:00:05Z')),
       )
       expect(newer.text).toBe('complete content')
 
       const staleSameTime = reduceRealtimeToolStream(
         newer,
-        processOutputPartial('prefix', 'SNAPSHOT', 0, 6, 6, '2026-07-28T10:00:05Z'),
+        processOutputPartial('prefix', 'SNAPSHOT', 0, 6, 6, Date.parse('2026-07-28T10:00:05Z')),
       )
       expect(staleSameTime).toBe(newer)
       expect(staleSameTime.text).toBe('complete content')
@@ -1345,11 +1348,11 @@ describe('thread realtime state', () => {
       // 验证同起止区间且 observedBytes 未增长的重复 SNAPSHOT 被识别为 STALE，不重复覆盖或计算。
       const initial = reduceRealtimeToolStream(
         null,
-        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:05Z'),
+        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, Date.parse('2026-07-28T10:00:05Z')),
       )
       const duplicate = reduceRealtimeToolStream(
         initial,
-        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:06Z'),
+        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, Date.parse('2026-07-28T10:00:06Z')),
       )
       expect(duplicate).toBe(initial)
       expect(duplicate.text).toBe('snapshot content')
@@ -1360,14 +1363,14 @@ describe('thread realtime state', () => {
       // 能合法替换 APPEND 累积文本并切换为 SNAPSHOT mode。
       const appended = reduceRealtimeToolStream(
         null,
-        processOutputPartial('accumulated live output', 'APPEND', 0, 23, 23, '2026-07-28T10:00:00Z'),
+        processOutputPartial('accumulated live output', 'APPEND', 0, 23, 23, Date.parse('2026-07-28T10:00:00Z')),
       )
       expect(appended.text).toBe('accumulated live output')
       expect(appended.processOutput?.mode).toBe('APPEND')
 
       const truncatedPreview = reduceRealtimeToolStream(
         appended,
-        processOutputPartial('... [output omitted] ...\ntruncated tail', 'SNAPSHOT', 23, 23, 23, '2026-07-28T10:00:01Z'),
+        processOutputPartial('... [output omitted] ...\ntruncated tail', 'SNAPSHOT', 23, 23, 23, Date.parse('2026-07-28T10:00:01Z')),
       )
       expect(truncatedPreview.text).toBe('... [output omitted] ...\ntruncated tail')
       expect(truncatedPreview.processOutput).toEqual({
@@ -1385,24 +1388,24 @@ describe('thread realtime state', () => {
       // 使后续连续 APPEND 可以正常追加。
       const first = reduceRealtimeToolStream(
         null,
-        processOutputPartial('hello', 'APPEND', 0, 5, 5, '2026-07-28T10:00:00Z'),
+        processOutputPartial('hello', 'APPEND', 0, 5, 5, Date.parse('2026-07-28T10:00:00Z')),
       )
       const gap = reduceRealtimeToolStream(
         first,
-        processOutputPartial('future', 'APPEND', 50, 56, 56, '2026-07-28T10:00:01Z'),
+        processOutputPartial('future', 'APPEND', 50, 56, 56, Date.parse('2026-07-28T10:00:01Z')),
       )
       expect(gap.processOutput?.gapPending).toBe(true)
 
       const healed = reduceRealtimeToolStream(
         gap,
-        processOutputPartial('hello', 'SNAPSHOT', 0, 5, 5, '2026-07-28T10:00:02Z'),
+        processOutputPartial('hello', 'SNAPSHOT', 0, 5, 5, Date.parse('2026-07-28T10:00:02Z')),
       )
       expect(healed.processOutput?.gapPending).toBe(false)
       expect(healed.processOutput?.endOffset).toBe(5)
 
       const continued = reduceRealtimeToolStream(
         healed,
-        processOutputPartial(' world', 'APPEND', 5, 11, 11, '2026-07-28T10:00:03Z'),
+        processOutputPartial(' world', 'APPEND', 5, 11, 11, Date.parse('2026-07-28T10:00:03Z')),
       )
       expect(continued.text).toBe('hello world')
       expect(continued.processOutput?.gapPending).toBe(false)
@@ -1413,7 +1416,7 @@ describe('thread realtime state', () => {
       // 验证陈旧 SNAPSHOT 虽不覆盖 text 和 offsets，但当其携带 error=true 时允许单调加宽 overlay 的 error 状态。
       const newer = reduceRealtimeToolStream(
         null,
-        processOutputPartial('fresh text', 'SNAPSHOT', 0, 10, 10, '2026-07-28T10:00:05Z'),
+        processOutputPartial('fresh text', 'SNAPSHOT', 0, 10, 10, Date.parse('2026-07-28T10:00:05Z')),
       )
       expect(newer.error).toBe(false)
 
@@ -1434,24 +1437,24 @@ describe('thread realtime state', () => {
             observedBytes: 3,
           },
         },
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }
       const merged = reduceRealtimeToolStream(newer, staleWithError)
       expect(merged.text).toBe('fresh text')
       expect(merged.processOutput?.endOffset).toBe(10)
       expect(merged.error).toBe(true)
-      expect(merged.createdAt).toBe('2026-07-28T10:00:05Z')
+      expect(merged.createdAt).toBe(Date.parse('2026-07-28T10:00:05Z'))
     })
 
     it('resets text and offsets cleanly on a legitimate new-stream SNAPSHOT', () => {
       // 先进入 gapPending 状态并携带旧流的更大 observedBytes。
       const first = reduceRealtimeToolStream(
         null,
-        processOutputPartial('first', 'APPEND', 0, 5, 5, '2026-07-28T10:00:00Z'),
+        processOutputPartial('first', 'APPEND', 0, 5, 5, Date.parse('2026-07-28T10:00:00Z')),
       )
       const gap = reduceRealtimeToolStream(
         first,
-        processOutputPartial('far', 'APPEND', 500, 503, 503, '2026-07-28T10:00:01Z'),
+        processOutputPartial('far', 'APPEND', 500, 503, 503, Date.parse('2026-07-28T10:00:01Z')),
       )
       expect(gap.processOutput?.gapPending).toBe(true)
       expect(gap.processOutput?.observedBytes).toBe(503)
@@ -1460,7 +1463,7 @@ describe('thread realtime state', () => {
       // 绝不沿用旧流的 observedBytes、endOffset 与 gapPending。
       const reset = reduceRealtimeToolStream(
         gap,
-        processOutputPartial('new stream', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:09Z'),
+        processOutputPartial('new stream', 'SNAPSHOT', 0, 3, 3, Date.parse('2026-07-28T10:00:09Z')),
       )
       expect(reset.text).toBe('new stream')
       expect(reset.processOutput).toEqual({
@@ -1475,7 +1478,7 @@ describe('thread realtime state', () => {
       // 重置后的连续 APPEND 必须无缝续写，不产生 gap。
       const continued = reduceRealtimeToolStream(
         reset,
-        processOutputPartial('!', 'APPEND', 3, 4, 4, '2026-07-28T10:00:10Z'),
+        processOutputPartial('!', 'APPEND', 3, 4, 4, Date.parse('2026-07-28T10:00:10Z')),
       )
       expect(continued.text).toBe('new stream!')
       expect(continued.processOutput?.gapPending).toBe(false)
@@ -1495,7 +1498,7 @@ describe('thread realtime state', () => {
           0,
           hugeText.length,
           hugeText.length,
-          '2026-07-28T10:00:00Z',
+          Date.parse('2026-07-28T10:00:00Z'),
         ),
       )
       expect(bounded.processOutput?.hasOmittedPrefix).toBe(true)
@@ -1512,7 +1515,7 @@ describe('thread realtime state', () => {
           hugeText.length,
           hugeText.length + 600 * 1024,
           hugeText.length + 600 * 1024,
-          '2026-07-28T10:00:01Z',
+          Date.parse('2026-07-28T10:00:01Z'),
         ),
       )
       expect(appended.text.startsWith(PROCESS_OUTPUT_OMISSION_MARKER)).toBe(true)
@@ -1529,7 +1532,7 @@ describe('thread realtime state', () => {
       startOffset: number,
       endOffset: number,
       observedBytes: number,
-      createdAt: string,
+      createdAt: number,
     ) {
       return {
         threadId: '7',
@@ -1570,7 +1573,7 @@ describe('thread realtime state', () => {
             observedBytes: 14,
           },
         },
-        createdAt: '2026-07-28T10:00:00Z',
+        createdAt: Date.parse('2026-07-28T10:00:00Z'),
       }
       const s1 = reduceRealtimeToolStream(null, p1)
       expect(s1.text).toBe('attempt 1 text')
@@ -1593,7 +1596,7 @@ describe('thread realtime state', () => {
             observedBytes: 21,
           },
         },
-        createdAt: '2026-07-28T10:00:05Z',
+        createdAt: Date.parse('2026-07-28T10:00:05Z'),
       }
       const s2 = reduceRealtimeToolStream(s1, p2)
       expect(s2.attempt).toBe(2)
@@ -1613,7 +1616,7 @@ function streamAt(sequence: number, text: string, thinking: string) {
     text,
     thinking,
     toolCalls: [],
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: Date.parse('2026-07-28T10:00:00Z'),
     status: 'streaming' as const,
   }
 }
@@ -1702,8 +1705,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approval: null,
     result: null,
     error: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }
@@ -1722,8 +1725,8 @@ function activeOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }

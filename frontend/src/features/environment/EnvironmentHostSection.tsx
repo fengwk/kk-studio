@@ -9,8 +9,8 @@ export interface EnvironmentHostSectionProps {
 }
 
 export function EnvironmentHostSection({ environment }: EnvironmentHostSectionProps) {
-  const { t, locale } = useI18n()
-  const lastSeen = formatTimestamp(environment.lastSeenAt, locale)
+  const { t } = useI18n()
+  const lastSeen = formatTimestamp(environment.lastSeenAt)
 
   return (
     <section className="env-mgmt-section" aria-label={t('ai.environment.runtime.title')}>

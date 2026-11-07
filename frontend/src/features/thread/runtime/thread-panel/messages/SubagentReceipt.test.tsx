@@ -70,7 +70,7 @@ function subagentMessage(
     text: xml,
     notification: { kind: 'SUBAGENT_RESULT', sourceThreadId },
     subjectEntryId: id,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }
@@ -87,7 +87,7 @@ function otherNotificationMessage(
     text,
     notification: { kind, sourceThreadId: 'child-thread-1' },
     subjectEntryId: `entry-${kind}`,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }

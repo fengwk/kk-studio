@@ -170,7 +170,7 @@ function createEvents(): ThreadEventRecord[] {
     turnNumber: Math.floor(i / 4) + 1,
     kind: (['TOOL_CALL', 'ASSISTANT_MESSAGE', 'TOOL_RESULT', 'TURN_START'] as const)[i % 4]!,
     historicalPreviewEligible: i % 4 === 1,
-    createdAt: new Date(Date.now() - (48 - i) * 1000).toISOString(),
+    createdAt: new Date(Date.now() - (48 - i) * 1000).getTime(),
     status: (i === 2 ? 'running' : i === 7 ? 'failed' : 'completed') as ThreadEventRecord['status'],
     title: i % 4 === 0 ? `TOOL_CALL · Step ${i + 1}` : i % 4 === 1 ? `ASSISTANT · Turn ${i + 1}` : i % 4 === 2 ? `TOOL_RESULT · Step ${i + 1}` : `TURN_START · Turn ${i + 1}`,
     summary: `Detailed summary for event step ${i + 1} processing runtime prompt context and status update verification with token usage details.`,

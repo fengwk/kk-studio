@@ -5,30 +5,15 @@ import { retryCountdownSeconds } from '@/features/thread/runtime/thread-panel/me
 const NOW = Date.UTC(2026, 6, 28, 10, 0, 0)
 
 describe('retryCountdownSeconds', () => {
-  it('returns 0 for null, blank and unparseable timestamps', () => {
+  // 测试意图：视图模型里的时间只有 epoch 毫秒数字一种形态，null 就是没有后续重试。
+  it('returns 0 when no retry instant is projected', () => {
     expect(retryCountdownSeconds(null, NOW)).toBe(0)
-    expect(retryCountdownSeconds('   ', NOW)).toBe(0)
-    expect(retryCountdownSeconds('not-a-date', NOW)).toBe(0)
-    expect(retryCountdownSeconds(NaN, NOW)).toBe(0)
-    // 数组少于 3 项（年月日）时不算合法时间戳。
-    expect(retryCountdownSeconds([2026, 99], NOW)).toBe(0)
-    // 数组元素非法时 Date.UTC 产出 NaN，同样按 0 处理。
-    expect(retryCountdownSeconds([Number.NaN, 1, 2], NOW)).toBe(0)
   })
 
-  it('accepts millisecond timestamps without guessing by magnitude', () => {
+  it('counts from the epoch-millisecond instant', () => {
     const retryAt = NOW + 5_000
     expect(retryCountdownSeconds(retryAt, NOW)).toBe(5)
     expect(retryCountdownSeconds(5_000, 0)).toBe(5)
-  })
-
-  it('parses string timestamps and full/first-of-day UTC arrays', () => {
-    expect(retryCountdownSeconds('2026-07-28T10:00:05Z', NOW)).toBe(5)
-    expect(retryCountdownSeconds([2026, 7, 28, 10, 0, 5], NOW)).toBe(5)
-    // 数组只给年月日时，时分秒缺省为 0（UTC 零点）。
-    expect(retryCountdownSeconds([2026, 7, 29], NOW)).toBe(
-      Math.ceil((Date.UTC(2026, 6, 29) - NOW) / 1000),
-    )
   })
 
   it('ceil()s partial seconds and clamps past timestamps to 0', () => {

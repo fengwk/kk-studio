@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import { formatDateTime24 } from '@/shared/lib/date-format'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import {
   formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
@@ -12,13 +12,11 @@ import {
 const EPOCH_MILLIS = 1784505610250
 
 describe('formatTimestamp', () => {
-  // 测试意图：epoch 毫秒按本地 24 小时制渲染，缺值不渲染。
-  it('renders epoch milliseconds in local time and empty values as empty', () => {
-    expect(formatTimestamp(EPOCH_MILLIS, 'en-US')).toBe(
-      formatDateTime24(new Date(EPOCH_MILLIS), 'en-US'),
-    )
-    expect(formatTimestamp(null, 'en-US')).toBe('')
-    expect(formatTimestamp(undefined, 'en-US')).toBe('')
+  // 测试意图：卡片元数据使用共享的分钟精度本地格式，缺值不渲染。
+  it('renders epoch milliseconds with the shared minute format and empty values as empty', () => {
+    expect(formatTimestamp(EPOCH_MILLIS)).toBe(formatBackendDate(EPOCH_MILLIS))
+    expect(formatTimestamp(null)).toBe('')
+    expect(formatTimestamp(undefined)).toBe('')
   })
 })
 

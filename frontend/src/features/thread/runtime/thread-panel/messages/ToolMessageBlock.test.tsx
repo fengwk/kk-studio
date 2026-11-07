@@ -18,7 +18,7 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
     id: 'tool-1',
     role: 'tool',
     subjectEntryId: null,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
     phase: 'result',
     contents: [],

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/ThinkingBlock'
 import { retryCountdownSeconds } from '@/features/thread/runtime/thread-panel/messages/retry-countdown'
 import type {
-  DialogueTimestamp,
   ModelAttemptFailureDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
@@ -74,7 +73,7 @@ export function ModelAttemptFailureMessageBlock({
   )
 }
 
-function useRetryCountdown(retryAt: DialogueTimestamp): { remainingSeconds: number } {
+function useRetryCountdown(retryAt: number | null): { remainingSeconds: number } {
   const [now, setNow] = useState(() => Date.now())
   const remainingSeconds = retryCountdownSeconds(retryAt, now)
 

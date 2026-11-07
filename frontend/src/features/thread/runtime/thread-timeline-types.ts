@@ -9,7 +9,6 @@ type DialogueRole =
   | 'entry'
   | 'model_attempt_failure'
 type DialogueStatus = 'streaming' | 'done' | 'error'
-export type DialogueTimestamp = string | number | readonly number[] | null
 export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 /** 控制面/回合摘要等特殊消息，与 user/assistant/tool 正文区分 */
 type MetaMessageKind = 'turn_usage'
@@ -93,7 +92,8 @@ interface BaseDialogueMessage {
   id: string
   role: DialogueRole
   subjectEntryId: string | null
-  createdAt: DialogueTimestamp
+  /** epoch 毫秒。 */
+  createdAt: number
   status?: DialogueStatus
 }
 
@@ -131,8 +131,10 @@ export interface ModelAttemptFailureDialogueMessage extends BaseDialogueMessage 
   thinking: string
   errorCode: string
   errorMessage: string
-  failedAt: DialogueTimestamp
-  retryAt: DialogueTimestamp
+  /** epoch 毫秒。 */
+  failedAt: number
+  /** 下一次尝试的 epoch 毫秒；没有后续重试时为 null。 */
+  retryAt: number | null
   /** 活动态为 attempt + 1；terminal ASSISTANT_ERROR 没有后续重试。 */
   nextAttempt: number | null
   /** 活动 snapshot 的稳定 generation 身份；durable Entry 不携带这些字段。 */

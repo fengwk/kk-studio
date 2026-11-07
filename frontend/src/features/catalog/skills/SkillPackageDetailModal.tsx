@@ -5,7 +5,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
-import { formatDateTime24 } from '@/shared/lib/date-format'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
@@ -48,7 +48,7 @@ export function SkillPackageDetailModal({
   onEdit: () => void
   onDeleted: () => void
 }) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -105,7 +105,7 @@ export function SkillPackageDetailModal({
   return (
     <Dialog
       className="resource-modal-card skill-package-modal modal-touch-target"
-      title={`${t('ai.skillPackages.detail')}: ${packageName}`}
+      title={t('ai.skillPackages.detailTitle', { name: packageName })}
       pending={downloadMutation.isPending}
       onClose={onClose}
     >
@@ -138,7 +138,7 @@ export function SkillPackageDetailModal({
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.publishedAt')}</dt>
-                  <dd>{formatDateTime24(new Date(detail.publishedAt), locale)}</dd>
+                  <dd>{formatBackendDate(detail.publishedAt)}</dd>
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.skillsCount')}</dt>

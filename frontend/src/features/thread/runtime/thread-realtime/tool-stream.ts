@@ -2,9 +2,9 @@ import { isCanonicalUuid } from '@/shared/lib/uuid'
 import {
   isPositiveInteger,
   stringifyJson,
-  toEpochMillis,
 } from '@/features/thread/runtime/thread-realtime/realtime-values'
 import { getString, isRecord, nonBlank as isNonBlankString } from '@/shared/lib/value'
+import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 interface RealtimeToolPartial {
@@ -18,7 +18,7 @@ interface RealtimeToolPartial {
   eventId: string
   /** 规范的 partial ToolResult payload：{toolCallId, contents, error, details}。 */
   payload: Record<string, unknown>
-  createdAt: string
+  createdAt: number
 }
 
 export const PROCESS_OUTPUT_MAX_CHARS = 512 * 1024
@@ -56,7 +56,7 @@ export interface RealtimeToolStream {
   errorText?: string
   /** Environment process.output 结构化流状态（mode、offsets、observedBytes、omission）。 */
   processOutput?: ProcessOutputStreamState
-  createdAt: string
+  createdAt: number
 }
 
 /** 用于 partial overlay 聚合的规范 ToolResult JSON 字段名。 */
@@ -72,6 +72,7 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     return null
   }
   const envelope = data
+  const createdAt = parseCodecInstantMillis(envelope.createdAt)
   if (
     envelope.type !== 'TOOL_PARTIAL'
     || envelope.subjectKind !== 'TOOL_INVOCATION'
@@ -81,7 +82,7 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     || typeof envelope.eventId !== 'string'
     || !isCanonicalUuid(envelope.eventId)
     || envelope.eventId !== envelope.eventId.toLowerCase()
-    || !isNonBlankString(envelope.createdAt)
+    || createdAt == null
     || !isRecord(envelope.payload)
   ) {
     return null
@@ -92,7 +93,7 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     attempt: envelope.attempt,
     eventId: envelope.eventId,
     payload: envelope.payload,
-    createdAt: envelope.createdAt,
+    createdAt,
   }
 }
 
@@ -116,8 +117,8 @@ export function snapshotToolStream(
     toolCallId: invocation.toolCallId,
     text: '',
     error: false,
-    // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
-    createdAt: '',
+    // HTTP 快照没有流事件时间，采用该 invocation 的创建时间；实时 partial 携带各自的 epoch 毫秒。
+    createdAt: invocation.createdAt,
   }
   const result = parseToolResultPayload(invocation.result)
   if (result != null) {
@@ -481,26 +482,24 @@ export function reduceRealtimeToolStream(
  */
 function classifySnapshot(
   current: RealtimeToolStream,
-  createdAt: string,
+  createdAt: number,
   details: ProcessOutputDetails,
 ): 'STALE' | 'RESET' | 'FORWARD' {
   const applied = current.processOutput
   if (applied == null) {
     return 'FORWARD'
   }
-  const currentMillis = toEpochMillis(current.createdAt)
-  const partialMillis = toEpochMillis(createdAt)
 
   // 1. 时间戳严格早于当前状态：必为乱序/重放的历史快照。
-  if (partialMillis != null && currentMillis != null && partialMillis < currentMillis) {
+  if (createdAt < current.createdAt) {
     return 'STALE'
   }
 
   // 2. 结束偏移回退：
   if (details.endOffset < applied.endOffset) {
     // 仅当时间戳严格晚于当前状态时，才视为新流合法重置（如新命令从 0 开始）；
-    // 否则（时间戳相同、更早或不可比较）属于流内乱序旧快照，必须作为 STALE 丢弃。
-    if (partialMillis != null && currentMillis != null && partialMillis > currentMillis) {
+    // 否则（时间戳相同或更早）属于流内乱序旧快照，必须作为 STALE 丢弃。
+    if (createdAt > current.createdAt) {
       return 'RESET'
     }
     return 'STALE'
@@ -526,16 +525,8 @@ function classifySnapshot(
 }
 
 /** 同一 attempt 的 process.output 时间戳只允许单调前进，避免乱序帧污染后续快照分类基线。 */
-function monotonicCreatedAt(current: string, candidate: string): string {
-  const currentMillis = toEpochMillis(current)
-  const candidateMillis = toEpochMillis(candidate)
-  if (candidateMillis == null) {
-    return current
-  }
-  if (currentMillis == null || candidateMillis > currentMillis) {
-    return candidate
-  }
-  return current
+function monotonicCreatedAt(current: number, candidate: number): number {
+  return candidate > current ? candidate : current
 }
 
 /** 当 tool partial overlay 属于同一 invocation attempt 且没有陈旧时返回 true。 */

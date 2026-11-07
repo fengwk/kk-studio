@@ -423,8 +423,8 @@ export const environmentCatalog = {
     'zh-CN': '管理',
   },
   'ai.environment.managementTitle': {
-    'en-US': 'Manage Environment',
-    'zh-CN': '管理环境',
+    'en-US': 'Manage Environment: {{name}}',
+    'zh-CN': '管理环境：{{name}}',
   },
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',

@@ -16,7 +16,7 @@ function event(
     title,
     text: `${title} 的摘要`,
     subjectEntryId: `entry-${kind}`,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }

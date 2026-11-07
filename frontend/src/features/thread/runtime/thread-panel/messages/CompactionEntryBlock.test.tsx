@@ -17,7 +17,7 @@ function compactionMessage(text: string, id = 'entry-comp1'): EntryEventDialogue
     title: '上下文已压缩',
     text,
     subjectEntryId: id,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }

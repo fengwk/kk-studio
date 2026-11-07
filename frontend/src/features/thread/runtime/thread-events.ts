@@ -14,9 +14,9 @@ import {
   parseAssistantUsage,
 } from '@/features/thread/runtime/thread-timeline/content-utils'
 import type {
-  DialogueTimestamp,
   TurnUsage,
 } from '@/features/thread/runtime/thread-timeline-types'
+import { formatBackendDateSeconds } from '@/shared/lib/date-format'
 import { translate, type TranslationKey } from '@/shared/i18n'
 import type {
   HarnessActiveAssistantOutputDTO,
@@ -81,7 +81,8 @@ export interface ThreadEventRecord {
   title: string
   /** 单行摘要：durable Entry 使用压缩后的 payload JSON。 */
   summary: string
-  createdAt: DialogueTimestamp
+  /** epoch 毫秒。 */
+  createdAt: number
   /** 结构化详情行（detail widget 渲染为 label/value）。 */
   details: ThreadEventDetailRow[]
   /** 事件的完整原始 JSON（durable Entry 为 payload JSON，synthetic 活跃记录为其 DTO / realtime stream 的 pretty JSON）。 */
@@ -362,10 +363,10 @@ type RecordBase = Pick<ThreadEventRecord, 'id' | 'source' | 'entryId' | 'turnSta
   details: ThreadEventDetailRow[]
 }
 
-function withTime(details: ThreadEventDetailRow[], createdAt: DialogueTimestamp): ThreadEventDetailRow[] {
+function withTime(details: ThreadEventDetailRow[], createdAt: number): ThreadEventDetailRow[] {
   return [
     ...details,
-    { label: translate('ai.runtime.event.detail.createdAt'), value: String(createdAt) },
+    { label: translate('ai.runtime.event.detail.createdAt'), value: formatBackendDateSeconds(createdAt) },
   ]
 }
 
@@ -732,8 +733,8 @@ function projectAttemptFailureRecord(
     { label: translate('ai.runtime.event.detail.sequence'), value: failure.sequence },
     { label: translate('ai.runtime.event.detail.errorCode'), value: failure.errorCode },
     { label: translate('ai.runtime.event.detail.errorMessage'), value: failure.errorMessage },
-    { label: translate('ai.runtime.event.detail.failedAt'), value: String(failure.failedAt) },
-    { label: translate('ai.runtime.event.detail.retryAt'), value: String(failure.retryAt) },
+    { label: translate('ai.runtime.event.detail.failedAt'), value: formatBackendDateSeconds(failure.failedAt) },
+    { label: translate('ai.runtime.event.detail.retryAt'), value: formatBackendDateSeconds(failure.retryAt) },
   ]
   if (failure.text) {
     details.push({

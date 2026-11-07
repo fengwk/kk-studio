@@ -163,7 +163,7 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     // 5. 切回 zh-CN 验证删除弹窗中文插值
     await page.click('#toggle-locale-btn')
     await page.getByRole('button', { name: '详情 core-tools' }).click()
-    const zhDetailModal = page.getByRole('dialog', { name: '详情: core-tools' })
+    const zhDetailModal = page.getByRole('dialog', { name: '详情：core-tools' })
     await expect(zhDetailModal).toContainText('概览')
     await zhDetailModal.getByRole('button', { name: '删除技能包 core-tools' }).click()
     const zhDeleteModal = page.getByRole('alertdialog')

@@ -13,7 +13,7 @@ const message: ToolDialogueMessage = {
   id: 'tool-1',
   role: 'tool',
   subjectEntryId: 'entry-1',
-  createdAt: null,
+  createdAt: 1785232800000,
   status: 'done',
   phase: 'result',
   contents: [{ type: 'text', text: 'full result' }],

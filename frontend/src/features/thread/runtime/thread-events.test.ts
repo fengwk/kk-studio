@@ -22,7 +22,7 @@ function entry(
   entryId: string,
   entryType: EntryType,
   payload: Record<string, unknown>,
-  createdAt = 1785232800,
+  createdAt = 1785232800000,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
@@ -59,8 +59,8 @@ function activeAssistantOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }
@@ -78,8 +78,8 @@ function generationFailure(
     thinking: 'partial thinking',
     errorCode: 'TRANSIENT',
     errorMessage: 'try later',
-    failedAt: 1785232800,
-    retryAt: 1785232805,
+    failedAt: 1785232800000,
+    retryAt: 1785232805000,
     ...overrides,
   }
 }
@@ -105,8 +105,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approval: null,
     result: null,
     error: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }
@@ -120,7 +120,7 @@ function modelStream(overrides: Partial<RealtimeModelStream> = {}): RealtimeMode
     text: 'hello',
     thinking: '',
     toolCalls: [],
-    createdAt: '2026-07-28T10:00:06Z',
+    createdAt: Date.parse('2026-07-28T10:00:06Z'),
     status: 'streaming',
     ...overrides,
   }
@@ -847,7 +847,7 @@ describe('buildThreadEventTimeline', () => {
       text: '',
       error: true,
       errorText: 'boom',
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: 1785232800000,
     }
     const failed = build(entriesTool, {
       toolInvocations: [toolInvocation({ status: 'RUNNING' })],
@@ -878,9 +878,9 @@ describe('buildThreadEventTimeline', () => {
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
     const failures = [
-      generationFailure({ attempt: 2, sequence: '6', failedAt: 1785232800 }),
-      generationFailure({ attempt: 2, sequence: '5', failedAt: 1785232700.5, retryAt: 1785232701 }),
-      generationFailure({ attempt: 2, sequence: '7', failedAt: 1785232900 }),
+      generationFailure({ attempt: 2, sequence: '6', failedAt: 1785232800000 }),
+      generationFailure({ attempt: 2, sequence: '5', failedAt: 1785232700500, retryAt: 1785232701000 }),
+      generationFailure({ attempt: 2, sequence: '7', failedAt: 1785232900000 }),
     ]
     const events = build(entries, {
       generationFailures: failures,
@@ -988,7 +988,7 @@ describe('buildThreadEventTimeline', () => {
           toolCallId: 'call-full',
           text: 'hello\n',
           error: false,
-          createdAt: '2026-07-28T10:00:02Z',
+          createdAt: 1785232802000,
         },
       ],
     ])

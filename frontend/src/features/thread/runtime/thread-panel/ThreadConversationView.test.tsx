@@ -26,7 +26,7 @@ function assistantMessage(id: string, text: string, status: 'done' | 'streaming'
     role: 'assistant',
     subjectEntryId: id,
     text,
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: 1785232800000,
     status,
   }
 }

@@ -8,7 +8,6 @@ import {
   isEnvironmentRuntimeUnavailableError,
   presentUpdateProgress,
 } from '@/features/environment/environment-utils'
-import { timestampMillis } from '@/shared/lib/date-format'
 import { EnvironmentInstallModal } from '@/features/environment/EnvironmentInstallModal'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
@@ -65,11 +64,11 @@ function formatUpdateProgress(update: EnvironmentUpdateProgressDTO, t: Translate
  */
 const STATUS_EXPIRY_RECHECK_SLACK_MS = 250
 
-/** 权威列表里最早的状态截止时间（毫秒）；没有任何可解析的截止时间时为 null。 */
+/** 权威列表里最早的状态截止时间（毫秒）；没有任何截止时间时为 null。 */
 function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
   let earliest: number | null = null
   for (const card of cards) {
-    const at = timestampMillis(card.statusExpiresAt)
+    const at = card.statusExpiresAt
     if (at == null) {
       continue
     }
@@ -81,7 +80,7 @@ function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
 }
 
 export function EnvironmentsPage() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
 
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -283,7 +282,7 @@ export function EnvironmentsPage() {
             const capabilityIds = (environment.capabilities ?? [])
               .map((capability) => capability.id)
               .filter(Boolean)
-            const lastSeen = formatTimestamp(environment.lastSeenAt, locale)
+            const lastSeen = formatTimestamp(environment.lastSeenAt)
 
             const runtimeQuery = runtimeQueries[index]
             const runtimeStatus = runtimeQuery.data?.status

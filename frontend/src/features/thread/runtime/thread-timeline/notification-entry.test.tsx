@@ -27,7 +27,7 @@ function notificationEntry(
       sourceThreadId: 'child-thread-1',
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     },
-    createdAt: 1785232800,
+    createdAt: 1785232800000,
     usageCost: null,
   }
 }
@@ -41,7 +41,7 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     payload: {
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     },
-    createdAt: 1785232800,
+    createdAt: 1785232800000,
     usageCost: null,
   }
 }
@@ -66,7 +66,7 @@ function queuedCommand(
           message: { role: 'USER', contents: [{ type: 'text', text }] },
         },
     cancelledAt: null,
-    createdAt: 1785232801,
+    createdAt: 1785232801000,
   }
 }
 
@@ -95,7 +95,7 @@ function notificationMessage(
     text,
     notification: { kind, sourceThreadId },
     subjectEntryId: `entry-${kind}`,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }

@@ -40,7 +40,7 @@ function boundController(): BoundThreadPanelController {
     events: [{
       id: 'entry:a', entryId: 'a', source: 'entry', turnStartEntryId: null, turnNumber: 1,
       kind: 'TOOL_CALL', title: 'ASSISTANT', status: 'completed', summary: 'tool_call',
-      createdAt: '2026-01-01', details: [], rawJson: '{}', historicalPreviewEligible: true,
+      createdAt: 1785232800000, details: [], rawJson: '{}', historicalPreviewEligible: true,
     }],
     thread: {
       threadId: 'thread', name: 'main', sessionId: 'session', headEntryId: 'head',

@@ -103,7 +103,7 @@ const mutationReviewHarness = {
       rendererKey: 'write',
       arguments: rawArgs,
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -143,7 +143,7 @@ const mutationReviewHarness = {
         content: LONG_WRITE_CONTENT,
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'SUCCEEDED',
     }
@@ -157,7 +157,7 @@ const mutationReviewHarness = {
       rendererKey: 'write',
       arguments: callMsg.arguments,
       contents: [{ type: 'text', text: rawDuplicateBody }],
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'done',
     }
 
@@ -183,7 +183,7 @@ const mutationReviewHarness = {
         new_string: 'const newVal = 2;',
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'streaming',
     }
 
@@ -210,7 +210,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: rawArgs,
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -258,7 +258,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: rawArgs,
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -305,7 +305,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'SUCCEEDED',
       approval: {
@@ -328,7 +328,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'done',
       editReview: resultReview,
     }
@@ -352,7 +352,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/src/App.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'SUCCEEDED',
       editReview: {
@@ -371,7 +371,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: callMsg.arguments,
       contents: [{ type: 'text', text: rawDuplicateBody }],
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'done',
     }
 
@@ -398,7 +398,7 @@ const mutationReviewHarness = {
         ...(isWrite ? { content: 'test content' } : { old_string: 'a', new_string: 'b' }),
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'error',
       invocationStatus: 'FAILED',
     }
@@ -413,7 +413,7 @@ const mutationReviewHarness = {
       arguments: callMsg.arguments,
       contents: [{ type: 'text', text: failureError }],
       errorMessage: failureError,
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'error',
     }
 

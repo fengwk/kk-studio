@@ -33,7 +33,7 @@ function entry(
     parentEntryId: null,
     entryType,
     payload,
-    createdAt: 1767225600,
+    createdAt: 1767225600000,
     usageCost: null,
   }
 }
@@ -96,7 +96,7 @@ export function CompactionCardHarnessApp() {
       subjectEntryId: null,
       role: 'assistant',
       text: Array.from({ length: streamLines }, (_, index) => `stream line ${index + 1}`).join('\n\n'),
-      createdAt: null,
+      createdAt: 1785258000000,
       status: 'streaming',
     })
   }

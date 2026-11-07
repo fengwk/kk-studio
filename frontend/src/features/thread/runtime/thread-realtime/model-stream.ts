@@ -3,9 +3,9 @@ import {
   isNonNegativeInteger,
   isPositiveInteger,
   nullableString,
-  toEpochMillis,
 } from '@/features/thread/runtime/thread-realtime/realtime-values'
 import { isRecord, nonBlank as isNonBlankString } from '@/shared/lib/value'
+import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type {
   HarnessActiveAssistantOutputDTO,
   HarnessGenerationFailureDTO,
@@ -33,7 +33,7 @@ export interface RealtimeModelDelta {
   kind: 'TEXT_DELTA' | 'THINKING_DELTA' | 'TOOL_CALL_DELTA'
   text: string
   toolCall?: RealtimeToolCallDelta
-  createdAt: string
+  createdAt: number
 }
 
 interface RealtimeModelCheckpoint {
@@ -42,7 +42,7 @@ interface RealtimeModelCheckpoint {
   attempt: number
   /** durable checkpoint 覆盖到的 delta sequence（追帧完成信号）。 */
   sequence: number
-  createdAt: string
+  createdAt: number
 }
 
 export interface RealtimeModelStream {
@@ -53,7 +53,7 @@ export interface RealtimeModelStream {
   text: string
   thinking: string
   toolCalls: RealtimeToolCallDraft[]
-  createdAt: string
+  createdAt: number
   /**
    * 'streaming' 表示 RUNNING/checkpoint/delta overlay；'done' 表示持久终止态 result
    * 投影；'error' 表示持久终止态 error 投影（checkpoint 已冻结）。timeline
@@ -75,6 +75,8 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     return null
   }
   const envelope = data
+  // realtime event JSON 的 createdAt 与 codec JSON 同源，都是 Java Instant.toString() 文本。
+  const createdAt = parseCodecInstantMillis(envelope.createdAt)
   if (
     envelope.type !== 'MODEL_DELTA'
     || envelope.subjectKind !== 'MODEL_INVOCATION'
@@ -82,8 +84,7 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     || !isNonBlankString(envelope.subjectId)
     || !isPositiveInteger(envelope.attempt)
     || !isPositiveInteger(envelope.sequence)
-    || !isNonBlankString(envelope.createdAt)
-    || toEpochMillis(envelope.createdAt) == null
+    || createdAt == null
     || !isRecord(envelope.payload)
   ) {
     return null
@@ -102,7 +103,7 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
       kind,
       text: '',
       toolCall: toolCall ?? undefined,
-      createdAt: envelope.createdAt,
+      createdAt,
     }
   }
   if (kind !== 'TEXT_DELTA' && kind !== 'THINKING_DELTA') {
@@ -119,7 +120,7 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     sequence: envelope.sequence,
     kind,
     text,
-    createdAt: envelope.createdAt,
+    createdAt,
   }
 }
 
@@ -144,6 +145,7 @@ export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckp
     return null
   }
   const envelope = data
+  const createdAt = parseCodecInstantMillis(envelope.createdAt)
   if (
     envelope.type !== 'MODEL_CHECKPOINT'
     || envelope.subjectKind !== 'MODEL_INVOCATION'
@@ -151,8 +153,7 @@ export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckp
     || !isNonBlankString(envelope.subjectId)
     || !isPositiveInteger(envelope.attempt)
     || !isPositiveInteger(envelope.sequence)
-    || !isNonBlankString(envelope.createdAt)
-    || toEpochMillis(envelope.createdAt) == null
+    || createdAt == null
     || Object.hasOwn(envelope, 'payload')
     || !hasOnlyFields(envelope, MODEL_CHECKPOINT_FIELDS)
   ) {
@@ -163,7 +164,7 @@ export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckp
     invocationId: envelope.subjectId,
     attempt: envelope.attempt,
     sequence: envelope.sequence,
-    createdAt: envelope.createdAt,
+    createdAt,
   }
 }
 
@@ -385,8 +386,8 @@ export function snapshotModelStream(
     text,
     thinking,
     toolCalls: [],
-    // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
-    createdAt: '',
+    // HTTP 快照没有流事件时间，采用该 generation 的创建时间；之后的实时事件携带各自的 epoch 毫秒。
+    createdAt: activeOutput.createdAt,
     status: activeOutput.status === 'SUCCEEDED'
       ? 'done'
       : failed

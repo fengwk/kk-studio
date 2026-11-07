@@ -47,7 +47,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         content: fullContent,
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -88,7 +88,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         content: '',
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -119,7 +119,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         new_string: 'const newVal = 2;',
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'streaming',
     }
 
@@ -167,7 +167,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         new_string: 'const a = 100;\nconst b = 200;',
       }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'WAITING_APPROVAL',
       approval: {
@@ -262,7 +262,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/src/App.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'SUCCEEDED',
       editReview: {
@@ -282,7 +282,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/src/App.tsx' }),
       contents: [{ type: 'text', text: rawDuplicateBody }],
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'done',
     }
 
@@ -338,7 +338,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
           rendererKey: 'edit',
           arguments: rawArgs,
           contents: [],
-          createdAt: '2026-10-19T00:00:00Z',
+          createdAt: Date.parse('2026-10-19T00:00:00Z'),
           status: 'done',
           invocationStatus: 'WAITING_APPROVAL',
           approval: {
@@ -383,7 +383,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
       status: 'done',
       invocationStatus: 'SUCCEEDED',
       approval: {
@@ -406,7 +406,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
       contents: [],
-      createdAt: '2026-10-19T00:00:01Z',
+      createdAt: Date.parse('2026-10-19T00:00:01Z'),
       status: 'done',
       editReview: resultReview,
     }

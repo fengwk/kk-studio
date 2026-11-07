@@ -22,7 +22,7 @@ import { headersUpdate, mcpServerService } from '@/features/catalog/mcp-server-s
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import { formatDateTime24 } from '@/shared/lib/date-format'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import {
   DEFAULT_TIMEOUT_MILLIS,
   parseAndValidateHeaders,
@@ -63,7 +63,7 @@ interface EditModalState {
 }
 
 export function McpServersPage() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
 
   const [createModal, setCreateModal] = useState<CreateModalState | null>(null)
@@ -422,7 +422,7 @@ export function McpServersPage() {
               onClick={handleOpenCreate}
             />
           {servers.map((server: McpServerSummaryDTO) => {
-            const updateTime = formatDateTime24(new Date(server.updatedAt), locale)
+            const updateTime = formatBackendDate(server.updatedAt)
 
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'
@@ -589,7 +589,7 @@ export function McpServersPage() {
       {editModal && (
         <Dialog
           className="mcp-modal-card"
-          title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
+          title={t('ai.mcp.editTitle', { name: editModal.server.name })}
           pending={updateMutation.isPending || editModal.discoverPending}
           onClose={handleRequestCloseEdit}
         >

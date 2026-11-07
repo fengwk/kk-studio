@@ -1,4 +1,7 @@
-import type { AppLocale } from '@/shared/i18n'
+/**
+ * 时间显示的唯一格式：本地 `YYYY-MM-DD HH:mm`。卡片与详情元数据使用分钟精度；
+ * 诊断时间线（如 Environment 事件日志）只在同一格式后追加 `:ss`。
+ */
 
 /** 把 wire Instant（epoch 毫秒）格式化为本地 `YYYY-MM-DD HH:mm`；非法值显示 '-'。 */
 export function formatBackendDate(value: number): string {
@@ -6,11 +9,20 @@ export function formatBackendDate(value: number): string {
   if (!Number.isFinite(date.getTime())) {
     return '-'
   }
-  return formatLocalDateMinutes(date)
+  return formatLocalDateTime(date)
+}
+
+/** 诊断时间线用的同一固定格式，精确到秒；非法值显示 '-'。 */
+export function formatBackendDateSeconds(value: number): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
+    return '-'
+  }
+  return `${formatLocalDateTime(date)}:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
 /** 本地日期时间，精确到分钟。调用方须传入有效日期。 */
-export function formatLocalDateMinutes(date: Date): string {
+function formatLocalDateTime(date: Date): string {
   return `${String(date.getFullYear()).padStart(4, '0')}-${String(
     date.getMonth() + 1,
   ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(
@@ -18,44 +30,19 @@ export function formatLocalDateMinutes(date: Date): string {
   ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-/** 本地 24 小时制日期时间（含秒）；locale 决定分隔符与字段顺序。 */
-export function formatDateTime24(date: Date, locale: AppLocale): string {
-  return date.toLocaleString(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-}
-
-/** wire 时间戳的合法形态：epoch 数字、ISO 字符串或 `[year, month, day, hour, minute, second]`。 */
-export type TimestampInput = number | string | readonly number[] | null | undefined
-
 /**
- * 时间戳转毫秒。数字直接按 epoch 毫秒处理；字符串按可解析日期；数组按 UTC 日历字段。
- * 无法识别的形态返回 null，绝不猜测当前时间。
+ * 解析历史 codec JSON 里的时间：只接受 Java `Instant.toString()` 的毫秒精度文本
+ * （UTC `Z`，整秒无小数，否则恰好三位小数，例如 `2026-01-01T00:00:05Z`、
+ * `2026-01-01T00:00:05.120Z`）。其他形态一律返回 null，由调用方按未知数据处理。
  */
-export function timestampMillis(value: TimestampInput): number | null {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      return null
-    }
-    return value
+export function parseCodecInstantMillis(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) {
+    return null
   }
-  if (typeof value === 'string') {
-    if (!value.trim()) {
-      return null
-    }
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : null
+  const millis = Date.parse(value)
+  if (!Number.isFinite(millis)) {
+    return null
   }
-  if (Array.isArray(value) && value.length >= 3) {
-    const [year, month, day, hour = 0, minute = 0, second = 0] = value.map(Number)
-    const parsed = Date.UTC(year, month - 1, day, hour, minute, second)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
+  // 往返一致才接受：拒绝 2026-02-30 这类会被 Date 静默归一化的非规范文本。
+  return new Date(millis).toISOString().replace('.000Z', 'Z') === value ? millis : null
 }

@@ -30,6 +30,8 @@ export function RetryControlsHarness() {
     baseUrl: 'https://api.openai.com/v1',
     description: 'OpenAI official endpoints',
     credential: '',
+    credentialConfigured: true,
+    clearCredential: false,
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     modelHttpRetryStatusCodes: [408, 429],
