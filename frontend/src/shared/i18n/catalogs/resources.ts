@@ -1044,6 +1044,10 @@ export const resourcesCatalog = {
     'en-US': 'Select a valid Provider Type',
     'zh-CN': '请选择有效的 Provider Type',
   },
+  'ai.catalog.validation.providerTimeout': {
+    'en-US': 'Model call timeouts must be whole milliseconds',
+    'zh-CN': '模型调用超时必须是整数毫秒',
+  },
   'ai.catalog.validation.model': {
     'en-US': 'Select a Default Model',
     'zh-CN': '请选择 Default Model',

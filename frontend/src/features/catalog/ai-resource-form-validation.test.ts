@@ -297,6 +297,47 @@ describe('ai-resource-form-validation', () => {
     })
   })
 
+  describe('provider timeout validation', () => {
+    // 超时是本地可控输入：非法值必须是可读的整数提示，不能被显示成网络故障。
+    it('reports the integer requirement instead of a network failure', () => {
+      setLocale('zh-CN')
+      const invalid = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: {
+            ...providerDraft(),
+            name: 'timeout-provider',
+            modelCallTimeoutMillis: '1,800,000',
+          },
+          modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(invalid.ok).toBe(false)
+      expect(invalid.message).toBe('模型调用超时必须是整数毫秒')
+      expect(invalid.fields.general).toBe(invalid.message)
+
+      setLocale('en-US')
+      const invalidEnglish = validateResourceDraft(
+        { kind: 'provider', mode: 'create' },
+        {
+          providerDraft: {
+            ...providerDraft(),
+            name: 'timeout-provider',
+            modelCallIdleTimeoutMillis: '1.5',
+          },
+          modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(invalidEnglish.ok).toBe(false)
+      expect(invalidEnglish.message).toBe('Model call timeouts must be whole milliseconds')
+      setLocale('zh-CN')
+    })
+  })
+
   describe('provider http retry policy validation', () => {
     it('accepts inherit (null), disabled ([]), and valid custom status codes', () => {
       // Inherit

@@ -58,6 +58,11 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /inputModalit|modality/i, key: 'ai.catalog.validation.inputModality' },
     { match: /modelId/i, key: 'ai.catalog.validation.modelId' },
     { match: /providerType|provider type/i, key: 'ai.catalog.validation.providerType' },
+    // Provider 超时是本地输入校验，必须给出整数提示；"timeout" 字样不能被当成网络故障。
+    {
+      match: /canonical non-negative integer/i,
+      key: 'ai.catalog.validation.providerTimeout',
+    },
     { match: /providerName|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
     {
       match: /model name already exists:?\s*(.*)$/i,
