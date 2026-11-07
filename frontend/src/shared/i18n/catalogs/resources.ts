@@ -1560,10 +1560,6 @@ export const resourcesCatalog = {
     'en-US': 'Unverified',
     'zh-CN': '未验证',
   },
-  'ai.mcp.statusFailed': {
-    'en-US': 'Failed',
-    'zh-CN': '失败',
-  },
   'ai.mcp.enabledState': {
     'en-US': 'Enabled State',
     'zh-CN': '启用状态',

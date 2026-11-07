@@ -1901,12 +1901,10 @@ export const LIVE_TURN_PLAN_TOOL_STATE_VALUES: readonly LiveTurnPlanToolState[] 
 export type McpDiscoveryStatus =
   | 'UNVERIFIED'
   | 'AVAILABLE'
-  | 'FAILED'
 
 export const MCP_DISCOVERY_STATUS_VALUES: readonly McpDiscoveryStatus[] = [
   'UNVERIFIED',
   'AVAILABLE',
-  'FAILED',
 ]
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO */

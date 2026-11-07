@@ -427,11 +427,7 @@ export function McpServersPage() {
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'
                 ? t('ai.mcp.statusAvailable')
-                : server.discoveryStatus === 'FAILED'
-                  ? t('ai.mcp.statusFailed')
-                  : server.discoveryStatus === 'UNVERIFIED'
-                    ? t('ai.mcp.statusUnverified')
-                    : String(server.discoveryStatus)
+                : t('ai.mcp.statusUnverified')
 
             const rows: Array<
               | [string, string]
