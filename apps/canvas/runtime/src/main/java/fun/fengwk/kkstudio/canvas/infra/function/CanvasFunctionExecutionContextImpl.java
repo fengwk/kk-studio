@@ -66,7 +66,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
         transactions.checkpoint(
             frozen.canvasId(),
             frozen.nodeId(),
-            frozen.requestId().toString(),
+            frozen.requestId(),
             claim.leaseToken(),
             Objects.requireNonNull(stage, "stage"),
             Objects.requireNonNull(adapterState, "adapterState"));

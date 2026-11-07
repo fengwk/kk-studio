@@ -146,14 +146,6 @@ public class CanvasResourceJdbcStore {
         .update();
   }
 
-  public int deleteByOwnerNode(UUID canvasId, UUID nodeId) {
-    return jdbc.sql(
-            "delete from canvas_resource where canvas_id = :canvasId and owner_node_id = :nodeId")
-        .param("canvasId", canvasId)
-        .param("nodeId", nodeId)
-        .update();
-  }
-
   private JdbcClient.StatementSpec insertStatement(String sql, CanvasResourceDO resource) {
     return jdbc.sql(sql)
         .param("id", resource.getId())

@@ -58,7 +58,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
         runtimeTransactions.completeSuccess(frozen, UUID.randomUUID(), frozen.outputResourceIds()));
     assertFalse(
         runtimeTransactions.markUnknown(
-            nodeId, REQUEST_1, UUID.randomUUID(), "stale unknown reason"));
+            nodeId, frozen.requestId(), UUID.randomUUID(), "stale unknown reason"));
 
     CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
@@ -102,7 +102,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
             frozen, claim.leaseToken(), frozen.outputResourceIds()));
     assertFalse(
         runtimeTransactions.failIfRunning(
-            nodeId, REQUEST_1, claim.leaseToken(), "ignored failure"));
+            nodeId, frozen.requestId(), claim.leaseToken(), "ignored failure"));
     assertEquals(
         CanvasFunctionRunStatus.RUNNING, runRepository.findByNodeId(nodeId).orElseThrow().status());
     assertEquals(1L, version(canvasId));
@@ -171,7 +171,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
             frozen1, UUID.randomUUID(), frozen1.outputResourceIds()));
     assertFalse(
         runtimeTransactions.markUnknown(
-            node1, REQUEST_1, UUID.randomUUID(), "stale unknown reason"));
+            node1, frozen1.requestId(), UUID.randomUUID(), "stale unknown reason"));
 
     CanvasFunctionRun run1InDb = runRepository.findByNodeId(node1).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, run1InDb.status());
@@ -206,7 +206,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
 
     assertTrue(
         runtimeTransactions.failIfRunning(
-            node3, request3, claim3.leaseToken(), "execution failed"));
+            node3, frozen3.requestId(), claim3.leaseToken(), "execution failed"));
     CanvasFunctionRun failedRun3 = runRepository.findByNodeId(node3).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.FAILED, failedRun3.status());
     assertTrue(pinRepository.findByRun(canvasId, node3, UUID.fromString(request3)).isEmpty());

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.canvas.testing;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -68,11 +67,6 @@ public final class TestCanvasFunctionCatalogSource {
               }
               return catalog;
             });
-    when(lease.bind(anyString()))
-        .thenAnswer(
-            invocation ->
-                new CanvasFunctionBinding(
-                    lease.catalog().require(invocation.getArgument(0)).function()));
     when(lease.require(any()))
         .thenAnswer(invocation -> require(lease.catalog(), invocation.getArgument(0)));
     doAnswer(

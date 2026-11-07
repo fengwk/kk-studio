@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -46,15 +45,14 @@ class PluginCanvasFunctionCatalogSourceTest {
     when(runtime.acquire()).thenReturn(snapshotLease);
   }
 
-  /** bind 冻结当前完整定义，require 按同一定义取回注册项。 */
+  /** 租用钉住当前目录，require 按同一定义取回注册项。 */
   @Test
-  void bindsAndRequiresTheCurrentDefinition() {
+  void requiresTheCurrentDefinition() {
     try (PluginCanvasFunctionCatalogSource.Lease lease =
         new PluginCanvasFunctionCatalogSource(runtime).acquire()) {
       assertSame(catalog, lease.catalog());
-      CanvasFunctionBinding binding = lease.bind("test.render");
-      assertEquals(DEFINITION, binding.definition());
-      assertSame(catalog.require("test.render"), lease.require(binding));
+      CanvasFunctionBinding binding = new CanvasFunctionBinding(DEFINITION);
+      assertSame(catalog.find("test.render").orElseThrow(), lease.require(binding));
     }
   }
 

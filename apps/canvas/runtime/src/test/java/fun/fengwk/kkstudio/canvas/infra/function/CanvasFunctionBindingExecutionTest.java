@@ -107,7 +107,7 @@ class CanvasFunctionBindingExecutionTest {
     verify(transactions)
         .failIfRunning(
             claim.nodeId(),
-            claim.requestId().toString(),
+            claim.requestId(),
             claim.leaseToken(),
             "Function is no longer available or its definition changed; start it again");
     assertEquals(0, catalogSource.openLeases());
@@ -134,8 +134,7 @@ class CanvasFunctionBindingExecutionTest {
     runWorker(catalogSource.source(), stateCodec, transactions, claim);
 
     verify(transactions)
-        .markUnknown(
-            eq(claim.nodeId()), eq(claim.requestId().toString()), eq(claim.leaseToken()), any());
+        .markUnknown(eq(claim.nodeId()), eq(claim.requestId()), eq(claim.leaseToken()), any());
     assertEquals(0, catalogSource.openLeases());
   }
 

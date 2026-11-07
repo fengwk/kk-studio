@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRe
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -119,7 +118,7 @@ public class CanvasFunctionRunTransactions {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(expectedVersion, "expectedVersion");
-    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    UUID validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
     CanvasDocument document = requireDocumentForUpdate(canvasId);
     NodeRecord node =
         canvasStore
@@ -130,7 +129,7 @@ public class CanvasFunctionRunTransactions {
     }
     CanvasFunctionRun existing = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
     // 精确 requestId 重放优先于版本校验：即使 expectedVersion 已过时也返回已接受结果，不再取租用、pin 或提交。
-    if (existing != null && existing.requestId().toString().equals(validatedRequestId)) {
+    if (existing != null && existing.requestId().equals(validatedRequestId)) {
       return new CanvasFunctionStartResult(existing, false);
     }
     if (existing != null
@@ -158,13 +157,12 @@ public class CanvasFunctionRunTransactions {
         freezeManifest(
             canvasId, nodeId, node.function().name(), args, definition.referencePolicy());
     List<CanvasFunctionFrozenOutput> outputs = freezeOutputs(node.name(), definition);
-    UUID requestIdUuid = Uuids.parseCanonical(validatedRequestId, "requestId");
     CanvasFunctionFrozenRun frozen =
         new CanvasFunctionFrozenRun(
             canvasId,
             nodeId,
             node.name(),
-            requestIdUuid,
+            validatedRequestId,
             binding,
             args,
             manifest,
@@ -178,7 +176,7 @@ public class CanvasFunctionRunTransactions {
     CanvasFunctionRun ready =
         new CanvasFunctionRun(
             nodeId,
-            requestIdUuid,
+            validatedRequestId,
             CanvasFunctionRunStatus.READY,
             0,
             frozen.stage(),
@@ -257,7 +255,7 @@ public class CanvasFunctionRunTransactions {
   public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
-    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    UUID validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
     CanvasDocument document = requireDocumentForUpdate(canvasId);
     canvasStore
         .lockNode(canvasId, nodeId)
@@ -266,7 +264,7 @@ public class CanvasFunctionRunTransactions {
         runRepository
             .findByNodeIdForUpdate(nodeId)
             .orElseThrow(() -> notFound("Canvas Function run not found"));
-    if (!current.requestId().toString().equals(validatedRequestId)) {
+    if (!current.requestId().equals(validatedRequestId)) {
       throw conflict("requestId does not match the current FunctionRun");
     }
     if (current.status() == CanvasFunctionRunStatus.UNKNOWN) {
@@ -308,7 +306,7 @@ public class CanvasFunctionRunTransactions {
     if (resolution == null) {
       throw DomainException.validation("resolution", "resolution is required");
     }
-    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    UUID validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
     String validatedVerification = validateVerification(verification);
     CanvasDocument document = requireDocumentForUpdate(canvasId);
     canvasStore
@@ -318,7 +316,7 @@ public class CanvasFunctionRunTransactions {
         runRepository
             .findByNodeIdForUpdate(nodeId)
             .orElseThrow(() -> notFound("Canvas Function run not found"));
-    if (!current.requestId().toString().equals(validatedRequestId)) {
+    if (!current.requestId().equals(validatedRequestId)) {
       throw conflict("requestId does not match the current FunctionRun");
     }
     if (current.status() != CanvasFunctionRunStatus.UNKNOWN) {
@@ -343,19 +341,19 @@ public class CanvasFunctionRunTransactions {
   public CanvasFunctionFrozenRun checkpoint(
       UUID canvasId,
       UUID nodeId,
-      String requestId,
+      UUID requestId,
       UUID leaseToken,
       String stage,
       Map<String, Object> adapterState) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
-    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    Objects.requireNonNull(requestId, "requestId");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(stage, "stage");
     Objects.requireNonNull(adapterState, "adapterState");
     CanvasDocument document = requireDocumentForUpdate(canvasId);
     requireLiveFunctionNode(canvasId, nodeId);
-    CanvasFunctionRun current = requireClaim(nodeId, validatedRequestId, leaseToken);
+    CanvasFunctionRun current = requireClaim(nodeId, requestId, leaseToken);
     CanvasFunctionFrozenRun next = stateCodec.checkpoint(decode(current), stage, adapterState);
     persistRunningState(current, next, leaseToken);
     bumpVersion(document);
@@ -364,7 +362,7 @@ public class CanvasFunctionRunTransactions {
 
   /** 提交结果不明：收敛为 UNKNOWN，保留 pin 与冻结计划，退出自动调度。 */
   @Transactional
-  public boolean markUnknown(UUID nodeId, String requestId, UUID leaseToken, String reason) {
+  public boolean markUnknown(UUID nodeId, UUID requestId, UUID leaseToken, String reason) {
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");
     String validatedReason = validateUnknownReason(reason);
@@ -410,7 +408,7 @@ public class CanvasFunctionRunTransactions {
       return false;
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(frozen.nodeId()).orElse(null);
-    if (!matchesClaim(current, frozen.requestId().toString(), leaseToken)) {
+    if (!matchesClaim(current, frozen.requestId(), leaseToken)) {
       return false;
     }
     for (CanvasFunctionFrozenOutput planned : frozen.outputs()) {
@@ -432,7 +430,7 @@ public class CanvasFunctionRunTransactions {
 
   /** 在租约仍有效时将 Run 收敛为 FAILED，并清理未挂接输出和本次 Run 的 pin。 */
   @Transactional
-  public boolean failIfRunning(UUID nodeId, String requestId, UUID leaseToken, String error) {
+  public boolean failIfRunning(UUID nodeId, UUID requestId, UUID leaseToken, String error) {
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");
     CanvasFunctionRun observed = runRepository.findByNodeId(nodeId).orElse(null);
@@ -466,7 +464,7 @@ public class CanvasFunctionRunTransactions {
     Objects.requireNonNull(nextState, "nextState");
     CanvasDocument document = requireDocumentForUpdate(run.canvasId());
     requireLiveFunctionNode(run.canvasId(), run.nodeId());
-    CanvasFunctionRun current = requireClaim(run.nodeId(), run.requestId().toString(), leaseToken);
+    CanvasFunctionRun current = requireClaim(run.nodeId(), run.requestId(), leaseToken);
     CanvasFunctionFrozenRun observed = decode(current);
     if (observed.submitState() != CanvasFunctionSubmitState.PENDING
         && nextState == CanvasFunctionSubmitState.SUBMITTING) {
@@ -659,7 +657,7 @@ public class CanvasFunctionRunTransactions {
     return node != null && node.function() != null;
   }
 
-  private CanvasFunctionRun requireClaim(UUID nodeId, String requestId, UUID leaseToken) {
+  private CanvasFunctionRun requireClaim(UUID nodeId, UUID requestId, UUID leaseToken) {
     CanvasFunctionRun run = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
     if (!matchesClaim(run, requestId, leaseToken)) {
       throw new CanvasFunctionInternalCancellation(
@@ -727,10 +725,10 @@ public class CanvasFunctionRunTransactions {
     return builder.toString().strip();
   }
 
-  private boolean matchesClaim(CanvasFunctionRun run, String requestId, UUID leaseToken) {
+  private boolean matchesClaim(CanvasFunctionRun run, UUID requestId, UUID leaseToken) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
-        && run.requestId().toString().equals(requestId)
+        && run.requestId().equals(requestId)
         && runRepository.holdsLease(run.nodeId(), leaseToken);
   }
 

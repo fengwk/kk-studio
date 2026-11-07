@@ -47,7 +47,7 @@ class PluginCanvasFunctionCatalogTest {
     assertEquals(List.of("plugin.render"), view.functionNames("alpha"));
     assertEquals(List.of(), view.functionNames("unknown"));
     // 内置 adapter 进入目录但不归属任何插件。
-    assertSame(builtinAdapter, view.catalog().require("builtin.render").adapter());
+    assertSame(builtinAdapter, view.catalog().find("builtin.render").orElseThrow().adapter());
   }
 
   /** 插件内的函数名按目录顺序（字典序）冻结，与 adapter 声明顺序无关。 */

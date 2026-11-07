@@ -161,9 +161,8 @@ class ComfyuiPluginPostgresIntegrationTest {
                 assertEquals(List.of(COMFYUI), context.getBean(PluginRegistry.class).pluginIds());
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(snapshot).functionNames(COMFYUI).isEmpty());
-                assertThrows(
-                    IllegalArgumentException.class,
-                    () -> PluginCanvasFunctionCatalog.of(snapshot).catalog().require(FUNCTION));
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(snapshot).catalog().find(FUNCTION).isEmpty());
               }
               assertEquals(1L, repository.find(COMFYUI).orElseThrow().version());
             });
@@ -357,7 +356,7 @@ class ComfyuiPluginPostgresIntegrationTest {
    */
   private int executeOnce(PluginCatalogRuntime.Lease lease) {
     CanvasFunctionCatalog.RegisteredFunction registered =
-        PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().require(FUNCTION);
+        PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().find(FUNCTION).orElseThrow();
     CanvasFunctionDefinition definition = registered.function();
     CanvasFunctionAdapter adapter = registered.adapter();
 

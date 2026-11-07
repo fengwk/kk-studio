@@ -105,7 +105,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertTrue(
         runtimeTransactions.markUnknown(
             targetNodeId,
-            REQUEST_1,
+            frozen.requestId(),
             claim.leaseToken(),
             "external submission outcome is unknown; manual verification required"));
 
@@ -177,7 +177,8 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     CanvasResource target1 =
         materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.output(0));
     runtimeTransactions.beginSubmit(frozen1, claim1.leaseToken());
-    runtimeTransactions.markUnknown(targetNodeId, REQUEST_1, claim1.leaseToken(), "timeout");
+    runtimeTransactions.markUnknown(
+        targetNodeId, frozen1.requestId(), claim1.leaseToken(), "timeout");
 
     CanvasFunctionRun failedResolved =
         runtimeTransactions.resolve(
@@ -214,7 +215,8 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     CanvasResource target2 =
         materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.output(0));
     runtimeTransactions.beginSubmit(frozen2, claim2.leaseToken());
-    runtimeTransactions.markUnknown(targetNodeId, REQUEST_2, claim2.leaseToken(), "timeout-2");
+    runtimeTransactions.markUnknown(
+        targetNodeId, frozen2.requestId(), claim2.leaseToken(), "timeout-2");
 
     CanvasFunctionRun cancelledResolved =
         runtimeTransactions.resolve(
@@ -259,7 +261,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
                   runtimeTransactions.checkpoint(
                       canvasId,
                       nodeId,
-                      REQUEST_1,
+                      claim.requestId(),
                       claim.leaseToken(),
                       "SUBMITTED",
                       Map.of("jobId", "job"));
@@ -280,18 +282,25 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
 
     runtimeTransactions.checkpoint(
-        canvasId, nodeId, REQUEST_1, claim.leaseToken(), "SUBMITTED", Map.of("jobId", "job"));
+        canvasId,
+        nodeId,
+        claim.requestId(),
+        claim.leaseToken(),
+        "SUBMITTED",
+        Map.of("jobId", "job"));
     assertEquals(2L, version(canvasId));
     assertEquals("SUBMITTED", runRepository.findByNodeId(nodeId).orElseThrow().stage());
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () ->
             runtimeTransactions.checkpoint(
-                canvasId, nodeId, REQUEST_1, UUID.randomUUID(), "LATE", Map.of()));
+                canvasId, nodeId, claim.requestId(), UUID.randomUUID(), "LATE", Map.of()));
     assertFalse(
-        runtimeTransactions.failIfRunning(nodeId, REQUEST_1, UUID.randomUUID(), "ignored failure"));
+        runtimeTransactions.failIfRunning(
+            nodeId, claim.requestId(), UUID.randomUUID(), "ignored failure"));
     assertTrue(
-        runtimeTransactions.failIfRunning(nodeId, REQUEST_1, claim.leaseToken(), "safe failure"));
+        runtimeTransactions.failIfRunning(
+            nodeId, claim.requestId(), claim.leaseToken(), "safe failure"));
     CanvasFunctionRun failed = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.FAILED, failed.status());
     assertEquals("safe failure", failed.error());
@@ -313,13 +322,13 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
         CanvasFunctionInternalCancellation.class,
         () ->
             runtimeTransactions.checkpoint(
-                canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
+                canvasId, nodeId, claim.requestId(), claim.leaseToken(), "LATE", Map.of()));
     jdbc.update("delete from canvas_document where id = ?", canvasId);
     assertThrows(
         DomainException.class,
         () ->
             runtimeTransactions.checkpoint(
-                canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
+                canvasId, nodeId, claim.requestId(), claim.leaseToken(), "LATE", Map.of()));
   }
 
   /** cancel 只接受当前 Run 的 requestId：陈旧 requestId 必须冲突，且不改变已有 READY Run。 */

@@ -87,7 +87,10 @@ class MediaPluginPostgresIntegrationTest {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
                 assertEquals(List.of(IMAGE_CROP_FUNCTION), functionNames(snapshot));
                 CanvasFunctionCatalog.RegisteredFunction registered =
-                    PluginCanvasFunctionCatalog.of(snapshot).catalog().require(IMAGE_CROP_FUNCTION);
+                    PluginCanvasFunctionCatalog.of(snapshot)
+                        .catalog()
+                        .find(IMAGE_CROP_FUNCTION)
+                        .orElseThrow();
                 assertTrue(registered.enabled(), "default configuration enables image.crop");
                 assertNull(registered.unavailableReason());
                 assertEquals(MEDIA_FUNCTION_ADAPTER, registered.adapter().getClass().getName());
@@ -130,7 +133,8 @@ class MediaPluginPostgresIntegrationTest {
                 CanvasFunctionCatalog.RegisteredFunction registered =
                     PluginCanvasFunctionCatalog.of(lease.snapshot())
                         .catalog()
-                        .require(IMAGE_CROP_FUNCTION);
+                        .find(IMAGE_CROP_FUNCTION)
+                        .orElseThrow();
                 assertTrue(registered.enabled());
                 assertEquals(MEDIA_FUNCTION_ADAPTER, registered.adapter().getClass().getName());
               }

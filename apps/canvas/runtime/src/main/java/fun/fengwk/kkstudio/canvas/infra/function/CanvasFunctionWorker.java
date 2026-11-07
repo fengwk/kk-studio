@@ -79,7 +79,7 @@ public class CanvasFunctionWorker {
       if (frozen.submitState() == CanvasFunctionSubmitState.SUBMITTING) {
         // 提交意图已持久化但结果不明：绝不重新提交，退出自动调度等待人工核查。
         transactions.markUnknown(
-            claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), AMBIGUOUS_SUBMISSION);
+            claim.nodeId(), claim.requestId(), claim.leaseToken(), AMBIGUOUS_SUBMISSION);
         return;
       }
       execute(claim, ownershipLost, frozen);
@@ -90,7 +90,7 @@ public class CanvasFunctionWorker {
           claim.requestId());
       if (!ownershipLost.get()) {
         transactions.markUnknown(
-            claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), unknown.getMessage());
+            claim.nodeId(), claim.requestId(), claim.leaseToken(), unknown.getMessage());
       }
     } catch (CanvasFunctionInternalCancellation cancellation) {
       log.debug(
@@ -107,7 +107,7 @@ public class CanvasFunctionWorker {
           error.getClass().getSimpleName());
       if (!ownershipLost.get()) {
         transactions.failIfRunning(
-            claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), PUBLIC_FAILURE);
+            claim.nodeId(), claim.requestId(), claim.leaseToken(), PUBLIC_FAILURE);
       }
     } finally {
       heartbeat.cancel(false);
@@ -172,7 +172,7 @@ public class CanvasFunctionWorker {
       return lease.require(frozen.binding());
     } catch (IllegalStateException changed) {
       transactions.failIfRunning(
-          claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), CATALOG_CHANGED);
+          claim.nodeId(), claim.requestId(), claim.leaseToken(), CATALOG_CHANGED);
       return null;
     }
   }

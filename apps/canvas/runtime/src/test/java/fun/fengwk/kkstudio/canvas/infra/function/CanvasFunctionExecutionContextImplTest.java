@@ -297,7 +297,7 @@ class CanvasFunctionExecutionContextImplTest {
     when(transactions.checkpoint(
             eq(CANVAS),
             eq(NODE),
-            eq(REQUEST.toString()),
+            eq(REQUEST),
             eq(LEASE),
             eq("SUBMITTING"),
             eq(Map.of("jobId", "job"))))
@@ -312,7 +312,8 @@ class CanvasFunctionExecutionContextImplTest {
   /** checkpoint CAS 失败抛出取消异常且不更新本地 currentRun。 */
   @Test
   void checkpointCasCancellationPropagatesWithoutUpdatingCurrent() {
-    when(transactions.checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any()))
+    when(transactions.checkpoint(
+            any(), any(), any(UUID.class), any(UUID.class), anyString(), any()))
         .thenThrow(new CanvasFunctionInternalCancellation("no longer RUNNING"));
     CanvasFunctionExecutionContextImpl context = context();
 
@@ -333,7 +334,7 @@ class CanvasFunctionExecutionContextImplTest {
         CanvasFunctionInternalCancellation.class,
         () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
     verify(transactions, never())
-        .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
+        .checkpoint(any(), any(), any(UUID.class), any(UUID.class), anyString(), any());
   }
 
   /** replace 允许在提交阶段推进提交事实后刷新上下文，但拒绝异构 Run。 */

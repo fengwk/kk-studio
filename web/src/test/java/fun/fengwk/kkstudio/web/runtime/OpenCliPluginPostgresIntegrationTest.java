@@ -188,7 +188,8 @@ class OpenCliPluginPostgresIntegrationTest {
                 CanvasFunctionCatalog.RegisteredFunction registered =
                     PluginCanvasFunctionCatalog.of(lease.snapshot())
                         .catalog()
-                        .require(GPT_IMAGE_FUNCTION);
+                        .find(GPT_IMAGE_FUNCTION)
+                        .orElseThrow();
                 assertTrue(registered.enabled());
                 submit(registered.adapter(), "generate portrait");
               }
@@ -458,7 +459,8 @@ class OpenCliPluginPostgresIntegrationTest {
   private static CanvasFunctionAdapter adapter(PluginCatalogRuntime.Lease lease) {
     return PluginCanvasFunctionCatalog.of(lease.snapshot())
         .catalog()
-        .require(GPT_IMAGE_FUNCTION)
+        .find(GPT_IMAGE_FUNCTION)
+        .orElseThrow()
         .adapter();
   }
 
