@@ -9,18 +9,16 @@ import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 媒体输入解析与生成结果暂存。
@@ -35,11 +33,6 @@ import java.util.regex.Pattern;
  * <p>没有任何网关绑定时，需要资源或需要暂存媒体的调用在发送请求之前就确定性失败，绝不消费额度后再伪装成功。
  */
 public final class MiniMaxMavisResourceAccess {
-
-  /** 会话 Resource URI 的严格形态：scheme + 固定 path + 规范小写 UUID。 */
-  private static final Pattern SESSION_RESOURCE =
-      Pattern.compile(
-          "vfs:/resources/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
 
   private static final String SESSION_RESOURCE_SCHEME = "vfs:";
 
@@ -209,9 +202,9 @@ public final class MiniMaxMavisResourceAccess {
   }
 
   private String resolveSessionResource(UUID sessionId, String resourceUri) {
-    if (!SESSION_RESOURCE.matcher(resourceUri).matches()) {
+    if (SessionResourceUri.parse(resourceUri).isEmpty()) {
       throw new PluginResourceUnavailableException(
-          "unsupported session resource reference: " + describe(resourceUri));
+          "unsupported session resource reference: " + SessionResourceUri.PREFIX + "<blobId>");
     }
     URI resolved = gateway.resolveSessionResource(sessionId, resourceUri);
     requireUsableDownloadUri(resolved);
@@ -238,18 +231,5 @@ public final class MiniMaxMavisResourceAccess {
               + reason
               + " cannot be served");
     }
-  }
-
-  /** 只保留 scheme 与形态，绝不回显可能含一次性签名的完整 URI。 */
-  private static String describe(String resourceUri) {
-    String lower = resourceUri.toLowerCase(Locale.ROOT);
-    if (lower.startsWith(SESSION_RESOURCE_SCHEME)) {
-      return SESSION_RESOURCE_SCHEME + "/resources/<blobId>";
-    }
-    Optional<String> scheme =
-        Optional.ofNullable(resourceUri.split(":", 2))
-            .filter(parts -> parts.length > 1)
-            .map(parts -> parts[0]);
-    return scheme.isPresent() ? scheme.get() + ":..." : "<unknown>";
   }
 }

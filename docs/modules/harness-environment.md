@@ -113,7 +113,7 @@ Duration terminalDeliveryGrace();
 Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT` 与 `CANCELLED`；
 执行器完成清理后交付真实结果，Runtime 不提前抢占终态，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
 
-能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码：[`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java) 只冻结码的语法 `[A-Z][A-Z0-9_]*`（至多 64 字符），当前没有预置码常量。
+能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8 的 JSON 对象）。`contents` 承载工具结果，`error` 表示失败，能力特有的结构化细节放在 `detailsJson`。
 
 ## daemon wire 协议会话与消息流
 
