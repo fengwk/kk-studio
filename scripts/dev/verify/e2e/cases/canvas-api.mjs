@@ -476,7 +476,7 @@ registerCase({
       { type: 'SET_NODE_GROUP', nodeId: cid(), expectedGroupId: null, groupId: null },
       { type: 'RENAME_GROUP', groupId: cid(), expectedTitle: 'whatever', title: 'renamed' },
     ])
-    assertExactFields(missingConflicts[0], ['kind', 'targetId', 'target'], 'target missing conflict')
+    assertExactFields(missingConflicts[0], ['type', 'targetId', 'target'], 'target missing conflict')
     assert(
       missingConflicts.every(
         (conflict) =>
@@ -537,7 +537,7 @@ registerCase({
     )
     assertExactFields(
       staleGroupConflicts[0],
-      ['kind', 'groupId', 'current'],
+      ['type', 'groupId', 'current'],
       'stale group conflict',
     )
     assert(staleGroupConflicts[0].current.title === 'Conflict Group', JSON.stringify(staleGroupConflicts))

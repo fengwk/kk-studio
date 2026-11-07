@@ -1772,12 +1772,27 @@ async function waitForComposer(page) {
 }
 
 async function expectComposerText(page, expected) {
-  await page.waitForFunction(
-    (text) =>
-      document.querySelector('.composer-editor')?.textContent === text,
-    expected,
-    { timeout: 10_000 },
-  )
+  try {
+    await page.waitForFunction(
+      (text) =>
+        document.querySelector('.composer-editor')?.textContent === text,
+      expected,
+      { timeout: 10_000 },
+    )
+  } catch {
+    // 超时只说明等到的那一帧不匹配：把当时的编辑区 HTML 与编辑器数量带回报告，
+    // 才能区分恢复延迟、不可见字符与多编辑器选错节点。
+    const actual = await page.evaluate(() => {
+      const editors = Array.from(document.querySelectorAll('.composer-editor'))
+      return editors.map((editor) => ({
+        text: editor.textContent,
+        html: editor.innerHTML,
+      }))
+    })
+    throw new Error(
+      `composer text mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    )
+  }
 }
 
 export async function expectStorage(page, key, expected) {
