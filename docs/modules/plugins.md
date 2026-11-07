@@ -16,7 +16,7 @@
 - **实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例暴露两类贡献：
   - `harnessContributors()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
   - `contributions(Class<T>)`：按类型交出产品域贡献，Canvas 读取 `contributions(CanvasFunctionAdapter.class)` 得到图形节点执行适配器。
-  两类贡献都在 configure 期冻结、互不依赖，均可为空列表；插件因此同时依赖 platform-plugin-api、harness-runtime 与自己的产品 SPI（Canvas 为 `kk-studio-canvas-spi`）。
+  两类贡献都在 configure 期冻结、互不依赖，均可为空列表；插件都依赖 platform-plugin-api 与 harness-runtime，贡献产品域能力的插件另外依赖对应产品 SPI（Canvas 为 `kk-studio-canvas-spi`）。
 
 当前发行物包含四个内置插件：
 

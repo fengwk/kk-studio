@@ -155,8 +155,8 @@ Canvas 负责 Run 的状态、调度、资源保护与人工决议；能力契�
 [`CanvasFunctionRunTransactions.start`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunTransactions.java) 的锁序固定为 document → node → run：
 
 ```text
-同 requestId：返回既有 Run（精确重放优先于一切校验）
-现有 Run 活跃且 requestId 不同：conflict
+同 requestId：返回既有 Run（精确重放优先于版本与目录校验）
+现有 Run 为 READY/RUNNING 或待核实的 UNKNOWN 且 requestId 不同：conflict
 租用目录 -> 按名找函数（已移除即 conflict）-> 比较完整定义指纹与 expectedVersion
 -> 严格解码 args -> 冻结引用 manifest（节点存在、index 在范围内且是 blob）与媒体事实
 -> 按输出计划预分配 resource id，构造 submitState=PENDING 的冻结计划 -> adapter.preflight
@@ -237,7 +237,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 
 - `revision` 只在产生变化的命令批或 Run 状态前进时 +1；冲突或非法命令整批不写入。
 - 所有写入按 document → node → run 加锁；跨 Run、节点、画布的操作在一个事务里完成，revision、pin、Resource 不出现部分提交。
-- 活跃 Run 不允许被第二个 requestId 覆盖，终态 Run 可以被新 requestId 取代。
+- READY/RUNNING 与待核实的 UNKNOWN 不允许被第二个 requestId 覆盖；SUCCEEDED/CANCELLED/FAILED 可以被新 requestId 取代。
 - 迟到回调只能收敛为 no-op；丢通知、listener 重连、进程重启都由 poll 加租约过期恢复。
 
 ## 从哪里改

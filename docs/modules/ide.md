@@ -35,7 +35,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。命令确认后服务端再读一次 `LIST_VIEWS`，但这次回读只用于刷新绑定缓存与补充响应：回读本身失败只记录告警，已确认的目录切换仍按成功返回，响应只带命令确认的目录与已知绑定身份，不伪造 workspace 与视图状态；回读成功且快照中已没有该绑定时，视图确实已关闭或换代，调用仍按不可用结束。
 
-每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。数据面按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
+每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务关闭上一个会话，旧代际的全部隧道子流随之失败，旧代际尚未消费的 bootstrap 票据与已签发的 cookie 在下一次使用时由 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 判为 `REPLACED` 而拒绝。数据面按 `IdeGenerationState` 裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
 
 ## 元数据服务与浏览器入口
 
@@ -58,7 +58,7 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 HTTP 中 64 位整数（非负）在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
-正常关闭等待 IDE 原生对话框，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
+正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
 
 ### 浏览器同源入口
 
@@ -90,7 +90,7 @@ HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空�
 
 ## 从哪里改
 
-- 新增 IDE 动作：同时修改 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto) 与 Daemon 的 [`contracts.ts`](../../daemon/src/contracts.ts)；协议变化属于 Daemon 发布，见 [Environment Daemon](../operations/environment-daemon.md)。
+- 新增 IDE 动作：同时修改 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto) 与 Daemon 的 [`contracts.ts`](../../daemon/src/contracts.ts)；桥接侧的视图关闭与工作台行为在 [`bridge.cjs`](../../daemon/ide-extension/bridge.cjs)。协议变化属于 Daemon 发布，见 [Environment Daemon](../operations/environment-daemon.md)。
 - 视图语义：[`EnvironmentIdeServiceImpl.java`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImpl.java)；跨节点：[`cluster`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/) 包。
 - 测试入口：[`EnvironmentIdeServiceImplTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImplTest.java) 覆盖 claim、绑定漂移、回执判定与切目录回读失败；[`IdeLeaseCoordinatorTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinatorTest.java) 覆盖按事件节点核对后的证明批次。内部端点与 problem 传递由 [`web/ide`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/) 的测试覆盖，公开 API 由 [`EnvironmentIdeControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/EnvironmentIdeControllerTest.java) 守护。连接服务通道的准入与收尾由 [`EnvironmentDaemonServerIdeTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerIdeTest.java) 覆盖。
 

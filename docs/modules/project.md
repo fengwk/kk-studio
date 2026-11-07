@@ -101,7 +101,7 @@ live turn 只读取冻结的命令，不按 workflow 反查。
 
 ```text
 Issue A
-  +-- designer -> Thread D -> Run 1(DESIGN), Run 3(REWORK)
+  +-- designer -> Thread D -> Run 1(DESIGN), Run 3(DESIGN)
   +-- reviewer -> Thread R -> Run 2(REVIEW), Run 4(REVIEW)
 ```
 
@@ -120,7 +120,7 @@ remaining = max(0, max_runs - used)
 
 Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一次额度；
 恢复已接受 Run、工具循环、协议续生成和问答等待沿用原次数。更换 Agent、返工或重开
-仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由明确授权或重置操作维护。
+仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由人工重置维护。
 
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
 承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
@@ -139,7 +139,7 @@ Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不�
 | 人工暂停或执行失败 | USER / ERROR 暂停原因 | 检查后显式恢复 |
 | 副作用结果不明 | FAILED Run 与 ERROR 暂停 | 核查后显式恢复 |
 | 工具等待输入或审批 | Harness ToolInvocation | 在 Pane 或待处理入口回答/决定 |
-| 新 Run 额度耗尽 | 阶段预算与 Run 历史计算 | 人工授权或重置 |
+| 新 Run 额度耗尽 | 阶段预算与 Run 历史计算 | 人工重置额度 |
 
 同一 Issue 只有一个 RUNNING/WAITING 主 Run。业务阻塞后停止新派发，在途调用按原 Run
 身份继续，到安全点才置 WAITING；控制暂停在活动 Run 收尾后设置并阻止新派发。回答问卷后，业务 BLOCKED 仍需显式恢复。
@@ -160,7 +160,7 @@ Harness 命令接受及 Work 登记。首次创建先写 Harness Session、
 ROOT 和 Thread，再写产品绑定与 Run，满足即时外键；失败时全部回滚。
 
 进入有 Agent 的阶段登记 Work。Agent 正常结束且未交接时，Run 终结并保持当前阶段；
-再次执行需要接受新 Run 并检查额度。额度耗尽时等待人工授权。
+再次执行需要接受新 Run 并检查额度。额度耗尽时等待人工重置。
 
 Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先写入 Run.next_state，
 工具返回“已接受，收尾后生效”。用户输入继续受控接受，处理完后才能交接。
