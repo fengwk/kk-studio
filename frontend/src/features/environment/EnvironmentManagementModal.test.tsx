@@ -76,8 +76,8 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
     expect(screen.getByText('Production host')).toBeInTheDocument()
-    // lastSeen 必须本地化展示，不直接铺 UTC 原文。
-    expect(screen.getByText(/2026\/07\/20 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
+    // lastSeen 使用共享固定格式（分钟精度），不直接铺 UTC 原文。
+    expect(screen.getByText(/2026-07-20 \d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
 
     // 绝不包含任何操作记录区域

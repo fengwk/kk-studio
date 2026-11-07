@@ -14,7 +14,7 @@ function message(
     id: 'tool-1',
     role: 'tool',
     subjectEntryId: null,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
     phase: 'call',
     contents: [],

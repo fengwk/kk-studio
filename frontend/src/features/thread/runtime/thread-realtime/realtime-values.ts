@@ -27,14 +27,6 @@ export function hasOnlyFields(record: Record<string, unknown>, fields: readonly 
   return Object.keys(record).every((key) => fields.includes(key))
 }
 
-export function toEpochMillis(value: unknown): number | null {
-  if (typeof value !== 'string' || !value.trim()) {
-    return null
-  }
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 export function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }

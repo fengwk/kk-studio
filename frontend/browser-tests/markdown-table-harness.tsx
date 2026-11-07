@@ -53,7 +53,7 @@ function buildMessage(appendedRows: number): TextDialogueMessage {
     id: 'entry-table',
     role: 'assistant',
     subjectEntryId: 'entry-table',
-    createdAt: '2026-10-06T10:00:00Z',
+    createdAt: Date.parse('2026-10-06T10:00:00Z'),
     status: 'done',
     text: [
       '## 表格复制检查',

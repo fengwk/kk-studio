@@ -1,8 +1,7 @@
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import { ApiError } from '@/shared/api/client'
-import { formatDateTime24 } from '@/shared/lib/date-format'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { formatByteCount } from '@/shared/lib/format-bytes'
-import type { AppLocale } from '@/shared/i18n'
 import type {
   EnvironmentDTO,
   EnvironmentEventLevel,
@@ -24,8 +23,8 @@ export function environmentEventLevelClass(level: EnvironmentEventLevel): string
   return `is-${level.toLowerCase()}`
 }
 
-export function formatTimestamp(value: number | null | undefined, locale: AppLocale): string {
-  return value == null ? '' : formatDateTime24(new Date(value), locale)
+export function formatTimestamp(value: number | null | undefined): string {
+  return value == null ? '' : formatBackendDate(value)
 }
 
 /** 当前 runtime 端点只在 READY owner 可用；按 code unavailable + reason ENVIRONMENT_UNAVAILABLE 识别。 */

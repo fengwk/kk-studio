@@ -1,13 +1,9 @@
-import type { DialogueTimestamp } from '@/features/thread/runtime/thread-timeline-types'
-import { timestampMillis } from '@/shared/lib/date-format'
-
 export function retryCountdownSeconds(
-  retryAt: DialogueTimestamp,
+  retryAt: number | null,
   now = Date.now(),
 ): number {
-  const retryAtMillis = timestampMillis(retryAt)
-  if (retryAtMillis == null) {
+  if (retryAt == null) {
     return 0
   }
-  return Math.max(0, Math.ceil((retryAtMillis - now) / 1000))
+  return Math.max(0, Math.ceil((retryAt - now) / 1000))
 }

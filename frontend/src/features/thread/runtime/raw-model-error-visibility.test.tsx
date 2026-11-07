@@ -168,7 +168,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
         text: '',
         thinking: '',
         toolCalls: [],
-        createdAt: '2026-09-15T12:00:00Z',
+        createdAt: Date.parse('2026-09-15T12:00:00Z'),
         status: 'error',
         errorCode: 'PROVIDER_ERROR',
         errorText: RAW_VENDOR_ERROR_BODY,
@@ -380,7 +380,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
             id: 'fail-1',
             role: 'model_attempt_failure',
             subjectEntryId: 'entry-1',
-            createdAt: '2026-09-15T12:00:00Z',
+            createdAt: Date.parse('2026-09-15T12:00:00Z'),
             status: 'done',
             attempt: 1,
             sequence: '0',
@@ -388,7 +388,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
             thinking: '',
             errorCode: 'HTTP_400',
             errorMessage: RAW_VENDOR_ERROR_BODY,
-            failedAt: '2026-09-15T12:00:00Z',
+            failedAt: Date.parse('2026-09-15T12:00:00Z'),
             retryAt: null,
             nextAttempt: null,
           }}
@@ -419,7 +419,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
             text: RAW_HTML_GATEWAY_ERROR,
             thinking: '',
             status: 'error',
-            createdAt: null,
+            createdAt: 1785232800000,
           }}
         />,
       )

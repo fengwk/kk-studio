@@ -11,7 +11,7 @@ function message(
     id: 'failure-1',
     role: 'model_attempt_failure',
     subjectEntryId: null,
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: Date.parse('2026-07-28T10:00:00Z'),
     status: 'done',
     attempt: 1,
     sequence: '2',
@@ -19,8 +19,8 @@ function message(
     thinking: 'partial thinking',
     errorCode: 'TRANSIENT',
     errorMessage: 'provider is busy',
-    failedAt: '2026-07-28T10:00:00Z',
-    retryAt: '2026-07-28T10:00:05Z',
+    failedAt: Date.parse('2026-07-28T10:00:00Z'),
+    retryAt: Date.parse('2026-07-28T10:00:05Z'),
     nextAttempt: 2,
     generationId: 'model-1',
     ...overrides,
@@ -94,10 +94,10 @@ describe('ModelAttemptFailureMessageBlock', () => {
 
   it('calculates remaining seconds without a polling interval', () => {
     expect(
-      retryCountdownSeconds('2026-07-28T10:00:05Z', Date.parse('2026-07-28T10:00:02.001Z')),
+      retryCountdownSeconds(Date.parse('2026-07-28T10:00:05Z'), Date.parse('2026-07-28T10:00:02.001Z')),
     ).toBe(3)
     expect(
-      retryCountdownSeconds('2026-07-28T10:00:05Z', Date.parse('2026-07-28T10:00:05Z')),
+      retryCountdownSeconds(Date.parse('2026-07-28T10:00:05Z'), Date.parse('2026-07-28T10:00:05Z')),
     ).toBe(0)
   })
 

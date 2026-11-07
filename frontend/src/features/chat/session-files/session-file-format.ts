@@ -1,5 +1,5 @@
 /** 会话文件面板的纯展示逻辑：vfs 路径、文本窗口解析与文件类型判断。 */
-import { formatLocalDateMinutes } from '@/shared/lib/date-format'
+import { formatBackendDate } from '@/shared/lib/date-format'
 
 /** 文本窗口每页行数；服务端上限 2000，较小分页便于逐页回看。 */
 export const SESSION_FILE_TEXT_PAGE_LINES = 500
@@ -86,11 +86,10 @@ export function parseSizeBytes(value: string | null | undefined): number | null 
   return Number.isSafeInteger(parsed) ? parsed : null
 }
 
-/** 更新时间是 epoch 毫秒整数，格式化为本地 `YYYY-MM-DD HH:mm`；非法值返回 null。 */
+/** 更新时间是 epoch 毫秒整数，格式化为共享的本地 `YYYY-MM-DD HH:mm`；非法值返回 null。 */
 export function formatSessionFileTime(value: number | null | undefined): string | null {
   if (value == null || !Number.isSafeInteger(value) || value < 0) {
     return null
   }
-  const date = new Date(value)
-  return formatLocalDateMinutes(date)
+  return formatBackendDate(value)
 }

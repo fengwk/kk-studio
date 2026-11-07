@@ -5,9 +5,9 @@ import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { formatBackendDateSeconds } from '@/shared/lib/date-format'
 import {
   environmentEventLevelClass,
-  formatTimestamp,
 } from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -23,7 +23,7 @@ export function EnvironmentManagementModal({
   environment,
   onClose,
 }: EnvironmentManagementModalProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
 
   const eventsQuery = useQuery({
     queryKey: queryKeys.environments.events(environment.id),
@@ -61,7 +61,7 @@ export function EnvironmentManagementModal({
               <div className="env-events-list">
                 {orderedEvents.map((evt, idx) => {
                   const levelClass = environmentEventLevelClass(evt.level)
-                  const timeStr = formatTimestamp(evt.occurredAt, locale)
+                  const timeStr = formatBackendDateSeconds(evt.occurredAt)
                   return (
                     <div
                       key={`${evt.type}-${idx}`}

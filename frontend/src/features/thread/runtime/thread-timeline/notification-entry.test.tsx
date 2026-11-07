@@ -95,7 +95,7 @@ function notificationMessage(
     text,
     notification: { kind, sourceThreadId },
     subjectEntryId: `entry-${kind}`,
-    createdAt: null,
+    createdAt: 1785232800000,
     status: 'done',
   }
 }

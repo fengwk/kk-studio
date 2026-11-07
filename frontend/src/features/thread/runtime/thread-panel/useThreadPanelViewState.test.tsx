@@ -7,7 +7,7 @@ function event(id: string, overrides: Partial<ThreadEventRecord> = {}): ThreadEv
   return {
     id, source: 'entry', entryId: id, turnStartEntryId: null, turnNumber: 0,
     kind: 'ASSISTANT_MESSAGE', status: 'completed', title: id, summary: id,
-    createdAt: null, details: [], rawJson: null, ...overrides,
+    createdAt: 1785232800000, details: [], rawJson: null, ...overrides,
   }
 }
 

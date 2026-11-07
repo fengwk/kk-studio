@@ -562,7 +562,7 @@ describe('thread timeline', () => {
       text: '正在输出',
       thinking: '正在思考',
       toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
       status: 'streaming',
     }
     const live = buildThreadTimeline([], [], [], stream)
@@ -607,7 +607,7 @@ describe('thread timeline', () => {
           argumentsJson: '{"path":"App.java","content":"class App {}"}',
         },
       ],
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
       status: 'streaming',
     }
 
@@ -634,7 +634,7 @@ describe('thread timeline', () => {
       text: 'current output',
       thinking: 'current plan',
       toolCalls: [],
-      createdAt: '2026-07-28T10:00:03Z',
+      createdAt: Date.parse('2026-07-28T10:00:03Z'),
       status: 'streaming',
     }
     const timeline = buildThreadTimeline(
@@ -659,7 +659,7 @@ describe('thread timeline', () => {
         thinking: 'partial thinking',
         errorCode: 'TRANSIENT',
         errorMessage: 'try later',
-        retryAt: 1785232805,
+        retryAt: 1785232805000,
         nextAttempt: 2,
       },
       {
@@ -684,7 +684,7 @@ describe('thread timeline', () => {
       text: 'partial answer',
       thinking: 'partial thinking',
       toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
       status: 'streaming',
     }
 
@@ -717,7 +717,7 @@ describe('thread timeline', () => {
       text: 'current output',
       thinking: '',
       toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
       status: 'streaming',
     }
     // 非 canonical sequence（带前导零）不是合法失败事实，必须被整条丢弃。
@@ -1230,8 +1230,8 @@ describe('thread timeline', () => {
         approval: { required: true, decision: null, decisionId: null },
         result: null,
         error: null,
-        createdAt: 1785232800,
-        updatedAt: 1785232800,
+        createdAt: 1785232800000,
+        updatedAt: 1785232800000,
       },
     ]
     const toolStreams = new Map<string, RealtimeToolStream>([
@@ -1242,7 +1242,7 @@ describe('thread timeline', () => {
         toolCallId: 'call-1',
         text: 'streaming partial output',
         error: false,
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }],
     ])
     const timeline = buildThreadTimeline(
@@ -1300,8 +1300,8 @@ describe('thread timeline', () => {
       approval: { required: true, decision: null, decisionId: null },
       result: null,
       error: null,
-      createdAt: 1785232800,
-      updatedAt: 1785232800,
+      createdAt: 1785232800000,
+      updatedAt: 1785232800000,
     }
     const toolStreams = new Map<string, RealtimeToolStream>([
       ['inv-2', {
@@ -1311,7 +1311,7 @@ describe('thread timeline', () => {
         toolCallId: 'call-1',
         text: 'second-turn partial output',
         error: false,
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }],
     ])
     const timeline = buildThreadTimeline(
@@ -1393,8 +1393,8 @@ describe('thread timeline', () => {
       approval: { required: true, decision: null, decisionId: null },
       result: null,
       error: null,
-      createdAt: 1785232800,
-      updatedAt: 1785232800,
+      createdAt: 1785232800000,
+      updatedAt: 1785232800000,
     }
     const timeline = buildThreadTimeline(
       [
@@ -1509,7 +1509,7 @@ describe('thread timeline', () => {
       toolCallId: 'call-1',
       text: 'stale partial',
       error: false,
-      createdAt: '2026-07-28T10:00:01Z',
+      createdAt: Date.parse('2026-07-28T10:00:01Z'),
     }
     const timeline = buildThreadTimeline(
       [
@@ -1563,7 +1563,7 @@ describe('thread timeline', () => {
       toolCallId: 'call-1',
       text: 'streaming partial',
       error: false,
-      createdAt: '2026-07-28T10:00:01Z',
+      createdAt: Date.parse('2026-07-28T10:00:01Z'),
     }
     const timeline = buildThreadTimeline(
       [
@@ -1951,7 +1951,7 @@ describe('thread timeline', () => {
         text: 'stale partial',
         error: true,
         errorText: 'temporary',
-        createdAt: '2026-07-28T10:00:01Z',
+        createdAt: Date.parse('2026-07-28T10:00:01Z'),
       }]]),
     )
     const tools = timeline.messages.filter((message) => message.role === 'tool')
@@ -1981,7 +1981,7 @@ describe('thread timeline', () => {
       text: 'final answer',
       thinking: '',
       toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: Date.parse('2026-07-28T10:00:00Z'),
       status: 'done',
     }
     const timeline = buildThreadTimeline([], [], [], done)
@@ -2360,8 +2360,8 @@ function generationFailure(
     thinking: 'partial thinking',
     errorCode: 'TRANSIENT',
     errorMessage: 'try later',
-    failedAt: 1785232800,
-    retryAt: 1785232805,
+    failedAt: 1785232800000,
+    retryAt: 1785232805000,
     ...overrides,
   }
 }
@@ -2385,8 +2385,8 @@ function activeAssistantOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }
@@ -2426,8 +2426,8 @@ function invocation(
     approval: null,
     result: null,
     error: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }

@@ -123,7 +123,7 @@ describe('thread timeline edge branches', () => {
         thinking: 'durable thinking',
         errorCode: 'TRANSIENT',
         errorMessage: 'provider down',
-        retryAt: '2026-01-01T00:00:05Z',
+        retryAt: Date.parse('2026-01-01T00:00:05Z'),
         nextAttempt: 2,
       },
     ])
@@ -331,7 +331,7 @@ describe('thread timeline edge branches', () => {
         text: 'internal realtime summary',
         thinking: '',
         toolCalls: [],
-        createdAt: '2026-01-01T00:00:00',
+        createdAt: Date.parse('2026-01-01T00:00:00Z'),
         status: 'streaming',
       },
     )
@@ -365,8 +365,8 @@ describe('thread timeline edge branches', () => {
           thinking: 'hidden',
           errorCode: 'ERROR',
           errorMessage: 'hidden',
-          failedAt: 1767225600,
-          retryAt: 1767225601,
+          failedAt: 1767225600000,
+          retryAt: 1767225601000,
         },
       ],
     )
@@ -405,7 +405,7 @@ describe('thread timeline edge branches', () => {
         toolCalls: [
           { index: 0, id: 'call-dedup', name: 'bash', argumentsJson: '{"command":"ls"}' },
         ],
-        createdAt: '2026-01-01T00:00:00',
+        createdAt: Date.parse('2026-01-01T00:00:00Z'),
         status: 'streaming',
       },
     )
@@ -433,7 +433,7 @@ describe('thread timeline edge branches', () => {
         toolCalls: [
           { index: 0, id: 'call-new', name: 'write', argumentsJson: '{}' },
         ],
-        createdAt: '2026-01-01T00:00:00',
+        createdAt: Date.parse('2026-01-01T00:00:00Z'),
         status: 'streaming',
       },
     )
@@ -465,8 +465,8 @@ describe('thread timeline edge branches', () => {
       approval: null,
       result: null,
       error: null,
-      createdAt: 1767225600,
-      updatedAt: 1767225600,
+      createdAt: 1767225600000,
+      updatedAt: 1767225600000,
     }
     const timeline = buildThreadTimeline(
       [
@@ -518,7 +518,7 @@ describe('thread timeline edge branches', () => {
           toolCallId: 'call-1',
           text: 'partial',
           error: false,
-          createdAt: '2026-01-01T00:00:00',
+          createdAt: Date.parse('2026-01-01T00:00:00Z'),
         }],
       ]),
     )
@@ -690,7 +690,7 @@ describe('thread timeline edge branches', () => {
       { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-miss-retry' },
     ])
     // 解析防御：attempt 快照必须通过完整校验（attempt<=0、sequence 非负整数、
-    // text/thinking 为字符串、retryAt 为 string/number/数字数组），否则同样回退。
+    // text/thinking 为字符串、retryAt 为规范 instant 文本），否则同样回退。
     const invalidAttempt = buildThreadTimeline(
       [
         entry('f-invalid-attempt', 'MODEL_ATTEMPT_FAILURE', {
@@ -719,23 +719,33 @@ describe('thread timeline edge branches', () => {
     expect(invalidText.messages).toMatchObject([
       { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-invalid-text' },
     ])
-    const retryArray = buildThreadTimeline(
+    // payload 是历史 codec JSON：节点内时间只有规范 instant 文本一种形态，
+    // 数组、数字与非规范文本都回退为 unknown_entry。
+    const nonCanonicalRetry = buildThreadTimeline(
       [
         entry('f-retry-array', 'MODEL_ATTEMPT_FAILURE', {
           attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
           error: { code: 'TRANSIENT', message: 'x' },
           retryAt: [2026, 1, 1, 0, 0, 5],
         }),
+        entry('f-retry-number', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: 1767225605000,
+        }),
+        entry('f-retry-text', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: '2026-01-01T00:00:05.12Z',
+        }),
       ],
       [],
       [],
     )
-    expect(retryArray.messages).toMatchObject([
-      {
-        role: 'model_attempt_failure',
-        retryAt: [2026, 1, 1, 0, 0, 5],
-        nextAttempt: 2,
-      },
+    expect(nonCanonicalRetry.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-retry-array' },
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-retry-number' },
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-retry-text' },
     ])
     const invalidRetry = buildThreadTimeline(
       [
@@ -893,7 +903,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     parentEntryId: null,
     entryType,
     payload,
-    createdAt: 1767225600,
+    createdAt: 1767225600000,
     usageCost: null,
   }
 }
@@ -913,7 +923,7 @@ function command(
     idempotencyKey: `cid-${label}`,
     payload,
     cancelledAt: null,
-    createdAt: 1767225600,
+    createdAt: 1767225600000,
   }
 }
 
@@ -941,7 +951,7 @@ describe('Turn usage after TURN_END', () => {
     entryId: string,
     entryType: EntryType,
     payload: Record<string, unknown>,
-    createdAt = 1785232800,
+    createdAt = 1785232800000,
   ): HarnessSessionEntryDTO {
     return {
       entryId,

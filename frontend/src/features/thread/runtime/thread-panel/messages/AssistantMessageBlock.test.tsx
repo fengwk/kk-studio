@@ -11,7 +11,7 @@ function message(overrides: Partial<TextDialogueMessage> = {}): TextDialogueMess
     text: 'partial answer',
     thinking: '',
     status: 'done',
-    createdAt: null,
+    createdAt: 1785232800000,
     ...overrides,
   }
 }

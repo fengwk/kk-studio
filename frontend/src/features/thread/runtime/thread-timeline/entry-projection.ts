@@ -1,6 +1,7 @@
 import { extractResultEditReview } from '@/features/thread/runtime/mutation-review'
 import { asRecord, getRecordList, parseRawJsonText } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
+import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type {
   DialogueContent,
   DialogueMessage,
@@ -300,7 +301,8 @@ function parseModelAttemptFailure(
 ) {
   const attempt = parseAttemptSnapshot(payload.attempt)
   const error = asRecord(payload.error)
-  const retryAt = timestampValue(payload.retryAt)
+  // payload 是历史 codec JSON：节点内时间只接受 Java Instant.toString() 的毫秒精度文本。
+  const retryAt = parseCodecInstantMillis(payload.retryAt)
   if (attempt == null || retryAt == null) {
     return null
   }
@@ -346,16 +348,6 @@ function parseAttemptSnapshot(value: unknown): {
 
 function integerValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
-}
-
-function timestampValue(value: unknown): string | number | readonly number[] | null {
-  if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) {
-    return value
-  }
-  return Array.isArray(value)
-    && value.every((part) => typeof part === 'number' && Number.isFinite(part))
-    ? value
-    : null
 }
 
 function projectToolCall(

@@ -21,7 +21,7 @@ function record(id: string, overrides: Partial<ThreadEventRecord> = {}): ThreadE
     status: 'completed',
     title: `Event ${id}`,
     summary: `summary ${id}`,
-    createdAt: '2026-07-28T10:00:00Z',
+    createdAt: 1785232800000,
     details: [{ label: 'Entry ID', value: id }],
     rawJson: '{"x":1}',
     ...overrides,
@@ -76,7 +76,7 @@ describe('ThreadEventView', () => {
     expect(first.className).toContain('thread-event')
     expect(first.className).toContain('kind-ASSISTANT_MESSAGE')
     expect(first.className).toContain('status-completed')
-    expect(first.querySelector('[data-event-time]')?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/)
+    expect(first.querySelector('[data-event-time]')?.textContent).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
     expect(first.querySelector('.thread-event-badge')?.textContent).toBe('Event e1')
     expect(first.querySelector('.thread-event-summary')?.textContent).toBe('summary e1')
     expect(selectedId()).toBeNull()
@@ -728,12 +728,12 @@ describe('ThreadEventView', () => {
       render(
         <ResponsiveHarness
           initialEvents={[
-            record('e-inv-1', { title: 'Invalid Date', createdAt: 'not-a-valid-date' }),
-            record('e-inv-2', { title: 'Null Date', createdAt: null as unknown as string }),
+            record('e-inv-1', { title: 'Invalid Date', createdAt: Number.NaN }),
+            record('e-inv-2', { title: 'Missing Date', createdAt: undefined as unknown as number }),
           ]}
         />,
       )
-      const times = screen.getAllByText('--:--:--')
+      const times = screen.getAllByText('-')
       expect(times).toHaveLength(2)
     })
 
