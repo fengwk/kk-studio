@@ -283,7 +283,7 @@ RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节
 树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
 直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈
 `goBack`，根层保持挂载但隐藏且 inert，草稿、上传和阅读位置不被重建。已绑定根通过 `/subagent` 命令、
-只读顶栏通过“查看 subagent 执行”动作打开轻量执行树面板，展示包含嵌套与 resume 计数且排除根的完整
+只读顶栏通过“查看 subagent 执行”动作打开轻量执行树面板，展示包含嵌套与 turns/tools 计数且排除根的完整
 `historyRows`，未绑定草稿禁用该命令。
 修饰键与中键保留独立 Thread 地址的浏览器行为。刷新失败明确提示，不伪造最新树。
 输入编排由 `ThreadComposer` 持有，DOM、光标、IME 与 Pill 由 `ComposerEditor` 隔离。
@@ -293,7 +293,7 @@ RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节
 终态结果优先于尚未结束时的 partial。工具名与参数属于同一 inline 文本流，保留换行、可选中复制，
 长路径在剩余宽度自然折行，不横滚；状态与展开图标占不收缩的尾部。
 工具状态直接保留 invocation 的 READY（排队或权威环境等待）、WAITING_APPROVAL、WAITING_INPUT、
-RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spinner；
+RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `aria-busy`；
 没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
@@ -479,7 +479,7 @@ Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览�
 Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；基础信息、YOLO 与工作流
 三个子表单共用单一提交互斥与按子表单隔离的结果提示。版本基线仅在成功写入或显式 reload 后推进，
 409 保留草稿与原版本。看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。
-工作流阶段编辑器独立为列表与属性表单组件，支持重排、转移边及人工/Agent 执行；
+工作流阶段编辑器是独立组件，包含阶段列表与选中阶段的属性表单，支持重排、转移边及人工/Agent 执行；
 缺失 Agent 或非法额度不能保存。Projects 的删除确认复用共享 ConfirmActionModal，
 复杂弹窗统一使用 Dialog 的 modal-body/modal-footer，并在窄屏通过 modal-touch-target
 提供 44px 触区与安全区留白；Issue 详情的规格编辑与证据上传分别由独立 pane 与 hook 承担。
@@ -505,10 +505,10 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 
 `/settings` 的静态 Plugins 页签挂载
 [`PluginsTab`](../../frontend/src/features/extensions/PluginsTab.tsx)，调用 `/api/platform/plugins`。
-卡片展示发行物已安装 Plugin 的安全 descriptor、region、状态和刷新摘要。
+卡片展示已安装 Plugin 的身份与版本、配置应用状态、能力、region、认证状态和刷新摘要。
 认证 contract 当前为 DEEP_LINK：选 region、打开官方链接、粘贴 callback、提交后清空 password 输入、
 重新读取安全状态。callback 不写浏览器 storage，同一请求保持单次提交。
-generation fence 隔离关闭/重开的弹窗。
+弹窗随 Plugin 身份重新挂载，关闭或换插件后迟到的认证与保存结果不写回新实例。
 REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认。
 新增认证形态须同步静态组件、领域 DTO、生成契约、i18n 与测试；
 后端 authKind:null 的管理形态需要先定义对应前端状态。
@@ -544,9 +544,9 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。
 2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。
-3. **组件层**：只在多处规则共享同一取值时才有，例如 `--topbar-bg`、`--stage-node`。
+3. **组件层**：只在多处规则共享同一取值时才有，例如 `--topbar-bg`。
 
-标尺同样是 token：间距 `--space-1..8`（4px 步进）、字号 `--font-size-xs/sm/md/lg/xl`（12 / 13 / 15 / 20 / 24px）、圆角 `--radius-*`、动效 `--duration-fast/base`、层级 `--z-raised/sticky/dropdown/modal/popover/toast`（局部堆叠只用 0–10 的整数）。字体 `--font` 与 `--mono`：标识符、id、版本号和数据值使用等宽，正文使用无衬线。
+标尺同样是 token：间距 `--space-1..6` 与 `--space-8`（4px 步进）、字号 `--font-size-xs/sm/md/lg/xl`（12 / 13 / 15 / 20 / 24px）、圆角 `--radius-*`、动效 `--duration-fast/base`、层级 `--z-raised/sticky/dropdown/modal/popover/toast`（局部堆叠只用 0–10 的整数）。字体 `--font` 与 `--mono`：标识符、id、版本号和数据值使用等宽，正文使用无衬线。
 
 | 用途 | Token |
 | --- | --- |

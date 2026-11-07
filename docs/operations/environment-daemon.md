@@ -82,14 +82,16 @@ Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 
 
 ```text
 # Unix
-bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token>
+bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--version <version>]
 bash install.sh status | uninstall | help
 
 # Windows (PS 5.1 与 PS7 pwsh 参数一致)
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-Version <version>]
 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status|uninstall|help
 ```
 
+`--version` / `-Version` 可选，值为不带 `v` 前缀的发行版本，用于把安装固定到该 tag；缺省解析
+latest 正式版本，受管在线更新即用它固定目标版本。
 只有 `install` / `status` / `uninstall` / `help` 四个动作，**没有交互提示**，未知或重复选项
 直接失败。Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有的普通文件，
 不是符号链接，内容非空且有界。Windows 的 `-ConfigFile` /
@@ -355,7 +357,7 @@ Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment T
 | --- | --- |
 | Linux | unit 首行必须是 `# Managed by scripts/daemon/install.sh` |
 | macOS | plist 第二行必须是 `<!-- Managed by scripts/daemon/install.sh -->` |
-| Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; schema=1; ownerSid=<当前 SID>` |
+| Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; ownerSid=<当前 SID>` |
 
 检查顺序在下载与写入之前。同名服务存在但标记不匹配、定义是符号链接/非普通文件、属主不是当前
 用户时，安装或卸载会拒绝并报告原因、服务定义路径或任务名，以及一条检查命令。
@@ -390,17 +392,18 @@ HOME 也不是默认工作目录。
 `THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该版本的官方安装脚本，
 由安装脚本校验官方归档及校验文件，并使用现有配置和令牌执行安装。
 
-- 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
-  capability 调用在起点被 busy 拒绝，连接仍保持认证。
+- 一个 Environment 同一时刻至多一次更新：Server 只在命令下发的短暂窗口内登记内存准入，发送返回后
+  立即释放；最终互斥由 Daemon 的本机准入门闩保证。更新期间普通 capability 调用在起点被 busy
+  拒绝，连接仍保持认证。
 - 只有官方受管安装接受更新。安装器以当前 `daemon.json` 和 `daemon.token` 为输入进行预检和快照发布；
   配置与令牌内容、技能和数据会保留，程序与服务定义由安装器更新。
 - Daemon 启动 **OS 级独立、短生命周期的任务**（Linux `systemd-run` 瞬时单元、
   macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），由其调用官方安装脚本完成替换与重启。
   安装器日志保存在 `~/.kk-studio/updates/<operationId>-*/install.log`；服务仍在运行时安装失败会发送安全的失败回执，
   服务停止后可通过该日志及安装器报告的备份路径排查，不自动重试。
-- **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
-  连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
-  SUCCEEDED / FAILED`。
+- **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；阶段回执只有 `ACCEPTED`、`PREPARED`
+  （下载、校验与磁盘配置预检通过，可交给 OS 更新器）与 `FAILED`，回执本身不表达成功；
+  重连后 Daemon 重发仍有效的回执。
 - 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
 - 如需覆盖安装：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。数据目录、日志与既有备份保留。重新 `READY` 后才继续正常使用。
 
@@ -427,7 +430,7 @@ HOME 也不是默认工作目录。
 
 | 动作 / 参数 | Unix | Windows | 说明 |
 | --- | --- | --- | --- |
-| install | `install` | `install` | 必填 `--config-file` / `-ConfigFile` 与 `--token-file` / `-TokenFile` |
+| install | `install` | `install` | 必填 `--config-file` / `-ConfigFile` 与 `--token-file` / `-TokenFile`；可选 `--version` / `-Version` |
 | status | `status` | `status` | 只读；退出码 0/1/3 见上 |
 | uninstall | `uninstall` | `uninstall` | 保留配置、token、数据、日志与备份 |
 | help | `help` | `help` | 输出用法 |
