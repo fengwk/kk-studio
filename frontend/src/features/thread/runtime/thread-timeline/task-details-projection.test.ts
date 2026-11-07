@@ -21,7 +21,7 @@ function entry(
     payload: {
       message: { role, contents },
     },
-    createdAt: 1785232800,
+    createdAt: 1785232800000,
     usageCost: null,
   }
 }
@@ -54,8 +54,8 @@ function toolInvocation(
     approval: null,
     result: null,
     error: null,
-    createdAt: 1785232800,
-    updatedAt: 1785232801,
+    createdAt: 1785232800000,
+    updatedAt: 1785232801000,
     ...overrides,
   }
 }
