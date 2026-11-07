@@ -144,10 +144,6 @@ Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安
 重复执行矩阵。Docker 发布与 Daemon Release 都要求该门禁成功；release 的 stage 还运行完整仓库脚本
 测试（含 Unix 安装器 fixture）与 tag/main ancestry、文档、敏感数据和版本门禁，随后在对应宿主上逐一
 烟测五个平台归档才上传 GitHub Release。
-常规 Windows 覆盖率步骤会启用同步退出诊断：无论成功或失败都上传 `windows-process-diagnostics` artifact
-（保留 7 天），记录退出来源、受管 helper 的进程事实、相关 Application Error 事件与工具链版本，
-不含 ProcessSpec 参数、环境、cwd、token 或内存；覆盖率成功却缺少 `exit-resolved` 证据时该步骤失败。
-诊断不保证足以定位根因，也只影响 CI 证据，不改变 Daemon 行为或发行版本。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
