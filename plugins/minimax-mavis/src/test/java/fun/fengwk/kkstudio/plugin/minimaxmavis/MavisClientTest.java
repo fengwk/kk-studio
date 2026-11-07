@@ -452,6 +452,54 @@ class MavisClientTest {
     assertEquals(1, opaqueForbidden.requests.size());
   }
 
+  /** 非 401/403 状态但正文声明的认证码同样收敛为认证拒绝，只发送一次。 */
+  @Test
+  void invokeTreatsNonStandardStatusWithAuthCodeAsAuthenticatedRejection() {
+    RecordingTransport transport =
+        new RecordingTransport()
+            .responder(new MavisHttpResponse(400, "{\"base_resp\":{\"status_code\":1004}}"));
+
+    assertThrows(
+        MavisAuthException.class,
+        () -> client(transport).invoke(credential(), MavisCapability.TTS, json("{}")));
+
+    assertEquals(1, transport.requests.size());
+  }
+
+  /** 非 2xx 且正文不是 JSON 时保留固定的非 JSON 摘要，不回显原文也不重试。 */
+  @Test
+  void nonJsonHttpErrorKeepsFixedDetail() {
+    RecordingTransport transport =
+        new RecordingTransport().responder(new MavisHttpResponse(500, "<html>"));
+
+    MavisTransportException error =
+        assertThrows(
+            MavisTransportException.class,
+            () -> client(transport).invoke(credential(), MavisCapability.TTS, json("{}")));
+
+    assertTrue(error.getMessage().contains("non-JSON error response"));
+    assertFalse(error.getMessage().contains("<html>"));
+    assertEquals(1, transport.requests.size());
+  }
+
+  /** 远端详情超过长度上限时截断到固定上限，避免把超长正文带进异常。 */
+  @Test
+  void oversizedRemoteDetailIsTruncated() {
+    String longMessage = "x".repeat(1_200);
+    RecordingTransport transport =
+        new RecordingTransport()
+            .responder(new MavisHttpResponse(500, "{\"message\":\"" + longMessage + "\"}"));
+
+    MavisTransportException error =
+        assertThrows(
+            MavisTransportException.class,
+            () -> client(transport).invoke(credential(), MavisCapability.TTS, json("{}")));
+
+    assertTrue(error.getMessage().endsWith("x".repeat(1_000)));
+    assertFalse(error.getMessage().contains("x".repeat(1_001)));
+    assertEquals(1, transport.requests.size());
+  }
+
   /** renewal 成功时只替换 token 与到期时间，client uuid 与 region 保持不变。 */
   @Test
   void renewReplacesTokenUnderReferenceRequestShape() {
