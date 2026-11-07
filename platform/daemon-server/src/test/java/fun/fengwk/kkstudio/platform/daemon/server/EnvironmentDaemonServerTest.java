@@ -2694,26 +2694,6 @@ class EnvironmentDaemonServerTest {
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：实例接管通知自身的 RuntimeException 只记录固定阶段与异常类名，新实例照常完成握手并 READY。 */
-  @Test
-  void replacedNotificationRuntimeFailureIsLoggedSafelyAndKeepsTheNewInstanceReady() {
-    Fixture fixture = new Fixture();
-    FakeControlChannel first = fixture.connectReady("channel-replaced-notify-first");
-    fixture.close(first.connectionId());
-    fixture.replacedNotificationFailure =
-        new IllegalStateException("replaced notification failed: " + SYNTHETIC_SECRET);
-
-    try (CoreLogCapture logs = new CoreLogCapture()) {
-      fixture.connectReady("channel-replaced-notify-second", OTHER_INSTANCE_ID);
-      logs.assertOnlySafeFailures(1, "daemon instance replaced notification");
-    }
-
-    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
-    assertEquals(
-        List.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID)),
-        fixture.replacedInstances);
-  }
-
   /** 内核 IDE 通道不解释载荷，任意有效命令即可驱动在途登记与收尾。 */
   private static final IdeCommand OPEN_VIEW_COMMAND =
       IdeCommand.newBuilder()

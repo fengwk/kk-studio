@@ -11,7 +11,8 @@ import java.util.Optional;
  * IDE 同源网关的一次性 bootstrap 票据：claim 成功后的 entryUrl 携带该票据，网关消费后设置绑定 view+epoch 的 HttpOnly cookie。
  *
  * <p>票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管 workspace，一次性且短时；消费时仍须复核当前 {@link
- * IdeGenerationState} 与视图绑定。关闭/恢复换代/实例接管都会撤销尚未消费的旧票据。
+ * IdeGenerationState} 与视图绑定。关闭/恢复换代时 {@link #revokeView} 撤销该视图尚未消费的票据；实例接管不批量撤销，旧代际票据在消费时因代际已
+ * REPLACED 被拒绝。
  */
 public final class IdeBootstrapTicketService {
 

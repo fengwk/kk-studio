@@ -492,7 +492,6 @@ final class EnvironmentDaemonServerTestSupport {
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
-    final List<DaemonConnectionIdentity> replacedInstances = new ArrayList<>();
     final List<HeartbeatNotification> heartbeatNotifications = new ArrayList<>();
     final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
@@ -505,7 +504,6 @@ final class EnvironmentDaemonServerTestSupport {
 
     Throwable readyNotificationFailure;
     Throwable updateNotificationFailure;
-    Throwable replacedNotificationFailure;
     RuntimeException settingsFailure;
 
     Fixture() {
@@ -531,14 +529,6 @@ final class EnvironmentDaemonServerTestSupport {
                     throwUnchecked(readyNotificationFailure);
                   }
                   readyNotifications.add(environmentId);
-                }
-
-                @Override
-                public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
-                  replacedInstances.add(previous);
-                  if (replacedNotificationFailure != null) {
-                    throwUnchecked(replacedNotificationFailure);
-                  }
                 }
 
                 @Override

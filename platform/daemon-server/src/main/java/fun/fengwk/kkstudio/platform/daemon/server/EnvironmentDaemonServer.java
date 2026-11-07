@@ -161,12 +161,6 @@ public final class EnvironmentDaemonServer
             }
             transferCoordinator.releaseAllTransfers(active, ticketService);
           }
-          try {
-            sessionListener.onDaemonInstanceReplaced(
-                new DaemonConnectionIdentity(environmentId, replacedInstanceId));
-          } catch (RuntimeException error) {
-            logFailure("daemon instance replaced notification", error);
-          }
         }
         DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
         pendingAdmissions.put(

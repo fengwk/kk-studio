@@ -174,9 +174,6 @@ public class HarnessEnvironmentConfiguration {
               error.getClass().getSimpleName());
         }
       }
-
-      @Override
-      public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {}
     };
   }
 }
