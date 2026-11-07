@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
@@ -36,6 +38,7 @@ import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 测试意图：锁定应用服务编排——inventory/export 在单一只读快照上构图与展开依赖；import 把解析、计划与事务写入串起来，并保证
@@ -229,5 +232,67 @@ class ConfigSyncServiceTest {
 
     assertEquals("config import is invalid", error.getMessage());
     assertFalse(error.getMessage().contains("leaked-secret-value"));
+  }
+
+  @Test
+  void importPreparesGitSkillPackagesBeforeApplying() {
+    // 测试意图：Git 技能包必须在写事务外先准备，准备结果随计划交给 applier，成功时不取消暂存。
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    SkillCatalogService.PreparedGitImport prepared = preparedGitImport();
+    when(skillCatalogService.prepareGitImport(
+            "pkg", null, "https://example.com/pkg.git", "main", null))
+        .thenReturn(prepared);
+    ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
+    request.setYaml(skillPackageYaml());
+
+    ConfigSyncImportResultDTO result = service.importYaml(request);
+
+    verify(skillCatalogService)
+        .prepareGitImport("pkg", null, "https://example.com/pkg.git", "main", null);
+    verify(applier).apply(any(), eq(List.of(prepared)));
+    verify(skillCatalogService, never()).cancelPreparedGitImport(any());
+    assertTrue(
+        result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+  }
+
+  @Test
+  void importCancelsPreparedGitSkillsWhenApplyFails() {
+    // 测试意图：已准备的 Git 暂存上传必须在下游非校验失败时取消，并原样抛出该失败。
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    SkillCatalogService.PreparedGitImport prepared = preparedGitImport();
+    when(skillCatalogService.prepareGitImport(
+            "pkg", null, "https://example.com/pkg.git", "main", null))
+        .thenReturn(prepared);
+    doThrow(DomainException.conflict("CONFIG_SYNC_WRITE", "write failed"))
+        .when(applier)
+        .apply(any(), any());
+    ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
+    request.setYaml(skillPackageYaml());
+
+    DomainException error = assertThrows(DomainException.class, () -> service.importYaml(request));
+
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    verify(skillCatalogService).cancelPreparedGitImport(prepared);
+  }
+
+  private static String skillPackageYaml() {
+    return "skillPackages:\n"
+        + "  - packageName: pkg\n"
+        + "    repositoryUrl: https://example.com/pkg.git\n"
+        + "    branch: main\n";
+  }
+
+  private static SkillCatalogService.PreparedGitImport preparedGitImport() {
+    return new SkillCatalogService.PreparedGitImport(
+        "pkg",
+        null,
+        "https://example.com/pkg.git",
+        "main",
+        null,
+        "commit-1",
+        List.of(),
+        UUID.randomUUID());
   }
 }
