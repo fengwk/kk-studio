@@ -486,6 +486,55 @@ describe('runtime temporary resource policy', () => {
     expect(sweeps[0]).toBe(9)
     runtime.close()
   })
+
+  /** 清扫失败只留下阶段与固定错误类型的诊断，不泄露原始 message，也不影响连接。 */
+  it('reports a safe sweep diagnostic and keeps the connection alive', async () => {
+    const stderr: string[] = []
+    const originalStderrWrite = process.stderr.write
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk))
+      return true
+    }) as any
+    const temporaryResources: TemporaryResourceSweeper = {
+      async sweep() {
+        throw new TypeError('sweep failed at /tmp/private')
+      },
+    }
+    const transport = new FakeTransport()
+    const runtime = new Runtime(baseOptions({ transport, temporaryResources }))
+    try {
+      runtime.start()
+      await waitFor(() => transport.connection !== null)
+      transport.receive(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SETTINGS,
+          environmentId: ENV,
+          payload: {
+            case: 'settings',
+            value: create(SettingsSchema, {
+              noProxyHosts: '',
+              resourceBudgets: create(ResourceBudgetsSchema, {
+                maxResourceBytes: 1048576n,
+                temporaryResourceTtlSeconds: 7n,
+                temporaryResourceCleanupIntervalSeconds: 1n,
+              }),
+            }),
+          },
+        }),
+      )
+      await waitFor(() => runtime.getState() === 'READY')
+      const connections = transport.connectCount
+      await waitFor(() => stderr.includes('daemon temporary resource sweep failed: TypeError\n'), 3000)
+      expect(stderr.join('')).not.toContain('/tmp/private')
+      expect(runtime.getState()).toBe('READY')
+      expect(runtime.getBoundEnvironmentId()).toBe(ENV)
+      expect(transport.connectCount).toBe(connections)
+    } finally {
+      process.stderr.write = originalStderrWrite
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
 })
 
 describe('runtime managed update branches', () => {

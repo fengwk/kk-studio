@@ -1,5 +1,5 @@
 /**
- * 停机释放的失败记录与安全诊断。
+ * 运行期释放与清扫的安全诊断，以及停机释放的失败记录。
  *
  * <p>诊断只输出固定阶段和固定异常类型，绝不输出 message、路径或可写的 error.name。
  * 诊断输出自身失败返回给调用方并入聚合，绝不再写第二次诊断。
@@ -31,7 +31,7 @@ function reportReleaseFailure(phase: string, error: unknown): unknown {
 }
 
 /** 这次失败的固定类型名：只认内建类型身份与「是不是 Error」，其余一律泛化为 UnknownError。 */
-function describeFailureType(error: unknown): string {
+export function describeFailureType(error: unknown): string {
   for (const [type, label] of BUILT_IN_FAILURE_TYPES) {
     if (error instanceof type) {
       return label

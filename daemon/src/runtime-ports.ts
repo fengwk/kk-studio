@@ -11,7 +11,6 @@ import type { EnvironmentInfo } from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
 import type { ControlTransport } from './transport/index.js'
 import type { PresignedPutSender } from './transport/resources.js'
-import type { SkillReconciler } from './skill/reconcile.js'
 
 /** 受控临时资源清扫端口；具体 workspace 存储由 coding 片提供。 */
 export interface TemporaryResourceSweeper {
@@ -71,7 +70,6 @@ export interface RuntimeOptions {
   /** IDE 使用证明处理器；未配置时 IDE_LEASE 必须显式报错。 */
   ideLease?: IdeLeaseHandler
   temporaryResources?: TemporaryResourceSweeper
-  skillReconciler?: SkillReconciler
   monotonicNow?: () => number
   heartbeatIntervalMillis?: number
   initialReconnectDelayMillis?: number

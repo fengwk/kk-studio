@@ -88,7 +88,7 @@ export class Runtime {
         onEnvelope: (generation, envelope) => this.session.onEnvelope(generation, envelope),
         onUpgradeFailed: (generation, statusCode, upgradeRequired) =>
           this.session.handleUpgradeFailed(generation, statusCode, upgradeRequired),
-        onDisconnected: (connection) => this.session.onConnectionLost(connection),
+        onDisconnected: () => this.session.onConnectionLost(),
       },
     })
     this.outbound = new OutboundControl(this.connection, daemonVersion, environment)
@@ -231,7 +231,6 @@ export class Runtime {
     this.session.stopTimers()
     this.shutdownRuntime.release('resource transfer client close', () => this.resources.close())
     if (connection !== null) {
-      connection.abort.abort('SHUTDOWN')
       this.shutdownRuntime.release('connection close', () => connection.connection.close())
     }
     this.session.clearLeaseRound()

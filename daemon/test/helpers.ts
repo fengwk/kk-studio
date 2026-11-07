@@ -62,6 +62,8 @@ export class FakeConnection implements ControlConnection {
   sent: Envelope[] = []
   open = true
   sendInterceptor?: (envelope: Envelope) => boolean | void
+  /** 模拟 close 同步触发 transport 的 onDisconnected 回调。 */
+  closeNotifier?: () => void
 
   send(envelope: Envelope): boolean {
     if (!this.open) {
@@ -79,6 +81,7 @@ export class FakeConnection implements ControlConnection {
 
   close(): void {
     this.open = false
+    this.closeNotifier?.()
   }
 
   isOpen(): boolean {
@@ -114,6 +117,11 @@ export class FakeTransport implements ControlTransport {
       connection.open = false
     }
     this.listener?.onDisconnected()
+  }
+
+  /** 模拟服务端 NO_ERROR GOAWAY；连接由生命周期按断开路径关闭。 */
+  goaway(): void {
+    this.listener?.onGoaway()
   }
 
   get sent(): Envelope[] {

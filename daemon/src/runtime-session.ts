@@ -24,6 +24,7 @@ import type { InvocationRuntime } from './runtime-invocations.js'
 import type { OutboundControl } from './runtime-outbound.js'
 import type { TemporaryResourceSweeper } from './runtime-ports.js'
 import type { ResourceRuntime } from './runtime-resources.js'
+import { describeFailureType } from './runtime-shutdown.js'
 import type { UpdateRuntime } from './runtime-update.js'
 import type { SkillReconciler } from './skill/reconcile.js'
 
@@ -131,12 +132,11 @@ export class ControlSession {
   }
 
   /** 连接失效不影响 invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与资源预算。 */
-  onConnectionLost(connection: ActiveConnection | null): void {
+  onConnectionLost(): void {
     this.options.resources.onConnectionLost()
     this.maxResourceBytesValue = 0
     this.options.outbound.unbind()
     this.activeIdeLeaseRound = null
-    connection?.abort.abort('CONTROL_DISCONNECTED')
     // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
     this.options.ideCommands.abortAll('CONTROL_DISCONNECTED')
   }
@@ -287,8 +287,12 @@ export class ControlSession {
       if (ttl <= 0) {
         return
       }
-      void temporaryResources.sweep(ttl).catch(() => {
-        // 清扫失败不影响连接状态。
+      void temporaryResources.sweep(ttl).catch((error: unknown) => {
+        try {
+          process.stderr.write(`daemon temporary resource sweep failed: ${describeFailureType(error)}\n`)
+        } catch {
+          // 诊断输出失败不影响连接与后续清扫。
+        }
       })
     }, cleanupIntervalSeconds * 1000)
   }

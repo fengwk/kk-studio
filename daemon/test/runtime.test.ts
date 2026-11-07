@@ -2688,6 +2688,91 @@ describe('runtime connection management', () => {
     setup.runtime.close()
   })
 
+  /**
+   * GOAWAY 是旧代际的断开：先关闭旧连接并清理其会话，再立即重连。
+   * 即使关闭同步回调 onDisconnected、旧代际稍后又迟到断开，会话清理也恰好一次。
+   */
+  it('closes the old generation on GOAWAY, cleans up once and cancels its IDE work', async () => {
+    let aborted = false
+    let agentStarted = false
+    const agentGate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<AbortSignal>()
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call) => {
+          agentStarted = true
+          await agentGate.promise
+          return textResult(call.invocationId)
+        },
+      },
+      ideCommandTimeoutMillis: 60_000,
+      ide: ideService({
+        async handle(_command, signal) {
+          started.resolve(signal)
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+          aborted = true
+          return { ok: true, views: [] }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(
+        serverMessage('INVOKE', {
+          environmentId: ENV,
+          invocationId: 'inv-goaway',
+          payload: invokePayload(),
+        }),
+      )
+      await waitFor(() => agentStarted)
+      const oldConnection = setup.transport.connection!
+      const oldListener = setup.transport.listener!
+      setup.transport.receive(
+        serverMessage('IDE_COMMAND', {
+          environmentId: ENV,
+          invocationId: 'ide-goaway',
+          payload: { action: 'LIST_VIEWS' },
+        }),
+      )
+      const signal = await started.promise
+      expect(signal.aborted).toBe(false)
+      oldConnection.closeNotifier = () => oldListener.onDisconnected()
+
+      setup.transport.goaway()
+      expect(signal.aborted).toBe(true)
+      expect(signal.reason).toBe('CONTROL_DISCONNECTED')
+      expect(oldConnection.isOpen()).toBe(false)
+      expect(setup.runtime.getBoundEnvironmentId()).toBeNull()
+      // 断连只中止 IDE 请求，不取消在途 Agent 执行。
+      expect(setup.runtime.getJournal().find('inv-goaway')?.state).toBe('RUNNING')
+      await waitFor(() => aborted)
+
+      await waitFor(() => setup.transport.connectCount >= 2)
+      expect(setup.transport.connection).not.toBe(oldConnection)
+      // 迟到的旧代际断开不能清掉新代际的绑定。
+      oldListener.onDisconnected()
+      setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+      await waitFor(() => setup.runtime.getState() === 'READY')
+      expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
+      expect(
+        setup.runtime.sendSkillState([create(SkillPackageStateSchema, { packageName: 'demo' })]),
+      ).toBe(true)
+      expect(sent(setup.transport).some((envelope) => envelope.invocationId === 'ide-goaway')).toBe(false)
+
+      agentGate.resolve()
+      await waitFor(() =>
+        sent(setup.transport).some(
+          (envelope) => envelope.invocationId === 'inv-goaway' && envelope.messageType === 'COMPLETED',
+        ),
+      )
+      expect(setup.runtime.getJournal().find('inv-goaway')?.state).toBe('COMPLETED')
+    } finally {
+      agentGate.resolve()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
   it('fails terminally on 401 registration rejection and reconnects on disconnect', async () => {
     const setup = buildRuntime()
     setup.runtime.start()
