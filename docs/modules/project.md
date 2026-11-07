@@ -38,7 +38,7 @@ Project 经窄适配使用运行时与存储：
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
-`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectSessionOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSessionOwnership.java) 实现平台定义的 `SessionOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project 缺失或已归档、Issue 缺失或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。规则是不允许分叉、不允许通用命令直写，删除 Session 前先删除绑定行；锁序由 Project 自己维护，平台编排只按固定顺序调用它。
+`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectSessionOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSessionOwnership.java) 实现平台定义的 `SessionOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project 缺失或已归档、Issue 缺失或层级不一致时拒绝），深删除按 `Project KEY SHARE -> Issue UPDATE` 与 Issue 写路径保持同锁序，并读写 `(issueId, agentName) -> threadId` 稳定绑定。规则是不允许分叉、不允许通用命令直写，删除 Session 前先删除绑定行；锁序由 Project 自己维护，平台编排只按固定顺序调用它。
 [`ProjectAgentReferenceCheck`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectAgentReferenceCheck.java) 实现平台的 `AgentReferenceCheck`：删除 Agent 前由本实现检查未归档项目的工作流阶段，平台核心不直读 `project` 表。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
@@ -123,7 +123,7 @@ Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一�
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由人工重置维护。
 
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
-承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
+承载阶段额度的读取与人工重置：首次授权由 Run 接受路径按 workflow 默认额度完成，重置高水位只能推进到
 `nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
 Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
 人工重置要求无活动 Run，高水位取服务端 `next_run_ordinal - 1`，前后额度与高水位写入 CONTROL
@@ -150,7 +150,8 @@ Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不�
 以返回的权威 head 收尾；运行时不可用时停止失败，不把活动 Run 当作空闲处理。
 正常收尾为 CANCELLED 并保留 USER 暂停；停止前在途结果不明时收尾为 FAILED 并保留 ERROR 暂停。
 空闲时再次 Stop 不覆盖 ERROR 及其详情，执行需显式恢复。直接换阶段与 Project 归档要求无
-活动 Run；Project 归档后其下的写操作与执行都被拒绝，恢复归档后才能继续。
+活动 Run；Project 归档后其下的写操作与执行都被拒绝，调谐只收敛并删除 Work。恢复归档会按当前
+workflow 为可执行的空闲 Issue 重新登记 Work，随后继续执行。
 
 ### 接受、交接与报告
 

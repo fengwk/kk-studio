@@ -1721,6 +1721,41 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
+  /** 测试意图：归档调谐收敛并删除 Work 之后，取消归档会按当前 workflow 为可执行 Issue 重新登记 Work，下一次调谐继续接受 Run。 */
+  @Test
+  void unarchiveProjectReregistersWorkAfterArchivedReconcile() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("取消归档续跑", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+
+    Project archived =
+        projectService.archiveProject(projectId, projectService.getProject(projectId).getVersion());
+    assertEquals(
+        IssueReconcileOutcome.CONVERGED_ARCHIVED, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
+
+    Project unarchived = projectService.unarchiveProject(projectId, archived.getVersion());
+    assertFalse(unarchived.isArchived());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
+
+    assertEquals(
+        IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where issue_id = ? and status = 'RUNNING'",
+            issue.getId()));
+  }
+
   /** 缺陷 8 测试意图：当工作流中的工作阶段没有配置 Agent 时，检查 stage.hasAgent() 绝不抛出 NullPointerException。 */
   @Test
   void stageWithoutAgentDoesNotThrowNpeWhenActiveRunChecked() {

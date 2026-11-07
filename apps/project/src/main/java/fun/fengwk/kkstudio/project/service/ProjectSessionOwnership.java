@@ -84,7 +84,8 @@ public class ProjectSessionOwnership implements SessionOwnership {
       throw new IllegalArgumentException("Issue owner does not exist");
     }
     UUID projectId = issue.getProjectId();
-    Project project = deletion ? projects.lockById(projectId) : projects.lockForShare(projectId);
+    Project project =
+        deletion ? projects.lockForKeyShare(projectId) : projects.lockForShare(projectId);
     if (project == null) {
       throw new IllegalStateException("Project owner does not exist");
     }

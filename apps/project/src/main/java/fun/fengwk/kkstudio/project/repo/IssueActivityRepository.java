@@ -103,17 +103,6 @@ public class IssueActivityRepository {
         .orElse(null);
   }
 
-  public List<IssueActivity> listByIssueId(UUID issueId) {
-    return jdbc.sql(
-            "select "
-                + COLUMNS
-                + " from project_issue_activity where issue_id = :issueId"
-                + " order by sequence asc")
-        .param("issueId", issueId)
-        .query(ROW_MAPPER)
-        .list();
-  }
-
   /** 按序号升序读取有界窗口 {@code (afterSequence, ...]}：投递游标只推进真正检视过的窗口。 */
   public List<IssueActivity> listPage(UUID issueId, long afterSequence, int limit) {
     return jdbc.sql(

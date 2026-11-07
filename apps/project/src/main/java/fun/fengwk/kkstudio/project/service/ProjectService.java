@@ -88,6 +88,7 @@ public class ProjectService {
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final SessionDeletionOrchestrator sessionDeletion;
   private final ProjectWorkflowJsonCodec workflowCodec;
+  private final IssueMutationSupport mutationSupport;
 
   @Transactional
   public Project createProject(String title, String description, boolean yoloEnabled) {
@@ -195,7 +196,13 @@ public class ProjectService {
     if (!projectRepository.updateArchivedAt(projectId, null, expectedVersion)) {
       throw conflict(locked, expectedVersion);
     }
-    return projectRepository.getById(projectId);
+    Project unarchived = projectRepository.getById(projectId);
+    ProjectWorkflow workflow = workflowCodec.decode(unarchived.getWorkflowJson());
+    // 归档期间调谐只收敛并删除 Work；恢复后必须按当前 workflow 重新登记，空闲 Issue 才能继续执行。
+    for (Issue issue : issueRepository.listByProjectId(projectId)) {
+      mutationSupport.wakeIfExecutable(issue, workflow);
+    }
+    return unarchived;
   }
 
   @Transactional
