@@ -499,7 +499,7 @@ function assertFirstTurnDurable(
   assert(
     failurePayload.error?.code === failure.errorCode
       && failurePayload.error?.message === failure.errorMessage
-      && instantEpochMillis(failurePayload.retryAt) === instantEpochMillis(failure.retryAt),
+      && payloadInstantMillis(failurePayload.retryAt) === instantEpochMillis(failure.retryAt),
     `durable failure error/retryAt mismatch: ${JSON.stringify({ expected: failure, actual: failurePayload })}`,
   )
   assert(
@@ -605,6 +605,20 @@ function instantEpochMillis(value, field = 'instant') {
     `${field} must be a non-negative epoch-millisecond integer: ${JSON.stringify(value)}`,
   )
   return value
+}
+
+/**
+ * Entry payload 是历史 codec 定义的 JSON 节点，不由平台 HTTP DTO 投影重写：
+ * codec 把 Instant 写成毫秒精度的 ISO-8601 文本（整秒时省略小数），
+ * 因此 payload 内的时间按该规范形态解析后再与 wire 的 epoch 毫秒比较。
+ */
+function payloadInstantMillis(value, field = 'payload instant') {
+  assert(
+    typeof value === 'string'
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value),
+    `${field} must be a millisecond-precision ISO instant: ${JSON.stringify(value)}`,
+  )
+  return Date.parse(value)
 }
 
 async function cleanup(label, errors, action) {
