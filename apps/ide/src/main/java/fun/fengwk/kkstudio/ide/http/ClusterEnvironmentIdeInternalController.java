@@ -53,7 +53,10 @@ public class ClusterEnvironmentIdeInternalController {
 
   private static final int MAX_METADATA_BODY_BYTES = IdeInternalPaths.MAX_METADATA_BODY_BYTES;
 
-  /** viewId 的路径约束：只匹配规范 UUID 形状，避免把同前缀下的其它内部子资源（如反向数据端点 {@code /reverse}）误判为 viewId 并返回 405。 */
+  /**
+   * viewId 的路径约束：只匹配 UUID 形状，避免把同前缀下的其它内部子资源（如 {@code /views} 或 {@code /directories}）误判为 viewId 并返回
+   * 405。
+   */
   private static final String VIEW_ID =
       "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 
