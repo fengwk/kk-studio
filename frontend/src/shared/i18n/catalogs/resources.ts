@@ -1140,6 +1140,10 @@ export const resourcesCatalog = {
     'en-US': 'Edit Package',
     'zh-CN': '编辑技能包',
   },
+  'ai.skillPackages.editTitle': {
+    'en-US': 'Edit Package: {{name}}',
+    'zh-CN': '编辑技能包：{{name}}',
+  },
   'ai.skillPackages.delete': {
     'en-US': 'Delete Package',
     'zh-CN': '删除技能包',
@@ -1255,6 +1259,10 @@ export const resourcesCatalog = {
   'ai.skillPackages.detail': {
     'en-US': 'Details',
     'zh-CN': '详情',
+  },
+  'ai.skillPackages.detailTitle': {
+    'en-US': 'Details: {{name}}',
+    'zh-CN': '详情：{{name}}',
   },
   'ai.skillPackages.summary': {
     'en-US': 'Overview',
@@ -1491,6 +1499,10 @@ export const resourcesCatalog = {
   'ai.mcp.edit': {
     'en-US': 'Edit MCP Server',
     'zh-CN': '编辑 MCP 服务',
+  },
+  'ai.mcp.editTitle': {
+    'en-US': 'Edit MCP Server: {{name}}',
+    'zh-CN': '编辑 MCP 服务：{{name}}',
   },
   'ai.mcp.delete': {
     'en-US': 'Delete MCP Server',

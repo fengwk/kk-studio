@@ -589,7 +589,7 @@ export function McpServersPage() {
       {editModal && (
         <Dialog
           className="mcp-modal-card"
-          title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
+          title={t('ai.mcp.editTitle', { name: editModal.server.name })}
           pending={updateMutation.isPending || editModal.discoverPending}
           onClose={handleRequestCloseEdit}
         >

@@ -51,7 +51,7 @@ export function SkillPackageEditModal({
   return (
     <Dialog
       className="resource-modal-card skill-package-modal modal-touch-target"
-      title={`${t('ai.skillPackages.edit')}: ${packageName}`}
+      title={t('ai.skillPackages.editTitle', { name: packageName })}
       pending={editMutation.isPending}
       onClose={onClose}
     >

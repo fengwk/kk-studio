@@ -209,7 +209,7 @@ describe('McpServersPage', () => {
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_edit'))
 
     expect(mcpServerService.getServer).toHaveBeenCalledWith('srv_edit')
-    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_edit' })
+    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_edit' })
     expect(screen.getByDisplayValue('srv_edit')).toBeDisabled()
 
     const urlInput = screen.getByDisplayValue('https://example.com/api')
@@ -244,7 +244,7 @@ describe('McpServersPage', () => {
     renderPage()
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
-    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_hdr' })
+    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_hdr' })
 
     fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
       target: { value: '{"X-Api-Key": "key_123"}' },
@@ -262,7 +262,7 @@ describe('McpServersPage', () => {
     })
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
-    const secondModal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_hdr' })
+    const secondModal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_hdr' })
     await user.click(within(secondModal).getByLabelText('清除已保存的请求头'))
     await user.click(within(secondModal).getByRole('button', { name: '确认' }))
 
@@ -290,7 +290,7 @@ describe('McpServersPage', () => {
     renderPage()
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_disc'))
-    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_disc' })
+    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_disc' })
     const urlInput = screen.getByDisplayValue('https://example.com/mcp')
     const discoverBtn = within(modal).getByRole('button', { name: '发现工具' })
 

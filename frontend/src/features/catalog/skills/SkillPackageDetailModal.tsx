@@ -105,7 +105,7 @@ export function SkillPackageDetailModal({
   return (
     <Dialog
       className="resource-modal-card skill-package-modal modal-touch-target"
-      title={`${t('ai.skillPackages.detail')}: ${packageName}`}
+      title={t('ai.skillPackages.detailTitle', { name: packageName })}
       pending={downloadMutation.isPending}
       onClose={onClose}
     >

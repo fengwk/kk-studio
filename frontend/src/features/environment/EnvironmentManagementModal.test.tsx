@@ -67,6 +67,8 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment())
 
+    // 弹窗标题统一为“动作/对象：名称”，环境名称带在同一条标题里。
+    expect(screen.getByRole('dialog', { name: '管理环境：test-environment' })).toBeInTheDocument()
     expect(screen.getByText('linux')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
     // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。

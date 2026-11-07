@@ -317,7 +317,7 @@ describe('SkillPackagesPage', () => {
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
     await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
-    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    const detailDialog = await screen.findByRole('dialog', { name: /详情：core-tools/ })
     await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
     const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
@@ -350,7 +350,7 @@ describe('SkillPackagesPage', () => {
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
     await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
-    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    const detailDialog = await screen.findByRole('dialog', { name: /详情：core-tools/ })
     await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
     const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
@@ -381,7 +381,7 @@ describe('SkillPackagesPage', () => {
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
     await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
-    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    const detailDialog = await screen.findByRole('dialog', { name: /详情：core-tools/ })
     await user.click(await within(detailDialog).findByRole('button', { name: '删除技能包 core-tools' }))
 
     const modal = await screen.findByRole('alertdialog')
@@ -422,7 +422,7 @@ describe('SkillPackagesPage', () => {
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
     await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
 
-    const modal = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    const modal = await screen.findByRole('dialog', { name: /详情：core-tools/ })
     // 文件树来自服务端归档索引，目录与文件都按路径展示。
     expect(await within(modal).findByText('run.sh')).toBeInTheDocument()
     expect(within(modal).getByText('scripts')).toBeInTheDocument()

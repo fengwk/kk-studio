@@ -39,7 +39,7 @@ export function EnvironmentManagementModal({
   return (
     <Dialog
       className="env-management-modal-card modal-touch-target"
-      title={`${t('ai.environment.managementTitle')} - ${environment.name}`}
+      title={t('ai.environment.managementTitle', { name: environment.name })}
       onClose={onClose}
     >
         <div className="modal-body env-mgmt-body">
