@@ -29,9 +29,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
-import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -227,10 +225,6 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
             "select date_trunc('milliseconds', statement_timestamp()) as now",
             (resultSet, rowNumber) -> resultSet.getTimestamp("now").toInstant())
         .orElseThrow(() -> new IllegalStateException("statement_timestamp returned no row"));
-  }
-
-  void notifyWorkAvailable(WorkTargetType type) {
-    notifyChannel(DurableWorkStore.CHANNEL, type.value());
   }
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
