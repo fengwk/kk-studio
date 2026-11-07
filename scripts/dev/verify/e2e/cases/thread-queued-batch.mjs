@@ -88,7 +88,7 @@ registerCase({
         description: 'Local controlled hold mock for queued command batch E2E.',
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
-        credential: `e2e-queue-${suffix}`,
+        credential: { operation: 'SET', value: `e2e-queue-${suffix}` },
         modelCallTimeoutMillis: '30000',
         modelCallIdleTimeoutMillis: '10000',
       })
