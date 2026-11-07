@@ -71,7 +71,17 @@ if (hang) {
 }
 `
   await writeFile(script, source)
-  return { command: { binary: process.execPath, prefixArgs: [script] }, pidFile }
+  return {
+    // 假 rg 是测试夹具，覆盖率数据没有任何用途：显式写出自己的 undefined 键，阻止 Node 把 worker 的
+    // NODE_V8_COVERAGE 传播给子进程。否则取消或到达上限时的终止可能撞上它退出时写覆盖率文件的窗口，
+    // 留下空或截断的 JSON，让 worker 的覆盖率读取整体失败。
+    command: {
+      binary: process.execPath,
+      prefixArgs: [script],
+      env: { NODE_V8_COVERAGE: undefined },
+    },
+    pidFile,
+  }
 }
 
 /** 等假 rg 真正启动并写出 pid；超时即测试失败，而不是把未启动当成已终止。 */

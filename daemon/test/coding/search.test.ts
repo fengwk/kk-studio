@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -522,6 +523,30 @@ describe('rg 进程生命周期与失败语义', () => {
     )
     expect(result.code).toBe(2)
     expect(result.stderr).toHaveLength(64 * 1024)
+  })
+
+  it('假 rg 不继承 worker 的覆盖率环境，自然退出也不留下覆盖率文件', async () => {
+    const dir = await tempDir()
+    const fake = await installFakeRipgrep(dir, { target: join(dir, 'a.txt'), matches: 1 })
+    const coverageDir = join(dir, 'coverage')
+    const previous = process.env.NODE_V8_COVERAGE
+    try {
+      // 与 Vitest 覆盖率 worker 的做法一致：夹具若继承它，退出时就会往这里写 JSON。
+      process.env.NODE_V8_COVERAGE = coverageDir
+      const result = await runRipgrep(
+        fake.command, [], dir, new AbortController().signal, () => true,
+      )
+      expect(result.code).toBe(0)
+      // 只影响这个子进程：父进程环境保持不变，需要统计覆盖率的子进程照常继承。
+      expect(process.env.NODE_V8_COVERAGE).toBe(coverageDir)
+      expect(existsSync(coverageDir)).toBe(false)
+    } finally {
+      if (previous === undefined) {
+        delete process.env.NODE_V8_COVERAGE
+      } else {
+        process.env.NODE_V8_COVERAGE = previous
+      }
+    }
   })
 
   it.each(['missing', 'invalid'] as const)('rg 启动失败（%s）不是无匹配，并确认未启动', async (kind) => {
