@@ -76,7 +76,8 @@ class HttpRetryStatusCodesContractTest {
         .perform(
             post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
+                .content(
+                    "{\"providerType\":\"openai\",\"credential\":{\"operation\":\"SET\",\"value\":\"k\"}}"))
         .andExpect(status().is2xxSuccessful())
         .andExpect(jsonPath("$.modelHttpRetryStatusCodes").value(nullValue()));
   }
@@ -91,7 +92,7 @@ class HttpRetryStatusCodesContractTest {
             post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
+                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":{\"operation\":\"SET\",\"value\":\"k\"},"
                         + "\"modelHttpRetryStatusCodes\":[500,503]}"))
         .andExpect(status().is2xxSuccessful());
     mockMvc
@@ -99,7 +100,7 @@ class HttpRetryStatusCodesContractTest {
             post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
+                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":{\"operation\":\"SET\",\"value\":\"k\"},"
                         + "\"modelHttpRetryStatusCodes\":null}"))
         .andExpect(status().is2xxSuccessful());
 
@@ -119,7 +120,7 @@ class HttpRetryStatusCodesContractTest {
               post("/api/platform/providers")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
-                      "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
+                      "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":{\"operation\":\"SET\",\"value\":\"k\"},"
                           + "\"modelHttpRetryStatusCodes\":"
                           + token
                           + "}"))
