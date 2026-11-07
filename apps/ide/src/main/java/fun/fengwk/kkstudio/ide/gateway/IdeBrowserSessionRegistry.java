@@ -188,7 +188,8 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     synchronized (lock) {
-      GenerationState state = generations.get(new Generation(identity));
+      Generation generation = new Generation(identity);
+      GenerationState state = generations.get(generation);
       if (state == null) {
         return;
       }
@@ -198,6 +199,9 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
       }
       state.views.remove(viewId);
       removeAllSessionsForView(identity.environmentId(), viewId);
+      if (state.views.isEmpty()) {
+        generations.remove(generation);
+      }
     }
   }
 

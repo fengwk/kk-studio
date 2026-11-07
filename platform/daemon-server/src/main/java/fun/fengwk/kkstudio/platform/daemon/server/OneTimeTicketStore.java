@@ -44,13 +44,15 @@ public final class OneTimeTicketStore<T> {
     }
   }
 
-  /** 铸造一条新令牌并绑定 {@code value}。 */
+  /** 铸造一条新令牌并绑定 {@code value}，同时回收已过期的未消费令牌。 */
   public String issue(T value) {
     Objects.requireNonNull(value, "value");
+    Instant now = clock.instant();
+    entries.values().removeIf(entry -> !entry.expiresAt.isAfter(now));
     byte[] bytes = new byte[TICKET_BYTES];
     random.nextBytes(bytes);
     String ticket = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    entries.put(ticket, new Entry<>(value, clock.instant().plus(ttl)));
+    entries.put(ticket, new Entry<>(value, now.plus(ttl)));
     return ticket;
   }
 

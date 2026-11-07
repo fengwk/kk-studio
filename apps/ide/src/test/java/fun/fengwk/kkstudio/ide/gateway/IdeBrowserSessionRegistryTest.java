@@ -80,6 +80,34 @@ class IdeBrowserSessionRegistryTest {
   }
 
   @Test
+  void closedGenerationIsReclaimedAfterLastView() {
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    String viewId = UUID.randomUUID().toString();
+
+    // 关闭后旧 cookie 失效，重新打开的新 epoch 仍拒绝旧 epoch。
+    registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
+    String oldToken = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    registry.viewClosed(IDENTITY, viewId, 1L);
+    assertFalse(registry.lookup(oldToken, ENV, viewId).isPresent());
+    registry.viewOpened(IDENTITY, viewId, 2L, "/workspace");
+    assertThrows(
+        IllegalStateException.class, () -> registry.open(IDENTITY, viewId, 1L, "/workspace"));
+    registry.viewClosed(IDENTITY, viewId, 2L);
+
+    // 每个 identity 只经历一次 open-close；空代际被回收后仍可持续打开超过上限的次数。
+    for (int i = 0; i <= IdeBrowserSessionRegistry.MAX_GENERATIONS; i++) {
+      DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "daemon-" + i);
+      String cycleViewId = UUID.randomUUID().toString();
+      registry.viewOpened(identity, cycleViewId, 1L, "/workspace");
+      String token = registry.open(identity, cycleViewId, 1L, "/workspace");
+      assertTrue(registry.lookup(token, ENV, cycleViewId).isPresent());
+
+      registry.viewClosed(identity, cycleViewId, 1L);
+      assertFalse(registry.lookup(token, ENV, cycleViewId).isPresent());
+    }
+  }
+
+  @Test
   void capacityConstraints() {
     IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
     for (int i = 0; i < IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION; i++) {
