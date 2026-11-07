@@ -75,6 +75,10 @@ test('test intent: chat completions returns a deterministic OpenAI SSE stream', 
       'This is a deterministic offline acceptance stub response.',
     )
     assert.equal(chunks.at(-1).choices[0].finish_reason, 'stop')
+    const usage = chunks.at(-1).usage
+    assert.ok(Number.isInteger(usage.prompt_tokens) && usage.prompt_tokens > 0, JSON.stringify(usage))
+    assert.ok(Number.isInteger(usage.completion_tokens) && usage.completion_tokens > 0, JSON.stringify(usage))
+    assert.equal(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens)
   } finally {
     await mock.close()
   }

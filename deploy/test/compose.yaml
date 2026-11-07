@@ -85,7 +85,7 @@ services:
     volumes:
       - ./mock/server.mjs:/mock/server.mjs:ro
       - ${CANVAS_TEST_MOCK_ROUTES:-./mock/routes.json}:/config/routes.json:ro
-      - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/storage/media:/fixtures:ro
+      - ../../apps/canvas/runtime/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake:/fixtures:ro
     healthcheck:
       test:
         - CMD

@@ -141,7 +141,7 @@ export async function initializeOpencliPlugin(client) {
 }
 
 /** Upload a Blob through a presigned PUT and verify the create-only guarantees. */
-async function uploadBlob(client, image) {
+export async function uploadBlob(client, image, fetchImpl = rawFetch) {
   const sha256 = createHash('sha256').update(image).digest('hex')
   const reservation = await client.jsonCall('POST', '/api/platform/storage/uploads', {
     filename: 'tiny.png',
@@ -150,13 +150,14 @@ async function uploadBlob(client, image) {
     sha256,
   })
   assert.ok(!('bucket' in reservation) && !('key' in reservation))
-  assert.equal(reservation.state, 'PENDING')
-  assert.equal(reservation.blobId, null)
+  assert.equal(reservation.type, 'PENDING')
+  assert.ok(!('blobId' in reservation))
+  assert.equal(typeof reservation.expiresAt, 'number')
   assert.match(reservation.id, UUID_V4)
   const put = reservation.presignedPut
   assert.equal(header(put.headers, 'if-none-match'), '*')
   assert.equal(header(put.headers, 'x-amz-checksum-sha256'), Buffer.from(sha256, 'hex').toString('base64'))
-  const upload = (body) => rawFetch(put.url, { method: put.method, headers: put.headers ?? {}, body })
+  const upload = (body) => fetchImpl(put.url, { method: put.method, headers: put.headers ?? {}, body })
   assert.equal((await upload(image)).status, 200)
 
   // 同内容重放验证 create-only；不同内容重放同时受 create-only 与 checksum 保护。
@@ -171,8 +172,9 @@ async function uploadBlob(client, image) {
 
   const completed = await client.jsonCall('POST', `/api/platform/storage/uploads/${reservation.id}/complete`)
   assert.equal(completed.id, reservation.id)
-  assert.equal(completed.state, 'READY')
-  assert.equal(completed.presignedPut, null)
+  assert.equal(completed.type, 'READY')
+  assert.ok(!('presignedPut' in completed))
+  assert.equal(typeof completed.expiresAt, 'number')
   assert.match(completed.blobId, UUID_V4)
   return completed
 }
@@ -185,13 +187,13 @@ async function assertWebpPreview(url) {
 }
 
 /** The stack starts with an empty catalog, so the smoke creates a stub provider/model/agent. */
-async function createStubCatalog({ jsonCall }) {
+export async function createStubCatalog({ jsonCall }) {
   const stub = await jsonCall('POST', '/api/platform/providers', {
     name: 'stub',
     description: 'offline smoke stub',
     providerType: 'openai',
     baseUrl: 'http://stub.local:8080/v1',
-    credential: 'stub-key',
+    credential: { operation: 'SET', value: 'stub-key' },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
   })
@@ -359,7 +361,8 @@ export async function runSmoke({ baseUrl, imageFixture }) {
 
   const generatedSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.id}`)
   const generatedNode = generatedSnapshot.nodes.find((node) => node.id === functionNode.id)
-  assert.equal(assertRunRevision(generatedSnapshot.document, 2, 2), 8)
+  // fake adapter 无外部副作用、不写 checkpoint；只剩 start/beginSubmit/confirmSubmitted/complete 四次推进。
+  assert.equal(assertRunRevision(generatedSnapshot.document, 2, 0), 6)
   assert.equal(generatedNode.resources.length, 1)
   const generatedResource = generatedNode.resources[0]
   assert.equal(generatedResource.kind, 'IMAGE')

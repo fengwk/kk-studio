@@ -197,7 +197,7 @@ test('test intent: the NEW_SESSION batch uses canonical root settings and the ow
     commandId: COMMAND_ID,
     marker: MARKER,
   })
-  assert.deepEqual(request.owner, { type: 'CHAT', chatId: CHAT_ID })
+  assert.deepEqual(request.owner, { kind: 'CHAT', id: CHAT_ID })
   assert.deepEqual(request.target, {
     type: 'NEW_SESSION',
     sessionId: SESSION_ID,

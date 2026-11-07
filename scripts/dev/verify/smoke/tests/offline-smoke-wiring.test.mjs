@@ -5,7 +5,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
@@ -13,7 +13,7 @@ import test from 'node:test'
 
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { functionBatch } from '../offline-canvas-contract.mjs'
-import { createAndRun, createClient, initializeOpencliPlugin } from '../offline-smoke.mjs'
+import { createAndRun, createClient, createStubCatalog, initializeOpencliPlugin, uploadBlob } from '../offline-smoke.mjs'
 import { CANVAS_ID, documentDto, functionDefinitions, functionVersion, patchDto, runDto } from './support/canvas-dto.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
@@ -183,6 +183,94 @@ test('test intent: the smoke script lives outside the deploy runtime assets', ()
   // Human host runners belong to scripts/; deploy/ keeps only compose/images/runtime assets.
   assert.ok(existsSync(path.join(REPOSITORY_ROOT, 'scripts/dev/verify/smoke/offline-chat.sh')))
   assert.ok(!existsSync(path.join(REPOSITORY_ROOT, 'deploy/test/run.sh')))
+})
+
+test('test intent: the stub catalog uses the unified SecretUpdate credential and current model/agent DTOs', async () => {
+  const requests = []
+  const jsonCall = async (method, requestPath, body = null) => {
+    requests.push([method, requestPath, body])
+    return requestPath === '/api/platform/providers' ? { credential: { configured: true } } : {}
+  }
+
+  await createStubCatalog({ jsonCall })
+
+  assert.deepEqual(
+    requests.map(([method, requestPath]) => [method, requestPath]),
+    [
+      ['POST', '/api/platform/providers'],
+      ['POST', '/api/platform/models'],
+      ['POST', '/api/platform/agents'],
+    ],
+  )
+  const provider = requests[0][2]
+  assert.deepEqual(provider.credential, { operation: 'SET', value: 'stub-key' })
+  assert.equal(provider.modelCallTimeoutMillis, '1800000')
+  assert.equal(provider.modelCallIdleTimeoutMillis, '120000')
+  const model = requests[1][2]
+  assert.equal(model.type, 'MODEL')
+  assert.deepEqual(model.config.limit, { context: 128000, output: 4096 })
+  assert.deepEqual(model.config.variants, [{ id: 'default', promptCacheRetention: 'SHORT' }])
+  const agent = requests[2][2]
+  assert.deepEqual(agent.execution, {
+    driver: 'builtin',
+    settings: { modelName: 'acceptance-stub', variant: 'default' },
+  })
+  assert.deepEqual(agent.config, { tools: [], skills: [], subagents: [] })
+})
+
+test('test intent: blob upload reads the current PENDING/READY union and enforces create-only PUT', async () => {
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+  const sha256 = createHash('sha256').update(image).digest('hex')
+  const uploadId = randomUUID()
+  const blobId = randomUUID()
+  const reservation = {
+    type: 'PENDING',
+    id: uploadId,
+    expiresAt: 1700000000000,
+    presignedPut: {
+      method: 'PUT',
+      url: 'http://uploads.local/object',
+      headers: {
+        'if-none-match': '*',
+        'x-amz-checksum-sha256': Buffer.from(sha256, 'hex').toString('base64'),
+      },
+      expiresAt: 1700000001000,
+      mediaType: 'image/png',
+      sizeBytes: String(image.length),
+    },
+  }
+  const completed = { type: 'READY', id: uploadId, blobId, expiresAt: 1700000002000 }
+  const requests = []
+  const jsonCall = async (method, requestPath, body = null) => {
+    requests.push([method, requestPath, body])
+    return requestPath.endsWith('/complete') ? completed : reservation
+  }
+  const uploads = []
+  const statuses = [200, 409, 400]
+  const fetchImpl = async (url, init) => {
+    uploads.push([url, init])
+    return { status: statuses.shift() }
+  }
+
+  const result = await uploadBlob({ jsonCall }, image, fetchImpl)
+
+  assert.equal(result.blobId, blobId)
+  assert.deepEqual(requests, [
+    [
+      'POST',
+      '/api/platform/storage/uploads',
+      { filename: 'tiny.png', mediaType: 'image/png', sizeBytes: String(image.length), sha256 },
+    ],
+    ['POST', `/api/platform/storage/uploads/${uploadId}/complete`, null],
+  ])
+  assert.deepEqual(
+    uploads.map(([url, init]) => [url, init.method, init.headers['if-none-match']]),
+    [
+      ['http://uploads.local/object', 'PUT', '*'],
+      ['http://uploads.local/object', 'PUT', '*'],
+      ['http://uploads.local/object', 'PUT', '*'],
+    ],
+  )
 })
 
 // 统一初始化契约：GET 坐标 -> PUT 秘密补丁 -> 状态轮询。
