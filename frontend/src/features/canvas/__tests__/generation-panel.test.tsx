@@ -16,7 +16,7 @@ vi.mock('@/features/canvas/canvas-api', () => ({
     method: 'GET',
     url: 'https://s3.example/preview',
     headers: {},
-    expiresAt: '2026-08-10T00:15:00Z',
+    expiresAt: 1786320900000,
   })),
 }))
 

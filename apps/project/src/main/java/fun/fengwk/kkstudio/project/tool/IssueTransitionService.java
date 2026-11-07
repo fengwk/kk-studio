@@ -210,11 +210,7 @@ public class IssueTransitionService {
     if (toState == null || toState.isBlank() || !toState.equals(toState.strip())) {
       throw DomainException.validation("issue_run", "to_state must be a non-blank state code");
     }
-    try {
-      return ProjectStateCode.of(toState);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("issue_run", "invalid to_state: " + toState);
-    }
+    return ProjectStateCode.of(toState);
   }
 
   private static IllegalStateException inconsistent() {

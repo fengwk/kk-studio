@@ -238,7 +238,7 @@ public class ProjectService {
     try {
       return workflowCodec.decode(json);
     } catch (IllegalArgumentException error) {
-      throw ProjectValidationUtils.validation("workflow", error);
+      throw DomainException.validation("workflow", error.getMessage(), error);
     }
   }
 

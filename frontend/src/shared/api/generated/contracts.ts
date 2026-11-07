@@ -2442,7 +2442,7 @@ export interface ProviderCreateDTO {
   providerType: ProviderType
   description?: string | null
   baseUrl?: string | null
-  credential?: string | null
+  credential?: SecretUpdate | null
   modelCallTimeoutMillis?: string | null
   modelCallIdleTimeoutMillis?: string | null
   modelHttpRetryStatusCodes?: number[] | null

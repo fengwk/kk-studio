@@ -62,7 +62,7 @@ public final class McpToolDiscovery {
         throw DomainException.validation(
             RESOURCE, "mcp server returned duplicate tools for source name: " + sourceName);
       }
-      String toolName = requireToolName(server, sourceName);
+      String toolName = McpToolNameNormalizer.requireModelToolName(server.name(), sourceName);
       if (!seenToolNames.add(toolName)) {
         throw DomainException.validation(
             RESOURCE,
@@ -124,14 +124,6 @@ public final class McpToolDiscovery {
       return McpInputSchemaConverter.toCanonicalJson(inputSchemaJson, RESOURCE);
     } catch (IllegalArgumentException error) {
       throw DomainException.validation(RESOURCE, "mcp tool input schema is invalid: " + sourceName);
-    }
-  }
-
-  private static String requireToolName(McpServer server, String sourceName) {
-    try {
-      return McpToolNameNormalizer.requireModelToolName(server.name(), sourceName);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage());
     }
   }
 }

@@ -444,7 +444,7 @@ describe('useCanvasController real snapshot runtime', () => {
       id: UPLOAD_ID,
       type: 'READY',
       blobId: 'blob-upload',
-      expiresAt: 1786320900,
+      expiresAt: 1786320900000,
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -863,13 +863,13 @@ describe('useCanvasController real snapshot runtime', () => {
       id: 'eeeeeeee-0000-4000-8000-000000000090',
       type: 'READY',
       blobId: 'blob-existing',
-      expiresAt: 1786320900,
+      expiresAt: 1786320900000,
     })
     vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
       id: uploadId,
       type: 'READY',
       blobId: 'blob-dedup',
-      expiresAt: 1786320900,
+      expiresAt: 1786320900000,
     }))
 
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })

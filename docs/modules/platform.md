@@ -309,7 +309,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
-Provider credential 在创建请求或 PUT 的 `SecretUpdate`（KEEP/SET/CLEAR）中写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
+Provider credential 通过 `SecretUpdate` 写入：创建请求只接受 `SET`（省略即无凭据），PUT 支持 KEEP/SET/CLEAR；常规响应只给 `{configured}` 安全投影，配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
 `GET /api/platform/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的

@@ -46,50 +46,48 @@ public class ProjectDtoMapper {
     if (dto == null) {
       throw DomainException.validation("workflow", "workflow is required");
     }
-    try {
-      if (dto.getStates() == null) {
-        throw new IllegalArgumentException("workflow states must not be null");
-      }
-      List<ProjectWorkflowState> states = new ArrayList<>();
-      for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
-        if (stateDto == null) {
-          throw new IllegalArgumentException("workflow state must not be null");
-        }
-        ProjectStateCode stateCode = requireWorkflowStateCode(stateDto.getState(), "state");
-        String name = stateDto.getName();
-        String agent = stateDto.getAgent();
-        String environment = stateDto.getEnvironment();
-        String instructions = stateDto.getInstructions();
-        Integer maxRuns = null;
-        if (stateDto.getMaxRuns() != null) {
-          long parsed = stateDto.getMaxRuns();
-          if (parsed < 1 || parsed > Integer.MAX_VALUE) {
-            throw DomainException.validation("maxRuns", "maxRuns must be in range [1, 2147483647]");
-          }
-          maxRuns = (int) parsed;
-        }
-        boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
-        List<ProjectStateCode> next =
-            stateDto.getNext() == null
-                ? List.of()
-                : stateDto.getNext().stream()
-                    .map(value -> requireWorkflowStateCode(value, "next"))
-                    .toList();
-        states.add(
-            new ProjectWorkflowState(
-                stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
-      }
-      return new ProjectWorkflow(states);
-    } catch (DomainException error) {
-      throw error;
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("workflow", error.getMessage(), error);
+    if (dto.getStates() == null) {
+      throw DomainException.validation("workflow", "workflow states must not be null");
     }
+    List<ProjectWorkflowState> states = new ArrayList<>();
+    for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
+      if (stateDto == null) {
+        throw DomainException.validation("workflow", "workflow state must not be null");
+      }
+      ProjectStateCode stateCode = requireWorkflowStateCode(stateDto.getState(), "state");
+      String name = stateDto.getName();
+      String agent = stateDto.getAgent();
+      String environment = stateDto.getEnvironment();
+      String instructions = stateDto.getInstructions();
+      Integer maxRuns = parseMaxRuns(stateDto.getMaxRuns());
+      boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
+      List<ProjectStateCode> next =
+          stateDto.getNext() == null
+              ? List.of()
+              : stateDto.getNext().stream()
+                  .map(value -> requireWorkflowStateCode(value, "next"))
+                  .toList();
+      states.add(
+          new ProjectWorkflowState(
+              stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
+    }
+    return new ProjectWorkflow(states);
+  }
+
+  /** maxRuns 是 64 位整数 DTO 字段：只校验领域可容纳的范围，wire 解析由 HTTP 边界负责。 */
+  private static Integer parseMaxRuns(Long value) {
+    if (value == null) {
+      return null;
+    }
+    if (value < 1 || value > Integer.MAX_VALUE) {
+      throw DomainException.validation("maxRuns", "maxRuns must be in range [1, 2147483647]");
+    }
+    return (int) (long) value;
   }
 
   private static ProjectStateCode requireWorkflowStateCode(String value, String field) {
     if (value == null) {
-      throw new IllegalArgumentException("workflow " + field + " must not be null");
+      throw DomainException.validation("workflow", "workflow " + field + " must not be null");
     }
     return ProjectStateCode.of(value);
   }

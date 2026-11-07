@@ -67,7 +67,7 @@ registerCase({
         description: 'Local OpenAI-compatible SSE mock for model attempt visibility.',
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
-        credential: `e2e-attempt-${suffix}`,
+        credential: { operation: 'SET', value: `e2e-attempt-${suffix}` },
         modelCallTimeoutMillis: '30000',
         modelCallIdleTimeoutMillis: '10000',
       })

@@ -10,7 +10,6 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.function.Supplier;
 
 /**
  * Project 领域边界预校验工具：使用严格 UTF-8 encoder（REPORT）做字符与字节边界检查，错误消息脱敏且不回显输入正文。
@@ -105,34 +104,7 @@ public final class ProjectValidationUtils {
     if (value == null || value.isBlank()) {
       throw DomainException.validation(field, field + " must be a state code");
     }
-    try {
-      return ProjectStateCode.of(value);
-    } catch (IllegalArgumentException error) {
-      throw validation(field, error);
-    }
-  }
-
-  /** 执行领域校验动作，把确定性领域拒绝翻译为平台校验错误。 */
-  public static void validate(String resource, Runnable action) {
-    try {
-      action.run();
-    } catch (IllegalArgumentException error) {
-      throw validation(resource, error);
-    }
-  }
-
-  /** 执行领域校验动作并返回结果，把确定性领域拒绝翻译为平台校验错误。 */
-  public static <T> T resolve(String resource, Supplier<T> action) {
-    try {
-      return action.get();
-    } catch (IllegalArgumentException error) {
-      throw validation(resource, error);
-    }
-  }
-
-  /** 把领域层确定性拒绝（{@link IllegalArgumentException}）翻译为平台校验错误，避免领域拒绝泄漏为内部错误。 */
-  public static DomainException validation(String resource, IllegalArgumentException error) {
-    return DomainException.validation(resource, error.getMessage());
+    return ProjectStateCode.of(value);
   }
 
   /** 请求正文指纹：SHA-256 小写十六进制，用于 Activity 的幂等去重。 */

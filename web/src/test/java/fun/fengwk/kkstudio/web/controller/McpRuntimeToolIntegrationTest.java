@@ -67,6 +67,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
@@ -218,11 +219,10 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     providerDto.setName(providerName);
     providerDto.setDescription("provider description");
     providerDto.setProviderType(ProviderType.OPENAI);
-    providerDto.setCredential("secret-credential-value");
+    providerDto.setCredential(SecretUpdate.set("secret-credential-value"));
     providerDto.setModelCallTimeoutMillis(120000L);
     providerDto.setModelCallIdleTimeoutMillis(3000L);
     ObjectNode providerBody = objectMapper.valueToTree(providerDto);
-    providerBody.put("credential", providerDto.getCredential());
     providerBody.put("modelCallTimeoutMillis", "120000");
     providerBody.put("modelCallIdleTimeoutMillis", "3000");
 

@@ -149,7 +149,7 @@ describe('IssueDetailModal', () => {
     id: 'mock-upload-id',
     type: 'READY',
     blobId: 'mock-blob-id',
-    expiresAt: 1789905600,
+    expiresAt: 1789905600000,
   }
 
   const createMockStorageService = (): StorageService => ({

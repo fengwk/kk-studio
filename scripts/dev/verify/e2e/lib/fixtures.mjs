@@ -502,7 +502,7 @@ export function providerCreateBody(suffix) {
     description: 'e2e provider',
     providerType: 'openai',
     baseUrl: 'https://example.com/v1',
-    credential: 'sk-e2e-test',
+    credential: { operation: 'SET', value: 'sk-e2e-test' },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
   }

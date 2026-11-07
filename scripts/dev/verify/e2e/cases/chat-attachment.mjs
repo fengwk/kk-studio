@@ -289,7 +289,7 @@ registerCase({
             description: 'Local Responses probe for attachment materialization.',
             providerType: 'openai_responses',
             baseUrl: mock.baseUrl,
-            credential: `e2e-image-${suffix}`,
+            credential: { operation: 'SET', value: `e2e-image-${suffix}` },
             modelCallTimeoutMillis: '30000',
             modelCallIdleTimeoutMillis: '10000',
           })

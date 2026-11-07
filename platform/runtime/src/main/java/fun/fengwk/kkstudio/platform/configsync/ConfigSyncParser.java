@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 
@@ -239,7 +240,7 @@ public final class ConfigSyncParser {
     properties.setDescription(entry.optString("description"));
     properties.setProviderType(type);
     properties.setBaseUrl(entry.optString("baseUrl"));
-    properties.setCredential(entry.optString("credential"));
+    properties.setCredential(providerCredential(entry.optString("credential")));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
     properties.setModelCallIdleTimeoutMillis(entry.optLong("modelCallIdleTimeoutMillis"));
     properties.setModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
@@ -249,6 +250,18 @@ public final class ConfigSyncParser {
       return null;
     }
     return new ProviderSpec(name, properties);
+  }
+
+  /** 文件中的凭据是普通文本：空白表示无凭据，非空值按 SET 事实校验，非法值不回显。 */
+  private static SecretUpdate providerCredential(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      return SecretUpdate.set(value);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, "provider credential is invalid");
+    }
   }
 
   private ModelSpec parseModel(

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -86,7 +87,7 @@ class AgentConfigValidatorTest {
       config.setSkills(List.of());
       config.setSubagents(List.of());
       assertTrue(
-          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
+          assertThrows(DomainException.class, () -> fixture.validator.validate(config))
               .getMessage()
               .contains("unknown agent tool: missing_tool"));
     }
@@ -101,7 +102,7 @@ class AgentConfigValidatorTest {
       config.setSkills(List.of(skillRef("tools", tooLong)));
       config.setSubagents(List.of());
       assertTrue(
-          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
+          assertThrows(DomainException.class, () -> fixture.validator.validate(config))
               .getMessage()
               .contains("canonical short names"));
     }
@@ -115,8 +116,8 @@ class AgentConfigValidatorTest {
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
-      IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
+      DomainException error =
+          assertThrows(DomainException.class, () -> fixture.validator.validate(config));
       assertTrue(error.getMessage().contains("internal tool"));
     }
   }
@@ -130,7 +131,7 @@ class AgentConfigValidatorTest {
       config.setSubagents(List.of("x".repeat(65)));
 
       assertTrue(
-          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
+          assertThrows(DomainException.class, () -> fixture.validator.validate(config))
               .getMessage()
               .contains("subagent name must be <= 64 characters"));
     }

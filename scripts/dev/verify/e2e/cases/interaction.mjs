@@ -263,7 +263,7 @@ registerCase({
         description: 'Local OpenAI-compatible SSE mock for the pending input contract.',
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
-        credential: `e2e-interaction-${suffix}`,
+        credential: { operation: 'SET', value: `e2e-interaction-${suffix}` },
         modelCallTimeoutMillis: '30000',
         modelCallIdleTimeoutMillis: '10000',
       })

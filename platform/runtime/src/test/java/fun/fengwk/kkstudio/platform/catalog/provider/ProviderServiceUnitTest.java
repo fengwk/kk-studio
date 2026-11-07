@@ -441,7 +441,8 @@ public class ProviderServiceUnitTest {
     ProviderCreateDTO properties = new ProviderCreateDTO();
     properties.setName(name);
     properties.setProviderType(providerType);
-    properties.setCredential(credential);
+    properties.setCredential(
+        credential == null || credential.isBlank() ? null : SecretUpdate.set(credential));
     return properties;
   }
 

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.List;
 
 /** {@link ProjectStateCode} 字符集与 {@link ProjectWorkflowReservedState} 保留编码契约。 */
@@ -28,7 +30,7 @@ class ProjectStateCodesTest {
     List<String> invalid =
         List.of("", "init", "1INIT", "INIT-1", "INIT ", " INIT", "INIT.ME", "A".repeat(65));
     for (String value : invalid) {
-      assertThrows(IllegalArgumentException.class, () -> ProjectStateCode.of(value));
+      assertThrows(DomainException.class, () -> ProjectStateCode.of(value));
     }
     assertThrows(NullPointerException.class, () -> ProjectStateCode.of(null));
   }

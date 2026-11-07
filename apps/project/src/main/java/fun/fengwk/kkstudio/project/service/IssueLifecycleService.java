@@ -83,9 +83,7 @@ public class IssueLifecycleService {
     mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
-    ProjectValidationUtils.validate(
-        "issue",
-        () -> new IssueStateTransitions(locked.workflow()).requireBlock(from, validReason));
+    new IssueStateTransitions(locked.workflow()).requireBlock(from, validReason);
     ObjectNode data = mutationSupport.newData();
     data.put("action", "BLOCK");
     data.put("from", locked.issue().getState());
@@ -120,11 +118,8 @@ public class IssueLifecycleService {
       throw DomainException.validation("issue", "Issue is not blocked");
     }
     ProjectStateCode recovered =
-        ProjectValidationUtils.resolve(
-            "issue",
-            () ->
-                new IssueStateTransitions(locked.workflow())
-                    .requireRecover(ProjectStateCode.of(issue.getBlockedFromState())));
+        new IssueStateTransitions(locked.workflow())
+            .requireRecover(ProjectStateCode.of(issue.getBlockedFromState()));
     ObjectNode data = mutationSupport.newData();
     data.put("action", "RECOVER");
     data.put("from", issue.getState());
@@ -315,8 +310,7 @@ public class IssueLifecycleService {
           "issue", "Cannot transition a paused issue; resume it first");
     }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
-    ProjectValidationUtils.validate(
-        "issue", () -> new IssueStateTransitions(locked.workflow()).requireTransition(from, to));
+    new IssueStateTransitions(locked.workflow()).requireTransition(from, to);
     mutationSupport.appendStateChange(
         locked.issue(), identity, "TRANSITION", from.value(), to.value());
     locked.issue().setState(to.value());
@@ -351,9 +345,7 @@ public class IssueLifecycleService {
       throw DomainException.validation("issue", "Cannot reopen a paused issue; resume it first");
     }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
-    ProjectStateCode to =
-        ProjectValidationUtils.resolve(
-            "issue", () -> new IssueStateTransitions(locked.workflow()).requireReopen(from));
+    ProjectStateCode to = new IssueStateTransitions(locked.workflow()).requireReopen(from);
     mutationSupport.appendStateChange(locked.issue(), identity, "REOPEN", from.value(), to.value());
     locked.issue().setState(to.value());
     return mutationSupport.persist(locked, expectedVersion);

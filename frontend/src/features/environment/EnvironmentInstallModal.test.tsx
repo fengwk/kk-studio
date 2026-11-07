@@ -66,7 +66,7 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8' })
     vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: "short-code'汉字", expiresAt: 1791191100,
+      code: "short-code'汉字", expiresAt: 1791191100000,
     })
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
   })
@@ -160,7 +160,7 @@ describe('EnvironmentInstallModal', () => {
       ...card, version: '9', registrationToken: 'rotated-long-token',
     })
     vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: 'fresh-code', expiresAt: 1791191400,
+      code: 'fresh-code', expiresAt: 1791191400000,
     })
     await user.click(copyButton())
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
@@ -218,7 +218,7 @@ describe('EnvironmentInstallModal', () => {
     view.unmount()
     await act(async () => {
       metadata.resolve(card); save.resolve(card)
-      code.resolve({ code: 'short-code', expiresAt: 1791191100 }); clipboard.resolve(true)
+      code.resolve({ code: 'short-code', expiresAt: 1791191100000 }); clipboard.resolve(true)
     })
     if (phase === 'save' || phase === 'metadata') expect(copyTextToClipboard).not.toHaveBeenCalled()
     if (phase === 'code') expect(copyTextToClipboard).not.toHaveBeenCalled()

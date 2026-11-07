@@ -168,7 +168,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     create.setName(name);
     create.setProviderType(ProviderType.fromWireValue(providerType));
     create.setBaseUrl(baseUrl);
-    create.setCredential(credential);
+    create.setCredential(credential == null ? null : SecretUpdate.set(credential));
     create.setModelCallTimeoutMillis(timeoutMillis);
     return providerService.createProvider(create);
   }

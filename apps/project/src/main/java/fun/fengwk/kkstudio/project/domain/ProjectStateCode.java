@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project.domain;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -16,7 +18,7 @@ public record ProjectStateCode(String value) {
   public ProjectStateCode {
     Objects.requireNonNull(value, "value");
     if (!PATTERN.matcher(value).matches()) {
-      throw new IllegalArgumentException("state code must match [A-Z][A-Z0-9_]{0,63}: " + value);
+      throw DomainException.validation("workflow", "state code must match [A-Z][A-Z0-9_]{0,63}");
     }
   }
 

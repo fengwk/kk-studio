@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project.service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
@@ -13,10 +14,11 @@ public record StageBudgetView(
   public static StageBudgetView budget(ProjectStateCode state, int maxRuns, long after) {
     Objects.requireNonNull(state, "state");
     if (ProjectWorkflowReservedState.isReserved(state)) {
-      throw new IllegalArgumentException("stage budget must target a work stage: " + state);
+      throw DomainException.validation(
+          "stage_budget", "stage budget must target a work stage: " + state);
     }
     if (maxRuns <= 0) {
-      throw new IllegalArgumentException("maxRuns must be > 0");
+      throw DomainException.validation("stage_budget", "maxRuns must be > 0");
     }
     if (after < 0) {
       throw new IllegalArgumentException("budgetAfterOrdinal must be >= 0");
@@ -47,7 +49,8 @@ public record StageBudgetView(
     Objects.requireNonNull(workflow, "workflow");
     ProjectWorkflowState stage = workflow.require(state);
     if (!stage.enabled() || !stage.hasAgent()) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "stage_budget",
           "stage budget requires an enabled agent stage, but " + state + " is not one");
     }
   }

@@ -400,7 +400,7 @@ async function setupDistributedHarness(ctx, suffix) {
     description: 'Distributed test provider',
     providerType: 'openai',
     baseUrl: 'http://stub.local:8080/v1',
-    credential: `e2e-dist-${suffix}`,
+    credential: { operation: 'SET', value: `e2e-dist-${suffix}` },
     modelCallTimeoutMillis: '60000',
     modelCallIdleTimeoutMillis: '30000',
   })

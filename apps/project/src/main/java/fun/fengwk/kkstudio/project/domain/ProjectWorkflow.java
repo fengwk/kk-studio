@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project.domain;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -24,7 +26,7 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
     Objects.requireNonNull(states, "states");
     states = List.copyOf(states);
     if (states.isEmpty()) {
-      throw new IllegalArgumentException("workflow must declare at least one state");
+      throw DomainException.validation("workflow", "workflow must declare at least one state");
     }
     Map<ProjectStateCode, ProjectWorkflowState> index = indexStates(states);
     requireReservedStates(index);
@@ -57,7 +59,9 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
   /** 要求状态存在，否则非法：配置整体保存时用它校验保留值、引用与边。 */
   public ProjectWorkflowState require(ProjectStateCode code) {
     return find(code)
-        .orElseThrow(() -> new IllegalArgumentException("workflow does not declare state " + code));
+        .orElseThrow(
+            () ->
+                DomainException.validation("workflow", "workflow does not declare state " + code));
   }
 
   private static Map<ProjectStateCode, ProjectWorkflowState> indexStates(
@@ -66,7 +70,8 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
     for (ProjectWorkflowState state : states) {
       Objects.requireNonNull(state, "states element");
       if (index.putIfAbsent(state.state(), state) != null) {
-        throw new IllegalArgumentException("workflow state code must be unique: " + state.state());
+        throw DomainException.validation(
+            "workflow", "workflow state code must be unique: " + state.state());
       }
     }
     return index;
@@ -75,7 +80,8 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
   private static void requireReservedStates(Map<ProjectStateCode, ProjectWorkflowState> index) {
     for (ProjectWorkflowReservedState reserved : ProjectWorkflowReservedState.values()) {
       if (!index.containsKey(reserved.code())) {
-        throw new IllegalArgumentException("workflow must reserve state " + reserved.code());
+        throw DomainException.validation(
+            "workflow", "workflow must reserve state " + reserved.code());
       }
     }
   }
@@ -84,8 +90,8 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
     for (ProjectWorkflowState state : index.values()) {
       for (ProjectStateCode next : state.next()) {
         if (!index.containsKey(next)) {
-          throw new IllegalArgumentException(
-              "state " + state.state() + " points to undeclared state " + next);
+          throw DomainException.validation(
+              "workflow", "state " + state.state() + " points to undeclared state " + next);
         }
       }
     }
@@ -96,12 +102,13 @@ public record ProjectWorkflow(List<ProjectWorkflowState> states) {
     Set<ProjectStateCode> reachable = reachableFromInit(index);
     for (ProjectWorkflowState state : index.values()) {
       if (isEnabledWorkStage(state) && !reachable.contains(state.state())) {
-        throw new IllegalArgumentException(
-            "enabled stage " + state.state() + " is not reachable from INIT");
+        throw DomainException.validation(
+            "workflow", "enabled stage " + state.state() + " is not reachable from INIT");
       }
     }
     if (!reachable.contains(ProjectWorkflowReservedState.DONE.code())) {
-      throw new IllegalArgumentException("workflow must provide a normal path from INIT to DONE");
+      throw DomainException.validation(
+          "workflow", "workflow must provide a normal path from INIT to DONE");
     }
   }
 

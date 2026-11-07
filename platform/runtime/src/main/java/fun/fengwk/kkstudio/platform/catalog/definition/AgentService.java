@@ -191,11 +191,7 @@ public class AgentService {
   }
 
   private void validateConfig(AgentConfigDTO config) {
-    try {
-      configValidator.validate(config);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
-    }
+    configValidator.validate(config);
   }
 
   private Mutation mutation(

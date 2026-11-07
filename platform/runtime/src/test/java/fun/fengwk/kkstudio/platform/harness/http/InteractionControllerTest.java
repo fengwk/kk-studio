@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -18,15 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
@@ -128,30 +124,6 @@ class InteractionControllerTest {
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(queryService);
-  }
-
-  @Test
-  void rejectsIncompleteToolInputBeforeTheService() {
-    InteractionController controller = new InteractionController(queryService, interactionService);
-
-    assertThrows(
-        DomainException.class,
-        () ->
-            controller.submitToolInput(
-                THREAD,
-                INVOCATION,
-                new HarnessToolInputDTO.Answer(null, List.of(List.of("optionA"))),
-                new MockHttpServletRequest()));
-    assertThrows(
-        DomainException.class,
-        () ->
-            controller.submitToolInput(
-                THREAD,
-                INVOCATION,
-                new HarnessToolInputDTO.Answer(SUBMISSION, null),
-                new MockHttpServletRequest()));
-
-    verifyNoInteractions(interactionService);
   }
 
   @Test

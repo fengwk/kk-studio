@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
@@ -151,7 +152,7 @@ class ConfigSyncApplierTest {
     properties.setName(name);
     properties.setProviderType(ProviderType.OPENAI);
     properties.setBaseUrl("https://api.example.com");
-    properties.setCredential("secret");
+    properties.setCredential(SecretUpdate.set("secret"));
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 

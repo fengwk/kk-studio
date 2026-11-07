@@ -164,6 +164,11 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
   assert.equal(created.name, 'e2e-provider-suffix')
   assert.equal(created.modelCallTimeoutMillis, '1800000')
   assert.equal(created.modelCallIdleTimeoutMillis, '120000')
+  assert.deepEqual(
+    created.credential,
+    { operation: 'SET', value: 'sk-e2e-test' },
+    'provider create only accepts SET credentials',
+  )
   assert.equal(Object.hasOwn(created, 'modelHttpRetryStatusCodes'), false)
 })
 

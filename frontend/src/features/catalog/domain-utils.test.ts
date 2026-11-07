@@ -188,7 +188,7 @@ describe('AI domain utilities', () => {
       description: 'provider desc',
       providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
-      credential: 'secret',
+      credential: { operation: 'SET', value: 'secret' },
       modelCallTimeoutMillis: '120000',
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,

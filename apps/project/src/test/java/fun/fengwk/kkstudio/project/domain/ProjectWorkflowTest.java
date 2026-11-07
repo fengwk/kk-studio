@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.List;
 
 /** {@link ProjectWorkflow} 聚合不变量：保留值、编码唯一、边合法与文档要求的可达性。 */
@@ -27,8 +29,7 @@ class ProjectWorkflowTest {
     assertTrue(workflow.find(ProjectStateCode.of("REVIEW")).isPresent());
     assertFalse(workflow.find(ProjectStateCode.of("GHOST")).isPresent());
     assertEquals("designer", workflow.require(ProjectStateCode.of("DESIGN")).agent());
-    assertThrows(
-        IllegalArgumentException.class, () -> workflow.require(ProjectStateCode.of("GHOST")));
+    assertThrows(DomainException.class, () -> workflow.require(ProjectStateCode.of("GHOST")));
     assertThrows(NullPointerException.class, () -> workflow.find(null));
   }
 
@@ -41,23 +42,19 @@ class ProjectWorkflowTest {
     ProjectWorkflowState done = ProjectDomainFixtures.reservedState("DONE", "完成");
 
     assertThrows(NullPointerException.class, () -> new ProjectWorkflow(null));
-    assertThrows(IllegalArgumentException.class, () -> new ProjectWorkflow(List.of()));
+    assertThrows(DomainException.class, () -> new ProjectWorkflow(List.of()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectWorkflow(List.of(init, init, blocked, done)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ProjectWorkflow(List.of(work, blocked, done)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ProjectWorkflow(List.of(init, work, done)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ProjectWorkflow(List.of(init, work, blocked)));
+        DomainException.class, () -> new ProjectWorkflow(List.of(init, init, blocked, done)));
+    assertThrows(DomainException.class, () -> new ProjectWorkflow(List.of(work, blocked, done)));
+    assertThrows(DomainException.class, () -> new ProjectWorkflow(List.of(init, work, done)));
+    assertThrows(DomainException.class, () -> new ProjectWorkflow(List.of(init, work, blocked)));
   }
 
   /** 边只能指向已声明状态，且不允许自身边、重复目标或指向 BLOCKED。 */
   @Test
   void rejectsIllegalEdges() {
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             new ProjectWorkflow(
                 List.of(
@@ -65,13 +62,11 @@ class ProjectWorkflowTest {
                     ProjectDomainFixtures.reservedState("BLOCKED", "业务阻塞"),
                     ProjectDomainFixtures.reservedState("DONE", "完成"))));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDomainFixtures.reservedState("INIT", "待开始", "INIT"));
+        DomainException.class, () -> ProjectDomainFixtures.reservedState("INIT", "待开始", "INIT"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDomainFixtures.reservedState("INIT", "待开始", "BLOCKED"));
+        DomainException.class, () -> ProjectDomainFixtures.reservedState("INIT", "待开始", "BLOCKED"));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> ProjectDomainFixtures.reservedState("INIT", "待开始", "DONE", "DONE"));
   }
 
@@ -80,7 +75,7 @@ class ProjectWorkflowTest {
   void requiresEnabledStagesReachableAndPathToDone() {
     // 启用阶段没有任何入口
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             new ProjectWorkflow(
                 List.of(
@@ -90,7 +85,7 @@ class ProjectWorkflowTest {
                     ProjectDomainFixtures.reservedState("DONE", "完成"))));
     // 只有保留状态且 INIT 没有正常边：不存在到 DONE 的正常路径
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             new ProjectWorkflow(
                 List.of(

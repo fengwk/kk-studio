@@ -151,13 +151,13 @@ describe('skill package upload', () => {
       id: 'upload-1',
       type: 'PENDING',
       presignedPut: presigned,
-      expiresAt: 1,
+      expiresAt: 1786320000000,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-1',
       type: 'READY',
       blobId: 'blob-1',
-      expiresAt: 1,
+      expiresAt: 1786320000000,
     })
 
     const promise = uploadSkillArchive({
@@ -183,13 +183,13 @@ describe('skill package upload', () => {
       id: 'upload-2',
       type: 'READY',
       blobId: 'blob-2',
-      expiresAt: 1,
+      expiresAt: 1786320000000,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-2',
       type: 'READY',
       blobId: 'blob-2',
-      expiresAt: 1,
+      expiresAt: 1786320000000,
     })
     const progress: UploadProgress[] = []
 

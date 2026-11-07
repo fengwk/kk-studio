@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.Arrays;
 import java.util.List;
 
@@ -17,23 +19,20 @@ class ProjectWorkflowStateTest {
   @Test
   void reservedStatesStayFixed() {
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> custom("INIT", "待开始", "worker", null, null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> custom("INIT", "待开始", null, "linux", null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("INIT", "待开始", null, null, "做事", null, true, "DONE"));
+        DomainException.class, () -> custom("INIT", "待开始", null, null, "做事", null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("INIT", "待开始", null, null, null, 1, true, "DONE"));
+        DomainException.class, () -> custom("INIT", "待开始", null, null, null, 1, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("INIT", "待开始", null, null, null, null, false, "DONE"));
+        DomainException.class, () -> custom("INIT", "待开始", null, null, null, null, false, "DONE"));
     // BLOCKED 与 DONE 不配置普通边；INIT 可以声明正常边
-    assertThrows(IllegalArgumentException.class, () -> reserved("BLOCKED", "业务阻塞", "DONE"));
-    assertThrows(IllegalArgumentException.class, () -> reserved("DONE", "完成", "INIT"));
+    assertThrows(DomainException.class, () -> reserved("BLOCKED", "业务阻塞", "DONE"));
+    assertThrows(DomainException.class, () -> reserved("DONE", "完成", "INIT"));
     assertEquals(1, reserved("INIT", "待开始", "DONE").next().size());
   }
 
@@ -45,11 +44,9 @@ class ProjectWorkflowStateTest {
     assertEquals("做事", manual.instructions());
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", null, "linux", null, null, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", null, "linux", null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", null, null, null, 2, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", null, null, null, 2, true, "DONE"));
   }
 
   /** 有 Agent 的工作阶段必须给出正数 maxRuns；有 maxRuns 就必须有 Agent。 */
@@ -62,40 +59,32 @@ class ProjectWorkflowStateTest {
     assertEquals(3, stage.maxRuns());
 
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> custom("WORK", "工作", "worker", null, null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", "worker", null, null, 0, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", "worker", null, null, 0, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", "worker", null, null, -1, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", "worker", null, null, -1, true, "DONE"));
   }
 
   /** 显示名、Agent/Environment 规范名与 {code next} 形状在构造期固定，非法输入不能进入配置。 */
   @Test
   void rejectsInvalidNamesAndEdges() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", " ", null, null, null, null, true, "DONE"));
+        DomainException.class, () -> custom("WORK", " ", null, null, null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", " 工作 ", null, null, null, null, true, "DONE"));
+        DomainException.class, () -> custom("WORK", " 工作 ", null, null, null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", " ", null, null, 1, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", " ", null, null, 1, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", "a/b", null, null, 1, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", "a/b", null, null, 1, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> custom("WORK", "工作", "a".repeat(65), null, null, 1, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", null, " ", null, null, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", null, " ", null, null, true, "DONE"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> custom("WORK", "工作", null, null, " ", null, true, "DONE"));
+        DomainException.class, () -> custom("WORK", "工作", null, null, " ", null, true, "DONE"));
     assertThrows(
         NullPointerException.class,
         () ->

@@ -114,7 +114,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("name", name);
     body.put("providerType", "openai");
-    body.put("credential", "k");
+    body.set("credential", objectMapper.valueToTree(Map.of("operation", "SET", "value", "k")));
     if (baseUrl != null) {
       body.put("baseUrl", baseUrl);
     }
@@ -137,11 +137,10 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     provider.setName(providerName);
     provider.setDescription("provider description");
     provider.setProviderType(ProviderType.OPENAI);
-    provider.setCredential("secret-value");
+    provider.setCredential(SecretUpdate.set("secret-value"));
     provider.setModelCallTimeoutMillis(120_000L);
     provider.setModelCallIdleTimeoutMillis(3_000L);
     ObjectNode providerBody = objectMapper.valueToTree(provider);
-    providerBody.put("credential", provider.getCredential());
     providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis().toString());
     providerBody.put(
         "modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis().toString());
@@ -831,6 +830,73 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
+  }
+
+  /** Agent 配置中选择未知工具时，校验器在产生处给出的 validation 直接到达 HTTP 边界。 */
+  @Test
+  void shouldRejectAgentConfigSelectionsAtTheHttpBoundary() throws Exception {
+    builtinAgentInitializer.afterPropertiesSet();
+    AgentConfigDTO config = new AgentConfigDTO();
+    config.setTools(List.of("missing_tool"));
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+    AgentUpdateDTO update = new AgentUpdateDTO();
+    update.setExpectedVersion(0L);
+    update.setConfig(config);
+
+    mockMvc
+        .perform(
+            put("/api/platform/agents/{name}", "Compaction")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(update)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("unknown agent tool: missing_tool"));
+  }
+
+  /** 组配置的结构错误由共享 codec 在产生处按 validation 拒绝，而不是变成内部错误。 */
+  @Test
+  void shouldRejectInvalidModelGroupShapeAtTheHttpBoundary() throws Exception {
+    ModelGroupMemberDTO member = new ModelGroupMemberDTO();
+    member.setModelName("p/m");
+    member.setVariant("default");
+    ModelGroupConfigDTO group = new ModelGroupConfigDTO();
+    group.setMembers(List.of(member));
+    group.setFallbackStatusCodes(List.of(429, 429));
+    group.setCooldownSeconds(0);
+    ModelGroupCreateDTO create = new ModelGroupCreateDTO();
+    create.setName("bad-group-" + System.nanoTime());
+    create.setGroup(group);
+
+    mockMvc
+        .perform(
+            post("/api/platform/models")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(create)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(
+            jsonPath("$.detail")
+                .value("group.fallbackStatusCodes must not contain duplicate statuses"));
+  }
+
+  /** Provider 创建只接受 SET 凭据：KEEP/CLEAR 属于更新语义，按 validation 拒绝。 */
+  @Test
+  void shouldRejectNonSetCredentialOnProviderCreate() throws Exception {
+    for (String operation : List.of("KEEP", "CLEAR")) {
+      ObjectNode body = objectMapper.createObjectNode();
+      body.put("name", "provider-" + operation.toLowerCase() + "-" + System.nanoTime());
+      body.put("providerType", "openai");
+      body.set("credential", objectMapper.valueToTree(Map.of("operation", operation)));
+      mockMvc
+          .perform(
+              post("/api/platform/providers")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body.toString()))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"))
+          .andExpect(jsonPath("$.detail").value("credential must use the SET operation on create"));
+    }
   }
 
   private static HarnessExecutionSelectionDTO execution(String modelName) {

@@ -46,7 +46,7 @@ describe('agentService', () => {
       name: 'minimax',
       providerType: 'openai',
       baseUrl: 'https://api.minimax.chat/v1',
-      credential: 'key',
+      credential: { operation: 'SET', value: 'key' },
       modelCallTimeoutMillis: '1800000',
       modelCallIdleTimeoutMillis: '120000',
     }
