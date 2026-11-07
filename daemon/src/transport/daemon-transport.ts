@@ -6,6 +6,7 @@ import http2, {
   type ServerHttp2Session,
   type ServerHttp2Stream,
 } from 'node:http2'
+import type { Duplex } from 'node:stream'
 import { createWebSocketStream, WebSocket } from 'ws'
 import { fromBinary } from '@bufbuild/protobuf'
 
@@ -24,6 +25,7 @@ import {
   type UpgradeRequired,
 } from '../generated/control_pb.js'
 import { handleIdeConnectRequest, handleIdeHttpRequest } from './ide-tunnel.js'
+import { abortControlSession, closeControlSession, guardControlStream } from './control-session.js'
 
 const {
   HTTP2_HEADER_STATUS,
@@ -75,6 +77,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
   private readonly inactivityTimeoutMillis: number
   private readonly controlStreamTimeoutMillis: number
   private activeWs: WebSocket | null = null
+  private activeWsStream: Duplex | null = null
   private activeSession: ServerHttp2Session | null = null
   private closed = false
 
@@ -121,6 +124,9 @@ export class DaemonWebSocketTransport implements ControlTransport {
 
     // 立即建立 WebSocket stream 与 HTTP/2 server 握手，不等 open 事件
     const wsStream = createWebSocketStream(ws)
+    this.activeWsStream = wsStream
+    guardControlStream(ws, wsStream)
+
     const session = http2.performServerHandshake(wsStream, {
       settings: {
         enableConnectProtocol: true,
@@ -160,10 +166,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
     const timer = setInterval(() => {
       if (Date.now() - lastInboundAt >= this.inactivityTimeoutMillis) {
         clearInterval(timer)
-        session.destroy()
-        try {
-          ws.terminate()
-        } catch {}
+        abortControlSession(session, wsStream, ws)
       }
     }, inactivityInterval)
 
@@ -208,12 +211,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
             rejectConnect(new Error(`handshake failed with 426`))
           }
           listener.onUpgradeFailed(426, upgradeRequired)
-          try {
-            session.destroy()
-          } catch {}
-          try {
-            ws.terminate()
-          } catch {}
+          abortControlSession(session, wsStream, ws)
         })
       } else {
         res.resume()
@@ -222,12 +220,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
           rejectConnect(new Error(`handshake failed with status ${statusCode}`))
         }
         listener.onUpgradeFailed(statusCode)
-        try {
-          session.destroy()
-        } catch {}
-        try {
-          ws.terminate()
-        } catch {}
+        abortControlSession(session, wsStream, ws)
       }
     })
 
@@ -253,10 +246,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
     // 控制流超时保护
     const controlTimer = setTimeout(() => {
       if (!connectResolved) {
-        session.destroy()
-        try {
-          ws.terminate()
-        } catch {}
+        abortControlSession(session, wsStream, ws)
         fireDisconnected()
       }
     }, this.controlStreamTimeoutMillis)
@@ -348,15 +338,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
             )
           },
           close: (): void => {
-            try {
-              controlStream?.end()
-            } catch {}
-            try {
-              session.close()
-            } catch {}
-            try {
-              ws.close()
-            } catch {}
+            closeControlSession(session, wsStream, ws, controlStream)
           },
         }
 
@@ -393,15 +375,10 @@ export class DaemonWebSocketTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closed = true
-    if (this.activeSession && !this.activeSession.destroyed) {
-      try {
-        this.activeSession.destroy()
-      } catch {}
-    }
-    if (this.activeWs) {
-      try {
-        this.activeWs.terminate()
-      } catch {}
+    const stream = this.activeWsStream
+    const ws = this.activeWs
+    if (stream !== null && ws !== null) {
+      abortControlSession(this.activeSession, stream, ws)
     }
   }
 }

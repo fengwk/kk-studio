@@ -327,12 +327,12 @@ try {
     }
     Assert-True -Condition ($exit -eq 0) -Message "install exits 0"
 
-    $installRoot = Join-Path $profileDir ".kk-studio"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "lib\main.js")) -Message "lib main.js published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "lib\runtime\code-server\lib\node.exe")) `
+    $sandboxInstallRoot = Join-Path $profileDir ".kk-studio"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib\main.js")) -Message "lib main.js published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib\runtime\code-server\lib\node.exe")) `
         -Message "frozen node.exe published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "daemon.json")) -Message "config published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "daemon.token")) -Message "token published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.json")) -Message "config published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.token")) -Message "token published"
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
 
     # Exercise an explicit release through the real install and verify the private snapshot.
@@ -347,7 +347,7 @@ try {
     Assert-Equal -Actual $script:NetworkCalls[1] -Expected "$base.sha256" -Message "exact checksum URL"
     foreach ($name in @("daemon.json", "daemon.token")) {
         $source = if ($name -eq "daemon.json") { $pairs[0] } else { $pairs[1] }
-        Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $installRoot $name)))) `
+        Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $sandboxInstallRoot $name)))) `
             -Expected ([Convert]::ToBase64String([IO.File]::ReadAllBytes($source))) -Message "$name preserved"
     }
     # Managed updates pass their proxy decision explicitly, including on PowerShell 5.1.
@@ -408,7 +408,7 @@ try {
         Assert-True -Condition $rejected -Message "$command rejects version"
     }
     $registered = @($script:Tasks.Values)[0]
-    $expectedConfig = Join-Path $installRoot "daemon.json"
+    $expectedConfig = Join-Path $sandboxInstallRoot "daemon.json"
     $expectedArguments = '"main.js" "--config" "' + $expectedConfig + '"'
     Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) `
         -Message "task arguments are the quoted direct argv"
@@ -423,9 +423,9 @@ try {
     # uninstall removes the program and task but keeps config/token.
     $exit = Invoke-Installer -Parameters @{ Command = "uninstall" }
     Assert-True -Condition ($exit -eq 0) -Message "uninstall exits 0"
-    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $installRoot "lib"))) -Message "lib removed"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib"))) -Message "lib removed"
     Assert-True -Condition ($script:Tasks.Count -eq 0) -Message "task removed"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "daemon.json")) -Message "config preserved"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.json")) -Message "config preserved"
 }
 finally {
     $env:USERPROFILE = $originalProfile

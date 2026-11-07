@@ -86,7 +86,8 @@ describe('Lsp Capabilities Group End-to-End', () => {
     supervisor = new TestProcessSupervisor()
     // 先保存 mkdtemp 结果再 realpath：realpath 抛错时也能清理已创建目录。
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-'))
-    tempDir = fs.realpathSync(tempDir)
+    // Windows 的 os.tmpdir() 可能是 8.3 短路径；JS realpathSync 不展开短名，native 才返回规范长路径。
+    tempDir = fs.realpathSync.native(tempDir)
   })
 
   afterEach(async () => {

@@ -70,7 +70,8 @@ afterEach(async () => {
 })
 
 describe('official installer handoff', () => {
-  it('holds the independent job until the receipt permit, then invokes the pinned installer with existing inputs', async () => {
+  // 这两个用例执行 POSIX runner（systemd-run + bash）；Windows 宿主走下方计划任务路径。
+  it.skipIf(process.platform === 'win32')('holds the independent job until the receipt permit, then invokes the pinned installer with existing inputs', async () => {
     // Execute the real generated runner, not an imitation of its wait/argument logic.
     const { home, config } = await fixture()
     applyNetworkSettings('http://localhost:8080', 'localhost,.internal')
@@ -164,7 +165,7 @@ describe('official installer handoff', () => {
       .rejects.toThrow()
   })
 
-  it('reports installer failure from the real detached runner', async () => {
+  it.skipIf(process.platform === 'win32')('reports installer failure from the real detached runner', async () => {
     // The job writes a failure marker after a non-zero installer exit, without leaking its output.
     const { home, config } = await fixture()
     const adapter = deps(home, 'echo "sensitive detail" >&2\nexit 7\n')
