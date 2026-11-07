@@ -263,6 +263,14 @@ release_curl() {
   fi
   curl -q --fail "$progress" --show-error --location --proto '=https' --proto-redir '=https' "$@"
 }
+# 下载与解包暂存必须与发布目标同处安装根，发布才是同文件系统的原子 rename，而不是可能
+# 部分完成的跨文件系统复制。根目录在下载前建立并核验，暂存准备失败一定发生在停止服务之前。
+ensure_install_root() {
+  if [ ! -e "$INSTALL_ROOT" ]; then
+    mkdir -m 0700 "$INSTALL_ROOT" || fail "无法创建安装根目录。"
+  fi
+  check_private_directory "$INSTALL_ROOT"
+}
 download_daemon() {
   local effective_url asset checksum expected actual pattern
   require_cmd curl
@@ -278,7 +286,9 @@ download_daemon() {
   # Bash 3.2 on macOS treats the leading byte of "；" as part of an unbraced name.
   echo "版本：${RELEASE_TAG}；平台：${RELEASE_OS}-${RELEASE_ARCH}" >&2
   stage '3/7 下载归档'
-  DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX")
+  ensure_install_root
+  DOWNLOAD_DIR=$(mktemp -d "$INSTALL_ROOT/.download.XXXXXXXX") ||
+    fail "无法在安装根创建暂存目录。"
   chmod 0700 "$DOWNLOAD_DIR"
   asset="kk-studio-daemon-$RELEASE_TAG-$RELEASE_OS-$RELEASE_ARCH.tar.gz"
   DOWNLOADED_ARCHIVE="$DOWNLOAD_DIR/$asset"
@@ -548,7 +558,7 @@ cmd_install() {
   check_managed_paths
   require_ownership
   stage '5/7 备份停止'
-  mkdir -p "$INSTALL_ROOT" "${SERVICE_PATH%/*}"
+  mkdir -p "${SERVICE_PATH%/*}"
   if [ "$HOST_OS" = Darwin ]; then mkdir -p "$INSTALL_ROOT/logs"; fi
   backup_current
   stage_file "$CONFIG_FILE" "$INSTALL_ROOT" daemon.json 0600; STAGED_CONFIG=$REGISTERED_TEMP_PATH

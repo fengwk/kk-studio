@@ -4,7 +4,7 @@
  *
  * The fixture shims curl/uname/service managers; the installer still performs its real
  * ownership/permission checks, real SHA256 verification, real release `--check-config` preflight
- * and real atomic program publication. No real service is registered.
+ * and real atomic program publication from its own staging directory. No real service is registered.
  */
 
 import assert from 'node:assert/strict'
@@ -238,6 +238,53 @@ describe('install.sh on Linux', () => {
       assert.ok(unit.includes(`${root}/lib/runtime/code-server/lib/node`))
       assert.ok(unit.includes(`${root}/lib/main.js`))
       assert.ok(existsSync(path.join(fixture.state, 'active')))
+    }))
+
+  it('publishes from a staging directory on the install root filesystem', () =>
+    withInstall(({ tmp, fixture, install }) => {
+      // 发布必须是安装根内的 rename：暂存位于安装根（而非 TMPDIR），源与目标同设备，避免跨文件系统复制。
+      const probe = path.join(tmp, 'publish-probe')
+      const probeScript = path.join(tmp, 'publish-probe.sh')
+      writeFileSync(
+        probeScript,
+        'printf \'%s\\n\' "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB" "$(file_mode "$DOWNLOAD_DIR")" \\\n' +
+          '  "$(stat -c \'%d\' "$DOWNLOAD_DIR" 2>/dev/null || stat -f \'%d\' "$DOWNLOAD_DIR")" > "$FAKE_PUBLISH_PROBE"\n',
+      )
+      const script = text(fixture.script)
+      const patched = script.replace('  publish_program\n', `  . '${probeScript}'\n  publish_program\n`)
+      assert.notEqual(script, patched)
+      fixture.script = path.join(tmp, 'install-publish-probe.sh')
+      writeFileSync(fixture.script, patched)
+      const result = install({ FAKE_PUBLISH_PROBE: probe })
+      assert.equal(result.status, 0, result.stderr)
+      const [source, destination, stagingMode, stagingDevice] = text(probe).trim().split('\n')
+      const root = fixture.installRoot
+      assert.equal(path.dirname(path.dirname(source)), root)
+      assert.equal(path.dirname(destination), root)
+      assert.equal(stagingMode, '700')
+      assert.equal(Number(stagingDevice), statSync(root).dev)
+    }))
+
+  it('leaves the running service untouched when the staging directory cannot be created', () =>
+    withInstall(({ fixture, install }) => {
+      // 暂存目录建在安装根内：根不可写时必须在停止服务之前失败，现有程序、配置和服务保持原样。
+      assert.equal(install().status, 0)
+      const root = fixture.installRoot
+      const files = ['daemon.json', 'daemon.token', 'lib/main.js'].map((name) => path.join(root, name))
+      const before = files.map(text)
+      const unit = text(unitPath(fixture))
+      chmodSync(root, 0o500)
+      try {
+        const result = install()
+        assert.notEqual(result.status, 0)
+        assert.match(result.stderr, /安装失败 \[3\/7 下载归档\]：无法在安装根创建暂存目录/)
+        files.forEach((file, index) => assert.equal(text(file), before[index], file))
+        assert.equal(text(unitPath(fixture)), unit)
+        assert.ok(existsSync(path.join(fixture.state, 'active')), 'the running service must not be stopped')
+        assert.ok(!existsSync(path.join(root, 'backups')), 'no backup may precede the staging preparation')
+      } finally {
+        chmodSync(root, 0o700)
+      }
     }))
 
   it('restores the previous program when publication fails', () =>
