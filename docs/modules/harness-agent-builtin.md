@@ -71,7 +71,7 @@ groupExecution?
 
 [`ModelOutcomeAppender`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelOutcomeAppender.java) 只把已提交的终态物化为不可变历史 Entry，并维护 ModelInvocation 的 attach-then-delete；它不推进 Thread head、不 request Work、不 complete claim，这些仍由 Runtime 掌握。失败 attempt 由 [`ModelAttemptFailureAppender`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelAttemptFailureAppender.java) 按顺序写成透明的 `MODEL_ATTEMPT_FAILURE` Entry，[`ModelAttemptMaterialization`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelAttemptMaterialization.java) 在删除临时行前校验结果路径已精确物化每个失败 attempt。[`BuiltinHistoryPayloadMapper`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/history/BuiltinHistoryPayloadMapper.java) 把 Provider 响应投影为公共 Assistant payload，保留 stop reason、七维 usage、可选解码时长、实际模型、请求时刻与 service tier。
 
-费用不是 durable 事实：读取时按当前目录定价用 [`ModelCost`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelCost.java) 精确现算（`BigDecimal`，总额等于六个互斥计费类别之和）。[`ModelPricing`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelPricing.java) 由基础费率与按顺序应用的覆盖、倍率规则组成；协议映射由 [Harness Model](harness-model.md) 承担。
+费用不是 durable 事实：读取时按当前目录定价用 [`ModelCost`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelCost.java) 精确现算（`BigDecimal`，总额等于 input、output、cacheRead、cacheWrite、reasoning 五个互斥计费类别之和）。[`ModelPricing`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelPricing.java) 由基础费率与按顺序应用的覆盖、倍率规则组成；协议映射由 [Harness Model](harness-model.md) 承担。
 
 ## 模型组
 

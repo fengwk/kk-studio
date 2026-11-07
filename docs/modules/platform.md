@@ -155,7 +155,7 @@ Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大�
 
 完整路径按 ROOT 到 head 排序；只追加写入、同 Session 父子外键与非 ROOT 父约束保证父链终止，
 CTE 不另做环路检测。`findRootEntry` 优先使用缓存，未命中时经唯一 ROOT 索引点查并缓存。
-`loadCurrent` 的冷查询仅返回 head 和分类锚点；控制 Entry 为 NOTIFICATION、SETTINGS、FORK，
+`loadCurrent` 的冷查询仅返回 head 和分类锚点；控制 Entry 为 NOTIFICATION、SETTINGS、FORK、NATIVE_COMPACTION，
 COMPACTION 是回合，其 settings 不参与真实模型，已关闭 Turn 引用必须位于当前祖先链。
 `isAncestor` 包含 head 自身，未知候选或其他分支返回 false；`loadPathMetrics` 只聚合
 INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
@@ -178,9 +178,10 @@ Entry 叶子优先逐层删除，Session 单独删除。
 递增 wake_version 且保留租约。`rescheduleWork` 使用数据库时间加非负整毫秒延迟，清空租约并保留
 wake_version；认领后存在新 wake 时保留较早的 available_at。
 
-环境亲和性绑定后冻结：upsert 使用 `required_environment_id is not distinct from
-excluded.required_environment_id or excluded.required_environment_id is null`，不一致的非空环境 ID
-使更新命中零行并被拒绝。`claimNextWork` 使用独立短事务和 `FOR UPDATE SKIP LOCKED`，
+环境亲和性绑定后冻结：插入冲突时先锁定已有行，再由
+[`WorkState.request`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)
+比较环境需求；新的非空环境 ID 与已冻结值不同即拒绝本次请求，null 表示不改变亲和性。
+`claimNextWork` 使用独立短事务和 `FOR UPDATE SKIP LOCKED`，
 以数据库 `statement_timestamp()` 判断到期，按 `available_at, target_id` 排序并签发租约。
 claim 与 heartbeat 是唯一只取单条 Work 行锁的调度事务，claim 必须是事务内首次 Work 加锁。
 
