@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApprovalCard } from './ApprovalCard'
 
@@ -44,12 +45,22 @@ it('拒绝在途禁用；失败精确复用 decisionId，写回原始来源身�
 })
 
 it('409 围栏不可重试且保留参数和拒绝按钮的 danger 语义', async () => {
-  vi.spyOn(harnessService, 'decideApproval').mockRejectedValue(new Error('409 stale'))
+  vi.spyOn(harnessService, 'decideApproval').mockRejectedValue(new ApiError('stale version', 409))
   render(<ApprovalCard {...props} />, { wrapper })
   fireEvent.click(screen.getByRole('button', { name: '允许' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled())
   await waitFor(() => expect(document.querySelector('.is-non-recoverable')).toBeInTheDocument())
   expect(document.querySelector('pre')?.textContent).toBe(args)
+})
+
+it('普通 Error 文本中的 409 不构成结构化冲突', async () => {
+  // 测试意图：只有 ApiError(status=409) 触发不可恢复围栏，响应文本不再参与判断。
+  vi.spyOn(harnessService, 'decideApproval').mockRejectedValue(new Error('409 stale transport'))
+  render(<ApprovalCard {...props} />, { wrapper })
+  fireEvent.click(screen.getByRole('button', { name: '允许' }))
+  await screen.findByText('409 stale transport')
+  expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
+  expect(document.querySelector('.is-non-recoverable')).not.toBeInTheDocument()
 })
 
 it.each(['ALLOWED', 'DENIED'])('已决 %s 没有写入口', (decision) => {

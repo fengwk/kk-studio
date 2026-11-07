@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   ModelCatalogPageDTO,
@@ -11,6 +11,7 @@ import { setLocale } from '@/shared/i18n'
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listModelCatalog: vi.fn(),
+    refreshModelCatalog: vi.fn(),
   },
 }))
 
@@ -194,5 +195,91 @@ describe('ModelCatalogPicker request fencing', () => {
     // generation 改变，重置列表，不与旧代际混合
     expect(screen.queryByText('catalog-provider / m1')).not.toBeInTheDocument()
     expect(screen.getByText('catalog-provider / m2')).toBeInTheDocument()
+  })
+
+  it('reloads the filtered first page after refresh instead of adopting the unfiltered response', async () => {
+    setLocale('zh-CN')
+    vi.mocked(agentService.listModelCatalog)
+      .mockResolvedValueOnce({ ...page('gen-1', [candidate('m1')]), nextCursor: 'cursor-m1' })
+      .mockResolvedValueOnce({ ...page('gen-1', [candidate('alpha-1')]), nextCursor: 'cursor-alpha-1' })
+      .mockResolvedValueOnce({ ...page('gen-2', [candidate('alpha-2')]), nextCursor: 'cursor-alpha-2' })
+      .mockResolvedValueOnce(page('gen-2', [candidate('alpha-3')]))
+    vi.mocked(agentService.refreshModelCatalog).mockResolvedValue({
+      ...page('gen-2', [candidate('unfiltered')]),
+      nextCursor: 'cursor-unfiltered',
+    })
+
+    render(<ModelCatalogPicker onApply={vi.fn()} />)
+    expect(await screen.findByText('catalog-provider / m1')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alpha' } })
+    expect(await screen.findByText('catalog-provider / alpha-1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    expect(await screen.findByText('catalog-provider / alpha-2')).toBeInTheDocument()
+    // 刷新响应不带 query：它的首页条目与游标都不能进入筛选结果，成功后按当前搜索词重取首页。
+    expect(screen.queryByText('catalog-provider / unfiltered')).not.toBeInTheDocument()
+    expect(agentService.listModelCatalog).toHaveBeenNthCalledWith(3, 'alpha', null, 20)
+
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    expect(await screen.findByText('catalog-provider / alpha-3')).toBeInTheDocument()
+    // load-more 沿用当前搜索词和筛选页游标，不能拼上刷新响应的未筛选游标。
+    expect(agentService.listModelCatalog).toHaveBeenLastCalledWith('alpha', 'cursor-alpha-2', 20)
+  })
+
+  it('drops the previous cursor when a new search first page fails', async () => {
+    setLocale('zh-CN')
+    vi.mocked(agentService.listModelCatalog)
+      .mockResolvedValueOnce(page('gen-1', [candidate('m1')]))
+      .mockResolvedValueOnce({ ...page('gen-1', [candidate('alpha')]), nextCursor: 'cursor-alpha' })
+      .mockRejectedValueOnce(new Error('catalog unavailable'))
+
+    render(<ModelCatalogPicker onApply={vi.fn()} />)
+    expect(await screen.findByText('catalog-provider / m1')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alpha' } })
+    expect(await screen.findByText('catalog-provider / alpha')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
+
+    // 首页失败时错误可见，但 alpha 的游标必须已经作废：不会再被拼到 beta 上。
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'beta' } })
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
+    expect(agentService.listModelCatalog).toHaveBeenCalledTimes(3)
+    expect(agentService.listModelCatalog).not.toHaveBeenCalledWith('beta', 'cursor-alpha', 20)
+  })
+
+  it('keeps the newer search result when the refresh response arrives after it started', async () => {
+    setLocale('zh-CN')
+    const refreshResponse = deferred<ModelCatalogPageDTO>()
+    const searchPage = deferred<ModelCatalogPageDTO>()
+    vi.mocked(agentService.listModelCatalog)
+      .mockResolvedValueOnce(page('gen-1', [candidate('base')]))
+      .mockReturnValueOnce(searchPage.promise)
+    vi.mocked(agentService.refreshModelCatalog).mockReturnValue(refreshResponse.promise)
+
+    render(<ModelCatalogPicker onApply={vi.fn()} />)
+    expect(await screen.findByText('catalog-provider / base')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    expect(agentService.refreshModelCatalog).toHaveBeenCalledTimes(1)
+
+    // 刷新 POST 在途时用户改搜索词：防抖发起的新首页请求持有更新的 epoch。
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'beta' } })
+    await waitFor(() => expect(agentService.listModelCatalog).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      refreshResponse.resolve(page('gen-2', [candidate('unfiltered')]))
+      await refreshResponse.promise
+    })
+    // 迟到的刷新响应不得再触发 reload，也不得覆盖用户的搜索请求。
+    expect(agentService.listModelCatalog).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      searchPage.resolve(page('gen-2', [candidate('beta')]))
+      await searchPage.promise
+    })
+    expect(screen.getByText('catalog-provider / beta')).toBeInTheDocument()
+    expect(screen.queryByText('catalog-provider / unfiltered')).not.toBeInTheDocument()
   })
 })

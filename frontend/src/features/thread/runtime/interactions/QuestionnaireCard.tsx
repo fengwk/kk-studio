@@ -21,7 +21,7 @@ import {
 import './interaction-cards.css'
 import type { HarnessToolInputResultDTO } from '@/shared/api/generated/contracts'
 
-export interface QuestionnaireCardProps {
+interface QuestionnaireCardProps {
   interactionId: string
   threadId: string
   argumentsJson: string
@@ -173,8 +173,8 @@ export function QuestionnaireCard({
       ])
       onSuccess?.(res)
     } catch (err: unknown) {
-      if (isConflictError(err) || (err instanceof Error && err.message.includes('409'))) {
-        // 409 或不可恢复冲突：保留草稿作查看，禁止过期提交
+      if (isConflictError(err)) {
+        // 409 冲突：保留草稿作查看，禁止过期提交
         interactionDraftStore.setSubmissionError(
           interactionId,
           t('ai.interaction.nonRecoverable'),

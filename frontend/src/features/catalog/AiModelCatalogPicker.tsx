@@ -48,10 +48,14 @@ export function ModelCatalogPicker({
   const load = useCallback(async (search: string, cursor: string | null, append: boolean) => {
     const epoch = requestEpoch.current + 1
     requestEpoch.current = epoch
-    setLoading(true)
     if (!append) {
+      // 首页请求确立当前筛选词；旧游标属于上一个搜索词，首页一开始就作废，
+      // 否则首页失败后仍会把旧游标拼到新搜索词上。
+      currentQuery.current = search
+      setNextCursor(null)
       setError(null)
     }
+    setLoading(true)
     try {
       const page = await agentService.listModelCatalog(search, cursor, pageSize)
       accept(page, epoch, append)
@@ -68,9 +72,8 @@ export function ModelCatalogPicker({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      currentQuery.current = query
       setExpandedId(null)
-      void load(query, null, false)
+      void load(query.trim(), null, false)
     }, 250)
     return () => window.clearTimeout(timer)
   }, [load, query])
@@ -85,17 +88,20 @@ export function ModelCatalogPicker({
     setLoading(true)
     setError(null)
     try {
-      const page = await agentService.refreshModelCatalog()
-      accept(page, epoch, false)
+      await agentService.refreshModelCatalog()
     } catch (cause) {
       if (epoch === requestEpoch.current) {
         setError(toUserFacingErrorMessage(cause))
-      }
-    } finally {
-      if (epoch === requestEpoch.current) {
         setLoading(false)
       }
+      return
     }
+    if (epoch !== requestEpoch.current) {
+      return
+    }
+    // 刷新响应是不带 query 的首页；直接采用会把未筛选结果混入当前搜索并让游标失去匹配，
+    // 因此刷新成功后按当前搜索词重新读取第一页。
+    await load(currentQuery.current, null, false)
   }
 
   return (

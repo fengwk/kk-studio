@@ -141,7 +141,7 @@ export type CommandCompactionState =
   | { status: 'failed' }
   | { status: 'ready'; availability: ManualCompactionAvailability }
 
-export interface ThreadCommandOptions {
+interface ThreadCommandOptions {
   compaction?: CommandCompactionState | null
   allowNewSession?: boolean
   readOnly?: boolean

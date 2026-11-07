@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ApiError } from '@/shared/api/client'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
@@ -168,7 +169,7 @@ describe('ai-resource-form-validation', () => {
       toUserFacingErrorMessage(new Error('config.defaultVariant must match a variant id')),
     ).toMatch(/默认 Variant/)
     expect(toUserFacingErrorMessage(new Error('duplicate variant id: fast'))).toMatch(/不能重复/)
-    expect(toUserFacingErrorMessage(new Error('401 Unauthorized'))).toMatch(/没有权限/)
+    expect(toUserFacingErrorMessage(new ApiError('Unauthorized', 401))).toMatch(/没有权限/)
   })
 
   it('passes Chinese text through unchanged', () => {

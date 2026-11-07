@@ -7,7 +7,7 @@ import { interactionIdentity } from '@/shared/lib/interactions'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-export interface UseInteractionsControllerResult {
+interface UseInteractionsControllerResult {
   items: InteractionDTO[]
   isLoading: boolean
   isFetchingMore: boolean
