@@ -3,7 +3,9 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）并返回结果；Harness 控制面的快照投影、写后回读、命令批归属判定与 Environment owner 路由由 `web.harness` / `web.environment` 的应用服务编排。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回所属模块的 DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Platform 与 Harness 的 Controller、DTO 和编排位于 `platform/runtime`，Chat、Canvas、Project 与 IDE 的
+Controller 和 DTO 位于各自产品模块。Web 装配这些接口以及组合根自身的传输入口；领域规则、映射和事务由所属模块持有。
+HTTP 边界统一配置 JSON、参数绑定与错误映射，Web 不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -62,12 +64,13 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 ## HTTP 入口
 
 JSON Controller 的成功响应直接返回资源，status 与业务结果对齐；
-health、资源下载和 WebSocket 使用各自传输形式。公开路由如下：
+health、资源下载和 WebSocket 使用各自传输形式。业务路由按所属命名空间组织，完整方法、参数与响应以
+生成的 [`ApiRoutes`](../../frontend/src/shared/api/generated/contracts.ts) 为准：
 
 | family | 路径 | 用途 |
 | --- | --- | --- |
 | Health | `/actuator/health` | 健康探针 |
-| Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
+| Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider credential 用 SecretUpdate 且只回 `configured`；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
 | Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、环境技能重同步（`environments/{environmentId}/resync-skills`）；Git 令牌用 SecretUpdate，响应只回 `configured` |
 | MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
@@ -85,7 +88,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/project/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 配置 CRUD、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
+| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 创建、读取与删除，当前运行状态快照、注册令牌轮换、安装设置、一次性安装码与脚本、卸载脚本、受管二进制在线更新、运维 events；创建和轮换响应及安装脚本含凭据 |
 | Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
@@ -149,9 +152,9 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 按该模型输出记录时间重建当时的请求前缀。它复用正式规划/物化/编码器，不推进游标、不调用 transport；
 接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用。
 `kind` 恒为 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表当前 catalog / Provider 定义下的重建结果，不等于原始发送字节。
-当前事实不允许精确重建时返回 409，客户端只按稳定的 `errors.reason` 恢复，不解析描述文本：
+当前事实不允许精确重建时返回 409，客户端只按稳定的顶层 `reason` 恢复，不解析描述文本：
 
-| `errors.reason` | 拒绝事实 |
+| `reason` | 拒绝事实 |
 | --- | --- |
 | `PREVIEW_PLANNING_FAILED` | 历史前缀无法规划 |
 | `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
@@ -196,18 +199,23 @@ JSON Controller 直接返回资源本身：读取、更新与动作 200，创建
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
 由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
 wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.dto`（Harness DTO 在 `platform.harness.dto`），Canvas 与
-Project 在各自 `dto` 包。
+Project 在各自 `dto` 包。持久化 JSON 的领域 codec 复用
+[`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)
+的节点读取、精确字段集合与“不回声上游字段集合”校验原语，各 codec 只声明字段集合和值类型。
 required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
 从容器 mapper 派生仅供 HTTP 消息转换器使用的配置，拒绝未知字段、标量强转、基本类型 null、重复键和尾随内容，
-不改变持久化、集群客户端和插件使用的 mapper。系统设置的 Long 属性以规范十进制字符串作为既有 wire 类型，
-要求与读取响应相同的字符串形态，不接受数值 token。请求体按字段或 record 组件的 `@Nullable`
+不改变持久化、集群客户端和插件使用的 mapper。Long 在请求与响应中均为规范非负十进制字符串，
+DTO 使用 `Long` / `long`，HTTP 边界统一解析并拒绝非法值。请求体按字段或 record 组件的 `@Nullable`
 统一检查必填性并递归检查 DTO、集合与 Map；未标注的属性缺失或为 null 时报告属性路径。
-UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
+创建请求中的 Provider credential、MCP headers 与 Git 技能包 token 是可空 `SecretUpdate`，非空时只接受
+`SET`；更新请求中的对应密钥字段必填，`KEEP` / `CLEAR` 必须显式提交，读取投影只返回 `configured`。
+UUID 路径和查询参数统一按 canonical 小写文本解析，非规范形式拒绝。领域 codec 另有严格语法校验。
 
 领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
 表达，全局 [`ProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemAdvice.java)
 按错误类别、原因或框架状态生成 problem 响应。领域版本坐标和 Canvas 冲突详情放在 `errors` 中，内部
-`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情；未预期异常不暴露内部消息。
+`resource` 不进入 wire。请求体含未知字段或标量类型/格式错误时，`detail` 指出字段路径与错误类别；
+无法定位到字段或语法本身损坏时使用固定文案，任何情况都不回显输入。未预期异常不暴露内部消息。
 locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。

@@ -14,21 +14,21 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 
 | 层 | 模块 | 职责 |
 | --- | --- | --- |
-| L5 组合根 | [`web`](../web/pom.xml) | 装配全部模块与插件；平台与 harness 的 HTTP 接口、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
+| L5 组合根 | [`web`](../web/pom.xml) | 装配模块与插件；HTTP 边界、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
 | L4 产品 | [`apps/chat`](../apps/chat/pom.xml) | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
 | L4 产品 | [`apps/project`](../apps/project/pom.xml) | Project 与 Issue 工作流、调度、Issue 工具；自带的 HTTP 接口与 DTO；拥有 `project_*` |
 | L4 产品 | [`apps/canvas/spi`](../apps/canvas/spi/pom.xml) | 画布函数 SPI，插件只依赖它 |
 | L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
 | L4 产品 | [`apps/ide`](../apps/ide/pom.xml) | IDE 视图与数据面、浏览器使用身份、跨节点路由、HTTP 接口与 DTO |
 | 插件 | [`plugins`](../plugins/pom.xml) | 构建期插件：Agent 工具与画布函数 |
-| L3 平台 | [`platform/runtime`](../platform/runtime/pom.xml) | 目录、存储与 VFS、环境、插件宿主、设置、配置同步、交互待办、独立 Agent 任务、通知、会话归属 SPI、跨节点设施，以及 harness 端口实现与引擎存储适配 |
+| L3 平台 | [`platform/runtime`](../platform/runtime/pom.xml) | 目录、存储与 VFS、环境、插件宿主、设置、配置同步、交互待办（含无产品页的独立 Agent 任务）、通知、会话归属 SPI、跨节点设施、平台与 Harness 的 HTTP 接口及 DTO，以及 harness 端口实现与引擎存储适配 |
 | L3 平台 | [`platform/daemon-server`](../platform/daemon-server/pom.xml) | Daemon 控制协议、会话与租约、调用裁决、资源票据、数据面隧道、IDE 与更新协调；实现 harness 的能力调用端口 |
 | L3 平台 | [`platform/plugin-api`](../platform/plugin-api/pom.xml) | 插件 SPI：身份、配置、凭据、资源、Harness 贡献与按类型返回的产品贡献 |
 | L2 harness | [`harness/runtime`](../harness/runtime/pom.xml) | Agent 内核：公开的命令、查询与订阅，SPI 端口，工具与贡献契约，内置工具，提示词渲染，Thread 与 Tool 处理器，执行退出账本 |
 | L2 harness | [`harness/agent-builtin`](../harness/agent-builtin/pom.xml) | 内置 Driver 的回合执行、请求冻结、流式与重试、模型组与自动压缩；只声明存储端口，不含 SQL |
 | L2 harness | [`harness/environment`](../harness/environment/pom.xml) | `EnvironmentId`、能力目录与能力调用端口 |
-| L2 harness | [`harness/model`](../harness/model/pom.xml) | 模型契约与 Provider 协议实现 |
-| L1 共享 | [`common`](../common/pom.xml) | 值契约：严格 JSON、资源引用、结果内容、输入 Schema、Work 状态 |
+| L2 harness | [`harness/model`](../harness/model/pom.xml) | 模型契约、Provider 协议实现与共享严格 JSON 原语 |
+| L1 共享 | [`common`](../common/pom.xml) | 值契约：领域错误、严格 JSON、URI 编码、资源引用、结果内容、输入 Schema、Work 状态 |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
 | 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理由平台下发；在线更新调用官方安装器 |
@@ -91,7 +91,7 @@ L1          │ common │◀───│ work │    │ schema │
 ```
 
 图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `work`；`canvas-runtime` 依赖
-`harness-model` 的共享 JSON 校验原语；`canvas-spi` 与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与
+`harness-model` 的共享 JSON 原语；`canvas-spi` 与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与
 `schema`。插件中只有 `minimax-mavis` 不依赖 `canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的
 测试夹具（test-jar）与 `schema`。
 
@@ -114,14 +114,40 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 
 ## HTTP 契约
 
-JSON 成功响应直接返回资源：读取、更新和动作使用 200，创建使用 201，异步受理使用 202，无内容使用
-204，204 不带响应体。下载、HTML 与字节流按各自的传输格式返回。
-HTTP JSON 的 `Instant` 以 epoch 毫秒整数读写。
+`/api` 后的业务域表达资源归属：`/api/platform` 是目录、环境、设置与存储等平台资源；
+`/api/harness` 是执行事实与控制，`/api/harness/builtin` 是内置 Driver 的接口；
+`/api/chat`、`/api/project`、`/api/canvas`、`/api/ide` 分别由相应产品模块提供。
+浏览器事件与 Daemon 连接分别使用 `/ws/events`、`/ws/daemon`，IDE 数据面使用
+`/ide/{environmentId}/{viewId}/`，节点间接口使用 `/internal`。完整的公开路由及其请求、
+响应类型由生成的 [`ApiRoutes`](../frontend/src/shared/api/generated/contracts.ts) 定义。
 
-错误使用 `application/problem+json`。响应包含固定的 `type: "about:blank"`、按请求语言本地化的
+JSON 成功响应直接返回资源：通常读取、更新和动作使用 200，创建使用 201，异步受理使用 202，
+无内容使用 204 且不带响应体。下载、HTML 与字节流按各自的传输格式返回。
+
+- `Instant` 以 epoch 毫秒整数读写，领域时间字段统一命名为 `createdAt`、`updatedAt`、`occurredAt` 等。
+  64 位整数字段在请求与响应中均为规范非负十进制字符串，DTO 使用 `Long` / `long`，由 HTTP 边界统一解析；
+  非法值按请求校验错误处理。Provider 超时、MCP `timeoutMillis` 和上传 `sizeBytes` 也遵循此规则。
+- 结构由运行时决定的自由格式 JSON 使用 JSON 节点；多形态 DTO 使用 `type` 区分各变体。
+  Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Issue Activity 的 `data`
+  都是节点，必须保留原始文本的内容按对应字段契约传输。
+- 有界配置集合直接返回数组；无界集合通过 `cursor`、`limit` 读取，响应提供
+  `{items, nextCursor}`，末页的 `nextCursor` 为 null。按资源语义返回的树形聚合直接使用数组。
+- 需要乐观并发控制的资源响应 `version`，写入请求提供 `expectedVersion`；DELETE 放在查询参数中，
+  其他写入放在请求体中。Canvas 的 `revision` 表示内容修订。
+- 密钥更新使用 `SecretUpdate`：`{operation: "KEEP" | "SET" | "CLEAR", value?}`。更新 DTO 的密钥字段必填，
+  保留需显式 `KEEP`；创建 DTO 的密钥字段可空，MCP headers、Git 技能包 token 与 Provider credential
+  提供时只接受 `SET`。插件的 `secretPatch` 是逐键补丁，缺省的键保持不变。
+  读取投影只返回配置状态，不返回秘密值。
+
+HTTP 解析拒绝未知字段、重复键、错误标量类型和尾随内容；必填性由 DTO 的可空声明确定。
+客户端输入错误在产生处抛 `DomainException`，按语义归类为校验、未找到或冲突；
+内部不变量破坏与未预期故障返回 500，不将所有参数异常统一当作客户端错误。
+请求体无法读取时，`detail` 只报告可定位的字段路径与错误类别，不回显输入；无法定位到字段时使用固定文本。
+
+错误使用 RFC 9457 `application/problem+json`。响应包含固定的 `type: "about:blank"`、按请求语言本地化的
 `title`、HTTP `status` 和稳定 `code`；可选的 `detail` 是去敏的英文详情，`reason` 是模块内稳定的大写下划线原因，
-`errors` 是结构化详情。版本冲突的 `errors` 含 `expectedVersion` 和 `actualVersion`，Canvas 命令冲突包含
-`conflicts`。响应不包含内部 `resource`。
+`errors` 是结构化详情。版本冲突的 `errors` 含规范十进制字符串形式的 `expectedVersion` 和 `actualVersion`，
+Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 
 | code | HTTP 状态 | 含义 |
 | --- | --- | --- |

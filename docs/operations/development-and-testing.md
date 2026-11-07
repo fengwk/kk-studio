@@ -382,7 +382,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 矩阵分成 L1 免费 API 契约、L2 真实文本与推理、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
-由 flag 组合和 case 的 `requires` 共同决定。
+由 flag 组合和 case 的 `requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；
+`code=conflict` 必须同时给出精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
 `{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；Agent config
@@ -390,7 +391,8 @@ Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录�
 更改 Agent 契约时同步 case、fixture 与生成的前端契约。
 
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
-返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
+返回 `400` / `code: validation`，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，
+版本必须是无前导零的非负十进制 long。
 用例验证空闲 Issue 的 STOP 产生 USER 暂停、暂停期间禁止合法流转且显式 resume 解除门禁；
 活动流通过详情接口的 `afterSequence`、`limit` 和 `nextActivityCursor` 验证有界分页。
 
@@ -405,10 +407,11 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 只验证用例与 HTTP mock 的契约，不能替代真实 HTTP L1 验收。
 
 运行快照与 IDE 拒绝路径也属于免费 L1：
-`environment.runtime_absent_unavailable` 验证无本代 READY 时返回 canonical
-`409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_no_ready_owner_rejected`
-使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭在无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
-返回 `400 validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
+`environment.runtime_absent_unavailable` 验证无本代 READY 时返回
+`409` / `code: unavailable` / `reason: ENVIRONMENT_UNAVAILABLE`，而不是伪造空快照；
+`environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭
+在无 READY owner 时的 `409` / `code: unavailable` / `reason: IDE_UNAVAILABLE`，并验证非 canonical
+environmentId 返回 `400` / `code: validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
@@ -830,6 +833,7 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 或登录流程里录入。
 
 可导出 Provider、Model、Agent、Skill Package（仅限 Git 渠道）、Environment、MCP 服务、插件普通配置与系统设置。上传渠道的本地归档技能包不进入配置导出，升级或重建后须在平台重新上传发布。
+配置同步 YAML 使用 YAML 数字，与 HTTP 中 64 位整数的字符串表示分别处理。
 Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationTokenHash` 并列嵌套，缺失
 该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
@@ -842,7 +846,7 @@ Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插�
 没有跳过项时点击“确认导入”；有跳过项时，可取消或明确选择“仅导入可用配置”。
 没有可导入项时不提供执行按钮。不支持的条目及依赖它们的配置不会被悄悄改写。
 
-YAML 结构、类型、有效值错误或当前必填字段缺失会直接拒绝整份文件，不进入导入计划；应根据错误提示修改文件后重新检查。预检发现的可跳过项（如未知系统设置字段）会在确认页列出原因，用户可取消或选择“仅导入可用配置”。
+YAML 结构、类型、有效值错误或当前必填字段缺失会直接拒绝整份文件，不进入导入计划；应根据错误提示修改文件后重新检查。预检发现的可跳过项（如未知条目字段、未知系统设置字段或未知顶层类别）会在确认页列出原因，用户可取消或选择“仅导入可用配置”；条目的已知字段仍先按写入路径校验。
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌摘要被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
@@ -948,7 +952,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
 脚本。随后仅向维护人员开放产品入口，Worker 保持停止。
 
-4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级解析错误与条目级可跳过项：若存在语法错误、必填项缺失或旧版废弃字段，会直接整份拒绝，须调整 YAML 内容后重试；存在未知设置项等可跳过条目时，支持在确认页选择“仅导入可用配置”。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对全局代理配置，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
+4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（包括旧版 Agent `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对全局代理配置，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
 
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
