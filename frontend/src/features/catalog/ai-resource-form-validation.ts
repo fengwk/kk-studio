@@ -74,6 +74,10 @@ function mapError(error: unknown): ResourceFormValidationResult {
   if (/group\.members|fallbackStatusCodes|cooldownSeconds/i.test(raw)) {
     return { ok: false, message, fields: { group: message } }
   }
+  // 超时整数错误在 "non-negative" 上会命中下面的价格规则，必须先归到表单级提示。
+  if (/canonical non-negative integer/i.test(raw)) {
+    return { ok: false, message, fields: { general: message } }
+  }
   if (/pricing|rate|condition|decimal|number|negative/i.test(raw)) {
     return { ok: false, message, fields: { pricing: message } }
   }
