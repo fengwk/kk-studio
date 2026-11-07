@@ -404,8 +404,8 @@ test('native Tab skips closed details inputs and disabled controls around both S
 test('keeps event history out of the card and inside the management modal', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   const history = [
-    { occurredAt: '2026-07-20T00:00:00.000Z', level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
-    { occurredAt: '2026-07-20T00:01:00.000Z', level: 'INFO', type: 'READY', message: 'environment ready' },
+    { occurredAt: Date.parse('2026-07-20T00:00:00.000Z'), level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
+    { occurredAt: Date.parse('2026-07-20T00:01:00.000Z'), level: 'INFO', type: 'READY', message: 'environment ready' },
   ]
   const card: EnvironmentDTO = {
     id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,

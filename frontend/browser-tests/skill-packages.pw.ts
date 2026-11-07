@@ -100,7 +100,7 @@ test.describe('Skill Packages real browser verification', () => {
     await page.goto('/browser-tests/skill-packages-harness.html')
 
     await card(page, 'upload-pack').getByRole('button', { name: '详情 upload-pack' }).click()
-    const detail = page.getByRole('dialog', { name: /详情: upload-pack/ })
+    const detail = page.getByRole('dialog', { name: /详情：upload-pack/ })
     await expect(detail).toBeVisible()
 
     // 文件树来自服务端归档索引：目录层级、文件名与解压后文件数都是真实路径。
@@ -130,7 +130,7 @@ test.describe('Skill Packages real browser verification', () => {
     await page.goto('/browser-tests/skill-packages-harness.html')
 
     await card(page, 'agent-used').getByRole('button', { name: '详情 agent-used' }).click()
-    const detail = page.getByRole('dialog', { name: /详情: agent-used/ })
+    const detail = page.getByRole('dialog', { name: /详情：agent-used/ })
     await expect(detail).toBeVisible()
     await detail.getByRole('button', { name: '删除技能包 agent-used' }).click()
 
