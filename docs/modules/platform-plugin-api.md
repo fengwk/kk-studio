@@ -42,7 +42,7 @@
 | `Authentication` | `ACCEPTED` / `REJECTED` / `UNAVAILABLE` / `NOT_CHECKED` | 只有远端确定性拒绝本次凭据才是 `REJECTED`，只有成功合法响应才是 `ACCEPTED`；`UNAVAILABLE` 仅表示本地没有可用凭据，其它故障一律 `NOT_CHECKED` |
 | `BrowserSession` | `UNKNOWN` | 浏览器登录态不由本能力核验 |
 
-实现只把已类型化的失败投影为维度，绝不从异常文本猜分类；未定义的运行时失败与进程级 `Error` 原样上抛，既不降级为维度也不伪装成健康结果。结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/platform/plugins/{pluginId}/check-connection`，请求体给出 `expectedVersion`，响应只回 `appliedVersion` 与上述维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望版本与当前已应用版本不一致（含尚未应用）是 409，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
+实现只把已类型化的失败投影为维度，绝不从异常文本猜分类；未定义的运行时失败与进程级 `Error` 原样上抛，既不降级为维度也不伪装成健康结果。结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/platform/plugins/{pluginId}/check-connection`，请求体给出 `expectedVersion`，响应只回 `pluginId`、`appliedVersion`、`checkedAt` 与上述三个维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望版本与当前已应用版本不一致是 409 `version_conflict`，已安装但本节点尚未应用是 409 `unavailable` 且 reason 为 `PLUGIN_NOT_APPLIED`，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
 
 ## 凭据契约
 
