@@ -42,12 +42,13 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
-必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
+接受目标主机上的绝对路径或 `vfs:` 会话路径，相对路径直接拒绝，且不接受 `workdir`；三个 `lsp.*` 能力的本地 `path`
+必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
-能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
+能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据能力标识查找本地实现。未知能力在执行前失败；连接握手校验控制协议版本。
 
 ## 执行与传输契约
 
@@ -127,7 +128,7 @@ IDE_LEASE
 SKILL_SYNC / SKILL_STATE
 ```
 
-`ControlEnvelope` 的固定字段为：
+Protobuf `Envelope` 的固定字段为：
 
 ```text
 message_type / environment_id / invocation_id? / payload (oneof body)
@@ -213,9 +214,9 @@ runtimeStatus: {
 - **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
 - **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 `ControlProtocolValidator` 校验。协议两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
+`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 `ControlProtocolValidator` 校验。协议验证未知字段、必填字段、canonical UUID/Instant、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
 
-二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
+上传资源的字节不进入控制通道：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。控制流和 IDE 数据流通过承载在 WebSocket 上的 HTTP/2 会话多路复用；所有能力统一通过通用 INVOKE 与结果协议交互。
 
 技能同步不作为原子 capability，而是通过连接级控制信封 `SKILL_SYNC` / `SKILL_STATE` 进行期望状态对账：
 Platform 下发包含包名、SHA-256、大小与下载地址的全量期望集合，Daemon 异步完成单飞对账，下载归档并解压验证，删除未在期望集中的标记目录，最终以 `SKILL_STATE` 上报所有受管技能包状态。
@@ -241,16 +242,16 @@ Platform 下发包含包名、SHA-256、大小与下载地址的全量期望集�
 
 ### 会话建立与租约围栏
 
-`EnvironmentDaemonServer` 实现核心服务接口：面向会话管理的 [`DaemonSessions`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)（`admit` / `open`）、面向数据面隧道的 [`EnvironmentTunnels`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/tunnel/EnvironmentTunnels.java)，以及面向产品调用方的 `EnvironmentCapabilityTransport.invoke`。此外它提供 `isReady`、`readyEnvironments`、`holdsReadyLease` 与 `expire(handle)` 供宿主判定与收敛，并为 [IDE](ide.md) 提供不解析载荷的 `requestIde` / `abandonIde` 通道与连接代际快照 `connectionIdentity`。
+`EnvironmentDaemonServer` 实现核心服务接口：面向会话管理的 [`DaemonSessions`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)（`admit` / `open` / `abandon`）、面向数据面隧道的 [`EnvironmentTunnels`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/tunnel/EnvironmentTunnels.java)，以及面向产品调用方的 `EnvironmentCapabilityTransport`。此外它提供 `isReady`、`holdsReadyLease` 与 `expire(handle)` 供宿主判定与收敛，并为 [IDE](ide.md) 提供 `requestIde` / `abandonIde` 通道与连接代际快照 `connectionIdentity`。
 
 一次连接的建立顺序固定如下：
 
 ```text
-admit(registrationToken, clientCapabilities)
+admit(DaemonHandshake(registrationToken, daemonInstanceId))
   核心 -> registrationDirectory.findByRegistrationToken   # 解析 environmentId
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
-open(admitted, channel, listener) -> DaemonSession
+open(admitted, control, tunnel) -> DaemonSession
   核心 -> 发送 SETTINGS(resourceBudgets, networkSettings)
 Daemon -> READY(environment, runtimeStatus)
   -> leaseStore.markReady                                # 围栏失效即协议错误
@@ -351,17 +352,20 @@ COMPLETED
 
 ### 锁边界
 
-理解并发时先区分协议推进、状态快照与回调执行。连接级锁的嵌套顺序为 `gate > state > inventory`，调用与 transfer 另有各自 monitor：
+理解并发时先区分协议推进、状态快照与回调执行。连接级 monitor 为 `DaemonConnectionSession.gate`、同一会话的
+`stateLock` 与核心 `EnvironmentDaemonServer.inventory`；调用与 transfer 另有各自 monitor：
 
 | monitor | 保护对象 |
 | --- | --- |
 | 每个连接代际的 `gate` | 该连接的入站协议处理序列与该连接待执行回调批次的排队 |
-| `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS）与该连接最近送达的临时资源 TTL/扫描间隔基线 |
+| 同一会话的 `stateLock` | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS）与该连接最近送达的临时资源 TTL/扫描间隔基线 |
 | 核心 `inventory` | 环境目录、连接目录、`invocationId` 目录与 tombstone |
 | 每个 `ActiveInvocation` | 其 transfer 集合与取消意图（终态标记是无锁 `AtomicBoolean`） |
 | 每个 `TransferBinding` | 该 transfer 的请求事实、已签发 uploadId、票据缓存与释放标记 |
 
-租约存储访问发生在连接 `gate` 内，但不持有 `state`、`inventory`、`ActiveInvocation` 或 `TransferBinding`；`invoke` 的围栏复核、票据服务 I/O、上传释放、连接关闭与全部 listener/session 回调都在上述锁之外执行，因此回调中重入核心 API 不会死锁。
+协议推进在 `gate` 内可以进入 `stateLock`（例如 READY、心跳与入站帧处理）；`inventory` 只作为叶子使用，持有它时不回调会话。
+租约存储访问发生在 `gate` 内时不持有 `inventory`、`ActiveInvocation` 或 `TransferBinding`。`invoke` 在 `stateLock` 内完成
+围栏复核与在途登记，票据服务 I/O、上传释放、连接清理以及全部 listener/session 回调都在这些 monitor 之外执行，因此回调中重入核心 API 不会死锁。
 
 回调本身不占用 `gate`：一帧产生的回调批次只在 `gate` 内按处理顺序入队，之后由单一 drainer 在锁外同步执行，其余并发 `receive` 把批次留在队列里即返回。因此同一连接上不存在两个线程同时执行回调，`onPartial` 阻塞只会推迟该连接后续批次的 drain，不会阻塞其他连接的协议处理，也允许回调内重入 `receive`。核心不持久化任何状态：进程重启后的会话事实由 daemon 重新握手建立。
 

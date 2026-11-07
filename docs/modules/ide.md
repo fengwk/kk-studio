@@ -23,7 +23,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 | action | 请求字段 | 成功回执 |
 | --- | --- | --- |
-| `OPEN_VIEW` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、可选 `directory` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath` |
+| `OPEN_VIEW` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(CREATE/RESUME)`、可选 `directory` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath` |
 | `CHANGE_DIRECTORY` | `viewId`、`documentId`、`bindingEpoch`、`directory` | `viewId`、Daemon 确认的规范 `directory` |
 | `FOCUS_TERMINAL` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `COLLAPSE_MOBILE` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
@@ -31,11 +31,11 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `LIST_VIEWS` | 无 | `views[]`：`viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`state(OPEN/CLOSING)` |
 | `LIST_DIRECTORIES` | 可选 `directory`，省略时为宿主主目录 | `directoryListing`：规范 `path`、可选 `parentPath`、`children[]`、`truncated` |
 
-失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CANCELLED`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，`bindingEpoch` 是规范正十进制字符串且不超过 Java long 上限；`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
+失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CANCELLED`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，Protobuf 中的 `binding_epoch` 是正 int64；HTTP 中对应的 `bindingEpoch` 是规范正十进制字符串。`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
 
 Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。命令确认后服务端再读一次 `LIST_VIEWS`，但这次回读只用于刷新绑定缓存与补充响应：回读本身失败只记录告警，已确认的目录切换仍按成功返回，响应只带命令确认的目录与已知绑定身份，不伪造 workspace 与视图状态；回读成功且快照中已没有该绑定时，视图确实已关闭或换代，调用仍按不可用结束。
 
-每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。每个 Environment 在本节点至多保留一个代际。各入口按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 统一裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
+每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。数据面按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
 
 ## 元数据服务与浏览器入口
 
@@ -56,11 +56,13 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。
 
+HTTP 中 64 位整数（非负）在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
+
 正常关闭等待 IDE 原生对话框，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
 
 ### 浏览器同源入口
 
-iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
+iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接与 document 仍存活、且登记了完全相同的 environment/view/claim 意图时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claimId 的同形请求返回同一绑定，参数漂移被拒绝。
 - 绑定身份缓存由 [`IdeViewBindingRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewBindingRegistry.java) 持有：仅保存当前绑定身份，不缓存视图目录与状态；缓存缺失或漂移时先用 `LIST_VIEWS` 重建再判定，旧 epoch 的关闭、目录与终端请求不作用于新绑定。

@@ -2,7 +2,7 @@
 
 `harness-agent-builtin` 是第一方 Builtin Agent Driver。它实现 [Harness Runtime](harness-runtime.md) 的 `AgentDriver` 契约，拥有 Builtin 分支的模型生成状态、Turn 解析、请求物化与响应物化，以及 Builtin 专属的自动压缩策略。Runtime 只保留与执行后端无关的公共内核；Builtin 的模型调用、流式 checkpoint、重试与模型组推进都在本模块完成。
 
-模块生产依赖只有 `kk-studio-common`、`kk-studio-harness-model` 与 `kk-studio-harness-runtime`，不依赖 Spring、JDBC、HTTP 或模型 SDK，也不依赖 Platform。依赖声明见 [`pom.xml`](../../harness/agent-builtin/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
+模块内部生产依赖为 `kk-studio-common`、`kk-studio-harness-model` 与 `kk-studio-harness-runtime`，另依赖 SLF4J 和 Jackson；不依赖 Spring、JDBC、HTTP 或模型 SDK，也不依赖 Platform。依赖声明见 [`pom.xml`](../../harness/agent-builtin/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
 
 ## Driver 边界
 
@@ -41,7 +41,7 @@ systemInstruction / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。它根据冻结的 variant 留存档位与本次 Session UUID 生成 [`ProviderCacheControl`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/cache/ProviderCacheControl.java)；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 平台在 invocation 创建时冻结当前实际模型的完整 variants；模型组每个成员各自冻结列表，切换成员时一起切换。历史 assistant 的实际模型名匹配当前模型时，按其 variant ID 在该冻结列表中查找可空 effort；缺失或不匹配为未知。新 invocation 使用最新配置重解释历史，重试与重启沿用冻结列表，不新增 Entry 历史字段。
 
@@ -63,7 +63,7 @@ groupExecution?
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
 - `Admitted` 后先持久化 `READY -> RUNNING`，这一步同时是陈旧启动围栏。
 
-随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。原类只做编排：增量接收、推送窗口与追帧节奏归 [`ModelStreamPublisher`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamPublisher.java)，累计 text/thinking 的 checkpoint 落库与 RUNNING + attempt + claim 围栏归 [`ModelCheckpointCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelCheckpointCommitter.java)，成功 / 重试 / 失败 / UNKNOWN / 模型组终态的唯一提交事务归 [`ModelTerminalCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelTerminalCommitter.java)。三者仍共享同一把锁，checkpoint 与终态提交保持串行，所有权围栏与推送节奏不变。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
+随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。执行编排把增量接收、推送窗口与追帧节奏交给 [`ModelStreamPublisher`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamPublisher.java)，累计 text/thinking 的 checkpoint 落库与 RUNNING + attempt + claim 围栏交给 [`ModelCheckpointCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelCheckpointCommitter.java)，成功 / 重试 / 失败 / UNKNOWN / 模型组终态的提交事务交给 [`ModelTerminalCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelTerminalCommitter.java)。三者共享同一把锁，checkpoint 与终态提交保持串行。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
 
 流式增量在内存合并，按 [`ModelStreamConfig`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamConfig.java) 的窗口推送有损增量；累计文本按独立节奏落库为 checkpoint，提交成功后才发布 checkpoint 事件，集成方也可以请求当前 owner 立即追帧。默认值为 50ms 推送窗口、256 个事件、64 KiB 增量载荷与 1500ms checkpoint 间隔。旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交批次。
 
@@ -110,7 +110,7 @@ groupExecution?
 - 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
 - ModelProcessor 的行为测试按关注点拆为 `ModelProcessorAdmissionTest`、`ModelProcessorStreamTest`、`ModelProcessorTerminalTest`、`ModelProcessorLifecycleTest` 与 `ModelProcessorGroupTest`；共享 fixture、Seed 和 fake 集中在 `ModelProcessorTestSupport`，Store 记录与失败注入统一使用 `RecordingStore`。
 - 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 Platform 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
-- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 8 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 29 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
+- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 8 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的关键类清单与门槛以 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml) 为准，由 runtime 自己的 check 负责，不存在跨模块 Ant report。
 
 ---
 

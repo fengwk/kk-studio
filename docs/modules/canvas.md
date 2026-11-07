@@ -134,7 +134,7 @@ Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态
 
 ### 目录冻结与插件投影
 
-插件在 `PluginInstance.contributions(CanvasFunctionAdapter.class)` 交出自己冻结的 adapter 列表；Canvas 把内置 adapter 与全部插件贡献交给 [`CanvasFunctionCatalog.from(...)`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalog.java) 冻结成唯一目录：每个 adapter 的 `enabled()`、`unavailableReason()`、`functions()` 各读取一次；adapter 未声明函数、function name 重复即失败，集合按字典序排列；enabled adapter 不得声明 unavailable reason，disabled adapter 必须有非空原因。每次快照构建只做一次这次校验与读取，租用快照的执行路径只读已冻结目录，不重复读取 adapter 定义。每项目录暴露版本身份 `definitionFingerprint`：按固定字段顺序对完整定义（name、description、argsSchema、outputs、referencePolicy）取 64 字符小写 SHA-256 十六进制摘要，与对象键序、集合顺序无关，只随定义内容变化。
+插件在 `PluginInstance.contributions(CanvasFunctionAdapter.class)` 交出自己冻结的 adapter 列表；Canvas 把内置 adapter 与全部插件贡献交给 [`CanvasFunctionCatalog.from(...)`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalog.java) 冻结成唯一目录：每个 adapter 的 `enabled()`、`unavailableReason()`、`functions()` 各读取一次；adapter 未声明函数、function name 重复即失败，集合按字典序排列；enabled adapter 不得声明 unavailable reason，disabled adapter 必须有非空原因。每次快照构建只做一次这次校验与读取，租用快照的执行路径只读已冻结目录，不重复读取 adapter 定义。每项目录暴露版本身份 `definitionFingerprint`：按固定字段顺序对完整定义（name、description、argsSchema、outputs、referencePolicy）取 64 字符小写 SHA-256 十六进制摘要；对象键与引用策略的集合按规范顺序处理，数组和输出槽位的顺序参与摘要。
 
 [`PluginCanvasFunctionCatalog`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalog.java) 是这次冻结的完整视图：目录本身加上按 adapter 身份记录的插件归属。它由 Web 组合根作为产品目录投影注入 `PluginCatalogRuntime`，因此新快照构建期目录校验失败时整份候选被拒绝、候选实例全部关闭、旧快照继续服务；校验成功后视图随快照一起发布，并按快照租用引用计数存活，在途 Run 不会看到已关闭的 adapter。
 
@@ -211,12 +211,13 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 - [`CanvasResourceController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceController.java)：资源下载与预览 URL 直读，从不返回 bucket 或对象 key。
 
 控制器只声明路由与类型，直接返回资源：创建画布 201，启动 Function run 202，其余 200；路径与查询参数使用 `UUID`，
-请求体的必填、未知字段、标量强转与 canonical UUID 由宿主的严格 HTTP mapper 统一校验，控制器与映射器只保留领域规则并抛
+请求体的必填、未知字段、标量强转与 canonical UUID 由宿主的严格 HTTP mapper 统一校验，客户端输入错误在产生处抛
 `DomainException`（见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。
 
 读模型的固定取值是 wire 枚举：资源与 Function 输出的 `kind`（`IMAGE` / `VIDEO` / `AUDIO` / `TEXT`）、Function run 的
 `status`、UNKNOWN 决议与画布冲突的 `target` / `group`。时间字段是 epoch 毫秒的 `Instant`（`createdAt`、`updatedAt`、
-预签名 `expiresAt`）；`revision` 与 Long 仍是规范十进制字符串。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
+预签名 `expiresAt`）；`revision` 等 64 位整数（非负）在请求与响应中都是规范十进制字符串。Function 的
+`args` 与 `argsSchema` 在 HTTP 上是 JSON 节点。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
 `BLOB` 只带 `blobId` 与服务端媒体事实。Canvas 的多形态 DTO（命令、资源槽位、快照资源、节点/分组 patch 与冲突载荷）统一用
 `type` 判别；资源自身的 `kind` 是内容品类，不是判别属性。
 

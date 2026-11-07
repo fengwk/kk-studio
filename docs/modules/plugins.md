@@ -11,7 +11,7 @@
 每个插件是一个实现了 [`Plugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/Plugin.java) 的顶层组件，通过 Spring Boot 的 `AutoConfiguration.imports` 注册。
 
 - **身份声明**：`descriptor()` 返回全局唯一的 `PluginDescriptor(id, name, version)`。
-- **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。配置校验与存储遵循严格 JSON 规范，普通值以 `valuesJson` 原文保留大整数、精确小数与超范围指数；秘密绝不以明文回读或导出，管理面仅投影每个秘密字段的 `{description, configured}`。
+- **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。管理 API 的 `valuesJson` 是 JSON 文本字符串；宿主校验、补默认值后保存并返回规范文本，数值逐值保真，不保证原始排版或数字 token。`valuesSchema` 和 `defaults` 作为 JSON 节点返回。秘密绝不以明文回读或导出，管理面仅投影每个秘密字段的 `{description, configured}`。
 - **认证规范**：`authenticationSpec()` 声明插件的认证模式，支持 `None`（无认证）、`StaticKey`（静态 API Key / Token，支持声明变更时失效认证代际的上下文关联字段）和 `DeepLink`（OAuth 风格的两阶段认证，支持区域候选）。
 - **实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例暴露两类贡献：
   - `harnessContributors()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
@@ -44,7 +44,7 @@
   - `workflows`：受控 ComfyUI 工作流定义列表，默认包含内置的 MiniMax H3 视频生成工作流。
 - **内置 H3 视频生成**：
   - 内置工作流模板：[`minimax-h3-ref2va-workflow.json`](../../plugins/comfyui/src/main/resources/fun/fengwk/kkstudio/plugin/comfyui/minimax-h3-ref2va-workflow.json)，基于 MiniMax H3 架构实现参考图加音频生成视频；
-  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 `/history/{promptId}` 轮询结果；
+  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 `/history/{promptId}` 轮询结果；路径段与 query 值统一经 `common.uri.UrlEncoding` 编码；
   - 产物物化：解析输出节点中的视频文件，下载并写入 Storage 形成不可变 `Blob`，返回 Canvas 节点执行结果。
 
 ---

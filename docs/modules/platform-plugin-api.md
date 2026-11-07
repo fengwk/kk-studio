@@ -24,9 +24,9 @@
 
 ## 配置与认证声明
 
-[`PluginConfigSchema`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfigSchema.java) 复用受控 `InputSchema` 类型，普通字段、唯一默认值与秘密字段分离。每层对象拒绝未知字段；只为缺失字段递归补默认，显式 null 不视作缺失，数字和布尔字符串不做容错，用户数组不与默认数组逐项合并。原始、默认和归一化 JSON 均受 64 KiB UTF-8 预算约束，严格拒绝重复键与尾随内容，数值按 BigDecimal / BigInteger 保真。普通值以严格 JSON 原文 `valuesJson` 承载，编辑、传输与存储都不经过浮点解析，大整数、精确小数与超范围指数按原 token 往返。
+[`PluginConfigSchema`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfigSchema.java) 复用受控 `InputSchema` 类型，普通字段、唯一默认值与秘密字段分离。每层对象拒绝未知字段；只为缺失字段递归补默认，显式 null 不视作缺失，数字和布尔字符串不做容错，用户数组不与默认数组逐项合并。原始、默认和归一化 JSON 均受 64 KiB UTF-8 预算约束，严格拒绝重复键与尾随内容。HTTP 的 `valuesJson` 是 JSON 对象文本字符串；宿主解析时按整数或精确十进制逐值保真，补默认并校验后保存和返回规范文本，不保证空白、指数写法或数字 token 原样往返。`valuesSchema` 和 `defaults` 是 JSON 节点。
 
-[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 只保存普通值原文和非负配置版本；秘密不进入普通配置。宿主为新安装的 Plugin 以 Schema 默认值写入版本 1，此后每次保存推进版本；版本变化时宿主重建插件快照，存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
+[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 承载普通值 JSON 文本和非负配置版本；秘密不进入普通配置。宿主为新安装的 Plugin 以 Schema 默认值写入版本 1，此后每次保存推进版本；版本变化时宿主重建插件快照，存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 
 [`PluginAuthSpec`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthSpec.java) 的封闭形态为 None、StaticKey 和 DeepLink。只有 DeepLink 声明 region 候选并提供 [`PluginAuthHandler`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthHandler.java)；StaticKey 必须引用 Schema 声明的秘密字段。当前 HTTP 交互入口采用 DeepLink。[`PluginCredentialRefresher`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialRefresher.java) 是独立可选能力，宿主只领取实际声明刷新器的插件凭据。
 
@@ -50,7 +50,7 @@
 
 [`PluginContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginContext.java) 只暴露本插件的 [`PluginCredentialAccess`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialAccess.java)、可选资源网关与 Prompt 任务/媒体端口。凭据访问没有 pluginId 参数，只能取得本插件快照或作废本次已用凭据；宿主拒绝跨插件快照。
 
-[`PluginCredentialStore`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialStore.java) 是宿主的唯一凭据存取端口，不通过 Context 交给插件。管理面只看到 [`PluginCredentialProjection`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialProjection.java)，调用快照不投影到管理面。密码学、CAS、租约与状态投影由宿主实现，读写都 fail closed。
+[`PluginCredentialStore`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialStore.java) 是宿主的凭据读取端口，不通过 Context 交给插件。管理面只看到 [`PluginCredentialProjection`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialProjection.java)，调用快照不投影到管理面。凭据与普通配置隔离存储，但不提供加密保证；宿主通过版本与租约保护刷新及调用期作废。
 
 刷新语义由类型化异常区分：[`PluginAuthRejectedException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthRejectedException.java) 表示服务端确定性拒绝，[`PluginRenewalNotSentException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginRenewalNotSentException.java) 表示可以证明请求根本没有发出，其它异常都收敛为结果未知；[`PluginCredentialUnavailableException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialUnavailableException.java) 携带 [`PluginCredentialUnavailableReason`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialUnavailableReason.java) 表达 Tool 侧的确定性不可用。
 

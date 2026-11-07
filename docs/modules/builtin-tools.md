@@ -4,7 +4,7 @@
 
 ## 环境与路径
 
-Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、Issue 或委派提示词给出；本地文件与 LSP 的 `path` 必须是绝对路径，相对路径直接拒绝；只有 bash 要求显式绝对 `workdir`。子 Agent 使用执行根当前 Environment，并从自己的对话历史执行；并行 Thread 共享所选宿主文件系统，文件隔离由任务安排与部署决定。
+Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、Issue 或委派提示词给出；文件工具的 `path` 可以是平台 `vfs:` 路径或 Environment 上的绝对本地路径，LSP 的 `path` 必须是绝对本地路径，相对路径直接拒绝；bash 要求显式绝对 `workdir`。子 Agent 使用执行根当前 Environment，并从自己的对话历史执行；并行 Thread 共享所选宿主文件系统，文件隔离由任务安排与部署决定。
 
 宿主文件能力由 Node.js Daemon 的 TypeScript 实现；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
 
