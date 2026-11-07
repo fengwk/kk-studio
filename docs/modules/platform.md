@@ -19,7 +19,8 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 
 [`PostgresqlPersistenceConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration.java)
 提供 PostgreSQL 异常翻译器，Boot 自动配置的 `JdbcTemplate`、`NamedParameterJdbcTemplate` 和
-`JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
+`JdbcClient` 共用它。Harness Store 事务核心与实时管道直接使用 `JdbcTemplate`，
+其余普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
 
 链路追踪采用 Spring Boot 4 官方 Micrometer Tracing（OpenTelemetry 桥接与 W3C 上下文传播）。
@@ -54,7 +55,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与导入 |
-| [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
+| [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅结果 `SourceSubscribed`：订阅瞬间的 ack 游标与释放句柄；注册、投递与失效分发容器在 `platform.notification`，本包不含领域事件语义、持久化或 LISTEN |
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `MessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 Harness HTTP DTO 的 wire 契约由
@@ -145,25 +146,26 @@ Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大�
 写入先校验完整父链，因此父节点的追加序必小于子节点。分页以最后一条 Entry 的 id 为 keyset 游标，
 由 `(session_id, entry_seq)` 索引覆盖；`loadPageBySession` 不改变线程快照与 EntryPath 的窄读语义。
 
-`loadEntryPath` 使用一次递归 CTE 从 head 回溯 ROOT，在事务局部缓存完整路径；
+`loadPath` 使用一次递归 CTE 从 head 回溯 ROOT，在事务局部缓存完整路径；
 同事务内基于缓存父路径派生新 Entry 可避免重复 CTE。关闭句柄清空缓存，
 删除 Entry 或 Session 时按 Session 驱逐。冷查询的 `loadCurrent` 只回溯并返回分类所需锚点；
 `isAncestor` 命中候选或 ROOT 即停；`loadPathMetrics` 在 SQL 聚合标量，
 三者都不把部分结果写入完整路径缓存。`loadSlice` 从 head 回溯至游标或 ROOT，
-游标不在祖先链上时返回完整链；`loadContributorCustomEntriesOnPath` 的冷查询只返回 head
+游标不在祖先链上时返回完整链；`loadContributorCustom` 的冷查询只返回 head
 与匹配 contributor 的 CUSTOM 节点。完整路径已缓存时上述读取复用缓存。
 
 完整路径按 ROOT 到 head 排序；只追加写入、同 Session 父子外键与非 ROOT 父约束保证父链终止，
-CTE 不另做环路检测。`findRootEntry` 优先使用缓存，未命中时经唯一 ROOT 索引点查并缓存。
+CTE 不另做环路检测。`findRoot` 优先使用缓存，未命中时经唯一 ROOT 索引点查并缓存。
 `loadCurrent` 的冷查询仅返回 head 和分类锚点；控制 Entry 为 NOTIFICATION、SETTINGS、FORK、NATIVE_COMPACTION，
 COMPACTION 是回合，其 settings 不参与真实模型，已关闭 Turn 引用必须位于当前祖先链。
 `isAncestor` 包含 head 自身，未知候选或其他分支返回 false；`loadPathMetrics` 只聚合
 INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
 `loadSlice` 命中游标时不包含游标，游标即 head 返回空列表；其他分支、其他 Session 或未知游标
-返回完整链并将 `baseEntryId` 置空。head 缺失时拒绝。切片及 CUSTOM 窄查询不回填完整路径缓存。
+返回完整链并将 `baseEntryId` 置空。head 缺失时拒绝。无游标时按完整路径读取，
+带游标的切片与 CUSTOM 窄查询不回填完整路径缓存。
 
 深删除先排序并锁定目标 Thread，重复 ID、未锁树或仍被引用的目标被拒绝；
-依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Tool、Driver 私有行、
+依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Stop 回执、Tool、Driver 私有行、
 执行退出事实、Thread 的顺序删除。Driver 私有行由 `DriverThreadDeletion` 锁定和删除，
 调用方必须显式传入组合根的 Driver 生命周期（无私有行时显式 `NONE`），不提供省略该端口的删除重载；
 Entry 叶子优先逐层删除，Session 单独删除。
@@ -174,14 +176,14 @@ Entry 叶子优先逐层删除，Session 单独删除。
 `lease_token`、`lease_until` 和 `required_environment_id`。Harness、Project 与 Canvas
 共用 [`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java)
 的 SQL，按 target type 过滤；变为可领取时在事务内向 `durable_work` 通知目标类型。
-`requestWork` 要求已锁 owning Thread：插入时使用数据库时间和版本 1；冲突时取较早 available_at、
-递增 wake_version 且保留租约。`rescheduleWork` 使用数据库时间加非负整毫秒延迟，清空租约并保留
+`WorkStore.request` 要求已锁 owning Thread：插入时使用数据库时间和版本 1；冲突时取较早 available_at、
+递增 wake_version 且保留租约。`WorkStore.reschedule` 使用数据库时间加非负整毫秒延迟，清空租约并保留
 wake_version；认领后存在新 wake 时保留较早的 available_at。
 
 环境亲和性绑定后冻结：插入冲突时先锁定已有行，再由
 [`WorkState.request`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)
 比较环境需求；新的非空环境 ID 与已冻结值不同即拒绝本次请求，null 表示不改变亲和性。
-`claimNextWork` 使用独立短事务和 `FOR UPDATE SKIP LOCKED`，
+`WorkStore.claimNext` 使用独立短事务和 `FOR UPDATE SKIP LOCKED`，
 以数据库 `statement_timestamp()` 判断到期，按 `available_at, target_id` 排序并签发租约。
 claim 与 heartbeat 是唯一只取单条 Work 行锁的调度事务，claim 必须是事务内首次 Work 加锁。
 
@@ -191,9 +193,9 @@ claim 与 heartbeat 是唯一只取单条 Work 行锁的调度事务，claim 必
 过期均不返回候选，数据库故障回滚事务。路由围栏决定哪台机器处理，行锁决定谁先领取，
 token/deadline 决定谁仍拥有，三者互不替代。
 
-`lockClaimedWork` 校验 token 与未过期租约；`renewWork` 以数据库时间延长且从不缩短租约。
-`releaseWork` 在 token 围栏下清空租约，必要时将未来 available_at 拉回当前，并在事务内通知。
-`completeWork` 在同一事务中检查 token 与领取时 wake_version：无新 wake 则删除行，
+`WorkStore.lockClaimed` 校验 token 与未过期租约；`WorkStore.renew` 以数据库时间延长且从不缩短租约。
+`WorkStore.release` 在 token 围栏下清空租约，必要时将未来 available_at 拉回当前，并在事务内通知。
+`WorkStore.complete` 在同一事务中检查 token 与领取时 wake_version：无新 wake 则删除行，
 有新 wake 则释放租约保留行；失去所有权则回滚业务写入。
 
 ### Dispatcher 生命周期
@@ -328,9 +330,9 @@ MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
 `pricing` 固定为 `{base, overrides, multipliers}`：所有价格与倍率在 wire 上都是十进制字符串，
 单位固定为 USD / 每百万 token；普通基础价缺省归一为 0，倍率缺省为 1，`reasoning: null`
 表示继承最终 output 价。`overrides` 与 `multipliers` 按数组顺序应用，规则 id 必须唯一；
-条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期
-与时区时间段。覆盖规则只写入非 null 字段，显式 `reasoning: null` 恢复继承；倍率规则逐字段
-缩放，未列出的字段不变。
+条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期、
+时区时间段与请求体 JSON Pointer 匹配。覆盖规则只写入非 null 字段，显式 `reasoning: null`
+恢复继承；倍率规则逐字段缩放，未列出的字段不变。
 
 models.dev 目录导入只填入 token 价格；`web_search` 等非 token 附加费用不计入并显示提示。
 由于不感知上游请求地区，含 `region` 条件的倍率规则（包括嵌套组合）整条忽略，保留基础价、
@@ -352,7 +354,7 @@ Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只�
 ### Git Skill Package
 
 每个 Package 保存不可变 `packageName`、当前 `packageVersion` 及其 Skill 列表。
-Git 渠道另保存不可变 repository URL、branch、最近检查的 `headCommit` 与检查结果；
+Git 渠道另保存不可变 repository URL、可编辑的检查 branch、最近检查的 `headCommit` 与检查结果；
 Git 渠道的 `packageVersion` 是发布的 commit SHA。
 Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字符分隔。
 根目录 `<name>/SKILL.md` 的 frontmatter 名称必须与目录一致；description 去掉首尾空白后为
@@ -630,7 +632,7 @@ HTTP 请求与响应以 `valuesJson` 字符串承载普通值。提交时以精�
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
 
-管理协议为 `/api/platform/plugins` 的列表/详情、配置写入和认证操作。
+管理协议为 `/api/platform/plugins` 的列表/详情、配置写入、连接检查与认证操作。
 配置 Schema 与安全秘密投影由插件声明派生；每个秘密字段只投影 `{description, configured}`，绝不回读明文。
 秘密更新仅支持 KEEP、SET、CLEAR。
 无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
@@ -685,7 +687,7 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数有明确取值范围，默认值由 schema 给出。改动 `baseUrl` 而不重新录入 `apiKey` 会删除已保存的密钥，新旧实例都在出网前失败。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求与长轮询超时等预算参数有明确取值范围，默认值由 schema 给出，响应体大小上限由客户端常量固定。改动 `baseUrl` 而不重新录入 `apiKey` 会删除已保存的密钥，新旧实例都在出网前失败。
 - 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
 - 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算也由插件配置模型统一校验。
 
