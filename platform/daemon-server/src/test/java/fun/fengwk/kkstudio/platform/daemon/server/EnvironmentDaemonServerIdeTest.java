@@ -305,7 +305,6 @@ class EnvironmentDaemonServerIdeTest {
     fixture.connectReady("c2");
 
     assertEquals(Optional.of(before), fixture.server.connectionIdentity(ENVIRONMENT_ID));
-    assertEquals(List.of(), fixture.replacedInstances);
   }
 
   @Test
@@ -314,7 +313,6 @@ class EnvironmentDaemonServerIdeTest {
         new EnvironmentDaemonServerTestSupport.Fixture();
     EnvironmentDaemonServerTestSupport.FakeControlChannel first = fixture.connectReady("c1");
     DaemonIdeCall before = fixture.server.requestIde(ENVIRONMENT_ID, openCommand());
-    DaemonConnectionIdentity identityBefore = before.identity();
 
     fixture.close(first);
     fixture.connectReady("c2", OTHER_INSTANCE_ID);
@@ -322,7 +320,6 @@ class EnvironmentDaemonServerIdeTest {
     assertTrue(before.reply().isCompletedExceptionally());
     assertInstanceOf(
         EnvironmentCapabilitySendUncertainException.class, before.reply().exceptionNow());
-    assertEquals(List.of(identityBefore), fixture.replacedInstances);
     assertEquals(
         Optional.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, OTHER_INSTANCE_ID)),
         fixture.server.connectionIdentity(ENVIRONMENT_ID));

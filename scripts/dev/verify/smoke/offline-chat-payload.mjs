@@ -22,7 +22,7 @@ export function buildOfflineChatBatchRequest({
     throw new TypeError(`unexpected option: ${Object.keys(unexpected).join(', ')}`)
   }
   return {
-    owner: { type: 'CHAT', chatId },
+    owner: { kind: 'CHAT', id: chatId },
     target: {
       type: 'NEW_SESSION',
       sessionId,

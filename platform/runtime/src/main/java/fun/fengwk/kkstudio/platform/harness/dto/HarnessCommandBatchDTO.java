@@ -8,7 +8,7 @@ import java.util.List;
 @Data
 public class HarnessCommandBatchDTO {
 
-  /** Chat 或 Canvas owner。 */
+  /** Chat owner；创建型用户命令批只接受 CHAT，owner 只用于授权、不承载展示字段。 */
   private HarnessCommandOwnerDTO owner;
 
   /** NEW_SESSION 或 NEW_THREAD 创建 target；既有 Thread 的继续写入见 {@link HarnessThreadCommandBatchDTO}。 */

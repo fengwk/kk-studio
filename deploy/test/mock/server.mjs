@@ -41,7 +41,7 @@ export function loadRoutes(routesPath) {
 }
 
 /** OpenAI Chat Completions SSE `data:` event for one streamed chunk. */
-function chatCompletionsChunk(model, delta, finishReason) {
+function chatCompletionsChunk(model, delta, finishReason, usage = null) {
   const chunk = {
     id: CHAT_COMPLETIONS_ID,
     object: 'chat.completion.chunk',
@@ -49,13 +49,17 @@ function chatCompletionsChunk(model, delta, finishReason) {
     model,
     choices: [{ index: 0, delta, finish_reason: finishReason }],
   }
+  if (usage !== null) {
+    chunk.usage = usage
+  }
   return `data: ${JSON.stringify(chunk)}\n\n`
 }
 
 /**
  * Deterministic OpenAI Chat Completions SSE body: role delta, content deltas, stop chunk, then the
  * `[DONE]` sentinel. Content chunks are derived from CHAT_COMPLETIONS_STUB_TEXT (4 words per chunk,
- * space-delimited).
+ * space-delimited). The terminal chunk carries complete usage, which the stream accumulator requires
+ * before it accepts a successful completion.
  */
 function chatCompletionsSse(model) {
   const words = CHAT_COMPLETIONS_STUB_TEXT.split(/\s+/)
@@ -70,7 +74,11 @@ function chatCompletionsSse(model) {
   return [
     chatCompletionsChunk(model, { role: 'assistant', content: '' }, null),
     ...contentDeltas.map((delta) => chatCompletionsChunk(model, delta, null)),
-    chatCompletionsChunk(model, {}, 'stop'),
+    chatCompletionsChunk(model, {}, 'stop', {
+      prompt_tokens: 1,
+      completion_tokens: words.length,
+      total_tokens: words.length + 1,
+    }),
     'data: [DONE]\n\n',
   ].join('')
 }

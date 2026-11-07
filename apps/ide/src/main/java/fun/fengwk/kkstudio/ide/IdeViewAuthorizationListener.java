@@ -6,8 +6,9 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 /**
  * IDE 视图授权的窄出口：owner 侧 claim/close 元数据事件，供浏览器会话与数据面按 Daemon 代际 + viewId + epoch 维护授权。
  *
- * <p>授权生命周期严格跟随 Daemon 的真实视图生命周期：claim 成功即授权、关闭或恢复换代即撤销该 epoch 的会话；实例接管时清空整个代际。
- * 同一实例断线重连时视图仍在，授权保留。实现必须是无副作用的本地内存登记，且只在 owner 节点被调用。
+ * <p>授权生命周期严格跟随 Daemon 的真实视图生命周期：claim 成功即授权、关闭或恢复换代即撤销该 epoch 的会话。实例接管不会调用本接口清空旧代际：旧代际凭据仍按 Daemon
+ * 实例登记，但入口与数据面在每次使用时依据本节点当前 READY 连接把 REPLACED 代际判为失效。 同一实例断线重连时视图仍在，授权保留。 实现必须是无副作用的本地内存登记，且只在
+ * owner 节点被调用。
  */
 public interface IdeViewAuthorizationListener {
 

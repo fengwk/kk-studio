@@ -88,6 +88,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.BrokenBarrierException;
@@ -167,6 +168,26 @@ class EnvironmentDaemonServerTest {
             fixture.server.invoke(
                 ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertEquals(List.of(MessageType.SETTINGS, MessageType.INVOKE), channel.messageTypes());
+  }
+
+  /** 测试意图：UUID.fromString 会接受的大写或短段形式不是规范 call.id，必须在任何 wire 发送前拒绝。 */
+  @Test
+  void nonCanonicalCallIdIsRejectedBeforeAnyWireSend() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-non-canonical-id");
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            descriptor,
+            new EnvironmentCapabilityCall(
+                CALL_ONE.toString().toUpperCase(Locale.ROOT), "{\"path\":\"/srv/repo/README.md\"}"),
+            Duration.ofSeconds(5));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener()));
+    assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
   }
 
   /** 测试意图：同步终态回调中再次发起同一环境调用必须成功，证明回调不占用环境级排他状态。 */
@@ -2692,26 +2713,6 @@ class EnvironmentDaemonServerTest {
     assertInstanceOf(
         EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
-  }
-
-  /** 测试意图：实例接管通知自身的 RuntimeException 只记录固定阶段与异常类名，新实例照常完成握手并 READY。 */
-  @Test
-  void replacedNotificationRuntimeFailureIsLoggedSafelyAndKeepsTheNewInstanceReady() {
-    Fixture fixture = new Fixture();
-    FakeControlChannel first = fixture.connectReady("channel-replaced-notify-first");
-    fixture.close(first.connectionId());
-    fixture.replacedNotificationFailure =
-        new IllegalStateException("replaced notification failed: " + SYNTHETIC_SECRET);
-
-    try (CoreLogCapture logs = new CoreLogCapture()) {
-      fixture.connectReady("channel-replaced-notify-second", OTHER_INSTANCE_ID);
-      logs.assertOnlySafeFailures(1, "daemon instance replaced notification");
-    }
-
-    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
-    assertEquals(
-        List.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID)),
-        fixture.replacedInstances);
   }
 
   /** 内核 IDE 通道不解释载荷，任意有效命令即可驱动在途登记与收尾。 */

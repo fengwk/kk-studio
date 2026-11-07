@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.daemon.server;
 
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
@@ -161,12 +162,6 @@ public final class EnvironmentDaemonServer
             }
             transferCoordinator.releaseAllTransfers(active, ticketService);
           }
-          try {
-            sessionListener.onDaemonInstanceReplaced(
-                new DaemonConnectionIdentity(environmentId, replacedInstanceId));
-          } catch (RuntimeException error) {
-            logFailure("daemon instance replaced notification", error);
-          }
         }
         DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
         pendingAdmissions.put(
@@ -301,7 +296,7 @@ public final class EnvironmentDaemonServer
       throw new IllegalArgumentException(
           "capability descriptor does not match EnvironmentCapabilityCatalog: " + descriptor.id());
     }
-    UUID invocationId = UUID.fromString(request.call().id());
+    UUID invocationId = Uuids.parseCanonical(request.call().id(), "call.id");
 
     if (updateCoordinator.isUpdating(environmentId)) {
       throw new EnvironmentCapabilityBusyException(

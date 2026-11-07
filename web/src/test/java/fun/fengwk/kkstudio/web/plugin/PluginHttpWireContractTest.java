@@ -29,6 +29,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.JsonNodeType;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
@@ -382,6 +383,32 @@ class PluginHttpWireContractTest {
     assertEquals("ACCEPTED", data.get("authentication").asString());
     assertEquals("UNKNOWN", data.get("browserSession").asString());
     assertInstantToken(data.get("checkedAt"), CHECKED_AT);
+  }
+
+  /** 测试意图：本节点尚未应用的已安装 Plugin 以 problem+json 的 409 unavailable 稳定语义返回。 */
+  @Test
+  void checkConnectionReportsNotAppliedPluginAsUnavailableConflict() throws Exception {
+    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+        .thenThrow(
+            DomainException.unavailable(
+                "PLUGIN_NOT_APPLIED", PluginManagementService.PENDING_APPLICATION_ERROR));
+
+    MockHttpServletResponse response =
+        mockMvc
+            .perform(
+                post("/api/platform/plugins/beta-deep-connected/check-connection")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"expectedVersion\":\"8\"}"))
+            .andReturn()
+            .getResponse();
+
+    assertEquals(409, response.getStatus());
+    assertTrue(
+        response.getContentType().startsWith(MediaType.APPLICATION_PROBLEM_JSON_VALUE),
+        response.getContentType());
+    JsonNode problem = JsonValues.readTree(bodyText(response));
+    assertEquals("unavailable", problem.get("code").asString());
+    assertEquals("PLUGIN_NOT_APPLIED", problem.get("reason").asString());
   }
 
   /** 测试意图：POST auth/prepare 的响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
