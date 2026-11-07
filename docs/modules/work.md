@@ -16,11 +16,11 @@ reschedule(claim, delay) -> 释放租约，下一次处理推迟 delay；有新 
 
 - **时间只有一个权威**：due、租约签发与有效性判断都取数据库 `statement_timestamp()` 并截断到毫秒，调用方只传相对 `Duration`。多节点时钟偏差不会让某个节点提前抢占别人的租约。
 - **wake 不会被吞掉**：`wake_version` 记录请求次数。Worker 完成时只删除与自己领取时版本一致的行；处理期间到达的新请求让行留下并立即可再领取。
-- **租约围栏调度跃迁**：续租、完成与重排都以调用方的 lease token 和数据库时间下仍有效的租约为条件；租约过期后旧 Worker 的这些跃迁落空，由新 Worker 接手。业务事实的写回也必须在所属事务内复核执行权。
+- **租约围栏调度跃迁**：续租、完成与重排都以调用方的 lease token 和数据库时间下仍有效的租约为条件；token 不匹配或租约过期时被拒绝（`IllegalArgumentException`，行已不存在时 `IllegalStateException`），由新 Worker 接手。业务事实的写回也必须在所属事务内复核执行权。
 
 ## 唤醒
 
-行变为「到期且无有效租约」的写入（请求、完成时的释放、重排）在同一事务内向通道 `durable_work` 发送 payload 为 target type 的 `NOTIFY`。组合根只监听这一个通道，按 payload 唤醒负责该类型的 dispatcher；连接断开重连后，组合根主动唤醒全部类型的 dispatcher 触发补读。通知只降低延迟，通知丢失由各 dispatcher 的周期轮询兜底恢复。
+请求、完成时保留行、重排与显式释放都会在同一事务内，当行已到期（`available_at <= clock_timestamp()`）时向通道 `durable_work` 发送 payload 为 target type 的 `NOTIFY`；仍持有租约时到达的新 wake 同样发送，不被租约吞掉。组合根只在这一个通道上接收 Work 唤醒，按 payload 唤醒负责该类型的 dispatcher；连接断开重连后，组合根主动唤醒全部类型的 dispatcher 触发补读。通知只降低延迟，通知丢失由各 dispatcher 的周期轮询兜底恢复。
 
 ## 使用方
 
@@ -32,4 +32,4 @@ reschedule(claim, delay) -> 释放租约，下一次处理推迟 delay；有新 
 
 ## 测试
 
-[`DurableWorkStoreIntegrationTest`](../../work/src/test/java/fun/fengwk/kkstudio/work/DurableWorkStoreIntegrationTest.java) 在真实 PostgreSQL 上覆盖 wake 合并、按 due 领取、租约过期接管与旧租约失权、完成与重排的版本语义，以及只在行变为可领取时发送提示。
+[`DurableWorkStoreIntegrationTest`](../../work/src/test/java/fun/fengwk/kkstudio/work/DurableWorkStoreIntegrationTest.java) 在真实 PostgreSQL 上覆盖 wake 合并、按 due 领取、租约过期接管与旧租约失权、完成与重排的版本语义、环境路由围栏，以及到期写入发送提示而完成删除不发送、回滚同时撤销行与提示。
