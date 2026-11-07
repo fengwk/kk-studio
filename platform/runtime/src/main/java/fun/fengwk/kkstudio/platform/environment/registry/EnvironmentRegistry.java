@@ -140,8 +140,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   then (recent_events - 0) || :disconnectedEvent::jsonb
                   else recent_events || :disconnectedEvent::jsonb
               end,
-          last_seen_at = statement_timestamp(),
-          lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
+          last_seen_at = date_trunc('milliseconds', statement_timestamp()) - interval '1 millisecond',
+          lease_until = date_trunc('milliseconds', statement_timestamp()) + (:leaseMillis * interval '1 millisecond')
       where environment_id = :environmentId
         and owner_node_id = :ownerNodeId
         and lease_token = :leaseToken
@@ -157,8 +157,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   then (recent_events - 0) || :releasedEvent::jsonb
                   else recent_events || :releasedEvent::jsonb
               end,
-          last_seen_at = statement_timestamp() - interval '1 millisecond',
-          lease_until = statement_timestamp()
+          last_seen_at = date_trunc('milliseconds', statement_timestamp()) - interval '1 millisecond',
+          lease_until = date_trunc('milliseconds', statement_timestamp())
       where environment_id = :environmentId
         and owner_node_id = :ownerNodeId
         and lease_token = :leaseToken
@@ -472,7 +472,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   /**
    * 连接断开时，围栏式将状态回退为 CONNECTING 并保留重连宽限租约。
    *
-   * <p>{@code runtime_info} 保留最近一次被接受的 READY 宿主 metadata，断线不清空。
+   * <p>{@code runtime_info} 保留最近一次被接受的 READY 宿主 metadata，断线不清空。宽限期从释放语句时刻的毫秒边界起算；宽限期为零时租约立即过期，
+   * 其他节点可立即接管。
    *
    * @return 围栏校验成功返回 true
    */
@@ -511,7 +512,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 持有者主动放弃路由租约，围栏校验通过后清除活跃租约（lease_until 置为当前时刻），使任何节点都可立即抢占。
+   * 持有者主动放弃路由租约，围栏校验通过后把 {@code lease_until} 截断到释放语句时刻的毫秒边界，使任何节点都可立即抢占； {@code last_seen_at}
+   * 保持严格早于 {@code lease_until}。
    *
    * @return 围栏校验成功且更新 1 行返回 true；若已释放或 token 不匹配返回 false
    */

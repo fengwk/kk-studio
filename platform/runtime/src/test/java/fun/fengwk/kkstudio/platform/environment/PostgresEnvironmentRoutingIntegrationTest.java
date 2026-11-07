@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -398,6 +399,87 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection node2Env = registryNode2.find(DEV).orElseThrow();
     assertEquals(node2, node2Env.ownerNodeId());
+  }
+
+  /**
+   * 测试意图：主动释放必须把租约截止点写为不晚于释放语句时刻，重复 release 立即被围栏拒绝，其他节点立即 tryAcquire 成功。
+   *
+   * <p>循环数百次放大 {@code timestamptz(3)} 的毫秒舍入窗口：修复前只要某次释放被向上取整到未来，重复 release 就会被接受或接管被阻塞； 修复后每次都必须
+   * 通过。
+   */
+  @Test
+  void releasedLeaseIsImmediatelyExpiredForRepeatReleaseAndOtherNodeTakeover() {
+    int iterations = 300;
+    int repeatReleaseAccepted = 0;
+    int blockedTakeovers = 0;
+    for (int i = 0; i < iterations; i++) {
+      var node1Bind = registryNode1.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+      assertInstanceOf(LeaseBindResult.Acquired.class, node1Bind, "iteration " + i);
+      UUID node1Token = ((LeaseBindResult.Acquired) node1Bind).leaseToken();
+
+      assertTrue(registryNode1.release(DEV, node1Token), "持有者 release 应成功，iteration " + i);
+      if (registryNode1.release(DEV, node1Token)) {
+        repeatReleaseAccepted++;
+      }
+
+      var node2Bind = registryNode2.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+      if (node2Bind instanceof LeaseBindResult.Acquired acquired) {
+        assertNotEquals(node1Token, acquired.leaseToken());
+        assertTrue(registryNode2.release(DEV, acquired.leaseToken()), "iteration " + i);
+        if (registryNode2.release(DEV, acquired.leaseToken())) {
+          repeatReleaseAccepted++;
+        }
+      } else {
+        blockedTakeovers++;
+      }
+    }
+
+    int repeatReleases = repeatReleaseAccepted;
+    int blocked = blockedTakeovers;
+    assertAll(
+        () -> assertEquals(0, repeatReleases, "已释放租约的重复 release 必须全部返回 false"),
+        () -> assertEquals(0, blocked, "释放后其他节点必须全部能立即 tryAcquire"));
+  }
+
+  /**
+   * 测试意图：宽限期为零的 disconnect 必须让租约立即过期，重复 disconnect 立即被围栏拒绝，其他节点立即 tryAcquire 成功。
+   *
+   * <p>这是 handshake 准入后未建立会话的 abandon 路径；循环放大毫秒舍入窗口，修复前只要租约截止点被向上取整到未来就会失败。
+   */
+  @Test
+  void zeroGraceDisconnectIsImmediatelyExpiredForRepeatAndOtherNodeTakeover() {
+    int iterations = 300;
+    int repeatDisconnectAccepted = 0;
+    int blockedTakeovers = 0;
+    for (int i = 0; i < iterations; i++) {
+      var node1Bind = registryNode1.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+      assertInstanceOf(LeaseBindResult.Acquired.class, node1Bind, "iteration " + i);
+      UUID node1Token = ((LeaseBindResult.Acquired) node1Bind).leaseToken();
+
+      assertTrue(
+          registryNode1.disconnect(DEV, node1Token, Duration.ZERO),
+          "零宽限期 disconnect 应成功，iteration " + i);
+      if (registryNode1.disconnect(DEV, node1Token, Duration.ZERO)) {
+        repeatDisconnectAccepted++;
+      }
+
+      var node2Bind = registryNode2.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+      if (node2Bind instanceof LeaseBindResult.Acquired acquired) {
+        assertNotEquals(node1Token, acquired.leaseToken());
+        assertTrue(registryNode2.disconnect(DEV, acquired.leaseToken(), Duration.ZERO));
+        if (registryNode2.disconnect(DEV, acquired.leaseToken(), Duration.ZERO)) {
+          repeatDisconnectAccepted++;
+        }
+      } else {
+        blockedTakeovers++;
+      }
+    }
+
+    int repeats = repeatDisconnectAccepted;
+    int blocked = blockedTakeovers;
+    assertAll(
+        () -> assertEquals(0, repeats, "零宽限期 disconnect 的重复调用必须全部返回 false"),
+        () -> assertEquals(0, blocked, "零宽限期断开后其他节点必须全部能立即 tryAcquire"));
   }
 
   private static Envelope readyEnvelope(EnvironmentId environmentId) {
