@@ -59,6 +59,7 @@ PID 文件也应只属于当前受管实例，不要复用其他工作区的运�
 | `DEV_SKIP_PACKAGE` | `false` | JAR 与 `web/target/.kk-studio-revision` 记录的修订都匹配当前 `HEAD` 时跳过 Maven |
 | `DEV_SKIP_NPM_INSTALL` | `false` | 完全跳过前端依赖安装或刷新 |
 | `DEV_READY_TIMEOUT_SECONDS` | `90` | 等待 Backend/Vite ready 的预算，超时打印日志并以非零状态退出 |
+| `LOG_LINES` | `120` | `logs` 与 `tail` 打印的最近行数 |
 | `JAVA_OPTS` | 空 | 传给 Backend JVM |
 | `SHARED_PREVIEW_ENV_FILE` | 未设置 | 显式给出时按字面量读取外部数据面配置；见[本机 preview 的外部数据面](#本机-preview-的外部数据面) |
 
@@ -126,16 +127,17 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
 V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变。Java 门禁以
 `mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
-React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动、基线不一致数据库的拒绝与 Node decoder。
-通过后上传仅含 `app.jar` 及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。
+React 产物的发行 Fat JAR；其后的必需步骤先用同一 JAR 验证生产入口启动，并单独校验生成的
+control protocol code 与提交产物一致。通过后上传仅含 `app.jar` 及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。
 `main` publish 只下载同 run、同 SHA 的该 artifact，
 校验版本、提交与文件摘要后选择 `deploy/local/Dockerfile` 的 `verified-artifact` 阶段构建镜像，
 不重新构建源码，也不使用普通 verify 产生的无前端 JAR；`dev` 仍从源码 context 使用默认 `source` 阶段。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
-Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
-Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash
-步骤覆盖，明确检查 Bash 3.2，不以 Homebrew Bash 的结果替代系统自带版本。
+Windows 安装器回归在同一宿主上分别运行 Windows PowerShell 5.1 与 PowerShell 7；前一个失败不会遮蔽
+后一个，任一失败仍阻断正常发布。
+Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash（macOS 为 3.2）
+步骤覆盖，不以 Homebrew Bash 的结果替代系统自带版本。
 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 是 Daemon 的平台门禁：Node 固定 24.21.0 并按
 `daemon/package-lock.json` 安装，在 linux-amd64、linux-arm64、macos-arm64、macos-amd64、windows-amd64
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
@@ -157,15 +159,16 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 ### Daemon 安装与受管更新回归
 
 在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
-Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 驱动安装器的伪终端交互，属于测试依赖，
+Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 让安装器在真实 TTY stderr 下运行（stdin 仍重定向），属于测试依赖，
 产品运行时不依赖 Python。不要改用 `script` 命令替代，因为各平台的参数与可用性不一致。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示；从 checkout
 运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实发行归档由
-[scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 独立打包并上传 GitHub Release。
+[scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 独立打包，再由
+`daemon-release` 工作流上传 GitHub Release。
 安装器不要求宿主 JDK 或 Node：服务直接运行归档自带的冻结运行时。测试不注册真实 systemd/launchd 服务。
-Windows 原生验收分别运行两个 host：
+Windows 原生验收在同一宿主上分别运行 Windows PowerShell 5.1 与 PowerShell 7：
 
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
@@ -182,11 +185,9 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
 验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
 
-只有 Linux/macOS 时，可用 PS7 运行
-`pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-它只提供可移植
-进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
-保留两个 Windows host 的完整门禁。
+Windows fixture 依赖真实的 Windows 安全主体与 ScheduledTasks cmdlet，只能在 Windows 宿主运行；
+镜像与 Daemon 发布 CI 都在 `windows-latest` 上分别用 Windows PowerShell 5.1 与 PowerShell 7
+执行完整门禁。
 
 ### 跨语言 UPDATE 命令
 
@@ -224,7 +225,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 
 根 [pom.xml](../../pom.xml) 的 JaCoCo 为测试 JVM 注入 agent，在 `test` 阶段生成各模块的
 `target/site/jacoco/`。配置了 `check` 的模块在 `verify` 阶段执行覆盖率门禁；
-检查范围、CLASS/BUNDLE 口径与阈值以对应模块 POM 为准，定向测试报告只代表选中的集合。
+检查范围、元素口径（CLASS/PACKAGE）与阈值以对应模块 POM 为准，定向测试报告只代表选中的集合。
 Harness 的公共 Runtime 与 Builtin Driver 分别由 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml)
 与 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml) 持有各自的关键类门禁，不跨模块合并覆盖率。
 
@@ -324,8 +325,9 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 Chat command batch 使用 `owner.kind=CHAT` 与 `owner.id`；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
-Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
-再检查浏览器入口。文档、敏感数据与 Git 空白检查：
+Fat JAR 的 static 资源由 `-Pdistribution` 的前端工具链、clean 与 resources 三个插件准备；CI 的
+[app-artifact.mjs](../../scripts/dev/ci/app-artifact.mjs) 再校验 JAR 含 `BOOT-INF/classes/static/index.html`
+与 assets。文档、敏感数据与 Git 空白检查：
 
 ```bash
 node scripts/dev/verify/e2e/run-matrix.mjs --docs
@@ -521,7 +523,8 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 
 该探针固定使用 `minimax-anthropic/MiniMax-M3` 的 wire model `claude-fable-5-dd-3M-xaMiniM`，
 关闭推理，每次输出上限 128 token，总共最多 4 次请求、不重试。两个独立 nonce 会话各先预热约 7k token
-的用户历史，再增加 24 个文本块；一组保留历史端点，另一组只删除历史标记、保留末端，system 很短且不打标。
+的用户历史，再增加 24 个文本块；一组保留历史端点，另一组只删除历史标记、保留末端。
+system 很短，两组都保留其固定的 ephemeral 标记。
 输出只包含标记位置、状态和数值 usage。上游可能自动缓存或不报告缓存写入，因此成功完成测量不等于证明断点带来提升；
 应比较两组读缓存 token，并明确该结果只适用于凭据指向的线路，不等同于 Anthropic 官方服务行为。
 
@@ -663,8 +666,8 @@ create+delete 工作负载结果比较。
 
 | 子命令 | 内容 |
 | --- | --- |
-| `sbom` | backend/frontend CycloneDX JSON SBOM，校验文件非空可解析 |
-| `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
+| `sbom` | backend/frontend/daemon CycloneDX JSON SBOM，校验文件非空可解析 |
+| `audit` | frontend/daemon `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
 | `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
@@ -1056,18 +1059,20 @@ reports/performance/
 reports/reliability/
   <timestamp>-regression-<pid>/{report.md,summary.json,iterations/}
   latest-regression/
+  LATEST_REGRESSION_RUN.txt
   <runId>/{report.md,summary.json,cases/,artifacts/}
   latest-agent/
   LATEST_AGENT_RUN.txt
 
 reports/supply-chain/
-  <timestamp>-<pid>/{backend-sbom,frontend-sbom,frontend-audit,backend-audit,image,logs/,summary.md,summary.json}
+  <timestamp>-<pid>/{backend-sbom,frontend-sbom,daemon-sbom,frontend-audit,daemon-audit,backend-audit,image,logs/,summary.md,summary.json}
   latest/
   LATEST_RUN.txt
 ```
 
-`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、npm audit、
-Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smoke log 和 summary。
+`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend/daemon SBOM、
+frontend/daemon npm audit、Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、
+smoke log 和 summary。
 
 分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，
 `logs/distributed-app-a/` 和 `logs/distributed-app-b/` 是容器 `/app/logs` 中的文本 `.log` 文件。
