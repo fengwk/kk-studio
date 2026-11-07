@@ -204,10 +204,6 @@ public class ProjectDtoMapper {
         .build();
   }
 
-  public IssueRunSummaryDTO toSummaryDto(IssueRun run) {
-    return toSummaryDto(run, null);
-  }
-
   public IssueRunSummaryDTO toSummaryDto(IssueRun run, String agentName) {
     if (run == null) {
       return null;
@@ -222,10 +218,6 @@ public class ProjectDtoMapper {
         .startedAt(run.getStartedAt())
         .endedAt(run.getEndedAt())
         .build();
-  }
-
-  public IssueRunDTO toDto(IssueRun run) {
-    return toDto(run, null);
   }
 
   public IssueRunDTO toDto(IssueRun run, String agentName) {

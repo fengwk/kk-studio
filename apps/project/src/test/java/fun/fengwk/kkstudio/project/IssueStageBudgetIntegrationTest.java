@@ -111,7 +111,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         count("select count(*) from project_issue_agent_thread where issue_id = ?", issue.getId()));
   }
 
-  /** 额度耗尽后拒绝新建 Run，并只展示待人工授权；历史 Run 仍保留。 */
+  /** 额度耗尽后拒绝新建 Run，并只展示待人工重置；历史 Run 仍保留。 */
   @Test
   void exhaustedBudgetRejectsNewRun() {
     String agent = createAgent();
@@ -167,55 +167,16 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(2L, next.getOrdinal());
   }
 
-  /** 首次授权只接受启用且有 Agent 的工作阶段，且不能重复授权。 */
-  @Test
-  void authorizeStageBudgetValidatesStageAndRejectsDuplicate() {
-    String agent = createAgent();
-    Project project = projectService.createProject("授权", "描述", true);
-    projectService.updateWorkflow(
-        project.getId(), project.getVersion(), workflowJson(agent, agent, 1));
-    Issue issue = createIssue(project.getId());
-
-    assertValidation(
-        () ->
-            issueStageBudgetService.authorizeStageBudget(
-                issue.getId(), issue.getVersion(), key("auth"), "INIT", 1));
-
-    Issue fresh = issueEditingService.getIssue(issue.getId());
-    StageBudgetView view =
-        issueStageBudgetService.authorizeStageBudget(
-            fresh.getId(), fresh.getVersion(), key("auth"), "DESIGN", 2);
-    assertEquals(2, view.maxRuns());
-    Issue afterAuth = issueEditingService.getIssue(issue.getId());
-    assertDuplicate(
-        () ->
-            issueStageBudgetService.authorizeStageBudget(
-                afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));
-  }
-
   /** 重放绕过旧版本与活动 Run 检查；异 payload 和新的重置请求不能改变额度。 */
   @Test
   void budgetReceiptsReplayAndActiveRunBlocksNewReset() {
     String agent = createAgent();
-    UUID projectId = createProjectWithStages("额度重放", agent, agent, 3);
+    UUID projectId = createProjectWithStages("额度重放", agent, agent, 2);
     Issue issue = createIssue(projectId);
-    String authKey = key("auth");
-    StageBudgetView authorized =
-        issueStageBudgetService.authorizeStageBudget(
-            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2);
-    assertEquals(
-        authorized,
-        issueStageBudgetService.authorizeStageBudget(
-            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2));
-    assertDuplicate(
-        () ->
-            issueStageBudgetService.authorizeStageBudget(
-                issue.getId(), issue.getVersion(), authKey, "DESIGN", 3));
-    Issue afterAuth = issueEditingService.getIssue(issue.getId());
     String resetKey = key("reset");
     StageBudgetView reset =
         issueStageBudgetService.resetStageBudget(
-            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2);
+            issue.getId(), issue.getVersion(), resetKey, "REVIEW", 2);
     assertEquals(0, reset.budgetAfterOrdinal());
     Issue afterReset = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.transition(issue.getId(), afterReset.getVersion(), key("t"), "DESIGN");
@@ -224,7 +185,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(
         reset,
         issueStageBudgetService.resetStageBudget(
-            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2));
+            issue.getId(), afterReset.getVersion(), resetKey, "REVIEW", 2));
     assertDuplicate(
         () ->
             issueStageBudgetService.resetStageBudget(

@@ -485,7 +485,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     List<Issue> activeIssues = issueEditingService.listIssues(projectId);
     assertEquals(1, activeIssues.size());
 
-    // authorizeStageBudget
+    // acceptRun 首次接受时自动授权阶段预算
     issueLifecycleService.transition(issue.getId(), updated.getVersion(), key("t"), "DESIGN");
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun run = issueRunService.acceptRun(inDesign.getId(), key("acc"));

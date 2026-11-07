@@ -69,6 +69,7 @@ class ProjectSessionOwnershipTest {
     when(issues.getById(issueId)).thenReturn(issue);
     when(issues.lockById(issueId)).thenReturn(issue);
     when(projects.lockForShare(projectId)).thenReturn(project);
+    when(projects.lockForKeyShare(projectId)).thenReturn(project);
     when(projects.lockById(projectId)).thenReturn(project);
     when(projects.getById(projectId)).thenReturn(project);
     when(bindings.findByIssueIdAndAgentName(issueId, "agent:variant")).thenReturn(binding);
@@ -93,6 +94,9 @@ class ProjectSessionOwnershipTest {
     var order = inOrder(projects, issues);
     order.verify(projects).lockForShare(projectId);
     order.verify(issues).lockById(issueId);
+    // 深删除与 Issue 写路径同锁序：Project KEY SHARE 而非排他锁，避免并发删除升级锁死锁。
+    order.verify(projects).lockForKeyShare(projectId);
+    verify(projects, never()).lockById(projectId);
   }
 
   @Test

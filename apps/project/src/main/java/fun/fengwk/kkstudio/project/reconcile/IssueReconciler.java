@@ -392,7 +392,7 @@ public class IssueReconciler {
     var budget = stageBudgetRepository.get(issue.getId(), issue.getState());
     if (budget != null) {
       if (budget.usedRuns() >= budget.maxRuns()) {
-        // 额度用尽只展示待人工授权：保留 mailbox 以便授权后立即推进。
+        // 额度用尽只展示待人工重置：保留 mailbox 以便重置后立即推进。
         return finish(
             claim,
             true,

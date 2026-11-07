@@ -24,9 +24,7 @@ class IssueStageBudgetServiceTest {
       new IssueStageBudgetService(stageBudgets, issueRuns, mutationSupport);
 
   @Test
-  void rejectsMissingStateBeforeReadingIssueFacts() {
-    assertMissingState(
-        () -> service.authorizeStageBudget(UUID.randomUUID(), 0L, "request", null, 1));
+  void resetRejectsMissingStateBeforeReadingIssueFacts() {
     assertMissingState(() -> service.resetStageBudget(UUID.randomUUID(), 0L, "request", null, 1));
     verifyNoInteractions(stageBudgets, issueRuns, mutationSupport);
   }

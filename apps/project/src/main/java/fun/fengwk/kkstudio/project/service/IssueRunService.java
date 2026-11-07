@@ -157,7 +157,7 @@ public class IssueRunService {
     }
     if (budgetRow.usedRuns() >= budgetRow.maxRuns()) {
       throw DomainException.validation(
-          "issue_run", "Stage budget is exhausted; a human must authorize more runs");
+          "issue_run", "Stage budget is exhausted; a human must reset the stage budget");
     }
 
     IssueAgentThread binding =

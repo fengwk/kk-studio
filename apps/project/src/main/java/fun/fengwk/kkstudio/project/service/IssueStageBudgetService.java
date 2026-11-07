@@ -18,7 +18,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issue 阶段预算用例：授权、重置与查询。
+ * Issue 阶段预算用例：读取与人工重置。
  *
  * <p>写路径复用 {@link IssueMutationSupport} 的 owner 锁与幂等 receipt，不在本类或平台层复制额度 推导。
  */
@@ -29,42 +29,6 @@ public class IssueStageBudgetService {
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueRunRepository issueRunRepository;
   private final IssueMutationSupport mutationSupport;
-
-  /** 首次自动执行接受时授权阶段额度（工作阶段必须是启用且有 Agent 的阶段）。 */
-  @Transactional
-  public StageBudgetView authorizeStageBudget(
-      UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
-    Objects.requireNonNull(issueId, "issueId");
-    ProjectStateCode code = ProjectValidationUtils.requireStateCode(state, "state");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "AUTHORIZE", key, code.value(), maxRuns);
-    ReceiptLock<IssueMutationSupport.Locked> receipt =
-        mutationSupport.lockUnlessReplayed(issueId, identity);
-    if (receipt.activity() != null) {
-      return getStageBudget(issueId, state);
-    }
-    IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked);
-    mutationSupport.requireVersion(locked, expectedVersion);
-    StageBudgetView authorized = StageBudgetView.authorize(locked.workflow(), code, maxRuns);
-    if (stageBudgetRepository.get(issueId, state) != null) {
-      throw DomainException.duplicate("stage_budget", "Stage budget is already authorized");
-    }
-    if (!stageBudgetRepository.insert(issueId, authorized)) {
-      throw new IllegalStateException("failed to insert stage budget");
-    }
-    ObjectNode data = mutationSupport.newData();
-    data.put("action", "AUTHORIZE");
-    data.put("state", state);
-    data.put("maxRuns", authorized.maxRuns());
-    data.put("budgetAfterOrdinal", authorized.budgetAfterOrdinal());
-    mutationSupport.appendActivity(
-        locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
-    mutationSupport.persist(locked, expectedVersion);
-    return getStageBudget(issueId, state);
-  }
 
   /** 重置阶段额度：高水位取服务端当前 {@code nextRunOrdinal - 1}，不得回退而重新授权历史 Run。 */
   @Transactional
