@@ -365,7 +365,7 @@ public final class ProviderResourceMaterializer {
    */
   private ProviderImageBlock inlineImage(
       ProviderResourceBlock resource, StorageBlob blob, InlineBudget budget) {
-    // 档位在命令接受事务中冻结；历史数据可能没有档位，按平台默认 720P 处理。
+    // 未指定图片档位的媒体按当前契约使用默认 720P；显式档位保持冻结值。
     ImageInputTier tier = resource.imageTier() == null ? ImageInputTier.P720 : resource.imageTier();
     boolean original = tier.isOriginal();
     long allowedChars =

@@ -44,6 +44,28 @@ describe('connection lifecycle', () => {
     remaining?.connection.close()
   })
 
+  /** 即使旧 transport 的关闭失败，也必须完成会话清理并发起重连。 */
+  it('notifies disconnect and reconnects when closing the GOAWAY connection throws', async () => {
+    const transport = new FakeTransport()
+    const disconnects: Array<unknown> = []
+    const lifecycle = buildLifecycle(transport, disconnects)
+    lifecycle.start()
+    await waitFor(() => lifecycle.getActiveConnection() !== null)
+    const active = lifecycle.getActiveConnection()!
+    transport.connection!.close = () => {
+      throw new Error('close failed')
+    }
+    try {
+      transport.goaway()
+      expect(lifecycle.getActiveConnection()).toBeNull()
+      expect(disconnects).toEqual([active])
+      await waitFor(() => transport.connectCount >= 2)
+      expect(disconnects).toHaveLength(1)
+    } finally {
+      lifecycle.beginShutdown('STOPPED', null)?.connection.close()
+    }
+  })
+
   /** GOAWAY 立即重连；若该次尝试失败，后续延迟仍按既有退避增长而不是停在 0。 */
   it('does not reset reconnect backoff to zero after an immediate GOAWAY reconnect fails', async () => {
     vi.useFakeTimers()

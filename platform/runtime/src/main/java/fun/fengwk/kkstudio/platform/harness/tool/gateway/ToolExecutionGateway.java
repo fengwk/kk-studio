@@ -180,7 +180,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         return new ToolGateway.Deny(resolved.error());
       }
       // 只读命名空间的写入在权限评估与审批之前确定性拒绝：既不弹审批，也不消耗权限策略，YOLO 同样不能绕过。
-      ToolInvocationError readOnlyRejection = readOnlyRejection(request, null);
+      ToolInvocationError readOnlyRejection = readOnlyRejection(request, scope.rootSessionId());
       if (readOnlyRejection != null) {
         return new ToolGateway.Deny(readOnlyRejection);
       }

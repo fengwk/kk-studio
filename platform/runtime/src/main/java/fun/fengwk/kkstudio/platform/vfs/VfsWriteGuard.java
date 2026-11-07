@@ -27,7 +27,7 @@ public final class VfsWriteGuard {
    *
    * @param toolName 模型可见工具名；只有 {@code write} 与 {@code edit} 会写文件
    * @param argumentsJson 调用参数原文
-   * @param rootSessionId 执行根会话；准入门禁阶段未知时为 null，文案退化为「当前对话目录」
+   * @param rootSessionId 调用方冻结的执行根会话
    * @return 确定性的拒绝文案；非只读写入返回 empty
    */
   public static Optional<String> rejection(
@@ -58,10 +58,7 @@ public final class VfsWriteGuard {
   /** 只读写入的固定文案：拒绝原因、未执行事实与可写位置。 */
   public static String message(
       String operation, String path, String readOnlyRoot, UUID rootSessionId) {
-    String writableRoot =
-        rootSessionId == null
-            ? "the current conversation's vfs:/sessions/ directory"
-            : "vfs:/sessions/" + rootSessionId + "/";
+    String writableRoot = "vfs:/sessions/" + rootSessionId + "/";
     return "Cannot "
         + operation
         + " "

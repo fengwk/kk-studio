@@ -531,9 +531,9 @@ class ProviderResourceMaterializerTest {
     verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
   }
 
-  /** 意图：历史数据可能没有档位事实，此时必须按平台默认 720P 送达，而不是原图。 */
+  /** 意图：未指定档位的媒体按当前契约以默认 720P 送达，而不是原图。 */
   @Test
-  void missingTierFallsBackToPlatformDefault720() {
+  void unspecifiedImageTierUsesDefault720() {
     byte[] png = TestImages.png(4000, 2000);
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);

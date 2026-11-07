@@ -56,6 +56,16 @@ class ToolExecutionGatewayVfsReadOnlyTest {
     assertTrue(deny.error().message().contains("vfs:/skills is read-only"), deny.error().message());
     assertTrue(
         deny.error().message().contains("The tool was not executed."), deny.error().message());
+    // preflight 与 YOLO 准入使用同一份执行根事实，直接给出真实可写根而非另一套泛化文案。
+    assertTrue(
+        deny.error()
+            .message()
+            .contains(
+                "Write under vfs:/sessions/"
+                    + ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW)
+                        .rootSessionId()
+                    + "/ instead."),
+        deny.error().message());
     // 只读拒绝先于权限：既不读权限策略，也不调用 evaluator，更不会弹审批。
     verifyNoInteractions(evaluator);
     assertEquals(0, settingsProvider.readCount());
