@@ -89,7 +89,7 @@ export function ApprovalCard({
       ])
       onSuccess?.()
     } catch (err: unknown) {
-      if (isConflictError(err) || (err instanceof Error && err.message.includes('409'))) {
+      if (isConflictError(err)) {
         setIsNonRecoverable(true)
         setError(t('ai.interaction.nonRecoverable'))
       } else {

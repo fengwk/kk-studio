@@ -29,10 +29,6 @@ export const shortcutsCatalog = {
     'en-US': 'Move the active command and confirm',
     'zh-CN': '移动选中命令并确认',
   },
-  'ai.runtime.shortcuts.commandEdges': {
-    'en-US': 'Jump to the first / last command',
-    'zh-CN': '跳到第一个/最后一个命令',
-  },
   'ai.runtime.shortcuts.group.application': {
     'en-US': 'Application',
     'zh-CN': '应用',
@@ -104,10 +100,6 @@ export const shortcutsCatalog = {
   'ai.runtime.shortcuts.label.commandNav': {
     'en-US': 'Command navigation',
     'zh-CN': '命令导航',
-  },
-  'ai.runtime.shortcuts.label.commandEdges': {
-    'en-US': 'Command edges',
-    'zh-CN': '命令边界',
   },
   'ai.runtime.shortcuts.label.debugNav': {
     'en-US': 'Debug navigation',

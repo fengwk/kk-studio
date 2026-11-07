@@ -47,6 +47,9 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 统一注入 Accept-Language 并设置请求超时。成功响应直接读取资源，空体返回 undefined；
 错误响应按 problem+json 解析，`ApiError` 保留 status、code、reason、detail 和 errors。
 恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。
+用户可见错误文案分两条互不混用的路径：HTTP 失败（`ApiError`）只按 status/code 分类，
+401/403、404、409、5xx 与传输层失败各有固定文案，字段校验失败用后端去敏 `detail` 匹配字段文案；
+只有本地表单校验抛出的英文文本按文本翻译。错误标题文本不参与分类。
 
 HTTP 路由与传输类型由领域控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
@@ -380,6 +383,8 @@ Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
 pricing；金额输入按十进制字符串提交，不引入 currency 或 unpriced 开关。pricing 编辑器按基础价格、
 规则列表、费率字段与条件编辑器拆分，override 与 multiplier 共用同一规则列表和费率字段渲染。
+新建 Model 的 models.dev 候选目录按当前搜索词分页读取：刷新后重取筛选后的第一页，
+不把不带 query 的刷新首页混入列表，翻页游标只与产生它的搜索词配对，迟到响应按请求代际丢弃。
 Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责搜索、过滤与查询聚合；
 资源控制器持有编辑器草稿、打开计划、校验、保存与删除确认；查询和写入分别由数据 Hook 承担。
 全局弹窗贡献只从上下文读取控制器，不复制状态。

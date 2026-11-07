@@ -81,13 +81,6 @@ export const SHORTCUT_CATALOG: ShortcutDefinition[] = [
     descriptionKey: 'ai.runtime.shortcuts.commandNav',
   },
   {
-    id: 'thread.commandEdges',
-    scope: 'thread',
-    keys: 'Home / End',
-    labelKey: 'ai.runtime.shortcuts.label.commandEdges',
-    descriptionKey: 'ai.runtime.shortcuts.commandEdges',
-  },
-  {
     id: 'debug.nav',
     scope: 'debug',
     keys: '↑ / ↓',

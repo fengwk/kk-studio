@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/chat/useChatListController'
 import { chatService } from '@/features/chat/chat-service'
+import { ApiError } from '@/shared/api/client'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/chat/chat-service', () => ({
@@ -284,7 +285,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    vi.mocked(chatService.updateChat).mockRejectedValueOnce(new Error('409 Conflict: version conflict'))
+    vi.mocked(chatService.updateChat).mockRejectedValueOnce(new ApiError('Conflict', 409))
 
     const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))

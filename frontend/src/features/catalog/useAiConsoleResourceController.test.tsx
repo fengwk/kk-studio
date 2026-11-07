@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleResourceController'
 import { agentService } from '@/shared/api/agent-service'
+import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   AgentDTO,
@@ -290,7 +291,9 @@ describe('useAiConsoleResourceController', () => {
     renderHarness()
     await ready()
 
-    vi.mocked(agentService.updateProvider).mockRejectedValue(new Error('Network Error'))
+    vi.mocked(agentService.updateProvider).mockRejectedValue(
+      new ApiError('Failed to fetch', undefined, 'network_error'),
+    )
     await user.click(screen.getByRole('button', { name: 'open-provider' }))
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {

@@ -1,5 +1,5 @@
 import { translate, type TranslationKey } from '@/shared/i18n'
-import { apiErrorDetail } from '@/shared/api/client'
+import { ApiError, apiErrorDetail } from '@/shared/api/client'
 
 /**
  * 从任意错误中取出可展示的失败详情：后端去敏 detail 优先，其次 Error/字符串文本。
@@ -19,10 +19,45 @@ export function errorDetailMessage(error: unknown): string | null {
   return null
 }
 
-/** 将底层英文/技术错误转成用户可读文案。 */
+/**
+ * HTTP 失败只看结构化 status/code：401/403、404、409 与 5xx 各有独立文案，
+ * 其余 4xx（字段校验）返回 null，由去敏 detail 继续决定字段文案。
+ * 传输层失败没有 status，client 用稳定 code 表达。
+ */
+function apiErrorCategoryKey(error: unknown): TranslationKey | null {
+  if (!(error instanceof ApiError)) {
+    return null
+  }
+  if (error.status === 401 || error.status === 403) {
+    return 'ai.catalog.validation.unauthorized'
+  }
+  if (error.status === 404) {
+    return 'ai.catalog.validation.notFound'
+  }
+  if (error.status === 409) {
+    return 'ai.catalog.validation.conflict'
+  }
+  if (error.status !== undefined) {
+    return error.status >= 500 ? 'ai.catalog.validation.server' : null
+  }
+  return error.code === 'network_error' || error.code === 'timeout'
+    ? 'ai.catalog.validation.network'
+    : null
+}
+
+/**
+ * 将失败转成用户可读文案。
+ *
+ * HTTP 失败（{@link ApiError}）按 status/code 分类，标题文本不参与判断；
+ * 只有本地表单校验（codec 抛出的英文文本）才按文本匹配字段文案。
+ */
 export function toUserFacingErrorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error ?? '')
-  const text = raw.trim()
+  const categoryKey = apiErrorCategoryKey(error)
+  if (categoryKey) {
+    return translate(categoryKey)
+  }
+
+  const text = errorDetailMessage(error)?.trim() ?? ''
   if (!text) {
     return translate('ai.catalog.validation.saveForm')
   }
@@ -81,12 +116,6 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /baseUrl/i, key: 'ai.catalog.validation.baseUrl' },
     { match: /tools.*重名|tools/i, key: 'ai.catalog.validation.toolsConflict' },
     { match: /skills.*重名|skills/i, key: 'ai.catalog.validation.skillsConflict' },
-    { match: /Network Error|Failed to fetch|ECONNREFUSED|timeout/i, key: 'ai.catalog.validation.network' },
-    { match: /401|Unauthorized/i, key: 'ai.catalog.validation.unauthorized' },
-    { match: /403|Forbidden/i, key: 'ai.catalog.validation.unauthorized' },
-    { match: /404|Not Found/i, key: 'ai.catalog.validation.notFound' },
-    { match: /409|Conflict/i, key: 'ai.catalog.validation.conflict' },
-    { match: /500|Internal Server Error/i, key: 'ai.catalog.validation.server' },
   ]
 
   for (const rule of rules) {

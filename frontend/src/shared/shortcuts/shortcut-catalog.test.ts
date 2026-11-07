@@ -69,6 +69,14 @@ describe('SHORTCUT_CATALOG', () => {
         .map((definition) => definition.keys)
     // Application：ThreadComposer 全局 Escape。
     expect(keysByScope('application')).toEqual(['Esc'])
+    // Thread：ThreadComposer 的发送/换行/历史与 slash 命令表（仅上下移动与确认）。
+    expect(keysByScope('thread')).toEqual([
+      'Enter',
+      'Shift+Enter',
+      '↑ / ↓',
+      '/',
+      '↑↓ · Enter',
+    ])
     // Debug：ThreadEventView 键盘语义。
     expect(keysByScope('debug')).toEqual([
       '↑ / ↓',

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ApiError } from '@/shared/api/client'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import type {
@@ -84,14 +85,33 @@ describe('ai-resource-form-validation additional branches', () => {
     ['baseUrl is invalid', /Base URL/],
     ['tools 重名', /Tools/],
     ['skills 去前缀后存在重名', /Skills/],
-    ['Network Error', /网络异常/],
-    ['401 Unauthorized', /没有权限/],
-    ['403 Forbidden', /没有权限/],
-    ['404 Not Found', /不存在/],
-    ['409 Conflict', /冲突/],
-    ['500 Internal Server Error', /服务暂时异常/],
   ])('translates %s', (message, expected) => {
     expect(toUserFacingErrorMessage(new Error(message))).toMatch(expected)
+  })
+
+  // 测试意图：HTTP 失败只按结构化 status/code 分类，标题文本不参与判断。
+  it.each([
+    [new ApiError('Request failed', undefined, 'network_error'), /网络异常/],
+    [new ApiError('Request timeout', undefined, 'timeout'), /网络异常/],
+    [new ApiError('Unauthorized', 401), /没有权限/],
+    [new ApiError('Forbidden', 403), /没有权限/],
+    [new ApiError('Not Found', 404), /不存在/],
+    [new ApiError('Conflict', 409), /冲突/],
+    [new ApiError('Internal Server Error', 500), /服务暂时异常/],
+    // 标题伪装成别的分类也不影响判断：状态码才是事实。
+    [new ApiError('Conflict', 500), /服务暂时异常/],
+  ])('classifies api error %# by status/code', (error, expected) => {
+    expect(toUserFacingErrorMessage(error)).toMatch(expected)
+  })
+
+  // 测试意图：普通 Error 只服务本地表单校验；带状态码字样的文本不再被当成 HTTP 失败。
+  it('does not classify plain error text as an HTTP failure', () => {
+    expect(toUserFacingErrorMessage(new Error('401 Unauthorized'))).toBe(
+      '保存失败，请检查必填项后重试',
+    )
+    expect(toUserFacingErrorMessage(new Error('409 Conflict'))).toBe(
+      '保存失败，请检查必填项后重试',
+    )
   })
 
   it('handles empty, localized, and unknown non-Error values', () => {
