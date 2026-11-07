@@ -20,7 +20,7 @@ reschedule(claim, delay) -> 释放租约，下一次处理推迟 delay；有新 
 
 ## 唤醒
 
-请求、完成时保留行、重排与显式释放都会在同一事务内，当行已到期（`available_at <= clock_timestamp()`）时向通道 `durable_work` 发送 payload 为 target type 的 `NOTIFY`；仍持有租约时到达的新 wake 同样发送，不被租约吞掉。组合根只为这类唤醒监听这一个通道，按 payload 唤醒负责该类型的 dispatcher；连接断开重连后，组合根主动唤醒全部类型的 dispatcher 触发补读。通知只降低延迟，通知丢失由各 dispatcher 的周期轮询兜底恢复。
+请求、完成时保留行、重排与显式释放都会在同一事务内，当行已到期（`available_at <= clock_timestamp()`）时向通道 `durable_work` 发送 payload 为 target type 的 `NOTIFY`；仍持有租约时到达的新 wake 同样发送，不被租约吞掉。组合根只在这一个通道上接收 Work 唤醒，按 payload 唤醒负责该类型的 dispatcher；连接断开重连后，组合根主动唤醒全部类型的 dispatcher 触发补读。通知只降低延迟，通知丢失由各 dispatcher 的周期轮询兜底恢复。
 
 ## 使用方
 
