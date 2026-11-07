@@ -10,7 +10,7 @@ HTTP 边界统一配置 JSON、参数绑定与错误映射，Web 不直连业务
 ## 组合与生命周期
 
 [`web/pom.xml`](../../web/pom.xml) 声明应用模块、Web transport、Flyway 和 runtime Plugin。
-Builtin/Common 经 Platform compile 依赖传递进入发行物。
+产品、Canvas、Harness 与 Builtin 模块由 web 直接声明；Common 经 Platform compile 依赖传递进入发行物。
 Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
 [`PluginCatalogConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/PluginCatalogConfiguration.java)
 装配唯一的 `PluginCatalogRuntime`：它为新安装的 Plugin 写入默认配置，收集真正内置的
@@ -47,12 +47,13 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，model executor 
 装配通知 codec、超限 payload 缓冲、本地优先 realtime 总线，以及流式追帧 codec 与应用服务。
 
 [`HarnessEnvironmentConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java)
-装配 Skill 同步执行器与编排器、远端退出对账专用虚拟线程 Executor 与 RemoteExitReconciler，并把 dispatcher 唤醒、Skill 同步、远端退出事实对账、IDE 租约心跳和换代清理收进同一个会话监听器。
+装配 Skill 同步执行器与编排器、远端退出对账专用虚拟线程 Executor 与 RemoteExitReconciler，并把 dispatcher 唤醒、Skill 同步、远端退出事实对账与 IDE 租约心跳收进同一个会话监听器。
+另一个 Daemon 实例接管时，连接服务关闭前一代会话，其隧道子流随之失败；旧代际 IDE 票据与 cookie 在下次使用时按 `IdeGenerationState` 的 `REPLACED` 拒绝，会话探测返回 409。
 Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需要 Harness 会话或 store。各动作在监听器内通过 ObjectProvider 延迟解析并各自隔离运行时异常。
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
-| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim；2) 轮询等待本机 Model/Tool 完成（≤ `drainTimeout`）；3) `EnvironmentDaemonServer.drain()` GOAWAY 与释放环境租约；4) `ToolProcessor.drain()` 移交远端工具执行并 release TOOL Work；5) 标记停止。`workersEnabled=false` 时不启动 dispatcher |
+| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 并标记停止；2) 轮询等待本机 Model/Tool 完成（≤ `drainTimeout`）；3) `EnvironmentDaemonServer.drain()` GOAWAY 与释放环境租约；4) `ToolProcessor.drain()` 移交远端工具执行并 release TOOL Work。`workersEnabled=false` 时不启动 dispatcher |
 | `issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
 | `canvasFunctionDispatcherLifecycle` | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
@@ -127,7 +128,7 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/harness/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
-派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
+派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost`，以及快照级 `stopReceipts`；
 `unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）。
 可选的 `afterEntryId`（canonical UUID，否则 400）请求增量历史：游标是当前 head 的祖先时，`baseEntryId` 等于游标，
 `entries` 只含游标之后的 Entry（游标即 head 时为空）；游标未知、位于其它分支或 Session 时返回完整历史，`baseEntryId` 为 null。
@@ -176,7 +177,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 进行 HMAC 认证与 owner 转发。
 
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
-  `Path` 限定在 `/ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
+  `Path` 限定在 `/ide/{environmentId}/{viewId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
   Studio 与受管环境属于同一可信浏览器边界（非沙箱隔离），不需要独立 IDE 域名或主机模板。
 - **会话探测**：`__ide/session` 只读、不触达 Daemon，返回 204（会话有效）、401（无会话）、409（代际已被另一个 Daemon 实例接管）或 503（暂无 READY 连接，同一实例重连后原 cookie 继续有效）。前端据此决定等待还是重新打开视图。
 - **开发代理**：本地开发时 Vite 代理 `/ide` 配置 `changeOrigin: false, ws: true`，保留浏览器原始 Host 与 Origin 以对齐同源校验。
@@ -230,7 +231,7 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 
 [`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
 共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
-Thread version、Canvas revision、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
+Thread version、Canvas revision、Project changed、Settings、Skill 同步、执行树、交互、环境失效与 Plugin 目录变更；realtime 走独立的 LISTEN 连接。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 通道、payload 与进程内 fan-out 归各自生产方所有：Harness 的 Thread version、执行树与交互失效由
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)

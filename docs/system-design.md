@@ -36,8 +36,8 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
 
-1. 产品依赖平台与 harness，平台依赖 harness；`harness/runtime` 只依赖 `common`、`harness/environment` 与
-   `harness/model`，`harness/agent-builtin` 依赖 runtime 与 model。平台从不依赖产品，产品之间互不依赖，harness
+1. 产品依赖平台与 harness（`canvas-spi` 只依赖 `common`），平台依赖 harness；`harness/runtime` 只依赖 `common`、
+   `harness/environment` 与 `harness/model`，`harness/agent-builtin` 依赖 `common`、runtime 与 model。平台从不依赖产品，产品之间互不依赖，harness
    不含 SQL、JDBC 或平台概念。
 2. 上层使用 harness 只有两种方式：开放接口 `HarnessRuntime` 的命令、查询与变更订阅；harness 定义、上层实现的
    SPI（网关、`HarnessStore`、`AgentDriver`、`HarnessContributor`）。
@@ -49,7 +49,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
    画布函数 SPI 在 Canvas。
 6. 表与通知通道只由归属模块访问和定义；依赖 `work` 的模块可以只读 join `durable_work`。产品表只引用 harness
    的公开身份（Session、Thread）。
-7. `web` 是唯一组合根，装配各层实现不算越层；SPA、错误映射、浏览器事件通道与 Daemon 传输只在这里。
+7. `web` 是唯一组合根，装配各层实现不算越层；SPA、错误映射、浏览器事件通道与 Daemon 接入只在这里。
 
 方框是 Maven 模块（省略 `kk-studio-` 前缀），箭头指向被依赖的模块：
 
@@ -129,7 +129,8 @@ JSON 成功响应直接返回资源：通常读取、更新和动作使用 200�
   非法值按请求校验错误处理。Provider 超时、MCP `timeoutMillis` 和上传 `sizeBytes` 也遵循此规则。
 - 结构由运行时决定的自由格式 JSON 使用 JSON 节点；多形态 DTO 使用 `type` 区分各变体。
   Harness 的 `execution.settings`、Canvas 的 Function `args` / `argsSchema` 与 Issue Activity 的 `data`
-  都是节点，必须保留原始文本的内容按对应字段契约传输。
+  都是节点，必须保留原始文本的内容按对应字段契约传输。Harness Entry 的 `payload` 是历史 codec 的 JSON 节点，
+  节点内时间为毫秒精度 ISO-8601 文本，不套用 DTO 的时间规则。
 - 有界配置集合直接返回数组；无界集合通过 `cursor`、`limit` 读取，响应提供
   `{items, nextCursor}`，末页的 `nextCursor` 为 null。按资源语义返回的树形聚合直接使用数组。
 - 需要乐观并发控制的资源响应 `version`，写入请求提供 `expectedVersion`；DELETE 放在查询参数中，
@@ -169,7 +170,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 
 ### 公开面与存储端口
 
-`harness/runtime` 的包按职责划分：`api` 是公开值与订阅契约，`spi` 是上层实现的窄端口，其余是内部实现。
+`harness/runtime` 的包按职责划分：`api` 是公开值与订阅契约，`spi` 是上层实现的窄端口，`codec`、`tool`、`contributor` 与 `prompt` 是上层可用的契约包，`runtime` 是内部实现。
 
 | 包 | 内容 |
 | --- | --- |
@@ -206,12 +207,12 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
   `readState`、`lockState`、`applyResponse`、`completeToolBatch`、`prepareAutomaticCompaction`、`stop`），
   并通过 `works()` 交出 `DriverWork(type, handler)`、通过 `cancelWork()` 与 `hasActiveWork()` 参与停止与排空。
 - Work 类型由定义方声明：内核只有 `WorkTargetType.THREAD` 与 `TOOL`；Driver 用
-  `WorkTargetType.driver(value, rank)` 定义自己的类型并声明环境亲和性。`rank` 决定调度顺序与锁阶梯，Builtin 的
+  `WorkTargetType.driver(value, rank)` 定义自己的类型；环境亲和性目前只有内核 `TOOL` 声明。`rank` 决定调度顺序与锁阶梯，Builtin 的
   `MODEL` 位于 THREAD 与 TOOL 之间。`DriverRegistry` 拒绝内核类型与重复类型，并把各 Driver 的处理器交给平台分发。
 - 执行退出只有三种：`ExecutionExitKind.DRIVER`、`TOOL`、`REMOTE`；结果不明的外部执行收敛为未确认事实，不重放。
 - 线程深删由两阶段 Driver 生命周期完成：`DriverRegistry` 按 Driver id 顺序调用
-  `lockThreadStateForDeletion` 与 `deleteLockedThreadState`。通用 `PostgresqlThreadStore` 只负责内核锁序、Work 与
-  Tool 行和 Thread 本身，从不引用具体 Driver 的私有表。
+  `lockThreadStateForDeletion` 与 `deleteLockedThreadState`。通用 `PostgresqlThreadStore` 只负责内核锁序，以及命令、Tool、Work、
+  Stop 回执、执行退出等内核行与 Thread 本身，从不引用具体 Driver 的私有表。
 - 内置 Driver 是 `BuiltinAgentDriver`：`id()` 为 `builtin`，用 `MODEL` Work 在 Studio 进程内调用模型，
   `BuiltinStore` 是它的私有持久化端口（`ModelInvocation` 的读写与按回合索引），`TurnResolver` 与
   `ModelGateway` 是它的执行端口。模块不依赖 Spring、JDBC 或数据库；模型组成员冷却由平台模型目录持有，Builtin
@@ -526,7 +527,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 - 事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读；终态一律从数据库读取。
 - 通知的生产方拥有 channel 与 payload 协议：Harness 的 thread version、执行树、交互，Canvas 的 revision，
   Project 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
-  `NotificationInvalidationHub` 只做定点失效；组合根持有唯一的 LISTEN 循环并按绑定投递与 resync。
+  `NotificationInvalidationHub` 只做定点失效；组合根持有 LISTEN 循环（durable 通知与 realtime 各一条）并按绑定投递与 resync。
 - 通道与帧格式见 [Web](modules/web.md)，合并与恢复见 [Frontend](modules/frontend.md)。
 
 ### 前端分层
