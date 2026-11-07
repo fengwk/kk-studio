@@ -76,6 +76,42 @@ test('test intent: an unverifiable remote is never reported as a clean exit', ()
     const completed = runCli(consumer)
     assert.equal(completed.status, 3)
     assert.ok(completed.stderr.includes('scan-incomplete'))
+    // The reason itself is printed, so a CI log alone says what to fix.
+    assert.ok(completed.stderr.includes('scan-incomplete-item remote remote-coverage:ls-remote-failed'))
+  })
+})
+
+test('test intent: --baseline gates only findings published after the previous release', () => {
+  withTempDir((directory) => {
+    initRepository(directory)
+    writeAndCommit(directory, { 'old.txt': 'key=' + sampleToken() + '\n' }, 'leak')
+    writeAndCommit(directory, { 'old.txt': 'clean\n' }, 'remove')
+    git(directory, 'tag', 'v1')
+
+    // The released finding stays in the report but no longer blocks the gate.
+    const released = runCli(directory, '--fail-on-high', '--baseline', 'v1')
+    assert.equal(released.status, 0)
+    assert.ok(released.stdout.includes('high_confidence_findings=1\n'))
+    assert.ok(released.stdout.includes('high_confidence_findings_after_baseline=0\n'))
+
+    // A new object committed after the release fails even after it is removed again.
+    writeAndCommit(directory, { 'new.txt': 'token=' + sampleToken() + '\n' }, 'leak again')
+    writeAndCommit(directory, { 'new.txt': 'clean\n' }, 'remove again')
+    const fresh = runCli(directory, '--fail-on-high', '--baseline', 'v1')
+    assert.equal(fresh.status, 1)
+    assert.ok(fresh.stdout.includes('high_confidence_findings_after_baseline=1\n'))
+    assert.ok(!(fresh.stdout + fresh.stderr).includes(sampleToken()))
+  })
+})
+
+test('test intent: an unknown baseline is a scan error, never a pass', () => {
+  withTempDir((directory) => {
+    initRepository(directory)
+    writeAndCommit(directory, { 'a.txt': 'key=' + sampleToken() + '\n' }, 'leak')
+
+    const completed = runCli(directory, '--fail-on-high', '--baseline', 'missing-release')
+    assert.equal(completed.status, 2)
+    assert.ok(completed.stderr.includes('scan-error'))
   })
 })
 

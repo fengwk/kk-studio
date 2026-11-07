@@ -111,13 +111,17 @@ jobs:
       # 通过门禁的提交才可能进入构建与发布步骤；任一门禁失败都会终止 workflow。
       - name: Scan for sensitive data
         run: node scripts/dev/verify/repository/check-sensitive-data.mjs
+      # tag 事件中 actions/checkout 会把发布 tag 改写成指向提交的轻量 tag；先从 origin 恢复全部
+      # 原始 tag，远端 ref 核对才一致，附注 tag 的消息也在扫描范围内。上一个发布 tag 作为基线：
+      # 它可达的历史已随该次发布通过门禁或人工复核，本次只对之后新出现的高置信度命中失败。
       - name: Scan full Git history for sensitive data
         run: |
           set -euo pipefail
           test "$(git rev-parse --is-shallow-repository)" = false
-          git remote get-url origin > /dev/null
+          git fetch --quiet origin '+refs/tags/*:refs/tags/*'
+          previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^')
           node scripts/dev/verify/repository/check-sensitive-history.mjs \
-            --remote-pr --fail-on-high --json "${RUNNER_TEMP}/sensitive-history.json"
+            --remote-pr --fail-on-high --baseline "${previous}" --json "${RUNNER_TEMP}/sensitive-history.json"
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
       # 版本对齐以仓库里的真实文件为准：根 POM 的 <version>、kk-studio.version 属性、daemon 包

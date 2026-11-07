@@ -321,12 +321,14 @@ test('release reuses the same daemon matrix and gates on it before staging', () 
   assert.match(stage, /persist-credentials: false/u)
   const history = stepsOf(stage).find((step) => stepField(step, 'name') === 'Scan full Git history for sensitive data')
   assert.ok(history)
+  // checkout 在 tag 事件里改写发布 tag，扫描前必须恢复 origin 的原始 tag；门禁以上一个发布 tag 为基线。
   assert.equal(stepField(history, 'run'), [
     'set -euo pipefail',
     'test "$(git rev-parse --is-shallow-repository)" = false',
-    'git remote get-url origin > /dev/null',
+    "git fetch --quiet origin '+refs/tags/*:refs/tags/*'",
+    "previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^')",
     'node scripts/dev/verify/repository/check-sensitive-history.mjs \\',
-    '--remote-pr --fail-on-high --json "${RUNNER_TEMP}/sensitive-history.json"',
+    '--remote-pr --fail-on-high --baseline "${previous}" --json "${RUNNER_TEMP}/sensitive-history.json"',
   ].join('\n'))
   assert.equal(stepField(history, 'if'), undefined)
   assert.doesNotMatch(history, /continue-on-error:/u)

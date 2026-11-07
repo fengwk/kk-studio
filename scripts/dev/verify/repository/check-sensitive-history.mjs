@@ -24,6 +24,9 @@
  * malformed header, a non-zero `cat-file` exit, an unreadable worktree file, an
  * unsupported ref target, or a remote-coverage check that cannot be verified.
  * `--fail-on-high` and `scan_incomplete` are never reported as success.
+ * `--baseline REV` narrows only the `--fail-on-high` gate, never the report: a
+ * finding in an object that REV already reaches was published (and gated or
+ * reviewed) with that earlier release, so a release only fails on new evidence.
  *
  * Nothing here is a verdict. Every hit is a candidate pending human review: the
  * report recommends credential rotation only after a reviewer confirms a real
@@ -1612,6 +1615,17 @@ export function highConfidenceFindings(report) {
   return rows.filter((row) => isHigh(row.rule))
 }
 
+/** Ids of every commit, tree, blob and tag object that `revision` reaches. */
+export function reachableObjects(root, revision) {
+  const listed = text(git(root, ['rev-list', '--objects', '--end-of-options', revision]).stdout)
+  return new Set(
+    listed
+      .split('\n')
+      .filter((line) => line)
+      .map((line) => line.split(' ', 1)[0]),
+  )
+}
+
 /** Record a failed PR audit as a degraded item instead of a silent success. */
 export function markRemotePrDegraded(report) {
   const remote = report.remote_pr_refs ?? {}
@@ -1629,7 +1643,7 @@ export function markRemotePrDegraded(report) {
 const USAGE =
   'usage: check-sensitive-history.mjs [-h] [--root ROOT] [--json JSON] [--markdown MARKDOWN]\n' +
   '                                   [--max-blob-bytes N] [--string-limit N] [--no-worktree]\n' +
-  '                                   [--fetch] [--remote-pr] [--fail-on-high]\n'
+  '                                   [--fetch] [--remote-pr] [--fail-on-high] [--baseline REV]\n'
 
 /** Join `--option -1` into `--option=-1`: parseArgs rejects a dash-led value otherwise. */
 function joinNegativeValues(argv) {
@@ -1670,6 +1684,7 @@ export function main(argv = process.argv.slice(2)) {
         fetch: { type: 'boolean' },
         'remote-pr': { type: 'boolean' },
         'fail-on-high': { type: 'boolean' },
+        baseline: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
       },
     }))
@@ -1692,7 +1707,12 @@ export function main(argv = process.argv.slice(2)) {
 
   const root = values.root ?? REPOSITORY_ROOT
   let report
+  let released = null
   try {
+    // Resolve the baseline first: an unknown revision fails before the long scan starts.
+    if (values.baseline !== undefined) {
+      released = reachableObjects(root, values.baseline)
+    }
     report = run(root, maxBlobBytes, {
       includeWorktree: !values['no-worktree'],
       fetch: values.fetch,
@@ -1729,13 +1749,21 @@ export function main(argv = process.argv.slice(2)) {
   }
   const high = highConfidenceFindings(report)
   process.stdout.write(`high_confidence_findings=${high.length}\n`)
+  const gated = released === null ? high : high.filter((row) => !released.has(row.object))
+  if (released !== null) {
+    process.stdout.write(`high_confidence_findings_after_baseline=${gated.length}\n`)
+  }
   const incomplete = report.degraded.incomplete
   if (incomplete) {
     process.stderr.write(
       `scan-incomplete items=${report.degraded.items.length} omitted=${report.degraded.omitted}\n`,
     )
+    // Degraded items are value-free by construction; printing them keeps a CI failure actionable.
+    for (const item of report.degraded.items) {
+      process.stderr.write(`scan-incomplete-item ${item.surface} ${item.detail} ${item.object}\n`)
+    }
   }
-  if (values['fail-on-high'] && high.length > 0) {
+  if (values['fail-on-high'] && gated.length > 0) {
     return 1
   }
   return incomplete ? 3 : 0
