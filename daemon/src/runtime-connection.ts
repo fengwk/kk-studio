@@ -7,7 +7,6 @@ export type RuntimeState = 'STOPPED' | 'DISCONNECTED' | 'CONNECTING' | 'READY' |
 /** 一条已建立的控制连接及其连接代际；握手就绪只由生命周期推进。 */
 export class ActiveConnection {
   ready = false
-  readonly abort = new AbortController()
 
   constructor(
     readonly generation: number,
@@ -144,26 +143,47 @@ export class ConnectionLifecycle {
       if (connection.generation !== generation || this.active !== connection) {
         return
       }
-      this.active = null
     } else if (this.state !== 'CONNECTING') {
       return
     }
+    this.disconnect(generation, connection, false)
+  }
+
+  /** 优雅 GOAWAY：先摘除并关闭旧代际，再立即重连；既有退避状态不会被清零。 */
+  handleGoaway(generation: number): void {
+    const connection = this.active
+    if (connection === null || connection.generation !== generation || !this.isCurrent(generation)) {
+      return
+    }
+    this.disconnect(generation, connection, true)
+  }
+
+  /**
+   * 统一断开路径：先摘除 active 并切到 DISCONNECTED，GOAWAY 时关闭旧连接，最后恰好通知会话一次。
+   *
+   * <p>关闭可能同步回调 onDisconnected；此时 active 已为空且状态不是 CONNECTING，迟到回调会被忽略。
+   */
+  private disconnect(generation: number, connection: ActiveConnection | null, goaway: boolean): void {
     if (!this.isCurrent(generation)) {
       return
     }
+    this.active = null
     this.state = 'DISCONNECTED'
+    if (goaway && connection !== null) {
+      try {
+        connection.connection.close()
+      } catch {
+        // 关闭失败仍继续断开清理与重连。
+      }
+    }
     this.options.callbacks.onDisconnected(connection)
+    if (goaway) {
+      this.scheduleReconnect(0)
+      return
+    }
     const delay = this.nextReconnectDelay
     this.nextReconnectDelay = Math.min(this.nextReconnectDelay * 2, this.options.maxReconnectDelayMillis)
     this.scheduleReconnect(delay)
-  }
-
-  handleGoaway(generation: number): void {
-    if (!this.isCurrent(generation)) {
-      return
-    }
-    this.nextReconnectDelay = 0
-    this.scheduleReconnect(0)
   }
 
   closeFailedHandshake(connection: ActiveConnection): void {
