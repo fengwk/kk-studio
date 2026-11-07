@@ -135,6 +135,16 @@ class TunnelPortContractTest {
     assertThrows(CancellationException.class, () -> join(pendingWrite));
     assertThrows(CancellationException.class, () -> join(cancelled.read()));
 
+    // 关闭也取消尚未完成的半关闭观察：消费方读到 EOF 后立即关闭交换时，对端的 endOutput 不会正常完成，
+    // 因此谁也不能把 endOutput 的完成当作“响应已交付”的证据。
+    TunnelStream halfClosed = tunnel.openWebSocket(wsRequest()).stream();
+    CompletionStage<Void> blockedWrite = halfClosed.write(bytes("half-close"));
+    CompletionStage<Void> halfClose = halfClosed.endOutput();
+    assertFalse(halfClose.toCompletableFuture().isDone());
+    halfClosed.close();
+    assertThrows(CancellationException.class, () -> join(blockedWrite));
+    assertThrows(CancellationException.class, () -> join(halfClose));
+
     tunnels.remove(ENVIRONMENT);
     FakeEnvironmentTunnel disconnectedSession = register(tunnels, "daemon-a");
     FakeTunnelStream disconnected =
