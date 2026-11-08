@@ -107,7 +107,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 help
 Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有、不是符号链接且有界的普通
 文件，且必须是同目录的兄弟文件 `daemon.json` / `daemon.token`。Windows 的 `-ConfigFile` /
 `-TokenFile` 必须由当前 SID 拥有、禁用 ACL 继承、不含其它 SID 的 Allow ACE，且不是 reparse point。
-安装器只校验文件元数据并复制 token 内容，**不读取 token 文本**。
+安装器只校验文件元数据并复制 token 内容，自身不解析 token 文本；发行归档的 `--check-config` 预检会读取同目录凭据以确认其存在且可读。
 
 `DAEMON_VERIFY_TIMEOUT_SECONDS`
 （默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖启动与稳定性验证窗口，均须十进制
