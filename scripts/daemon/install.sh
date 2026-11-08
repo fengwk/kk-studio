@@ -868,11 +868,16 @@ cmd_uninstall() {
     return 0
   fi
   check_managed_paths
-  if [ ! -e "$SERVICE_PATH" ] && ! { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+  local has_service=false
+  if [ -e "$SERVICE_PATH" ] || { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+    has_service=true
+  fi
+  # 只有配置/数据而没有服务定义或程序时无事可做；服务已被移除但 lib 仍残留时仍要完成清理。
+  if [ "$has_service" = false ] && [ ! -d "$INSTALLED_LIB" ]; then
     echo "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"
     return 0
   fi
-  require_ownership
+  if [ "$has_service" = true ]; then require_ownership; fi
   [ -d "$INSTALLED_LIB" ] || fail "找不到当前安装程序，无法取得独立管理副本；未删除任何文件。"
   resolve_release_platform
   bootstrap_directory

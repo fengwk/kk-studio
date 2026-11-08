@@ -1364,13 +1364,21 @@ function Invoke-Uninstall {
         return 0
     }
     $task = Find-DaemonTask
-    if ($null -eq $task) {
+    $hasLib = Test-Path -LiteralPath $script:InstalledLib -PathType Container
+    # 只有配置/数据而没有任务或程序时无事可做；任务已被移除但 lib 仍残留时仍要完成清理。
+    if ($null -eq $task -and -not $hasLib) {
         Write-Host "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"
         return 0
     }
-    Assert-ManagedTask -Task $task
-    Assert-ManagedLayout -HasTask $true
-    if (-not (Test-Path -LiteralPath $script:InstalledLib -PathType Container)) {
+    if ($null -ne $task) {
+        Assert-ManagedTask -Task $task
+        Assert-ManagedLayout -HasTask $true
+    }
+    else {
+        # lib 残留没有任务可核对，但仍必须是本卡片私有目录布局；绝不删除未知路径。
+        Assert-ManagedLayout -HasTask $true
+    }
+    if (-not $hasLib) {
         Throw-Failure "找不到当前安装程序，无法取得独立管理副本；未删除任何文件。" -Action "卸载"
     }
     # 从当前安装取得独立管理副本后再删除 lib；helper 不加载即将删除的模块。
@@ -1382,7 +1390,9 @@ function Invoke-Uninstall {
     $script:PhaseCode = "stop"
     Stop-DaemonTaskAndWait -HelperRoot $helperRoot
     $script:PhaseCode = "publish"
-    Unregister-ScheduledTask -TaskName $script:TaskName -TaskPath "\" -Confirm:$false
+    if ($null -ne (Find-DaemonTask)) {
+        Unregister-ScheduledTask -TaskName $script:TaskName -TaskPath "\" -Confirm:$false
+    }
     Remove-Item -LiteralPath $script:InstalledLib -Recurse -Force
     $script:PhaseCode = "done"
     Write-Host "KK Studio 环境已卸载，受管服务和程序已移除。"

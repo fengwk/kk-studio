@@ -325,6 +325,18 @@ describe('install.sh on Linux', () => {
       assert.equal(uninstall().status, 0)
     }))
 
+  it('uninstall still removes a program left behind after the service definition disappeared', () =>
+    withInstall(({ fixture, install, uninstall }) => {
+      // 上一次卸载可能已移除服务定义但未能删除 lib；再次卸载必须完成清理而不是报告“无事可做”。
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      unlinkSync(unitPath(fixture))
+      const result = uninstall()
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(!existsSync(path.join(root, 'lib')))
+      assert.ok(existsSync(path.join(root, 'daemon.json')))
+    }))
+
   it('uninstall refuses to delete a program whose helper copy is unavailable', () =>
     withInstall(({ fixture, install, uninstall }) => {
       assert.equal(install().status, 0)

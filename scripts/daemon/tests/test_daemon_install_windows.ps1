@@ -544,6 +544,22 @@ try {
     Assert-True -Condition ($exit -eq 1) -Message "status exits 1 after uninstall"
     $exit = Invoke-Installer -Parameters @{ Command = "uninstall"; EnvironmentId = $environmentId }
     Assert-True -Condition ($exit -eq 0) -Message "second uninstall is idempotent"
+
+    # A program left behind after its task disappeared is still cleaned by uninstall.
+    $staleId = "55555555-5555-4555-8555-555555555555"
+    $stalePairs = New-Inputs -Environment $staleId
+    $exit = Invoke-Installer -Parameters @{
+        Command = "install"; EnvironmentId = $staleId; Version = $daemonVersion
+        ConfigFile = $stalePairs[0]; TokenFile = $stalePairs[1]
+    }
+    Assert-True -Condition ($exit -eq 0) -Message "stale-card fixture installs"
+    $staleTaskName = "kk-studio-daemon-$($script:CurrentSid)-$staleId"
+    $script:Tasks.Remove($staleTaskName) | Out-Null
+    $exit = Invoke-Installer -Parameters @{ Command = "uninstall"; EnvironmentId = $staleId }
+    Assert-True -Condition ($exit -eq 0) -Message "orphan program uninstall exits 0"
+    $staleRoot = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $staleId
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $staleRoot "lib"))) -Message "orphan program removed"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $staleRoot "daemon.json")) -Message "orphan config preserved"
 }
 finally {
     $env:USERPROFILE = $originalProfile
