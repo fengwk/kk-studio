@@ -221,6 +221,8 @@ write_last_operation() {
 cleanup() {
   local code=$? failure=$FAILURE_REASON path cleanup_failed=false operation_result= operation_error=null
   trap - EXIT
+  # A recorded failure must never be reported as success if an error path lost its status.
+  if [ "$code" -eq 0 ] && [ -n "$FAILURE_REASON" ]; then code=1; fi
   for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
     if ! rm -f "$path"; then cleanup_failed=true; fi
   done
@@ -293,6 +295,9 @@ trap 'exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
+  # Explicit ${reason} boundary: Bash 3 in a UTF-8 locale otherwise consumes the first byte of
+  # the following non-ASCII punctuation as part of the variable name under `set -u`.
+  FAILURE_REASON="拒绝操作非受管服务（${reason}）"
   echo "安装失败：拒绝操作非受管服务（${reason}）。未自动回滚，未知文件未变更。" >&2
   echo "服务定义：$actual_path" >&2
   if [ "$HOST_OS" = Linux ]; then
@@ -300,7 +305,6 @@ ownership_conflict() {
   else
     echo "下一步：运行 launchctl print $LAUNCHD_TARGET 确认归属后再处理。不要伪造所有权标记，不要改动未知文件。" >&2
   fi
-  FAILURE_REASON="拒绝操作非受管服务（$reason）"
   PHASE_CODE=ownership
   exit 1
 }

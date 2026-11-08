@@ -24,6 +24,9 @@ $secondEnvironmentId = "22222222-2222-4222-8222-222222222222"
 
 $script:Failures = 0
 $script:Checks = 0
+# Seed the real current SID while StrictMode is active before any dot-source so the fixture ACL
+# helpers never receive an undefined/empty identity.
+$script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 function Assert-True {
     param([Parameter(Mandatory = $true)][bool] $Condition, [Parameter(Mandatory = $true)][string] $Message)
