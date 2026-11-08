@@ -220,7 +220,8 @@ describe('Windows installer security: card isolation, credentials and task owner
       '$action.Execute',
       '$action.Arguments',
       '$action.WorkingDirectory',
-      'IndexOf',
+      'ConvertTo-WindowsCommandLine -Arguments (New-DaemonArgumentList)',
+      '$arguments.Equals($expectedArguments, [StringComparison]::Ordinal)',
       'Equals',
       '[StringComparison]::OrdinalIgnoreCase',
       "$Task.PSObject.Properties['Principal']",
@@ -230,8 +231,6 @@ describe('Windows installer security: card isolation, credentials and task owner
       '$Task.TaskName -ne $script:TaskName',
       '$Task.Description -ne $script:TaskDescription',
       '$script:InstalledNode',
-      'main.js',
-      '$script:InstalledConfig',
       '拒绝操作非受管计划任务',
       '不要伪造所有权标记',
     ])

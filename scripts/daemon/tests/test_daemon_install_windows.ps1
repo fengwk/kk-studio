@@ -612,6 +612,22 @@ try {
         -Message "task working directory is the card lib"
     Assert-Equal -Actual ([string] $registered.Principal.UserId) -Expected $script:CurrentSid `
         -Message "task principal is the current user"
+    # A lookalike executable or extra argv must not be mistaken for our exact task definition.
+    foreach ($field in @("Execute", "Arguments")) {
+        $original = [string] $registeredAction.$field
+        $rejected = $false
+        try {
+            $registeredAction.$field = $original + ".foreign"
+            Assert-ManagedTask -Task $registered
+        }
+        catch {
+            $rejected = $true
+        }
+        finally {
+            $registeredAction.$field = $original
+        }
+        Assert-True -Condition $rejected -Message "lookalike task $field is rejected"
+    }
     $record = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
     Assert-Equal -Actual ([string] $record.type) -Expected "install" -Message "last operation type install"
     Assert-Equal -Actual ([string] $record.result) -Expected "succeeded" -Message "last operation succeeded"

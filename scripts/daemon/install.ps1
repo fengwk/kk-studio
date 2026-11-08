@@ -655,9 +655,9 @@ function Assert-ManagedTask {
             $execute = [string] $action.Execute
             $arguments = [string] $action.Arguments
             $workingDirectory = [string] $action.WorkingDirectory
-            if ($execute.IndexOf($script:InstalledNode, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
-                $arguments.IndexOf("main.js", [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
-                $arguments.IndexOf($script:InstalledConfig, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+            $expectedArguments = ConvertTo-WindowsCommandLine -Arguments (New-DaemonArgumentList)
+            if (-not $execute.Equals($script:InstalledNode, [StringComparison]::OrdinalIgnoreCase) -or
+                -not $arguments.Equals($expectedArguments, [StringComparison]::Ordinal) -or
                 -not $workingDirectory.Equals($script:InstalledLib, [StringComparison]::OrdinalIgnoreCase)) {
                 $foreign = $true
             }
