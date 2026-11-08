@@ -14,7 +14,6 @@ import type { UpdateOutcomeLike } from './runtime-ports.js'
 
 const exec = promisify(execFile)
 const MAX_INSTALLER_BYTES = 1024 * 1024
-const PERMIT_TIMEOUT_SECONDS = 120
 
 /**
  * 独立更新作业的 Unix runner。
@@ -261,7 +260,7 @@ function windowsActionScript(
     `      $current = Join-Path ${ps(environmentRoot)} 'last-operation.json'`,
     `      $recorded = $false`,
     `      if (Test-Path -LiteralPath $current -PathType Leaf) {`,
-    `        try { $existing = Get-Content -LiteralPath $current -Raw | ConvertFrom-Json; if ($existing.operationId -eq ${ps(operationId)}) { $recorded = $true } } catch { }`,
+    `        try { $existing = Get-Content -LiteralPath $current -Raw | ConvertFrom-Json; if ($null -ne $existing -and $existing.operationId -eq ${ps(operationId)}) { $recorded = $true } } catch { }`,
     `      }`,
     `      if (-not $recorded -and (Test-Path -LiteralPath ${ps(environmentRoot)} -PathType Container)) {`,
     `        $json = '{"operationId":' + (${ps(JSON.stringify(operationId))}) + ',"type":"update","targetVersion":' + (${ps(JSON.stringify(targetVersion))}) + ',"phase":"job","result":"failed","time":' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + ',"errorCode":"installer"}'`,
