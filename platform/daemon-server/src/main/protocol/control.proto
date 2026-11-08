@@ -39,6 +39,7 @@ enum MessageType {
   ERROR = 24;
   SKILL_SYNC = 25;
   SKILL_STATE = 26;
+  ENVIRONMENT_CONFIG = 27;
 }
 
 enum OperatingSystem {
@@ -126,6 +127,7 @@ message Envelope {
     Error error = 27;
     SkillSync skill_sync = 28;
     SkillState skill_state = 29;
+    EnvironmentConfig environment_config = 30;
   }
 }
 
@@ -138,9 +140,8 @@ message UpgradeRequired {
 
 message Settings {
   ResourceBudgets resource_budgets = 1;
-  optional string display_name = 2;
-  optional string proxy_url = 3;
-  optional string no_proxy_hosts = 4;
+  reserved 2, 3, 4;
+  reserved "display_name", "proxy_url", "no_proxy_hosts";
 }
 
 message ResourceBudgets {
@@ -149,19 +150,46 @@ message ResourceBudgets {
   optional int64 temporary_resource_cleanup_interval_seconds = 3;
 }
 
+// 一张 Environment 卡片当前的完整 Daemon 配置；每次下发都是完整快照而非增量。
+message EnvironmentConfig {
+  optional int64 version = 1;
+  DaemonConfiguration config = 2;
+}
+
+message DaemonConfiguration {
+  string studio_url = 1;
+  optional string bash_executable = 2;
+  LspConfiguration lsp = 3;
+  optional string proxy_url = 4;
+}
+
+// 保留配置中的服务器声明顺序；服务器不能退化为无序 map。
+message LspConfiguration {
+  repeated LspServer servers = 1;
+}
+
+message LspServer {
+  string id = 1;
+  repeated string command = 2;
+  repeated string extensions = 3;
+  repeated string root_markers = 4;
+  repeated string first_match_markers = 5;
+}
+
 message Ready {
   optional string daemon_version = 1;
-  EnvironmentInfo environment = 2;
+  HostInfo host_info = 2;
   RuntimeSnapshot runtime_status = 3;
 }
 
-message EnvironmentInfo {
+message HostInfo {
   OperatingSystem operating_system = 1;
   Architecture architecture = 2;
   optional string time_zone = 3;
   optional string user_name = 4;
   optional string home_directory = 5;
-  optional string note = 6;
+  reserved 6;
+  reserved "note";
   optional string temp_directory = 7;
 }
 
@@ -182,6 +210,20 @@ message RuntimeSnapshot {
 message RuntimeBody {
   optional string daemon_version = 1;
   UpdateProgress update = 2;
+  ConfigurationStatus configuration = 3;
+}
+
+message ConfigurationStatus {
+  optional int64 applied_version = 1;
+  optional string proxy_url = 2;
+  ConfigurationError error = 3;
+}
+
+// 稳定规则错误；不回显命令参数、token 或原始输入。
+message ConfigurationError {
+  optional int64 version = 1;
+  string code = 2;
+  optional string field = 3;
 }
 
 message UpdateProgress {
