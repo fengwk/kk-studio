@@ -41,6 +41,7 @@ function runtimeFor(
 ) {
   const tracker = new RuntimeStatusTracker('test')
   const prepareCalls: Parameters<EnvironmentConfigRuntimeOptions['prepare']>[0][] = []
+  const preparePrevious: Parameters<EnvironmentConfigRuntimeOptions['prepare']>[1][] = []
   const defaultPrepare = async (config: Parameters<EnvironmentConfigRuntimeOptions['prepare']>[0]) => prepared(config)
   const onApplied = vi.fn()
   const onCandidate = vi.fn()
@@ -58,9 +59,10 @@ function runtimeFor(
     environmentId: initial.environmentId,
     initial,
     tracker,
-    prepare: async (config) => {
+    prepare: async (config, previous) => {
       prepareCalls.push(config)
-      return (customPrepare ?? defaultPrepare)(config)
+      preparePrevious.push(previous)
+      return (customPrepare ?? defaultPrepare)(config, previous)
     },
     onCandidate,
     onCandidateAborted,
@@ -76,6 +78,7 @@ function runtimeFor(
     runtime,
     tracker,
     prepareCalls,
+    preparePrevious,
     onCandidate: effective.onCandidate,
     onCandidateAborted: effective.onCandidateAborted,
     onApplied: effective.onApplied,
@@ -96,12 +99,13 @@ describe('EnvironmentConfigRuntime', () => {
   // 启动时缓存版本相同也必须真正完成一次校验/准备，并原子写回私有缓存。
   it('initializes the same cached version and atomically persists the private cache', async () => {
     const initial = initialConfig()
-    const { runtime, tracker, prepareCalls, onApplied } = runtimeFor(initial)
+    const { runtime, tracker, prepareCalls, preparePrevious, onApplied } = runtimeFor(initial)
 
     const result = await runtime.submit(initial.configVersion, daemonConfigurationOf(initial))
 
     expect(result).toMatchObject({ kind: 'applied', config: { configVersion: 0n } })
     expect(prepareCalls).toHaveLength(1)
+    expect(preparePrevious).toEqual([null])
     expect(onApplied).toHaveBeenCalledWith(initial, runtime.config)
     expect(runtime.hasAppliedConfiguration).toBe(true)
     expect(tracker.getConfiguration()).toEqual({
@@ -113,6 +117,20 @@ describe('EnvironmentConfigRuntime', () => {
     expect(lstatSync(initial.configPath).mode & 0o777).toBe(0o600)
     expect(loadDaemonConfig(initial.configPath).configVersion).toBe(0n)
     expect(readdirSync(dirname(initial.configPath)).filter((name) => name.includes('.tmp'))).toEqual([])
+  })
+
+  // 首次应用传 null 表示尚无运行快照；初始化后变更才以已发布快照为 previous。
+  it('passes null previous on first application and the applied snapshot afterwards', async () => {
+    const initial = initialConfig()
+    const { runtime, preparePrevious } = runtimeFor(initial)
+    await runtime.submit(0n, daemonConfigurationOf(initial))
+    const first = runtime.config
+
+    await runtime.submit(1n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://proxy.invalid:8080' })
+
+    expect(preparePrevious).toHaveLength(2)
+    expect(preparePrevious[0]).toBeNull()
+    expect(preparePrevious[1]).toBe(first)
   })
 
   // 内容相同的新版本只推进确认版本，不重建网络/LSP 资源。

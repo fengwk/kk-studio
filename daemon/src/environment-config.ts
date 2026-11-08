@@ -24,8 +24,11 @@ export interface EnvironmentConfigRuntimeOptions {
   environmentId: string
   initial: DaemonConfig
   tracker: RuntimeStatusTracker
-  /** 校验候选并准备网络/LSP；previous 是当前已发布快照，供只重建变化组件；失败不得发布。 */
-  prepare(config: DaemonConfig, previous: DaemonConfig): Promise<PreparedEnvironmentConfig>
+  /**
+   * 校验候选并准备网络/LSP。previous 是当前已发布运行快照；首次应用尚无运行快照时为 null，
+   * 装配层必须真实准备全部资源，不能按启动缓存内容跳过。
+   */
+  prepare(config: DaemonConfig, previous: DaemonConfig | null): Promise<PreparedEnvironmentConfig>
   /** 候选开始准备；控制地址/代理变化时在此暂停旧连接的新的入站执行。 */
   onCandidate(previous: DaemonConfig, candidate: DaemonConfig): void
   /** 候选失败或被放弃；恢复候选准备前的入站准入。 */
@@ -244,6 +247,8 @@ export class EnvironmentConfigRuntime {
 
     const sameContent = this.initialized && request.content === this.acceptedContent
     const previous = this.current
+    // 首次应用没有已发布的运行快照，即使启动缓存内容相同也必须真实准备组件。
+    const runtimePrevious = this.initialized ? previous : null
     if (sameContent) {
       // 内容相同只推进确认版本；不重新解析程序，也不重建网络/LSP。
       const candidate = { ...previous, configVersion: request.version }
@@ -276,7 +281,7 @@ export class EnvironmentConfigRuntime {
     this.options.onCandidate(previous, admissionCandidate)
     try {
       try {
-        prepared = await this.options.prepare(admissionCandidate, previous)
+        prepared = await this.options.prepare(admissionCandidate, runtimePrevious)
       } catch (error) {
         return this.failCandidate(request.version, error)
       }

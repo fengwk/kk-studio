@@ -325,7 +325,8 @@ export class ControlSession {
           this.options.outbound.environmentId ?? undefined,
           safeMessage(new Error(result.message)),
         )
-        this.options.connection.closeFailedHandshake(connection)
+        // 发布不变量已破坏：自动重连会继续使用混合资源状态，必须进入 FAILED 终止。
+        this.options.stop('environment configuration is inconsistent')
         return
     }
   }

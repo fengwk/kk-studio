@@ -662,6 +662,31 @@ describe('runtime inbound protocol branches', () => {
       await runtime.awaitCompletion()
     }
   })
+
+  // 发布不变量破坏时不能自动重连继续使用混合资源状态，必须进入 FAILED 终止。
+  it('enters FAILED instead of reconnecting when configuration publication is inconsistent', async () => {
+    const transport = new FakeTransport()
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        prepareConfiguration: async (config) => ({
+          config,
+          publish: () => {
+            throw new Error('publish invariants broken')
+          },
+          retire: async () => {},
+        }),
+      }),
+    )
+    runtime.start()
+    await waitFor(() => transport.connection !== null)
+    transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
+    await waitFor(() => runtime.getState() === 'FAILED')
+    expect(runtime.getFailureReason()).toBe('environment configuration is inconsistent')
+    await runtime.awaitCompletion()
+    expect(transport.connectCount).toBe(1)
+  })
 })
 
 describe('runtime journal capacity recovery evidence', () => {

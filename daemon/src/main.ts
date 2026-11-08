@@ -238,14 +238,16 @@ export interface ConfigurationResourceRuntime {
  */
 export async function prepareRuntimeConfiguration(
   resources: ConfigurationResourceRuntime,
-  previous: DaemonConfig,
+  previous: DaemonConfig | null,
   candidate: DaemonConfig,
 ): Promise<PreparedEnvironmentConfig> {
-  const network =
-    previous.proxyUrl === candidate.proxyUrl ? null : resources.networks.prepare(candidate.proxyUrl)
+  // 首次应用没有已发布运行快照：当前 facade/network 只是启动占位，必须真实准备两者。
+  const networkChanged = previous === null || previous.proxyUrl !== candidate.proxyUrl
+  const lspChanged = previous === null || lspConfigurationChanged(previous, candidate)
+  const network = networkChanged ? resources.networks.prepare(candidate.proxyUrl) : null
   let lsp: ReturnType<LspFacade['prepare']> | null = null
   try {
-    lsp = lspConfigurationChanged(previous, candidate) ? resources.lsp.prepare(candidate.lsp) : null
+    lsp = lspChanged ? resources.lsp.prepare(candidate.lsp) : null
   } catch (error) {
     if (network !== null) {
       try {
@@ -266,7 +268,7 @@ export async function prepareRuntimeConfiguration(
       if (lsp !== null) {
         cleanups.push(lsp.publish())
       }
-      return Promise.all(cleanups).then(() => undefined)
+      return settleResourceCleanups(cleanups)
     },
     retire: async () => {
       const cleanups: Promise<void>[] = []
@@ -276,8 +278,30 @@ export async function prepareRuntimeConfiguration(
       if (lsp !== null) {
         cleanups.push(lsp.retire())
       }
-      await Promise.all(cleanups)
+      await settleResourceCleanups(cleanups)
     },
+  }
+}
+
+/**
+ * 等全部收尾真正结束再聚合失败；不能使用 Promise.all，否则首个拒绝会让调用方提前发布终止/释放锁。
+ */
+async function settleResourceCleanups(cleanups: Promise<void>[]): Promise<void> {
+  if (cleanups.length === 0) {
+    return
+  }
+  const results = await Promise.allSettled(cleanups)
+  const failures: unknown[] = []
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push(result.reason)
+    }
+  }
+  if (failures.length === 1) {
+    throw failures[0]
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, 'environment configuration resource cleanup failed')
   }
 }
 

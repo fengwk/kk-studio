@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { main, prepareRuntimeConfiguration } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
+import { createLspFacade } from '../src/coding/lsp.js'
+import { daemonConfigurationOf, EnvironmentConfigRuntime } from '../src/environment-config.js'
+import { RuntimeStatusTracker } from '../src/runtime-status.js'
 import {
   Architecture,
   MessageType,
@@ -19,7 +22,7 @@ import * as native from '../src/native/index.js'
 import * as network from '../src/network.js'
 import * as transportModule from '../src/transport/index.js'
 import type { DaemonConfig, ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
-import { waitFor } from './helpers.js'
+import { fakeProcessSupervisor, testConfig, waitFor } from './helpers.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
 import {
   TOKEN,
@@ -757,5 +760,124 @@ describe('daemon configuration resource preparation', () => {
     )
     expect(aggregated).toBeInstanceOf(AggregateError)
     expect((aggregated as AggregateError).errors).toEqual([lspFailure, retireFailure])
+  })
+
+  // 首次应用没有运行快照：即使启动缓存内容相同，也必须真实初始化空 facade 的 LSP。
+  it('initializes the real LSP facade for the first cached-config application', async () => {
+    const initial = testConfig({
+      lsp: {
+        java: {
+          command: [process.execPath],
+          extensions: ['.java'],
+          rootMarkers: [],
+          firstMatchMarkers: [],
+        },
+      },
+    })
+    cleans.push(() => rmSync(initial.dataDir, { recursive: true, force: true }))
+    const networkRuntime = new network.NetworkRuntime(null)
+    const lspFacade = createLspFacade(fakeProcessSupervisor)
+    const preparePrevious: Array<DaemonConfig | null> = []
+    const runtime = new EnvironmentConfigRuntime({
+      paths: {
+        configPath: initial.configPath,
+        dataDir: initial.dataDir,
+        tokenPath: initial.tokenPath,
+        distributionDir: initial.distributionDir,
+      },
+      environmentId: initial.environmentId,
+      initial,
+      tracker: new RuntimeStatusTracker('test'),
+      prepare: (config, previous) => {
+        preparePrevious.push(previous)
+        return prepareRuntimeConfiguration({ networks: networkRuntime, lsp: lspFacade }, previous, config)
+      },
+      onCandidate: () => {},
+      onCandidateAborted: () => {},
+      onApplied: () => {},
+      report: () => {},
+      track: () => {},
+    })
+    try {
+      expect(lspFacade.support('/tmp/App.java')).toMatchObject({ language: null, available: false })
+      const result = await runtime.submit(0n, daemonConfigurationOf(initial))
+      expect(result.kind).toBe('applied')
+      expect(preparePrevious).toEqual([null])
+      expect(lspFacade.support('/tmp/App.java')).toMatchObject({
+        language: 'java',
+        available: true,
+        supported: true,
+      })
+    } finally {
+      await runtime.close()
+      await lspFacade.close()
+      await networkRuntime.close()
+    }
+  })
+
+  // publish/retire 必须等全部收尾 settled 再聚合失败，不能让首个拒绝提前放行终止。
+  it('waits for every resource cleanup to settle before rejecting', async () => {
+    const fakes = resourceFakes()
+    const previous = candidate()
+    const next = {
+      ...previous,
+      configVersion: 1n,
+      proxyUrl: 'http://proxy.example.com:8080',
+      lsp: {
+        typescript: {
+          command: ['typescript-language-server'],
+          extensions: ['.ts'],
+          rootMarkers: ['tsconfig.json'],
+          firstMatchMarkers: [],
+        },
+      },
+    }
+    const prepared = await prepareRuntimeConfiguration(fakes.resources, previous, next)
+
+    const publishNetwork = Promise.withResolvers<void>()
+    const publishLsp = Promise.withResolvers<void>()
+    fakes.network.publish.mockReturnValue(publishNetwork.promise)
+    fakes.lsp.publish.mockReturnValue(publishLsp.promise)
+    let publishOutcome: unknown = null
+    const publishObserved = (prepared.publish() as Promise<void>).then(
+      () => {
+        publishOutcome = 'resolved'
+      },
+      (error: unknown) => {
+        publishOutcome = error
+      },
+    )
+    const networkPublishFailure = new Error('network publish cleanup failed')
+    const lspPublishFailure = new Error('lsp publish cleanup failed')
+    publishNetwork.reject(networkPublishFailure)
+    await Promise.resolve()
+    expect(publishOutcome).toBeNull()
+    publishLsp.reject(lspPublishFailure)
+    await publishObserved
+    expect(publishOutcome).toBeInstanceOf(AggregateError)
+    expect((publishOutcome as AggregateError).errors).toEqual([networkPublishFailure, lspPublishFailure])
+
+    const retireNetwork = Promise.withResolvers<void>()
+    const retireLsp = Promise.withResolvers<void>()
+    fakes.network.retire.mockReturnValue(retireNetwork.promise)
+    fakes.lsp.retire.mockReturnValue(retireLsp.promise)
+    let retireOutcome: unknown = null
+    const retireObserved = prepared.retire().then(
+      () => {
+        retireOutcome = 'resolved'
+      },
+      (error: unknown) => {
+        retireOutcome = error
+      },
+    )
+    const networkRetireFailure = new Error('network retire cleanup failed')
+    const lspRetireFailure = new Error('lsp retire cleanup failed')
+    retireNetwork.reject(networkRetireFailure)
+    await Promise.resolve()
+    expect(retireOutcome).toBeNull()
+    retireLsp.reject(lspRetireFailure)
+    await retireObserved
+    expect(retireOutcome).toBeInstanceOf(AggregateError)
+    expect((retireOutcome as AggregateError).errors).toEqual([networkRetireFailure, lspRetireFailure])
   })
 })
