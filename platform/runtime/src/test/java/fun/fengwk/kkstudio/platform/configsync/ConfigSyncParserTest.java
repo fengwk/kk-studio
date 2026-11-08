@@ -59,6 +59,7 @@ class ConfigSyncParserTest {
             // bashExecutable 只接受非空白字符串：即使条目另含未知字段，空白值也必须硬错。
             valid.replace("bashExecutable: /bin/bash", "bashExecutable: \"  \""),
             valid.replace("\"pom.xml\"", "\"../outside\""),
+            valid.replace("\".java\"", "\"java\""),
             valid.replace("https://studio.example.com/", "https://studio.example.com/private"))) {
       // 每个 mutation 都必须真正改动 fixture，否则断言会退化为对同一份合法文档的重复解析。
       assertNotEquals(valid, invalid, () -> "mutation must change the fixture: " + invalid);
@@ -68,6 +69,32 @@ class ConfigSyncParserTest {
               parser.parse(
                   invalid.replace("    daemonConfig:", "    bogus: true\n    daemonConfig:")));
     }
+  }
+
+  @Test
+  void daemonConfigAndNoteAreParsedInCanonicalForm() {
+    String yamlText =
+        "environments:\n"
+            + "  - name: env\n"
+            + "    note: \"  trimmed note  \"\n"
+            + "    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n"
+            + "    daemonConfig:\n"
+            + "      studioUrl: https://studio.example.com/\n"
+            + "      bashExecutable: null\n"
+            + "      proxyUrl: \"  \"\n"
+            + "      lsp:\n"
+            + "        servers:\n"
+            + "          jdtls:\n"
+            + "            command: [jdtls]\n"
+            + "            extensions: [\" .JAVA \"]\n";
+    var environment = parser.parse(yamlText).environments().get(0);
+
+    assertEquals("trimmed note", environment.note());
+    assertEquals("https://studio.example.com", environment.daemonConfig().getStudioUrl());
+    assertNull(environment.daemonConfig().getProxyUrl());
+    assertEquals(
+        List.of(".java"),
+        environment.daemonConfig().getLsp().getServers().get("jdtls").getExtensions());
   }
 
   @Test
@@ -404,6 +431,11 @@ class ConfigSyncParserTest {
             "environments:\n"
                 + "  - name: env\n"
                 + "    registrationTokenHash: 1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n"
+                + "    daemonConfig:\n"
+                + "      studioUrl: https://studio.example.com\n"
+                + "      bashExecutable: null\n"
+                + "      lsp: null\n"
+                + "      proxyUrl: null\n"
                 + "    bogus: 1\n");
     assertTrue(environment.environments().isEmpty());
 
@@ -475,7 +507,15 @@ class ConfigSyncParserTest {
         DomainException.class,
         () ->
             parser.parse(
-                "environments:\n  - name: env\n    registrationTokenHash: ''\n    bogus: 1\n"));
+                "environments:\n"
+                    + "  - name: env\n"
+                    + "    registrationTokenHash: ''\n"
+                    + "    daemonConfig:\n"
+                    + "      studioUrl: https://studio.example.com\n"
+                    + "      bashExecutable: null\n"
+                    + "      lsp: null\n"
+                    + "      proxyUrl: null\n"
+                    + "    bogus: 1\n"));
     assertThrows(
         DomainException.class,
         () -> parser.parse("mcpServers:\n  - name: mcp\n    url: not-a-url\n    bogus: 1\n"));

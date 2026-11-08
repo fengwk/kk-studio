@@ -390,11 +390,11 @@ public final class ConfigSyncParser {
             DaemonConfigDTO.class, configNode, entry.path + ".daemonConfig", removed);
     DaemonConfigDTO config =
         yaml.convert(cleanedConfig, DaemonConfigDTO.class, entry.path + ".daemonConfig");
-    // 与 CRUD 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
+    // 与 CRUD 共用静态校验并接住规范化结果：known 非法值必须硬拒绝，未知字段不能绕过。
     EnvironmentService.validateName(name);
     EnvironmentService.validateRegistrationTokenHash(tokenHash);
-    EnvironmentService.validateNote(note);
-    EnvironmentService.validateDaemonConfig(config);
+    note = EnvironmentService.validateNote(note);
+    config = EnvironmentService.validateDaemonConfig(config);
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
     }
