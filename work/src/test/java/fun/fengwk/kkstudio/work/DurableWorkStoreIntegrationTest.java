@@ -381,7 +381,10 @@ class DurableWorkStoreIntegrationTest {
   }
 
   private static void seedEnvironment(UUID environmentId) {
-    jdbc.sql("insert into environment (id, name, registration_token_hash) values (?, ?, ?)")
+    jdbc.sql(
+            "insert into environment (id, name, registration_token_hash, daemon_config)"
+                + " values (?, ?, ?, '{\"studioUrl\":\"https://studio.example.com\","
+                + "\"bashExecutable\":null,\"lsp\":null,\"proxyUrl\":null}'::jsonb)")
         .params(environmentId, "env-" + environmentId, "a".repeat(64))
         .update();
   }
@@ -389,12 +392,12 @@ class DurableWorkStoreIntegrationTest {
   private static void seedConnection(UUID environmentId, UUID owner, String status) {
     jdbc.sql(
             "insert into environment_connection (environment_id, owner_node_id, lease_token,"
-                + " status, runtime_info, skill_state, recent_events, last_seen_at, lease_until)"
+                + " status, ready_metadata, skill_state, recent_events, last_seen_at, lease_until)"
                 + " values (?, ?, ?, ?, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,"
                 + " statement_timestamp(), statement_timestamp() + interval '30 minutes')"
                 + " on conflict (environment_id) do update set owner_node_id = excluded.owner_node_id,"
                 + " lease_token = excluded.lease_token, status = excluded.status,"
-                + " runtime_info = excluded.runtime_info, last_seen_at = excluded.last_seen_at,"
+                + " ready_metadata = excluded.ready_metadata, last_seen_at = excluded.last_seen_at,"
                 + " lease_until = excluded.lease_until")
         .params(environmentId, owner, UUID.randomUUID(), status)
         .update();

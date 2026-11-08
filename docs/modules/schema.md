@@ -119,14 +119,18 @@ Work lease 成对，环境亲和性由各模块声明。Fill First 模型组的�
 固定冷却秒数由应用 codec 校验；`model_group_cooldown` 只保存 `(组, 成员模型, 成员 Variant)`
 的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
-`environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
-应用 codec 在读写时严格校验，非法数据在读取时明确拒绝。
-`environment.install_code` 是同一行上的 jsonb 列，只保存随机一次性安装 code 的 SHA-256 摘要与
-UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null 表示没有未核销的 code；
-CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；
-兑换要求注册凭证代际一致、摘要匹配且严格未过期，成功后原子清空该列并推进版本；
-任何注册凭证变更在同一条 UPDATE 中清空它。该列不参与配置导出，不保存 code 明文。
-Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，不持久化更新历史与历史查询。
+`environment.daemon_config` 必须是 JSON object；数据库只兜底这一形状，字段结构与取值由
+应用 codec 在读写时严格校验（`studioUrl` 必填，`bashExecutable`、`lsp`、`proxyUrl` 可空），
+非法数据在读取时明确拒绝。卡片备注保存在独立的 `note` 列，最多 512 字符，空值存为 NULL。
+`environment.install_code_hash` 与 `install_code_expires_at` 成对出现（CHECK 约束同时为 NULL 或同时非空）：
+前者只保存随机一次性安装 code 的 SHA-256 摘要，后者保存数据库时间下的 UTC 失效点（固定五分钟）。
+签发按版本 CAS 覆盖旧值且不推进版本；兑换要求摘要匹配、严格未过期且目标 OS 合法，成功后原子清空两列、
+轮换注册凭证摘要并推进版本；修改 `daemon_config` 或注册凭证的任何 UPDATE 在同一语句中清空它们，
+只修改 `note` 不清空。该摘要不参与配置导出，不保存 code 明文。
+`environment_connection.ready_metadata` 保存最近一次被接受的 READY `{daemonVersion, hostInfo}`
+（hostInfo 只含 OS、架构、时区、用户名、HOME、临时目录），断线保留。
+Environment 的当前运行状态与更新进度不入库：`appliedVersion`、`proxyUrl`、配置错误与更新进度只存在于
+Daemon 内存与 Server 当前控制代际的缓存，不持久化更新历史与历史查询。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。

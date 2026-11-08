@@ -1,6 +1,6 @@
 # 系统设计
 
-`kk-studio` 2.0.1 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
+`kk-studio` 3.0.0 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
 [`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
 文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
 
@@ -31,7 +31,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L1 共享 | [`common`](../common/pom.xml) | 值契约：领域错误、严格 JSON、URI 编码、资源引用、结果内容、输入 Schema、Work 状态 |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
-| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理由平台下发；在线更新调用官方安装器 |
+| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理来自所属卡片；在线更新调用官方安装器 |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
@@ -401,14 +401,19 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 
 ### 环境注册与对账
 
-环境身份是全局唯一且不可变的 name，运行时解析为内部 UUID。`environment_connection` 同时承载路由租约、连接状态、
-宿主信息、技能投影与运维事件窗口；`cluster_node` 记录节点身份与存活。READY、HEARTBEAT 与断开都以
+环境身份由不可变 name 与内部 UUID 共同表达：name 创建后不变，UUID 用于连接、Work、安装目录与服务定位。
+`environment` 行保存 `note` 与完整 `daemon_config`（`studioUrl`、`bashExecutable`、`lsp`、`proxyUrl`），
+`version` 既是 CAS 版本也是配置快照版本；每次显式保存都推进版本并发布 `environment_changed`。
+`environment_connection` 同时承载路由租约、连接状态、`ready_metadata`（Daemon 版本与宿主信息）、技能投影与
+运维事件窗口；`cluster_node` 记录节点身份与存活。READY、HEARTBEAT 与断开都以
 `(environment_id, owner_node_id, lease_token)` 为围栏，心跳只续租，只有状态、宿主信息、技能状态与运维事件真正
 变化时才发布 `environment_changed`。READY 会清空 `skill_state`，随后由技能对账全量重建；自然到期没有数据库写
 事件，由读取时按截止点判定。
 
-系统设置中的全局代理是 Studio 后端与所有 Daemon 共用的唯一定义。平台在 Daemon 连接就绪时下发当前设置，设置变更
-后向全部在线 Daemon 重新下发，Daemon 侧行为见下文。
+配置与连接状态是两个事实：READY 只说明当前进程已应用过某份配置并完成注册。owner 在初始控制流、READY 后核对、
+`environment_changed` 通知与心跳对账时读取权威版本，向 Daemon 下发完整 `ENVIRONMENT_CONFIG` 快照；Daemon 应用
+成功后回报 `RuntimeSnapshot.configuration`（`appliedVersion`、`proxyUrl`、可空 `error`）。卡片版本由服务端持有，
+当前运行快照只存在于 owner 会话内存，不另建状态表。
 
 跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领、排空本机执行、向 Daemon
 发送 GOAWAY 并释放路由租约、移交在途远端工具，最后反注册。`/ws/events` 的跨节点载荷与 IDE 集群接口走内部路径。
@@ -419,8 +424,8 @@ Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /cont
 Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
 `CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
 （`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
-`UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`RUNTIME_STATUS`、`ERROR`，
-以及技能对账的 `SKILL_SYNC` 与 `SKILL_STATE`。
+`UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`ENVIRONMENT_CONFIG`、
+`RUNTIME_STATUS`、`ERROR`，以及技能对账的 `SKILL_SYNC` 与 `SKILL_STATE`。
 
 能力目录由 harness 定义、Daemon 实现：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、`PROCESS_EXEC`、
 `FS_GREP`、`FS_FIND`、三个 LSP 能力。每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
@@ -455,13 +460,19 @@ Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_
 
 ### 代理与在线更新
 
-代理只来自平台下发的全局设置。Daemon 不读环境变量，也不查询操作系统代理；只支持无认证的 `http://host:port`。
+代理按主体隔离：Backend 自身的请求使用系统设置 `backendNetwork`；每张卡片的 `daemonConfig.proxyUrl` 只作用于该
+Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量，也不查询操作系统代理；只支持无认证的
+`http://host:port`，没有隐式直连回退或自动系统代理探测。
 
-- 生效范围是 Daemon 的出站请求（S3、更新安装器下载）以及它启动的命令、LSP 与 code-server。子进程通过
-  `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 获得同一设置，设置变更只影响之后启动的子进程。
-- 控制连接始终直连 Studio：它使用独占的直连 Agent，不经过代理策略，否则错误的代理设置会让 Daemon 再也收不到修正。
-- 在线更新只走官方安装器：平台下发目标版本，Daemon 启动对应版本 tag 的 `install.sh` 或 `install.ps1`（带平台
-  代理），由安装器下载、校验、替换并重启；Daemon 只回执阶段与结果，不自行下载或替换制品。
+- 卡片代理的生效范围是该 Daemon 的出站请求（S3、技能下载、更新安装器下载）与控制 WS/WSS。控制连接与普通请求
+  使用同一策略；代理不可达会使执行端失联，恢复方式是恢复网络后接收修正，或修正卡片后重新安装。
+- Bash、LSP、code-server 与 IDE 终端保留宿主真实环境，不注入卡片代理；code-server/bridge 的 loopback 使用
+  专用直连通道。
+- 人工安装/覆盖下载继承执行时的宿主代理环境；在线更新作业只构造本次下载所需的大小写代理变量（卡片 `proxyUrl`，
+  `null` 时显式直连），不改 `process.env` 或通用进程监督器。
+- 在线更新只走官方安装器：平台下发目标版本，Daemon 在系统临时目录创建独立 OS 作业，下载对应版本 tag 的官方
+  安装器并调用其 `update` 动作；安装器校验归档、替换程序与服务定义，不写配置或 token。Daemon 只回执
+  `ACCEPTED`/`PREPARED`/`FAILED`，最终成功以新版本 READY 为准；唯一持久诊断是卡片的 `last-operation.json`。
 
 ## 一次请求的执行链
 
@@ -577,7 +588,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 - Provider、MCP、Daemon 与插件凭据经受控入口写入，普通 DTO、日志与 Debug 保持脱敏；它们以明文存入 PostgreSQL，
   保护依赖数据库访问控制与备份加密。技能仓库令牌不回显，也不下发给 Daemon。
 - 注册令牌文件要求 owner-only 权限；路径操作要求显式绝对路径，只有进程执行要求显式绝对 `workdir`。
-- 代理只支持无认证的 HTTP 代理，控制连接始终直连；在线更新只由官方安装器执行，Daemon 不自行替换制品。
+- 代理只支持无认证的 HTTP 代理，Backend 与各卡片分别使用自己的代理；在线更新只由官方安装器执行，Daemon 不自行替换制品。
 - 生产变更需经过审批并准备可恢复备份；备份同时覆盖 PostgreSQL 与 S3 数据及部署密钥。
 
 首次运行见[项目 README](../README.md)，参数与生产操作见[部署与运行](operations/deployment.md)，开发与质量入口见

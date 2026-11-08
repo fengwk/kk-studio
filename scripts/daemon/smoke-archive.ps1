@@ -121,7 +121,11 @@ const native = await import(pathToFileURL(join(root, 'native', 'index.js')).href
 const configRoot = join(root, 'config')
 await native.ensurePrivateDirectory(configRoot)
 await native.writePrivateFile(join(configRoot, 'daemon.token'), 'smoke-token')
-await native.writePrivateFile(join(configRoot, 'daemon.json'), JSON.stringify({ studioUrl: 'http://127.0.0.1:59999', bashExecutable }))
+await native.writePrivateFile(join(configRoot, 'daemon.json'), JSON.stringify({
+  environmentId: '11111111-1111-4111-8111-111111111111',
+  version: '0',
+  daemonConfig: { studioUrl: 'http://127.0.0.1:59999', bashExecutable },
+}))
 const directory = join(root, 'private-data')
 await native.ensurePrivateDirectory(directory)
 const lock = await native.acquireDirectoryLock(directory)
@@ -149,7 +153,11 @@ process.stdout.write('native directory lock ok')
     if ($LASTEXITCODE -ne 0 -or $valid -ne 'Daemon configuration is valid') {
         Fail '--check-config rejected the valid configuration'
     }
-    foreach ($document in @('{"studioUrl":"not-a-url"}', '{"daemon":{"studioUrl":"http://127.0.0.1:59999"}}')) {
+    # 旧平铺对象与外壳包装都不是当前信封，真实 schema 必须拒绝。
+    foreach ($document in @(
+        '{"studioUrl":"http://127.0.0.1:59999","note":"archive smoke"}',
+        '{"daemon":{"environmentId":"11111111-1111-4111-8111-111111111111","version":"0","daemonConfig":{"studioUrl":"http://127.0.0.1:59999"}}}'
+    )) {
         [System.IO.File]::WriteAllText($config, $document, $utf8)
         # PowerShell 5.1 represents redirected native stderr as non-terminating errors.
         $ErrorActionPreference = 'Continue'

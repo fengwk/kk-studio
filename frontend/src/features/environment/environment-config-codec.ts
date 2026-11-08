@@ -49,69 +49,120 @@ function nonblankText(value: unknown, field: string): string {
   return value
 }
 
-/**
- * Studio HTTP(S) origin：无 userinfo/path/query/fragment，端口合法，
- * 与 DaemonConfigCodec.origin 的规范化结果一致。
- */
-function origin(value: unknown): string {
-  const raw = nonblankText(value, 'daemonConfig.studioUrl')
-  if (/[\s\\]/.test(raw) || [...raw].some((char) => char.codePointAt(0)! > 0x7e)) {
-    fail('daemonConfig.studioUrl')
-  }
-  const scheme = /^https?:\/\//i.exec(raw)
-  if (scheme === null) fail('daemonConfig.studioUrl')
-  const rest = raw.slice(scheme[0].length)
-  const cut = rest.search(/[/?#]/)
-  const authority = cut === -1 ? rest : rest.slice(0, cut)
-  const path = cut === -1 ? '' : rest.slice(cut)
-  if (authority.length === 0 || authority.includes('@') || authority.endsWith(':')) {
-    fail('daemonConfig.studioUrl')
-  }
-  if (path !== '' && path !== '/') fail('daemonConfig.studioUrl')
+const hostnamePattern =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.?$/
+const portPattern = /^[0-9]{1,5}$/
+
+/** 解析显式端口；保留原始 authority（含 :80 与 host 大小写），与 Java codec 一致。 */
+function parsePort(value: string, field: string): number {
+  if (!portPattern.test(value)) fail(field)
+  const port = Number(value)
+  if (port < 1 || port > 65535) fail(field)
+  return port
+}
+
+function validateBracketedHost(host: string, field: string): void {
+  if (!host.includes(':')) fail(field)
   let url: URL
   try {
-    url = new URL(raw)
+    url = new URL(`http://[${host}]`)
   } catch {
-    return fail('daemonConfig.studioUrl')
+    return fail(field)
   }
-  if (url.hostname.length === 0 || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
-    fail('daemonConfig.studioUrl')
+  if (!url.hostname.startsWith('[')) fail(field)
+}
+
+function validateHostname(host: string, field: string): void {
+  if (!hostnamePattern.test(host)) fail(field)
+  // WHATWG URL 会把 127.0.0.999 当作域名；Java URI.getHost 将其视为非法 IPv4，
+  // 因此对纯数字点分 host 额外校验四段 0..255。
+  if (host.includes('.') && /^[0-9.]+$/.test(host)) {
+    const octets = host.split('.')
+    if (
+      octets.length !== 4 ||
+      octets.some((octet) => !/^[0-9]{1,3}$/.test(octet) || Number(octet) > 255)
+    ) {
+      fail(field)
+    }
   }
-  if (url.port === '0') fail('daemonConfig.studioUrl')
-  return url.origin
+}
+
+/** 严格解析 authority：拒绝空 userinfo、空端口和非法 host/port。 */
+function parseAuthority(value: string, field: string): number | null {
+  if (value.length === 0 || value.includes('@')) fail(field)
+  let host: string
+  let portText: string | null = null
+  let bracketed = false
+  if (value.startsWith('[')) {
+    const close = value.indexOf(']')
+    if (close <= 1) fail(field)
+    host = value.slice(1, close)
+    bracketed = true
+    const suffix = value.slice(close + 1)
+    if (suffix !== '') {
+      if (!suffix.startsWith(':')) fail(field)
+      portText = suffix.slice(1)
+    }
+  } else {
+    if (value.includes('[') || value.includes(']')) fail(field)
+    const colon = value.indexOf(':')
+    if (colon !== -1) {
+      if (colon !== value.lastIndexOf(':')) fail(field)
+      host = value.slice(0, colon)
+      portText = value.slice(colon + 1)
+    } else {
+      host = value
+    }
+  }
+  if (host.length === 0) fail(field)
+  if (bracketed) validateBracketedHost(host, field)
+  else validateHostname(host, field)
+  return portText === null ? null : parsePort(portText, field)
 }
 
 /**
- * 卡片代理：null/空白表示显式直连；非空只接受无认证的 http://host:port，
- * 拒绝 userinfo、path、query、fragment 与非法端口。
+ * 只按原始文本解析 HTTP(S) URL，不依赖 WHATWG URL 的默认端口/主机大小写归一化。
+ * 调用方仅接受空 path 或单个 /，因此空 ? / # 段也不会被吞掉。
+ */
+function parseHttpUrl(
+  value: unknown,
+  field: string,
+  schemes: readonly string[],
+): { scheme: string; authority: string; port: number | null } {
+  const raw = nonblankText(value, field)
+  if (/[\s\\]/.test(raw) || [...raw].some((char) => char.codePointAt(0)! > 0x7e)) fail(field)
+  const schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(raw)
+  if (schemeMatch === null) fail(field)
+  const scheme = schemeMatch[1]!.toLowerCase()
+  if (!schemes.includes(scheme)) fail(field)
+  const rest = raw.slice(schemeMatch[0].length)
+  const cut = rest.search(/[/?#]/)
+  const authority = cut === -1 ? rest : rest.slice(0, cut)
+  const suffix = cut === -1 ? '' : rest.slice(cut)
+  if (suffix !== '' && suffix !== '/') fail(field)
+  return { scheme, authority, port: parseAuthority(authority, field) }
+}
+
+/**
+ * Studio HTTP(S) origin：无 userinfo/path/query/fragment，端口合法。
+ * 与 DaemonConfigCodec.origin 一样只小写 scheme，保留 Backend 已接受的显式端口和 host 大小写，
+ * 避免用户仅编辑备注/代理时产生无意的 studioUrl 变更。
+ */
+function origin(value: unknown): string {
+  const parsed = parseHttpUrl(value, 'daemonConfig.studioUrl', ['http', 'https'])
+  return `${parsed.scheme}://${parsed.authority}`
+}
+
+/**
+ * 卡片代理：null/空白表示显式直连；非空只接受无认证且带显式端口的 http://host:port。
+ * 端口按原始 authority 解析，因此 http://proxy:80 不会被 URL.port 的空字符串误判为无端口。
  */
 function proxy(value: unknown): string | null {
   const raw = stringOrNull(value, 'daemonConfig.proxyUrl')
   if (raw === null || raw.trim().length === 0) return null
-  if (/[\s\\]/.test(raw) || [...raw].some((char) => char.codePointAt(0)! > 0x7e)) {
-    fail('daemonConfig.proxyUrl')
-  }
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return fail('daemonConfig.proxyUrl')
-  }
-  if (
-    url.protocol !== 'http:' ||
-    url.username !== '' ||
-    url.password !== '' ||
-    url.search !== '' ||
-    url.hash !== '' ||
-    (url.pathname !== '' && url.pathname !== '/') ||
-    url.hostname.length === 0 ||
-    url.port === ''
-  ) {
-    fail('daemonConfig.proxyUrl')
-  }
-  const port = Number(url.port)
-  if (!Number.isInteger(port) || port < 1 || port > 65535) fail('daemonConfig.proxyUrl')
-  return `http://${url.host}`
+  const parsed = parseHttpUrl(raw, 'daemonConfig.proxyUrl', ['http'])
+  if (parsed.port === null) fail('daemonConfig.proxyUrl')
+  return `http://${parsed.authority}`
 }
 
 function bashExecutable(value: unknown): string | null {

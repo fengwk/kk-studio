@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
@@ -124,6 +124,20 @@ describe('EnvironmentInstallModal', () => {
     expect(environmentService.createInstallCode).toHaveBeenLastCalledWith('env-1', '12')
   })
 
+  it('shows a CAS refresh failure and closes the stale conflict', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.createInstallCode).mockRejectedValueOnce(
+      new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'environment changed'),
+    )
+    vi.mocked(environmentService.getEnvironment).mockRejectedValueOnce(new Error('refresh failed'))
+    open()
+    await user.click(copyInstall())
+    const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
+    await user.click(within(conflict).getByRole('button', { name: '刷新' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('refresh failed')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
   it('shows the install code failure instead of pretending a command was copied', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.createInstallCode).mockRejectedValue(new Error('code unavailable'))
@@ -131,6 +145,48 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyInstall())
     expect(await screen.findByRole('alert')).toHaveTextContent('code unavailable')
     expect(copyTextToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('shows a non-Error install code failure as text', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.createInstallCode).mockRejectedValue('offline')
+    open()
+    await user.click(copyInstall())
+    expect(await screen.findByRole('alert')).toHaveTextContent('offline')
+    expect(copyTextToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('ignores a duplicate submit while the install code request is in flight', async () => {
+    const code = deferred<{ code: string; expiresAt: number }>()
+    vi.mocked(environmentService.createInstallCode).mockReturnValue(code.promise)
+    open()
+    const form = screen.getByRole('dialog').querySelector('form')!
+    await act(async () => {
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+    })
+    expect(environmentService.createInstallCode).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      code.resolve({ code: 'short-code', expiresAt: 1_791_191_100_000 })
+    })
+    expect(copyTextToClipboard).toHaveBeenCalledTimes(1)
+  })
+
+  it('dismisses copied feedback and closes a conflict through its callbacks', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.click(copyInstall())
+    await screen.findByRole('status')
+    await user.click(screen.getByRole('button', { name: '关闭通知' }))
+    expect(screen.queryByRole('status')).toBeNull()
+
+    vi.mocked(environmentService.createInstallCode).mockRejectedValueOnce(
+      new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'environment changed'),
+    )
+    await user.click(copyInstall())
+    const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
+    await user.click(within(conflict).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
   it('copies a card-scoped uninstall command without calling the server', async () => {

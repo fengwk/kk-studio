@@ -36,7 +36,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-2.0.1.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-3.0.0.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -173,8 +173,8 @@ pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_w
 
 该套件检查真实 ScheduledTasks 定义、ACL、Node argv 和进程捕获，但不注册任务。
 Windows 计划任务以发行归档内的冻结运行时直接执行 `main.js`，命令行只承载唯一的
-`--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、note、
-bashExecutable 与 lsp 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
+`--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、bashExecutable、
+lsp 与 proxyUrl 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
 套件在非 ASCII 工作目录下真实运行安装器，并覆盖非零退出、双流大输出与选项环境恢复。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
@@ -399,7 +399,7 @@ Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycl
 Thread 快照增量读取属于免费 L1：`thread_snapshot.incremental_read` 用缺失 Agent 的回合快速收敛，不调用模型，
 验证非法 `afterEntryId` 返回 400、祖先游标只返回其后的 Entry、游标即 head 时为空增量、非祖先游标回退完整历史。
 
-安装配置与安装码兑换属于免费 L1 API 契约。可用
+卡片配置与安装码兑换属于免费 L1 API 契约。可用
 `node scripts/dev/verify/e2e/run-matrix.mjs --only environment.install_script_code_roundtrip`
 定向验证五分钟一次性安装码、重签替换、未消费码的轮换失效，以及兑换生成 fresh token 和推进版本。
 Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸载脚本检查不携带 secret。
@@ -807,8 +807,8 @@ install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared
 缺配置或不一致时在启动前失败。`SPRING_PROFILES_ACTIVE` 不是 `prod`、Flyway 没有关闭、或进程
 试图承担 Harness worker，都会直接报错，不会让本机进程成为第二个迁移执行者或第二个 worker。
 
-Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，通过 Studio 的
-安装弹窗保存配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
+Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，先在卡片中保存
+`daemonConfig`，再通过安装弹窗选择 OS、复制命令并执行；宿主 Daemon 按配置中的 studioUrl 连接 NAS App 的
 `wss://<studio-origin>/ws/daemon`。
 
 ### 共享数据库重建
@@ -835,8 +835,9 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 
 可导出 Provider、Model、Agent、Skill Package（仅限 Git 渠道）、Environment、MCP 服务、插件普通配置与系统设置。上传渠道的本地归档技能包不进入配置导出，升级或重建后须在平台重新上传发布。
 配置同步 YAML 使用 YAML 数字，与 HTTP 中 64 位整数的字符串表示分别处理。
-Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationTokenHash` 并列嵌套，缺失
-该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
+Environment 条目把完整卡片配置 `daemonConfig`、可空 `note` 与 `name`、`registrationTokenHash` 并列嵌套；
+文件省略 `note` 表示清空备注，缺失 `daemonConfig` 或仍含旧安装设置字段（`installConfig`、`operatingSystem`）
+时拒绝。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
 内置 Agent（如 `Compaction`）只满足依赖，不作为条目导出；导入节点用自身内置定义满足引用，不会因此被覆盖。
 系统设置是有界的六节核心设置，不引用任何模型或提示词 Agent。
@@ -861,12 +862,12 @@ Skill Package 私有仓库令牌遵循同一策略：导出携带原值，导入
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；
 导入期间应避免并发编辑，同名配置按文件覆盖。未授权部分导入时，执行发现跳过项也会拒绝。
 配置导入具备全文件原子性（包含 Git 技能包）：Git 远端网络拉取与归档准备在写事务前执行，发布在同一数据库事务内完成；写入失败时整体回滚，不产生部分导入。准备阶段生成的暂存归档尽力清理，未清理的暂存对象由存储过期机制回收。设置页的未保存草稿不会被自动覆盖，可在导入结果中明确重新加载。
-网络代理设置参与同步，导入后 Backend 的新 HTTP 请求以及 Daemon 收到更新后的新请求使用新路由，正在执行的请求不受影响。
+Backend 的 `backendNetwork` 设置参与同步，导入后 Backend 新发起的 HTTP 请求使用新路由，正在执行的请求不受影响；Daemon 代理属于各卡片的 `daemonConfig.proxyUrl`，不经系统设置下发。
 
 Git 渠道的 Skill Package 导出保存包名、描述、仓库地址、分支与可选令牌。导入执行时重新解析分支当前 HEAD 并构建归档，目标节点须能访问仓库；分支变化会改变导入内容，拉取或构建失败会中止导入。检查与执行都会重新发现 MCP 工具，外部服务状态变化可能使实际结果与预览不同；发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
-Environment 保留注册令牌摘要，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
-导入会深度校验 `installConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖安装设置，
-文件省略 `installConfig` 即清空，令牌摘要与安装设置在同一次原子更新中生效。
+Environment 保留注册令牌摘要与完整卡片配置，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
+导入会深度校验 `daemonConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖备注与配置，
+令牌摘要、备注与 `daemonConfig` 在同一次原子更新中生效。
 
 配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
 连接租约和发现快照，也不包含部署级数据库/S3 参数或 Plugin 秘密。
@@ -953,7 +954,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
 脚本。随后仅向维护人员开放产品入口，Worker 保持停止。
 
-4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（包括旧版 Agent `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对全局代理配置，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
+4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（包括旧版 Agent `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对 Backend 代理与各卡片的 `daemonConfig.proxyUrl`，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
 
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。

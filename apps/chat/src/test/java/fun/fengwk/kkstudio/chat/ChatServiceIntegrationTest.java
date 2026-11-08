@@ -219,8 +219,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     try (Connection conn = newConnection();
         Statement statement = conn.createStatement()) {
       statement.execute(
-          "insert into environment (id, name, registration_token_hash) values "
-              + "('00000000-0000-0000-0000-0000000000aa', 'env-a', repeat('a', 64))");
+          "insert into environment (id, name, registration_token_hash, daemon_config) values "
+              + "('00000000-0000-0000-0000-0000000000aa', 'env-a', repeat('a', 64),"
+              + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+              + "\"lsp\":null,\"proxyUrl\":null}'::jsonb)");
     }
 
     ChatCreateDTO create = new ChatCreateDTO();

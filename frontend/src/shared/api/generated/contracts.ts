@@ -677,12 +677,12 @@ export interface CreateProjectRequestDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration */
-export interface DaemonConfiguration {
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO */
+export interface DaemonConfigDTO {
   studioUrl: string
-  note?: string | null
   bashExecutable?: string | null
   lsp?: DaemonLspConfiguration | null
+  proxyUrl?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonLspConfiguration */
@@ -749,13 +749,16 @@ export const ENTRY_TYPE_VALUES: readonly EntryType[] = [
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO */
 export interface EnvironmentCreateDTO {
   name: string
+  note?: string | null
+  daemonConfig: DaemonConfigDTO
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO */
 export interface EnvironmentDTO {
   id: string
   name: string
-  installConfig?: EnvironmentInstallConfigDTO | null
+  note?: string | null
+  daemonConfig: DaemonConfigDTO
   registrationToken?: string | null
   status: EnvironmentStatus
   ready: boolean
@@ -765,7 +768,6 @@ export interface EnvironmentDTO {
   timeZone?: string | null
   userName?: string | null
   homeDirectory?: string | null
-  note?: string | null
   daemonVersion?: string | null
   capabilities: LiveEnvironmentCapabilityDTO[]
   version: string
@@ -912,27 +914,30 @@ export interface EnvironmentInstallCodeRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO */
-export interface EnvironmentInstallConfigDTO {
-  operatingSystem: DaemonOperatingSystem
-  daemon: DaemonConfiguration
-}
-
-/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO */
-export interface EnvironmentInstallConfigUpdateDTO {
-  expectedVersion: string
-  installConfig: EnvironmentInstallConfigDTO
-}
-
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRotateTokenDTO */
 export interface EnvironmentRotateTokenDTO {
   expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationDTO */
+export interface EnvironmentRuntimeConfigurationDTO {
+  appliedVersion?: string | null
+  proxyUrl?: string | null
+  error?: EnvironmentRuntimeConfigurationErrorDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationErrorDTO */
+export interface EnvironmentRuntimeConfigurationErrorDTO {
+  version: string
+  code: string
+  field?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO */
 export interface EnvironmentRuntimeDTO {
   daemonVersion: string
   update: EnvironmentUpdateProgressDTO | null
+  configuration: EnvironmentRuntimeConfigurationDTO
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO */
@@ -976,6 +981,13 @@ export const ENVIRONMENT_UPDATE_COMMAND_STATUS_VALUES: readonly EnvironmentUpdat
   'IN_PROGRESS',
   'SENT_UNCONFIRMED',
 ]
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO */
+export interface EnvironmentUpdateDTO {
+  expectedVersion: string
+  note?: string | null
+  daemonConfig: DaemonConfigDTO
+}
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateProgressDTO */
 export interface EnvironmentUpdateProgressDTO {
@@ -2777,12 +2789,18 @@ export interface SystemSettingsAiRuntimeDTO {
   modelHttpRetryStatusCodes: number[]
 }
 
+/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO */
+export interface SystemSettingsBackendNetworkDTO {
+  proxyUrl?: string | null
+  noProxyHosts: string
+}
+
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO */
 export interface SystemSettingsDTO {
   tool: SystemSettingsToolDTO
   aiRuntime: SystemSettingsAiRuntimeDTO
   environment: SystemSettingsEnvironmentDTO
-  network: SystemSettingsNetworkDTO
+  backendNetwork: SystemSettingsBackendNetworkDTO
   storageMedia: SystemSettingsStorageMediaDTO
   advanced: SystemSettingsAdvancedDTO
   version: string
@@ -2794,12 +2812,6 @@ export interface SystemSettingsDTO {
 export interface SystemSettingsEnvironmentDTO {
   maxResourceBytes: string
   heartbeatTimeoutMillis: string
-}
-
-/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO */
-export interface SystemSettingsNetworkDTO {
-  proxyUrl?: string | null
-  noProxyHosts: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming */
@@ -2906,7 +2918,7 @@ export interface SystemSettingsUpdateDTO {
   tool: SystemSettingsToolDTO
   aiRuntime: SystemSettingsAiRuntimeDTO
   environment: SystemSettingsEnvironmentDTO
-  network: SystemSettingsNetworkDTO
+  backendNetwork: SystemSettingsBackendNetworkDTO
   storageMedia: SystemSettingsStorageMediaDTO
   advanced: SystemSettingsAdvancedDTO
   expectedVersion: string
@@ -3213,11 +3225,6 @@ export interface ApiRoutes {
   'GET /api/platform/config-sync': {
     response: ConfigSyncInventoryDTO
   }
-  'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}': {
-    path: { operatingSystem: DaemonOperatingSystem }
-    response: string
-    responseType: 'text'
-  }
   'GET /api/platform/environments': {
     response: EnvironmentDTO[]
   }
@@ -3231,13 +3238,19 @@ export interface ApiRoutes {
   }
   'GET /api/platform/environments/{environmentId}/install-script': {
     path: { environmentId: string }
-    query: { code: string }
+    query: { code: string; operatingSystem: DaemonOperatingSystem }
     response: string
     responseType: 'text'
   }
   'GET /api/platform/environments/{environmentId}/runtime': {
     path: { environmentId: string }
     response: EnvironmentRuntimeStatusDTO
+  }
+  'GET /api/platform/environments/{environmentId}/uninstall-script': {
+    path: { environmentId: string }
+    query: { operatingSystem: DaemonOperatingSystem }
+    response: string
+    responseType: 'text'
   }
   'GET /api/platform/mcp-servers': {
     response: McpServerSummaryDTO[]
@@ -3627,9 +3640,9 @@ export interface ApiRoutes {
     body: AgentUpdateDTO
     response: AgentDTO
   }
-  'PUT /api/platform/environments/{environmentId}/install-settings': {
+  'PUT /api/platform/environments/{environmentId}': {
     path: { environmentId: string }
-    body: EnvironmentInstallConfigUpdateDTO
+    body: EnvironmentUpdateDTO
     response: EnvironmentDTO
   }
   'PUT /api/platform/mcp-servers/{name}': {
@@ -3685,6 +3698,6 @@ export interface ApiRoutes {
 
 export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
   'GET /api/harness/sessions/{sessionId}/files/download': 'blob',
-  'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}': 'text',
   'GET /api/platform/environments/{environmentId}/install-script': 'text',
+  'GET /api/platform/environments/{environmentId}/uninstall-script': 'text',
 }

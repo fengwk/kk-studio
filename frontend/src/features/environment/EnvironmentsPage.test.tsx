@@ -114,6 +114,7 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-1',
         name: 'local-dev',
+        daemonConfig: testDaemonConfig(),
         userName: 'dev-user',
         homeDirectory: '/home/dev',
         status: 'READY',
@@ -129,6 +130,7 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-2',
         name: 'stale-box',
+        daemonConfig: testDaemonConfig(),
         userName: 'ops-user',
         homeDirectory: '/srv/operations',
         status: 'READY',
@@ -144,6 +146,7 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-3',
         name: 'connecting-box',
+        daemonConfig: testDaemonConfig(),
         userName: null,
         homeDirectory: null,
         status: 'CONNECTING',

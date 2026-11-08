@@ -57,8 +57,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** 核心测试的内存基座：可控 fake control channel / lease store，以及握手与 protobuf 帧构造辅助。 */
 final class EnvironmentDaemonServerTestSupport {
@@ -506,8 +508,13 @@ final class EnvironmentDaemonServerTestSupport {
     Throwable readyNotificationFailure;
     Throwable updateNotificationFailure;
     RuntimeException settingsFailure;
+    volatile Consumer<EnvironmentId> configLookupHook;
 
     Fixture() {
+      this(Runnable::run);
+    }
+
+    Fixture(Executor configExecutor) {
       configs.put(ENVIRONMENT_ID, configSnapshot(ENVIRONMENT_ID, 0L));
       configs.put(OTHER_ENVIRONMENT_ID, configSnapshot(OTHER_ENVIRONMENT_ID, 0L));
       this.server =
@@ -558,10 +565,14 @@ final class EnvironmentDaemonServerTestSupport {
                 }
                 return settings.get();
               },
-              Runnable::run);
+              configExecutor);
     }
 
     private Optional<EnvironmentConfigSnapshot> findConfig(EnvironmentId environmentId) {
+      Consumer<EnvironmentId> hook = configLookupHook;
+      if (hook != null) {
+        hook.accept(environmentId);
+      }
       if (configLookupFailure != null) {
         throwUnchecked(configLookupFailure);
       }

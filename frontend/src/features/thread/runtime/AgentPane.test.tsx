@@ -1124,6 +1124,7 @@ describe('AgentPane orchestration', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID }, [{
       id: 'env-local-1',
       name: 'local',
+      daemonConfig: testDaemonConfig(),
       userName: null,
       homeDirectory: null,
       ready: true,

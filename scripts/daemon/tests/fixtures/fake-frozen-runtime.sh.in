@@ -21,8 +21,9 @@ NATIVE_FOREIGN='@NATIVE_FOREIGN@'
 CONFIG_MODE='@CONFIG_MODE@'
 PID_FILE='@PID_FILE@'
 
-# Mirrors the real schema: the bare config object is valid, an outer "daemon" wrapper and a
-# non-HTTP(S) studioUrl are rejected with the stable marker.
+# Mirrors the current schema: the bare {environmentId, version, daemonConfig} envelope is valid,
+# while an outer "daemon" wrapper, a legacy flat object and a non-HTTP(S) studioUrl are rejected
+# with the stable marker.
 check_config() {
   cfg=$1
   if [ ! -s "$cfg" ]; then exit 2; fi
@@ -34,9 +35,12 @@ check_config() {
     printf 'Daemon configuration is valid\n'
     exit 0
   fi
-  if ! @GREP@ -q '"studioUrl"[[:space:]]*:[[:space:]]*"http' "$cfg"; then
+  if ! @GREP@ -Eq '"environmentId"[[:space:]]*:[[:space:]]*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"' "$cfg" ||
+     ! @GREP@ -Eq '"version"[[:space:]]*:[[:space:]]*"(0|[1-9][0-9]*)"' "$cfg" ||
+     ! @GREP@ -Eq '"daemonConfig"[[:space:]]*:[[:space:]]*[{]' "$cfg" ||
+     ! @GREP@ -Eq '"studioUrl"[[:space:]]*:[[:space:]]*"http' "$cfg"; then
     if [ "$INVALID_REJECTED" = 1 ]; then
-      printf 'Invalid daemon configuration: daemon.studioUrl: must be an HTTP(S) origin\n' >&2
+      printf 'Invalid daemon configuration: daemon.environmentId: must be a canonical lowercase UUID\n' >&2
       exit 2
     fi
     printf 'Daemon configuration is valid\n'
