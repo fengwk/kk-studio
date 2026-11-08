@@ -5,10 +5,11 @@ Contract tests for scripts/daemon/install.ps1 on Windows PowerShell 5.1 and Powe
 
 .DESCRIPTION
 The tests never download a real release, never register a real Scheduled Task and never
-touch the real user profile. They build a tiny archive from a real node.exe (already on the
-runner) plus a stub daemon main.js, stub the network and the ScheduledTasks cmdlets, and
+touch the real user profile. They build tiny archives from a real node.exe (already on the
+runner) plus a stub daemon main.js, a behaviourally faithful lock-helper stand-in (atomic
+directory marker, holds stdin until release), stub network and ScheduledTasks cmdlets, and
 redirect managed paths to a private sandbox so install.ps1 exercises its real ownership/ACL,
-SHA256, --check-config preflight and atomic program-publication logic end to end.
+SHA256, JSON envelope, --check-config preflight and per-card publication logic end to end.
 #>
 
 Set-StrictMode -Version Latest
@@ -16,10 +17,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $installer = Join-Path $repoRoot "scripts\daemon\install.ps1"
-$releaseTag = "v1.0.14"
 $daemonVersion = "1.0.14"
-$asset = "kk-studio-daemon-$releaseTag-windows-amd64.tar.gz"
-$platform = "windows-amd64"
+$nextVersion = "1.0.15"
+$environmentId = "11111111-1111-4111-8111-111111111111"
+$secondEnvironmentId = "22222222-2222-4222-8222-222222222222"
 
 $script:Failures = 0
 $script:Checks = 0
@@ -47,6 +48,7 @@ function Assert-Equal {
 
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-ps-test-" + [Guid]::NewGuid().ToString("N"))
 $httpDir = Join-Path $sandbox "http"
+$lockLog = Join-Path $sandbox "lock.log"
 $profileMarker = [string] [char] 0x73AF + [string] [char] 0x5883 + [char]::ConvertFromUtf32(0x1F600)
 $profileDir = Join-Path $sandbox ("profile-" + $profileMarker)
 New-Item -ItemType Directory -Path $httpDir, $profileDir -Force | Out-Null
@@ -57,17 +59,60 @@ if ($null -eq $nodeCommand) {
     throw "a real node.exe is required on PATH for the fixture"
 }
 
-$stubMain = @'
+$fakeHelper = @'
+import fs from "node:fs"
+import path from "node:path"
+
+const [mode, directory, seconds] = process.argv.slice(2)
+const log = process.env.KK_TEST_LOCK_LOG
+const note = (value) => { if (log) { fs.appendFileSync(log, value + "\n") } }
+fs.mkdirSync(directory, { recursive: true })
+const marker = path.join(directory, ".fake-install-lock")
+if (mode === "hold") {
+  try { fs.mkdirSync(marker) } catch {
+    process.stderr.write("install operation lock is busy\n")
+    process.exit(75)
+  }
+  note("hold-start")
+  process.stdout.write("locked\n")
+  process.stdin.resume()
+  process.stdin.on("end", () => {
+    try { fs.rmdirSync(marker) } catch {}
+    note("hold-end")
+    process.exit(0)
+  })
+} else if (mode === "wait") {
+  note("wait-runtime-lock")
+  if (process.env.KK_TEST_DAEMON_LOCKED === "1") {
+    process.stderr.write("daemon runtime lock wait timed out\n")
+    process.exit(76)
+  }
+  process.exit(0)
+} else {
+  process.exit(2)
+}
+'@
+
+function New-FixtureArchive {
+    param([Parameter(Mandatory = $true)][string] $Version)
+    $assets = "kk-studio-daemon-v$Version-windows-amd64.tar.gz"
+    $staging = Join-Path $sandbox ("staging-" + $Version)
+    New-Item -ItemType Directory -Path (Join-Path $staging "runtime\code-server\lib") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $staging "runtime\code-server\out\node") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $staging "native") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $staging "node_modules\koffi") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $staging "node_modules\@koromix\koffi-win32-x64") -Force | Out-Null
+    $stubMain = @"
 import fs from "node:fs"
 const argv = process.argv.slice(2)
 if (argv[0] === "--version") {
-  process.stdout.write("kk-studio-daemon 1.0.14\n")
+  process.stdout.write("kk-studio-daemon $Version\n")
   process.exit(0)
 }
 if (argv[0] === "--check-config") {
-  const path = argv[1]
-  if (!path || !fs.existsSync(path)) { process.exit(2) }
-  const body = fs.readFileSync(path, "utf8")
+  const value = argv[1]
+  if (!value || !fs.existsSync(value)) { process.exit(2) }
+  const body = fs.readFileSync(value, "utf8")
   if (body.includes("INVALID") || /"daemon"\s*:/.test(body)) {
     process.stderr.write("Invalid daemon configuration: daemon.daemon: unknown field\n")
     process.exit(2)
@@ -76,29 +121,31 @@ if (argv[0] === "--check-config") {
   process.exit(0)
 }
 process.exit(3)
-'@
+"@
+    Set-Content -LiteralPath (Join-Path $staging "main.js") -Value $stubMain -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $staging "package.json") `
+        -Value ('{"name":"@kk-studio/daemon","version":"' + $Version + '","type":"module"}') -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $staging "delay.js") -Value "export {}" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $staging "native\lock-helper.js") -Value $fakeHelper -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $staging "node_modules\koffi\index.js") `
+        -Value "module.exports = {}" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $staging "node_modules\@koromix\koffi-win32-x64\index.js") `
+        -Value "module.exports = {}" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $staging "runtime\code-server\out\node\entry.js") `
+        -Value "// frozen entry" -Encoding ASCII
+    Copy-Item -LiteralPath $nodeCommand.Source `
+        -Destination (Join-Path $staging "runtime\code-server\lib\node.exe") -Force
+    $archivePath = Join-Path $httpDir $assets
+    tar.exe -czf $archivePath -C $staging .
+    if ($LASTEXITCODE -ne 0) { throw "failed to build the fixture archive" }
+    $digest = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    Set-Content -LiteralPath "$archivePath.sha256" -Value "$digest  $assets`n" -Encoding ASCII -NoNewline
+}
 
-$staging = Join-Path $sandbox "staging"
-New-Item -ItemType Directory -Path (Join-Path $staging "runtime\code-server\lib") -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $staging "main.js") -Value $stubMain -Encoding UTF8
-Set-Content -LiteralPath (Join-Path $staging "package.json") `
-    -Value ('{"name":"@kk-studio/daemon","version":"' + $daemonVersion + '","type":"module"}') -Encoding UTF8
-Copy-Item -LiteralPath $nodeCommand.Source `
-    -Destination (Join-Path $staging "runtime\code-server\lib\node.exe") -Force
-
-$archivePath = Join-Path $httpDir $asset
-tar.exe -czf $archivePath -C $staging .
-if ($LASTEXITCODE -ne 0) { throw "failed to build the fixture archive" }
-$digest = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
-Set-Content -LiteralPath "$archivePath.sha256" -Value "$digest  $asset`n" -Encoding ASCII -NoNewline
+New-FixtureArchive -Version $daemonVersion
+New-FixtureArchive -Version $nextVersion
 
 # --- network and ScheduledTasks stubs ------------------------------------------------------
-
-function Invoke-RestMethod {
-    param([Parameter(Mandatory = $true)][string] $Uri, $Headers, $Proxy, [switch] $NoProxy)
-    $script:NetworkCalls += $Uri
-    return [pscustomobject] @{ tag_name = $script:FixtureTag }
-}
 
 function Invoke-WebRequest {
     param(
@@ -153,8 +200,6 @@ function Get-ScheduledTaskInfo { param([string] $TaskName, [string] $TaskPath = 
     return [pscustomobject] @{ LastRunTime = Get-Date; LastTaskResult = 0; NextRunTime = Get-Date }
 }
 
-function Export-ScheduledTask { param([string] $TaskName, [string] $TaskPath = "\") return "<Task />" }
-
 function Start-ScheduledTask { param([string] $TaskName, [string] $TaskPath = "\")
     if ($script:Tasks.ContainsKey($TaskName)) { $script:Tasks[$TaskName].State = "Running" }
 }
@@ -169,22 +214,27 @@ function Unregister-ScheduledTask { param([string] $TaskName, [string] $TaskPath
 
 # --- harness -------------------------------------------------------------------------------
 
-$script:FixtureTag = $releaseTag
 $script:HttpDir = $httpDir
 $script:NetworkCalls = @()
 $script:NetworkProxies = @()
 $originalProfile = $env:USERPROFILE
+$originalLockLog = $env:KK_TEST_LOCK_LOG
+$originalLocked = $env:KK_TEST_DAEMON_LOCKED
 $env:USERPROFILE = $profileDir
+$env:KK_TEST_LOCK_LOG = $lockLog
+$env:KK_TEST_DAEMON_LOCKED = ""
 
 function New-Inputs {
     param(
-        [string] $Config = '{"studioUrl":"https://studio.example.com"}',
+        [string] $Environment = $environmentId,
+        [string] $Config,
         [string] $Token = "token-value"
     )
-    # Dot-sourcing help resets installer state; resolve the real SID again before input ACLs.
-    Initialize-HostContext
     $directory = Join-Path $sandbox ("inputs-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    if ([string]::IsNullOrEmpty($Config)) {
+        $Config = '{"environmentId":"' + $Environment + '","version":"0","daemonConfig":{"studioUrl":"https://studio.example.com"}}'
+    }
     $configPath = Join-Path $directory "daemon.json"
     $tokenPath = Join-Path $directory "daemon.token"
     Set-Content -LiteralPath $configPath -Value $Config -Encoding UTF8
@@ -206,21 +256,24 @@ function Import-Installer {
     $script:InstallerInitializeHostContext = ${function:Initialize-HostContext}
     function Initialize-HostContext {
         & $script:InstallerInitializeHostContext
-        # GetFolderPath(UserProfile) ignores USERPROFILE. Keep the real SID from the original
-        # initializer, then confine every managed path to this fixture sandbox.
+        # GetFolderPath(UserProfile) ignores USERPROFILE. Keep the real SID and the UUID-derived
+        # task name, then confine every managed path to this fixture sandbox.
         $script:HomePath = $profileDir
         $script:InstallRoot = Join-Path $profileDir ".kk-studio"
-        $script:InstalledLib = Join-Path $script:InstallRoot "lib"
+        $script:EnvironmentsRoot = Join-Path $script:InstallRoot "environments"
+        $script:EnvironmentRoot = Join-Path $script:EnvironmentsRoot $script:TargetEnvironmentId
+        $script:InstalledLib = Join-Path $script:EnvironmentRoot "lib"
         $script:InstalledNode = Join-Path $script:InstalledLib "runtime\code-server\lib\node.exe"
-        $script:InstalledConfig = Join-Path $script:InstallRoot "daemon.json"
-        $script:InstalledToken = Join-Path $script:InstallRoot "daemon.token"
+        $script:InstalledConfig = Join-Path $script:EnvironmentRoot "daemon.json"
+        $script:InstalledToken = Join-Path $script:EnvironmentRoot "daemon.token"
+        $script:WorkDirectory = Join-Path $script:EnvironmentRoot ".work"
+        $script:LastOperation = Join-Path $script:EnvironmentRoot "last-operation.json"
     }
 }
 
 function Invoke-Installer {
     param([hashtable] $Parameters)
     # Tasks survive across install, status, and uninstall. Dot-sourcing reinstalls the sandbox wrapper.
-    # The hashtable is the installer's named-parameter set, not a string[] of flag text.
     . Import-Installer -Parameters $Parameters
     return (Invoke-Main)
 }
@@ -238,6 +291,7 @@ fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
     $probePath = Join-Path $probeDir "argv-probe.js"
     $outputPath = Join-Path $probeDir "argv-probe.json"
     Set-Content -LiteralPath $probePath -Value $probe -Encoding ASCII
+
     $environment = [string] [char] 0x73AF + [string] [char] 0x5883
     $trailing = "C:\" + [string] [char] 0x5C3E + [string] [char] 0x968F + "\"
     $arguments = @(
@@ -277,10 +331,12 @@ fs.writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)), "utf8")
     }
 }
 
+function Get-CurrentTaskName {
+    return "kk-studio-daemon-$($script:CurrentSid)-$environmentId"
+}
+
 try {
     # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
-    # The original initializer resolves the real SID and does not write files; the wrapper then
-    # redirects every managed path into the sandbox before any input ACL or installation work.
     . Import-Installer -Parameters @{ Command = "help" }
     Initialize-HostContext
     Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
@@ -289,17 +345,16 @@ try {
     Assert-DirectArgumentRoundTrip
     Set-Content -LiteralPath (Join-Path $profileDir ".keep") -Value "keep" -Encoding ASCII
 
-    # Pure contract checks that do not touch the filesystem.
-    Assert-True -Condition ($installer -and (Test-Path -LiteralPath $installer)) -Message "installer exists"
-
     $pairs = New-Inputs
     $exit = Invoke-Installer -Parameters @{ Command = "help" }
     Assert-True -Condition ($exit -eq 0) -Message "help exits 0"
 
+    # Unknown parameters are rejected by the real binder before any work.
     $rejected = $false
     try {
         Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; UnknownOption = "unexpected"
+            Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+            ConfigFile = $pairs[0]; TokenFile = $pairs[1]; UnknownOption = "unexpected"
         } | Out-Null
     }
     catch {
@@ -307,128 +362,187 @@ try {
     }
     Assert-True -Condition $rejected -Message "unknown parameter is rejected"
 
-    # The real daemon.json is the bare config object; a wrapped "daemon" object must fail preflight.
-    $wrapped = New-Inputs -Config '{"daemon":{"studioUrl":"https://studio.example.com"}}'
-    $wrappedRejected = $false
+    # The old flat daemon.json must fail closed before any network access.
+    $flat = New-Inputs -Config '{"studioUrl":"https://studio.example.com"}'
+    $script:NetworkCalls = @()
+    $flatRejected = $false
     try {
         Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $wrapped[0]; TokenFile = $wrapped[1]
+            Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+            ConfigFile = $flat[0]; TokenFile = $flat[1]
         } | Out-Null
     }
     catch {
-        $wrappedRejected = $true
+        $flatRejected = $true
     }
-    Assert-True -Condition $wrappedRejected -Message "wrapped daemon object is rejected by preflight"
+    Assert-True -Condition ($flatRejected -and $script:NetworkCalls.Count -eq 0) -Message "flat config rejected before network"
 
-    # Full install through stubs.
+    # A config that belongs to another card is rejected after download and before stopping.
+    $foreign = New-Inputs -Environment $secondEnvironmentId
+    $foreignRejected = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+            ConfigFile = $foreign[0]; TokenFile = $foreign[1]
+        } | Out-Null
+    }
+    catch {
+        $foreignRejected = $true
+    }
+    Assert-True -Condition $foreignRejected -Message "another card configuration is rejected"
+
+    # Invalid daemonConfig is rejected by the release preflight.
+    $invalid = New-Inputs -Config ('{"environmentId":"' + $environmentId +
+        '","version":"0","daemonConfig":{"invalid":true,"studioUrl":"https://studio.example.com"}}')
+    $invalidRejected = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+            ConfigFile = $invalid[0]; TokenFile = $invalid[1]
+        } | Out-Null
+    }
+    catch {
+        $invalidRejected = $true
+    }
+    Assert-True -Condition $invalidRejected -Message "invalid daemonConfig rejected by preflight"
+
+    # Full install into the UUID-scoped layout.
     $pairs = New-Inputs
-    $exit = Invoke-Installer -Parameters @{
-        Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]
-    }
-    Assert-True -Condition ($exit -eq 0) -Message "install exits 0"
-
-    $sandboxInstallRoot = Join-Path $profileDir ".kk-studio"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib\main.js")) -Message "lib main.js published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib\runtime\code-server\lib\node.exe")) `
-        -Message "frozen node.exe published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.json")) -Message "config published"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.token")) -Message "token published"
-    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
-
-    # Exercise an explicit release through the real install and verify the private snapshot.
     $script:NetworkCalls = @()
     $exit = Invoke-Installer -Parameters @{
-        Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+        ConfigFile = $pairs[0]; TokenFile = $pairs[1]
     }
-    Assert-True -Condition ($exit -eq 0) -Message "explicit version install succeeds"
-    $base = "https://github.com/fengwk/kk-studio/releases/download/$releaseTag/$asset"
-    Assert-True -Condition ($script:NetworkCalls.Count -eq 2) -Message "explicit version performs exactly two downloads"
-    Assert-Equal -Actual $script:NetworkCalls[0] -Expected $base -Message "exact archive URL"
-    Assert-Equal -Actual $script:NetworkCalls[1] -Expected "$base.sha256" -Message "exact checksum URL"
-    foreach ($name in @("daemon.json", "daemon.token")) {
-        $source = if ($name -eq "daemon.json") { $pairs[0] } else { $pairs[1] }
-        Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $sandboxInstallRoot $name)))) `
-            -Expected ([Convert]::ToBase64String([IO.File]::ReadAllBytes($source))) -Message "$name preserved"
-    }
-    # Managed updates pass their proxy decision explicitly, including on PowerShell 5.1.
-    $oldMode = $env:KK_DAEMON_INSTALL_PROXY_ENV
-    $oldProxy = $env:HTTPS_PROXY
-    $oldNoProxy = $env:NO_PROXY
-    try {
-        $env:KK_DAEMON_INSTALL_PROXY_ENV = "1"
-        $env:HTTPS_PROXY = "http://127.0.0.1:8080"
-        $env:NO_PROXY = "localhost"
-        $script:NetworkProxies = @()
-        $exit = Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
-        }
-        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "proxy install succeeds"
-        foreach ($proxy in $script:NetworkProxies) {
-            Assert-Equal -Actual $proxy -Expected "http://127.0.0.1:8080" -Message "archive request uses managed proxy"
-        }
-        # A platform bypass applies to both the release host and its subdomains.
-        $env:NO_PROXY = "github.com"
-        $script:NetworkProxies = @()
-        $exit = Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
-        }
-        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "bypass install succeeds"
-        foreach ($proxy in $script:NetworkProxies) {
-            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "bypassed archive request is direct"
-        }
-        $env:HTTPS_PROXY = ""
-        $env:NO_PROXY = ""
-        $script:NetworkProxies = @()
-        $exit = Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
-        }
-        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "direct install succeeds"
-        foreach ($proxy in $script:NetworkProxies) {
-            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "direct archive request has no proxy"
-        }
-    }
-    finally {
-        $env:KK_DAEMON_INSTALL_PROXY_ENV = $oldMode
-        $env:HTTPS_PROXY = $oldProxy
-        $env:NO_PROXY = $oldNoProxy
-    }
-    foreach ($bad in @("", "../bad", ("a" * 65), "bad`n")) {
-        $script:NetworkCalls = @()
-        $rejected = $false
-        try {
-            Invoke-Installer -Parameters @{ Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $bad } | Out-Null
-        }
-        catch { $rejected = $true }
-        Assert-True -Condition ($rejected -and $script:NetworkCalls.Count -eq 0) -Message "invalid version rejected before network"
-    }
-    foreach ($command in @("help", "status", "uninstall")) {
-        $rejected = $false
-        try { Invoke-Installer -Parameters @{ Command = $command; Version = "1" } | Out-Null }
-        catch { $rejected = $true }
-        Assert-True -Condition $rejected -Message "$command rejects version"
-    }
-    $registered = @($script:Tasks.Values)[0]
-    $expectedConfig = Join-Path $sandboxInstallRoot "daemon.json"
-    $expectedArguments = '"main.js" "--config" "' + $expectedConfig + '"'
-    Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) `
-        -Message "task arguments are the quoted direct argv"
+    Assert-True -Condition ($exit -eq 0) -Message "install exits 0"
+    $envRoot = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $environmentId
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "lib\main.js")) -Message "lib main.js published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "lib\runtime\code-server\lib\node.exe")) `
+        -Message "frozen node.exe published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "daemon.json")) -Message "config published"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "daemon.token")) -Message "token published"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $envRoot ".work"))) -Message "work staging cleaned"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $profileDir ".kk-studio\backups"))) -Message "no backups directory"
+    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
+    $taskName = Get-CurrentTaskName
+    Assert-True -Condition ($script:Tasks.ContainsKey($taskName)) -Message "task name contains SID and UUID"
+    $registered = $script:Tasks[$taskName]
+    $expectedDescription = "Managed by scripts/daemon/install.ps1; ownerSid=$($script:CurrentSid); environmentId=$environmentId"
+    Assert-Equal -Actual $registered.Description -Expected $expectedDescription -Message "task ownership marker is exact"
+    $expectedArguments = '"main.js" "--config" "' + (Join-Path $envRoot "daemon.json") + '"'
+    Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) -Message "task arguments are the quoted direct argv"
     Assert-True -Condition (-not $registered.Action.Argument.Contains("token-value")) -Message "task arguments do not expose token"
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
+    $record = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
+    Assert-Equal -Actual ([string] $record.type) -Expected "install" -Message "last operation type install"
+    Assert-Equal -Actual ([string] $record.result) -Expected "succeeded" -Message "last operation succeeded"
+    Assert-True -Condition ((Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw).Length -le 4096) `
+        -Message "last operation stays bounded"
 
-    # status is read-only and reports Running. It must use the same sandbox wrapper as install.
-    $exit = Invoke-Installer -Parameters @{ Command = "status" }
+    # Two cards of the same user stay independent.
+    $secondPairs = New-Inputs -Environment $secondEnvironmentId
+    $exit = Invoke-Installer -Parameters @{
+        Command = "install"; EnvironmentId = $secondEnvironmentId; Version = $daemonVersion
+        ConfigFile = $secondPairs[0]; TokenFile = $secondPairs[1]
+    }
+    Assert-True -Condition ($exit -eq 0) -Message "second card installs independently"
+    $secondRoot = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $secondEnvironmentId
+    Assert-True -Condition ((Test-Path -LiteralPath (Join-Path $secondRoot "lib\main.js")) -and
+        (Test-Path -LiteralPath (Join-Path $envRoot "lib\main.js"))) -Message "both card programs exist"
+    Assert-True -Condition ($script:Tasks.Count -eq 2) -Message "two independent tasks are registered"
+
+    # update replaces only the program/task; config and token stay byte-identical.
+    $configBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))
+    $tokenBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.token")))
+    Set-Content -LiteralPath (Join-Path $envRoot "lib\old-marker") -Value "old" -Encoding ASCII
+    $script:NetworkCalls = @()
+    $exit = Invoke-Installer -Parameters @{
+        Command = "update"; EnvironmentId = $environmentId; Version = $nextVersion
+    }
+    Assert-True -Condition ($exit -eq 0) -Message "update exits 0"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $envRoot "lib\old-marker"))) -Message "program replaced"
+    Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))) `
+        -Expected $configBefore -Message "config unchanged by update"
+    Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.token")))) `
+        -Expected $tokenBefore -Message "token unchanged by update"
+    $record = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
+    Assert-Equal -Actual ([string] $record.type) -Expected "update" -Message "last operation type update"
+    Assert-Equal -Actual ([string] $record.targetVersion) -Expected $nextVersion -Message "update target version recorded"
+
+    # update refuses configuration options and never creates a missing installation.
+    $rejectedUpdate = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "update"; EnvironmentId = $environmentId; Version = $nextVersion
+            ConfigFile = $pairs[0]; TokenFile = $pairs[1]
+        } | Out-Null
+    }
+    catch {
+        $rejectedUpdate = $true
+    }
+    Assert-True -Condition $rejectedUpdate -Message "update rejects configuration options"
+    $missingUpdate = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "update"; EnvironmentId = "33333333-3333-4333-8333-333333333333"; Version = $nextVersion
+        } | Out-Null
+    }
+    catch {
+        $missingUpdate = $true
+    }
+    Assert-True -Condition $missingUpdate -Message "update requires an existing installation"
+
+    # A busy card fails without touching the program.
+    $busyId = "44444444-4444-4444-8444-444444444444"
+    $busyRoot = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $busyId
+    New-Item -ItemType Directory -Path $busyRoot -Force | Out-Null
+    Set-Acl -LiteralPath $busyRoot -AclObject (New-PrivateAcl -Directory)
+    New-Item -ItemType Directory -Path (Join-Path $busyRoot ".fake-install-lock") -Force | Out-Null
+    $busyPairs = New-Inputs -Environment $busyId
+    $busyRejected = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $busyId; Version = $daemonVersion
+            ConfigFile = $busyPairs[0]; TokenFile = $busyPairs[1]
+        } | Out-Null
+    }
+    catch {
+        $busyRejected = $true
+    }
+    Assert-True -Condition $busyRejected -Message "busy card is rejected"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $busyRoot "lib"))) -Message "busy card keeps no program"
+
+    # status is read-only and distinguishes Running from stopped.
+    $exit = Invoke-Installer -Parameters @{ Command = "status"; EnvironmentId = $environmentId }
     Assert-True -Condition ($exit -eq 0) -Message "status exits 0 when Running"
-    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "status preserves the registered task"
+    Assert-True -Condition ($script:Tasks.Count -eq 2) -Message "status preserves tasks"
+    $script:Tasks[$taskName].State = "Ready"
+    $exit = Invoke-Installer -Parameters @{ Command = "status"; EnvironmentId = $environmentId }
+    Assert-True -Condition ($exit -eq 3) -Message "status exits 3 when stopped"
 
-    # uninstall removes the program and task but keeps config/token.
-    $exit = Invoke-Installer -Parameters @{ Command = "uninstall" }
+    # uninstall removes only the target card and keeps its configuration and user data.
+    $skillDir = Join-Path $envRoot "skills\skill-a"
+    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $skillDir "SKILL.md") -Value "user data" -Encoding ASCII
+    $exit = Invoke-Installer -Parameters @{ Command = "uninstall"; EnvironmentId = $environmentId }
     Assert-True -Condition ($exit -eq 0) -Message "uninstall exits 0"
-    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "lib"))) -Message "lib removed"
-    Assert-True -Condition ($script:Tasks.Count -eq 0) -Message "task removed"
-    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $sandboxInstallRoot "daemon.json")) -Message "config preserved"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $envRoot "lib"))) -Message "only target lib removed"
+    Assert-True -Condition (-not $script:Tasks.ContainsKey($taskName)) -Message "only target task removed"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "daemon.json")) -Message "config preserved"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "daemon.token")) -Message "token preserved"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $skillDir "SKILL.md")) -Message "user data preserved"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $secondRoot "lib\main.js")) -Message "other card untouched"
+    $record = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
+    Assert-Equal -Actual ([string] $record.type) -Expected "uninstall" -Message "last operation type uninstall"
+
+    $exit = Invoke-Installer -Parameters @{ Command = "status"; EnvironmentId = $environmentId }
+    Assert-True -Condition ($exit -eq 1) -Message "status exits 1 after uninstall"
+    $exit = Invoke-Installer -Parameters @{ Command = "uninstall"; EnvironmentId = $environmentId }
+    Assert-True -Condition ($exit -eq 0) -Message "second uninstall is idempotent"
 }
 finally {
     $env:USERPROFILE = $originalProfile
+    $env:KK_TEST_LOCK_LOG = $originalLockLog
+    $env:KK_TEST_DAEMON_LOCKED = $originalLocked
     Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
 }
 

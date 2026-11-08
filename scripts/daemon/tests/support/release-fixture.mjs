@@ -240,6 +240,10 @@ fs.mkdirSync(path.join(prefix, 'node_modules'), { recursive: true })
 if (process.env.FAKE_NPM_OMIT_PREBUILT === '1' || targetOs === null || targetCpu === null) {
   process.exit(0)
 }
+// koffi 本体是普通生产依赖；安装锁 helper 从 node_modules/koffi 加载原生绑定。
+const koffiRoot = path.join(prefix, 'node_modules', 'koffi')
+fs.mkdirSync(koffiRoot, { recursive: true })
+fs.writeFileSync(path.join(koffiRoot, 'index.js'), 'module.exports = {}\\n')
 const prebuilt = path.join(prefix, 'node_modules', '@koromix', 'koffi-' + targetOs + '-' + targetCpu)
 fs.mkdirSync(prebuilt, { recursive: true })
 fs.writeFileSync(path.join(prebuilt, 'index.js'), 'module.exports = {}\\n')
@@ -291,6 +295,9 @@ export class ReleaseFixture {
     mkdirSync(path.join(daemon, 'node_modules'), { recursive: true })
     symlinkSync(path.join(REPOSITORY_ROOT, 'daemon/node_modules/tar'), path.join(daemon, 'node_modules/tar'), 'dir')
     writeText(path.join(daemon, 'dist', 'main.js'), MAIN_JS, 0o644)
+    // The release archive ships the native install-lock helper and its dependencies.
+    writeText(path.join(daemon, 'dist', 'delay.js'), 'export {}\n', 0o644)
+    writeText(path.join(daemon, 'dist', 'native', 'lock-helper.js'), 'export {}\n', 0o644)
     writeExecutable(path.join(daemon, 'ide-extension', 'extension.js'), 'module.exports = {}\n')
 
     const codeServer = {}
