@@ -176,11 +176,14 @@ $script:VerifyStableSeconds = 0
 
 function New-ScheduledTaskAction {
     param([string] $Execute, [string] $Argument, [string] $WorkingDirectory)
-    return [pscustomobject] @{ Execute = $Execute; Argument = $Argument; WorkingDirectory = $WorkingDirectory }
+    return [pscustomobject] @{ Execute = $Execute; Arguments = $Argument; WorkingDirectory = $WorkingDirectory }
 }
 
 function New-ScheduledTaskTrigger { param([switch] $AtLogOn, [string] $User) return "trigger" }
-function New-ScheduledTaskPrincipal { param([string] $UserId, $LogonType, $RunLevel) return "principal" }
+function New-ScheduledTaskPrincipal {
+    param([string] $UserId, $LogonType, $RunLevel)
+    return [pscustomobject] @{ UserId = $UserId; LogonType = $LogonType; RunLevel = $RunLevel }
+}
 function New-ScheduledTaskSettingsSet {
     param($ExecutionTimeLimit, [switch] $AllowStartIfOnBatteries, [switch] $DontStopIfGoingOnBatteries,
         $MultipleInstances, [int] $RestartCount, $RestartInterval)
@@ -189,7 +192,71 @@ function New-ScheduledTaskSettingsSet {
 
 function New-ScheduledTask {
     param($Action, $Trigger, $Principal, $Settings, [string] $Description)
-    return [pscustomobject] @{ TaskPath = "\"; TaskName = $script:TaskName; State = "Ready"; Description = $Description; Action = $Action }
+    return [pscustomobject] @{
+        TaskPath = "\"; TaskName = $script:TaskName; State = "Ready"; Description = $Description
+        Actions = @($Action); Principal = $Principal; Triggers = @($Trigger); Settings = $Settings
+    }
+}
+
+function New-ControlledTask {
+    param(
+        [Parameter(Mandatory = $true)][string] $Environment,
+        [Parameter(Mandatory = $true)][string] $PrincipalUserId,
+        [int] $ActionCount = 1
+    )
+    $root = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $Environment
+    $lib = Join-Path $root "lib"
+    $node = Join-Path $lib "runtime\code-server\lib\node.exe"
+    $config = Join-Path $root "daemon.json"
+    $action = New-ScheduledTaskAction -Execute $node `
+        -Argument ('"main.js" "--config" "' + $config + '"') -WorkingDirectory $lib
+    $actions = @($action)
+    if ($ActionCount -gt 1) { $actions = @($action, $action) }
+    $principal = New-ScheduledTaskPrincipal -UserId $PrincipalUserId `
+        -LogonType Interactive -RunLevel Limited
+    $description = "Managed by scripts/daemon/install.ps1; ownerSid=$($script:CurrentSid); environmentId=$Environment"
+    $task = New-ScheduledTask -Action $actions -Trigger "trigger" `
+        -Principal $principal -Settings "settings" -Description $description
+    $task.TaskName = "kk-studio-daemon-$($script:CurrentSid)-$Environment"
+    return $task
+}
+
+function Assert-ControlledTaskRejected {
+    param(
+        [Parameter(Mandatory = $true)][string] $Environment,
+        [Parameter(Mandatory = $true)][string] $PrincipalUserId,
+        [Parameter(Mandatory = $true)][int] $ActionCount,
+        [Parameter(Mandatory = $true)][string] $Label
+    )
+    $root = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $Environment
+    $task = New-ControlledTask -Environment $Environment `
+        -PrincipalUserId $PrincipalUserId -ActionCount $ActionCount
+    $taskName = $task.TaskName
+    $script:Tasks[$taskName] = $task
+    $pairs = New-Inputs -Environment $Environment
+    $script:NetworkCalls = @()
+    $rejected = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $Environment; Version = $daemonVersion
+            ConfigFile = $pairs[0]; TokenFile = $pairs[1]
+        } | Out-Null
+    }
+    catch {
+        $rejected = $true
+    }
+    Assert-True -Condition $rejected -Message "$Label task is rejected"
+    Assert-True -Condition ($script:Tasks.ContainsKey($taskName)) -Message "$Label task is not replaced"
+    Assert-Equal -Actual ([string] $script:Tasks[$taskName].Description) -Expected $task.Description `
+        -Message "$Label task description is unchanged"
+    Assert-True -Condition (@($script:Tasks[$taskName].Actions).Count -eq $ActionCount) `
+        -Message "$Label task actions are unchanged"
+    Assert-Equal -Actual ([string] $script:Tasks[$taskName].Principal.UserId) `
+        -Expected ([string] $task.Principal.UserId) -Message "$Label task principal is unchanged"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $root "lib"))) `
+        -Message "$Label task receives no program"
+    Assert-True -Condition ($script:NetworkCalls.Count -eq 0) -Message "$Label task is rejected before network"
+    $script:Tasks.Remove($taskName) | Out-Null
 }
 
 function Register-ScheduledTask {
@@ -533,11 +600,18 @@ try {
     Assert-True -Condition ($script:Tasks.ContainsKey($taskName)) -Message "task name contains SID and UUID"
     $registered = $script:Tasks[$taskName]
     $expectedDescription = "Managed by scripts/daemon/install.ps1; ownerSid=$($script:CurrentSid); environmentId=$environmentId"
+    Assert-Equal -Actual $registered.TaskName -Expected $taskName -Message "task name is exact"
     Assert-Equal -Actual $registered.Description -Expected $expectedDescription -Message "task ownership marker is exact"
+    Assert-True -Condition (@($registered.Actions).Count -eq 1) -Message "task has exactly one action"
+    $registeredAction = @($registered.Actions)[0]
     $expectedArguments = '"main.js" "--config" "' + (Join-Path $envRoot "daemon.json") + '"'
-    Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) -Message "task arguments are the quoted direct argv"
-    Assert-True -Condition (-not $registered.Action.Argument.Contains("token-value")) -Message "task arguments do not expose token"
-    Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
+    Assert-True -Condition ($registeredAction.Arguments -ceq $expectedArguments) -Message "task arguments are the quoted direct argv"
+    Assert-True -Condition (-not $registeredAction.Arguments.Contains("token-value")) -Message "task arguments do not expose token"
+    Assert-Contains -Haystack $registeredAction.Execute -Needle "node.exe" -Message "task runs node.exe"
+    Assert-Equal -Actual $registeredAction.WorkingDirectory -Expected (Join-Path $envRoot "lib") `
+        -Message "task working directory is the card lib"
+    Assert-Equal -Actual ([string] $registered.Principal.UserId) -Expected $script:CurrentSid `
+        -Message "task principal is the current user"
     $record = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
     Assert-Equal -Actual ([string] $record.type) -Expected "install" -Message "last operation type install"
     Assert-Equal -Actual ([string] $record.result) -Expected "succeeded" -Message "last operation succeeded"
@@ -555,7 +629,8 @@ try {
     $oldMarker = Join-Path $envRoot "lib\stage-old-marker"
     Set-Content -LiteralPath $oldMarker -Value "old" -Encoding ASCII
     $taskBeforeStageFailure = $script:Tasks[$taskName]
-    $taskActionBeforeStageFailure = [string] $taskBeforeStageFailure.Action.Argument
+    $taskActionsBeforeStageFailure = @($taskBeforeStageFailure.Actions)
+    $taskActionBeforeStageFailure = [string] $taskActionsBeforeStageFailure[0].Arguments
     $taskDescriptionBeforeStageFailure = [string] $taskBeforeStageFailure.Description
     $taskBeforeStageFailure.State = "Running"
     $replacementConfig = '{"environmentId":"' + $environmentId +
@@ -594,9 +669,10 @@ try {
         -Expected $tokenBeforeStageFailure -Message "stage failure does not write token"
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "stage failure leaves one task"
     $taskAfterStageFailure = $script:Tasks[$taskName]
+    $taskActionsAfterStageFailure = @($taskAfterStageFailure.Actions)
     Assert-Equal -Actual ([string] $taskAfterStageFailure.State) -Expected "Running" `
         -Message "stage failure does not stop the old service"
-    Assert-Equal -Actual ([string] $taskAfterStageFailure.Action.Argument) -Expected $taskActionBeforeStageFailure `
+    Assert-Equal -Actual ([string] $taskActionsAfterStageFailure[0].Arguments) -Expected $taskActionBeforeStageFailure `
         -Message "stage failure does not replace the task action"
     Assert-Equal -Actual ([string] $taskAfterStageFailure.Description) -Expected $taskDescriptionBeforeStageFailure `
         -Message "stage failure does not replace the task definition"
@@ -606,6 +682,12 @@ try {
     Assert-Equal -Actual ([string] $stageRecord.result) -Expected "failed" -Message "stage failure is recorded"
     Assert-Equal -Actual ([string] $stageRecord.phase) -Expected "stage" -Message "stage phase is recorded"
     Assert-Equal -Actual ([string] $stageRecord.errorCode) -Expected "stage" -Message "stage error code is recorded"
+
+    # A same-name task owned by another principal or carrying multiple actions is not ours.
+    Assert-ControlledTaskRejected -Environment "77777777-7777-4777-8777-777777777777" `
+        -PrincipalUserId "S-1-5-18" -ActionCount 1 -Label "other principal"
+    Assert-ControlledTaskRejected -Environment "88888888-8888-4888-8888-888888888888" `
+        -PrincipalUserId $script:CurrentSid -ActionCount 2 -Label "multiple actions"
 
     # Two cards of the same user stay independent.
     $secondPairs = New-Inputs -Environment $secondEnvironmentId

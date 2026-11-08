@@ -637,28 +637,51 @@ function Find-DaemonTask {
 function Assert-ManagedTask {
     param([Parameter(Mandatory = $true)] $Task)
     # 所有权同时核对当前用户、卡片 UUID（精确描述）与本卡片的受管程序/配置路径；
-    # 同名但指向其它程序的任务一律拒绝，且绝不改写它。
-    $actions = $null
-    $property = $Task.PSObject.Properties['Actions']
-    if ($null -ne $property) {
-        $actions = $property.Value
+    # 同名但指向其它程序的任务一律拒绝，且绝不改写它。真实 CIM 任务只有 Actions 数组，
+    # 必须恰好一项，Principal.UserId 也必须解析为当前用户 SID。
+    $actions = @()
+    $actionsProperty = $Task.PSObject.Properties['Actions']
+    if ($null -ne $actionsProperty -and $null -ne $actionsProperty.Value) {
+        $actions = @($actionsProperty.Value)
     }
-    $action = $null
-    if ($null -ne $actions -and @($actions).Count -gt 0) {
-        $action = @($actions)[0]
-    }
-    else {
-        $single = $Task.PSObject.Properties['Action']
-        if ($null -ne $single) { $action = $single.Value }
-    }
-    $foreign = $Task.Description -ne $script:TaskDescription
+    $foreign = $Task.TaskName -ne $script:TaskName -or
+        $Task.Description -ne $script:TaskDescription
     if (-not $foreign) {
-        if ($null -eq $action -or
-            [string] $action.Execute -notlike "*$($script:InstalledNode)" -or
-            [string] $action.Arguments -notlike "*main.js*" -or
-            [string] $action.Arguments -notlike "*$($script:InstalledConfig)*") {
+        if ($actions.Count -ne 1 -or $null -eq $actions[0]) {
             $foreign = $true
         }
+        else {
+            $action = $actions[0]
+            $execute = [string] $action.Execute
+            $arguments = [string] $action.Arguments
+            $workingDirectory = [string] $action.WorkingDirectory
+            if ($execute.IndexOf($script:InstalledNode, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+                $arguments.IndexOf("main.js", [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+                $arguments.IndexOf($script:InstalledConfig, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+                -not $workingDirectory.Equals($script:InstalledLib, [StringComparison]::OrdinalIgnoreCase)) {
+                $foreign = $true
+            }
+        }
+    }
+    if (-not $foreign) {
+        $principal = $null
+        $principalProperty = $Task.PSObject.Properties['Principal']
+        if ($null -ne $principalProperty) { $principal = $principalProperty.Value }
+        $principalUserId = $null
+        if ($null -ne $principal) {
+            $userIdProperty = $principal.PSObject.Properties['UserId']
+            if ($null -ne $userIdProperty) { $principalUserId = [string] $userIdProperty.Value }
+        }
+        $principalSid = $null
+        if (-not [string]::IsNullOrEmpty($principalUserId)) {
+            try {
+                $principalSid = Convert-AccountNameToSid -AccountName $principalUserId
+            }
+            catch {
+                $principalSid = $null
+            }
+        }
+        if ($principalSid -ne $script:CurrentSid) { $foreign = $true }
     }
     if ($foreign) {
         $name = ConvertTo-PowerShellLiteral -Value $script:TaskName
