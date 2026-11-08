@@ -4,6 +4,7 @@ import { problemError } from './fixtures/problem.mjs'
 
 import {
   assertExpiresNearFiveMinutes,
+  assertUninstallScript,
 } from '../cases/environment-install-config.mjs'
 import {
   assertDaemonConfig,
@@ -127,8 +128,10 @@ function installScript(token, envelope) {
   ].join('\n')
 }
 
-function uninstallScript(environmentId) {
-  return `bash "$stage/install.sh" uninstall --environment-id '${environmentId}'\n`
+function uninstallScript(environmentId, operatingSystem) {
+  return operatingSystem === 'windows'
+    ? `& powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Command uninstall -EnvironmentId '${environmentId}'\n`
+    : `bash "$stage/install.sh" uninstall --environment-id '${environmentId}'\n`
 }
 
 test('environment install-script case is a free L1 matrix case using card UUID and OS parameter', () => {
@@ -162,6 +165,7 @@ test('environment install-script case checks code, headers, local cache envelope
   const invalidated = new Map()
   let deleted = false
   const calls = []
+  const uninstallOperatingSystems = []
   const secretWrites = []
 
   const card = () => ({ id: environmentId, name: 'fixture', note, daemonConfig: saved, version })
@@ -241,10 +245,12 @@ test('environment install-script case checks code, headers, local cache envelope
         }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=linux`) {
-        return { json: uninstallScript(environmentId), headers: scriptHeaders() }
+        uninstallOperatingSystems.push('linux')
+        return { json: uninstallScript(environmentId, 'linux'), headers: scriptHeaders() }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=windows`) {
-        return { json: uninstallScript(environmentId), headers: scriptHeaders() }
+        uninstallOperatingSystems.push('windows')
+        return { json: uninstallScript(environmentId, 'windows'), headers: scriptHeaders() }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=solaris`) {
         throw problemError(400, 'validation', 'operatingSystem must be linux, macos or windows', path)
@@ -269,6 +275,7 @@ test('environment install-script case checks code, headers, local cache envelope
   assert.deepEqual(secretWrites, [], 'case must not write script, token or code artifacts')
   assert.ok(calls.includes(`GET /api/platform/environments/${environmentId}/uninstall-script`))
   assert.equal(calls.filter((call) => call.endsWith('/uninstall-script')).length, 3)
+  assert.deepEqual(uninstallOperatingSystems, ['linux', 'windows'])
   assert.equal(calls.filter((call) => call.endsWith('/install-codes')).length, 5)
   assert.equal(
     calls.filter((call) => call === `GET /api/platform/environments/${environmentId}/install-script`).length,
@@ -276,6 +283,46 @@ test('environment install-script case checks code, headers, local cache envelope
     'case must redeem twice and reject missing/invalid OS, missing, tampered, consumed, replaced and rotated codes',
   )
   assert.ok(!calls.some((call) => call.includes('spawn') || call.includes('exec')))
+})
+
+test('uninstall assertion requires the real per-OS CLI, exact card UUID and no secrets', () => {
+  // 测试意图：生产脚本 Unix 用 --environment-id、Windows 用 -EnvironmentId，均以单引号携带 canonical UUID；
+  // 断言必须按 OS 精确匹配真实 CLI，不能把 Windows 脚本当 Unix 放行或退化为只含 uninstall。
+  const environmentId = '00000000-0000-4000-8000-0000000000ab'
+  const secrets = ['registration-token', 'e2e environment note', 'http://127.0.0.1:18081']
+  const options = { environmentId, secrets }
+  const unix = uninstallScript(environmentId, 'linux')
+  const windows = uninstallScript(environmentId, 'windows')
+
+  assert.doesNotThrow(() => assertUninstallScript(unix, { ...options, operatingSystem: 'linux' }))
+  assert.doesNotThrow(() => assertUninstallScript(windows, { ...options, operatingSystem: 'windows' }))
+  assert.throws(
+    () => assertUninstallScript(unix, { ...options, operatingSystem: 'windows' }),
+    /windows uninstall action with card UUID/,
+  )
+  assert.throws(
+    () => assertUninstallScript(windows, { ...options, operatingSystem: 'linux' }),
+    /linux uninstall action with card UUID/,
+  )
+  assert.throws(
+    () => assertUninstallScript('bash install.sh uninstall\n', { ...options, operatingSystem: 'linux' }),
+    /linux uninstall action with card UUID/,
+  )
+  assert.throws(
+    () => assertUninstallScript(
+      uninstallScript('00000000-0000-4000-8000-0000000000cd', 'linux'),
+      { ...options, operatingSystem: 'linux' },
+    ),
+    /linux uninstall action with card UUID/,
+  )
+  assert.throws(
+    () => assertUninstallScript(`${unix}echo registration-token\n`, { ...options, operatingSystem: 'linux' }),
+    /environment token, note or saved config/,
+  )
+  assert.throws(
+    () => assertUninstallScript(`${windows}echo studioUrl\n`, { ...options, operatingSystem: 'windows' }),
+    /saved config field/,
+  )
 })
 
 for (const failure of ['http', 'timeout']) {

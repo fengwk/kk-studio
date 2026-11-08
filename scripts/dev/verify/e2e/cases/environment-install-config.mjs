@@ -197,10 +197,17 @@ function assertInstallScript(
   return token
 }
 
-function assertUninstallScript(script, { environmentId, secrets }) {
+export function assertUninstallScript(script, { environmentId, secrets, operatingSystem }) {
   assert(typeof script === 'string' && script.length > 0, 'uninstall script must be non-empty text')
   assert(!script.trim().startsWith('{'), 'uninstall script must not be a Result envelope')
-  assertScriptContains(script, 'uninstall --environment-id', 'uninstall action')
+  assert(
+    operatingSystem === 'linux' || operatingSystem === 'macos' || operatingSystem === 'windows',
+    `unsupported uninstall operatingSystem: ${operatingSystem}`,
+  )
+  const action = operatingSystem === 'windows'
+    ? `& powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Command uninstall -EnvironmentId '${environmentId}'`
+    : `bash "$stage/install.sh" uninstall --environment-id '${environmentId}'`
+  assertScriptContains(script, action, `${operatingSystem} uninstall action with card UUID`)
   assertScriptContains(script, environmentId, 'uninstall card UUID')
   for (const secret of secrets) {
     assertScriptOmits(script, secret, 'environment token, note or saved config')
@@ -526,7 +533,7 @@ registerCase({
           String(headerValue(uninstallHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
           'uninstall download must set nosniff',
         )
-        assertUninstallScript(uninstall, { environmentId, secrets })
+        assertUninstallScript(uninstall, { environmentId, secrets, operatingSystem })
       }
       await expectHttpError(
         () => ctx.call('GET', `${environmentPath}/uninstall-script?operatingSystem=solaris`),

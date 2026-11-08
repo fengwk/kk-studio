@@ -26,6 +26,7 @@ import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { encodePathTail } from './lib/fixtures.mjs'
 import { listChats } from './lib/harness.mjs'
+import { ENVIRONMENT_CARD_ACTIONS } from './ui/environment-actions.mjs'
 import {
   assertReadOnlyZeroFooter,
   waitForSettledAssistantText,
@@ -562,16 +563,12 @@ async function main(argv) {
     assert(await environmentCards.count() > 0, 'environments page has no cards')
     for (const card of await environmentCards.all()) {
       const actions = card.locator('.resource-card-actions button')
-      // 环境卡能力集不得缺失或重复。
-      assert(await actions.count() === 6, 'environment card must expose Install, Uninstall, Manage, Update Daemon, Rotate Token and Delete')
-      for (const [name, pattern] of [
-        ['Install', /安装|Install/],
-        ['Uninstall', /卸载|Uninstall/],
-        ['Manage', /管理|Manage/],
-        ['Update Daemon', /更新 Daemon|Update Daemon/],
-        ['Rotate Token', /重新生成 Token|Rotate Token/],
-        ['Delete', /删除|Delete/],
-      ]) {
+      // 环境卡能力集不得缺失或重复：安装、卸载、编辑、管理、更新、轮换 Token、删除。
+      assert(
+        await actions.count() === ENVIRONMENT_CARD_ACTIONS.length,
+        `environment card must expose exactly seven actions: ${ENVIRONMENT_CARD_ACTIONS.map(([name]) => name).join(', ')}`,
+      )
+      for (const [name, pattern] of ENVIRONMENT_CARD_ACTIONS) {
         assert(
           await actions.filter({ hasText: pattern }).count() === 1,
           `environment card must expose exactly one ${name} action`,

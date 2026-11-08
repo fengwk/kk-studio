@@ -30,11 +30,8 @@ export const TEST_ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
  */
 const privateTestRoot = await ensurePrivateDirectory(mkdtempSync(join(tmpdir(), 'kk-daemon-private-')))
 process.once('exit', () => {
-  try {
-    rmSync(privateTestRoot, { recursive: true, force: true })
-  } catch {
-    // 进程退出阶段尽力清理；失败不改写测试结果。
-  }
+  // 清理失败必须使测试进程失败，不能把未释放的夹具目录当成成功。
+  rmSync(privateTestRoot, { recursive: true, force: true })
 })
 
 /** 在私有测试根下创建真实 owner-only 语义的新目录。 */
