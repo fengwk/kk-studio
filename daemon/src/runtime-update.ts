@@ -247,8 +247,9 @@ async function executeUpdateAttempt(
 export interface UpdateRuntimeOptions {
   update: UpdatePort | null
   ide: IdeService | null
-  config: DaemonConfig
+  config(): DaemonConfig
   daemonVersion: string
+  status: RuntimeStatusTracker
   outbound: OutboundControl
   /** 普通/恢复执行及其拥有的上传收尾尚未结束。 */
   hasProtectedExecutions(): boolean
@@ -269,7 +270,7 @@ export class UpdateRuntime {
   private active: ActiveUpdate | null = null
 
   constructor(private readonly options: UpdateRuntimeOptions) {
-    this.status = new RuntimeStatusTracker(options.daemonVersion)
+    this.status = options.status
   }
 
   get configured(): boolean {
@@ -390,7 +391,7 @@ export class UpdateRuntime {
             command,
             update,
             this.options.ide,
-            this.options.config,
+            this.options.config(),
             (progress) => this.reportProgress(active, progress),
           )
     active.controller = null

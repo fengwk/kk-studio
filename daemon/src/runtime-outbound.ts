@@ -2,7 +2,7 @@ import { create } from '@bufbuild/protobuf'
 
 import type {
   Envelope,
-  EnvironmentInfo,
+  HostInfo,
   IdeResult,
   Progress,
   RuntimeSnapshot,
@@ -36,7 +36,7 @@ export class OutboundControl {
   constructor(
     private readonly connection: ConnectionLifecycle,
     private readonly daemonVersion: string,
-    private readonly environment: EnvironmentInfo,
+    private readonly environment: HostInfo,
   ) {}
 
   get environmentId(): string | null {
@@ -51,6 +51,11 @@ export class OutboundControl {
   /** READY 且已绑定：需要就绪状态的出站帧使用的门禁。 */
   get canSend(): boolean {
     return this.isReady && this.boundEnvironmentId !== null
+  }
+
+  /** 已完成 SETTINGS scope 绑定；CONNECTING 阶段允许的帧使用。 */
+  get isBound(): boolean {
+    return this.boundEnvironmentId !== null
   }
 
   bind(environmentId: string): void {
@@ -72,7 +77,7 @@ export class OutboundControl {
           case: 'ready',
           value: create(ReadySchema, {
             daemonVersion: this.daemonVersion,
-            environment: this.environment,
+            hostInfo: this.environment,
             runtimeStatus,
           }),
         },
@@ -81,6 +86,9 @@ export class OutboundControl {
   }
 
   sendHeartbeat(runtimeStatus: RuntimeSnapshot, ideLeaseRound: bigint | undefined): boolean {
+    if (!this.isBound) {
+      return false
+    }
     return this.send(
       create(EnvelopeSchema, {
         messageType: MessageType.HEARTBEAT,
@@ -188,7 +196,7 @@ export class OutboundControl {
   }
 
   sendRuntimeStatus(runtimeStatus: RuntimeSnapshot): boolean {
-    if (!this.canSend) {
+    if (!this.isBound) {
       return false
     }
     return this.send(

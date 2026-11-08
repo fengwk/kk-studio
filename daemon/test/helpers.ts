@@ -17,11 +17,22 @@ import {
   type Envelope,
 } from '../src/generated/control_pb.js'
 
-/** 创建一个 owner-only 的临时 daemon 根，含 daemon.json 与 daemon.token。 */
+/** 测试卡片的固定 canonical UUID。 */
+export const TEST_ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
+
+/** 创建一个 owner-only 的临时 daemon 根，含新结构 daemon.json 与 daemon.token。 */
 export function createDaemonRoot(token = 'test-registration-token'): { root: string; configPath: string } {
   const root = mkdtempSync(join(tmpdir(), 'kk-daemon-test-'))
   const configPath = join(root, 'daemon.json')
-  writeFileSync(configPath, JSON.stringify({ studioUrl: 'https://studio.example.com' }), 'utf8')
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      environmentId: TEST_ENVIRONMENT_ID,
+      version: '0',
+      daemonConfig: { studioUrl: 'https://studio.example.com' },
+    }),
+    'utf8',
+  )
   chmodSync(configPath, 0o600)
   const tokenPath = join(root, 'daemon.token')
   writeFileSync(tokenPath, token, 'utf8')
@@ -32,14 +43,17 @@ export function createDaemonRoot(token = 'test-registration-token'): { root: str
 export function testConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   const { root, configPath } = createDaemonRoot()
   return {
+    environmentId: TEST_ENVIRONMENT_ID,
+    configVersion: 0n,
     configPath,
     dataDir: root,
     tokenPath: join(root, 'daemon.token'),
     studioUrl: 'https://studio.example.com',
     gatewayUri: 'wss://studio.example.com/ws/daemon',
     bashExecutable: 'bash',
-    note: null,
+    bashExecutableSetting: null,
     lsp: {},
+    proxyUrl: null,
     distributionDir: root,
     ...overrides,
   }

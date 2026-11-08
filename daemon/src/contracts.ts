@@ -3,15 +3,36 @@ import type { Readable, Writable } from 'node:stream'
 import type { IdeLease } from './generated/control_pb.js'
 
 /** Runtime boundaries shared by capability, native process and transport implementations. */
+
+/** 卡片中可热编辑的完整 Daemon 配置；每次下发/缓存都是完整快照。 */
+export interface DaemonConfiguration {
+  studioUrl: string
+  /** 原始配置值；null 表示使用宿主 PATH 中的 bash。 */
+  bashExecutable: string | null
+  lsp: Record<string, LspServerConfig>
+  proxyUrl: string | null
+}
+
+/**
+ * 本进程当前已应用配置的执行上下文。
+ *
+ * <p>安装目录、凭证路径与 distribution 目录是启动即固定的事实；studioUrl/proxyUrl/bash/lsp 随控制通道热更新，
+ * 每次切换发布一个新的不可变对象。environmentId 是本进程唯一绑定的卡片身份。
+ */
 export interface DaemonConfig {
+  environmentId: string
+  configVersion: bigint
   configPath: string
   dataDir: string
   tokenPath: string
   studioUrl: string
   gatewayUri: string
-  bashExecutable: string
-  note: string | null
+  /** 已解析的 bash 可执行文件；未解析成功时为 null，候选配置不会发布。 */
+  bashExecutable: string | null
+  /** 配置中的原始 bash 值，用于持久化与 wire 快照。 */
+  bashExecutableSetting: string | null
   lsp: Record<string, LspServerConfig>
+  proxyUrl: string | null
   distributionDir: string
 }
 

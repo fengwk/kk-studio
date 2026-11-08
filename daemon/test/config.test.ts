@@ -6,17 +6,22 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DAEMON_VERSION,
+  EnvironmentConfigurationError,
   checkConfig,
   invalidConfigurationLine,
   loadDaemonConfig,
+  parseDaemonConfiguration,
   printInfoCommand,
   readRegistrationToken,
-  validateDirectArgs,
+  resolveDaemonConfiguration,
   resolveDistributionDir,
   resolveExecutable,
+  validateDirectArgs,
 } from '../src/config.js'
 import { currentPlatformKey } from '../src/release.js'
 import { createDaemonRoot } from './helpers.js'
+
+const ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
 
 function writeConfig(root: string, config: unknown): string {
   const path = join(root, 'daemon.json')
@@ -25,27 +30,43 @@ function writeConfig(root: string, config: unknown): string {
   return path
 }
 
+function document(
+  daemonConfig: Record<string, unknown> = { studioUrl: 'https://a.example.com' },
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    environmentId: ENVIRONMENT_ID,
+    version: '4',
+    daemonConfig,
+    ...overrides,
+  }
+}
+
 function tokenPath(root: string): string {
   return join(root, 'daemon.token')
 }
 
 describe('loadDaemonConfig', () => {
-  it('loads a valid config and derives token/data/gateway paths', () => {
+  it('loads the canonical environment snapshot and derives token/data/gateway paths', () => {
     const { root, configPath } = createDaemonRoot()
     const config = loadDaemonConfig(configPath, root)
     expect(config.configPath).toBe(configPath)
     expect(config.dataDir).toBe(root)
     expect(config.tokenPath).toBe(tokenPath(root))
+    expect(config.environmentId).toBe(ENVIRONMENT_ID)
+    expect(config.configVersion).toBe(0n)
     expect(config.studioUrl).toBe('https://studio.example.com')
     expect(config.gatewayUri).toBe('wss://studio.example.com/ws/daemon')
     expect(config.distributionDir).toBe(root)
-    expect(config.note).toBeNull()
+    expect(config.bashExecutableSetting).toBeNull()
+    expect(config.bashExecutable).toBe(resolveExecutable('bash'))
+    expect(config.proxyUrl).toBeNull()
     expect(config.lsp).toEqual({})
   })
 
   it('maps http studio urls to ws and normalizes the origin', () => {
     const { root } = createDaemonRoot()
-    const configPath = writeConfig(root, { studioUrl: 'http://127.0.0.1:8080/' })
+    const configPath = writeConfig(root, document({ studioUrl: 'http://127.0.0.1:8080/' }))
     const config = loadDaemonConfig(configPath)
     expect(config.studioUrl).toBe('http://127.0.0.1:8080')
     expect(config.gatewayUri).toBe('ws://127.0.0.1:8080/ws/daemon')
@@ -61,38 +82,103 @@ describe('loadDaemonConfig', () => {
       'not-a-url',
       '',
     ]) {
-      const configPath = writeConfig(root, { studioUrl })
+      const configPath = writeConfig(root, document({ studioUrl }))
       expect(() => loadDaemonConfig(configPath), studioUrl).toThrow()
     }
   })
 
-  it('validates note structure and rejects controls and surrounding whitespace', () => {
+  it('rejects the legacy flat document and unknown daemonConfig fields', () => {
     const { root } = createDaemonRoot()
-    expect(loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', note: '  hello  ' })).note).toBe('hello')
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', note: 'bad\nnote' }))).toThrow(
-      /control characters/,
-    )
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', note: 'x'.repeat(600) }))).toThrow(
-      /512/,
-    )
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com' })),
+    ).toThrow(/unknown field/)
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', note: 'hello' }))),
+    ).toThrow(/unknown field/)
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, { ...document(), extra: 1 })),
+    ).toThrow(/unknown field/)
   })
 
-  it('rejects unknown fields and duplicate keys', () => {
+  it('validates the environment id and canonical non-negative version string', () => {
     const { root } = createDaemonRoot()
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', extra: 1 }))).toThrow(/unknown field/)
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, { ...document(), environmentId: 'not-a-uuid' })),
+    ).toThrow(/canonical lowercase UUID/)
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, { ...document(), environmentId: 'AAAAAAAA-2222-4333-8444-555555555555' })),
+    ).toThrow(/canonical lowercase UUID/)
+    for (const version of [0, -1, '01', '+1', ' 1', '1.0', '', null]) {
+      expect(() => loadDaemonConfig(writeConfig(root, { ...document(), version })), String(version)).toThrow(
+        /canonical non-negative decimal string|signed 64-bit/,
+      )
+    }
+    expect(loadDaemonConfig(writeConfig(root, { ...document(), version: '9223372036854775807' })).configVersion).toBe(
+      9223372036854775807n,
+    )
+    expect(() =>
+      loadDaemonConfig(writeConfig(root, { ...document(), version: '9223372036854775808' })),
+    ).toThrow(/signed 64-bit/)
+  })
+
+  it('rejects duplicate keys and non-object documents', () => {
+    const { root } = createDaemonRoot()
     const path = join(root, 'daemon.json')
-    writeFileSync(path, '{"studioUrl":"https://a.example.com","studioUrl":"https://b.example.com"}', 'utf8')
+    writeFileSync(
+      path,
+      `{"environmentId":"${ENVIRONMENT_ID}","version":"1","daemonConfig":{"studioUrl":"https://a.example.com","studioUrl":"https://b.example.com"}}`,
+      'utf8',
+    )
     chmodSync(path, 0o600)
     expect(() => loadDaemonConfig(path)).toThrow(/duplicate keys/)
+    writeFileSync(path, '[1,2]', 'utf8')
+    expect(() => loadDaemonConfig(path)).toThrow(/must be an object/)
   })
 
-  it('resolves an absolute bash executable and fails closed for a missing one', () => {
+  it('does not block bootstrap on a missing bash but rejects it when resolving a candidate', () => {
     const { root } = createDaemonRoot()
-    const ok = loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', bashExecutable: process.execPath }))
-    expect(ok.bashExecutable).toBe(resolveExecutable(process.execPath))
+    const config = loadDaemonConfig(
+      writeConfig(root, document({ studioUrl: 'https://a.example.com', bashExecutable: '/definitely/missing/bash' })),
+    )
+    expect(config.bashExecutable).toBeNull()
+    expect(config.bashExecutableSetting).toBe('/definitely/missing/bash')
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', bashExecutable: '/definitely/missing/bash' })),
-    ).toThrow(/must resolve to an executable/)
+      resolveDaemonConfiguration(
+        {
+          configPath: config.configPath,
+          dataDir: config.dataDir,
+          tokenPath: config.tokenPath,
+          distributionDir: config.distributionDir,
+        },
+        ENVIRONMENT_ID,
+        4n,
+        parseDaemonConfiguration({ studioUrl: 'https://a.example.com', bashExecutable: '/definitely/missing/bash' }),
+      ),
+    ).toThrow(EnvironmentConfigurationError)
+    const ok = loadDaemonConfig(
+      writeConfig(root, document({ studioUrl: 'https://a.example.com', bashExecutable: process.execPath })),
+    )
+    expect(ok.bashExecutable).toBe(resolveExecutable(process.execPath))
+  })
+
+  it('validates proxy urls strictly and stores null as explicit direct', () => {
+    const { root } = createDaemonRoot()
+    const config = loadDaemonConfig(
+      writeConfig(root, document({ studioUrl: 'https://a.example.com', proxyUrl: 'http://127.0.0.1:7890' })),
+    )
+    expect(config.proxyUrl).toBe('http://127.0.0.1:7890')
+    for (const proxyUrl of [
+      'https://127.0.0.1:7890',
+      'http://user:pass@127.0.0.1:7890',
+      'http://127.0.0.1:7890/path',
+      'socks5://127.0.0.1:1080',
+      'http://127.0.0.1',
+    ]) {
+      expect(() =>
+        loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', proxyUrl }))),
+        proxyUrl,
+      ).toThrow(/unauthenticated http:\/\/host:port/)
+    }
   })
 
   it('validates the LSP server map', () => {
@@ -107,26 +193,29 @@ describe('loadDaemonConfig', () => {
         },
       },
     }
-    const config = loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', lsp }))
+    const config = loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', lsp })))
     expect(config.lsp.java?.extensions).toEqual(['.java'])
     expect(config.lsp.java?.rootMarkers).toEqual(['pom.xml'])
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', lsp: { servers: {} } })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', lsp: { servers: {} } }))),
     ).toThrow(/at least one server/)
     expect(() =>
       loadDaemonConfig(
-        writeConfig(root, {
-          studioUrl: 'https://a.example.com',
-          lsp: { servers: { java: { command: ['java'], extensions: ['java'] } } },
-        }),
+        writeConfig(
+          root,
+          document({ studioUrl: 'https://a.example.com', lsp: { servers: { java: { command: ['java'], extensions: ['java'] } } } }),
+        ),
       ),
     ).toThrow(/leading dot/)
     expect(() =>
       loadDaemonConfig(
-        writeConfig(root, {
-          studioUrl: 'https://a.example.com',
-          lsp: { servers: { java: { command: ['java'], extensions: ['.java'], rootMarkers: ['../x'] } } },
-        }),
+        writeConfig(
+          root,
+          document({
+            studioUrl: 'https://a.example.com',
+            lsp: { servers: { java: { command: ['java'], extensions: ['.java'], rootMarkers: ['../x'] } } },
+          }),
+        ),
       ),
     ).toThrow(/traversal/)
   })
@@ -146,7 +235,7 @@ describe('loadDaemonConfig', () => {
       chmodSync(tokenPath(root), 0o600)
     }
     const otherRoot = mkdtempSync(join(tmpdir(), 'kk-daemon-test-'))
-    const otherConfig = writeConfig(otherRoot, { studioUrl: 'https://a.example.com' })
+    const otherConfig = writeConfig(otherRoot, document())
     expect(() => loadDaemonConfig(otherConfig)).toThrow(/existing regular file/)
   })
 
@@ -223,7 +312,7 @@ describe('executable and distribution resolution', () => {
 describe('config file content is not echoed', () => {
   it('does not include raw studio url secrets in diagnostics', () => {
     const { root } = createDaemonRoot()
-    const configPath = writeConfig(root, { studioUrl: 'https://user:pass@studio.example.com' })
+    const configPath = writeConfig(root, document({ studioUrl: 'https://user:pass@studio.example.com' }))
     try {
       loadDaemonConfig(configPath)
       throw new Error('expected failure')
@@ -256,27 +345,31 @@ describe('config field validation branches', () => {
   it('rejects oversized config before reading it into memory', () => {
     const { root } = createDaemonRoot()
     const path = join(root, 'daemon.json')
-    writeFileSync(path, `{"studioUrl":"https://a.example.com","note":"${'x'.repeat(1024 * 1024)}"}`, 'utf8')
+    writeFileSync(
+      path,
+      `{"environmentId":"${ENVIRONMENT_ID}","version":"1","daemonConfig":{"studioUrl":"https://a.example.com","bashExecutable":"${'x'.repeat(1024 * 1024)}"}}`,
+      'utf8',
+    )
     chmodSync(path, 0o600)
     expect(() => loadDaemonConfig(path)).toThrow(/cannot read valid JSON/)
   })
 
-  it('rejects non-object documents, non-string and blank fields', () => {
+  it('rejects non-object and wrong scalar fields at their nested paths', () => {
     const { root } = createDaemonRoot()
-    expect(() => loadDaemonConfig(rawConfig(root, '[1,2]'))).toThrow(/must be an object/)
-    expect(() => loadDaemonConfig(writeConfig(root, {}))).toThrow(/studioUrl.*nonblank/)
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: 123 }))).toThrow(/studioUrl.*must be a string/)
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', note: 5 }))).toThrow(
-      /note.*must be a string/,
+    expect(() => loadDaemonConfig(writeConfig(root, document({ studioUrl: 123 } as any)))).toThrow(
+      /studioUrl.*must be a string/,
     )
+    expect(() => loadDaemonConfig(writeConfig(root, document({ studioUrl: '' })))).toThrow(/studioUrl.*nonblank/)
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', bashExecutable: 5 })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', bashExecutable: 5 } as any))),
     ).toThrow(/bashExecutable.*must be a string/)
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', bashExecutable: '  ' })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: 'https://a.example.com', bashExecutable: '  ' }))),
     ).toThrow(/bashExecutable.*nonblank/)
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: 'https://a.example.com', bashExecutable: 'bad\u0000cmd' })),
+      loadDaemonConfig(
+        writeConfig(root, document({ studioUrl: 'https://a.example.com', bashExecutable: 'bad\u0000cmd' })),
+      ),
     ).toThrow(/control characters/)
   })
 
@@ -284,22 +377,24 @@ describe('config field validation branches', () => {
     const { root } = createDaemonRoot()
     const base = 'https://a.example.com'
     const valid = { command: ['java'], extensions: ['.java'], rootMarkers: [], firstMatchMarkers: [] }
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: base, lsp: [] }))).toThrow(/lsp.*must be an object/)
+    expect(() => loadDaemonConfig(writeConfig(root, document({ studioUrl: base, lsp: [] })))).toThrow(
+      /lsp.*must be an object/,
+    )
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: base, lsp: { servers: { java: valid }, extra: 1 } })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: base, lsp: { servers: { java: valid }, extra: 1 } }))),
     ).toThrow(/unknown field/)
-    expect(() => loadDaemonConfig(writeConfig(root, { studioUrl: base, lsp: { servers: [] } }))).toThrow(
+    expect(() => loadDaemonConfig(writeConfig(root, document({ studioUrl: base, lsp: { servers: [] } })))).toThrow(
       /servers.*must be an object/,
     )
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: base, lsp: { servers: { 'bad id': valid } } })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: base, lsp: { servers: { 'bad id': valid } } }))),
     ).toThrow(/server IDs must match/)
     expect(() =>
-      loadDaemonConfig(writeConfig(root, { studioUrl: base, lsp: { servers: { java: 5 } } })),
+      loadDaemonConfig(writeConfig(root, document({ studioUrl: base, lsp: { servers: { java: 5 } } }))),
     ).toThrow(/must be an object/)
     expect(() =>
       loadDaemonConfig(
-        writeConfig(root, { studioUrl: base, lsp: { servers: { java: { ...valid, extra: 1 } } } }),
+        writeConfig(root, document({ studioUrl: base, lsp: { servers: { java: { ...valid, extra: 1 } } } })),
       ),
     ).toThrow(/unknown field/)
   })
@@ -307,7 +402,8 @@ describe('config field validation branches', () => {
   it('validates list requirements, emptiness and entries', () => {
     const { root } = createDaemonRoot()
     const base = 'https://a.example.com'
-    const lsp = (server: Record<string, unknown>): string => writeConfig(root, { studioUrl: base, lsp: { servers: { java: server } } })
+    const lsp = (server: Record<string, unknown>): string =>
+      writeConfig(root, document({ studioUrl: base, lsp: { servers: { java: server } } }))
     expect(() => loadDaemonConfig(lsp({ extensions: ['.java'] }))).toThrow(/command.*nonempty array/)
     expect(() => loadDaemonConfig(lsp({ command: [], extensions: ['.java'] }))).toThrow(/command.*nonempty array/)
     // 可选列表缺失或为空都归一为空数组。

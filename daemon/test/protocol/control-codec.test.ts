@@ -13,7 +13,13 @@ import {
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
-  EnvironmentInfoSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
+  LspConfigurationSchema,
+  LspServerSchema,
+  ConfigurationStatusSchema,
+  ConfigurationErrorSchema,
+  HostInfoSchema,
   ErrorSchema,
   ExecutionExitedSchema,
   ExpectedFileSchema,
@@ -412,6 +418,157 @@ describe('control binary codec', () => {
     ).toThrow(/must not declare invocationId/)
   })
 
+  it('validates ENVIRONMENT_CONFIG as a complete snapshot', () => {
+    const config = create(DaemonConfigurationSchema, {
+      studioUrl: 'https://studio.example.com',
+      bashExecutable: '/usr/bin/bash',
+      proxyUrl: 'http://127.0.0.1:7890',
+      lsp: create(LspConfigurationSchema, {
+        servers: [
+          create(LspServerSchema, {
+            id: 'java',
+            command: ['java'],
+            extensions: ['.java'],
+            rootMarkers: ['pom.xml'],
+            firstMatchMarkers: ['src/main/java'],
+          }),
+        ],
+      }),
+    })
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: ENVIRONMENT_ID,
+          payload: { case: 'environmentConfig', value: create(EnvironmentConfigSchema, { config }) },
+        }),
+      ),
+    ).toThrow(/version is required/)
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: ENVIRONMENT_ID,
+          payload: { case: 'environmentConfig', value: create(EnvironmentConfigSchema, { version: 4n }) },
+        }),
+      ),
+    ).toThrow(/config is required/)
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: 'env-config',
+          payload: {
+            case: 'environmentConfig',
+            value: create(EnvironmentConfigSchema, { version: 4n, config }),
+          },
+        }),
+      ),
+    ).toThrow(/must not declare invocationId/)
+    const invalidCases: Array<[string, any, RegExp]> = [
+      ['studio', create(DaemonConfigurationSchema, { studioUrl: 'ftp://studio.example.com' }), /studioUrl/],
+      [
+        'proxy',
+        create(DaemonConfigurationSchema, { studioUrl: 'https://a.example.com', proxyUrl: 'https://a:1' }),
+        /proxyUrl/,
+      ],
+      [
+        'lsp',
+        create(DaemonConfigurationSchema, {
+          studioUrl: 'https://a.example.com',
+          lsp: create(LspConfigurationSchema, {
+            servers: [create(LspServerSchema, { id: 'java', command: ['java'], extensions: ['java'] })],
+          }),
+        }),
+        /leading dot/,
+      ],
+    ]
+    for (const [name, value, expected] of invalidCases) {
+      expect(() =>
+        encodeBinary(
+          create(EnvelopeSchema, {
+            messageType: MessageType.ENVIRONMENT_CONFIG,
+            environmentId: ENVIRONMENT_ID,
+            payload: { case: 'environmentConfig', value: create(EnvironmentConfigSchema, { version: 4n, config: value }) },
+          }),
+        ),
+        name,
+      ).toThrow(expected)
+    }
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'environmentConfig',
+            value: create(EnvironmentConfigSchema, {
+              version: 4n,
+              config: create(DaemonConfigurationSchema, {
+                studioUrl: 'https://a.example.com',
+                lsp: create(LspConfigurationSchema, {
+                  servers: [
+                    create(LspServerSchema, { id: 'java', command: ['java'], extensions: ['.java'] }),
+                    create(LspServerSchema, { id: 'java', command: ['java'], extensions: ['.java'] }),
+                  ],
+                }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/repeat id/)
+  })
+
+  it('validates runtime configuration status bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RUNTIME_STATUS,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'runtimeStatus',
+            value: create(RuntimeStatusSchema, {
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, {
+                  daemonVersion: '1.0.0',
+                  configuration: create(ConfigurationStatusSchema, {
+                    appliedVersion: 3n,
+                    proxyUrl: 'ftp://invalid',
+                  }),
+                }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/configuration\.proxyUrl/)
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RUNTIME_STATUS,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'runtimeStatus',
+            value: create(RuntimeStatusSchema, {
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, {
+                  daemonVersion: '1.0.0',
+                  configuration: create(ConfigurationStatusSchema, {
+                    error: create(ConfigurationErrorSchema, { code: 'VALIDATION_FAILED' }),
+                  }),
+                }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/error\.version/)
+  })
+
   it('validates READY bounds', () => {
     expect(() =>
       encodeBinary(
@@ -424,7 +581,7 @@ describe('control binary codec', () => {
           },
         }),
       ),
-    ).toThrow(/ready\.environment is required/)
+    ).toThrow(/ready\.hostInfo is required/)
 
     expect(() =>
       encodeBinary(
@@ -435,7 +592,7 @@ describe('control binary codec', () => {
             case: 'ready',
             value: create(ReadySchema, {
               daemonVersion: '1.0.0',
-              environment: create(EnvironmentInfoSchema, {
+              hostInfo: create(HostInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
                 timeZone: 'Invalid/Zone',
@@ -462,14 +619,13 @@ describe('control binary codec', () => {
             case: 'ready',
             value: create(ReadySchema, {
               daemonVersion: '1.0.0',
-              environment: create(EnvironmentInfoSchema, {
+              hostInfo: create(HostInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
                 timeZone: 'UTC',
                 userName: 'test',
                 homeDirectory: '/home/test',
                 tempDirectory: '/tmp',
-                note: 'test-note',
               }),
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 1n,
@@ -1102,14 +1258,13 @@ describe('control binary codec', () => {
             case: 'ready',
             value: create(ReadySchema, {
               daemonVersion: '1.0.0',
-              environment: create(EnvironmentInfoSchema, {
+              hostInfo: create(HostInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
                 timeZone: 'UTC',
                 userName: ' user ',
                 homeDirectory: '/home/test',
                 tempDirectory: '/tmp',
-                note: 'test-note',
               }),
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 1n,

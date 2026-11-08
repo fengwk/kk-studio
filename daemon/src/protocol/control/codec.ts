@@ -11,10 +11,11 @@ import {
   type CapabilityResult,
   type Content,
   type Envelope,
-  type EnvironmentInfo,
+  type EnvironmentConfig,
   type Error as ProtocolErrorMessage,
   type ExpectedFile,
   type Heartbeat,
+  type HostInfo,
   type IdeCommand,
   type IdeLease,
   type IdeResult,
@@ -37,6 +38,8 @@ import {
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
 import { DAEMON_VERSION_PATTERN } from '../../release.js'
+import { parseDaemonConfiguration } from '../../config.js'
+import type { DaemonConfiguration } from '../../contracts.js'
 import { LONG_MAX, MAX_SKILL_PACKAGE_NAME_CHARS, SKILL_PACKAGE_NAME_PATTERN } from '../../validation-constants.js'
 import { frame, requireMessageLength, unframe } from './framing.js'
 import {
@@ -108,6 +111,7 @@ const BOUND = new Set<MessageType>([
   MessageType.ERROR,
   MessageType.SKILL_SYNC,
   MessageType.SKILL_STATE,
+  MessageType.ENVIRONMENT_CONFIG,
 ])
 
 const INVOCATION = new Set<MessageType>([
@@ -139,6 +143,7 @@ const NO_INVOCATION = new Set<MessageType>([
   MessageType.IDE_LEASE,
   MessageType.SKILL_SYNC,
   MessageType.SKILL_STATE,
+  MessageType.ENVIRONMENT_CONFIG,
 ])
 
 interface UnknownCarrier {
@@ -146,13 +151,13 @@ interface UnknownCarrier {
 }
 
 /** Decodes one bare protobuf message and applies all application-level checks. */
-function decodeBinary(bytes: Uint8Array): Envelope {
+export function decodeBinary(bytes: Uint8Array): Envelope {
   requireMessageLength(bytes.length)
   return validate(fromBinary(EnvelopeSchema, bytes, { readUnknownFields: true }))
 }
 
 /** Validates and encodes one bare protobuf message. */
-function encodeBinary(envelope: Envelope): Uint8Array {
+export function encodeBinary(envelope: Envelope): Uint8Array {
   validate(envelope)
   const bytes = toBinary(EnvelopeSchema, envelope)
   requireMessageLength(bytes.length)
@@ -287,6 +292,10 @@ export function validate(envelope: Envelope): Envelope {
       requireCase(envelope, 'skillState', 'SKILL_STATE')
       validateSkillState(envelope.payload.value as SkillState)
       break
+    case MessageType.ENVIRONMENT_CONFIG:
+      requireCase(envelope, 'environmentConfig', 'ENVIRONMENT_CONFIG')
+      validateEnvironmentConfig(envelope.payload.value as EnvironmentConfig)
+      break
     default:
       throw new Error('messageType must be a known non-unspecified value')
   }
@@ -320,22 +329,75 @@ function validateSettings(settings: Settings): void {
     settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds,
     'settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds',
   )
-  requireText(settings.noProxyHosts, 'settings.noProxyHosts', { maxChars: 4096 })
-  if (settings.proxyUrl !== undefined) {
-    requireText(settings.proxyUrl, 'settings.proxyUrl', { nonBlank: true, maxChars: 2048 })
+}
+
+/** 校验并还原一条完整 ENVIRONMENT_CONFIG 快照。 */
+export function parseEnvironmentConfig(config: EnvironmentConfig): {
+  version: bigint
+  configuration: DaemonConfiguration
+} {
+  if (config.version === undefined) {
+    throw new Error('environmentConfig.version is required')
   }
-  if (settings.displayName !== undefined) {
-    requireText(settings.displayName, 'settings.displayName', { nonBlank: true, maxChars: MAX_DISPLAY_NAME_CHARS })
+  requireSafeLong(config.version, 'environmentConfig.version', 0n, LONG_MAX)
+  if (config.config === undefined) {
+    throw new Error('environmentConfig.config is required')
+  }
+  assertNoUnknown(config.config, 'environmentConfig.config')
+  const servers: Record<string, unknown> = {}
+  for (const server of config.config!.lsp?.servers ?? []) {
+    if (servers[server.id] !== undefined) {
+      throw new Error('environmentConfig.config.lsp.servers must not repeat id')
+    }
+    assertNoUnknown(server, 'environmentConfig.config.lsp.server')
+    servers[server.id] = {
+      command: [...server.command],
+      ...(server.extensions.length === 0 ? {} : { extensions: [...server.extensions] }),
+      ...(server.rootMarkers.length === 0 ? {} : { rootMarkers: [...server.rootMarkers] }),
+      ...(server.firstMatchMarkers.length === 0
+        ? {}
+        : { firstMatchMarkers: [...server.firstMatchMarkers] }),
+    }
+  }
+  const plain = {
+    studioUrl: config.config!.studioUrl,
+    bashExecutable: config.config!.bashExecutable ?? null,
+    lsp: config.config!.lsp === undefined ? null : { servers },
+    proxyUrl: config.config!.proxyUrl ?? null,
+  }
+  return {
+    version: config.version!,
+    configuration: parseDaemonConfiguration(plain, 'environmentConfig.config'),
+  }
+}
+
+function validateEnvironmentConfig(config: EnvironmentConfig): void {
+  assertNoUnknown(config, 'environmentConfig')
+  if (config.version === undefined) {
+    throw new Error('environmentConfig.version is required')
+  }
+  requireSafeLong(config.version, 'environmentConfig.version', 0n, LONG_MAX)
+  if (config.config === undefined) {
+    throw new Error('environmentConfig.config is required')
+  }
+  assertNoUnknown(config.config, 'environmentConfig.config')
+  try {
+    parseEnvironmentConfig(config)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('environmentConfig.config')) {
+      throw error
+    }
+    throw new Error(`environmentConfig.config is invalid: ${error instanceof Error ? error.message : 'invalid value'}`)
   }
 }
 
 function validateReady(ready: Ready): void {
   assertNoUnknown(ready, 'ready')
   const daemonVersion = requireDaemonVersion(ready.daemonVersion, 'ready.daemonVersion')
-  if (ready.environment === undefined) {
-    throw new Error('ready.environment is required')
+  if (ready.hostInfo === undefined) {
+    throw new Error('ready.hostInfo is required')
   }
-  validateEnvironment(ready.environment)
+  validateHostInfo(ready.hostInfo)
   if (ready.runtimeStatus === undefined) {
     throw new Error('ready.runtimeStatus is required')
   }
@@ -343,26 +405,33 @@ function validateReady(ready: Ready): void {
   if (snapshot.status?.daemonVersion !== daemonVersion) {
     throw new Error('ready.runtimeStatus.status.daemonVersion must match ready.daemonVersion')
   }
+  if (snapshot.status.configuration?.appliedVersion === undefined) {
+    throw new Error('ready.runtimeStatus.status.configuration.appliedVersion is required')
+  }
 }
 
-function validateEnvironment(info: EnvironmentInfo): void {
-  assertNoUnknown(info, 'ready.environment')
-  if (!info.operatingSystem) {
-    throw new Error('ready.environment.operatingSystem is required')
+function validateHostInfo(info: HostInfo): void {
+  assertNoUnknown(info, 'ready.hostInfo')
+  if (
+    info.operatingSystem !== 1 &&
+    info.operatingSystem !== 2 &&
+    info.operatingSystem !== 3 &&
+    info.operatingSystem !== 4
+  ) {
+    throw new Error('ready.hostInfo.operatingSystem is required')
   }
-  if (!info.architecture) {
-    throw new Error('ready.environment.architecture is required')
+  if (info.architecture !== 1 && info.architecture !== 2) {
+    throw new Error('ready.hostInfo.architecture is required')
   }
-  const zone = requireText(info.timeZone, 'ready.environment.timeZone', { nonBlank: true, maxChars: 128 })
+  const zone = requireText(info.timeZone, 'ready.hostInfo.timeZone', { nonBlank: true, maxChars: 128 })
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: zone })
   } catch {
-    throw new Error('ready.environment.timeZone must be a valid ZoneId')
+    throw new Error('ready.hostInfo.timeZone must be a valid ZoneId')
   }
-  requireSingleLine(info.userName, 'ready.environment.userName')
-  requireSingleLine(info.homeDirectory, 'ready.environment.homeDirectory')
-  requireSingleLine(info.note, 'ready.environment.note', MAX_NOTE_CHARS)
-  requireSingleLine(info.tempDirectory, 'ready.environment.tempDirectory')
+  requireSingleLine(info.userName, 'ready.hostInfo.userName')
+  requireSingleLine(info.homeDirectory, 'ready.hostInfo.homeDirectory')
+  requireSingleLine(info.tempDirectory, 'ready.hostInfo.tempDirectory')
 }
 
 function validateHeartbeat(heartbeat: Heartbeat): void {
@@ -392,10 +461,53 @@ function validateSnapshot(snapshot: RuntimeSnapshot, path: string): RuntimeSnaps
   }
   assertNoUnknown(snapshot.status, `${path}.status`)
   requireDaemonVersion(snapshot.status.daemonVersion, `${path}.status.daemonVersion`)
+  if (snapshot.status.configuration !== undefined) {
+    validateConfigurationStatus(snapshot.status.configuration, `${path}.status.configuration`)
+  }
   if (snapshot.status.update !== undefined) {
     validateUpdateProgress(snapshot.status.update, `${path}.status.update`)
   }
   return snapshot
+}
+
+function validateConfigurationStatus(
+  configuration: { appliedVersion?: bigint; proxyUrl?: string; error?: { version?: bigint; code?: string; field?: string } },
+  path: string,
+): void {
+  assertNoUnknown(configuration as UnknownCarrier, path)
+  if (configuration.appliedVersion !== undefined) {
+    requireSafeLong(configuration.appliedVersion, `${path}.appliedVersion`, 0n, LONG_MAX)
+  }
+  if (configuration.proxyUrl !== undefined) {
+    if (configuration.appliedVersion === undefined) {
+      throw new Error(`${path}.proxyUrl requires appliedVersion`)
+    }
+    requireText(configuration.proxyUrl, `${path}.proxyUrl`, {
+      nonBlank: true,
+      maxChars: 2048,
+      pattern: /^http:\/\/(?:\[[^\]]+\]|[^/?#@[\]:]+):[0-9]{1,5}$/,
+    })
+  }
+  if (configuration.error !== undefined) {
+    const error = configuration.error
+    assertNoUnknown(error as UnknownCarrier, `${path}.error`)
+    if (error.version === undefined) {
+      throw new Error(`${path}.error.version is required`)
+    }
+    requireSafeLong(error.version, `${path}.error.version`, 0n, LONG_MAX)
+    requireText(error.code, `${path}.error.code`, {
+      nonBlank: true,
+      maxChars: 64,
+      pattern: /^[A-Z][A-Z0-9_]{0,63}$/,
+    })
+    if (error.field !== undefined) {
+      requireText(error.field, `${path}.error.field`, {
+        nonBlank: true,
+        maxChars: 256,
+        pattern: /^[A-Za-z0-9_.\[\]-]+$/,
+      })
+    }
+  }
 }
 
 function validateUpdateProgress(update: UpdateProgress, path: string): void {

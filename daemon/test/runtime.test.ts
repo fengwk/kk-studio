@@ -23,6 +23,8 @@ import {
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   ErrorSchema,
   HeartbeatSchema,
   IdeAction as ProtoIdeAction,
@@ -310,11 +312,27 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
-          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
             temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),
             temporaryResourceCleanupIntervalSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceCleanupIntervalSeconds ?? 30),
+          }),
+        }),
+      },
+    })
+  }
+  if (type === 'ENVIRONMENT_CONFIG') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.ENVIRONMENT_CONFIG,
+      environmentId: envId,
+      payload: {
+        case: 'environmentConfig',
+        value: create(EnvironmentConfigSchema, {
+          version: BigInt(rawPayload.version ?? 0),
+          config: create(DaemonConfigurationSchema, {
+            studioUrl: rawPayload.studioUrl ?? 'https://studio.example.com',
+            ...(rawPayload.bashExecutable === undefined ? {} : { bashExecutable: rawPayload.bashExecutable }),
+            ...(rawPayload.proxyUrl === undefined ? {} : { proxyUrl: rawPayload.proxyUrl }),
           }),
         }),
       },
@@ -544,6 +562,7 @@ async function handshake(setup: Setup): Promise<void> {
       },
     }),
   )
+  setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
   await waitFor(() => setup.runtime.getState() === 'READY')
   expect(setup.runtime.getState()).toBe('READY')
 }
@@ -585,7 +604,7 @@ describe('runtime handshake', () => {
         payload: { case: 'settings', value: create(SettingsSchema, {}) },
       }),
     )
-    await waitFor(() => lastErrorMessage(setup.transport)?.includes('settings.noProxyHosts is required') === true)
+    await waitFor(() => lastErrorMessage(setup.transport)?.includes('settings.resourceBudgets is required') === true)
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.runtime.close()
   })
@@ -762,8 +781,7 @@ describe('runtime invocation lifecycle', () => {
     }
   })
 
-  it('replays terminal state completed during disconnection with new connection environmentId on RECOVER and passes outbound validation', async () => {
-    const NEW_ENV = '22222222-3333-4444-8555-666666666666'
+  it('replays terminal state completed during disconnection on the same fixed environment after RECOVER', async () => {
     const completeGate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       capabilities: {
@@ -808,11 +826,11 @@ describe('runtime invocation lifecycle', () => {
         ),
       ).toBe(false)
 
-      // 3. 重连握手并绑定全新的 NEW_ENV
+      // 3. 重连握手：固定 UUID 不随连接改变。
       await waitFor(() => setup.transport.connection !== null && setup.transport.connection.open)
       setup.transport.receive(
         serverMessage('SETTINGS', {
-          environmentId: NEW_ENV,
+          environmentId: ENV,
           payload: {
             resourceBudgets: {
               maxResourceBytes: 1024 * 1024,
@@ -822,12 +840,13 @@ describe('runtime invocation lifecycle', () => {
           },
         }),
       )
+      setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
       await waitFor(() => setup.runtime.getState() === 'READY')
 
       // 4. 发送 RECOVER 取回 invocation
       setup.transport.receive(
         serverMessage('RECOVER', {
-          environmentId: NEW_ENV,
+          environmentId: ENV,
           invocationId: 'inv-disconnect-recover',
           payload: {},
         }),
@@ -846,8 +865,8 @@ describe('runtime invocation lifecycle', () => {
           envelope.messageType === 'COMPLETED',
       )
       expect(completedEnvelope).toBeDefined()
-      // 必须带新连接的 environmentId，绝不能是旧 ENV 或 null/undefined
-      expect(completedEnvelope?.environmentId).toBe(NEW_ENV)
+      // 固定卡片身份：重连后仍使用同一 environmentId。
+      expect(completedEnvelope?.environmentId).toBe(ENV)
 
       // 确保没有因 validation 失败而产生 ERROR 报文
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(false)
@@ -1467,6 +1486,7 @@ describe('runtime update handling', () => {
     setup.transport.disconnect()
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     await waitFor(() => releases.length === 2)
 
@@ -2128,6 +2148,7 @@ describe('runtime update handling', () => {
     setup.transport.disconnect()
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     const reconnectReady = sent(setup.transport)
       .filter((envelope) => envelope.messageType === 'READY')
@@ -2489,6 +2510,7 @@ describe('runtime IDE commands', () => {
       expect(signal.reason).toBe('CONTROL_DISCONNECTED')
       await vi.advanceTimersByTimeAsync(5)
       setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV }))
+      setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
       expect(setup.runtime.getState()).toBe('READY')
       gate.resolve()
       await vi.advanceTimersByTimeAsync(0)
@@ -2665,6 +2687,7 @@ describe('runtime connection management', () => {
     // 显式等待重连并完成握手状态同步，再验证同 instance 的行为。
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     expect(setup.transport.connection).not.toBe(firstConnection)
 
@@ -2752,6 +2775,7 @@ describe('runtime connection management', () => {
       // 迟到的旧代际断开不能清掉新代际的绑定。
       oldListener.onDisconnected()
       setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+      setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
       await waitFor(() => setup.runtime.getState() === 'READY')
       expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
       expect(
@@ -2937,6 +2961,7 @@ describe('runtime protocol version and scope', () => {
     )
 
     setup.transport.receive(serverMessage('SETTINGS', {}))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     const pkg = create(SkillPackageSchema, { packageName: 'demo', sha256: 'a'.repeat(64) })
     setup.transport.receive(syncEnvelope([pkg]))
@@ -2973,6 +2998,7 @@ describe('runtime IDE command lifetime and shutdown convergence', () => {
 
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT')).toBe(false)
     expect(setup.runtime.getJournal().find('ide-1')).toBeUndefined()
@@ -3542,6 +3568,7 @@ describe('runtime execution exit confirmation', () => {
         setup.transport.disconnect()
         await waitFor(() => setup.transport.connectCount >= 2)
         setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
         await waitFor(() => setup.runtime.getState() === 'READY')
         setup.transport.receive(invoke2)
         // 等待重连后的 STARTED

@@ -149,6 +149,11 @@ export class ConnectionLifecycle {
     this.disconnect(generation, connection, false)
   }
 
+  /** 当前配置/代理切换后主动断开重连；沿用 GOAWAY 的立即重连与代际隔离。 */
+  reconnect(generation: number): void {
+    this.handleGoaway(generation)
+  }
+
   /** 优雅 GOAWAY：先摘除并关闭旧代际，再立即重连；既有退避状态不会被清零。 */
   handleGoaway(generation: number): void {
     const connection = this.active

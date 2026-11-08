@@ -12,7 +12,7 @@ import {
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createDaemonTransport } from './transport/index.js'
-import { installOutboundNetwork, ProxyConfigurationError } from './network.js'
+import { NetworkRuntime, ProxyConfigurationError } from './network.js'
 import {
   UnsupportedPlatformError,
   acquireDirectoryLock,
@@ -23,7 +23,7 @@ import {
 import { fileCapabilities, setFileCapabilityHooks } from './coding/files.js'
 import { searchCapabilities } from './coding/search.js'
 import { processCapability } from './coding/process.js'
-import { createLspCapabilities } from './coding/lsp.js'
+import { createLspFacade } from './coding/lsp.js'
 import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.js'
 import { SkillPackageInstaller } from './skill/installer.js'
 import { createSkillReconciler } from './skill/reconcile.js'
@@ -113,10 +113,10 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
-    const network = await installOutboundNetwork()
-    closers.push(() => network.close())
+    const networks = new NetworkRuntime(config.proxyUrl)
+    closers.push(() => networks.close())
 
-    const lspGroup = createLspCapabilities(config, supervisor)
+    const lspGroup = createLspFacade(supervisor)
     closers.push(() => lspGroup.close())
     // Files 的 read 通过该钩子输出 lsp: header；write/edit 提交后通知 LSP 刷新文档。
     setFileCapabilityHooks({
@@ -137,8 +137,7 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     closers.push(() => ide.close())
 
     const transport = createDaemonTransport({
-      gatewayUri: config.gatewayUri,
-      config,
+      config: () => runtime?.getAppliedConfig() ?? config,
       ide,
       daemonInstanceId: randomUUID(),
     })
@@ -155,7 +154,22 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       transport,
       capabilities,
       processes: supervisor,
-      environment: detectEnvironmentInfo(config),
+      environment: detectEnvironmentInfo(),
+      prepareConfiguration: async (candidate) => {
+        const network = networks.prepare(candidate.proxyUrl)
+        const lsp = lspGroup.prepare(candidate.lsp)
+        return {
+          config: candidate,
+          publish: () => {
+            const networkCleanup = network.publish()
+            const lspCleanup = lsp.publish()
+            return Promise.all([networkCleanup, lspCleanup]).then(() => undefined)
+          },
+          retire: async () => {
+            await Promise.all([network.retire(), lsp.retire()])
+          },
+        }
+      },
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,

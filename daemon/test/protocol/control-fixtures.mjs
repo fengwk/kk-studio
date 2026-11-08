@@ -47,8 +47,13 @@ import {
   UpgradeRequiredSchema,
   FailedSchema,
   CancelledSchema,
-  EnvironmentInfoSchema,
+  HostInfoSchema,
   RuntimeBodySchema,
+  ConfigurationStatusSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
+  LspConfigurationSchema,
+  LspServerSchema,
 } from '../../dist/generated/control_pb.js'
 
 export const ENVIRONMENT_ID = '3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f'
@@ -162,6 +167,10 @@ function runtimeSnapshot(withUpdate) {
     revision: 7n,
     status: create(RuntimeBodySchema, {
       daemonVersion: '5.0.1',
+      configuration: create(ConfigurationStatusSchema, {
+        appliedVersion: 4n,
+        proxyUrl: 'http://127.0.0.1:7890',
+      }),
       ...(withUpdate
         ? {
             update: create(UpdateProgressSchema, {
@@ -182,14 +191,40 @@ export function settingsEnvelope() {
     payload: {
       case: 'settings',
       value: create(SettingsSchema, {
-        proxyUrl: 'http://proxy.invalid:8080',
-        noProxyHosts: 'localhost,10.0.0.0/8',
         resourceBudgets: create(ResourceBudgetsSchema, {
           maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 3600n,
           temporaryResourceCleanupIntervalSeconds: 60n,
         }),
-        displayName: 'dev-box',
+      }),
+    },
+  })
+}
+
+export function environmentConfigEnvelope() {
+  return create(EnvelopeSchema, {
+    messageType: MessageType.ENVIRONMENT_CONFIG,
+    environmentId: ENVIRONMENT_ID,
+    payload: {
+      case: 'environmentConfig',
+      value: create(EnvironmentConfigSchema, {
+        version: 4n,
+        config: create(DaemonConfigurationSchema, {
+          studioUrl: 'https://studio.example.com',
+          bashExecutable: '/usr/bin/bash',
+          proxyUrl: 'http://127.0.0.1:7890',
+          lsp: create(LspConfigurationSchema, {
+            servers: [
+              create(LspServerSchema, {
+                id: 'java',
+                command: ['java'],
+                extensions: ['.java'],
+                rootMarkers: ['pom.xml'],
+                firstMatchMarkers: ['src/main/java'],
+              }),
+            ],
+          }),
+        }),
       }),
     },
   })
@@ -203,13 +238,12 @@ export function readyEnvelope() {
       case: 'ready',
       value: create(ReadySchema, {
         daemonVersion: '5.0.1',
-        environment: create(EnvironmentInfoSchema, {
+        hostInfo: create(HostInfoSchema, {
           operatingSystem: OperatingSystem.LINUX,
           architecture: Architecture.AMD64,
           timeZone: 'Asia/Shanghai',
           userName: 'dev',
           homeDirectory: '/srv/work',
-          note: 'local workstation',
           tempDirectory: '/tmp',
         }),
         runtimeStatus: runtimeSnapshot(false),
@@ -429,6 +463,7 @@ export const GOLDEN_FIXTURES = [
   ['completed.bin', completedEnvelope],
   ['execution-exited.bin', executionExitedEnvelope],
   ['settings.bin', settingsEnvelope],
+  ['environment-config.bin', environmentConfigEnvelope],
   ['ready.bin', readyEnvelope],
   ['heartbeat.bin', heartbeatEnvelope],
   ['runtime-status.bin', runtimeStatusEnvelope],
