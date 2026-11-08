@@ -10,6 +10,7 @@ import {
   type PreparedEnvironmentConfig,
 } from '../src/environment-config.js'
 import type { DaemonConfiguration } from '../src/contracts.js'
+import { verifyPrivateFile } from '../src/native/index.js'
 import { RuntimeStatusTracker } from '../src/runtime-status.js'
 import { testConfig } from './helpers.js'
 
@@ -114,7 +115,10 @@ describe('EnvironmentConfigRuntime', () => {
       error: null,
     })
     expect(readFileSync(initial.configPath, 'utf8')).toBe(serializeDaemonCache(runtime.config))
-    expect(lstatSync(initial.configPath).mode & 0o777).toBe(0o600)
+    await verifyPrivateFile(initial.configPath)
+    if (process.platform !== 'win32') {
+      expect(lstatSync(initial.configPath).mode & 0o777).toBe(0o600)
+    }
     expect(loadDaemonConfig(initial.configPath).configVersion).toBe(0n)
     expect(readdirSync(dirname(initial.configPath)).filter((name) => name.includes('.tmp'))).toEqual([])
   })
