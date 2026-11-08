@@ -31,7 +31,9 @@ DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
 # 其父目录即 Daemon 运行数据目录。DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录
 # （fixture 路径与 Tool 调用的 workdir 都由它派生），两者互不影响。
 DAEMON_ROOT=${DAEMON_ROOT:-"$WORK_DIR/daemon"}
-DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
+# 卡片由 name 或 UUID 定位；默认使用 e2e seed 中的 tool-e2e 卡片。
+DAEMON_ENVIRONMENT_NAME=${DAEMON_ENVIRONMENT_NAME:-$DAEMON_ENV_NAME}
+DAEMON_ENVIRONMENT_ID=${DAEMON_ENVIRONMENT_ID:-}
 
 export DAEMON_ENV_ROOT
 
@@ -353,11 +355,17 @@ start_daemon() {
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   # 只有 bootstrap helper 物化 daemon.json/daemon.token；daemon 只接收 --config。
   # 凭证经 assignment 前缀进入子进程环境（不出现在任何 argv），helper 在 exec 前 unset。
+  local -a environment_selector=()
+  if [ -n "$DAEMON_ENVIRONMENT_ID" ]; then
+    environment_selector=(DAEMON_ENVIRONMENT_ID="$DAEMON_ENVIRONMENT_ID")
+  else
+    environment_selector=(DAEMON_ENVIRONMENT_NAME="$DAEMON_ENVIRONMENT_NAME")
+  fi
   DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env \
     "${test_env_unsets[@]}" \
     DAEMON_ROOT="$DAEMON_ROOT" \
     DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
-    DAEMON_NOTE="$DAEMON_NOTE" \
+    "${environment_selector[@]}" \
     DAEMON_DIST="$DAEMON_DIST" \
     DAEMON_NODE="$DAEMON_NODE" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \

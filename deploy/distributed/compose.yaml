@@ -233,7 +233,7 @@ services:
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
       KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080
-      KK_STUDIO_DAEMON_NOTE: Distributed test node A (shared data, no app-to-app network).
+      KK_STUDIO_DAEMON_ENVIRONMENT_NAME: ${DISTRIBUTED_ENV_A_NAME:-distributed-a}
     volumes:
       - daemon-workspace-a:/workspace
     networks:
@@ -250,7 +250,7 @@ services:
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
       KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080
-      KK_STUDIO_DAEMON_NOTE: Distributed test node B (shared data, no app-to-app network).
+      KK_STUDIO_DAEMON_ENVIRONMENT_NAME: ${DISTRIBUTED_ENV_B_NAME:-distributed-b}
     volumes:
       - daemon-workspace-b:/workspace
     networks:
@@ -279,7 +279,7 @@ services:
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN:-e2e-token-dist-c}
       KK_STUDIO_DAEMON_STUDIO_URL: http://daemon-ingress:8080
-      KK_STUDIO_DAEMON_NOTE: Distributed test node C (failover/handover daemon).
+      KK_STUDIO_DAEMON_ENVIRONMENT_NAME: ${DISTRIBUTED_ENV_C_NAME:-distributed-c}
     volumes:
       - daemon-workspace-c:/workspace
     networks:
