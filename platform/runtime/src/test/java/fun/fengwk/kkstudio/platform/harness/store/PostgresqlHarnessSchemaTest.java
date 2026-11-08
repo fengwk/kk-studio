@@ -196,9 +196,12 @@ class PostgresqlHarnessSchemaTest {
     // 2. REMOTE 可以以 DRIVER 执行代次为 parent_execution
     UUID envId = UUID.randomUUID();
     jdbc.update(
-        "insert into environment (id, name, registration_token_hash, created_at, updated_at)"
-            + " values (?, 'env-1',"
-            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', now(), now())",
+        "insert into environment (id, name, note, registration_token_hash, daemon_config,"
+            + " created_at, updated_at)"
+            + " values (?, 'env-1', null,"
+            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
+            + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+            + "\"lsp\":null,\"proxyUrl\":null}'::jsonb, now(), now())",
         envId);
     UUID remoteExecutionId = UUID.randomUUID();
     jdbc.update(

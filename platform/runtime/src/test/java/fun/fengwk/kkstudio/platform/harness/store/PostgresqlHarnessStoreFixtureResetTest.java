@@ -30,7 +30,9 @@ class PostgresqlHarnessStoreFixtureResetTest {
         "template must contain the real V1 migration history");
 
     jdbc.update(
-        "insert into environment (id, name, registration_token_hash) values (?, ?, ?)",
+        "insert into environment (id, name, note, registration_token_hash, daemon_config)"
+            + " values (?, ?, null, ?, '{\"studioUrl\":\"https://studio.example.com\","
+            + "\"bashExecutable\":null,\"lsp\":null,\"proxyUrl\":null}'::jsonb)",
         UUID.randomUUID(),
         PROBE_NAME,
         "a".repeat(64));
