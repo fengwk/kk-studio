@@ -9,6 +9,7 @@ import { setLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
 import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
@@ -23,6 +24,7 @@ export const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 export const CARD_A: EnvironmentDTO = {
   id: ENV_A,
   name: 'local-node',
+  daemonConfig: testDaemonConfig(),
   ready: true,
   status: 'READY',
   version: '1',
@@ -37,6 +39,7 @@ export const CARD_A: EnvironmentDTO = {
 export const CARD_B: EnvironmentDTO = {
   id: ENV_B,
   name: 'remote-node',
+  daemonConfig: testDaemonConfig(),
   ready: true,
   status: 'READY',
   version: '1',

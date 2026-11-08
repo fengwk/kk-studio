@@ -8,6 +8,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { storageService } from '@/shared/api/storage-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {
   EnvironmentDTO,
   SkillEnvironmentSyncDTO,
@@ -168,7 +169,7 @@ function environment(id: string, name: string, ready: boolean): EnvironmentDTO {
   return {
     id,
     name,
-    installConfig: null,
+    daemonConfig: testDaemonConfig(),
     registrationToken: null,
     status: ready ? 'READY' : 'OFFLINE',
     ready,

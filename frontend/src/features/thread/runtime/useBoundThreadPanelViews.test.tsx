@@ -16,6 +16,7 @@ import type {
   EnvironmentDTO,
   HarnessModelRequestDebugDTO,
 } from '@/shared/api/generated/contracts'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: { getModelRequestDebug: vi.fn(), previewHistoricalRequest: vi.fn() },
@@ -197,6 +198,7 @@ it('passes composer draft model and environment to debug and ignores stale respo
 const READY_ENVIRONMENT: EnvironmentDTO = {
   id: '8d347585-fd47-46da-9e0b-66d61e0ff21b',
   name: 'dev-box',
+  daemonConfig: testDaemonConfig(),
   registrationToken: null,
   status: 'READY',
   statusExpiresAt: null,
