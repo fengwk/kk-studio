@@ -11,13 +11,13 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.UUID;
 
 /** {@code environment} 读取路径与两种行锁的真实 SQL 覆盖：按名/按注册令牌查询、排序与 KEY SHARE 读取。 */
@@ -56,6 +56,8 @@ class EnvironmentRepositoryIntegrationTest {
     UUID beta = insert("beta", "token-beta");
 
     assertThat(repository.getById(alpha).getName()).isEqualTo("alpha");
+    assertThat(repository.getById(alpha).getDaemonConfig().getStudioUrl())
+        .isEqualTo("https://studio.example.com");
     assertThat(repository.getByName("beta").getId()).isEqualTo(beta);
     assertThat(
             repository.getByRegistrationTokenHash(RegistrationTokens.hash("token-alpha")).getId())
@@ -87,44 +89,50 @@ class EnvironmentRepositoryIntegrationTest {
         .containsExactly("beta", "alpha");
   }
 
-  /** 安装 code 与稳定行同表：仅 token 变化时清空，配置更新保留未核销 code。 */
+  /** 只有备注变化时保留未兑换安装码；完整配置或 token 变化时同一 CAS 语句撤销安装码。 */
   @Test
-  void updateByIdClearsInstallCodeOnlyWhenRegistrationTokenChanges() {
+  void updateByIdClearsInstallCodeOnlyWhenConfigOrTokenChanges() {
     UUID id = insert("gamma", "token-gamma");
     setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
+
+    Environment noteUpdate = repository.getById(id);
+    noteUpdate.setNote("new note");
+    assertThat(transaction.execute(status -> repository.updateById(noteUpdate, 0L))).isTrue();
+    assertThat(readInstallCode(id)).isEqualTo(EnvironmentInstallCodes.hash("install-code"));
+
+    setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
     Environment configUpdate = repository.getById(id);
-    configUpdate.setInstallConfig(
-        EnvironmentInstallConfigs.read(
-            "{\"operatingSystem\":\"macos\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}"));
+    DaemonConfigDTO config = configUpdate.getDaemonConfig();
+    config.setBashExecutable("/bin/bash");
+    configUpdate.setDaemonConfig(config);
+    assertThat(transaction.execute(status -> repository.updateById(configUpdate, 1L))).isTrue();
+    assertThat(readInstallCode(id)).isNull();
+    assertThat(repository.getById(id).getDaemonConfig().getBashExecutable()).isEqualTo("/bin/bash");
 
-    Boolean configUpdated =
-        transaction.execute(
-            status -> repository.updateById(configUpdate, configUpdate.getVersion()));
-    assertThat(configUpdated).isTrue();
-    assertThat(readInstallCode(id)).isNotNull();
-
+    setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
     Environment tokenUpdate = repository.getById(id);
     tokenUpdate.setRegistrationTokenHash(RegistrationTokens.hash("rotated-token"));
-    Boolean tokenUpdated =
-        transaction.execute(status -> repository.updateById(tokenUpdate, tokenUpdate.getVersion()));
-    assertThat(tokenUpdated).isTrue();
+    assertThat(transaction.execute(status -> repository.updateById(tokenUpdate, 2L))).isTrue();
     assertThat(readInstallCode(id)).isNull();
+    assertThat(repository.getById(id).getVersion()).isEqualTo(3L);
   }
 
   private void setInstallCode(UUID id, String codeHash) {
     jdbcClient
         .sql(
-            "update environment set install_code = jsonb_build_object("
-                + "'codeHash', :codeHash, 'expiresAt', :expiresAt) where id = :id")
+            "update environment set install_code_hash = :codeHash,"
+                + " install_code_expires_at = current_timestamp + interval '5 minutes'"
+                + " where id = :id")
         .param("codeHash", codeHash)
-        .param("expiresAt", Instant.now().plusSeconds(300).toString())
         .param("id", id)
         .update();
   }
 
   private String readInstallCode(UUID id) {
     return jdbcClient
-        .sql("select install_code::text from environment where id = :id")
+        .sql(
+            "select install_code_hash from environment where id = :id"
+                + " and install_code_expires_at > current_timestamp")
         .param("id", id)
         .query(String.class)
         .optional()
@@ -137,9 +145,11 @@ class EnvironmentRepositoryIntegrationTest {
         .sql(
             """
             insert into environment (
-                id, name, registration_token_hash, install_config, created_at, updated_at, version
+                id, name, note, registration_token_hash, daemon_config, created_at, updated_at, version
             ) values (
-                :id, :name, :registrationTokenHash, '{"operatingSystem":"linux","daemon":{"studioUrl":"https://studio.example.com"}}'::jsonb, current_timestamp, current_timestamp, 0
+                :id, :name, null, :registrationTokenHash,
+                '{"studioUrl":"https://studio.example.com","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb,
+                current_timestamp, current_timestamp, 0
             )
             """)
         .param("id", id)

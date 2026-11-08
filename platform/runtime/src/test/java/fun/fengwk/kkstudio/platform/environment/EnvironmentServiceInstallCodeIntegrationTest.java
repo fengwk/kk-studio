@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -19,20 +20,19 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -68,20 +68,20 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     // 导出/数据库可见的凭证摘要不是安装授权。
     String exposedHash = environmentRepository.getById(envId.value()).getRegistrationTokenHash();
     assertThrows(
-        DomainException.class, () -> environmentService.installationScript(envId, exposedHash));
+        DomainException.class, () -> generateScript(environmentService, envId, exposedHash));
     assertThrows(
         DomainException.class,
         () ->
-            environmentService.installationScript(
-                envId, EnvironmentInstallCodes.hash(exposedHash)));
+            generateScript(
+                environmentService, envId, EnvironmentInstallCodes.hash(exposedHash)));
     String tamperedCode = (originalCode.charAt(0) == 'A' ? "B" : "A") + originalCode.substring(1);
 
     assertThrows(
-        DomainException.class, () -> environmentService.installationScript(envId, tamperedCode));
+        DomainException.class, () -> generateScript(environmentService, envId, tamperedCode));
 
     // 伪造失败后真实记录完整无损，正品 code 成功核销
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
-    String script = environmentService.installationScript(envId, originalCode);
+    String script = generateScript(environmentService, envId, originalCode);
     assertThat(script).isNotBlank().contains("install.sh");
     assertThat(countInstallCodes(envId)).isZero();
   }
@@ -98,13 +98,13 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     assertThrows(
         DomainException.class,
-        () -> environmentService.installationScript(envB, issuedA.getCode()));
+        () -> generateScript(environmentService, envB, issuedA.getCode()));
 
     assertThat(countInstallCodes(envA)).isEqualTo(1L);
     assertThat(countInstallCodes(envB)).isZero();
 
     // 环境 A 正确兑换
-    String script = environmentService.installationScript(envA, issuedA.getCode());
+    String script = generateScript(environmentService, envA, issuedA.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envA)).isZero();
   }
@@ -115,13 +115,13 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     EnvironmentId envId = createTestEnvironment("duplicate-consume-env");
     EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
 
-    String firstScript = environmentService.installationScript(envId, issued.getCode());
+    String firstScript = generateScript(environmentService, envId, issued.getCode());
     assertThat(firstScript).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
         DomainException.class,
-        () -> environmentService.installationScript(envId, issued.getCode()));
+        () -> generateScript(environmentService, envId, issued.getCode()));
   }
 
   /** 测试意图：对同一环境再次签发安装 code（新替旧）原子覆盖旧 code，旧 code 无法再消费。 */
@@ -136,11 +136,11 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 旧 code 消费失败
     assertThrows(
-        DomainException.class, () -> environmentService.installationScript(envId, first.getCode()));
+        DomainException.class, () -> generateScript(environmentService, envId, first.getCode()));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 新 code 消费成功
-    String script = environmentService.installationScript(envId, second.getCode());
+    String script = generateScript(environmentService, envId, second.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
   }
@@ -157,7 +157,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThrows(DomainException.class, () -> environmentService.issueInstallCode(envId, 0L));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    assertThat(environmentService.installationScript(envId, issued.getCode())).isNotBlank();
+    assertThat(generateScript(environmentService, envId, issued.getCode())).isNotBlank();
     assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
   }
 
@@ -169,19 +169,18 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     jdbcClient
         .sql(
             """
-            update environment set install_code = jsonb_build_object(
-                'codeHash', :codeHash,
-                'expiresAt', :expiresAt)
+            update environment set
+                install_code_hash = :codeHash,
+                install_code_expires_at = current_timestamp - interval '1 minute'
             where id = :id
             """)
         .param("codeHash", EnvironmentInstallCodes.hash(issued.getCode()))
-        .param("expiresAt", Instant.now().minusSeconds(60).toString())
         .param("id", envId.value())
         .update();
 
     assertThrows(
         DomainException.class,
-        () -> environmentService.installationScript(envId, issued.getCode()));
+        () -> generateScript(environmentService, envId, issued.getCode()));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
     assertThat(environmentService.get(envId).getVersion()).isEqualTo(1L);
   }
@@ -199,7 +198,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     assertThrows(
         DomainException.class,
-        () -> environmentService.installationScript(envId, issued.getCode()));
+        () -> generateScript(environmentService, envId, issued.getCode()));
   }
 
   /** 测试意图：签发 code 后配置导入（updateImportedEnvironment）更新了凭据摘要，旧 code 失效拒绝消费。 */
@@ -210,12 +209,13 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     String newImportedTokenHash = RegistrationTokens.hash("imported-fresh-token");
-    environmentService.updateImportedEnvironment(envId, newImportedTokenHash, validConfig(), 1L);
+    environmentService.updateImportedEnvironment(
+        envId, null, newImportedTokenHash, validConfig(), 1L);
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
         DomainException.class,
-        () -> environmentService.installationScript(envId, issued.getCode()));
+        () -> generateScript(environmentService, envId, issued.getCode()));
   }
 
   /** 测试意图：真实 PostgreSQL 下多个独立 Service 实例共享状态，实例 1 签发 code，实例 2 可成功核销。 */
@@ -232,7 +232,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 由第二个服务实例核销 code 并生成脚本
-    String script = serviceInstance2.installationScript(envId, issued.getCode());
+    String script = generateScript(serviceInstance2, envId, issued.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
 
@@ -242,7 +242,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 再次在第一个实例尝试兑换失败
     assertThrows(
-        DomainException.class, () -> serviceInstance1.installationScript(envId, issued.getCode()));
+        DomainException.class, () -> generateScript(serviceInstance1, envId, issued.getCode()));
   }
 
   /** 测试意图：多线程并发核销同一安装 code，数据库行锁与原子消费保证严格只有一次成功，其余全被拒绝。 */
@@ -266,7 +266,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
               () -> {
                 try {
                   startGate.await();
-                  environmentService.installationScript(envId, issued.getCode());
+                  generateScript(environmentService, envId, issued.getCode());
                   successes.incrementAndGet();
                 } catch (DomainException error) {
                   if (error.code() == DomainErrorCode.VALIDATION) {
@@ -310,12 +310,15 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     try (MockedStatic<EnvironmentInstallScripts> mocked =
         Mockito.mockStatic(EnvironmentInstallScripts.class)) {
       mocked
-          .when(() -> EnvironmentInstallScripts.install(any(), any(), any()))
+          .when(
+              () ->
+                  EnvironmentInstallScripts.install(
+                      any(), anyLong(), any(), any(), any(), any()))
           .thenThrow(new IllegalStateException("simulated render failure"));
 
       assertThrows(
           IllegalStateException.class,
-          () -> environmentService.installationScript(envId, issued.getCode()));
+          () -> generateScript(environmentService, envId, issued.getCode()));
     }
 
     // 事务回滚后：临时 code 未被删除，版本保持不变
@@ -324,7 +327,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(card.getVersion()).isEqualTo(1L);
 
     // 原 code 仍可成功兑换，且成功后版本推进为 2
-    String script = environmentService.installationScript(envId, issued.getCode());
+    String script = generateScript(environmentService, envId, issued.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
     assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
@@ -341,7 +344,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     EnvironmentRepository failingRepo =
         new EnvironmentRepository(jdbcClient, environmentChangeNotifier) {
           @Override
-          public boolean redeemInstallCode(
+          public Optional<Long> redeemInstallCode(
               UUID environmentId,
               long expectedVersion,
               String codeHash,
@@ -358,7 +361,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     assertThrows(
         DataAccessResourceFailureException.class,
-        () -> failingService.installationScript(envId, issued.getCode()));
+        () -> generateScript(failingService, envId, issued.getCode()));
 
     // 事务回滚后：code 仍然有效保留
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
@@ -366,7 +369,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(card.getVersion()).isEqualTo(1L);
 
     // 使用正常 service 重试兑换成功
-    String script = environmentService.installationScript(envId, issued.getCode());
+    String script = generateScript(environmentService, envId, issued.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
     assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
@@ -375,27 +378,32 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   private EnvironmentId createTestEnvironment(String name) {
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName(name);
+    create.setDaemonConfig(validConfig());
     EnvironmentDTO card = environmentService.create(create);
-    EnvironmentInstallConfigUpdateDTO update = new EnvironmentInstallConfigUpdateDTO();
+    // 创建后执行一次同内容 PUT，把版本推进到 1，覆盖显式保存也推进 CAS 的契约。
+    EnvironmentUpdateDTO update = new EnvironmentUpdateDTO();
     update.setExpectedVersion(card.getVersion());
-    update.setInstallConfig(validConfig());
+    update.setDaemonConfig(validConfig());
     EnvironmentDTO updated =
-        environmentService.updateInstallConfig(EnvironmentId.parse(card.getId()), update);
+        environmentService.update(EnvironmentId.parse(card.getId()), update);
     return EnvironmentId.parse(updated.getId());
   }
 
-  private EnvironmentInstallConfigDTO validConfig() {
-    DaemonConfiguration daemon = new DaemonConfiguration();
-    daemon.setStudioUrl("https://studio.example.com");
-    EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
-    config.setOperatingSystem(DaemonOperatingSystem.LINUX);
-    config.setDaemon(daemon);
+  private String generateScript(EnvironmentService service, EnvironmentId id, String code) {
+    return service.installationScript(id, code, DaemonOperatingSystem.LINUX, "3.0.0");
+  }
+
+  private DaemonConfigDTO validConfig() {
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
     return config;
   }
 
   private long countInstallCodes(EnvironmentId id) {
     return jdbcClient
-        .sql("select count(*) from environment where id = :id and install_code is not null")
+        .sql(
+            "select count(*) from environment where id = :id"
+                + " and install_code_hash is not null")
         .param("id", id.value())
         .query(Long.class)
         .single();

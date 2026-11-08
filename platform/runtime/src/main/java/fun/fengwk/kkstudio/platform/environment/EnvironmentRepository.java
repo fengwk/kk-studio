@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigCodec;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 
 import java.sql.ResultSet;
@@ -12,30 +13,38 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * {@code environment} 的 JdbcClient 仓库：Environment 读取、两种行锁、CAS 写与硬删除；token 变更在同一 CAS 语句中清空安装 code。
+ * {@code environment} 的 JdbcClient 仓库：卡片读取、两种行锁、CAS 写与硬删除；安装码使用普通列并与配置写入共享同一行锁。
  *
  * <p>所有写方法都要求调用方已开启真实外层事务。稳定 Environment 的 create/update/delete 在写入成功后于同一事务连接发布 {@code
- * environment_changed}，通知失败会连同写入一起回滚；安装 code 只写入 Environment 行，签发不推进版本，兑换在同一语句中清空 code、轮换 token
- * 并递增版本。
+ * environment_changed}，通知失败会连同写入一起回滚。安装码签发不推进版本；兑换在同一语句中清空 code、轮换 token 并递增版本。
+ * 显式保存配置或轮换 token 会撤销未兑换安装码，仅修改备注不会。
  */
 @Repository
 public class EnvironmentRepository {
 
   private static final String COLUMNS =
-      "id, name, registration_token_hash, install_config::text as install_config_json, version, "
+      "id, name, note, registration_token_hash, daemon_config::text as daemon_config_json, version, "
           + "created_at, updated_at";
 
   static final String UPDATE_BY_ID_SQL =
       """
       update environment
       set registration_token_hash = :registrationTokenHash,
-          install_config = cast(:installConfigJson as jsonb),
-          install_code = case
-              when registration_token_hash is distinct from :registrationTokenHash then null
-              else install_code
+          note = :note,
+          daemon_config = cast(:daemonConfigJson as jsonb),
+          install_code_hash = case
+              when registration_token_hash is distinct from :registrationTokenHash
+                  or daemon_config is distinct from cast(:daemonConfigJson as jsonb) then null
+              else install_code_hash
+          end,
+          install_code_expires_at = case
+              when registration_token_hash is distinct from :registrationTokenHash
+                  or daemon_config is distinct from cast(:daemonConfigJson as jsonb) then null
+              else install_code_expires_at
           end,
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
@@ -45,34 +54,35 @@ public class EnvironmentRepository {
   private static final String INSERT_SQL =
       """
       insert into environment (
-          id, name, registration_token_hash, install_config, created_at, updated_at, version
+          id, name, note, registration_token_hash, daemon_config, created_at, updated_at, version
       ) values (
-          :id, :name, :registrationTokenHash, cast(:installConfigJson as jsonb), current_timestamp, current_timestamp, 0
+          :id, :name, :note, :registrationTokenHash, cast(:daemonConfigJson as jsonb),
+          current_timestamp, current_timestamp, 0
       )
       """;
 
   private static final String SAVE_INSTALL_CODE_SQL =
       """
       update environment
-      set install_code = jsonb_build_object(
-          'codeHash', :codeHash,
-          'expiresAt', :expiresAt
-      )
+      set install_code_hash = :codeHash,
+          install_code_expires_at = statement_timestamp() + interval '5 minutes'
       where id = :environmentId and version = :expectedVersion
+      returning install_code_expires_at
       """;
 
   private static final String REDEEM_INSTALL_CODE_SQL =
       """
       update environment
-      set install_code = null,
+      set install_code_hash = null,
+          install_code_expires_at = null,
           registration_token_hash = :registrationTokenHash,
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
       where id = :environmentId
         and version = :expectedVersion
-        and install_code is not null
-        and install_code ->> 'codeHash' = :codeHash
-        and (install_code ->> 'expiresAt')::timestamptz > statement_timestamp()
+        and install_code_hash = :codeHash
+        and install_code_expires_at > statement_timestamp()
+      returning version
       """;
 
   private static final RowMapper<Environment> ROW_MAPPER = EnvironmentRepository::mapRow;
@@ -144,10 +154,9 @@ public class EnvironmentRepository {
                 .sql(INSERT_SQL)
                 .param("id", environment.getId())
                 .param("name", environment.getName())
+                .param("note", environment.getNote())
                 .param("registrationTokenHash", environment.getRegistrationTokenHash())
-                .param(
-                    "installConfigJson",
-                    EnvironmentInstallConfigs.write(environment.getInstallConfig()))
+                .param("daemonConfigJson", DaemonConfigCodec.write(environment.getDaemonConfig()))
                 .update()
             == 1;
     if (created) {
@@ -156,16 +165,15 @@ public class EnvironmentRepository {
     return created;
   }
 
-  /** CAS 原子更新 registrationTokenHash 与 installConfig；name 是不可变身份，绝不参与更新。 */
+  /** CAS 原子更新备注、完整配置与 registrationTokenHash；name 是不可变身份，绝不参与更新。 */
   public boolean updateById(Environment environment, long expectedVersion) {
     EnvironmentChangeNotifier.requireTransaction();
     boolean updated =
         jdbcClient
                 .sql(UPDATE_BY_ID_SQL)
                 .param("registrationTokenHash", environment.getRegistrationTokenHash())
-                .param(
-                    "installConfigJson",
-                    EnvironmentInstallConfigs.write(environment.getInstallConfig()))
+                .param("note", environment.getNote())
+                .param("daemonConfigJson", DaemonConfigCodec.write(environment.getDaemonConfig()))
                 .param("id", environment.getId())
                 .param("expectedVersion", expectedVersion)
                 .update()
@@ -193,49 +201,49 @@ public class EnvironmentRepository {
   }
 
   /**
-   * 保存或覆盖 Environment 行上的临时安装 code；不修改安装配置，不递增 CAS 版本。
+   * 保存或覆盖 Environment 行上的临时安装 code；不修改配置，不递增 CAS 版本。
    *
-   * <p>调用方必须在锁定同一 Environment 行的事务中执行，并通过 {@code expectedVersion} 证明签发基于当前配置版本。
+   * <p>调用方必须在锁定同一 Environment 行的事务中执行，并通过 {@code expectedVersion} 证明签发基于当前配置版本。失效时间由数据库时间
+   * 加上固定五分钟窗口生成，返回实际写入的过期时间。
    */
-  public boolean saveInstallCode(
-      UUID environmentId, long expectedVersion, String codeHash, Instant expiresAt) {
+  public Optional<Instant> saveInstallCode(
+      UUID environmentId, long expectedVersion, String codeHash) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(codeHash, "codeHash");
-    Objects.requireNonNull(expiresAt, "expiresAt");
     EnvironmentChangeNotifier.requireTransaction();
     return jdbcClient
-            .sql(SAVE_INSTALL_CODE_SQL)
-            .param("environmentId", environmentId)
-            .param("expectedVersion", expectedVersion)
-            .param("codeHash", codeHash)
-            .param("expiresAt", expiresAt.toString())
-            .update()
-        == 1;
+        .sql(SAVE_INSTALL_CODE_SQL)
+        .param("environmentId", environmentId)
+        .param("expectedVersion", expectedVersion)
+        .param("codeHash", codeHash)
+        .query(
+            (rs, rowNum) ->
+                PostgresJdbcTypes.toInstant(rs.getObject("install_code_expires_at", OffsetDateTime.class)))
+        .optional();
   }
 
   /**
-   * 原子兑换安装 code：在数据库时间下严格校验摘要与有效期后，清空 install_code、轮换注册凭证并递增版本。
+   * 原子兑换安装 code：在数据库时间下严格校验摘要与有效期后，清空 code、轮换注册凭证并递增版本。
    *
-   * <p>调用方必须在锁定同一 Environment 行的事务中执行；摘要不匹配、已过期或版本不匹配时返回 false 且不写入任何字段。
+   * <p>调用方必须在锁定同一 Environment 行的事务中执行；摘要不匹配、已过期或版本不匹配时返回空且不写入任何字段。返回值是兑换后的新 CAS
+   * 版本，脚本必须使用该版本而不是兑换前版本。
    */
-  public boolean redeemInstallCode(
+  public Optional<Long> redeemInstallCode(
       UUID environmentId, long expectedVersion, String codeHash, String registrationTokenHash) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(codeHash, "codeHash");
     Objects.requireNonNull(registrationTokenHash, "registrationTokenHash");
     EnvironmentChangeNotifier.requireTransaction();
-    boolean redeemed =
+    Optional<Long> redeemed =
         jdbcClient
-                .sql(REDEEM_INSTALL_CODE_SQL)
-                .param("environmentId", environmentId)
-                .param("expectedVersion", expectedVersion)
-                .param("codeHash", codeHash)
-                .param("registrationTokenHash", registrationTokenHash)
-                .update()
-            == 1;
-    if (redeemed) {
-      notifier.environmentChanged(environmentId);
-    }
+            .sql(REDEEM_INSTALL_CODE_SQL)
+            .param("environmentId", environmentId)
+            .param("expectedVersion", expectedVersion)
+            .param("codeHash", codeHash)
+            .param("registrationTokenHash", registrationTokenHash)
+            .query(Long.class)
+            .optional();
+    redeemed.ifPresent(ignored -> notifier.environmentChanged(environmentId));
     return redeemed;
   }
 
@@ -263,9 +271,9 @@ public class EnvironmentRepository {
     Environment environment = new Environment();
     environment.setId(rs.getObject("id", UUID.class));
     environment.setName(rs.getString("name"));
+    environment.setNote(rs.getString("note"));
     environment.setRegistrationTokenHash(rs.getString("registration_token_hash"));
-    environment.setInstallConfig(
-        EnvironmentInstallConfigs.read(rs.getString("install_config_json")));
+    environment.setDaemonConfig(DaemonConfigCodec.read(rs.getString("daemon_config_json")));
     environment.setVersion(rs.getLong("version"));
     environment.setCreatedAt(
         PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)));

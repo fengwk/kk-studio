@@ -121,9 +121,11 @@ comment on index idx_storage_object_cleanup_due is 'Storage Maintenance tombston
 create table environment (
     id                  uuid          primary key,
     name                varchar(64)   not null,
+    note                varchar(512),
     registration_token_hash char(64)  not null,
-    install_config      jsonb,
-    install_code        jsonb,
+    daemon_config       jsonb         not null,
+    install_code_hash   char(64),
+    install_code_expires_at timestamptz(3),
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
@@ -135,46 +137,35 @@ create table environment (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
+    constraint ck_environment_note check (
+        note is null or btrim(note) <> ''
+    ),
     constraint ck_environment_registration_token_hash check (
         registration_token_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_environment_version_nonneg check (version >= 0),
-    constraint ck_environment_install_config_object check (
-        install_config is null or jsonb_typeof(install_config) = 'object'
+    constraint ck_environment_daemon_config_object check (
+        jsonb_typeof(daemon_config) = 'object'
     ),
-    constraint ck_environment_install_code_object check (
-        install_code is null or (
-            jsonb_typeof(install_code) = 'object'
-            and install_code ? 'codeHash'
-            and install_code ? 'expiresAt'
-            and install_code - 'codeHash' - 'expiresAt' = '{}'::jsonb
-        )
+    constraint ck_environment_install_code_pair check (
+        (install_code_hash is null) = (install_code_expires_at is null)
     ),
     constraint ck_environment_install_code_hash check (
-        install_code is null or (
-            jsonb_typeof(install_code -> 'codeHash') = 'string'
-            and install_code ->> 'codeHash' ~ '^[0-9a-f]{64}$'
-        )
-    ),
-    constraint ck_environment_install_code_expires_at check (
-        install_code is null or (
-            jsonb_typeof(install_code -> 'expiresAt') = 'string'
-            and install_code ->> 'expiresAt'
-                ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'
-            and pg_input_is_valid(install_code ->> 'expiresAt', 'timestamptz')
-        )
+        install_code_hash is null or install_code_hash ~ '^[0-9a-f]{64}$'
     )
 );
 
-comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token_hash 是 Daemon 握手凭证的 SHA-256';
+comment on table environment is '稳定 Environment 卡片注册表：UUID 主键跨重启不变，name 是唯一且不可变的配置标识，daemon_config 是该卡片的完整 Daemon 配置';
 comment on column environment.id is 'Environment 的全局唯一 UUID（服务端生成，永不变更）';
-comment on column environment.name is 'Environment 唯一名称（非空、无首尾空白、不含斜杠、不超过 64 字符）';
+comment on column environment.name is 'Environment 唯一名称（非空、无首尾空白、不含斜杠、不超过 64 字符）；创建后不可变';
+comment on column environment.note is '卡片备注（最多 512 字符），保存后立即影响展示和提示词，不依赖 Daemon READY';
 comment on column environment.registration_token_hash is 'Daemon 握手准入注册凭证的 SHA-256（小写十六进制）；明文只在创建、轮换与安装脚本中出现一次，不落库';
-comment on column environment.install_config is '保存的安装设置（不含 token，不表示已部署）';
-comment on column environment.install_code is '一次性安装 code 摘要与 UTC 失效时间（JSON object：codeHash、expiresAt）；null 表示没有未核销 code';
+comment on column environment.daemon_config is '该卡片的完整 Daemon 配置（JSON object：studioUrl、bashExecutable、lsp、proxyUrl）；Studio 数据库是唯一权威';
+comment on column environment.install_code_hash is '一次性安装 code 的 SHA-256；与 install_code_expires_at 成对出现，兑换或配置变更后清空';
+comment on column environment.install_code_expires_at is '安装 code 的数据库时间失效点（固定五分钟）；与 install_code_hash 成对出现';
 comment on column environment.created_at is '创建时间（毫秒精度）';
 comment on column environment.updated_at is '最后更新时间（毫秒精度），应用侧维护';
-comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 开始，每次更新 +1';
+comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 开始，每次显式更新 +1；同时是完整配置快照版本';
 
 create index idx_environment_updated
     on environment (updated_at, id);
@@ -184,7 +175,7 @@ create table environment_connection (
     owner_node_id   uuid           not null,
     lease_token     uuid           not null,
     status          varchar(32)    not null,
-    runtime_info    jsonb,
+    ready_metadata  jsonb,
     skill_state     jsonb          not null default '[]'::jsonb,
     recent_events   jsonb          not null default '[]'::jsonb,
     last_seen_at    timestamptz(3) not null,
@@ -194,8 +185,8 @@ create table environment_connection (
     constraint ck_environment_connection_status check (
         status in ('CONNECTING', 'READY')
     ),
-    constraint ck_environment_connection_runtime_info check (
-        runtime_info is null or jsonb_typeof(runtime_info) = 'object'
+    constraint ck_environment_connection_ready_metadata check (
+        ready_metadata is null or jsonb_typeof(ready_metadata) = 'object'
     ),
     constraint ck_environment_connection_skill_state check (
         jsonb_typeof(skill_state) = 'array'
@@ -213,7 +204,7 @@ comment on column environment_connection.environment_id is 'Environment 的全�
 comment on column environment_connection.owner_node_id is '当前持有该连接路由的 App 节点实例 UUID';
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
-comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
+comment on column environment_connection.ready_metadata is '最近一次被接受的 READY 宿主 metadata（daemonVersion + hostInfo JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
 comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
 comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';

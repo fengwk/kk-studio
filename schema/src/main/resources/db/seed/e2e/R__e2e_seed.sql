@@ -146,16 +146,18 @@ insert into agent (
 -- host (tool-e2e), reliability (docker-reliability), and distributed (distributed-a / distributed-b).
 -- Repeatable migration must be re-runnable without deleting existing environments with FK/lease.
 insert into environment (
-    id, name, registration_token_hash, created_at, updated_at, version
+    id, name, note, registration_token_hash, daemon_config, created_at, updated_at, version
 ) values
-    ('11111111-1111-1111-1111-111111111111'::uuid, 'tool-e2e', encode(sha256('e2e-token-host-tool'::bytea), 'hex'), current_timestamp, current_timestamp, 0),
-    ('22222222-2222-2222-2222-222222222222'::uuid, 'docker-reliability', encode(sha256('e2e-token-reliability'::bytea), 'hex'), current_timestamp, current_timestamp, 0),
-    ('33333333-3333-3333-3333-333333333333'::uuid, 'distributed-a', encode(sha256('e2e-token-dist-a'::bytea), 'hex'), current_timestamp, current_timestamp, 0),
-    ('44444444-4444-4444-4444-444444444444'::uuid, 'distributed-b', encode(sha256('e2e-token-dist-b'::bytea), 'hex'), current_timestamp, current_timestamp, 0),
-    ('55555555-5555-5555-5555-555555555555'::uuid, 'distributed-c', encode(sha256('e2e-token-dist-c'::bytea), 'hex'), current_timestamp, current_timestamp, 0)
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'tool-e2e', null, encode(sha256('e2e-token-host-tool'::bytea), 'hex'), '{"studioUrl":"http://127.0.0.1:8080","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, current_timestamp, current_timestamp, 0),
+    ('22222222-2222-2222-2222-222222222222'::uuid, 'docker-reliability', null, encode(sha256('e2e-token-reliability'::bytea), 'hex'), '{"studioUrl":"http://127.0.0.1:8080","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, current_timestamp, current_timestamp, 0),
+    ('33333333-3333-3333-3333-333333333333'::uuid, 'distributed-a', null, encode(sha256('e2e-token-dist-a'::bytea), 'hex'), '{"studioUrl":"http://127.0.0.1:8080","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, current_timestamp, current_timestamp, 0),
+    ('44444444-4444-4444-4444-444444444444'::uuid, 'distributed-b', null, encode(sha256('e2e-token-dist-b'::bytea), 'hex'), '{"studioUrl":"http://127.0.0.1:8080","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, current_timestamp, current_timestamp, 0),
+    ('55555555-5555-5555-5555-555555555555'::uuid, 'distributed-c', null, encode(sha256('e2e-token-dist-c'::bytea), 'hex'), '{"studioUrl":"http://127.0.0.1:8080","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, current_timestamp, current_timestamp, 0)
 on conflict (id) do update set
     name = excluded.name,
+    note = excluded.note,
     registration_token_hash = excluded.registration_token_hash,
+    daemon_config = excluded.daemon_config,
     updated_at = current_timestamp;
 
 -- Harness runtime policy rows are gone: retry and realtime stream policy are

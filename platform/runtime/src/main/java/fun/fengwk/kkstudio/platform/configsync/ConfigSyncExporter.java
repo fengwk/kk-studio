@@ -203,11 +203,10 @@ public final class ConfigSyncExporter {
   private Map<String, Object> exportEnvironment(Environment env) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("name", env.getName());
+    putIfNotNull(map, "note", env.getNote());
+    map.put("daemonConfig", yaml.toMap(env.getDaemonConfig(), "daemonConfig"));
     // 只导出凭证摘要：导入后已安装的 Daemon 继续用原明文握手，导出文件本身不能冒充 Daemon。
     map.put("registrationTokenHash", env.getRegistrationTokenHash());
-    if (env.getInstallConfig() != null) {
-      map.put("installConfig", yaml.toMap(env.getInstallConfig(), "installConfig"));
-    }
     return map;
   }
 

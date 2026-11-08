@@ -24,9 +24,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
@@ -376,19 +375,32 @@ public final class ConfigSyncParser {
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqName("name");
     declared.add(name);
+    if (entry.contains("installConfig") || entry.contains("operatingSystem")) {
+      // 旧安装设置不是可跳过的未知字段：旧格式永远不能被静默当作兼容导入。
+      throw DomainException.validation(
+          RESOURCE, "environment entry uses removed installConfig/operatingSystem; use daemonConfig");
+    }
     String tokenHash = entry.reqString("registrationTokenHash");
-    // 与 register/update 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
+    String note = entry.optString("note");
+    Object configNode = requireObject(entry, "daemonConfig");
+    List<String> removed = new ArrayList<>();
+    Object cleanedConfig =
+        yaml.removeUnknownProperties(
+            DaemonConfigDTO.class, configNode, entry.path + ".daemonConfig", removed);
+    DaemonConfigDTO config =
+        yaml.convert(cleanedConfig, DaemonConfigDTO.class, entry.path + ".daemonConfig");
+    // 与 CRUD 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
     EnvironmentService.validateName(name);
     EnvironmentService.validateRegistrationTokenHash(tokenHash);
-    Object configNode = entry.node("installConfig");
-    EnvironmentInstallConfigDTO config =
-        configNode == null
-            ? null
-            : EnvironmentInstallConfigs.parse(EnvironmentInstallConfigs.tree(configNode));
+    EnvironmentService.validateNote(note);
+    EnvironmentService.validateDaemonConfig(config);
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
     }
-    return new EnvironmentSpec(name, tokenHash, config);
+    if (reportUnknownConfig(removed, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
+      return null;
+    }
+    return new EnvironmentSpec(name, note, tokenHash, config);
   }
 
   private McpSpec parseMcpServer(
@@ -460,6 +472,11 @@ public final class ConfigSyncParser {
     Object node = document.get(key);
     if (!(node instanceof Map<?, ?> rawMap)) {
       throw DomainException.validation(RESOURCE, "settings must be an object");
+    }
+    if (rawMap.containsKey("network")) {
+      // 旧全局 network 已被 card/backend 配置隔离取代，必须在导入前置契约检查中明确拒绝。
+      throw DomainException.validation(
+          RESOURCE, "settings.network is no longer supported; use backendNetwork");
     }
     Map<String, Object> raw = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
@@ -577,7 +594,7 @@ public final class ConfigSyncParser {
       String packageName, String description, String repositoryUrl, String branch, String token) {}
 
   public record EnvironmentSpec(
-      String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {}
+      String name, String note, String registrationTokenHash, DaemonConfigDTO daemonConfig) {}
 
   public record McpSpec(String name, McpConfigParser.HttpConfig config) {}
 
@@ -603,6 +620,10 @@ public final class ConfigSyncParser {
     Object node(String key) {
       consumed.add(key);
       return raw.get(key);
+    }
+
+    boolean contains(String key) {
+      return raw.containsKey(key);
     }
 
     String reqString(String key) {
