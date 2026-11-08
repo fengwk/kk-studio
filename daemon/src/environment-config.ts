@@ -42,7 +42,11 @@ interface PendingRequest {
   version: bigint
   configuration: DaemonConfiguration
   content: string
-  resolve(result: EnvironmentConfigApplyResult): void
+  resolvers: Array<(result: EnvironmentConfigApplyResult) => void>
+}
+
+function closedResult(): EnvironmentConfigApplyResult {
+  return { kind: 'fatal', message: 'configuration runtime is closed' }
 }
 
 function configurationOf(config: DaemonConfig): DaemonConfiguration {
@@ -74,7 +78,9 @@ export class EnvironmentConfigRuntime {
   private current: DaemonConfig
   private initialized = false
   private processing = false
+  private active: PendingRequest | null = null
   private pending: PendingRequest | null = null
+  private readonly closeWaiters: Array<() => void> = []
   private closed = false
 
   constructor(private readonly options: EnvironmentConfigRuntimeOptions) {
@@ -98,7 +104,7 @@ export class EnvironmentConfigRuntime {
   /** 提交一条服务端完整快照；串行归并到当前/最高待版本。 */
   async submit(version: bigint, configuration: DaemonConfiguration): Promise<EnvironmentConfigApplyResult> {
     if (this.closed) {
-      return { kind: 'fatal', message: 'configuration runtime is closed' }
+      return closedResult()
     }
     const content = contentOf(configuration)
     if (version === this.acceptedVersion && content !== this.acceptedContent) {
@@ -116,37 +122,66 @@ export class EnvironmentConfigRuntime {
     if (version === this.acceptedVersion && this.initialized) {
       return { kind: 'confirmed', config: this.current }
     }
-    return new Promise<EnvironmentConfigApplyResult>((resolve) => {
-      this.enqueue({ version, configuration, content, resolve })
-    })
-  }
 
-  /** 停机时释放尚未开始的候选。当前网络/LSP 由装配层持有的 facade 统一关闭。 */
-  async close(): Promise<void> {
-    this.closed = true
-    this.pending?.resolve({ kind: 'fatal', message: 'configuration runtime is closed' })
-    this.pending = null
-  }
+    // 同版本请求共享一次应用结果。未初始化时绝不能先用 stale 放行 READY；
+    // 即使该版本已被更高待版本取代，也把等待者并入实际应用的最高版本。
+    const sameVersion =
+      this.active?.version === version ? this.active : this.pending?.version === version ? this.pending : null
+    if (sameVersion !== null) {
+      if (sameVersion.content !== content) {
+        throw new Error('the same environment config version must not change its content')
+      }
+      return this.wait(sameVersion)
+    }
+    if (this.pending !== null && version < this.pending.version) {
+      return this.initialized
+        ? { kind: 'stale', config: this.current }
+        : this.wait(this.pending)
+    }
+    if (this.active !== null && version < this.active.version) {
+      return this.initialized
+        ? { kind: 'stale', config: this.current }
+        : this.wait(this.active)
+    }
 
-  private enqueue(request: PendingRequest): void {
+    const request: PendingRequest = { version, configuration, content, resolvers: [] }
     if (this.pending !== null) {
-      if (request.version < this.pending.version) {
-        request.resolve({ kind: 'stale', config: this.current })
-        return
+      const replaced = this.pending
+      if (this.initialized) {
+        this.settle(replaced, { kind: 'stale', config: this.current })
+      } else {
+        request.resolvers.push(...replaced.resolvers.splice(0))
       }
-      if (request.version === this.pending.version) {
-        if (request.content !== this.pending.content) {
-          throw new Error('the same pending environment config version must not change its content')
-        }
-        request.resolve({ kind: 'stale', config: this.current })
-        return
-      }
-      // 更高版本替换尚未开始的待处理项；较低版本已确定不会被应用。
-      this.pending.resolve({ kind: 'stale', config: this.current })
     }
     this.pending = request
     if (!this.processing) {
       void this.drain()
+    }
+    return this.wait(request)
+  }
+
+  /** 停机时拒绝待处理候选，并等正在准备/发布的候选真正收敛后才返回。 */
+  async close(): Promise<void> {
+    this.closed = true
+    const pending = this.pending
+    this.pending = null
+    if (pending !== null) {
+      this.settle(pending, closedResult())
+    }
+    if (this.processing) {
+      await new Promise<void>((resolve) => this.closeWaiters.push(resolve))
+    }
+  }
+
+  private wait(request: PendingRequest): Promise<EnvironmentConfigApplyResult> {
+    return new Promise<EnvironmentConfigApplyResult>((resolve) => {
+      request.resolvers.push(resolve)
+    })
+  }
+
+  private settle(request: PendingRequest, result: EnvironmentConfigApplyResult): void {
+    for (const resolve of request.resolvers.splice(0)) {
+      resolve(result)
     }
   }
 
@@ -159,20 +194,28 @@ export class EnvironmentConfigRuntime {
       for (;;) {
         const request = this.pending
         this.pending = null
-        if (request === undefined || request === null || this.closed) {
+        if (request === null || this.closed) {
           return
         }
+        this.active = request
+        let result: EnvironmentConfigApplyResult
         try {
-          request.resolve(await this.apply(request))
+          result = await this.apply(request)
         } catch (error) {
-          request.resolve({
+          result = {
             kind: 'fatal',
             message: error instanceof Error ? error.message : 'environment config application failed',
-          })
+          }
         }
+        this.active = null
+        this.settle(request, result)
       }
     } finally {
       this.processing = false
+      this.active = null
+      for (const resolve of this.closeWaiters.splice(0)) {
+        resolve()
+      }
       if (this.pending !== null && !this.closed) {
         void this.drain()
       }
@@ -212,6 +255,10 @@ export class EnvironmentConfigRuntime {
       } catch (error) {
         return this.failCandidate(request.version, error)
       }
+      if (this.closed) {
+        await this.retirePrepared(prepared)
+        return closedResult()
+      }
       if (prepared.config.configVersion !== request.version) {
         await this.retirePrepared(prepared)
         return this.failCandidate(
@@ -222,6 +269,10 @@ export class EnvironmentConfigRuntime {
       candidate = prepared.config
     }
 
+    if (this.closed) {
+      await this.retirePrepared(prepared)
+      return closedResult()
+    }
     try {
       await writePrivateFile(this.options.paths.configPath, serializeDaemonCache(candidate))
     } catch (error) {
@@ -234,6 +285,10 @@ export class EnvironmentConfigRuntime {
       return { kind: 'failed', version: request.version, code: 'PERSIST_FAILED' }
     }
 
+    if (this.closed) {
+      await this.retirePrepared(prepared)
+      return closedResult()
+    }
     // 同步发布：不 await、不逐字段修改共享对象。候选资源先完成切换，再发布不可变配置快照。
     const previous = this.current
     try {

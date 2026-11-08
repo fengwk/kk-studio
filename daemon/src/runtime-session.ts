@@ -292,6 +292,11 @@ export class ControlSession {
         return
       case 'confirmed':
       case 'stale':
+        // 只有已存在可用快照时 stale/confirmed 才能放行 READY；未初始化必须等待真正应用。
+        if (!this.options.configuration.hasAppliedConfiguration) {
+          this.options.outbound.sendRuntimeStatus(this.options.updates.snapshot())
+          return
+        }
         if (this.reconnectPending) {
           this.requestReconnect(connection)
           return
