@@ -1,79 +1,110 @@
 #!/usr/bin/env bash
-# Official-release-only, per-user installer for the Node Environment Daemon.
-# Bash 3.2 / GNU and BSD utilities. JSON and token semantics belong exclusively to the
-# downloaded daemon preflight.
+# Official-release-only, per-environment installer for the Node Environment Daemon.
+# One installation is one Studio card: every managed path and OS service is scoped by its
+# canonical environment UUID. Bash 3.2 / GNU and BSD utilities. JSON semantics belong to the
+# downloaded daemon preflight; this script enforces the installation envelope only.
 set -euo pipefail
 umask 077
 
 RELEASE_BASE=https://github.com/fengwk/kk-studio/releases
-SERVICE_NAME=kk-studio-daemon.service
+SERVICE_PREFIX=kk-studio-daemon
+LAUNCHD_PREFIX=fun.fengwk.kkstudio.environment-daemon
 UNIT_MARKER='# Managed by scripts/daemon/install.sh'
-LAUNCHD_LABEL=fun.fengwk.kkstudio.environment-daemon
 PLIST_MARKER='<!-- Managed by scripts/daemon/install.sh -->'
+UUID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+VERSION_PATTERN='^[0-9A-Za-z._+-]{1,64}$'
+
+ACTION=help
+ACTION_LABEL=安装
+ENV_ID=
+VERSION=
+VERSION_JSON=null
 CONFIG_FILE=
 TOKEN_FILE=
-VERSION=
 SEEN_OPTIONS=
-DOWNLOAD_DIR=
-BACKUP_DIR=
-PUBLISHED=false
-INSTALLING=false
+HOST_OS=
+INSTALL_ROOT=
+ENV_ROOT=
+INSTALLED_LIB=
+INSTALLED_CONFIG=
+INSTALLED_TOKEN=
+WORK_DIR=
+LAST_OPERATION=
+STDOUT_LOG=
+STDERR_LOG=
+SERVICE_NAME=
+SERVICE_PATH=
+SERVICE_MARKER=
+LAUNCHD_DOMAIN=
+LAUNCHD_TARGET=
+BOOTSTRAP_DIR=
+MGMT_DIR=
+STAGED_NODE=
+STAGED_MAIN=
+DOWNLOADED_ARCHIVE=
+OPERATION_ID=
 PHASE='1/7 检查环境与输入'
+PHASE_CODE=input
 FAILURE_REASON=
-START_SINCE=
-START_CURSOR=
 STOP_ATTEMPTED=false
-stage() { PHASE=$1; echo "[$PHASE]" >&2; }
+PUBLISHED=false
+HELPER_PID=
+HELPER_FIFO=
+HELPER_FD_OPEN=false
+HELPER_READY=false
 TEMP_PATHS=()
+SUCCESS_OUTPUT=
 VERIFY_TIMEOUT_SECONDS=${DAEMON_VERIFY_TIMEOUT_SECONDS:-30}
 VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 
 usage() {
   cat <<'EOF'
-Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--version <version>]
-       bash install.sh status | uninstall | help
+Usage: bash install.sh install --environment-id <UUID> --version <version> \
+                                --config-file <absolute daemon.json> --token-file <absolute daemon.token>
+       bash install.sh update --environment-id <UUID> --version <version>
+       bash install.sh status --environment-id <UUID>
+       bash install.sh uninstall --environment-id <UUID>
+       bash install.sh help
 
-Install downloads the specified or latest official GitHub release for this OS/architecture, validates
-private sibling inputs with that distribution, replaces program/config/token and restarts
-the user service. Requires curl and a SHA256 tool; no JRE or user Node is needed.
-Inputs must be named daemon.json and daemon.token in the same private directory.
-The release --check-config preflight validates the configuration, its sibling token and the
-configured Bash before any installation change.
-No interactive prompts. Unknown and duplicate options fail closed.
+Installs, updates, inspects or removes the official Environment Daemon of exactly one Studio
+card. The canonical --environment-id UUID scopes the installation directory and the OS service;
+two cards of the same user never share a service, a program directory or an operation lock.
 
-Fixed layout: ~/.kk-studio (0700), daemon.json and daemon.token (0600),
-lib/ (Node Daemon distribution with its frozen code-server runtime), logs/ (macOS),
-backups/ (private unique backups).
-Uninstall removes only the owned service and program; config/token/data remain.
-After install, return to Studio and confirm the environment reports READY.
-No automatic rollback: after publication failures, use the reported backup and
-one status or log command for manual recovery, or retry install with corrected inputs.
+install is the only bootstrap/overwrite command. update replaces only the program and the
+service definition of an existing installation: it reads the current daemon.json, re-validates
+it after the service has stopped and never accepts or writes a configuration or token.
+The release must be named explicitly by --version; no mutable "latest" release is resolved.
 
-Linux uses systemd --user; macOS uses the current user's GUI LaunchAgent.
-Status exits 0 when the unit is active / LaunchAgent is loaded, 1 if absent,
-3 if installed but inactive / not loaded. Loaded is not a running-process check.
-DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 control
-the startup and stability windows (non-negative integers; 0 checks immediately).
+Fixed layout (0700 directories, 0600 files):
+  ~/.kk-studio/environments/<environment-id>/{daemon.json,daemon.token,daemon.lock,install.lock,
+  lib/,ide/,skills/,.work/,last-operation.json,daemon.stdout.log,daemon.stderr.log}
+
+Installation operations are serialized by a kernel lock (install.lock) held through a separate
+temporary helper copy: no PID guessing, stale lock directory or flock command is used, and the
+helper never loads the library that is about to be replaced. A busy card is reported, not waited on.
+
+There is no backup, no historical program directory, no operation log history and no automatic
+rollback: a failure after publication can leave the service unavailable and is recovered by
+running install again. .work/ is the only staging area and is cleaned by this operation.
+last-operation.json holds at most one bounded diagnostic record without secrets.
+
+Uninstall stops and removes only this card's service and program; configuration, credentials,
+skills and other user data remain. It does not delete the Studio card.
+
+Status exits 0 when the service is active/loaded, 1 when it is absent, 3 when it is installed
+but inactive/not loaded. Loaded is not a running-process check.
+DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 control the startup and
+stability windows (non-negative integers; 0 checks immediately).
 EOF
 }
 
+stage() {
+  PHASE=$1
+  PHASE_CODE=${2:-$PHASE_CODE}
+  echo "[$PHASE]" >&2
+}
 fail() {
-  local action=安装 detail=$*
-  if [ "$INSTALLING" = true ]; then
-    FAILURE_REASON=$detail
-    exit 1
-  fi
-  if [ "$1" = "--uninstall" ]; then
-    action=卸载
-    shift
-    detail=$*
-  fi
-  echo "${action}失败：${detail}" >&2
-  if [ "$action" = 卸载 ]; then
-    echo "下一步：处理上述问题后，重新复制并执行卸载命令。" >&2
-  else
-    echo "下一步：修正上述问题后，重新复制并执行安装命令。" >&2
-  fi
+  FAILURE_REASON=$*
   exit 1
 }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
@@ -92,7 +123,6 @@ check_metadata() {
   case "$mode" in '' | *[!0-7]*) fail "cannot interpret permissions: $path" ;; esac
   (( (8#$mode & mask) == 0 )) || fail "unsafe permissions: $path"
 }
-
 check_private_directory() {
   local path=$1
   [ ! -L "$path" ] || fail "symbolic link directory is unsafe: $path"
@@ -105,11 +135,7 @@ check_file() {
   local path=$1 private=$2
   [ ! -L "$path" ] || fail "symbolic link file is unsafe: $path"
   [ -f "$path" ] && [ -r "$path" ] || fail "must be a readable regular file: $path"
-  if [ "$private" = true ]; then
-    check_metadata "$path" 8#077
-  else
-    check_metadata "$path" 8#022
-  fi
+  if [ "$private" = true ]; then check_metadata "$path" 8#077; else check_metadata "$path" 8#022; fi
   local mode
   mode=$(file_mode "$path")
   (( (8#$mode & 8#400) != 0 )) || fail "must be readable by its owner: $path"
@@ -118,54 +144,146 @@ check_input() {
   local path=$1 maximum=$2 size
   check_private_directory "${path%/*}"
   check_file "$path" true
-  size=$(wc -c <"$path")
-  (( size > 0 && size <= maximum )) || fail "input is empty or exceeds size limit: $path"
+  check_input_size "$path" "$maximum"
+}
+check_input_size() {
+  local size
+  size=$(wc -c <"$1")
+  (( size > 0 && size <= $2 )) || fail "input is empty or exceeds size limit: $1"
+}
+ensure_private_root() {
+  local path=$1
+  if [ ! -e "$path" ]; then mkdir -m 0700 "$path" || fail "无法创建受管目录。"; fi
+  check_private_directory "$path"
 }
 check_managed_paths() {
   local path
   check_private_directory "$INSTALL_ROOT"
-  for path in "$INSTALLED_LIB" "$INSTALL_ROOT/logs" "$INSTALL_ROOT/backups"; do
+  check_private_directory "$INSTALL_ROOT/environments"
+  check_private_directory "$ENV_ROOT"
+  for path in "$INSTALLED_LIB" "$ENV_ROOT/ide" "$ENV_ROOT/skills" "$WORK_DIR"; do
     check_private_directory "$path"
   done
-  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN"; do
-    if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
-  done
-  for path in "$STDOUT_LOG" "$STDERR_LOG"; do
+  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$LAST_OPERATION" "$STDOUT_LOG" "$STDERR_LOG"; do
     if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
   done
 }
 
+validate_environment_id_value() {
+  [[ $1 =~ $UUID_PATTERN ]] ||
+    fail "--environment-id must be a canonical lowercase UUID (value not echoed)"
+  ENV_ID=$1
+}
+validate_version() { [[ $VERSION =~ $VERSION_PATTERN ]] || fail "invalid version"; }
+new_operation_id() {
+  local hex nibble variant
+  hex=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+  nibble=$((16#${hex:16:1}))
+  case $((nibble % 4)) in 0) variant=8 ;; 1) variant=9 ;; 2) variant=a ;; 3) variant=b ;; esac
+  printf '%s-%s-4%s-%s%s-%s\n' "${hex:0:8}" "${hex:8:4}" "${hex:13:3}" "$variant" "${hex:17:3}" "${hex:20:12}"
+}
+
+# Written only while this operation holds install.lock. Fixed fields only: no free-form message,
+# no configuration or token, no caller-supplied text. The record is atomically replaced and any
+# real I/O failure is reported to the caller; there is no silent success and no retry/backup.
+write_last_operation() {
+  local result=$1 code=$2 timestamp json temporary
+  if [ ! -d "$ENV_ROOT" ]; then
+    echo "无法写入本机诊断记录：受管目录不存在。" >&2
+    return 1
+  fi
+  timestamp=$(( $(date +%s) * 1000 ))
+  json=$(printf '{"operationId":"%s","type":"%s","targetVersion":%s,"phase":"%s","result":"%s","time":%s,"errorCode":%s}' \
+    "$OPERATION_ID" "$ACTION" "$VERSION_JSON" "$PHASE_CODE" "$result" "$timestamp" "$code")
+  if (( ${#json} > 4096 )); then
+    echo "无法写入本机诊断记录：记录超出上限。" >&2
+    return 1
+  fi
+  temporary="$ENV_ROOT/.last-operation.json.tmp.$$"
+  if ! printf '%s\n' "$json" >"$temporary"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! chmod 0600 "$temporary"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv -f "$temporary" "$LAST_OPERATION"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  return 0
+}
+# 受管暂存的删除失败必须被看见：成功结果只能在清理成功后写入。
 cleanup() {
-  local code=$? path
+  local code=$? failure=$FAILURE_REASON path cleanup_failed=false operation_result= operation_error=null
   trap - EXIT
-  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do rm -f "$path"; done
-  if [ -n "$DOWNLOAD_DIR" ]; then rm -rf "$DOWNLOAD_DIR"; fi
-  if [ "$code" -ne 0 ] && [ "$INSTALLING" = true ]; then
-    echo "安装失败 [$PHASE]：${FAILURE_REASON:-该阶段操作未完成。}" >&2
+  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
+    if ! rm -f "$path"; then cleanup_failed=true; fi
+  done
+  if [ "$HELPER_READY" = true ] && [ -n "$WORK_DIR" ]; then
+    if ! rm -rf "$WORK_DIR"; then cleanup_failed=true; fi
+  fi
+  if [ "$HELPER_READY" = true ]; then
+    if [ "$code" -eq 0 ] && [ "$cleanup_failed" = true ]; then
+      code=1
+      PHASE='清理受管暂存'
+      PHASE_CODE=cleanup
+      failure='受管暂存未能完全清理。'
+    fi
+    if [ "$code" -ne 0 ]; then
+      operation_result=failed
+      operation_error=$(printf '"%s"' "$PHASE_CODE")
+    else
+      operation_result=succeeded
+    fi
+    # 固定结果必须与清理结果一致：清理失败或记录写不进去都不能宣称成功。
+    if ! write_last_operation "$operation_result" "$operation_error"; then
+      code=1
+    fi
+  fi
+  if ! release_install_lock; then
+    echo "安装操作锁未能正常释放；锁由进程退出释放。" >&2
+    code=1
+  fi
+  if [ -n "$MGMT_DIR" ]; then
+    if ! rm -rf "$MGMT_DIR"; then
+      echo "无法清理独立管理副本：$MGMT_DIR" >&2
+      code=1
+    fi
+    MGMT_DIR=
+  fi
+  if [ -n "$BOOTSTRAP_DIR" ]; then
+    if ! rm -rf "$BOOTSTRAP_DIR"; then
+      echo "无法清理系统临时目录：$BOOTSTRAP_DIR" >&2
+      code=1
+    fi
+    BOOTSTRAP_DIR=
+  fi
+  if [ "$code" -eq 0 ] && [ -n "$SUCCESS_OUTPUT" ]; then
+    printf '%s\n' "$SUCCESS_OUTPUT"
+  fi
+  if [ "$code" -ne 0 ] && [ "$ACTION" != status ] && [ "$ACTION" != help ]; then
+    echo "${ACTION_LABEL}失败 [${PHASE}]：${failure:-该阶段操作未完成。}" >&2
     if [ "$PUBLISHED" = true ]; then
-      echo "程序或配置已开始替换；未自动回滚。" >&2
+      echo "受管程序或服务已开始替换；未自动回滚、未保留备份目录。" >&2
     elif [ "$STOP_ATTEMPTED" = true ]; then
-      echo "程序和配置尚未替换；已尝试停止服务，请检查服务状态。" >&2
+      echo "受管程序尚未替换；已尝试停止服务，请检查服务状态。" >&2
     else
-      echo "现有程序和配置未改动。" >&2
+      echo "现有程序、配置和服务未改动。" >&2
     fi
-    echo "备份：${BACKUP_DIR:-无（尚未创建备份）}" >&2
-    if [ -n "$START_SINCE" ] && [ "$HOST_OS" = Linux ]; then
-      local logs=
-      if [ -n "$START_CURSOR" ]; then
-        logs=$(journalctl --user -u "$SERVICE_NAME" --after-cursor "$START_CURSOR" -n 50 --no-pager 2>/dev/null) || logs=
-      fi
-      case "$logs" in
-        *'daemon failed: environment registration is rejected: invalid registration token'*)
-          echo "原因：本次启动的注册令牌被拒绝。下一步：在 Studio 重新生成安装命令。" >&2 ;;
-        *) echo "下一步：运行 systemctl --user status $SERVICE_NAME 检查服务状态。" >&2 ;;
-      esac
-      echo "查看本次日志：journalctl --user -u $SERVICE_NAME --since '$START_SINCE' -n 50 --no-pager" >&2
-    elif [ "$PUBLISHED" = true ] && [ "$HOST_OS" = Darwin ]; then
-      echo "下一步：查看日志 ${STDERR_LOG}，修正后重新安装。" >&2
-    else
-      echo "下一步：修正上述问题后重新执行安装命令。" >&2
+    if [ -d "$ENV_ROOT" ] && [ -f "$LAST_OPERATION" ]; then
+      echo "本机诊断：$LAST_OPERATION" >&2
     fi
+    if [ "$HOST_OS" = Darwin ] && [ "$PUBLISHED" = true ]; then
+      echo "下一步：查看日志 ${STDERR_LOG}，修正后重新执行对应命令。" >&2
+    elif [ "$HOST_OS" = Linux ]; then
+      echo "下一步：运行 systemctl --user status $SERVICE_NAME 检查服务状态。" >&2
+    fi
+    echo "下一步：修正上述问题后重新执行对应命令。" >&2
   fi
   exit "$code"
 }
@@ -175,7 +293,6 @@ trap 'exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
-  INSTALLING=false
   echo "安装失败：拒绝操作非受管服务（${reason}）。未自动回滚，未知文件未变更。" >&2
   echo "服务定义：$actual_path" >&2
   if [ "$HOST_OS" = Linux ]; then
@@ -183,10 +300,14 @@ ownership_conflict() {
   else
     echo "下一步：运行 launchctl print $LAUNCHD_TARGET 确认归属后再处理。不要伪造所有权标记，不要改动未知文件。" >&2
   fi
+  FAILURE_REASON="拒绝操作非受管服务（$reason）"
+  PHASE_CODE=ownership
   exit 1
 }
+# Ownership requires the current user, the exact marker and the UUID-scoped program/config paths;
+# a definition that merely shares the expected name is not claimable.
 require_ownership() {
-  local fragment=
+  local fragment= marker owner mode
   if [ "$HOST_OS" = Linux ]; then
     fragment=$(systemctl --user show --property=FragmentPath --value "$SERVICE_NAME") ||
       fail "cannot inspect systemd service ownership"
@@ -198,17 +319,21 @@ require_ownership() {
   if [ -e "$SERVICE_PATH" ] || [ -L "$SERVICE_PATH" ]; then
     [ ! -L "$SERVICE_PATH" ] && [ -f "$SERVICE_PATH" ] ||
       ownership_conflict "definition is a symlink or not a regular file"
-    local marker
     if [ "$HOST_OS" = Linux ]; then marker=$(head -n 1 "$SERVICE_PATH");
     else marker=$(sed -n '2p' "$SERVICE_PATH"); fi
     [ "$marker" = "$SERVICE_MARKER" ] || ownership_conflict "missing ownership marker"
-    local owner mode
     owner=$(file_owner_uid "$SERVICE_PATH") || ownership_conflict "cannot inspect definition owner"
     [ "$owner" = "$(id -u)" ] || ownership_conflict "definition belongs to another user"
     mode=$(file_mode "$SERVICE_PATH") || ownership_conflict "cannot inspect definition permissions"
     case "$mode" in '' | *[!0-7]*) ownership_conflict "cannot interpret definition permissions" ;; esac
     (( (8#$mode & 8#022) == 0 )) || ownership_conflict "definition is group/other writable"
     check_file "$SERVICE_PATH" false
+    grep -Fq -- "$INSTALLED_LIB/runtime/code-server/lib/node" "$SERVICE_PATH" ||
+      ownership_conflict "definition does not run this environment program"
+    grep -Fq -- "$INSTALLED_LIB/main.js" "$SERVICE_PATH" ||
+      ownership_conflict "definition does not run this environment program"
+    grep -Fq -- "$INSTALLED_CONFIG" "$SERVICE_PATH" ||
+      ownership_conflict "definition does not use this environment configuration"
   elif [ "$HOST_OS" = Darwin ] && launchd_loaded; then
     ownership_conflict "job is loaded but its definition is absent"
   elif [ "$HOST_OS" = Linux ] && [ -n "$fragment" ]; then
@@ -227,31 +352,19 @@ require_manager() {
   fi
 }
 launchd_loaded() { launchctl print "$LAUNCHD_TARGET" >/dev/null 2>&1; }
-stop_launchd() {
-  local attempt
-  if launchd_loaded; then
-    launchctl bootout "$LAUNCHD_TARGET" ||
-      fail ${1:+"$1"} "无法停止服务，未替换或删除任何文件。"
-    for ((attempt=0; attempt<=VERIFY_TIMEOUT_SECONDS; attempt++)); do
-      if ! launchd_loaded; then return 0; fi
-      if (( attempt < VERIFY_TIMEOUT_SECONDS )); then sleep 1; fi
-    done
-    fail ${1:+"$1"} "服务停止后仍处于加载状态，未替换或删除任何文件。"
-  fi
-}
 
 # 本机发行平台：uname 结果映射到官方归档的 os/arch 命名。不支持的平台 fail closed。
 resolve_release_platform() {
   local machine
   case "$HOST_OS" in
-    Linux) RELEASE_OS=linux ;;
-    Darwin) RELEASE_OS=macos ;;
+    Linux) RELEASE_OS=linux; KO_OS=linux ;;
+    Darwin) RELEASE_OS=macos; KO_OS=darwin ;;
     *) fail "unsupported operating system: $HOST_OS" ;;
   esac
   machine=$(uname -m)
   case "$machine" in
-    x86_64 | amd64) RELEASE_ARCH=amd64 ;;
-    arm64 | aarch64) RELEASE_ARCH=arm64 ;;
+    x86_64 | amd64) RELEASE_ARCH=amd64; KO_ARCH=x64 ;;
+    arm64 | aarch64) RELEASE_ARCH=arm64; KO_ARCH=arm64 ;;
     *) fail "unsupported architecture: $machine" ;;
   esac
 }
@@ -263,41 +376,30 @@ release_curl() {
   fi
   curl -q --fail "$progress" --show-error --location --proto '=https' --proto-redir '=https' "$@"
 }
-# 下载与解包暂存必须与发布目标同处安装根，发布才是同文件系统的原子 rename，而不是可能
-# 部分完成的跨文件系统复制。根目录在下载前建立并核验，暂存准备失败一定发生在停止服务之前。
-ensure_install_root() {
-  if [ ! -e "$INSTALL_ROOT" ]; then
-    mkdir -m 0700 "$INSTALL_ROOT" || fail "无法创建安装根目录。"
-  fi
-  check_private_directory "$INSTALL_ROOT"
+# 下载/解包在系统临时目录进行，绝不进入卡片目录：取得安装操作锁之前，另一个操作不得清理这里的文件。
+bootstrap_directory() {
+  local base=${TMPDIR:-/tmp}
+  [ -d "$base" ] || fail "系统临时目录不存在。"
+  BOOTSTRAP_DIR=$(mktemp -d "$base/kk-studio-install.XXXXXXXX") ||
+    fail "无法创建系统临时目录。"
+  chmod 0700 "$BOOTSTRAP_DIR"
 }
 download_daemon() {
-  local effective_url asset checksum expected actual pattern
+  local asset checksum expected actual pattern
   require_cmd curl
-  if [ -n "$VERSION" ]; then
-    RELEASE_TAG="v$VERSION"
-  else
-    effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' "$RELEASE_BASE/latest") ||
-      fail "无法下载：不能解析最新正式版本。请检查网络后重试。"
-    case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
-      *) fail "latest release did not resolve to an official immutable release tag" ;; esac
-  fi
+  RELEASE_TAG="v$VERSION"
   [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._+-]{1,64}$ ]] || fail "invalid official release tag"
-  # Bash 3.2 on macOS treats the leading byte of "；" as part of an unbraced name.
   echo "版本：${RELEASE_TAG}；平台：${RELEASE_OS}-${RELEASE_ARCH}" >&2
-  stage '3/7 下载归档'
-  ensure_install_root
-  DOWNLOAD_DIR=$(mktemp -d "$INSTALL_ROOT/.download.XXXXXXXX") ||
-    fail "无法在安装根创建暂存目录。"
-  chmod 0700 "$DOWNLOAD_DIR"
+  stage '3/7 下载归档' download
+  bootstrap_directory
   asset="kk-studio-daemon-$RELEASE_TAG-$RELEASE_OS-$RELEASE_ARCH.tar.gz"
-  DOWNLOADED_ARCHIVE="$DOWNLOAD_DIR/$asset"
+  DOWNLOADED_ARCHIVE="$BOOTSTRAP_DIR/$asset"
   checksum="$DOWNLOADED_ARCHIVE.sha256"
   release_curl --archive --output "$DOWNLOADED_ARCHIVE" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
     fail "无法下载：正式版本发行归档获取失败。请检查网络后重试。"
   release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
     fail "无法下载：正式版本 SHA256 获取失败。请检查网络后重试。"
-  stage '4/7 校验解包配置'
+  stage '4/7 校验解包配置' verify
   expected=$(cat "$checksum")
   pattern=${asset//./\\.}
   pattern=${pattern//+/\\+}
@@ -309,9 +411,34 @@ download_daemon() {
   expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
   [ "${actual%% *}" = "$expected" ] || fail "校验失败：SHA256 与正式版本不一致。"
 }
-# Do not echo arbitrary daemon diagnostics. The release may print one stable, value-free
-# `Invalid daemon configuration:` line naming the field path and rule; surface only that
-# bounded line so stack traces and raw input values can never be echoed.
+# 配置信封检查：旧平铺 JSON 与其它卡片的配置都必须在停止服务前被拒绝。退出码 3 专门表示
+# UUID 不匹配；daemonConfig 的内部规则由发行归档的 --check-config 负责。
+check_config_envelope() {
+  local file=$1 status=0
+  "$STAGED_NODE" -e '
+    const fs = require("node:fs");
+    let value;
+    try { value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(2); }
+    if (value === null || typeof value !== "object" || Array.isArray(value)) process.exit(2);
+    const keys = Object.keys(value).sort().join(",");
+    if (keys !== "daemonConfig,environmentId,version") process.exit(2);
+    if (typeof value.environmentId !== "string" || value.environmentId !== process.argv[2]) process.exit(3);
+    if (typeof value.version !== "string" || !/^(0|[1-9][0-9]*)$/.test(value.version)) process.exit(2);
+    if (value.daemonConfig === null || typeof value.daemonConfig !== "object" ||
+        Array.isArray(value.daemonConfig)) process.exit(2);
+  ' "$file" "$ENV_ID" || status=$?
+  case "$status" in
+    0) ;;
+    3) fail "配置属于另一张环境卡片；未改动现有安装。" ;;
+    *) fail "配置格式不是当前版本；未改动现有安装。" ;;
+  esac
+}
+early_input_check() {
+  local file=$1
+  grep -Fq '"environmentId"' "$file" && grep -Fq '"daemonConfig"' "$file" &&
+    grep -Fq '"version"' "$file" ||
+    fail "配置格式不是当前版本；未改动现有安装。"
+}
 preflight_failure_detail() {
   local line
   while IFS= read -r line; do
@@ -324,82 +451,166 @@ preflight_failure_detail() {
         return 0
         ;;
     esac
-  done <"$DOWNLOAD_DIR/preflight.log"
+  done <"$BOOTSTRAP_DIR/preflight.log"
   return 1
 }
-recheck_inputs() {
-  check_input "$CONFIG_FILE" 1048576
-  check_input "$TOKEN_FILE" 16384
-  [ "${CONFIG_FILE%/*}" = "${TOKEN_FILE%/*}" ] ||
-    fail "staged inputs must remain sibling daemon.json and daemon.token"
+run_check_config() {
+  local node=$1 main=$2 config=$3 output detail
+  if ! "$node" "$main" --check-config "$config" >"$BOOTSTRAP_DIR/preflight.log" 2>&1; then
+    detail=$(preflight_failure_detail) &&
+      fail "配置校验失败：$detail 现有安装未改动。"
+    fail "配置校验失败：daemon.json 与同目录 daemon.token 未通过校验。现有安装未改动。"
+  fi
+  output=$(cat "$BOOTSTRAP_DIR/preflight.log")
+  [ "$output" = "Daemon configuration is valid" ] ||
+    fail "配置校验失败：--check-config 输出无法识别。现有安装未改动。"
 }
-preflight() {
-  local output detail extract="$DOWNLOAD_DIR/extract" version manifest_platform
+extract_release() {
+  local paths path manifest_platform version_output
   [ -s "$DOWNLOADED_ARCHIVE" ] || fail "校验失败：下载的发行归档为空。"
-  # 已验证官方 SHA 的归档仍检查文件名；不解析 GNU/BSD 不同的详细列表，不依赖额外运行时。
-  local paths path
   paths=$(tar -tzf "$DOWNLOADED_ARCHIVE") || fail "校验失败：发行归档无法列出。"
   while IFS= read -r path; do
     case "$path" in
-      /* | ../* | .. | */../* | */.. | *\\* | *:*)
-        fail "校验失败：发行归档包含不安全路径。"
-        ;;
+      /* | ../* | .. | */../* | */.. | *\\* | *:*) fail "校验失败：发行归档包含不安全路径。" ;;
     esac
   done <<<"$paths"
-  mkdir -p "$extract"
-  tar -xzf "$DOWNLOADED_ARCHIVE" -C "$extract" || fail "校验失败：发行归档无法解包。"
-  STAGED_NODE="$extract/runtime/code-server/lib/node"
-  STAGED_MAIN="$extract/main.js"
+  mkdir -p "$BOOTSTRAP_DIR/extract"
+  tar -xzf "$DOWNLOADED_ARCHIVE" -C "$BOOTSTRAP_DIR/extract" || fail "校验失败：发行归档无法解包。"
+  STAGED_NODE="$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node"
+  STAGED_MAIN="$BOOTSTRAP_DIR/extract/main.js"
   [ -x "$STAGED_NODE" ] || fail "校验失败：发行归档缺少运行时。"
-  [ -f "$extract/runtime/code-server/out/node/entry.js" ] ||
+  [ -f "$BOOTSTRAP_DIR/extract/native/lock-helper.js" ] ||
+    fail "校验失败：发行归档缺少安装操作锁 helper。"
+  [ -d "$BOOTSTRAP_DIR/extract/node_modules/koffi" ] ||
+    fail "校验失败：发行归档缺少 helper 的 native 依赖。"
+  [ -f "$BOOTSTRAP_DIR/extract/runtime/code-server/out/node/entry.js" ] ||
     fail "校验失败：发行归档缺少 code-server 入口。"
   [ -f "$STAGED_MAIN" ] || fail "校验失败：发行归档缺少程序入口。"
-  [ -f "$extract/runtime-manifest.json" ] || fail "校验失败：发行归档缺少运行时清单。"
+  [ -f "$BOOTSTRAP_DIR/extract/runtime-manifest.json" ] || fail "校验失败：发行归档缺少运行时清单。"
   manifest_platform=$(
     "$STAGED_NODE" -e '
       const fs = require("fs");
       const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const key = process.argv[2];
       const asset = manifest.codeServer && manifest.codeServer[key];
-      if (!asset || typeof asset !== "object") { process.exit(2); }
+      if (!asset || typeof asset !== "object") process.exit(2);
       process.stdout.write(key);
-    ' "$extract/runtime-manifest.json" "$RELEASE_OS-$RELEASE_ARCH" 2>/dev/null
+    ' "$BOOTSTRAP_DIR/extract/runtime-manifest.json" "$RELEASE_OS-$RELEASE_ARCH" 2>/dev/null
   ) || fail "校验失败：发行清单不是本机平台。"
-  [ "$manifest_platform" = "$RELEASE_OS-$RELEASE_ARCH" ] ||
-    fail "校验失败：发行清单不是本机平台。"
-  version=$("$STAGED_NODE" "$STAGED_MAIN" --version 2>&1) ||
+  [ "$manifest_platform" = "$RELEASE_OS-$RELEASE_ARCH" ] || fail "校验失败：发行清单不是本机平台。"
+  version_output=$("$STAGED_NODE" "$STAGED_MAIN" --version 2>&1) ||
     fail "校验失败：下载的发行归档无法执行。"
-  [ "$version" = "kk-studio-daemon ${RELEASE_TAG#v}" ] ||
+  [ "$version_output" = "kk-studio-daemon $VERSION" ] ||
     fail "daemon --version does not match resolved release tag"
-  recheck_inputs
-  # Validate exactly the secure snapshot that will be published, not inputs reread later.
-  cp "$CONFIG_FILE" "$DOWNLOAD_DIR/daemon.json"
-  cp "$TOKEN_FILE" "$DOWNLOAD_DIR/daemon.token"
-  chmod 0600 "$DOWNLOAD_DIR/daemon.json" "$DOWNLOAD_DIR/daemon.token"
-  CONFIG_FILE="$DOWNLOAD_DIR/daemon.json"
-  TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
-  if ! "$STAGED_NODE" "$STAGED_MAIN" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
-    detail=$(preflight_failure_detail) && fail "配置校验失败：$detail 现有安装未改动。"
-    fail "配置校验失败：暂存的配置与令牌未通过校验。现有安装未改动。"
+}
+stage_release_inputs() {
+  local source_config=$1 source_token=$2
+  check_input "$source_config" 1048576
+  check_input "$source_token" 16384
+  mkdir -p "$BOOTSTRAP_DIR/inputs"
+  chmod 0700 "$BOOTSTRAP_DIR/inputs"
+  cp "$source_config" "$BOOTSTRAP_DIR/inputs/daemon.json" || fail "无法暂存环境配置。"
+  cp "$source_token" "$BOOTSTRAP_DIR/inputs/daemon.token" || fail "无法暂存环境凭据。"
+  chmod 0600 "$BOOTSTRAP_DIR/inputs/daemon.json" "$BOOTSTRAP_DIR/inputs/daemon.token"
+  STAGED_CONFIG="$BOOTSTRAP_DIR/inputs/daemon.json"
+  STAGED_TOKEN="$BOOTSTRAP_DIR/inputs/daemon.token"
+  check_input_size "$STAGED_CONFIG" 1048576
+  check_input_size "$STAGED_TOKEN" 16384
+  check_config_envelope "$STAGED_CONFIG"
+  run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
+    "$BOOTSTRAP_DIR/extract/main.js" "$STAGED_CONFIG"
+}
+# 独立管理副本：只复制冻结 Node、锁 helper 及其 native 依赖。它不加载即将删除的旧 lib，
+# 也不加载即将 rename 的新 lib，因此 Windows 上被加载的 node/native 文件不会被移动或删除。
+prepare_management_copy() {
+  local source=$1 koffi_arch
+  koffi_arch="koffi-${KO_OS}-${KO_ARCH}"
+  MGMT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-managed.XXXXXXXX") ||
+    fail "无法创建独立管理副本。"
+  chmod 0700 "$MGMT_DIR"
+  cp "$source/runtime/code-server/lib/node" "$MGMT_DIR/node" || fail "无法复制冻结运行时。"
+  chmod 0700 "$MGMT_DIR/node"
+  cp "$source/package.json" "$MGMT_DIR/package.json" || fail "无法复制 helper 模块清单。"
+  cp "$source/delay.js" "$MGMT_DIR/delay.js" || fail "无法复制 helper 依赖。"
+  mkdir -p "$MGMT_DIR/native" "$MGMT_DIR/node_modules/@koromix"
+  cp "$source/native/"*.js "$MGMT_DIR/native/" || fail "无法复制安装操作锁 helper。"
+  cp -R "$source/node_modules/koffi" "$MGMT_DIR/node_modules/koffi" ||
+    fail "无法复制 helper 的 native 依赖。"
+  cp -R "$source/node_modules/@koromix/$koffi_arch" "$MGMT_DIR/node_modules/@koromix/$koffi_arch" ||
+    fail "无法复制 helper 的 native 预编译模块。"
+  [ -f "$MGMT_DIR/native/lock-helper.js" ] && [ -x "$MGMT_DIR/node" ] ||
+    fail "独立管理副本不完整。"
+}
+# 安装操作锁：helper 先取得内核 install.lock，再在 stdout 报一行 locked。脚本保持管道打开直到
+# 受管发布与启动验证结束；脚本异常退出时管道关闭，helper 随之释放内核锁。
+hold_install_lock() {
+  local label=$1 ready errors status attempt
+  stage "$label" lock
+  ready="$BOOTSTRAP_DIR/helper.ready"
+  errors="$BOOTSTRAP_DIR/helper.err"
+  HELPER_FIFO="$BOOTSTRAP_DIR/helper.stdin"
+  mkfifo -m 600 "$HELPER_FIFO" || fail "无法创建安装操作锁管道。"
+  "$MGMT_DIR/node" "$MGMT_DIR/native/lock-helper.js" hold "$ENV_ROOT" \
+    <"$HELPER_FIFO" >"$ready" 2>"$errors" &
+  HELPER_PID=$!
+  exec 9>"$HELPER_FIFO" || fail "无法打开安装操作锁管道。"
+  HELPER_FD_OPEN=true
+  for ((attempt = 0; attempt <= VERIFY_TIMEOUT_SECONDS * 10; attempt++)); do
+    if grep -qx 'locked' "$ready" 2>/dev/null; then
+      HELPER_READY=true
+      return 0
+    fi
+    if ! kill -0 "$HELPER_PID" 2>/dev/null; then
+      status=0
+      wait "$HELPER_PID" || status=$?
+      HELPER_PID=
+      exec 9>&- || true
+      HELPER_FD_OPEN=false
+      case "$status" in
+        75) fail "该环境的另一个安装操作正在执行；本次未改动任何受管文件。" ;;
+        *) fail "无法取得安装操作锁；本次未改动任何受管文件。" ;;
+      esac
+    fi
+    sleep 0.1
+  done
+  fail "取得安装操作锁超时；本次未改动任何受管文件。"
+}
+release_install_lock() {
+  local status=0
+  if [ "$HELPER_FD_OPEN" = true ]; then
+    exec 9>&- || status=1
+    HELPER_FD_OPEN=false
   fi
-  output=$(cat "$DOWNLOAD_DIR/preflight.log")
-  [ "$output" = "Daemon configuration is valid" ] ||
-    fail "配置校验失败：--check-config 输出无法识别。现有安装未改动。"
+  if [ -n "$HELPER_PID" ]; then
+    wait "$HELPER_PID" || status=$?
+    HELPER_PID=
+    HELPER_READY=false
+    if [ "$status" -ne 0 ]; then return 1; fi
+  fi
+  return 0
 }
-stage_file() {
-  local source=$1 directory=$2 name=$3 mode=$4
-  REGISTERED_TEMP_PATH=$(mktemp "$directory/.$name.tmp.XXXXXXXX")
-  TEMP_PATHS+=("$REGISTERED_TEMP_PATH")
-  cp "$source" "$REGISTERED_TEMP_PATH"
-  chmod "$mode" "$REGISTERED_TEMP_PATH"
-}
-escape_exec_argument() {
-  local value=$1 percent_escape='%%' dollar_escape='$$'
-  value=${value//\\/\\\\}
-  value=${value//\"/\\\"}
-  value=${value//%/$percent_escape}
-  value=${value//\$/$dollar_escape}
-  printf '"%s"' "$value"
+# 停止服务后用真实内核运行锁证明目标进程已经退出。超时或无法检查都必须失败，而不是继续替换文件。
+stop_service_and_wait() {
+  local label=$1 status=0
+  stage "$label" stop
+  if [ -e "$SERVICE_PATH" ] || { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+    STOP_ATTEMPTED=true
+    if [ "$HOST_OS" = Linux ]; then
+      systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 ||
+        fail "systemd 未能停止服务；程序和配置尚未替换。"
+    else
+      launchctl bootout "$LAUNCHD_TARGET" >/dev/null 2>&1 ||
+        fail "无法停止服务，未替换或删除任何文件。"
+    fi
+  fi
+  PHASE_CODE=wait-lock
+  "$MGMT_DIR/node" "$MGMT_DIR/native/lock-helper.js" wait "$ENV_ROOT" "$VERIFY_TIMEOUT_SECONDS" ||
+    status=$?
+  case "$status" in
+    0) ;;
+    76) fail "服务停止后仍持有运行锁，未替换或删除任何受管文件。" ;;
+    *) fail "无法确认服务已释放运行锁，未替换或删除任何受管文件。" ;;
+  esac
 }
 xml_escape() {
   local value=$1 index=0 character
@@ -413,16 +624,23 @@ xml_escape() {
   done
 }
 xml_string() { printf '<string>%s</string>\n' "$(xml_escape "$1")"; }
+escape_exec_argument() {
+  local value=$1 percent_escape='%%' dollar_escape='$$'
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//%/$percent_escape}
+  value=${value//\$/$dollar_escape}
+  printf '"%s"' "$value"
+}
 stage_service() {
-  STAGED_SERVICE="$DOWNLOAD_DIR/service"
   local node_bin="$INSTALLED_LIB/runtime/code-server/lib/node"
   local arguments=("$node_bin" "$INSTALLED_LIB/main.js" --config "$INSTALLED_CONFIG") argument line=
   if [ "$HOST_OS" = Linux ]; then
     for argument in "${arguments[@]}"; do line="$line $(escape_exec_argument "$argument")"; done
-    cat >"$STAGED_SERVICE" <<EOF
+    cat >"$BOOTSTRAP_DIR/service" <<EOF
 $UNIT_MARKER
 [Unit]
-Description=kk-studio Environment Daemon
+Description=kk-studio Environment Daemon ($ENV_ID)
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=300
@@ -438,7 +656,7 @@ TimeoutStopSec=30
 KillMode=mixed
 UMask=0077
 NoNewPrivileges=yes
-SyslogIdentifier=kk-studio-daemon
+SyslogIdentifier=kk-studio-daemon-$ENV_ID
 
 [Install]
 WantedBy=default.target
@@ -455,50 +673,66 @@ EOF
       printf '<key>StandardOutPath</key>\n'; xml_string "$STDOUT_LOG"
       printf '<key>StandardErrorPath</key>\n'; xml_string "$STDERR_LOG"
       printf '</dict></plist>\n'
-    } >"$STAGED_SERVICE"
+    } >"$BOOTSTRAP_DIR/service"
     require_cmd plutil
-    plutil -lint "$STAGED_SERVICE" >/dev/null || fail "generated LaunchAgent failed validation; existing installation unchanged"
+    plutil -lint "$BOOTSTRAP_DIR/service" >/dev/null ||
+      fail "生成的 LaunchAgent 未通过校验；现有安装未改动。"
   fi
 }
-backup_current() {
-  local path present=false
-  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
-    if [ -f "$path" ]; then present=true; fi
-  done
-  if [ -d "$INSTALLED_LIB" ]; then present=true; fi
-  [ "$present" = true ] || return 0
-  mkdir -p "$INSTALL_ROOT/backups"
-  BACKUP_DIR=$(mktemp -d "$INSTALL_ROOT/backups/install.XXXXXXXX")
-  chmod 0700 "$BACKUP_DIR"
-  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
-    if [ -f "$path" ]; then
-      cp "$path" "$BACKUP_DIR/${path##*/}"
-      chmod 0600 "$BACKUP_DIR/${path##*/}"
-    fi
-  done
+stage_publish_file() {
+  local source=$1 directory=$2 name=$3 mode=$4
+  mkdir -p "$directory"
+  STAGED_FILE=$(mktemp "$directory/.$name.tmp.XXXXXXXX") || fail "无法创建待发布文件。"
+  TEMP_PATHS+=("$STAGED_FILE")
+  cp "$source" "$STAGED_FILE" || fail "无法复制待发布文件。"
+  chmod "$mode" "$STAGED_FILE" || fail "无法设置待发布文件权限。"
 }
-# 发布新的发行目录：先把旧目录改名进备份，再把已解包的新目录改名到受管位置。
-# 新目录落盘失败时尝试把旧目录放回；放回失败必须明确报告，不能当成已恢复。
+# 配置与凭据必须按最终文件名成对暂存在同一个私有目录：真实 daemon 预检从配置同目录读取
+# daemon.token，临时文件名会让它读到旧凭据（重装）或不存在（首装）。
+stage_named_file() {
+  local source=$1 directory=$2 name=$3 mode=$4
+  mkdir -p "$directory"
+  chmod 0700 "$directory" || fail "无法设置待发布目录权限。"
+  STAGED_FILE="$directory/$name"
+  TEMP_PATHS+=("$STAGED_FILE")
+  cp "$source" "$STAGED_FILE" || fail "无法复制待发布文件。"
+  chmod "$mode" "$STAGED_FILE" || fail "无法设置待发布文件权限。"
+}
+# .work 是本卡片唯一暂存区：取得操作锁后先清理上一次的残留，再从已验证归档解包到目标文件系统，
+# lib 的发布因此是同文件系统 rename，而不是可能部分完成的跨文件系统复制。
+stage_program() {
+  WORK_DIR="$ENV_ROOT/.work"
+  rm -rf "$WORK_DIR"
+  mkdir -m 0700 "$WORK_DIR" || fail "无法在卡片目录创建暂存区。"
+  cp "$DOWNLOADED_ARCHIVE" "$WORK_DIR/archive.tar.gz" || fail "无法复制发行归档到暂存区。"
+  chmod 0600 "$WORK_DIR/archive.tar.gz"
+  mkdir -m 0700 "$WORK_DIR/lib" || fail "无法创建暂存程序目录。"
+  tar -xzf "$WORK_DIR/archive.tar.gz" -C "$WORK_DIR/lib" ||
+    fail "无法在卡片暂存区解包发行归档。"
+  rm -f "$WORK_DIR/archive.tar.gz"
+  [ -f "$WORK_DIR/lib/main.js" ] && [ -x "$WORK_DIR/lib/runtime/code-server/lib/node" ] ||
+    fail "暂存程序不完整。"
+}
 publish_program() {
-  if [ -e "$INSTALLED_LIB" ]; then
-    [ -n "$BACKUP_DIR" ] || fail "无法备份现有发行目录，未替换任何文件。"
-    mv "$INSTALLED_LIB" "$BACKUP_DIR/lib" || fail "无法备份现有发行目录，未替换任何文件。"
-  fi
-  if ! mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"; then
-    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/lib" ] && [ ! -e "$INSTALLED_LIB" ]; then
-      restore_ok=false
-      if mv "$BACKUP_DIR/lib" "$INSTALLED_LIB"; then restore_ok=true; fi
-      if [ "$restore_ok" = true ]; then
-        fail "无法发布新发行目录。已恢复上一版程序。"
-      fi
-      fail "无法发布新发行目录，且上一版程序未能恢复。请使用报告的备份手动恢复。"
-    fi
-    fail "无法发布新发行目录。"
-  fi
+  rm -rf "$INSTALLED_LIB" || fail "无法删除旧程序目录。"
+  mv "$WORK_DIR/lib" "$INSTALLED_LIB" || fail "无法发布新程序目录。"
+  PUBLISHED=true
 }
-verify_running() {
+start_and_verify() {
   local attempt stable pid active
-  for ((attempt=0; attempt<=VERIFY_TIMEOUT_SECONDS; attempt++)); do
+  stage '7/7 稳定性验证' start
+  if [ "$HOST_OS" = Linux ]; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || fail "systemd 未能重新加载服务定义。"
+    systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 || fail "systemd 未能启用用户服务。"
+    systemctl --user reset-failed "$SERVICE_NAME" >/dev/null 2>&1 ||
+      fail "无法清除旧 systemd 失败计数；请检查用户服务管理器后重新安装。"
+    systemctl --user restart "$SERVICE_NAME" >/dev/null 2>&1 || fail "systemd 未能启动服务。"
+  else
+    launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH" >/dev/null 2>&1 ||
+      fail "launchd 未能加载 LaunchAgent。"
+  fi
+  PHASE_CODE=verify
+  for ((attempt = 0; attempt <= VERIFY_TIMEOUT_SECONDS; attempt++)); do
     active=false
     if [ "$HOST_OS" = Linux ]; then
       if systemctl --user is-active --quiet "$SERVICE_NAME"; then active=true; fi
@@ -508,7 +742,7 @@ verify_running() {
       if kill -0 "$pid" 2>/dev/null; then active=true; fi
     fi
     if [ "$active" = true ]; then
-      for ((stable=0; stable<VERIFY_STABLE_SECONDS; stable++)); do
+      for ((stable = 0; stable < VERIFY_STABLE_SECONDS; stable++)); do
         sleep 1
         if [ "$HOST_OS" = Linux ]; then
           systemctl --user is-active --quiet "$SERVICE_NAME" || fail "服务启动失败：服务未能保持运行。"
@@ -520,101 +754,167 @@ verify_running() {
   done
   fail "服务启动失败：服务启动后没有保持运行。"
 }
-cmd_install() {
-  INSTALLING=true
-  stage '1/7 检查环境与输入'
+
+cmd_install_arguments() {
   local option value
   while [ $# -gt 0 ]; do
     option=$1
-    case "$option" in --config-file | --token-file | --version) ;; *) fail "unknown option (value not echoed)" ;; esac
+    case "$option" in
+      --environment-id | --version | --config-file | --token-file) ;;
+      *) fail "unknown option (value not echoed)" ;;
+    esac
     case "$SEEN_OPTIONS" in *"|$option|"*) fail "duplicate option: $option" ;; esac
     SEEN_OPTIONS="$SEEN_OPTIONS|$option|"
     [ $# -ge 2 ] || fail "missing value for $option"
     value=$2
     [ -n "$value" ] || fail "missing value for $option"
     case "$option" in
-      --version)
-        [[ $value =~ ^[0-9A-Za-z._+-]{1,64}$ ]] || fail "invalid version"
-        VERSION=$value ;;
+      --environment-id) validate_environment_id_value "$value" ;;
+      --version) VERSION=$value ;;
       --config-file) absolute_path "$value" "$option"; CONFIG_FILE=$value ;;
       --token-file) absolute_path "$value" "$option"; TOKEN_FILE=$value ;;
     esac
     shift 2
   done
-  [ -n "$CONFIG_FILE" ] && [ -n "$TOKEN_FILE" ] || fail "install requires --config-file and --token-file"
+  [ -n "$ENV_ID" ] && [ -n "$VERSION" ] && [ -n "$CONFIG_FILE" ] && [ -n "$TOKEN_FILE" ] ||
+    fail "install requires --environment-id, --version, --config-file and --token-file"
+  validate_version
   [ "${CONFIG_FILE##*/}" = daemon.json ] && [ "${TOKEN_FILE##*/}" = daemon.token ] &&
     [ "${CONFIG_FILE%/*}" = "${TOKEN_FILE%/*}" ] || fail "inputs must be sibling daemon.json and daemon.token"
-  require_manager
-  require_ownership
-  check_managed_paths
-  check_input "$CONFIG_FILE" 1048576
-  check_input "$TOKEN_FILE" 16384
-  resolve_release_platform
-  stage '2/7 解析版本'
-  download_daemon
-  preflight
-  stage_service
-  # All semantic checks (including macOS plist lint) precede target writes and stop.
-  check_managed_paths
-  require_ownership
-  stage '5/7 备份停止'
-  mkdir -p "${SERVICE_PATH%/*}"
-  if [ "$HOST_OS" = Darwin ]; then mkdir -p "$INSTALL_ROOT/logs"; fi
-  backup_current
-  stage_file "$CONFIG_FILE" "$INSTALL_ROOT" daemon.json 0600; STAGED_CONFIG=$REGISTERED_TEMP_PATH
-  stage_file "$TOKEN_FILE" "$INSTALL_ROOT" daemon.token 0600; STAGED_TOKEN=$REGISTERED_TEMP_PATH
-  stage_file "$STAGED_SERVICE" "${SERVICE_PATH%/*}" service 0644; STAGED_SERVICE=$REGISTERED_TEMP_PATH
-  if [ -f "$SERVICE_PATH" ]; then
-    STOP_ATTEMPTED=true
-    if [ "$HOST_OS" = Linux ]; then
-      systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 ||
-        fail "systemd 未能停止服务；程序和配置尚未替换。"
-    else stop_launchd; fi
-  fi
-  # From the first rename onward a failure must report manual recovery, even partial publication.
-  PUBLISHED=true
-  stage '6/7 发布启动'
-  publish_program
-  mv -f "$STAGED_CONFIG" "$INSTALLED_CONFIG"
-  mv -f "$STAGED_TOKEN" "$INSTALLED_TOKEN"
-  mv -f "$STAGED_SERVICE" "$SERVICE_PATH"
-  if [ "$HOST_OS" = Linux ]; then
-    systemctl --user daemon-reload >/dev/null 2>&1 ||
-      fail "systemd 未能重新加载服务定义。"
-    systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 ||
-      fail "systemd 未能启用用户服务。"
-    systemctl --user reset-failed "$SERVICE_NAME" >/dev/null 2>&1 ||
-      fail "无法清除旧 systemd 失败计数；请检查用户服务管理器后重新安装。"
-    START_SINCE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-    # Cursor excludes even older failures in the same second. Without one, do not infer a cause.
-    local journal_tail= line
-    journal_tail=$(journalctl --user -u "$SERVICE_NAME" -n 0 --show-cursor --no-pager 2>/dev/null) || journal_tail=
-    while IFS= read -r line; do
-      case "$line" in '-- cursor: '*) START_CURSOR=${line#'-- cursor: '} ;; esac
-    done <<<"$journal_tail"
-    systemctl --user restart "$SERVICE_NAME" >/dev/null 2>&1 ||
-      fail "systemd 未能启动服务。"
+}
+cmd_update_arguments() {
+  local option value
+  while [ $# -gt 0 ]; do
+    option=$1
+    case "$option" in --environment-id | --version) ;; *) fail "unknown option (value not echoed)" ;; esac
+    case "$SEEN_OPTIONS" in *"|$option|"*) fail "duplicate option: $option" ;; esac
+    SEEN_OPTIONS="$SEEN_OPTIONS|$option|"
+    [ $# -ge 2 ] || fail "missing value for $option"
+    value=$2
+    [ -n "$value" ] || fail "missing value for $option"
+    case "$option" in
+      --environment-id) validate_environment_id_value "$value" ;;
+      --version) VERSION=$value ;;
+    esac
+    shift 2
+  done
+  [ -n "$ENV_ID" ] && [ -n "$VERSION" ] ||
+    fail "update requires --environment-id and --version (it never accepts configuration or token)"
+  validate_version
+}
+cmd_install_or_update() {
+  local operation=$1 staged_config= staged_token= staged_service path
+  if [ "$operation" = install ]; then
+    ACTION_LABEL=安装
+    stage '1/7 检查环境与输入' input
+    require_manager
+    require_ownership
+    check_input "$CONFIG_FILE" 1048576
+    check_input "$TOKEN_FILE" 16384
+    early_input_check "$CONFIG_FILE"
+    if [ -e "$INSTALLED_LIB" ] && [ ! -f "$SERVICE_PATH" ] && ! { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+      ownership_conflict "program directory exists without the owned service"
+    fi
   else
-    launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH" >/dev/null 2>&1 ||
-      fail "launchd 未能加载 LaunchAgent。"
+    ACTION_LABEL=更新
+    stage '1/7 检查环境与输入' input
+    require_manager
+    require_ownership
+    [ -d "$ENV_ROOT" ] || fail "未安装：update 只能更新已有的受管安装。"
+    [ -d "$INSTALLED_LIB" ] || fail "未安装：缺少受管程序目录。"
+    for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN"; do
+      [ -f "$path" ] || fail "缺少当前环境配置或凭据；update 不会创建它们。"
+      check_file "$path" true
+    done
+    grep -Fq '"environmentId"' "$INSTALLED_CONFIG" ||
+      fail "现有配置不是当前版本；请重新执行 install。"
   fi
-  stage '7/7 稳定性验证'
-  verify_running
-  echo "KK Studio 环境安装完成：程序/配置已写入；服务已运行。"
-  echo
-  echo "请返回 Studio，确认环境状态为 READY。"
-  if [ -n "$BACKUP_DIR" ]; then echo "原安装已备份：$BACKUP_DIR"; fi
+  check_managed_paths
+  stage '2/7 解析版本' version
+  resolve_release_platform
+  download_daemon
+  extract_release
+  if [ "$operation" = install ]; then
+    stage_release_inputs "$CONFIG_FILE" "$TOKEN_FILE"
+  else
+    # update 只读取当前配置做信封检查；最终语义复检在停机之后用新程序完成。
+    check_config_envelope "$INSTALLED_CONFIG"
+  fi
+  prepare_management_copy "$BOOTSTRAP_DIR/extract"
+  stage_service
+  # All semantic checks precede target writes and stop.
+  require_ownership
+  hold_install_lock '5/7 取得操作锁'
+  ensure_private_root "$INSTALL_ROOT"
+  ensure_private_root "$INSTALL_ROOT/environments"
+  ensure_private_root "$ENV_ROOT"
+  check_managed_paths
+  stage_program
+  if [ "$operation" = install ]; then
+    # 校验与发布使用同一份同名配对文件：.work/inputs/daemon.json + daemon.token。
+    stage_named_file "$STAGED_CONFIG" "$WORK_DIR/inputs" daemon.json 0600
+    staged_config=$STAGED_FILE
+    stage_named_file "$STAGED_TOKEN" "$WORK_DIR/inputs" daemon.token 0600
+    staged_token=$STAGED_FILE
+  fi
+  stage_publish_file "$BOOTSTRAP_DIR/service" "${SERVICE_PATH%/*}" service 0644
+  staged_service=$STAGED_FILE
+  stop_service_and_wait '6/7 停止发布启动'
+  # Final checks after the service is stopped: install validates the exact snapshot that will be
+  # published; update re-validates the current configuration against the new program and never
+  # accepts another one.
+  PHASE_CODE=validate
+  if [ "$operation" = install ]; then
+    check_config_envelope "$staged_config"
+    run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
+      "$BOOTSTRAP_DIR/extract/main.js" "$staged_config"
+  else
+    check_config_envelope "$INSTALLED_CONFIG"
+    run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
+      "$BOOTSTRAP_DIR/extract/main.js" "$INSTALLED_CONFIG"
+  fi
+  PHASE_CODE=publish
+  publish_program
+  mv -f "$staged_service" "$SERVICE_PATH" || fail "无法发布受管服务定义。"
+  if [ "$operation" = install ]; then
+    mv -f "$staged_config" "$INSTALLED_CONFIG" || fail "无法发布环境配置。"
+    mv -f "$staged_token" "$INSTALLED_TOKEN" || fail "无法发布环境凭据。"
+  fi
+  if [ "$HOST_OS" = Darwin ]; then
+    : >>"$STDOUT_LOG"
+    : >>"$STDERR_LOG"
+    chmod 0600 "$STDOUT_LOG" "$STDERR_LOG"
+  fi
+  start_and_verify
+  PHASE_CODE=done
+  if [ "$operation" = install ]; then
+    SUCCESS_OUTPUT="KK Studio 环境安装完成：程序/配置已写入；服务已运行。
+
+请返回 Studio，确认环境状态为 READY。"
+  else
+    SUCCESS_OUTPUT="KK Studio 环境更新完成：程序/服务定义已替换；配置与凭据未改动。
+
+请返回 Studio，确认环境状态为 READY。"
+  fi
 }
 cmd_status() {
-  require_manager
-  require_ownership
-  [ -f "$SERVICE_PATH" ] || { echo "未安装：找不到受管服务定义 $SERVICE_PATH" >&2; return 1; }
+  ACTION_LABEL=检查
+  if [ ! -d "$ENV_ROOT" ]; then
+    echo "未安装：找不到该卡片环境的受管目录。" >&2
+    return 1
+  fi
+  if [ ! -e "$SERVICE_PATH" ] && ! { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+    echo "未安装：找不到该卡片环境的受管服务。" >&2
+    return 1
+  fi
   check_managed_paths
+  require_ownership
   if [ "$HOST_OS" = Linux ]; then
     local code=0
     systemctl --user --no-pager status "$SERVICE_NAME" || code=$?
     case "$code" in 0 | 3) ;; *) fail "systemctl status failed ($code)" ;; esac
     if command -v journalctl >/dev/null 2>&1; then journalctl --user --no-pager -n 20 -u "$SERVICE_NAME"; fi
+    if [ -f "$LAST_OPERATION" ]; then cat "$LAST_OPERATION"; fi
     systemctl --user is-active --quiet "$SERVICE_NAME" || return 3
   else
     local loaded=false path
@@ -622,61 +922,113 @@ cmd_status() {
     for path in "$STDOUT_LOG" "$STDERR_LOG"; do
       if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; tail -n 20 "$path"; fi
     done
+    if [ -f "$LAST_OPERATION" ]; then cat "$LAST_OPERATION"; fi
     [ "$loaded" = true ] || return 3
   fi
 }
 cmd_uninstall() {
-  require_manager
-  require_ownership
-  check_managed_paths
-  if [ ! -f "$SERVICE_PATH" ]; then
-    echo "KK Studio 环境未安装受管服务。配置、数据和备份均已保留。"
+  ACTION_LABEL=卸载
+  stage '1/3 检查环境与输入' input
+  if [ ! -d "$ENV_ROOT" ]; then
+    echo "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"
     return 0
   fi
-  if [ "$HOST_OS" = Linux ]; then
-    systemctl --user disable --now "$SERVICE_NAME" || fail --uninstall "无法停止或禁用服务，未删除任何文件"
-  else stop_launchd --uninstall; fi
-  rm -f "$SERVICE_PATH"
-  rm -rf "$INSTALLED_LIB"
-  if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload; fi
-  echo "KK Studio 环境已卸载，受管服务和程序已移除。"
-  echo
-  echo "配置、数据和备份已保留。"
+  check_managed_paths
+  local has_service=false
+  if [ -e "$SERVICE_PATH" ] || { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+    has_service=true
+  fi
+  # 只有配置/数据而没有服务定义或程序时无事可做；服务已被移除但 lib 仍残留时仍要完成清理。
+  if [ "$has_service" = false ] && [ ! -d "$INSTALLED_LIB" ]; then
+    echo "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"
+    return 0
+  fi
+  if [ "$has_service" = true ]; then require_ownership; fi
+  [ -d "$INSTALLED_LIB" ] || fail "找不到当前安装程序，无法取得独立管理副本；未删除任何文件。"
+  resolve_release_platform
+  bootstrap_directory
+  prepare_management_copy "$INSTALLED_LIB"
+  hold_install_lock '2/3 取得操作锁'
+  stop_service_and_wait '3/3 停止并移除服务'
+  PHASE_CODE=publish
+  rm -f "$SERVICE_PATH" || fail "无法移除受管服务定义。"
+  rm -rf "$INSTALLED_LIB" || fail "无法移除受管程序目录。"
+  if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload >/dev/null 2>&1 || true; fi
+  PHASE_CODE=done
+  SUCCESS_OUTPUT="KK Studio 环境已卸载，受管服务和程序已移除。
+
+配置、凭据、技能与用户数据已保留。"
 }
+
 main() {
   local action=${1:-help}
-  if [ $# -gt 0 ]; then shift; fi
+  [ $# -gt 0 ] && shift
   case "$action" in
-    help | --help | -h) [ $# -eq 0 ] || fail "help accepts no options"; usage; return ;;
-    install)
-      if [ $# -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then usage; return; fi ;;
-    status | uninstall) [ $# -eq 0 ] || fail "$action accepts no options" ;;
+    help | --help | -h)
+      [ $# -eq 0 ] || fail "help accepts no options"
+      usage
+      return 0 ;;
+    install | update)
+      if [ $# -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then usage; return 0; fi ;;
+    status | uninstall) ;;
     *) fail "unknown command (value not echoed)" ;;
   esac
   [ -n "${HOME:-}" ] || fail "HOME must be set"
   while [ "$HOME" != / ] && [ "${HOME%/}" != "$HOME" ]; do HOME=${HOME%/}; done
   absolute_path "$HOME" HOME
-  INSTALL_ROOT="$HOME/.kk-studio"
-  INSTALLED_LIB="$INSTALL_ROOT/lib"
-  INSTALLED_CONFIG="$INSTALL_ROOT/daemon.json"
-  INSTALLED_TOKEN="$INSTALL_ROOT/daemon.token"
-  STDOUT_LOG="$INSTALL_ROOT/logs/environment-daemon.stdout.log"
-  STDERR_LOG="$INSTALL_ROOT/logs/environment-daemon.stderr.log"
   HOST_OS=$(uname -s)
-  case "$HOST_OS" in
-    Linux) SERVICE_PATH="$HOME/.config/systemd/user/$SERVICE_NAME"; SERVICE_MARKER=$UNIT_MARKER ;;
-    Darwin)
-      LAUNCHD_DOMAIN="gui/$(id -u)"
-      LAUNCHD_TARGET="$LAUNCHD_DOMAIN/$LAUNCHD_LABEL"
-      SERVICE_PATH="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"; SERVICE_MARKER=$PLIST_MARKER ;;
-    *) fail "unsupported operating system: $HOST_OS" ;;
-  esac
+  case "$HOST_OS" in Linux | Darwin) ;; *) fail "unsupported operating system: $HOST_OS" ;; esac
   local value
   for value in "$VERIFY_TIMEOUT_SECONDS" "$VERIFY_STABLE_SECONDS"; do
     case "$value" in '' | *[!0-9]*) fail "verification windows must be non-negative decimal integers" ;; esac
   done
   VERIFY_TIMEOUT_SECONDS=$((10#$VERIFY_TIMEOUT_SECONDS))
   VERIFY_STABLE_SECONDS=$((10#$VERIFY_STABLE_SECONDS))
-  case "$action" in install) cmd_install "$@" ;; status) cmd_status ;; uninstall) cmd_uninstall ;; esac
+  case "$action" in
+    install)
+      ACTION=install
+      cmd_install_arguments "$@" ;;
+    update)
+      ACTION=update
+      cmd_update_arguments "$@" ;;
+    status | uninstall)
+      [ $# -eq 2 ] && [ "$1" = --environment-id ] || fail "$action requires exactly --environment-id <UUID>"
+      validate_environment_id_value "$2"
+      ACTION=$action ;;
+  esac
+  INSTALL_ROOT="$HOME/.kk-studio"
+  ENV_ROOT="$INSTALL_ROOT/environments/$ENV_ID"
+  INSTALLED_LIB="$ENV_ROOT/lib"
+  INSTALLED_CONFIG="$ENV_ROOT/daemon.json"
+  INSTALLED_TOKEN="$ENV_ROOT/daemon.token"
+  WORK_DIR="$ENV_ROOT/.work"
+  LAST_OPERATION="$ENV_ROOT/last-operation.json"
+  STDOUT_LOG="$ENV_ROOT/daemon.stdout.log"
+  STDERR_LOG="$ENV_ROOT/daemon.stderr.log"
+  OPERATION_ID=$(new_operation_id)
+  # 在线更新作业传入自己的 operationId，使固定 last-operation.json 能与发起它的控制命令对应；
+  # 非法值忽略，人工命令始终使用本地生成的身份。
+  if [ -n "${KK_STUDIO_UPDATE_OPERATION_ID:-}" ] &&
+    [[ $KK_STUDIO_UPDATE_OPERATION_ID =~ $UUID_PATTERN ]]; then
+    OPERATION_ID=$KK_STUDIO_UPDATE_OPERATION_ID
+  fi
+  if [ -n "$VERSION" ]; then VERSION_JSON=$(printf '"%s"' "$VERSION"); fi
+  case "$HOST_OS" in
+    Linux)
+      SERVICE_NAME="$SERVICE_PREFIX-$ENV_ID.service"
+      SERVICE_PATH="$HOME/.config/systemd/user/$SERVICE_NAME"
+      SERVICE_MARKER=$UNIT_MARKER ;;
+    Darwin)
+      LAUNCHD_LABEL="$LAUNCHD_PREFIX.$ENV_ID"
+      LAUNCHD_DOMAIN="gui/$(id -u)"
+      LAUNCHD_TARGET="$LAUNCHD_DOMAIN/$LAUNCHD_LABEL"
+      SERVICE_PATH="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+      SERVICE_MARKER=$PLIST_MARKER ;;
+  esac
+  case "$ACTION" in
+    install | update) cmd_install_or_update "$ACTION" ;;
+    status) cmd_status ;;
+    uninstall) cmd_uninstall ;;
+  esac
 }
 main "$@"

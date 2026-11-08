@@ -1,466 +1,463 @@
 /**
- * Contract tests for `scripts/daemon/install.sh` on Linux (systemd): install, publication rollback,
- * option and archive validation, status and uninstall.
+ * Contract tests for `scripts/daemon/install.sh` on Linux (systemd): per-card UUID layout, install
+ * and update semantics, service ownership, status, uninstall and cleanup.
  *
- * The fixture shims curl/uname/service managers; the installer still performs its real
- * ownership/permission checks, real SHA256 verification, real release `--check-config` preflight
- * and real atomic program publication from its own staging directory. No real service is registered.
+ * The fixture shims curl/uname/service managers and runs a real host Node for the installer's
+ * JSON envelope/manifest checks; the installer still performs its real ownership/permission
+ * checks, real SHA256 verification, real daemon `--check-config` preflight, real kernel-lock
+ * helper ordering (a faithful directory-marker stand-in) and real atomic program publication from
+ * its own `.work` staging directory. No real service is registered.
  */
 
 import assert from 'node:assert/strict'
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
 
-import { InstallFixture, sha256Of, withTempDir, writeExecutable } from './support/release-fixture.mjs'
+import {
+  ENVIRONMENT_ID,
+  ENVIRONMENT_VERSION,
+  InstallFixture,
+  SECOND_ENVIRONMENT_ID,
+  daemonJson,
+  sha256Of,
+  withTempDir,
+  writeExecutable,
+} from './support/release-fixture.mjs'
 import { writeTarGz } from './support/tar.mjs'
 
 const mode = (file) => statSync(file).mode & 0o777
 const text = (file) => readFileSync(file, 'utf8')
-const unitPath = (fixture) => path.join(fixture.home, '.config/systemd/user/kk-studio-daemon.service')
+const bytes = (file) => readFileSync(file)
+const envRoot = (fixture) => fixture.envRoot
+const unitPath = (fixture) => fixture.unitPath
+const lastOperation = (fixture) => JSON.parse(text(path.join(envRoot(fixture), 'last-operation.json')))
 
-/** Run `body(context)` with a fresh Linux install fixture and its private inputs. */
+/** Run `body(context)` with a fresh Linux install fixture, its private inputs and CLI shortcuts. */
 function withInstall(body) {
   return withTempDir((tmp) => {
     const fixture = new InstallFixture(tmp)
+    fixture.environmentId = ENVIRONMENT_ID
     const [configFile, tokenFile] = fixture.makeInputs()
     const context = {
       tmp,
       fixture,
       configFile,
       tokenFile,
-      install: (extraEnv) =>
-        fixture.run(['install', '--config-file', context.configFile, '--token-file', context.tokenFile], { extraEnv }),
+      install: (extraEnv = {}, overrides = {}) =>
+        fixture.run([
+          'install',
+          '--environment-id', overrides.environmentId ?? ENVIRONMENT_ID,
+          '--version', overrides.version ?? '1.1.1',
+          '--config-file', overrides.configFile ?? context.configFile,
+          '--token-file', overrides.tokenFile ?? context.tokenFile,
+        ], { extraEnv }),
+      update: (extraEnv = {}, overrides = {}) =>
+        fixture.run([
+          'update',
+          '--environment-id', overrides.environmentId ?? ENVIRONMENT_ID,
+          '--version', overrides.version ?? '1.2.0',
+        ], { extraEnv }),
+      status: (environmentId = ENVIRONMENT_ID) => fixture.run(['status', '--environment-id', environmentId]),
+      uninstall: (environmentId = ENVIRONMENT_ID) => fixture.run(['uninstall', '--environment-id', environmentId]),
     }
     return body(context)
   })
 }
 
-const libDir = (fixture) => path.join(fixture.installRoot, 'lib')
-const tokenRejection = 'daemon failed: environment registration is rejected: invalid registration token'
+/** Publish the bytes of `fixture.asset` under another release version (same program content). */
+function addRelease(fixture, version) {
+  const asset = `kk-studio-daemon-v${version}-${fixture.releaseOs}-${fixture.releaseArch}.tar.gz`
+  const archive = path.join(fixture.httpDir, asset)
+  copyFileSync(path.join(fixture.httpDir, fixture.asset), archive)
+  writeFileSync(`${archive}.sha256`, `${sha256Of(archive)}  ${asset}\n`)
+  return asset
+}
 
 describe('install.sh on Linux', () => {
-  it('installs the exact requested version without resolving latest and preserves private inputs', () =>
-    withInstall(({ fixture, configFile, tokenFile, install }) => {
-      assert.equal(install().status, 0)
-      const version = '1.1.1+build'
-      const asset = `kk-studio-daemon-v${version}-linux-amd64.tar.gz`
-      const archive = path.join(fixture.httpDir, asset)
-      copyFileSync(path.join(fixture.httpDir, fixture.asset), archive)
-      writeFileSync(`${archive}.sha256`, `${sha256Of(archive)}  ${asset}\n`)
-      const log = path.join(fixture.state, 'version-curl')
-      const result = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile, '--version', version], {
-        extraEnv: { FAKE_CURL_LOG: log, FAKE_NODE_VERSION: version },
-      })
-      assert.equal(result.status, 0, result.stderr)
-      const urls = text(log).trim().split('\n').map(line => JSON.parse(line).at(-1))
-      const base = `https://github.com/fengwk/kk-studio/releases/download/v${version}/${asset}`
-      assert.deepEqual(urls, [base, `${base}.sha256`])
-      for (const name of ['daemon.json', 'daemon.token']) {
-        assert.equal(text(path.join(fixture.installRoot, name)), text(path.join(path.dirname(configFile), name)))
-      }
-      assert.doesNotMatch(result.stdout + result.stderr + text(unitPath(fixture)), /token-value/)
-      assert.match(text(path.join(fixture.state, 'commands')), /--user stop/)
-      assert.ok(readdirSync(path.join(fixture.installRoot, 'backups')).length > 0)
-    }))
-
-  it('rejects unsafe, missing, duplicate and non-install versions before network access', () =>
-    withInstall(({ fixture, configFile, tokenFile }) => {
-      const log = path.join(fixture.state, 'invalid-curl')
-      const args = ['install', '--config-file', configFile, '--token-file', tokenFile]
-      for (const suffix of [
-        ['--version', ''], ['--version', '../bad'], ['--version', 'a'.repeat(65)],
-        ['--version', 'bad\n'], ['--version'], ['--version', '1', '--version', '2'],
-      ]) {
-        const result = fixture.run([...args, ...suffix], { extraEnv: { FAKE_CURL_LOG: log } })
-        assert.notEqual(result.status, 0, JSON.stringify(suffix))
-      }
-      for (const command of ['help', 'status', 'uninstall']) {
-        assert.notEqual(fixture.run([command, '--version', '1']).status, 0)
-      }
-      assert.equal(existsSync(log), false)
-    }))
-
-  it('preserves the child failure with redirected stdin and real terminal stderr', () =>
-    withTempDir((tmp) => {
-      const fixture = new InstallFixture(tmp)
-      fixture.script = path.join(tmp, 'tty-probe.sh')
-      writeExecutable(fixture.script, '#!/bin/bash\n[ ! -t 0 ] && [ -t 2 ] || exit 91\nexit 23\n')
-      assert.equal(fixture.run([], { stderrTTY: true }).status, 23)
-    }))
-
-  it('uses archive progress only when stderr is a TTY, even with redirected stdin', () =>
-    withInstall(({ fixture, configFile, tokenFile }) => {
-      const log = path.join(fixture.state, 'curl-options')
-      const result = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile], {
-        stderrTTY: true, extraEnv: { FAKE_CURL_LOG: log },
-      })
-      assert.equal(result.status, 0, result.stdout + result.stderr)
-      const calls = text(log).trim().split('\n').map(line => JSON.parse(line))
-      assert.deepEqual(calls.map(args => args.includes('--progress-bar')), [false, true, false])
-      assert.ok(calls.every(args => args[0] === '-q' && args.includes('--show-error')))
-      writeFileSync(log, '')
-      const nonTTY = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile], {
-        extraEnv: { FAKE_CURL_LOG: log },
-      })
-      assert.equal(nonTTY.status, 0, nonTTY.stderr)
-      const silentCalls = text(log).trim().split('\n').map(line => JSON.parse(line))
-      assert.equal(silentCalls.length, 3)
-      assert.ok(silentCalls.every(args => args.includes('--silent') && !args.includes('--progress-bar')))
-    }))
-  it('clears an old start limit after reload and before restart, retaining limits', () =>
-    withInstall(({ fixture, install }) => {
-      writeFileSync(path.join(fixture.state, 'start-limit'), '')
-      assert.notEqual(spawnSync(path.join(fixture.bindir, 'systemctl'), ['--user', 'restart', 'kk-studio-daemon.service'], {
-        env: { ...process.env, FAKE_SERVICE_STATE: fixture.state },
-      }).status, 0)
-      writeFileSync(path.join(fixture.state, 'commands'), '')
-      const result = install()
-      assert.equal(result.status, 0, result.stderr)
-      const commands = text(path.join(fixture.state, 'commands'))
-      assert.match(commands, /daemon-reload\n--user enable.*\n--user reset-failed.*\n--user restart/)
-      assert.match(text(unitPath(fixture)), /StartLimitIntervalSec=300\nStartLimitBurst=5/)
-      assert.deepEqual([...result.stderr.matchAll(/\[(\d)\/7 /g)].map(m => Number(m[1])), [1, 2, 3, 4, 5, 6, 7])
-      assert.doesNotMatch(result.stderr + result.stdout, /token-value|\x1b|\r/)
-    }))
-
-  it('hard fails reset without restarting and reports publication and backup', () =>
-    withInstall(({ fixture, install }) => {
-      assert.equal(install().status, 0)
-      writeFileSync(path.join(fixture.state, 'commands'), '')
-      const result = install({ FAKE_RESET_FAIL: '1' })
-      assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /安装失败 \[6\/7 发布启动\].*失败计数/)
-      assert.match(result.stderr, /备份：.*backups\/install\./)
-      assert.doesNotMatch(text(path.join(fixture.state, 'commands')), /restart/)
-    }))
-
-  it('translates only current startup diagnostics without exposing raw secrets', () =>
-    withInstall(({ fixture, install }) => {
-      assert.equal(install().status, 0)
-      for (const current of ['', 'subprocess: invalid registration token injected-secret', `${tokenRejection} injected-secret`]) {
-        const result = install({ FAKE_START_FAIL: '1', FAKE_CURRENT_JOURNAL: current })
-        assert.notEqual(result.status, 0)
-        assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]/)
-        assert.equal(result.stderr.includes('在 Studio 重新生成安装命令'), current.startsWith(tokenRejection))
-        assert.doesNotMatch(result.stderr, /injected-secret|old-secret|token-value/)
-        assert.match(result.stderr, /journalctl .*--since/)
-      }
-    }))
-
-  it('reports verification failure after a successful restart using only current diagnostics', () =>
-    withInstall(({ install }) => {
-      const result = install({
-        FAKE_INACTIVE: '1', FAKE_CURRENT_JOURNAL: `${tokenRejection} injected-secret`,
-        DAEMON_VERIFY_TIMEOUT_SECONDS: '0',
-      })
-      assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /安装失败 \[7\/7 稳定性验证\].*没有保持运行/)
-      assert.match(result.stderr, /在 Studio 重新生成安装命令/)
-      assert.doesNotMatch(result.stdout + result.stderr, /READY|安装完成|injected-secret|old-secret|token-value/)
-      assert.match(result.stderr, /备份：无（尚未创建备份）/)
-      assert.doesNotMatch(result.stderr, /请使用备份手动恢复/)
-    }))
-
-  it('preserves the startup failure when no cursor exists or journal reading fails', () =>
-    withInstall(({ install }) => {
-      for (const extra of [{ FAKE_NO_CURSOR: '1' }, { FAKE_JOURNAL_FAIL: '1' }]) {
-        const result = install({
-          FAKE_START_FAIL: '1', FAKE_CURRENT_JOURNAL: `${tokenRejection} injected-secret`, ...extra,
-        })
-        assert.notEqual(result.status, 0)
-        assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]：systemd 未能启动服务/)
-        assert.doesNotMatch(result.stdout + result.stderr, /令牌被拒绝|重新生成安装命令|old-secret|injected-secret|READY/)
-      }
-    }))
-
-  it('does not call an existing installation a first install when preflight fails', () =>
-    withInstall(({ install }) => {
-      assert.equal(install().status, 0)
-      const result = install({ FAKE_NODE_VERSION: '9.9.9' })
-      assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /备份：无（尚未创建备份）/)
-      assert.doesNotMatch(result.stderr, /首次安装/)
-    }))
-
-  it('gives static reasons for failed service manager operations', () =>
-    withInstall(({ install }) => {
-      assert.equal(install().status, 0)
-      for (const [command, phase, reason] of [
-        ['stop', '5/7 备份停止', 'systemd 未能停止服务'],
-        ['daemon-reload', '6/7 发布启动', 'systemd 未能重新加载服务定义'],
-        ['enable', '6/7 发布启动', 'systemd 未能启用用户服务'],
-      ]) {
-        const result = install({ FAKE_MANAGER_FAIL: command })
-        assert.notEqual(result.status, 0)
-        assert.ok(result.stderr.includes(`安装失败 [${phase}]：${reason}`), result.stderr)
-        assert.doesNotMatch(result.stderr, /injected-manager-secret|该阶段操作未完成/)
-      }
-    }))
-
-  it('reports a static launchd bootstrap failure with the correct log path', () =>
-    withTempDir(tmp => {
-      const fixture = new InstallFixture(tmp, { hostOs: 'Darwin' })
-      const [config, token] = fixture.makeInputs()
-      const result = fixture.run(['install', '--config-file', config, '--token-file', token], {
-        extraEnv: { FAKE_MANAGER_FAIL: 'bootstrap' },
-      })
-      assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]：launchd 未能加载 LaunchAgent/)
-      assert.ok(result.stderr.includes(path.join(fixture.installRoot, 'logs/environment-daemon.stderr.log')))
-      assert.doesNotMatch(result.stderr, /injected-manager-secret|该阶段操作未完成/)
-    }))
-
-  it('reports archive download failure before any publication', () =>
-    withInstall(({ fixture, install }) => {
-      unlinkSync(path.join(fixture.httpDir, fixture.asset))
-      const result = install()
-      assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /安装失败 \[3\/7 下载归档\]/)
-      assert.match(result.stderr, /现有程序和配置未改动/)
-      assert.match(result.stderr, /备份：无/)
-    }))
-
-  it('installs the program, config, token and service', () =>
+  it('installs one card into its UUID layout without backups and cleans its staging area', () =>
     withInstall(({ fixture, install }) => {
       const result = install()
       assert.equal(result.status, 0, result.stderr)
       assert.ok(result.stdout.includes('READY'))
-      const root = fixture.installRoot
+      const root = envRoot(fixture)
       assert.ok(existsSync(path.join(root, 'lib/main.js')))
       accessSync(path.join(root, 'lib/runtime/code-server/lib/node'), constants.X_OK)
       for (const name of ['daemon.json', 'daemon.token']) {
         assert.equal(mode(path.join(root, name)), 0o600, name)
       }
+      // 同卡片只有一套受管服务；根目录不再有全局 daemon.json/token、backups 或 .work 残留。
+      assert.ok(!existsSync(path.join(fixture.installRoot, 'daemon.json')))
+      assert.ok(!existsSync(path.join(fixture.installRoot, 'daemon.token')))
+      assert.ok(!existsSync(path.join(fixture.installRoot, 'backups')))
+      assert.ok(!existsSync(path.join(root, '.work')))
       const unit = text(unitPath(fixture))
       assert.equal(unit.split('\n')[0], '# Managed by scripts/daemon/install.sh')
       assert.ok(unit.includes(`${root}/lib/runtime/code-server/lib/node`))
       assert.ok(unit.includes(`${root}/lib/main.js`))
+      assert.ok(unit.includes(`${root}/daemon.json`))
+      assert.ok(unit.includes(ENVIRONMENT_ID))
+      assert.ok(existsSync(path.join(fixture.state, 'active')))
+      const record = lastOperation(fixture)
+      assert.equal(record.type, 'install')
+      assert.equal(record.targetVersion, '1.1.1')
+      assert.equal(record.phase, 'done')
+      assert.equal(record.result, 'succeeded')
+      assert.equal(record.errorCode, null)
+      assert.ok(text(path.join(root, 'last-operation.json')).length <= 4096)
+      assert.doesNotMatch(result.stdout + result.stderr + unit, /token-value/)
+    }))
+
+  it('keeps two cards of the same user independent', () =>
+    withInstall(({ fixture, install, uninstall, status }) => {
+      fixture.environmentId = ENVIRONMENT_ID
+      assert.equal(install().status, 0)
+      const [secondConfig, secondToken] = fixture.makeInputs({ environmentId: SECOND_ENVIRONMENT_ID })
+      fixture.environmentId = SECOND_ENVIRONMENT_ID
+      const second = fixture.run([
+        'install', '--environment-id', SECOND_ENVIRONMENT_ID, '--version', '1.1.1',
+        '--config-file', secondConfig, '--token-file', secondToken,
+      ])
+      assert.equal(second.status, 0, second.stderr)
+      const firstRoot = path.join(fixture.installRoot, 'environments', ENVIRONMENT_ID)
+      const secondRoot = path.join(fixture.installRoot, 'environments', SECOND_ENVIRONMENT_ID)
+      assert.ok(existsSync(path.join(firstRoot, 'lib/main.js')))
+      assert.ok(existsSync(path.join(secondRoot, 'lib/main.js')))
+      assert.notEqual(firstRoot, secondRoot)
+      const firstUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${ENVIRONMENT_ID}.service`)
+      const secondUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${SECOND_ENVIRONMENT_ID}.service`)
+      assert.ok(existsSync(firstUnit) && existsSync(secondUnit))
+      assert.ok(text(firstUnit).includes(firstRoot))
+      assert.ok(text(secondUnit).includes(secondRoot))
+
+      // 卸载一张卡片只移除该卡片的服务与程序，另一张卡片的服务定义、程序和配置不受影响。
+      writeFileSync(path.join(fixture.state, 'commands'), '')
+      assert.equal(uninstall(ENVIRONMENT_ID).status, 0)
+      assert.ok(!existsSync(firstUnit))
+      assert.ok(!existsSync(path.join(firstRoot, 'lib')))
+      assert.ok(existsSync(path.join(firstRoot, 'daemon.json')))
+      assert.ok(existsSync(secondUnit))
+      assert.ok(existsSync(path.join(secondRoot, 'lib/main.js')))
+      const uninstallCommands = text(path.join(fixture.state, 'commands'))
+      assert.match(uninstallCommands, new RegExp(`--user stop kk-studio-daemon-${ENVIRONMENT_ID}.service`))
+      assert.doesNotMatch(uninstallCommands, new RegExp(SECOND_ENVIRONMENT_ID))
+    }))
+
+  it('records the operation id supplied by an online update and ignores invalid values', () =>
+    withInstall(({ fixture, install }) => {
+      const supplied = '9f1c1c5e-2f4b-4b6a-8f2e-3c4d5e6f7a8b'
+      assert.equal(install({ KK_STUDIO_UPDATE_OPERATION_ID: supplied }).status, 0)
+      assert.equal(lastOperation(fixture).operationId, supplied)
+      writeFileSync(path.join(fixture.state, 'commands'), '')
+      assert.equal(install({ KK_STUDIO_UPDATE_OPERATION_ID: 'not-a-uuid' }).status, 0)
+      assert.notEqual(lastOperation(fixture).operationId, 'not-a-uuid')
+    }))
+
+  it('reinstalls with a new credential only after validating the exact named pair that is published', () =>
+    withInstall(({ fixture, install }) => {
+      // 真实预检从配置同目录读取 daemon.token；重装时必须验证新凭据而不是旧文件。
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const [configFile, tokenFile] = fixture.makeInputs({ token: 'new-token-value' })
+      const result = install({}, { configFile, tokenFile })
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(text(path.join(root, 'daemon.token')), 'new-token-value')
+      assert.equal(text(path.join(root, 'daemon.json')), text(configFile))
+    }))
+
+  it('fails with a non-zero status when the bounded result record cannot be written', () =>
+    withInstall(({ tmp, fixture, install }) => {
+      const realMv = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim()
+      assert.ok(realMv)
+      writeExecutable(path.join(fixture.bindir, 'mv'), '#!/bin/sh\n' +
+        'case "$*" in *last-operation.json*) echo "injected mv failure" >&2; exit 1;; esac\n' +
+        `exec "${realMv}" "$@"\n`)
+      const result = install()
+      assert.notEqual(result.status, 0)
+      // 发布可能已完成，但没有可信结果记录时绝不能输出成功文案。
+      assert.doesNotMatch(result.stdout, /安装完成|READY/)
+      assert.match(result.stderr, /无法写入本机诊断记录/)
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'last-operation.json')))
+    }))
+
+  it('does not report success when managed staging cannot be cleaned', () =>
+    withInstall(({ fixture, install }) => {
+      const realRm = spawnSync('which', ['rm'], { encoding: 'utf8' }).stdout.trim()
+      assert.ok(realRm)
+      const counter = path.join(fixture.state, 'rm-count')
+      writeExecutable(path.join(fixture.bindir, 'rm'), '#!/bin/sh\n' +
+        'case "$1" in -rf) case "$2" in */.work)\n' +
+        `  n=0; [ -f "'"$counter"'" ] && n=$(cat "'"$counter"'")\n` +
+        `  n=$((n + 1)); printf '%s' "$n" > "'"$counter"'"\n` +
+        '  [ "$n" -ge 2 ] && exit 1\n' +
+        'esac;; esac\n' +
+        `exec "${realRm}" "$@"\n`)
+      const result = install()
+      assert.notEqual(result.status, 0)
+      assert.doesNotMatch(result.stdout, /安装完成|READY/)
+      assert.match(result.stderr, /受管暂存未能完全清理/)
+      assert.equal(lastOperation(fixture).result, 'failed')
+      assert.equal(lastOperation(fixture).errorCode, 'cleanup')
+      assert.ok(existsSync(path.join(envRoot(fixture), '.work')))
+    }))
+
+  it('update replaces only the program and service and never writes config or token', () =>
+    withInstall(({ fixture, install, update }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const config = bytes(path.join(root, 'daemon.json'))
+      const token = bytes(path.join(root, 'daemon.token'))
+      const unit = text(unitPath(fixture))
+      // A marker inside the program directory proves the directory was replaced, not merged.
+      writeFileSync(path.join(root, 'lib/old-marker'), 'old')
+      addRelease(fixture, '1.2.0')
+      const result = update({ FAKE_NODE_VERSION: '1.2.0' })
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(result.stdout.includes('配置与凭据未改动'))
+      assert.ok(!existsSync(path.join(root, 'lib/old-marker')))
+      assert.ok(bytes(path.join(root, 'daemon.json')).equals(config))
+      assert.ok(bytes(path.join(root, 'daemon.token')).equals(token))
+      assert.equal(text(unitPath(fixture)), unit)
+      assert.deepEqual(readdirSync(root).filter((name) => name.startsWith('.daemon')), [])
+      assert.ok(!existsSync(path.join(root, '.work')))
+      assert.equal(lastOperation(fixture).type, 'update')
+      assert.equal(lastOperation(fixture).targetVersion, '1.2.0')
+    }))
+
+  it('update rejects configuration options before any network access', () =>
+    withInstall(({ fixture, configFile, tokenFile }) => {
+      const log = path.join(fixture.state, 'update-curl')
+      for (const suffix of [
+        ['--config-file', configFile], ['--token-file', tokenFile],
+      ]) {
+        const result = fixture.run([
+          'update', '--environment-id', ENVIRONMENT_ID, '--version', '1.2.0', ...suffix,
+        ], { extraEnv: { FAKE_CURL_LOG: log } })
+        assert.notEqual(result.status, 0, JSON.stringify(suffix))
+        assert.match(result.stderr, /unknown option/)
+      }
+      assert.equal(existsSync(log), false)
+    }))
+
+  it('update requires an existing managed installation', () =>
+    withInstall(({ update }) => {
+      const result = update()
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /未安装/)
+    }))
+
+  it('update re-validates the current configuration after the service stops', () =>
+    withInstall(({ fixture, install, update }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      writeFileSync(path.join(root, 'lib/new-marker'), 'new')
+      const config = daemonJson({ environmentId: ENVIRONMENT_ID, studioUrl: 'invalid' })
+      writeFileSync(path.join(root, 'daemon.json'), config)
+      addRelease(fixture, '1.2.0')
+      const result = update({ FAKE_NODE_VERSION: '1.2.0' })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /\[6\/7 停止发布启动\]/)
+      // 停机后复检失败：旧程序目录仍在，配置内容未变，结果记录 validate 阶段。
+      assert.ok(existsSync(path.join(root, 'lib/new-marker')))
+      assert.equal(text(path.join(root, 'daemon.json')), config)
+      assert.equal(lastOperation(fixture).result, 'failed')
+      assert.equal(lastOperation(fixture).phase, 'validate')
+      assert.ok(existsSync(path.join(fixture.state, 'active')) === false)
+    }))
+
+  it('rejects the old flat configuration before downloading', () =>
+    withInstall(({ fixture, configFile, install }) => {
+      writeFileSync(configFile, '{"studioUrl":"https://studio.example.com"}')
+      const log = path.join(fixture.state, 'old-config-curl')
+      const result = install({ FAKE_CURL_LOG: log })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /配置格式不是当前版本/)
+      assert.equal(existsSync(log), false)
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
+    }))
+
+  it('rejects another card configuration without touching the installation', () =>
+    withInstall(({ fixture, install, configFile, tokenFile }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const before = bytes(path.join(root, 'daemon.json'))
+      const [otherConfig, otherToken] = fixture.makeInputs({ environmentId: SECOND_ENVIRONMENT_ID })
+      const result = install({}, { configFile: otherConfig, tokenFile: otherToken })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /配置属于另一张环境卡片/)
+      assert.ok(bytes(path.join(root, 'daemon.json')).equals(before))
       assert.ok(existsSync(path.join(fixture.state, 'active')))
     }))
 
-  it('publishes from a staging directory on the install root filesystem', () =>
-    withInstall(({ tmp, fixture, install }) => {
-      // 发布必须是安装根内的 rename：暂存位于安装根（而非 TMPDIR），源与目标同设备，避免跨文件系统复制。
-      const probe = path.join(tmp, 'publish-probe')
-      const probeScript = path.join(tmp, 'publish-probe.sh')
-      writeFileSync(
-        probeScript,
-        'printf \'%s\\n\' "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB" "$(file_mode "$DOWNLOAD_DIR")" \\\n' +
-          '  "$(stat -c \'%d\' "$DOWNLOAD_DIR" 2>/dev/null || stat -f \'%d\' "$DOWNLOAD_DIR")" > "$FAKE_PUBLISH_PROBE"\n',
-      )
-      const script = text(fixture.script)
-      const patched = script.replace('  publish_program\n', `  . '${probeScript}'\n  publish_program\n`)
-      assert.notEqual(script, patched)
-      fixture.script = path.join(tmp, 'install-publish-probe.sh')
-      writeFileSync(fixture.script, patched)
-      const result = install({ FAKE_PUBLISH_PROBE: probe })
-      assert.equal(result.status, 0, result.stderr)
-      const [source, destination, stagingMode, stagingDevice] = text(probe).trim().split('\n')
-      const root = fixture.installRoot
-      assert.equal(path.dirname(path.dirname(source)), root)
-      assert.equal(path.dirname(destination), root)
-      assert.equal(stagingMode, '700')
-      assert.equal(Number(stagingDevice), statSync(root).dev)
+  it('rejects an invalid daemonConfig through the release preflight', () =>
+    withInstall(({ fixture, install }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const before = bytes(path.join(root, 'daemon.json'))
+      const config = JSON.stringify({
+        environmentId: ENVIRONMENT_ID,
+        version: ENVIRONMENT_VERSION,
+        daemonConfig: { invalid: true, studioUrl: 'https://studio.example.com' },
+      })
+      const [configFile, tokenFile] = fixture.makeInputs({ config })
+      const result = install({}, { configFile, tokenFile })
+      assert.notEqual(result.status, 0)
+      assert.ok(result.stderr.includes('Invalid daemon configuration'), result.stderr)
+      assert.ok(bytes(path.join(root, 'daemon.json')).equals(before))
+      assert.ok(existsSync(path.join(fixture.state, 'active')))
     }))
 
-  it('leaves the running service untouched when the staging directory cannot be created', () =>
+  it('cleans a previous .work residue only after taking the operation lock', () =>
     withInstall(({ fixture, install }) => {
-      // 暂存目录建在安装根内：根不可写时必须在停止服务之前失败，现有程序、配置和服务保持原样。
+      const root = envRoot(fixture)
+      mkdirSync(path.join(root, '.work'), { recursive: true, mode: 0o700 })
+      writeFileSync(path.join(root, '.work/residue'), 'stale')
+      const result = install()
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(!existsSync(path.join(root, '.work')))
+    }))
+
+  it('reports a busy card and changes nothing', () =>
+    withInstall(({ fixture, install }) => {
+      const root = envRoot(fixture)
+      mkdirSync(root, { recursive: true, mode: 0o700 })
+      chmodSync(root, 0o700)
+      // 原子目录标记模拟另一个进程持有 install.lock。
+      mkdirSync(path.join(root, '.fake-install-lock'))
+      const result = install()
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /另一个安装操作正在执行/)
+      assert.ok(!existsSync(path.join(root, 'lib')))
+      assert.ok(!existsSync(path.join(fixture.state, 'active')))
+      assert.ok(!existsSync(path.join(root, 'last-operation.json')))
+    }))
+
+  it('fails without touching the program when the runtime lock is not released', () =>
+    withInstall(({ fixture, install }) => {
+      const result = install({ FAKE_DAEMON_LOCKED: '1' })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /\[6\/7 停止发布启动\].*运行锁/)
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
+      assert.ok(!existsSync(path.join(fixture.state, 'active')))
+    }))
+
+  it('reports status absent, active and inactive', () =>
+    withInstall(({ fixture, install, status, uninstall }) => {
+      assert.equal(status().status, 1)
       assert.equal(install().status, 0)
-      const root = fixture.installRoot
-      const files = ['daemon.json', 'daemon.token', 'lib/main.js'].map((name) => path.join(root, name))
-      const before = files.map(text)
-      const unit = text(unitPath(fixture))
-      chmodSync(root, 0o500)
-      try {
-        const result = install()
-        assert.notEqual(result.status, 0)
-        assert.match(result.stderr, /安装失败 \[3\/7 下载归档\]：无法在安装根创建暂存目录/)
-        files.forEach((file, index) => assert.equal(text(file), before[index], file))
-        assert.equal(text(unitPath(fixture)), unit)
-        assert.ok(existsSync(path.join(fixture.state, 'active')), 'the running service must not be stopped')
-        assert.ok(!existsSync(path.join(root, 'backups')), 'no backup may precede the staging preparation')
-      } finally {
-        chmodSync(root, 0o700)
+      assert.equal(status().status, 0)
+      unlinkSync(path.join(fixture.state, 'active'))
+      assert.equal(status().status, 3)
+      assert.equal(uninstall().status, 0)
+      assert.equal(status().status, 1)
+    }))
+
+  it('uninstall removes only the owned service and program', () =>
+    withInstall(({ fixture, install, uninstall }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      mkdirSync(path.join(root, 'skills/skill-a'), { recursive: true, mode: 0o700 })
+      chmodSync(path.join(root, 'skills'), 0o700)
+      writeFileSync(path.join(root, 'skills/skill-a/SKILL.md'), 'user data')
+      const result = uninstall()
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(!existsSync(path.join(root, 'lib')))
+      assert.ok(!existsSync(unitPath(fixture)))
+      assert.ok(existsSync(path.join(root, 'daemon.json')))
+      assert.ok(existsSync(path.join(root, 'daemon.token')))
+      assert.ok(existsSync(path.join(root, 'skills/skill-a/SKILL.md')))
+      assert.equal(lastOperation(fixture).type, 'uninstall')
+      assert.equal(lastOperation(fixture).result, 'succeeded')
+      // 再次卸载保持成功且不虚构错误。
+      assert.equal(uninstall().status, 0)
+    }))
+
+  it('uninstall still removes a program left behind after the service definition disappeared', () =>
+    withInstall(({ fixture, install, uninstall }) => {
+      // 上一次卸载可能已移除服务定义但未能删除 lib；再次卸载必须完成清理而不是报告“无事可做”。
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      unlinkSync(unitPath(fixture))
+      const result = uninstall()
+      assert.equal(result.status, 0, result.stderr)
+      assert.ok(!existsSync(path.join(root, 'lib')))
+      assert.ok(existsSync(path.join(root, 'daemon.json')))
+    }))
+
+  it('uninstall refuses to delete a program whose helper copy is unavailable', () =>
+    withInstall(({ fixture, install, uninstall }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      // 缺少 native helper 时无法取得管理副本：必须 fail closed，不能无锁删除。
+      unlinkSync(path.join(root, 'lib/native/lock-helper.js'))
+      const result = uninstall()
+      assert.notEqual(result.status, 0)
+      assert.ok(existsSync(unitPath(fixture)))
+      assert.ok(existsSync(path.join(root, 'lib/main.js')))
+    }))
+
+  it('rejects duplicate, unknown and non-UUID options before network access', () =>
+    withInstall(({ fixture, configFile, tokenFile, install, status, uninstall }) => {
+      const log = path.join(fixture.state, 'invalid-curl')
+      for (const args of [
+        ['install', '--environment-id', ENVIRONMENT_ID, '--environment-id', ENVIRONMENT_ID, '--version', '1.1.1', '--config-file', configFile, '--token-file', tokenFile],
+        ['install', '--environment-id', ENVIRONMENT_ID, '--version', '1.1.1', '--config-file', configFile, '--token-file', tokenFile, '--unknown-option', 'x'],
+        ['install', '--environment-id', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', '--version', '1.1.1', '--config-file', configFile, '--token-file', tokenFile],
+        ['install', '--environment-id', '../bad', '--version', '1.1.1', '--config-file', configFile, '--token-file', tokenFile],
+        ['install', '--environment-id', ENVIRONMENT_ID, '--version', '../bad', '--config-file', configFile, '--token-file', tokenFile],
+        ['install', '--environment-id', ENVIRONMENT_ID, '--version', '', '--config-file', configFile, '--token-file', tokenFile],
+        ['update', '--environment-id', ENVIRONMENT_ID],
+        ['update', '--environment-id', ENVIRONMENT_ID, '--version', 'x', '--version', 'y'],
+        ['status', '--environment-id', ENVIRONMENT_ID, '--version', '1'],
+        ['uninstall', '--environment-id', ENVIRONMENT_ID, '--config-file', configFile],
+      ]) {
+        const result = fixture.run(args, { extraEnv: { FAKE_CURL_LOG: log } })
+        assert.notEqual(result.status, 0, JSON.stringify(args))
       }
+      assert.equal(existsSync(log), false)
+      assert.equal(status().status, 1)
+      assert.equal(uninstall().status, 0)
     }))
 
-  it('restores the previous program when publication fails', () =>
+  it('rejects a checksum mismatch and unsafe archive paths without publishing', () =>
     withInstall(({ tmp, fixture, install }) => {
-      // 新发行目录改名失败时，已经移进备份的旧 lib 必须回到受管位置。
-      assert.equal(install().status, 0)
-      const previous = text(path.join(libDir(fixture), 'main.js'))
-      const script = text(fixture.script)
-      const patched = script.replace('mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"', 'false')
-      assert.notEqual(script, patched)
-      fixture.script = path.join(tmp, 'install-fail-publish.sh')
-      writeFileSync(fixture.script, patched)
-      const result = install()
-      assert.notEqual(result.status, 0)
-      assert.equal(text(path.join(libDir(fixture), 'main.js')), previous)
-      assert.ok(result.stderr.includes('已恢复上一版程序'))
-    }))
-
-  it('reports it when restoring the previous program also fails', () =>
-    withInstall(({ tmp, fixture, install }) => {
-      // 发布失败后再恢复失败时，必须明确报告，不能把旧程序仍在备份里说成已恢复。
-      assert.equal(install().status, 0)
-      const patched = text(fixture.script)
-        .replace('mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"', 'false')
-        .replace('mv "$BACKUP_DIR/lib" "$INSTALLED_LIB"', 'false')
-      assert.ok(!patched.includes('mv "$DOWNLOAD_DIR/extract" "$INSTALLED_LIB"'))
-      assert.ok(!patched.includes('mv "$BACKUP_DIR/lib" "$INSTALLED_LIB"'))
-      fixture.script = path.join(tmp, 'install-fail-restore.sh')
-      writeFileSync(fixture.script, patched)
-      const result = install()
-      assert.notEqual(result.status, 0)
-      assert.ok(result.stderr.includes('未能恢复'))
-      assert.ok(!existsSync(libDir(fixture)))
-    }))
-
-  it('backs up the previous program on a second install', () =>
-    withInstall(({ fixture, install }) => {
-      assert.equal(install().status, 0)
-      const result = install()
-      assert.equal(result.status, 0, result.stderr)
-      const backupsRoot = path.join(fixture.installRoot, 'backups')
-      const backups = readdirSync(backupsRoot).filter((name) => name.startsWith('install.'))
-      assert.ok(backups.length > 0, 'a backup directory must be created on reinstall')
-      const backup = path.join(backupsRoot, backups[0])
-      assert.ok(statSync(path.join(backup, 'lib')).isDirectory())
-      assert.equal(mode(path.join(backup, 'daemon.token')), 0o600)
-    }))
-
-  it('rejects unsafe input permissions', () =>
-    withInstall(({ fixture, configFile, install }) => {
-      chmodSync(configFile, 0o644)
-      assert.notEqual(install().status, 0)
-      assert.ok(!existsSync(libDir(fixture)))
-    }))
-
-  it('rejects a non-private input directory', () =>
-    withInstall(({ tmp, fixture, install }) => {
-      chmodSync(path.join(tmp, 'inputs'), 0o755)
-      assert.notEqual(install().status, 0)
-      assert.ok(!existsSync(libDir(fixture)))
-    }))
-
-  it('rejects duplicate and unknown options', () =>
-    withInstall(({ fixture, configFile, tokenFile }) => {
-      const duplicate = fixture.run(['install', '--config-file', configFile, '--config-file', configFile, '--token-file', tokenFile])
-      assert.notEqual(duplicate.status, 0)
-      const unknown = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile, '--unknown-option', 'unknown-value'])
-      assert.notEqual(unknown.status, 0)
-    }))
-
-  it('rejects a checksum mismatch', () =>
-    withInstall(({ fixture, install }) => {
+      const archive = path.join(fixture.httpDir, fixture.asset)
       writeFileSync(path.join(fixture.httpDir, `${fixture.asset}.sha256`), `${'0'.repeat(64)}  ${fixture.asset}\n`)
       assert.notEqual(install().status, 0)
-      assert.ok(!existsSync(libDir(fixture)))
-    }))
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
 
-  it('rejects SHA-verified escaping paths before extraction', () =>
-    withInstall(({ tmp, fixture, install }) => {
-      // 即使 SHA 已通过，也必须在 tar 解包前拒绝逃逸路径。
+      // 即使 SHA 已通过，也必须在解包前拒绝逃逸路径。
+      fixture.buildArchive(archive)
+      writeFileSync(path.join(fixture.httpDir, `${fixture.asset}.sha256`), `${sha256Of(archive)}  ${fixture.asset}\n`)
       const extracted = path.join(tmp, 'extract-called')
       const realTar = spawnSync('which', ['tar'], { encoding: 'utf8' }).stdout.trim()
       assert.ok(realTar)
       writeExecutable(path.join(fixture.bindir, 'tar'), `#!/bin/sh\nif [ "$1" = "-xzf" ]; then : > "${extracted}"; fi\nexec "${realTar}" "$@"\n`)
       const outside = path.join(tmp, 'absolute-escape')
-      const archive = path.join(fixture.httpDir, fixture.asset)
-      for (const member of ['../escape', outside]) {
-        writeTarGz(archive, [{ name: member, type: 'file', content: 'evil' }])
-        writeFileSync(path.join(fixture.httpDir, `${fixture.asset}.sha256`), `${sha256Of(archive)}  ${fixture.asset}\n`)
-        const result = install()
-        assert.notEqual(result.status, 0, member)
-        assert.ok(result.stderr.includes('不安全路径'), member)
-        assert.ok(!existsSync(extracted), member)
-        assert.ok(!existsSync(outside), member)
-        assert.ok(!existsSync(libDir(fixture)), member)
-      }
-    }))
-
-  it('rejects a non-official tag', () =>
-    withInstall(({ install }) => {
-      const result = install({ FAKE_TAG: 'main' })
+      writeTarGz(archive, [{ name: '../escape', type: 'file', content: 'evil' }, { name: outside, type: 'file', content: 'evil' }])
+      writeFileSync(path.join(fixture.httpDir, `${fixture.asset}.sha256`), `${sha256Of(archive)}  ${fixture.asset}\n`)
+      const result = install()
       assert.notEqual(result.status, 0)
-      assert.ok(result.stderr.includes('invalid official release tag'))
+      assert.ok(result.stderr.includes('不安全路径'), result.stderr)
+      assert.ok(!existsSync(extracted))
+      assert.ok(!existsSync(outside))
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
     }))
 
-  it('rejects a version mismatch', () =>
-    withInstall(({ fixture, install }) => {
+  it('rejects a version mismatch and unsafe input permissions', () =>
+    withInstall(({ fixture, configFile, install }) => {
       assert.notEqual(install({ FAKE_NODE_VERSION: '9.9.9' }).status, 0)
-      assert.ok(!existsSync(libDir(fixture)))
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
+      chmodSync(configFile, 0o644)
+      assert.notEqual(install().status, 0)
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
     }))
 
-  it('rejects an invalid config without changing the installation', () =>
-    withInstall(({ fixture }) => {
-      // 真实契约是裸 daemon 对象：既拒绝非法取值，也拒绝外层 "daemon" 包裹的假结构。
-      for (const config of [
-        '{"invalid":true,"studioUrl":"https://studio.example.com"}',
-        '{"daemon":{"studioUrl":"https://studio.example.com"}}',
-      ]) {
-        const [configFile, tokenFile] = fixture.makeInputs({ config })
-        const result = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile])
-        assert.notEqual(result.status, 0, config)
-        assert.ok(result.stderr.includes('Invalid daemon configuration'), config)
-        assert.ok(!existsSync(libDir(fixture)), config)
-      }
-    }))
-
-  it('reports status absent before install', () =>
-    withInstall(({ fixture }) => {
-      assert.equal(fixture.run(['status']).status, 1)
-    }))
-
-  it('distinguishes active, inactive and absent status', () =>
+  it('uses the system bash and prints help', () =>
     withInstall(({ fixture, install }) => {
-      // 0 = active, 3 = installed but inactive, 1 = not installed. This is the documented status
-      // contract and must not collapse "installed but stopped" into "absent".
-      assert.equal(install().status, 0)
-      assert.equal(fixture.run(['status']).status, 0)
-      unlinkSync(path.join(fixture.state, 'active'))
-      assert.equal(fixture.run(['status']).status, 3)
-      assert.equal(fixture.run(['uninstall']).status, 0)
-      assert.equal(fixture.run(['status']).status, 1)
-    }))
-
-  it('never echoes the registration token', () =>
-    withInstall(({ fixture, install }) => {
-      const result = install()
-      assert.equal(result.status, 0, result.stderr)
-      writeFileSync(path.join(fixture.httpDir, `${fixture.asset}.sha256`), `${'0'.repeat(64)}  ${fixture.asset}\n`)
-      const failed = install()
-      assert.notEqual(failed.status, 0)
-      for (const output of [result.stdout, result.stderr, failed.stdout, failed.stderr]) {
-        assert.ok(!output.includes('token-value'))
-      }
-    }))
-
-  it('uses the system bash, not another bash on PATH', () =>
-    withInstall(({ fixture, install }) => {
-      // The macOS gate runs under /bin/bash (3.2). A competing PATH bash must not replace it.
       writeExecutable(path.join(fixture.bindir, 'bash'), '#!/bin/sh\nexit 99\n')
-      const result = install()
-      assert.equal(result.status, 0, result.stderr)
-    }))
-
-  it('uninstall removes the program and keeps config', () =>
-    withInstall(({ fixture, install }) => {
       assert.equal(install().status, 0)
-      const result = fixture.run(['uninstall'])
-      assert.equal(result.status, 0, result.stderr)
-      assert.ok(!existsSync(libDir(fixture)))
-      assert.ok(!existsSync(unitPath(fixture)))
-      assert.ok(existsSync(path.join(fixture.installRoot, 'daemon.json')))
-      assert.ok(existsSync(path.join(fixture.installRoot, 'daemon.token')))
-    }))
-
-  it('prints help and rejects an unknown command', () =>
-    withInstall(({ fixture }) => {
       assert.equal(fixture.run(['help']).status, 0)
       assert.notEqual(fixture.run(['unknown-command']).status, 0)
     }))
