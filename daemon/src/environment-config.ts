@@ -8,6 +8,7 @@ import {
 } from './config.js'
 import type { RuntimeStatusTracker } from './runtime-status.js'
 import { writePrivateFile } from './native/private-fs.js'
+import { ProtocolError } from './protocol.js'
 
 /** 已准备但尚未发布的运行组件；publish 同步切换，retire 只用于未发布候选。 */
 export interface PreparedEnvironmentConfig {
@@ -23,8 +24,12 @@ export interface EnvironmentConfigRuntimeOptions {
   environmentId: string
   initial: DaemonConfig
   tracker: RuntimeStatusTracker
-  /** 校验候选并准备网络/LSP；失败不得发布。 */
-  prepare(config: DaemonConfig): Promise<PreparedEnvironmentConfig>
+  /** 校验候选并准备网络/LSP；previous 是当前已发布快照，供只重建变化组件；失败不得发布。 */
+  prepare(config: DaemonConfig, previous: DaemonConfig): Promise<PreparedEnvironmentConfig>
+  /** 候选开始准备；控制地址/代理变化时在此暂停旧连接的新的入站执行。 */
+  onCandidate(previous: DaemonConfig, candidate: DaemonConfig): void
+  /** 候选失败或被放弃；恢复候选准备前的入站准入。 */
+  onCandidateAborted(previous: DaemonConfig, candidate: DaemonConfig): void
   /** 发布新快照；用于暂停旧连接入站、按需主动重连。 */
   onApplied(previous: DaemonConfig, next: DaemonConfig): void
   report(error: unknown): void
@@ -108,7 +113,7 @@ export class EnvironmentConfigRuntime {
     }
     const content = contentOf(configuration)
     if (version === this.acceptedVersion && content !== this.acceptedContent) {
-      throw new Error('the same environment config version must not change its content')
+      throw new ProtocolError('the same environment config version must not change its content')
     }
     if (version < this.acceptedVersion) {
       if (!this.initialized) {
@@ -129,7 +134,7 @@ export class EnvironmentConfigRuntime {
       this.active?.version === version ? this.active : this.pending?.version === version ? this.pending : null
     if (sameVersion !== null) {
       if (sameVersion.content !== content) {
-        throw new Error('the same environment config version must not change its content')
+        throw new ProtocolError('the same environment config version must not change its content')
       }
       return this.wait(sameVersion)
     }
@@ -225,7 +230,7 @@ export class EnvironmentConfigRuntime {
   private async apply(request: PendingRequest): Promise<EnvironmentConfigApplyResult> {
     if (request.version === this.acceptedVersion) {
       if (request.content !== this.acceptedContent) {
-        throw new Error('the same environment config version must not change its content')
+        throw new ProtocolError('the same environment config version must not change its content')
       }
       if (this.initialized) {
         return { kind: 'confirmed', config: this.current }
@@ -238,45 +243,98 @@ export class EnvironmentConfigRuntime {
     }
 
     const sameContent = this.initialized && request.content === this.acceptedContent
-    let candidate: DaemonConfig
-    let prepared: PreparedEnvironmentConfig | null = null
+    const previous = this.current
     if (sameContent) {
       // 内容相同只推进确认版本；不重新解析程序，也不重建网络/LSP。
-      candidate = { ...this.current, configVersion: request.version }
-    } else {
+      const candidate = { ...previous, configVersion: request.version }
+      const persisted = await this.persist(request, candidate)
+      if (persisted !== null) {
+        return persisted
+      }
+      if (this.closed) {
+        return closedResult()
+      }
+      this.publishSnapshot(request, candidate)
+      return { kind: 'applied', config: candidate }
+    }
+
+    let candidate: DaemonConfig
+    try {
+      candidate = resolveDaemonConfiguration(
+        this.options.paths,
+        this.options.environmentId,
+        request.version,
+        request.configuration,
+      )
+    } catch (error) {
+      return this.failCandidate(request.version, error)
+    }
+    // 实际控制地址/代理是否变化由会话判定；必须在候选准备前暂停旧连接的新入站执行。
+    const admissionCandidate = candidate
+    let prepared: PreparedEnvironmentConfig | null = null
+    let published = false
+    this.options.onCandidate(previous, admissionCandidate)
+    try {
       try {
-        candidate = resolveDaemonConfiguration(
-          this.options.paths,
-          this.options.environmentId,
-          request.version,
-          request.configuration,
-        )
-        prepared = await this.options.prepare(candidate)
+        prepared = await this.options.prepare(admissionCandidate, previous)
       } catch (error) {
         return this.failCandidate(request.version, error)
       }
       if (this.closed) {
-        await this.retirePrepared(prepared)
         return closedResult()
       }
       if (prepared.config.configVersion !== request.version) {
-        await this.retirePrepared(prepared)
         return this.failCandidate(
           request.version,
           new EnvironmentConfigurationError(undefined, 'prepared configuration version does not match the request'),
         )
       }
       candidate = prepared.config
+      const persisted = await this.persist(request, candidate)
+      if (persisted !== null) {
+        return persisted
+      }
+      if (this.closed) {
+        return closedResult()
+      }
+      // 同步发布：不 await、不逐字段修改共享对象。候选资源先完成切换，再发布不可变配置快照。
+      try {
+        const cleanup = prepared.publish()
+        if (cleanup !== undefined && cleanup !== null) {
+          this.options.track(
+            cleanup.catch((error: unknown) => {
+              this.options.report(error)
+            }),
+          )
+        }
+      } catch (error) {
+        this.options.report(error)
+        return { kind: 'fatal', message: 'prepared environment resources could not be published' }
+      }
+      published = true
+      this.publishSnapshot(request, candidate)
+      return { kind: 'applied', config: candidate }
+    } finally {
+      if (!published) {
+        // 候选失败/放弃时恢复准备前的准入，并回收候选资源。
+        this.options.onCandidateAborted(previous, admissionCandidate)
+        await this.retirePrepared(prepared)
+      }
     }
+  }
 
+  /** 原子写私有缓存；失败上报 PERSIST_FAILED，close 后禁止写入。 */
+  private async persist(
+    request: PendingRequest,
+    candidate: DaemonConfig,
+  ): Promise<EnvironmentConfigApplyResult | null> {
     if (this.closed) {
-      await this.retirePrepared(prepared)
       return closedResult()
     }
     try {
       await writePrivateFile(this.options.paths.configPath, serializeDaemonCache(candidate))
+      return null
     } catch (error) {
-      await this.retirePrepared(prepared)
       this.options.tracker.failConfiguration({
         version: request.version.toString(),
         code: 'PERSIST_FAILED',
@@ -284,27 +342,11 @@ export class EnvironmentConfigRuntime {
       this.options.report(error)
       return { kind: 'failed', version: request.version, code: 'PERSIST_FAILED' }
     }
+  }
 
-    if (this.closed) {
-      await this.retirePrepared(prepared)
-      return closedResult()
-    }
-    // 同步发布：不 await、不逐字段修改共享对象。候选资源先完成切换，再发布不可变配置快照。
+  /** 发布不可变快照并推进状态；资源 publish 已在此前完成。 */
+  private publishSnapshot(request: PendingRequest, candidate: DaemonConfig): void {
     const previous = this.current
-    try {
-      const cleanup = prepared?.publish()
-      if (cleanup !== undefined && cleanup !== null) {
-        this.options.track(
-          cleanup.catch((error: unknown) => {
-            this.options.report(error)
-          }),
-        )
-      }
-    } catch (error) {
-      await this.retirePrepared(prepared)
-      this.options.report(error)
-      return { kind: 'fatal', message: 'prepared environment resources could not be published' }
-    }
     this.current = candidate
     this.acceptedVersion = request.version
     this.acceptedContent = request.content
@@ -314,7 +356,6 @@ export class EnvironmentConfigRuntime {
       proxyUrl: candidate.proxyUrl,
     })
     this.options.onApplied(previous, candidate)
-    return { kind: 'applied', config: candidate }
   }
 
   private failCandidate(version: bigint, error: unknown): EnvironmentConfigApplyResult {

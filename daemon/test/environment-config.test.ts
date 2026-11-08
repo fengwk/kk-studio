@@ -43,6 +43,8 @@ function runtimeFor(
   const prepareCalls: Parameters<EnvironmentConfigRuntimeOptions['prepare']>[0][] = []
   const defaultPrepare = async (config: Parameters<EnvironmentConfigRuntimeOptions['prepare']>[0]) => prepared(config)
   const onApplied = vi.fn()
+  const onCandidate = vi.fn()
+  const onCandidateAborted = vi.fn()
   const report = vi.fn()
   const tracked: Promise<void>[] = []
   const { prepare: customPrepare, ...rest } = overrides
@@ -60,6 +62,8 @@ function runtimeFor(
       prepareCalls.push(config)
       return (customPrepare ?? defaultPrepare)(config)
     },
+    onCandidate,
+    onCandidateAborted,
     onApplied,
     report,
     track: (promise) => {
@@ -68,7 +72,16 @@ function runtimeFor(
     ...rest,
   }
   const runtime = new EnvironmentConfigRuntime(effective)
-  return { runtime, tracker, prepareCalls, onApplied: effective.onApplied, report: effective.report, tracked }
+  return {
+    runtime,
+    tracker,
+    prepareCalls,
+    onCandidate: effective.onCandidate,
+    onCandidateAborted: effective.onCandidateAborted,
+    onApplied: effective.onApplied,
+    report: effective.report,
+    tracked,
+  }
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -309,6 +322,37 @@ describe('EnvironmentConfigRuntime', () => {
     const corrected = await runtime.submit(2n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://proxy.invalid:8080' })
     expect(corrected).toMatchObject({ kind: 'applied', config: { configVersion: 2n } })
     expect(tracker.getConfiguration()).toMatchObject({ appliedVersion: '2', error: null })
+  })
+
+  // 候选准入钩子必须早于 prepare；准备失败后恢复准备前状态且只通知一次。
+  it('notifies candidate suspension before preparation and aborts it on failure', async () => {
+    const initial = initialConfig()
+    const gate = deferred()
+    const started = deferred()
+    const events: string[] = []
+    const { runtime, onCandidate, onCandidateAborted } = runtimeFor(initial, {
+      prepare: async () => {
+        events.push('prepare')
+        started.resolve()
+        await gate.promise
+        throw new Error('prepare failed')
+      },
+      onCandidate: vi.fn(() => {
+        events.push('candidate')
+      }),
+      onCandidateAborted: vi.fn(() => {
+        events.push('aborted')
+      }),
+    })
+
+    const applying = runtime.submit(1n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://proxy.invalid:8080' })
+    await started.promise
+    expect(events).toEqual(['candidate', 'prepare'])
+    gate.resolve()
+    await expect(applying).resolves.toMatchObject({ kind: 'failed', code: 'VALIDATION_FAILED' })
+    expect(events).toEqual(['candidate', 'prepare', 'aborted'])
+    expect(onCandidate).toHaveBeenCalledTimes(1)
+    expect(onCandidateAborted).toHaveBeenCalledTimes(1)
   })
 
   // 缓存写入失败不得发布候选；候选清理失败也必须进入诊断，而不是静默吞掉。

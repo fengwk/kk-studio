@@ -792,15 +792,8 @@ function createDefaultNetwork(proxyUrl: string | null): DefaultOutboundNetwork {
 }
 
 /**
- * 子进程保留调用方/宿主真实环境，不注入、不删除任何代理变量。
- *
- * <p>卡片代理只属于 Daemon 自身请求；Bash、LSP 与 IDE 终端不得因平台代理被改写。
+ * 当前进程已应用配置的出站网络；未配置时明确失败，绝不静默直连。
  */
-export function subprocessEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...environment }
-}
-
-/** 当前进程已应用配置的出站网络；未配置时明确失败，绝不静默直连。 */
 export function getOutboundNetwork(): OutboundNetwork {
   if (currentNetwork === undefined) {
     throw new Error('outbound network is not initialized')

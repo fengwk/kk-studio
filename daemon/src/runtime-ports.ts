@@ -60,8 +60,8 @@ export interface RuntimeOptions {
   processes: ProcessSupervisor
   /** READY 上报的宿主 metadata；缺省时按当前进程检测。 */
   environment?: HostInfo
-  /** 校验并准备候选网络/LSP；缺省为无外部资源的最小实现（测试替代）。 */
-  prepareConfiguration?(config: DaemonConfig): Promise<PreparedEnvironmentConfig>
+  /** 校验并准备候选网络/LSP；previous 是当前已发布快照，供只重建变化组件。 */
+  prepareConfiguration?(config: DaemonConfig, previous: DaemonConfig): Promise<PreparedEnvironmentConfig>
   daemonVersion?: string
   journal?: InvocationJournal
   /** 自定义资源上传端口；缺省时使用内置控制面客户端。 */

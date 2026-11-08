@@ -23,7 +23,8 @@ import {
 import { fileCapabilities, setFileCapabilityHooks } from './coding/files.js'
 import { searchCapabilities } from './coding/search.js'
 import { processCapability } from './coding/process.js'
-import { createLspFacade } from './coding/lsp.js'
+import { createLspFacade, type LspFacade } from './coding/lsp.js'
+import type { PreparedEnvironmentConfig } from './environment-config.js'
 import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.js'
 import { SkillPackageInstaller } from './skill/installer.js'
 import { createSkillReconciler } from './skill/reconcile.js'
@@ -155,21 +156,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       capabilities,
       processes: supervisor,
       environment: detectEnvironmentInfo(),
-      prepareConfiguration: async (candidate) => {
-        const network = networks.prepare(candidate.proxyUrl)
-        const lsp = lspGroup.prepare(candidate.lsp)
-        return {
-          config: candidate,
-          publish: () => {
-            const networkCleanup = network.publish()
-            const lspCleanup = lsp.publish()
-            return Promise.all([networkCleanup, lspCleanup]).then(() => undefined)
-          },
-          retire: async () => {
-            await Promise.all([network.retire(), lsp.retire()])
-          },
-        }
-      },
+      prepareConfiguration: (candidate, previous) =>
+        prepareRuntimeConfiguration({ networks, lsp: lspGroup }, previous, candidate),
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,
@@ -233,6 +221,69 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     }
   }
   return outcome
+}
+
+/** 配置热应用实际需要准备的两个资源端口。 */
+export interface ConfigurationResourceRuntime {
+  networks: Pick<NetworkRuntime, 'prepare'>
+  lsp: Pick<LspFacade, 'prepare'>
+}
+
+/**
+ * 只重建实际变化的网络/LSP 候选，并在 LSP 准备失败时回收已准备的网络候选。
+ *
+ * <p>仅 bash 等非资源字段变化时两个组件都保持当前实例，不产生无意义的候选。网络候选先建立，
+ * 便于发布时同步切换；若随后 LSP 准备失败，必须关闭该未发布网络，不能把句柄留给进程退出。
+ * 清理失败与主错误用固定摘要聚合，绝不静默吞掉。
+ */
+export async function prepareRuntimeConfiguration(
+  resources: ConfigurationResourceRuntime,
+  previous: DaemonConfig,
+  candidate: DaemonConfig,
+): Promise<PreparedEnvironmentConfig> {
+  const network =
+    previous.proxyUrl === candidate.proxyUrl ? null : resources.networks.prepare(candidate.proxyUrl)
+  let lsp: ReturnType<LspFacade['prepare']> | null = null
+  try {
+    lsp = lspConfigurationChanged(previous, candidate) ? resources.lsp.prepare(candidate.lsp) : null
+  } catch (error) {
+    if (network !== null) {
+      try {
+        await network.retire()
+      } catch (retireError) {
+        throw new AggregateError([error, retireError], 'network candidate cleanup failed')
+      }
+    }
+    throw error
+  }
+  return {
+    config: candidate,
+    publish: () => {
+      const cleanups: Promise<void>[] = []
+      if (network !== null) {
+        cleanups.push(network.publish())
+      }
+      if (lsp !== null) {
+        cleanups.push(lsp.publish())
+      }
+      return Promise.all(cleanups).then(() => undefined)
+    },
+    retire: async () => {
+      const cleanups: Promise<void>[] = []
+      if (network !== null) {
+        cleanups.push(network.retire())
+      }
+      if (lsp !== null) {
+        cleanups.push(lsp.retire())
+      }
+      await Promise.all(cleanups)
+    },
+  }
+}
+
+/** LSP 声明是否变化；未变化时继续使用当前 facade，不重建 pool。 */
+function lspConfigurationChanged(previous: DaemonConfig, candidate: DaemonConfig): boolean {
+  return JSON.stringify(previous.lsp) !== JSON.stringify(candidate.lsp)
 }
 
 /** 逆序释放全部已装配资源，逐个捕获失败而不吞掉，交由调用方汇总。 */

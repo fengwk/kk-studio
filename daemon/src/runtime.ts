@@ -162,6 +162,9 @@ export class Runtime {
       prepare:
         options.prepareConfiguration ??
         (async (config) => ({ config, publish() {}, retire: async () => {} })),
+      onCandidate: (previous, candidate) => this.session.onConfigurationCandidate(previous, candidate),
+      onCandidateAborted: (previous, candidate) =>
+        this.session.onConfigurationCandidateAborted(previous, candidate),
       onApplied: (previous, next) => this.session.onConfigurationApplied(previous, next),
       report: (error) => {
         try {
@@ -276,9 +279,8 @@ export class Runtime {
     this.invocations.cancelForShutdown()
     this.ideCommands.abortAll('SHUTDOWN')
     this.updates.abortForShutdown()
-    this.shutdownRuntime.release('environment config close', () => {
-      void this.configuration.close()
-    })
+    // 配置 close 要等待正在准备的候选与 retire 收敛；必须纳入 in-flight，不能 void 后提前发布终止。
+    this.shutdownRuntime.releaseTracked('environment config close', () => this.configuration.close())
     void this.shutdownRuntime.finalize(
       () => this.transport.close(),
       () => this.connection.resolveTermination(terminalState),

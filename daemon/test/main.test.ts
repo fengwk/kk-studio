@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { main } from '../src/main.js'
+import { main, prepareRuntimeConfiguration } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import {
   Architecture,
@@ -18,7 +18,7 @@ import {
 import * as native from '../src/native/index.js'
 import * as network from '../src/network.js'
 import * as transportModule from '../src/transport/index.js'
-import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
+import type { DaemonConfig, ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
 import {
@@ -651,4 +651,111 @@ describe('daemon main unsupported platform', () => {
     },
     60_000,
   )
+})
+
+describe('daemon configuration resource preparation', () => {
+  function candidate(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
+    return {
+      environmentId: '11111111-2222-4333-8444-555555555555',
+      configVersion: 0n,
+      configPath: '/tmp/kk-daemon-test/daemon.json',
+      dataDir: '/tmp/kk-daemon-test',
+      tokenPath: '/tmp/kk-daemon-test/daemon.token',
+      studioUrl: 'https://studio.example.com',
+      gatewayUri: 'wss://studio.example.com/ws/daemon',
+      bashExecutable: process.execPath,
+      bashExecutableSetting: null,
+      lsp: {},
+      proxyUrl: null,
+      distributionDir: '/tmp/kk-daemon-test',
+      ...overrides,
+    }
+  }
+
+  function resourceFakes() {
+    const network = { publish: vi.fn(async () => {}), retire: vi.fn(async () => {}) }
+    const networks = { prepare: vi.fn(() => network) }
+    const lsp = { publish: vi.fn(async () => {}), retire: vi.fn(async () => {}) }
+    const lspGroup = { prepare: vi.fn(() => lsp) }
+    return { network, networks, lsp, lspGroup, resources: { networks, lsp: lspGroup } }
+  }
+
+  // 仅 bash 等执行字段变化时，网络/LSP 都沿用当前组件，不创建新候选。
+  it('does not rebuild unchanged network or LSP components', async () => {
+    const fakes = resourceFakes()
+    const previous = candidate()
+    const next = { ...previous, configVersion: 1n, bashExecutableSetting: '/bin/bash' }
+
+    const prepared = await prepareRuntimeConfiguration(fakes.resources, previous, next)
+
+    expect(fakes.networks.prepare).not.toHaveBeenCalled()
+    expect(fakes.lspGroup.prepare).not.toHaveBeenCalled()
+    await prepared.publish()
+    await prepared.retire()
+  })
+
+  // LSP 变化只准备 LSP；网络保持当前句柄。
+  it('prepares only the LSP candidate when the proxy is unchanged', async () => {
+    const fakes = resourceFakes()
+    const previous = candidate()
+    const next = {
+      ...previous,
+      configVersion: 1n,
+      lsp: {
+        typescript: {
+          command: ['typescript-language-server'],
+          extensions: ['.ts'],
+          rootMarkers: ['tsconfig.json'],
+          firstMatchMarkers: [],
+        },
+      },
+    }
+
+    const prepared = await prepareRuntimeConfiguration(fakes.resources, previous, next)
+
+    expect(fakes.networks.prepare).not.toHaveBeenCalled()
+    expect(fakes.lspGroup.prepare).toHaveBeenCalledTimes(1)
+    await prepared.publish()
+    await prepared.retire()
+    expect(fakes.lsp.publish).toHaveBeenCalledTimes(1)
+    expect(fakes.lsp.retire).toHaveBeenCalledTimes(1)
+  })
+
+  // LSP 准备失败必须回收已准备的网络候选；清理也失败时两者都保留在聚合错误里。
+  it('retires a prepared network candidate when LSP preparation fails', async () => {
+    const fakes = resourceFakes()
+    const lspFailure = new Error('lsp prepare failed')
+    fakes.lspGroup.prepare.mockImplementation(() => {
+      throw lspFailure
+    })
+    const previous = candidate()
+    const next = {
+      ...previous,
+      configVersion: 1n,
+      proxyUrl: 'http://proxy.example.com:8080',
+      lsp: {
+        typescript: {
+          command: ['typescript-language-server'],
+          extensions: ['.ts'],
+          rootMarkers: ['tsconfig.json'],
+          firstMatchMarkers: [],
+        },
+      },
+    }
+
+    await expect(prepareRuntimeConfiguration(fakes.resources, previous, next)).rejects.toBe(lspFailure)
+    expect(fakes.network.retire).toHaveBeenCalledTimes(1)
+
+    const retireFailure = new Error('network retire failed')
+    const failing = resourceFakes()
+    failing.network.retire.mockRejectedValue(retireFailure)
+    failing.lspGroup.prepare.mockImplementation(() => {
+      throw lspFailure
+    })
+    const aggregated = await prepareRuntimeConfiguration(failing.resources, previous, next).catch(
+      (error: unknown) => error,
+    )
+    expect(aggregated).toBeInstanceOf(AggregateError)
+    expect((aggregated as AggregateError).errors).toEqual([lspFailure, retireFailure])
+  })
 })

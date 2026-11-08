@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { CapabilityContext, DaemonConfig, LspServerConfig, ResourceUploader } from '../../src/contracts.js'
-import { createLspCapabilities, type LspFacade } from '../../src/coding/lsp.js'
+import { createLspFacade, type LspFacade } from '../../src/coding/lsp.js'
 import { fakeDaemonLspConfig, awaitEvent } from './fake-lsp-helper.js'
 import { TestProcessSupervisor } from './test-process-supervisor.js'
 
@@ -61,7 +61,8 @@ describe('LSP generation hot swap', () => {
     const slowTranscript = path.join(tempDir, 'slow.jsonl')
     const fastTranscript = path.join(tempDir, 'fast.jsonl')
     const initial = config(tempDir, fakeDaemonLspConfig('java', 'slow-definition', slowTranscript))
-    group = createLspCapabilities(initial, supervisor)
+    group = createLspFacade(supervisor)
+    void group.update(initial.lsp)
     const controller = new AbortController()
     const context: CapabilityContext = {
       config: initial,
