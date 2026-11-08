@@ -30,8 +30,8 @@ public class EnvironmentIdeConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public IdeViewBindingRegistry ideViewBindingRegistry() {
-    return new IdeViewBindingRegistry();
+  public IdeViewBindingRegistry ideViewBindingRegistry(IdeCommandTransport transport) {
+    return new IdeViewBindingRegistry(transport);
   }
 
   @Bean(name = "localEnvironmentIdeService")

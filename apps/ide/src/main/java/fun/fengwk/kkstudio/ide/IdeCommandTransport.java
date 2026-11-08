@@ -18,7 +18,7 @@ import java.util.UUID;
  *
  * <p>只暴露请求与放弃两条语义，使上层不直接接触会话核心的连接目录、锁与租约实现。
  */
-public class IdeCommandTransport {
+public class IdeCommandTransport implements IdeCurrentGeneration {
 
   private final EnvironmentDaemonServer server;
 
@@ -44,6 +44,12 @@ public class IdeCommandTransport {
    */
   public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
     return server.connectionIdentity(environmentId);
+  }
+
+  /** 供授权/路由登记在登记锁内复核身份使用，与方法 {@link #connectionIdentity} 同源。 */
+  @Override
+  public Optional<DaemonConnectionIdentity> current(EnvironmentId environmentId) {
+    return connectionIdentity(environmentId);
   }
 
   /** 向指定 READY Daemon 代际批量下发一轮使用证明；代际/租约已变化时抛不可用且不重放。 */

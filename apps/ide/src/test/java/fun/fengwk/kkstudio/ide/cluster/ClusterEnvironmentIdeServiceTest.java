@@ -78,7 +78,7 @@ class ClusterEnvironmentIdeServiceTest {
             localTransport,
             new IdeBootstrapTicketService(),
             new AllowGateway(),
-            new IdeViewBindingRegistry(),
+            new IdeViewBindingRegistry(localTransport),
             Duration.ofSeconds(1),
             new NoopAuthorization());
     service = new ClusterEnvironmentIdeService(registry, client, local);
@@ -356,7 +356,7 @@ class ClusterEnvironmentIdeServiceTest {
   private static final class NoopAuthorization implements IdeViewAuthorizationListener {
 
     @Override
-    public void ensureViewCapacity(EnvironmentId environmentId) {}
+    public void ensureViewCapacity(DaemonConnectionIdentity identity) {}
 
     @Override
     public void viewOpened(
