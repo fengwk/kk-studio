@@ -22,6 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
@@ -100,7 +101,6 @@ class DaemonCrossLanguageIntegrationTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String VALID_TOKEN = "valid-registration-token-123456";
   private static final String INVALID_TOKEN = "invalid-registration-token-999999";
-  private static final String DAEMON_VERSION = "2.0.0";
   private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
   private Server server;
@@ -122,9 +122,17 @@ class DaemonCrossLanguageIntegrationTest {
 
   private Path testDataDir;
   private DaemonProcess daemonProcess;
+  private String daemonVersion;
 
   @BeforeEach
   void setUp() throws Exception {
+    // 版本对齐门禁保护的包清单是期望值来源，不维护测试专属版本号。
+    daemonVersion =
+        JsonMapper.builder()
+            .build()
+            .readTree(Files.readString(repoRoot().resolve("daemon/package.json")))
+            .get("version")
+            .asString();
     scheduler = new ScheduledExecutorScheduler("test-transport-", false);
     scheduler.start();
     executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -242,7 +250,7 @@ class DaemonCrossLanguageIntegrationTest {
 
     assertNotNull(leaseStore.readyCapabilities(), "markReady must record capabilities");
     assertEquals(
-        DAEMON_VERSION,
+        daemonVersion,
         leaseStore.readyCapabilities().daemonVersion(),
         "daemon_version in READY must match daemon version");
 
@@ -258,7 +266,7 @@ class DaemonCrossLanguageIntegrationTest {
                 env ->
                     env.getMessageType() == MessageType.READY
                         && env.hasReady()
-                        && DAEMON_VERSION.equals(env.getReady().getDaemonVersion()));
+                        && daemonVersion.equals(env.getReady().getDaemonVersion()));
     assertTrue(hasReadyInbound, "READY envelope with correct daemon_version must be received");
   }
 
@@ -571,7 +579,7 @@ class DaemonCrossLanguageIntegrationTest {
     assertTrue(
         heartbeatEnv.getHeartbeat().hasRuntimeStatus(), "HEARTBEAT must carry runtimeStatus");
     assertEquals(
-        DAEMON_VERSION,
+        daemonVersion,
         heartbeatEnv.getHeartbeat().getRuntimeStatus().getStatus().getDaemonVersion(),
         "HEARTBEAT runtimeStatus must report matching daemonVersion");
 
@@ -580,7 +588,7 @@ class DaemonCrossLanguageIntegrationTest {
 
     DaemonRuntimeSnapshot snapshot = daemonServer.runtimeStatus(ENVIRONMENT_ID).orElse(null);
     assertNotNull(snapshot, "Server core must maintain DaemonRuntimeSnapshot");
-    assertEquals(DAEMON_VERSION, snapshot.status().daemonVersion());
+    assertEquals(daemonVersion, snapshot.status().daemonVersion());
   }
 
   /**
