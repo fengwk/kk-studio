@@ -253,7 +253,14 @@ function Import-Installer {
     # into a named parameter. Callers pass a hashtable of the installer's real parameter names,
     # including Unicode paths. Unknown keys stay unbound so the installer itself rejects them.
     # help defines the installer functions without Invoke-Main and without touching an installation.
+    $resolvedSid = $script:CurrentSid
     . $installer @Parameters
+    # Dot-sourcing resets script scope. help never calls Initialize-HostContext, so retain the real
+    # current-user SID resolved earlier for the fixture's ACL helpers; install/status/uninstall
+    # still initialize it again from WindowsIdentity.
+    if (-not [string]::IsNullOrEmpty($resolvedSid)) {
+        $script:CurrentSid = $resolvedSid
+    }
     $script:InstallerInitializeHostContext = ${function:Initialize-HostContext}
     function Initialize-HostContext {
         & $script:InstallerInitializeHostContext

@@ -23,10 +23,15 @@ const mode = (file) => statSync(file).mode & 0o777
 const bytes = (file) => readFileSync(file)
 const unitPath = (fixture) => fixture.unitPath
 const envRoot = (fixture) => fixture.envRoot
+// Test-only host override lets Linux hosts exercise the Darwin fixture; CI uses the real host.
+const HOST_OS = process.env.TEST_INSTALLER_HOST_OS ?? (process.platform === 'darwin' ? 'Darwin' : 'Linux')
+const MACHINE = process.env.TEST_INSTALLER_MACHINE ?? (process.arch === 'arm64' ? 'arm64' : 'x86_64')
+const managedMarker = (fixture) =>
+  fixture.hostOs === 'Linux' ? '# Managed by scripts/daemon/install.sh' : '<!-- Managed by scripts/daemon/install.sh -->'
 
 function withInstall(body) {
   return withTempDir((tmp) => {
-    const fixture = new InstallFixture(tmp)
+    const fixture = new InstallFixture(tmp, { hostOs: HOST_OS, machine: MACHINE })
     fixture.environmentId = ENVIRONMENT_ID
     const [configFile, tokenFile] = fixture.makeInputs()
     const context = { tmp, fixture, configFile, tokenFile }
@@ -114,7 +119,9 @@ describe('install.sh safety', () => {
     withInstall(({ fixture, install }) => {
       const unit = unitPath(fixture)
       mkdirSync(path.dirname(unit), { recursive: true })
-      writeFileSync(unit, '# Managed by scripts/daemon/install.sh\n[Service]\nExecStart=/bin/true\n')
+      writeFileSync(unit, fixture.hostOs === 'Linux'
+        ? `${managedMarker(fixture)}\n[Service]\nExecStart=/bin/true\n`
+        : `<?xml version="1.0" encoding="UTF-8"?>\n${managedMarker(fixture)}\n<plist version="1.0"><dict/></plist>\n`)
       const nativeStat = spawnSync('which', ['stat'], { encoding: 'utf8' }).stdout.trim()
       assert.ok(nativeStat)
       writeExecutable(
@@ -128,7 +135,7 @@ describe('install.sh safety', () => {
       )
       const before = bytes(unit)
       const result = install()
-      assert.notEqual(result.status, 0)
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
       for (const expected of ['belongs to another user', unit, '不要伪造所有权标记']) {
         assert.ok(result.stderr.includes(expected), expected)
       }
@@ -141,13 +148,25 @@ describe('install.sh safety', () => {
       const unit = unitPath(fixture)
       const other = path.join(fixture.installRoot, 'environments', SECOND_ENVIRONMENT_ID)
       mkdirSync(path.dirname(unit), { recursive: true })
-      writeFileSync(unit, [
-        '# Managed by scripts/daemon/install.sh',
-        '[Service]',
-        `ExecStart="${other}/lib/runtime/code-server/lib/node" "${other}/lib/main.js" --config "${other}/daemon.json"`,
-      ].join('\n') + '\n')
+      const lines = fixture.hostOs === 'Linux'
+        ? [
+            managedMarker(fixture),
+            '[Service]',
+            `ExecStart="${other}/lib/runtime/code-server/lib/node" "${other}/lib/main.js" --config "${other}/daemon.json"`,
+          ]
+        : [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            managedMarker(fixture),
+            '<plist version="1.0"><dict><key>ProgramArguments</key><array>',
+            `<string>${other}/lib/runtime/code-server/lib/node</string>`,
+            `<string>${other}/lib/main.js</string>`,
+            '<string>--config</string>',
+            `<string>${other}/daemon.json</string>`,
+            '</array></dict></plist>',
+          ]
+      writeFileSync(unit, lines.join('\n') + '\n')
       const result = install()
-      assert.notEqual(result.status, 0)
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
       assert.match(result.stderr, /does not run this environment program/)
       assert.ok(existsSync(unit))
       assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
@@ -159,7 +178,7 @@ describe('install.sh safety', () => {
       mkdirSync(path.join(root, 'lib'), { recursive: true, mode: 0o700 })
       writeFileSync(path.join(root, 'lib/unknown'), 'unknown')
       const result = install()
-      assert.notEqual(result.status, 0)
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
       assert.match(result.stderr, /program directory exists without the owned service/)
       assert.ok(existsSync(path.join(root, 'lib/unknown')))
       assert.ok(!existsSync(path.join(fixture.state, 'active')))

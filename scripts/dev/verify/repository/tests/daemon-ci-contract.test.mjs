@@ -522,7 +522,11 @@ test('the Windows installer launches main.js directly and its fixture stays insi
         installer,
         /Invoke-NativeProcess -Executable \$node `\r?\n\s+-Arguments @\("main\.js", "--version"\) `\r?\n\s+-WorkingDirectory \$script:StagedLib/u,
     )
-    assert.match(installer, /\$arguments = @\("main\.js", "--check-config", \$stagedConfig\)/u)
+    assert.match(
+        installer,
+        /function Invoke-CheckConfig \{[\s\S]*?Invoke-NativeProcess -Executable \$node `\r?\n\s+-Arguments @\("main\.js", "--check-config", \$ConfigPath\) `\r?\n\s+-WorkingDirectory \$StagedLib/u,
+        'the staged config check must launch main.js directly with the staged library as cwd',
+    )
     assert.match(
         installer,
         /\$script:HomePath =\r?\n\s+\[Environment\]::GetFolderPath\(\[Environment\+SpecialFolder\]::UserProfile\)/u,
@@ -538,27 +542,29 @@ test('the Windows installer launches main.js directly and its fixture stays insi
         /\$repoRoot = Split-Path -Parent \(Split-Path -Parent \(Split-Path -Parent \$PSScriptRoot\)\)/u,
         'repoRoot must climb tests -> daemon -> scripts -> repository root',
     )
-    const heredoc = fixture.match(/\$stubMain = @'\r?\n([\s\S]*?)\r?\n'@/u)
+    const heredoc = fixture.match(/\$stubMain = @"\r?\n([\s\S]*?)\r?\n"@/u)
     assert.ok(heredoc, 'missing stubMain heredoc')
     const stub = heredoc[1]
     assert.match(stub, /import fs from "node:fs"/u)
     assert.doesNotMatch(stub, /\brequire\(/u)
     assert.match(
         fixture,
-        /\. Import-Installer -Parameters @\{ Command = "help" \}\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
+        /\. Import-Installer -Parameters @\{ Command = "help"[^\r\n]*\}\r?\n\s+Initialize-HostContext\r?\n[\s\S]*?\r?\n\s+Assert-DirectArgumentRoundTrip/u,
     )
     assert.match(fixture, /\$acl = New-PrivateAcl\r?\n\s+Set-Acl -LiteralPath \$configPath -AclObject \$acl/u)
     assert.match(fixture, /\$script:HomePath = \$profileDir/u)
     const importInstaller = fixture.match(/function Import-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
     assert.match(importInstaller, /param\(\[hashtable\] \$Parameters\)/u)
+    assert.match(importInstaller, /\$resolvedSid = \$script:CurrentSid\r?\n\s+\. \$installer @Parameters/u)
+    assert.match(importInstaller, /if \(-not \[string\]::IsNullOrEmpty\(\$resolvedSid\)\) \{\r?\n\s+\$script:CurrentSid = \$resolvedSid/u)
     assert.match(importInstaller, /\. \$installer @Parameters/u)
     const invokeInstaller = fixture.match(/function Invoke-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
     assert.doesNotMatch(invokeInstaller, /\$script:Tasks = @\{\}/u)
     assert.match(invokeInstaller, /param\(\[hashtable\] \$Parameters\)/u)
     assert.match(invokeInstaller, /\. Import-Installer -Parameters \$Parameters/u)
-    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "status" \}/u)
+    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "status"; EnvironmentId = \$environmentId \}/u)
     assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "help" \}/u)
-    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "uninstall" \}/u)
+    assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "uninstall"; EnvironmentId = \$environmentId \}/u)
     assert.match(fixture, /ConfigFile = \$pairs\[0\]; TokenFile = \$pairs\[1\]/u)
     assert.match(fixture, /UnknownOption = "unexpected"/u)
     assert.doesNotMatch(fixture, /\. \$installer status/u)
@@ -567,7 +573,9 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-windows-stub-'))
     try {
         writeFileSync(path.join(directory, 'package.json'), '{"type":"module"}\n')
-        writeFileSync(path.join(directory, 'main.js'), `${stub}\n`)
+        // The fixture's expandable here-string interpolates $Version in PowerShell; mirror that for
+        // the raw Node stub executed here.
+        writeFileSync(path.join(directory, 'main.js'), `${stub.replaceAll('$Version', '1.0.14')}\n`)
         writeFileSync(path.join(directory, 'daemon.json'), '{"studioUrl":"https://studio.example.com"}\n')
         const entry = path.join(directory, 'main.js')
         const version = spawnSync(process.execPath, [entry, '--version'], { encoding: 'utf8' })
