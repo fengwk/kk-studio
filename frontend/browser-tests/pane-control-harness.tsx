@@ -7,6 +7,7 @@ import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type { AgentDTO, EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
@@ -18,6 +19,7 @@ export const HARNESS_CHILD_THREAD_ID = 'a1000000-0000-4000-8000-0000000000a2'
 const HARNESS_ENVIRONMENTS: EnvironmentDTO[] = [{
   id: 'a2000000-0000-4000-8000-0000000000e1',
   name: 'NAS',
+  daemonConfig: testDaemonConfig(),
   status: 'READY',
   statusExpiresAt: null,
   ready: true,

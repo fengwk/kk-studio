@@ -6,6 +6,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
 import { setLocale } from '@/shared/i18n'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {
   AgentDTO,
   EnvironmentDTO,
@@ -53,6 +54,7 @@ function environment(id: string, name: string): EnvironmentDTO {
   return {
     id,
     name,
+    daemonConfig: testDaemonConfig(),
     status: 'READY',
     ready: true,
     statusExpiresAt: null,

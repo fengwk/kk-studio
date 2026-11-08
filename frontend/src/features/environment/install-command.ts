@@ -1,32 +1,28 @@
 import { url } from '@/shared/api/client'
 import {
   DAEMON_OPERATING_SYSTEM_VALUES,
-  type DaemonLspServerConfiguration,
   type DaemonOperatingSystem,
-  type EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
-/**
- * 安装设置校验失败。只携带字段路径；`message` 不含输入值，供非 UI 调用方使用，
- * 组件通过 `field` 渲染字段级 i18n 文案而不直接展示英文 message。
- */
-export class InstallConfigError extends Error {
+/** 安装命令参数校验失败。只携带字段路径，不包含命令注入内容。 */
+export class InstallCommandError extends Error {
   readonly field: string
 
   constructor(field: string) {
     super(`Invalid ${field}`)
-    this.name = 'InstallConfigError'
+    this.name = 'InstallCommandError'
     this.field = field
   }
 }
 
 function fail(field: string): never {
-  throw new InstallConfigError(field)
+  throw new InstallCommandError(field)
 }
 
 // Java Character.isISOControl (C0 + C1) plus the JSON/JS line separators.
 // eslint-disable-next-line no-control-regex
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+
 /**
  * 可安装的宿主系统：Daemon 还能运行在 WSL，但没有独立的安装/卸载脚本；
  * 安装入口只服务生成值中除 WSL 以外的系统。
@@ -37,171 +33,17 @@ export const INSTALL_OPERATING_SYSTEMS: readonly InstallOperatingSystem[] =
     (operatingSystem): operatingSystem is InstallOperatingSystem => operatingSystem !== 'wsl',
   )
 
-/** 校验后的安装设置：操作系统收窄为受支持的取值。 */
-export interface ValidatedInstallConfig extends EnvironmentInstallConfigDTO {
-  operatingSystem: InstallOperatingSystem
-}
-
 export function isInstallOperatingSystem(value: unknown): value is InstallOperatingSystem {
   return (INSTALL_OPERATING_SYSTEMS as readonly unknown[]).includes(value)
 }
 
-const topLevelFields = ['operatingSystem', 'daemon']
-const daemonFields = ['studioUrl', 'note', 'bashExecutable', 'lsp']
-const serverFields = ['command', 'extensions', 'rootMarkers', 'firstMatchMarkers']
-const serverIdPattern = /^[A-Za-z0-9_.-]+$/
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasUnknownField(value: Record<string, unknown>, allowed: string[]): boolean {
-  return Object.keys(value).some(key => !allowed.includes(key))
-}
-
-function stringOrNull(value: unknown, field: string): string | null {
-  if (value === null || value === undefined) return null
-  if (typeof value !== 'string') fail(field)
-  return value
+export function detectInstallOS(platform: string): InstallOperatingSystem {
+  return /win/i.test(platform) ? 'windows' : /mac/i.test(platform) ? 'macos' : 'linux'
 }
 
 function nonblankText(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim().length === 0 || controls.test(value)) fail(field)
   return value
-}
-
-/** Studio HTTP(S) origin：无 userinfo/path/query/fragment，端口合法，与共享 codec 一致。 */
-function origin(value: unknown): string {
-  const raw = nonblankText(value, 'daemon.studioUrl')
-  if (/[\s\\]/.test(raw) || [...raw].some(char => char.codePointAt(0)! > 0x7e)) fail('daemon.studioUrl')
-  const scheme = /^https?:\/\//i.exec(raw)
-  if (scheme === null) fail('daemon.studioUrl')
-  const rest = raw.slice(scheme[0].length)
-  const cut = rest.search(/[/?#]/)
-  const authority = cut === -1 ? rest : rest.slice(0, cut)
-  const path = cut === -1 ? '' : rest.slice(cut)
-  if (authority.length === 0 || authority.includes('@') || authority.endsWith(':')) {
-    fail('daemon.studioUrl')
-  }
-  if (path !== '' && path !== '/') fail('daemon.studioUrl')
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return fail('daemon.studioUrl')
-  }
-  if (url.hostname.length === 0 || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
-    fail('daemon.studioUrl')
-  }
-  if (url.port === '0') fail('daemon.studioUrl')
-  return url.origin
-}
-
-function note(value: unknown): string | null {
-  const raw = stringOrNull(value, 'daemon.note')
-  if (raw === null) return null
-  if (controls.test(raw)) fail('daemon.note')
-  const stripped = raw.trim()
-  if (stripped.length === 0 || stripped.length > 512) fail('daemon.note')
-  return stripped
-}
-
-function bashExecutable(value: unknown): string | null {
-  const raw = stringOrNull(value, 'daemon.bashExecutable')
-  if (raw === null) return null
-  if (raw.trim().length === 0 || controls.test(raw)) fail('daemon.bashExecutable')
-  return raw
-}
-
-function stringList(
-  value: unknown,
-  path: string,
-  required: boolean,
-  kind: 'plain' | 'extension' | 'marker',
-): string[] {
-  if (value === null || value === undefined) {
-    if (required) fail(path)
-    return []
-  }
-  if (!Array.isArray(value)) fail(path)
-  if (value.length === 0) {
-    if (required) fail(path)
-    return []
-  }
-  return value.map((item, index) => {
-    const field = `${path}[${index}]`
-    if (typeof item !== 'string' || item.trim().length === 0 || controls.test(item)) fail(field)
-    if (kind === 'extension') {
-      const extension = item.trim().toLowerCase()
-      if (extension.length < 2 || !extension.startsWith('.')
-        || extension.includes('/') || extension.includes('\\')) fail(field)
-      return extension
-    }
-    if (kind === 'marker') {
-      const marker = item.trim()
-      const segments = marker.replaceAll('\\', '/').split('/')
-      const traversal = segments.some(part => part === '..' || part === '.' || part === '')
-      if (marker.startsWith('/') || marker.startsWith('\\') || marker.includes(':') || traversal) {
-        fail(field)
-      }
-      return marker
-    }
-    return item
-  })
-}
-
-function lspConfiguration(
-  value: unknown,
-): { servers: Record<string, DaemonLspServerConfiguration> } | null {
-  if (value === null || value === undefined) return null
-  if (!isPlainObject(value) || Object.keys(value).some(key => key !== 'servers')) fail('daemon.lsp')
-  const nodes = value.servers
-  if (!isPlainObject(nodes) || Object.keys(nodes).length === 0) fail('daemon.lsp.servers')
-  const servers: Record<string, DaemonLspServerConfiguration> = Object.create(null)
-  for (const [id, node] of Object.entries(nodes)) {
-    const path = `daemon.lsp.servers.${id}`
-    if (!serverIdPattern.test(id) || !isPlainObject(node) || hasUnknownField(node, serverFields)) {
-      fail(path)
-    }
-    servers[id] = {
-      command: stringList(node.command, `${path}.command`, true, 'plain'),
-      extensions: stringList(node.extensions, `${path}.extensions`, true, 'extension'),
-      rootMarkers: stringList(node.rootMarkers, `${path}.rootMarkers`, false, 'marker'),
-      firstMatchMarkers: stringList(
-        node.firstMatchMarkers,
-        `${path}.firstMatchMarkers`,
-        false,
-        'marker',
-      ),
-    }
-  }
-  return { servers }
-}
-
-/**
- * 返回规范化配置：studioUrl 收敛为 origin，note 去空白，extensions 转小写，
- * markers 去空白，与服务端保存结果一致。
- */
-export function validateInstallConfig(
-  config: EnvironmentInstallConfigDTO,
-): ValidatedInstallConfig {
-  if (!isPlainObject(config) || hasUnknownField(config, topLevelFields)) fail('installConfig')
-  const os = config.operatingSystem
-  if (!isInstallOperatingSystem(os)) fail('installConfig.operatingSystem')
-  if (!isPlainObject(config.daemon) || hasUnknownField(config.daemon, daemonFields)) fail('daemon')
-  return {
-    operatingSystem: os,
-    daemon: {
-      studioUrl: origin(config.daemon.studioUrl),
-      note: note(config.daemon.note),
-      bashExecutable: bashExecutable(config.daemon.bashExecutable),
-      lsp: lspConfiguration(config.daemon.lsp),
-    },
-  }
-}
-
-export function detectInstallOS(platform: string): InstallOperatingSystem {
-  return /win/i.test(platform) ? 'windows' : /mac/i.test(platform) ? 'macos' : 'linux'
 }
 
 /** bash `$'...'` 与 PowerShell 单引号，都把已编码 URL 当作字面量。 */
@@ -211,15 +53,22 @@ const ps = (value: string) => `'${value.replaceAll("'", "''")}'`
 /** 严格 origin：无 userinfo、path、query、fragment。 */
 function downloadOrigin(value: string): string {
   const raw = nonblankText(value, 'downloadOrigin')
-  if (/[\s\\]/.test(raw) || [...raw].some(char => char.codePointAt(0)! > 0x7e)) fail('downloadOrigin')
+  if (/[\s\\]/.test(raw) || [...raw].some((char) => char.codePointAt(0)! > 0x7e)) {
+    fail('downloadOrigin')
+  }
   let url: URL
   try {
     url = new URL(raw)
   } catch {
     return fail('downloadOrigin')
   }
-  if (url.origin !== raw || (url.protocol !== 'http:' && url.protocol !== 'https:')
-    || url.username !== '' || url.password !== '' || url.port === '0') {
+  if (
+    url.origin !== raw ||
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port === '0'
+  ) {
     fail('downloadOrigin')
   }
   return url.origin
@@ -239,6 +88,10 @@ function windowsCommand(url: string): string {
   const quoted = ps(url)
   return `& { Set-PSDebug -Off; $ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script)) }`
 }
+
+/**
+ * 安装命令只携带卡片 UUID、一次性 code 与目标 OS；完整配置和新 token 由服务端在兑换脚本时下发。
+ */
 export function generateInstallCommand(
   origin: string,
   environmentId: string,
@@ -252,18 +105,25 @@ export function generateInstallCommand(
     origin,
     url('GET /api/platform/environments/{environmentId}/install-script', {
       path: { environmentId },
-      query: { code },
+      query: { code, operatingSystem: os },
     }),
   )
   return os === 'windows' ? windowsCommand(downloadUrl) : unixCommand(downloadUrl)
 }
 
-export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
+/** 卸载命令只定位当前卡片与目标 OS；不读取、不携带任何凭据。 */
+export function generateUninstallCommand(
+  origin: string,
+  environmentId: string,
+  os: InstallOperatingSystem,
+): string {
+  nonblankText(environmentId, 'environmentId')
   if (!isInstallOperatingSystem(os)) fail('operatingSystem')
   const downloadUrl = scriptUrl(
     origin,
-    url('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
-      path: { operatingSystem: os },
+    url('GET /api/platform/environments/{environmentId}/uninstall-script', {
+      path: { environmentId },
+      query: { operatingSystem: os },
     }),
   )
   return os === 'windows' ? windowsCommand(downloadUrl) : unixCommand(downloadUrl)

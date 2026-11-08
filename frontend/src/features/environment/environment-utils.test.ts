@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { formatBackendDate } from '@/shared/lib/date-format'
 import {
+  environmentProxyText,
   formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
+  presentEnvironmentConfig,
   presentUpdateProgress,
   updateDownloadPercent,
 } from '@/features/environment/environment-utils'
+import {
+  testEnvironment,
+  testRuntimeStatus,
+} from '@/test-support/environment-test-fixtures'
 
 /** 服务端 Instant 的 wire 形态是 epoch 毫秒整数。 */
 const EPOCH_MILLIS = 1784505610250
@@ -54,5 +60,115 @@ describe('update progress formatting', () => {
       ),
     ).toBe(false)
     expect(isEnvironmentRuntimeUnavailableError(new Error('network'))).toBe(false)
+  })
+})
+
+
+describe('configuration status', () => {
+  // 测试意图：只有当前 owner 快照的 appliedVersion 与卡片版本相等才是已应用，并明确区分直连与未知。
+  it('derives applied, pending, failed, unavailable and unknown from the runtime snapshot', () => {
+    expect(presentEnvironmentConfig(testEnvironment({ version: '3' }), undefined)).toMatchObject({
+      state: 'unknown',
+      appliedVersion: null,
+      proxy: { known: false },
+    })
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '3', status: 'OFFLINE', ready: false }),
+        undefined,
+      ),
+    ).toMatchObject({ state: 'pendingConnect', proxy: { known: false } })
+    // 断线后即使缓存里仍有上一代已应用快照，也不得继续显示已应用或直连。
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '3', status: 'OFFLINE', ready: false }),
+        testRuntimeStatus({
+          configuration: { appliedVersion: '3', proxyUrl: null, error: null },
+        }),
+      ),
+    ).toEqual({
+      state: 'pendingConnect',
+      appliedVersion: null,
+      proxy: { known: false },
+      error: null,
+    })
+
+    const applied = presentEnvironmentConfig(
+      testEnvironment({ version: '3' }),
+      testRuntimeStatus({
+        configuration: { appliedVersion: '3', proxyUrl: null, error: null },
+      }),
+    )
+    expect(applied).toEqual({
+      state: 'applied',
+      appliedVersion: '3',
+      proxy: { known: true, url: null },
+      error: null,
+    })
+    expect(environmentProxyText(applied, '直连')).toBe('直连')
+
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '3' }),
+        testRuntimeStatus({
+          configuration: { appliedVersion: '2', proxyUrl: 'http://127.0.0.1:7890', error: null },
+        }),
+      ),
+    ).toMatchObject({ state: 'pendingApply', proxy: { known: true } })
+
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '3' }),
+        testRuntimeStatus({
+          configuration: {
+            appliedVersion: '2',
+            proxyUrl: null,
+            error: { version: '3', code: 'VALIDATION_FAILED', field: 'daemonConfig.proxyUrl' },
+          },
+        }),
+      ),
+    ).toEqual({
+      state: 'failed',
+      appliedVersion: '2',
+      proxy: { known: true, url: null },
+      error: { code: 'VALIDATION_FAILED', field: 'daemonConfig.proxyUrl' },
+    })
+  })
+
+  it('keeps a stale error from hiding the applied current version and never invents direct', () => {
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '4' }),
+        testRuntimeStatus({
+          configuration: {
+            appliedVersion: '4',
+            proxyUrl: null,
+            error: { version: '3', code: 'PERSIST_FAILED' },
+          },
+        }),
+      ),
+    ).toMatchObject({ state: 'applied', error: null })
+    expect(
+      environmentProxyText(
+        presentEnvironmentConfig(
+          testEnvironment({ version: '4' }),
+          testRuntimeStatus({
+            configuration: { appliedVersion: null, proxyUrl: null, error: null },
+          }),
+        ),
+        '直连',
+      ),
+    ).toBe('—')
+  })
+
+  it('compares large versions exactly and treats a version ahead of the card as unknown', () => {
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '9007199254740992' }),
+        testRuntimeStatus({
+          configuration: { appliedVersion: '9007199254740993', proxyUrl: null, error: null },
+        }),
+      ).state,
+    ).toBe('unknown')
   })
 })

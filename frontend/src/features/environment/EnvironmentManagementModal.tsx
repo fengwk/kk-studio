@@ -10,6 +10,7 @@ import {
   environmentEventLevelClass,
 } from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
+import { EnvironmentConfigurationSection } from '@/features/environment/EnvironmentConfigurationSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import './environment-management.css'
@@ -44,6 +45,7 @@ export function EnvironmentManagementModal({
     >
         <div className="modal-body env-mgmt-body">
           <EnvironmentHostSection environment={environment} />
+          <EnvironmentConfigurationSection environment={environment} />
 
           <section className="env-mgmt-section" aria-label={t('ai.environment.events.title')}>
             <div className="env-mgmt-section-header">

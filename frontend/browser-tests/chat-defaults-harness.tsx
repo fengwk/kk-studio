@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
@@ -40,6 +41,7 @@ const initialEnvironments: EnvironmentDTO[] = [
   {
     id: 'env-docker-node',
     name: 'docker-node',
+    daemonConfig: testDaemonConfig(),
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
@@ -52,6 +54,7 @@ const initialEnvironments: EnvironmentDTO[] = [
   {
     id: 'env-ubuntu',
     name: 'ubuntu',
+    daemonConfig: testDaemonConfig(),
     status: 'READY',
     ready: true,
     statusExpiresAt: null,

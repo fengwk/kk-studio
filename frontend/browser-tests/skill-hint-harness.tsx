@@ -5,6 +5,7 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type { AgentDTO, EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
@@ -15,6 +16,7 @@ export const HARNESS_ROOT_THREAD_ID = 'a1000000-0000-4000-8000-0000000000b1'
 const HARNESS_ENVIRONMENTS: EnvironmentDTO[] = [{
   id: 'a2000000-0000-4000-8000-0000000000e1',
   name: 'NAS',
+  daemonConfig: testDaemonConfig(),
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
@@ -28,6 +30,7 @@ const HARNESS_ENVIRONMENTS: EnvironmentDTO[] = [{
 }, {
   id: 'a2000000-0000-4000-8000-0000000000e2',
   name: 'builder',
+  daemonConfig: testDaemonConfig(),
   status: 'READY',
   statusExpiresAt: null,
   ready: true,

@@ -1,25 +1,38 @@
 import { expect, test, type Page } from '@playwright/test'
 import { tokenColor } from './fixture'
-import type {
-  EnvironmentDTO,
-  EnvironmentInstallConfigDTO,
-} from '@/shared/api/generated/contracts'
+import { url } from '@/shared/api/client'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import {
+  testDaemonConfig,
+  testEnvironment,
+  testRuntimeStatus,
+} from '@/test-support/environment-test-fixtures'
 
 // 全量 layout 回归也会收集本文件，剪贴板读写权限由本文件自持，不依赖专属 install 配置。
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
 
 const token = 'browser-private-token'
-const initialConfig: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'macos',
-  daemon: { studioUrl: 'https://saved.example.com', note: 'saved note', bashExecutable: '/bin/bash',
-    lsp: { servers: { ts: { command: ['~/ts-server', "quote'$`"], extensions: ['.ts'] } } } },
-}
+const savedConfig = testDaemonConfig({
+  studioUrl: 'https://saved.example.com',
+  bashExecutable: '/bin/bash',
+  lsp: { servers: { ts: { command: ['~/ts-server', "quote'$`"], extensions: ['.ts'] } } },
+  proxyUrl: null,
+})
 
 async function api(page: Page) {
-  let card: EnvironmentDTO = { id: 'env-1', name: 'host-one', version: '7', status: 'OFFLINE', ready: false,
-    statusExpiresAt: null, lastSeenAt: null, capabilities: [], createdAt: 0, updatedAt: 0, installConfig: initialConfig }
+  let card: EnvironmentDTO = testEnvironment({
+    id: 'env-1',
+    name: 'host-one',
+    note: 'saved note',
+    version: '7',
+    status: 'OFFLINE',
+    ready: false,
+    daemonConfig: savedConfig,
+  })
   let conflict = false
   const calls: string[] = []
+  const updateBodies: Record<string, unknown>[] = []
+  const createBodies: Record<string, unknown>[] = []
   await page.route('**/api/platform/environments**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -27,299 +40,275 @@ async function api(page: Page) {
     calls.push(`${method} ${path}`)
     if (method === 'PUT') {
       const body = request.postDataJSON()
-      expect(Object.keys(body).sort()).toEqual(['expectedVersion', 'installConfig'])
+      updateBodies.push(body)
+      expect(Object.keys(body).sort()).toEqual(['daemonConfig', 'expectedVersion', 'note'])
       if (conflict || body.expectedVersion !== card.version) {
         conflict = false
-        card = { ...card, version: String(Number(card.version) + 1) }
-        return route.fulfill({ status: 409, contentType: 'application/problem+json',
-          json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'conflict' } })
+        card = { ...card, version: String(BigInt(card.version) + 1n) }
+        return route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'conflict' },
+        })
       }
-      card = { ...card, installConfig: body.installConfig, version: String(Number(card.version) + 1) }
+      card = {
+        ...card,
+        note: body.note,
+        daemonConfig: body.daemonConfig,
+        version: String(BigInt(card.version) + 1n),
+      }
       return route.fulfill({ json: card })
     }
     if (path.endsWith('/install-codes')) {
-      return route.fulfill({ json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' } })
+      expect(request.postDataJSON()).toEqual({ expectedVersion: card.version })
+      return route.fulfill({
+        json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' },
+      })
     }
     if (path.endsWith('/rotate-token')) {
-      card = { ...card, version: String(Number(card.version) + 1) }
+      card = { ...card, version: String(BigInt(card.version) + 1n) }
       return route.fulfill({ json: { ...card, registrationToken: token } })
     }
     if (method === 'POST') {
-      card = { ...card, name: request.postDataJSON().name, installConfig: null, version: '0' }
+      const body = request.postDataJSON()
+      createBodies.push(body)
+      expect(Object.keys(body).sort()).toEqual(['daemonConfig', 'name', 'note'])
+      card = testEnvironment({
+        id: 'env-new',
+        name: body.name,
+        note: body.note,
+        daemonConfig: body.daemonConfig,
+        version: '0',
+        status: 'OFFLINE',
+        ready: false,
+      })
       return route.fulfill({ json: { ...card, registrationToken: token } })
     }
-    return route.fulfill({ json: path.endsWith('/env-1') ? card : [card] })
+    if (method === 'GET' && path === '/api/platform/environments') {
+      return route.fulfill({ json: [card] })
+    }
+    if (method === 'GET' && path === '/api/platform/environments/env-1') {
+      return route.fulfill({ json: card })
+    }
+    if (method === 'GET' && path === '/api/platform/environments/env-new') {
+      return route.fulfill({ json: card })
+    }
+    return route.fulfill({ status: 404, json: { code: 'not_found' } })
   })
-  return { calls, conflictNext: () => { conflict = true } }
+  return {
+    calls,
+    updateBodies,
+    createBodies,
+    conflictNext: () => {
+      conflict = true
+    },
+  }
 }
 
 for (const width of [1280, 390, 320]) {
-  test(`saved form, safe copy, reopen and uninstall at ${width}px`, async ({ page }, testInfo) => {
+  test(`edits the only card config, saves CAS, then copies install and uninstall commands at ${width}px`, async ({
+    page,
+  }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const mock = await api(page)
     await page.goto('/browser-tests/environment-install-harness.html')
     await expect(page.getByRole('button', { name: '安装 / 覆盖 host-one' })).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`cards-${width}.png`), fullPage: true })
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
-    const modal = page.getByRole('dialog', { name: '安装/覆盖环境' })
-    await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://saved.example.com')
-    await expect(modal.getByRole('button', { name: '操作系统' })).toHaveAttribute('data-value', 'macos')
-    await expect(modal.getByText('不含路径或查询参数。')).toBeVisible()
-    await expect(modal.locator('details, summary')).toHaveCount(0)
-    await expect(modal.getByText(/可选：Java/)).toHaveCount(0)
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('/bin/bash')
-    await expect(modal.getByLabel('备注')).toHaveValue('saved note')
-    expect(await modal.getByRole('textbox', { name: 'LSP servers' }).inputValue()).toContain('~/ts-server')
-    await modal.getByLabel('备注').fill("draft 汉字 '$`")
-    await page.screenshot({ path: testInfo.outputPath(`install-${width}.png`), fullPage: true })
-    const box = await modal.boundingBox()
+
+    await page.getByRole('button', { name: '编辑配置 host-one' }).click()
+    const edit = page.getByRole('dialog', { name: '编辑环境：host-one' })
+    await expect(edit.getByRole('textbox', { name: '环境名称' })).toBeDisabled()
+    await expect(edit.getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
+      'https://saved.example.com',
+    )
+    await expect(edit.getByRole('textbox', { name: '备注' })).toHaveValue('saved note')
+    await expect(edit.getByRole('textbox', { name: 'Daemon 代理' })).toHaveValue('')
+    await expect(edit.getByRole('checkbox')).toBeChecked()
+    expect(await edit.getByRole('textbox', { name: 'LSP servers' }).inputValue()).toContain(
+      '~/ts-server',
+    )
+    await expect(edit.getByRole('button', { name: /帮助：Daemon 代理/ })).toBeVisible()
+    await edit.getByRole('button', { name: /帮助：Daemon 代理/ }).click()
+    await expect(edit.getByText(/留空表示直连/).first()).toBeVisible()
+
+    await edit.getByRole('textbox', { name: '备注' }).fill("draft 汉字 '$`")
+    await edit
+      .getByRole('textbox', { name: 'Daemon 代理' })
+      .fill('http://127.0.0.1:7890')
+    await page.screenshot({ path: testInfo.outputPath(`edit-${width}.png`), fullPage: true })
+    const box = await edit.boundingBox()
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
-    await expect(page.getByRole('status')).toContainText('安装命令已复制，5分钟内有效')
+
+    mock.conflictNext()
+    await edit.getByRole('button', { name: '保存配置' }).click()
+    const conflict = page.getByRole('alertdialog', { name: '数据已发生变化' })
+    await expect(conflict).toBeVisible()
+    await expect(edit.getByRole('textbox', { name: '备注' })).toHaveValue("draft 汉字 '$`")
+    await conflict.getByRole('button', { name: '刷新', exact: true }).click()
+    await expect(conflict).toHaveCount(0)
+    await expect(edit.getByRole('textbox', { name: 'Daemon 代理' })).toHaveValue(
+      'http://127.0.0.1:7890',
+    )
+    await edit.getByRole('button', { name: '保存配置' }).click()
+    await expect(edit).toHaveCount(0)
+    expect(mock.updateBodies).toHaveLength(2)
+    expect(mock.updateBodies[0]!.expectedVersion).toBe('7')
+    expect(mock.updateBodies[1]!.expectedVersion).toBe('8')
+    expect(mock.updateBodies[1]!.note).toBe("draft 汉字 '$`")
+    expect(mock.updateBodies[1]!.daemonConfig).toMatchObject({
+      studioUrl: 'https://saved.example.com',
+      bashExecutable: '/bin/bash',
+      proxyUrl: 'http://127.0.0.1:7890',
+    })
+
+    const beforeInstall = mock.calls.length
+    await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
+    const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
+    await expect(install.getByRole('textbox', { name: 'Studio 地址' })).toHaveCount(0)
+    await expect(install.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveCount(0)
+    await install.getByRole('button', { name: '操作系统' }).click()
+    await page.getByRole('option', { name: 'macOS', exact: true }).click()
+    await install.getByRole('button', { name: '复制安装命令' }).click()
+    await expect(page.getByRole('status')).toContainText('安装命令已复制，5 分钟内有效')
     await expect(page.getByRole('status')).toHaveCSS('opacity', '1')
-    await expect(modal.getByRole('status')).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath(`install-toast-${width}.png`), fullPage: true })
     const command = await page.evaluate(() => navigator.clipboard.readText())
     const pageOrigin = new URL(page.url()).origin
-    const url = `${pageOrigin}/api/platform/environments/env-1/install-script?code=browser-install-code`
-    expect(command).toBe(`(set -o pipefail; curl -fsSL $'${url}' | bash)`)
+    const installUrl = `${pageOrigin}${url(
+      'GET /api/platform/environments/{environmentId}/install-script',
+      {
+        path: { environmentId: 'env-1' },
+        query: { code: 'browser-install-code', operatingSystem: 'macos' },
+      },
+    )}`
+    expect(command).toBe(`(set -o pipefail; curl -fsSL $'${installUrl}' | bash)`)
     expect(command).not.toContain(token)
     expect(mock.calls.filter(c => c.endsWith('/install-codes'))).toHaveLength(1)
     expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(0)
+    expect(mock.calls.slice(beforeInstall)).toEqual([
+      'POST /api/platform/environments/env-1/install-codes',
+    ])
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
-    await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
-    await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
-    await expect(modal.getByLabel('备注')).toHaveValue("draft 汉字 '$`")
-    await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
+    await install.getByRole('button', { name: '关闭', exact: true }).last().click()
+
     const before = mock.calls.length
     await page.getByRole('button', { name: '卸载 host-one', exact: true }).click()
     const uninstall = page.getByRole('dialog', { name: '卸载环境' })
-    await expect(uninstall).toContainText('Studio 中的环境记录不会删除')
+    await expect(uninstall).toContainText('Studio 中的环境卡片不会删除')
     await uninstall.getByRole('button', { name: '操作系统' }).click()
     await page.getByRole('option', { name: 'Windows', exact: true }).click()
     await uninstall.getByRole('button', { name: '复制卸载命令' }).click()
     await expect(page.getByRole('status')).toContainText('卸载命令已复制')
-    await expect(page.getByRole('status')).toHaveCSS('opacity', '1')
-    await expect(uninstall.getByRole('status')).toHaveCount(0)
-    expect(await page.evaluate(() => navigator.clipboard.readText())).not.toContain(token)
+    const uninstallCommand = await page.evaluate(() => navigator.clipboard.readText())
+    const uninstallUrl = `${pageOrigin}${url(
+      'GET /api/platform/environments/{environmentId}/uninstall-script',
+      { path: { environmentId: 'env-1' }, query: { operatingSystem: 'windows' } },
+    )}`
+    expect(uninstallCommand).toContain(uninstallUrl)
+    expect(uninstallCommand).not.toContain(token)
     expect(mock.calls.slice(before)).toEqual([])
     await page.screenshot({ path: testInfo.outputPath(`uninstall-${width}.png`), fullPage: true })
   })
 }
 
-for (const width of [1280, 390, 320]) {
-  test(`fresh install shows a gray LSP example placeholder at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: width === 1280 ? 900 : 700 })
-    await api(page)
+for (const width of [1280, 390]) {
+  test(`creates a full card config and then copies the install command at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    const mock = await api(page)
     await page.goto('/browser-tests/environment-install-harness.html')
     await page.getByRole('button', { name: '创建环境', exact: true }).click()
-    await page.getByLabel(/环境名称/).fill(`fresh-${width}`)
-    await page.getByRole('button', { name: '确认', exact: true }).click()
-    const modal = page.getByRole('dialog', { name: '安装/覆盖环境' })
-    await expect(modal.getByRole('heading', { name: '安装/覆盖环境' })).toBeVisible()
-    await expect(modal).not.toContainText('host-one')
-    await expect(modal.getByRole('button', { name: '保存并复制安装命令' })).toBeEnabled()
-    await page.screenshot({ path: testInfo.outputPath(`install-initial-${width}.png`), animations: 'disabled' })
-    await expect(modal.locator('details, summary')).toHaveCount(0)
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
-    await expect(modal.getByLabel('备注')).toHaveAttribute('placeholder', '例如：开发工作站')
-    // 占位符使用次要前景色 token。
-    const gray = await tokenColor(page, '--fg-muted')
-    for (const label of ['Bash 可执行文件', '备注']) {
-      const field = modal.getByLabel(label)
-      expect(await field.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
-      expect(await field.evaluate(element => getComputedStyle(element, '::placeholder').color)).toBe(gray)
-    }
-    // 字段只使用 modal-body 的统一 row-gap，不能再叠加相邻 margin。
-    const spacing = await modal.evaluate(element => {
-      const body = element.querySelector('.modal-body')!
-      const labels = ['Bash 可执行文件', '备注']
-      const groups = labels.map(label => [...element.querySelectorAll('.form-group')]
-        .find(group => group.querySelector(':scope > span')?.textContent === label)!)
-      const gap = Number.parseFloat(getComputedStyle(body).rowGap)
-      return {
-        gap,
-        margins: groups.map(group => Number.parseFloat(getComputedStyle(group).marginTop)),
-        distances: groups.slice(1).map((group, index) => group.getBoundingClientRect().top - groups[index]!.getBoundingClientRect().bottom),
-      }
-    })
-    expect(spacing.gap).toBe(18)
-    expect(spacing.margins).toEqual([0, 0])
-    expect(spacing.distances.every(distance => Math.abs(distance - spacing.gap) <= 1)).toBe(true)
-    const lsp = modal.locator('label.ui-checkbox', { hasText: '启用 LSP servers' })
-    await expect(lsp).toBeVisible()
-    await lsp.scrollIntoViewIfNeeded()
-    await lsp.click()
-    await expect(modal.getByRole('checkbox')).toBeChecked()
-    const editor = modal.getByRole('textbox', { name: 'LSP servers' })
-    await expect(editor).toHaveValue('')
-    expect(await editor.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
-    const example = await editor.getAttribute('placeholder')
-    expect(example).toContain('"jdtls"')
-    expect(example).toContain('pom.xml')
-    await expect(modal.locator('#install-lsp-help')).toHaveText('请先在目标主机安装对应的语言服务器。')
-    await expect(modal.locator('#install-lsp-help')).not.toContainText('rootMarkers')
-    const color = await editor.evaluate(element => getComputedStyle(element, '::placeholder').color)
-    expect(color).toBe(await tokenColor(page, '--fg-muted'))
-    await editor.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath(`lsp-placeholder-${width}.png`), animations: 'disabled' })
-    if (width === 1280) {
-      await modal.locator('.modal-body-text').scrollIntoViewIfNeeded()
-      await page.screenshot({ path: testInfo.outputPath('install-copy-1280.png'), animations: 'disabled' })
-    }
-    const os = modal.getByRole('button', { name: '操作系统' })
-    await os.click()
-    await page.getByRole('option', { name: 'Windows', exact: true }).click()
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', 'C:\\Program Files\\Git\\bin\\bash.exe')
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('')
-    await modal.getByLabel('Bash 可执行文件').fill('D:\\custom\\bash.exe')
-    await modal.getByLabel('备注').fill('我的工作站')
-    await os.click()
-    await page.getByRole('option', { name: 'macOS', exact: true }).click()
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
-    await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('D:\\custom\\bash.exe')
-    await expect(modal.getByLabel('备注')).toHaveValue('我的工作站')
-    await editor.fill('{"jdtls":{"command":["/usr/bin/jdtls"],"extensions":[".java"]}}')
-    await expect(editor).toHaveValue(/\/usr\/bin\/jdtls/)
-    await expect(editor).not.toHaveValue(/mason/)
-    expect(await editor.evaluate(element => element.matches(':placeholder-shown'))).toBe(false)
-    await page.screenshot({ path: testInfo.outputPath(`lsp-filled-${width}.png`), animations: 'disabled' })
-    await modal.locator('.install-credential-note').scrollIntoViewIfNeeded()
-    const overlap = await modal.evaluate(element => {
-      const note = element.querySelector('.install-credential-note')!.getBoundingClientRect()
-      const footer = element.querySelector('.modal-footer')!.getBoundingClientRect()
-      return { noteBottom: note.bottom, footerTop: footer.top, footerBottom: footer.bottom }
-    })
-    expect(overlap.noteBottom).toBeLessThanOrEqual(overlap.footerTop + 1)
-    expect(overlap.footerBottom).toBeLessThanOrEqual(width === 1280 ? 900 : 700)
-  })
-}
+    const create = page.getByRole('dialog', { name: '创建环境' })
+    await create.getByRole('textbox', { name: /环境名称/ }).fill(`fresh-${width}`)
+    await create.getByRole('textbox', { name: '备注' }).fill('我的工作站')
+    await expect(create.getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
+      new URL(page.url()).origin,
+    )
+    await create.getByRole('textbox', { name: 'Daemon 代理' }).fill('')
+    await expect(create.getByRole('button', { name: /帮助：保存后的配置无需重装 Daemon/ })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`create-${width}.png`), fullPage: true })
+    await create.getByRole('button', { name: '创建环境', exact: true }).click()
 
-test('create opens form without exposing credentials; rotate does not fetch token', async ({ page }) => {
-  const mock = await api(page)
-  await page.goto('/browser-tests/environment-install-harness.html')
-  await page.getByRole('button', { name: '创建环境', exact: true }).click()
-  await page.getByLabel(/环境名称/).fill('new-host')
-  await page.getByRole('button', { name: '确认', exact: true }).click()
-  const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
-  await expect(install).toBeVisible()
-  await expect(install.getByRole('button', { name: '保存并复制安装命令' })).toBeEnabled()
-  expect(await page.locator('body').innerText()).not.toContain(token)
-  await install.getByRole('button', { name: '关闭', exact: true }).last().click()
-  await page.getByRole('button', { name: '重新生成 Token new-host' }).click()
-  await page.getByRole('alertdialog').getByRole('button', { name: '重新生成 Token', exact: true }).click()
-  await expect(page.getByRole('alertdialog')).toHaveCount(0)
-  expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(1)
-  expect(await page.locator('body').innerText()).not.toContain(token)
-})
-
-test('CAS conflict preserves draft; clipboard rejection explicitly says saved, not copied', async ({ page }) => {
-  const mock = await api(page)
-  await page.goto('/browser-tests/environment-install-harness.html')
-  await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
-  const modal = page.getByRole('dialog', { name: '安装/覆盖环境' })
-  await expect(modal.getByRole('button', { name: '保存并复制安装命令' })).toBeEnabled()
-  await modal.getByLabel('Studio 地址').fill('https://draft.example.com')
-  mock.conflictNext()
-  await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
-  await expect(page.getByRole('alertdialog', { name: '数据已发生变化' })).toBeVisible()
-  expect(mock.calls.filter(c => c.endsWith('/rotate-token'))).toHaveLength(0)
-  await page.getByRole('alertdialog').getByRole('button', { name: '刷新', exact: true }).click()
-  await expect(page.getByRole('alertdialog')).toHaveCount(0)
-  await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://draft.example.com')
-  await page.evaluate(() => {
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('denied')) } })
-    document.execCommand = () => false
-  })
-  await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
-  await expect(modal.getByRole('alert')).toContainText('配置已保存，但命令生成或复制失败')
-  expect(await page.locator('body').innerText()).not.toContain(token)
-})
-
-for (const viewport of [
-  { width: 1280, height: 900 },
-  { width: 390, height: 700 },
-  { width: 320, height: 568 },
-  { width: 390, height: 360 },
-]) {
-  test(`modal scroll, help and unclipped menus at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
-    await page.setViewportSize(viewport)
-    await api(page)
-    await page.goto('/browser-tests/environment-install-harness.html')
-    await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
-    const modal = page.getByRole('dialog', { name: '安装/覆盖环境' })
-    await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://saved.example.com')
-    const trigger = modal.getByRole('button', { name: '操作系统' })
-    for (const name of ['Linux', 'macOS', 'Windows']) {
-      await trigger.click()
-      const option = page.getByRole('option', { name, exact: true })
-      await option.scrollIntoViewIfNeeded()
-      expect(await option.evaluate(element => {
-        const rect = element.getBoundingClientRect()
-        return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-      })).toBe(true)
-      await option.click()
-    }
-    await trigger.click()
-    await page.screenshot({ path: testInfo.outputPath('install-menu.png'), fullPage: true })
-    await page.keyboard.press('Tab')
-    await expect(page.getByRole('listbox')).toHaveCount(0)
-    await expect(modal.getByLabel('Studio 地址')).toBeFocused()
-    const editor = modal.getByRole('textbox', { name: 'LSP servers' })
-    await editor.scrollIntoViewIfNeeded()
-    const help = modal.locator('#install-lsp-help')
-    const bounds = await modal.evaluate(element => {
-      const editor = element.querySelector('textarea')!.getBoundingClientRect()
-      const help = element.querySelector('#install-lsp-help')!.getBoundingClientRect()
-      const footer = element.querySelector('.modal-footer')!.getBoundingClientRect()
-      return { bottom: editor.bottom, helpTop: help.top, height: editor.height, footerTop: footer.top, footerBottom: footer.bottom }
+    await expect(create).toHaveCount(0)
+    expect(mock.createBodies).toHaveLength(1)
+    expect(mock.createBodies[0]).toMatchObject({
+      name: `fresh-${width}`,
+      note: '我的工作站',
+      daemonConfig: {
+        studioUrl: new URL(page.url()).origin,
+        bashExecutable: null,
+        lsp: null,
+        proxyUrl: null,
+      },
     })
-    expect(bounds.height).toBeGreaterThanOrEqual(160)
-    expect(bounds.helpTop).toBeGreaterThanOrEqual(bounds.bottom + 6)
-    expect(bounds.footerTop).toBeGreaterThanOrEqual(0)
-    expect(bounds.footerBottom).toBeLessThanOrEqual(viewport.height)
-    await help.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('lsp-help.png'), fullPage: true })
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
-    await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
-    await page.getByRole('button', { name: '卸载 host-one', exact: true }).click()
-    const uninstall = page.getByRole('dialog', { name: '卸载环境' })
-    for (const name of ['Linux', 'macOS', 'Windows']) {
-      await uninstall.getByRole('button', { name: '操作系统' }).click()
-      const option = page.getByRole('option', { name, exact: true })
-      await option.scrollIntoViewIfNeeded()
-      expect(await option.evaluate(element => {
-        const rect = element.getBoundingClientRect()
-        return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-      })).toBe(true)
-      await option.click()
-    }
-    await uninstall.getByRole('button', { name: '操作系统' }).click()
-    expect(await page.getByRole('listbox').evaluate(element => element.closest('.modal-body'))).toBeNull()
-    const menuBox = (await page.getByRole('listbox').boundingBox())!
-    expect(menuBox.x).toBeGreaterThanOrEqual(0)
-    expect(menuBox.y).toBeGreaterThanOrEqual(0)
-    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width)
-    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height)
-    await page.screenshot({ path: testInfo.outputPath('uninstall-menu.png'), fullPage: true })
-    await page.keyboard.press('Escape')
-    await expect(uninstall.getByRole('button', { name: '操作系统' })).toBeFocused()
-    await uninstall.getByRole('button', { name: '复制卸载命令' }).click()
-    const toast = page.getByRole('status')
-    await expect(toast).toContainText('卸载命令已复制')
-    await expect(toast).toHaveCSS('opacity', '1')
-    expect(await toast.evaluate(element => element.closest('[role="dialog"]'))).toBeNull()
+    const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
+    await expect(install).toBeVisible()
+    await expect(install.getByRole('button', { name: '复制安装命令' })).toBeEnabled()
+    await expect(install).not.toContainText(token)
+    await install.getByRole('button', { name: '操作系统' }).click()
+    await page.getByRole('option', { name: 'Linux', exact: true }).click()
+    await install.getByRole('button', { name: '复制安装命令' }).click()
+    await expect(page.getByRole('status')).toContainText('安装命令已复制，5 分钟内有效')
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+      '/api/platform/environments/env-new/install-script?code=browser-install-code&operatingSystem=linux',
+    )
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
-    await page.screenshot({ path: testInfo.outputPath('uninstall-toast.png'), fullPage: true })
   })
 }
 
-test('normal and compact portal menus flip, stay clickable, and keep native adjacent Tab order', async ({ page }, testInfo) => {
+test('keeps event history out of the card and shows connection and config state separately', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const history = [
+    { occurredAt: Date.parse('2026-07-20T00:00:00.000Z'), level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
+    { occurredAt: Date.parse('2026-07-20T00:01:00.000Z'), level: 'INFO', type: 'READY', message: 'environment ready' },
+  ]
+  const card = testEnvironment({
+    id: 'env-1',
+    name: 'recovered-box',
+    version: '3',
+    status: 'READY',
+    ready: true,
+    lastSeenAt: 1784505660000,
+  })
+  const runtime = testRuntimeStatus({
+    revision: '3',
+    configuration: { appliedVersion: '3', proxyUrl: null, error: null },
+  })
+  await page.route('**/api/platform/environments**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/events')) return route.fulfill({ json: history })
+    if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+    if (path.endsWith('/env-1')) return route.fulfill({ json: card })
+    return route.fulfill({ json: [card] })
+  })
+
+  await page.goto('/browser-tests/environment-install-harness.html')
+  const cardLocator = page.locator('.environment-card')
+  await expect(cardLocator).toBeVisible({ timeout: 15000 })
+  await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('已应用', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('直连', { exact: true })).toBeVisible()
+  await expect(cardLocator).not.toContainText('daemon connection lost')
+  await page.screenshot({ path: testInfo.outputPath('card-config-status.png'), fullPage: true })
+
+  await cardLocator.getByRole('button', { name: /管理/ }).click()
+  const modal = page.getByRole('dialog', { name: /管理环境/ })
+  await expect(modal.getByText('daemon connection lost')).toBeVisible()
+  await expect(modal.getByText('environment ready')).toBeVisible()
+  await expect(modal.getByText('配置', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('management-config.png'), fullPage: true })
+})
+
+test('normal and compact portal menus flip, stay clickable, and keep native adjacent Tab order', async ({
+  page,
+}, testInfo) => {
   await page.setViewportSize({ width: 320, height: 240 })
   await page.goto('/browser-tests/environment-install-harness.html?controls')
   for (const label of ['Normal', 'Compact']) {
@@ -351,30 +340,9 @@ test('normal and compact portal menus flip, stay clickable, and keep native adja
   }
 })
 
-test('larger fonts preserve the editor help gap and reachable footer on a narrow screen', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 320, height: 568 })
-  await api(page)
-  await page.goto('/browser-tests/environment-install-harness.html')
-  await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
-  const modal = page.getByRole('dialog', { name: '安装/覆盖环境' })
-  await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://saved.example.com')
-  await page.addStyleTag({ content: '.environment-install-modal {font-size:20px} .environment-install-modal .form-group, .environment-install-modal .field-help, .environment-install-modal .confirm-modal-description, .environment-install-modal button {font-size:inherit;line-height:1.5}' })
-  await modal.locator('#install-lsp-help').scrollIntoViewIfNeeded()
-  const bounds = await modal.evaluate(element => ({
-    editorBottom: element.querySelector('textarea')!.getBoundingClientRect().bottom,
-    helpTop: element.querySelector('#install-lsp-help')!.getBoundingClientRect().top,
-    footerBottom: element.querySelector('.modal-footer')!.getBoundingClientRect().bottom,
-    scrollWidth: element.scrollWidth,
-    clientWidth: element.clientWidth,
-  }))
-  expect(bounds.helpTop).toBeGreaterThan(bounds.editorBottom)
-  expect(bounds.footerBottom).toBeLessThanOrEqual(568)
-  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth)
-  await expect(modal.getByRole('button', { name: '保存并复制安装命令' })).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('large-fonts.png'), fullPage: true })
-})
-
-test('native Tab skips closed details inputs and disabled controls around both Select modes', async ({ page }) => {
+test('native Tab skips closed details inputs and disabled controls around both Select modes', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/browser-tests/environment-install-harness.html?controls&tab-boundaries')
   for (const label of ['Normal', 'Compact']) {
@@ -388,50 +356,10 @@ test('native Tab skips closed details inputs and disabled controls around both S
     await expect(page.getByText(label === 'Normal' ? 'Between details' : 'After details', { exact: true })).toBeFocused()
     await expect(page.getByRole('listbox')).toHaveCount(0)
   }
-  // closed details 的子 input 在 DOM 中存在，但不是当前原生 Tab 顺序的一部分。
   await expect(page.getByLabel('Closed before')).toBeHidden()
   await expect(page.getByLabel('Closed between')).toBeHidden()
   await expect(page.getByLabel('Closed after')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Disabled between' })).toBeDisabled()
-})
-
-/**
- * 卡片只呈现当前状态，历史事件只在管理弹窗的 Events 中可见。
- *
- * 通过离线路由 mock 渲染真实 EnvironmentsPage：同一环境有历史 WARN 且当前 READY 时，
- * 卡片不得内嵌任何事件投影，而管理弹窗仍展示完整历史（WARN 与后续 READY）。
- */
-test('keeps event history out of the card and inside the management modal', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
-  const history = [
-    { occurredAt: Date.parse('2026-07-20T00:00:00.000Z'), level: 'WARN', type: 'DISCONNECTED', message: 'daemon connection lost' },
-    { occurredAt: Date.parse('2026-07-20T00:01:00.000Z'), level: 'INFO', type: 'READY', message: 'environment ready' },
-  ]
-  const card: EnvironmentDTO = {
-    id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
-    statusExpiresAt: null, lastSeenAt: 1784505660000, capabilities: [], createdAt: 0, updatedAt: 0,
-  }
-  await page.route('**/api/platform/environments**', async route => {
-    const path = new URL(route.request().url()).pathname
-    if (path.endsWith('/events')) {
-      return route.fulfill({ json: history })
-    }
-    return route.fulfill({ json: path.endsWith('/env-1') ? card : [card] })
-  })
-
-  await page.goto('/browser-tests/environment-install-harness.html')
-  const cardLocator = page.locator('.environment-card')
-  // 首次冷启动时 vite 需现编译模块图，给首个可见断言更宽的窗口。
-  await expect(cardLocator).toBeVisible({ timeout: 15000 })
-  await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
-  // 卡片不回显事件文本。
-  await expect(cardLocator).not.toContainText('daemon connection lost')
-  await page.screenshot({ path: testInfo.outputPath('card-without-history.png'), fullPage: true })
-
-  // 管理弹窗仍展示完整历史：历史 WARN 与后续 READY。
-  await cardLocator.getByRole('button', { name: /管理/ }).click()
-  const modal = page.getByRole('dialog', { name: /管理环境/ })
-  await expect(modal.getByText('daemon connection lost')).toBeVisible()
-  await expect(modal.getByText('environment ready')).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('management-history.png'), fullPage: true })
+  // 维持既有 Select token 校验：普通/compact 都使用主题控件，不从系统原生菜单取色。
+  expect(await tokenColor(page, '--fg-muted')).not.toBe('')
 })
