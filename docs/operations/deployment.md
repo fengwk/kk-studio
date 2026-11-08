@@ -197,7 +197,7 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 校验不同的数据
    全库 dump 与 S3 业务对象；确认备份可恢复后保留原库。
 2. 在安全边界新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用当前发行物初始化当前 Schema。
 3. 部署 App 并指向新库，通过产品导入校验写入配置 YAML，核对导入预检报错与跳过项处置、
-   Provider 凭据、Environment 注册令牌摘要和安装设置。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
+   Provider 凭据、Environment 注册令牌摘要与完整卡片配置（`note` 与 `daemonConfig`）。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
 4. 启动已安装的 Daemon 并验收重连；需要安装时通过 Environment 安装弹窗生成命令并在主机执行。
    运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`，Daemon 据此执行本机受管更新；
    无法受管更新时需重新覆盖安装。
@@ -332,12 +332,17 @@ distributed.sh 提供受控命令集：`disconnect-db-a` / `reconnect-db-a` 注�
 
 Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 
-容器入口在启动前按与产品相同的布局物化配置与凭证：把注入的注册凭证写为
-`/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
-生成兄弟 `daemon.json`，最后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
+每个容器只承载一张卡片。容器入口在启动前物化本地缓存与凭证：由冻结 Node 调用
+`daemon-config-cache.mjs`，按 `KK_STUDIO_DAEMON_ENVIRONMENT_ID`（或
+`KK_STUDIO_DAEMON_ENVIRONMENT_NAME`）从 Studio 读取卡片，必要时把 `studioUrl` 修正为
+`http://app:8080`，写出 `{environmentId, version, daemonConfig}` 形式的
+`/workspace/.kk-studio/daemon.json`；注入的注册凭证单独写为同目录 `daemon.token`
+（目录 0700、文件 0600），随后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
 凭证文本既不进入 argv（`ps` 不可见），也不残留在 `/proc/<pid>/environ`；Daemon 由配置的
 `studioUrl` 自行派生上述 gateway。`--config` 是 Daemon 唯一的运行参数：数据目录取配置文件的
-父目录，LSP 配置与备注也在该文件中。
+父目录，卡片备注不进入该文件。相关入口环境变量为 `KK_STUDIO_DAEMON_STUDIO_URL`、
+`KK_STUDIO_DAEMON_ENVIRONMENT_ID` / `_NAME`、`KK_STUDIO_DAEMON_REGISTRATION_TOKEN`、
+可选的 `KK_STUDIO_DAEMON_ROOT` 与 `KK_STUDIO_DAEMON_DIST`。
 
 [daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 Node 24.21.0 builder 编译 Daemon，
 并通过 [`prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存目标架构的真实发行归档，runtime 使用
@@ -422,7 +427,7 @@ Canvas Function runtime 变量也只在启动期读取。
 离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
 loopback proxy。这些 build 参数不会自动进入 App/Daemon runtime。
 
-Backend 与 Daemon 的运行代理在 **系统设置 → 网络** 保存，全局只配置一个无认证 HTTP 代理地址
+Backend 的运行代理在 **系统设置 → 网络**（`backendNetwork`）保存，只配置一个无认证 HTTP 代理地址
 `http://host:port`；HTTPS 请求通过 CONNECT。地址留空即强制直连，不继承宿主环境变量。
 保存后新发起的 Backend HTTP 请求使用新代理，无需重启；在途请求和响应流继续完成，
 无模型、Git 或插件单独覆盖。绕过规则用逗号分隔，
@@ -434,8 +439,10 @@ Backend 与 Daemon 的运行代理在 **系统设置 → 网络** 保存，全�
 容器里的 `127.0.0.1` 不是宿主机。公网媒体下载即使走代理也要求 Backend 正向解析
 并校验全部地址，CONNECT 固定到已校验 IP，不能用代理绕过公网地址准入。
 
-Daemon 的新请求与新启动子进程使用该配置，控制连接始终直连；
-详情见 [Environment Daemon](environment-daemon.md#网络代理)。
+Daemon 的运行代理不来自该设置：每张卡片使用自己的 `daemonConfig.proxyUrl`，`null` 表示明确直连；
+Bash、LSP、code-server 与 IDE 终端保留宿主真实代理环境，不被卡片代理改写。安装/覆盖下载继承执行时的
+宿主代理环境，在线更新作业只构造本次下载所需的代理变量。详情见
+[Environment Daemon](environment-daemon.md#网络代理)。
 浏览器直传/下载以及 Hub、ComfyUI 自身的外部请求由各自的网络配置决定。
 
 ## 清理
@@ -529,10 +536,10 @@ tag 不同：
 `127.0.0.1:18080`，Vite/HMR 默认监听 `127.0.0.1:5173`；配置文件的权限要求、键白名单与失败
 边界见[开发与测试](development-and-testing.md#本机-preview-的外部数据面)。
 
-Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机通过 Studio 的安装弹窗保存
-配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
-`wss://<studio-origin>/ws/daemon`。安装机制、安装设置字段、注册 token
-文件、更新与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
+Environment Daemon 不属于 NAS App 容器：需要主机能力时，先在 Studio 保存该卡片的
+`daemonConfig`，再到目标主机通过安装弹窗选择 OS、复制命令并执行；宿主 Daemon 按配置中的
+studioUrl 连接 NAS App 的 `wss://<studio-origin>/ws/daemon`。安装机制、卡片配置字段、注册
+token 文件、更新与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界
 
