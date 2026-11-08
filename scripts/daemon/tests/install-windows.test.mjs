@@ -305,6 +305,7 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       'Prepare-StagedArchive',
       'New-ManagementCopy',
       'New-DaemonScheduledTaskDefinition',
+      'New-PrivateDirectory -Path $directory',
       'Start-InstallLockHelper',
       'Stage-WorkProgram',
       'Stop-DaemonTaskAndWait',
@@ -312,6 +313,11 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       'Publish-PrivateFile',
       'Register-ScheduledTask',
       'Start-AndVerifyDaemonTask',
+    )
+    // The lock helper only protects its final directory; all three roots must be created first.
+    assert.match(
+      functionBody('Invoke-InstallCommon'),
+      /foreach \(\$directory in @\(\$script:InstallRoot, \$script:EnvironmentsRoot, \$script:EnvironmentRoot\)\) \{/,
     )
     // Only the bootstrap install writes config/token; update never does.
     assert.ok(functionBody('Invoke-InstallCommon').includes('if ($Operation -eq "install") {'))
@@ -391,6 +397,12 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
     ])
     assertIncludesNone(body, ['token', 'ReadAllText($script:InstalledConfig'])
     assertIncludesAll(functionBody('Invoke-Main'), ['Write-LastOperation -Result "succeeded"', 'Write-LastOperation -Result "failed"'])
+  })
+
+  it('reports the current fixed phase in failure diagnostics', () => {
+    const body = functionBody('Throw-Failure')
+    assertIncludesAll(body, ['$script:PhaseCode', '[阶段 ${phase}]'])
+    assertIncludesNone(body, ['$args', '$Command'])
   })
 
   it('uninstall takes the helper copy, stops and unregisters before removing the program', () => {
