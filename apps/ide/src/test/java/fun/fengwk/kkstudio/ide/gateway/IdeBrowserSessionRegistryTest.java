@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -116,7 +117,58 @@ class IdeBrowserSessionRegistryTest {
     assertThrows(
         IllegalStateException.class,
         () -> registry.viewOpened(IDENTITY, UUID.randomUUID().toString(), 1L, "/workspace"));
-    assertThrows(IllegalStateException.class, () -> registry.ensureViewCapacity(ENV));
+    assertThrows(IllegalStateException.class, () -> registry.ensureViewCapacity(IDENTITY));
+  }
+
+  /** 意图：新进程复用相同 Environment/view/epoch/workspace 时得到新 token，旧 token 与迟到旧 close 都不影响新会话。 */
+  @Test
+  void replacedDaemonInstanceGetsItsOwnGenerationAndToken() {
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    DaemonConnectionIdentity first = new DaemonConnectionIdentity(ENV, "daemon-1");
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "daemon-2");
+    String viewId = UUID.randomUUID().toString();
+
+    registry.viewOpened(first, viewId, 1L, "/workspace");
+    String firstToken = registry.open(first, viewId, 1L, "/workspace");
+    assertTrue(registry.lookup(firstToken, ENV, viewId).isPresent());
+
+    // 同一进程重连：重新确认容量与重新登记同一视图都不撤销既有会话。
+    registry.ensureViewCapacity(first);
+    registry.viewOpened(first, viewId, 1L, "/workspace");
+    assertEquals(firstToken, registry.open(first, viewId, 1L, "/workspace"));
+
+    // 新进程在授权入口接管：旧代际登记与 token 被清除，不复用旧 token。
+    registry.ensureViewCapacity(replacement);
+    assertFalse(registry.lookup(firstToken, ENV, viewId).isPresent());
+    assertThrows(IllegalStateException.class, () -> registry.open(first, viewId, 1L, "/workspace"));
+    registry.viewOpened(replacement, viewId, 1L, "/workspace");
+    String replacementToken = registry.open(replacement, viewId, 1L, "/workspace");
+    assertNotEquals(firstToken, replacementToken);
+    assertTrue(registry.lookup(replacementToken, ENV, viewId).isPresent());
+
+    // 旧进程迟到的 close 只能命中旧代际，不影响新会话。
+    registry.viewClosed(first, viewId, 1L);
+    assertTrue(registry.lookup(replacementToken, ENV, viewId).isPresent());
+  }
+
+  /** 意图：旧代际已满不阻断新实例授权，容量按当前实例自身计算。 */
+  @Test
+  void fullPreviousGenerationDoesNotBlockReplacementInstance() {
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    for (int i = 0; i < IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION; i++) {
+      registry.viewOpened(IDENTITY, UUID.randomUUID().toString(), 1L, "/workspace");
+    }
+    assertThrows(IllegalStateException.class, () -> registry.ensureViewCapacity(IDENTITY));
+
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "daemon-2");
+    registry.ensureViewCapacity(replacement);
+    String viewId = UUID.randomUUID().toString();
+    registry.viewOpened(replacement, viewId, 1L, "/workspace");
+
+    assertTrue(
+        registry
+            .lookup(registry.open(replacement, viewId, 1L, "/workspace"), ENV, viewId)
+            .isPresent());
   }
 
   @Test
@@ -226,7 +278,7 @@ class IdeBrowserSessionRegistryTest {
 
     // Multi-environment capacity check (tests loop continue branch)
     EnvironmentId otherEnv = EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
-    registry.ensureViewCapacity(otherEnv);
+    registry.ensureViewCapacity(new DaemonConnectionIdentity(otherEnv, "daemon-other"));
 
     // Advance past TTL and reopen -> invalidates expired existing token and creates new token
     now.set(now.get().plus(Duration.ofHours(1)));

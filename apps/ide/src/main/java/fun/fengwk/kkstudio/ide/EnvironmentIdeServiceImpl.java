@@ -43,7 +43,8 @@ import java.util.concurrent.TimeoutException;
  * IDE 视图控制服务实现：owner 在发任何命令前经事件节点核对 exact intent，然后通过既有 lease/READY 围栏下发一条 {@code IDE_COMMAND}。
  *
  * <p>绑定身份命令必须匹配 owner 缓存的 document+epoch，且缓存缺失/漂移时先用 {@code LIST_VIEWS} 重建再重判；旧 epoch 的关闭、目录与终端请求不得
- * 作用于新绑定。命令超时/断线映射为不可用；Daemon 的 VIEW_GONE 立即拒绝并撤销本地授权，其它拒绝保留安全文案。所有失败路径都不重放副作用。
+ * 作用于新绑定。授权、路由缓存与入口票据的作用域都是完整 Daemon 进程身份：登记前先复核回执来自本节点当前 READY 实例，旧实例迟到的结果不能创建新授权，也不能
+ * 撤销新实例的会话。命令超时/断线映射为不可用；Daemon 的 VIEW_GONE 立即拒绝并撤销本地授权，其它拒绝保留安全文案。所有失败路径都不重放副作用。
  */
 @Slf4j
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
@@ -177,7 +178,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     recordAuthorized(view);
     UUID viewId = binding.viewId();
     EnvironmentId environmentId = binding.environmentId();
-    bootstrapTickets.revokeView(environmentId, viewId.toString());
+    bootstrapTickets.revokeView(binding.daemonIdentity(), viewId.toString());
     String ticket;
     try {
       ticket =
@@ -204,9 +205,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return dto;
   }
 
-  /** 授权与路由缓存只能成对发布；授权失败时该视图不得出现在任何后续命令的缓存中。 */
+  /** 授权与路由缓存只能成对发布；迟到旧实例的回执在登记前被拒绝，授权失败时该视图不得出现在任何后续命令的缓存中。 */
   private void recordAuthorized(ViewSnapshot view) {
     IdeViewBindingRegistry.Binding binding = view.binding();
+    requireCurrentGeneration(binding.daemonIdentity());
     if (viewAuthorization != null) {
       try {
         viewAuthorization.viewOpened(
@@ -394,13 +396,16 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
+    // 迟到旧实例的快照既不是当前视图事实，也不能据以重建授权或清除新实例的会话。
+    requireCurrentGeneration(result.identity());
+    DaemonConnectionIdentity identity = result.identity();
     List<IdeViewSummary> views = result.reply().getViewsList();
     List<ViewSnapshot> authorized = new ArrayList<>(views.size());
     for (IdeViewSummary view : views) {
       ViewSnapshot snapshot =
           new ViewSnapshot(
               new IdeViewBindingRegistry.Binding(
-                  result.identity(),
+                  identity,
                   parseUuid(view.getViewId(), "viewId"),
                   parseUuid(view.getDocumentId(), "documentId"),
                   parseUuid(view.getEventNodeId(), "eventNodeId"),
@@ -417,8 +422,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     List<IdeViewBindingRegistry.Binding> current =
         authorized.stream().map(ViewSnapshot::binding).toList();
-    revokeStaleAuthorizations(environmentId, current);
-    bindings.replaceEnvironment(environmentId, current);
+    revokeStaleAuthorizations(identity, current);
+    bindings.replace(identity, current);
     return authorized;
   }
 
@@ -440,9 +445,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
   }
 
-  /** 权威列表缺少的视图或 epoch 已换代时，撤销旧会话；新绑定自己的会话不受影响。只比对 Daemon 实际返回的 view+epoch。 */
+  /** 权威列表缺少的视图或 epoch 已换代时，撤销旧会话；新绑定自己的会话不受影响。只比对同一 Daemon 进程实际返回的 view+epoch。 */
   private void revokeStaleAuthorizations(
-      EnvironmentId environmentId, List<IdeViewBindingRegistry.Binding> current) {
+      DaemonConnectionIdentity identity, List<IdeViewBindingRegistry.Binding> current) {
     if (viewAuthorization == null) {
       return;
     }
@@ -450,30 +455,27 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     for (IdeViewBindingRegistry.Binding binding : current) {
       epochs.put(binding.viewId(), binding.bindingEpoch());
     }
-    for (IdeViewBindingRegistry.Binding existing : bindings.listEnvironment(environmentId)) {
+    for (IdeViewBindingRegistry.Binding existing : bindings.list(identity)) {
       Long currentEpoch = epochs.get(existing.viewId());
       if (currentEpoch == null || currentEpoch != existing.bindingEpoch()) {
         viewAuthorization.viewClosed(
             existing.daemonIdentity(), existing.viewId().toString(), existing.bindingEpoch());
-        bootstrapTickets.revokeView(environmentId, existing.viewId().toString());
+        bootstrapTickets.revokeView(existing.daemonIdentity(), existing.viewId().toString());
       }
     }
   }
 
   private IdeViewBindingRegistry.Binding requireBinding(
       EnvironmentId environmentId, UUID viewId, UUID documentId, long bindingEpoch) {
-    Optional<IdeViewBindingRegistry.Binding> cached = bindings.find(environmentId, viewId);
     IdeViewBindingRegistry.Binding binding =
-        cached
+        currentBinding(environmentId, viewId)
             .filter(candidate -> candidate.matches(documentId, bindingEpoch))
-            .filter(this::isCurrentGeneration)
             .orElse(null);
     if (binding == null) {
-      // 本地缓存缺失/漂移：以 Daemon 的 LIST_VIEWS 为权威重建后再判定；旧 epoch 仍不匹配即拒绝。
+      // 本地缓存缺失/漂移：以 Daemon 的 LIST_VIEWS 为权威重建后再判定；旧进程或旧 epoch 仍不匹配即拒绝。
       loadViews(environmentId);
       binding =
-          bindings
-              .find(environmentId, viewId)
+          currentBinding(environmentId, viewId)
               .filter(candidate -> candidate.matches(documentId, bindingEpoch))
               .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
     }
@@ -485,6 +487,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         binding.viewId(),
         binding.claimId());
     return binding;
+  }
+
+  /** 只查本节点当前 READY 实例的绑定：另一个进程即使复用相同 view/epoch 也不会命中。 */
+  private Optional<IdeViewBindingRegistry.Binding> currentBinding(
+      EnvironmentId environmentId, UUID viewId) {
+    return transport
+        .connectionIdentity(environmentId)
+        .flatMap(identity -> bindings.find(identity, viewId));
   }
 
   private void requireIntent(
@@ -518,8 +528,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (viewAuthorization == null) {
       return;
     }
+    DaemonConnectionIdentity identity = requireReadyIdentity(environmentId);
     try {
-      viewAuthorization.ensureViewCapacity(environmentId);
+      viewAuthorization.ensureViewCapacity(identity);
     } catch (IllegalStateException error) {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "environment IDE view capacity is exhausted", error);
@@ -528,20 +539,32 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private void revokeLocal(IdeViewBindingRegistry.Binding binding) {
     bindings.removeIfMatches(
-        binding.environmentId(), binding.viewId(), binding.documentId(), binding.bindingEpoch());
+        binding.daemonIdentity(), binding.viewId(), binding.documentId(), binding.bindingEpoch());
     if (viewAuthorization != null) {
       viewAuthorization.viewClosed(
           binding.daemonIdentity(), binding.viewId().toString(), binding.bindingEpoch());
     }
-    bootstrapTickets.revokeView(binding.environmentId(), binding.viewId().toString());
+    bootstrapTickets.revokeView(binding.daemonIdentity(), binding.viewId().toString());
   }
 
-  /** 缓存绑定必须仍属于当前 READY Daemon 代际；实例接管后旧 epoch 立即失效。 */
-  private boolean isCurrentGeneration(IdeViewBindingRegistry.Binding binding) {
+  /** 本节点当前 READY 的 Daemon 进程身份；没有就绪连接时任何授权与命令都不可用。 */
+  private DaemonConnectionIdentity requireReadyIdentity(EnvironmentId environmentId) {
     return transport
-        .connectionIdentity(binding.environmentId())
-        .map(binding.daemonIdentity()::equals)
-        .orElse(false);
+        .connectionIdentity(environmentId)
+        .orElseThrow(
+            () ->
+                DomainException.unavailable("IDE_UNAVAILABLE", "environment daemon is not ready"));
+  }
+
+  /** 回执/快照必须来自本节点当前 READY 实例；实例已被替换时旧结果不得创建或重建授权。 */
+  private void requireCurrentGeneration(DaemonConnectionIdentity identity) {
+    if (!transport
+        .connectionIdentity(identity.environmentId())
+        .map(identity::equals)
+        .orElse(false)) {
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "environment daemon instance has been replaced");
+    }
   }
 
   private IdeCall call(EnvironmentId environmentId, IdeCommand command) {

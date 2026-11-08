@@ -234,7 +234,7 @@ class EnvironmentIdeServiceImplTest {
     DomainException error =
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
-    assertTrue(bindings.find(ENV, VIEW).isPresent());
+    assertTrue(bindings.find(transport.identity, VIEW).isPresent());
     assertTrue(authorization.closed.isEmpty());
   }
 
@@ -298,7 +298,7 @@ class EnvironmentIdeServiceImplTest {
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals(EnvironmentIdeViewState.CLOSING, changed.getState());
-    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertTrue(bindings.find(transport.identity, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     assertEquals("/client/link/.", transport.commands.get(1).getDirectory());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
 
@@ -373,7 +373,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(7L, changed.getBindingEpoch());
     assertNull(changed.getWorkspacePath(), "回读失败时不得伪造 Daemon workspace");
     assertNull(changed.getState(), "回读失败时不得伪造 Daemon 视图状态");
-    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertTrue(bindings.find(transport.identity, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     assertEquals(
         List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY, IdeAction.LIST_VIEWS), actions());
   }
@@ -407,7 +407,7 @@ class EnvironmentIdeServiceImplTest {
               DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
       assertFalse(error.getMessage().contains(request.getDirectory()));
       assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-      assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+      assertTrue(bindings.find(transport.identity, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     }
     // No directory in reply fails validation.
     transport.replies.add(IdeResult.newBuilder().setOk(true).setViewId(VIEW.toString()).build());
@@ -417,7 +417,7 @@ class EnvironmentIdeServiceImplTest {
             DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertFalse(error.getMessage().contains(request.getDirectory()));
     assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertTrue(bindings.find(transport.identity, VIEW).orElseThrow().matches(DOCUMENT, 7L));
   }
 
   /** 目录回执后若视图已换代，不得以旧 epoch 构造成功响应。 */
@@ -450,7 +450,7 @@ class EnvironmentIdeServiceImplTest {
 
     assertThrows(
         DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
-    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 8L));
+    assertTrue(bindings.find(transport.identity, VIEW).orElseThrow().matches(DOCUMENT, 8L));
   }
 
   @Test
@@ -490,6 +490,60 @@ class EnvironmentIdeServiceImplTest {
     assertTrue(
         transport.commands.stream()
             .noneMatch(command -> command.getAction() == IdeAction.FOCUS_TERMINAL));
+  }
+
+  /** 意图：实例已被替换后，旧进程迟到的 OPEN_VIEW 回执不得登记授权、路由缓存或入口票据。 */
+  @Test
+  void lateOpenReplyFromReplacedInstanceIsNotAuthorized() {
+    transport.identity = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    transport.invocationIdentity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertEquals(DomainErrorCode.UNAVAILABLE, error.code());
+    assertEquals("IDE_UNAVAILABLE", error.reason());
+    assertTrue(authorization.opened.isEmpty());
+    assertEquals(0, tickets.pendingCount());
+    assertTrue(
+        bindings.find(new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE), VIEW).isEmpty(),
+        "迟到的旧实例回执不得登记路由绑定");
+    assertTrue(bindings.find(transport.identity, VIEW).isEmpty());
+  }
+
+  /** 意图：容量预检按本节点当前 READY 实例执行，而不是按 Environment 汇总所有代际。 */
+  @Test
+  void capacityPrecheckUsesCurrentDaemonInstance() {
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+    service.openView(ENV, openRequest(null));
+
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    transport.identity = replacement;
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+    service.openView(ENV, openRequest(null));
+
+    assertEquals(
+        List.of(new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE), replacement),
+        authorization.capacityChecks);
+  }
+
+  /** 意图：没有当前 READY 实例时授权入口直接不可用，不下发命令，也不签发入口票据。 */
+  @Test
+  void capacityPrecheckFailsWithoutReadyDaemonInstance() {
+    transport.ready = false;
+
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertEquals(DomainErrorCode.UNAVAILABLE, error.code());
+    assertEquals("IDE_UNAVAILABLE", error.reason());
+    assertTrue(transport.commands.isEmpty());
+    assertTrue(authorization.capacityChecks.isEmpty());
+    assertEquals(0, tickets.pendingCount());
   }
 
   @Test
@@ -782,6 +836,12 @@ class EnvironmentIdeServiceImplTest {
     private volatile CountDownLatch pendingStarted;
     private volatile CompletableFuture<IdeResult> pendingReply;
     private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+
+    /** 命令实际到达的连接身份；与 {@link #identity} 不同即模拟实例替换期间迟到的回执。 */
+    private DaemonConnectionIdentity invocationIdentity;
+
+    private boolean ready = true;
+
     private int abandoned;
 
     @Override
@@ -798,12 +858,13 @@ class EnvironmentIdeServiceImplTest {
       } else if (!neverCompletes.get()) {
         future.complete(replies.removeFirst());
       }
-      return new IdeRequest(identity, UUID.randomUUID(), future);
+      DaemonConnectionIdentity bound = invocationIdentity == null ? identity : invocationIdentity;
+      return new IdeRequest(bound, UUID.randomUUID(), future);
     }
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(identity);
+      return ready ? Optional.of(identity) : Optional.empty();
     }
 
     @Override
@@ -852,11 +913,13 @@ class EnvironmentIdeServiceImplTest {
 
     private final List<OpenedEvent> opened = new ArrayList<>();
     private final List<Closed> closed = new ArrayList<>();
+    private final List<DaemonConnectionIdentity> capacityChecks = new ArrayList<>();
     private boolean capacityExhausted;
     private boolean failOpened;
 
     @Override
-    public void ensureViewCapacity(EnvironmentId environmentId) {
+    public void ensureViewCapacity(DaemonConnectionIdentity identity) {
+      capacityChecks.add(identity);
       if (capacityExhausted) {
         throw new IllegalStateException("capacity exhausted");
       }

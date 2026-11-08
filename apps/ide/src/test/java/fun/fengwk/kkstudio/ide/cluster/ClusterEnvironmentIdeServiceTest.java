@@ -356,7 +356,7 @@ class ClusterEnvironmentIdeServiceTest {
   private static final class NoopAuthorization implements IdeViewAuthorizationListener {
 
     @Override
-    public void ensureViewCapacity(EnvironmentId environmentId) {}
+    public void ensureViewCapacity(DaemonConnectionIdentity identity) {}
 
     @Override
     public void viewOpened(
