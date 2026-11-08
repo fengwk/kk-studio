@@ -427,7 +427,7 @@ Canvas Function runtime 变量也只在启动期读取。
 离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
 loopback proxy。这些 build 参数不会自动进入 App/Daemon runtime。
 
-Backend 与 Daemon 的运行代理在 **系统设置 → 网络** 保存，全局只配置一个无认证 HTTP 代理地址
+Backend 的运行代理在 **系统设置 → 网络**（`backendNetwork`）保存，只配置一个无认证 HTTP 代理地址
 `http://host:port`；HTTPS 请求通过 CONNECT。地址留空即强制直连，不继承宿主环境变量。
 保存后新发起的 Backend HTTP 请求使用新代理，无需重启；在途请求和响应流继续完成，
 无模型、Git 或插件单独覆盖。绕过规则用逗号分隔，
@@ -439,8 +439,10 @@ Backend 与 Daemon 的运行代理在 **系统设置 → 网络** 保存，全�
 容器里的 `127.0.0.1` 不是宿主机。公网媒体下载即使走代理也要求 Backend 正向解析
 并校验全部地址，CONNECT 固定到已校验 IP，不能用代理绕过公网地址准入。
 
-Daemon 的新请求与新启动子进程使用该配置，控制连接始终直连；
-详情见 [Environment Daemon](environment-daemon.md#网络代理)。
+Daemon 的运行代理不来自该设置：每张卡片使用自己的 `daemonConfig.proxyUrl`，`null` 表示明确直连；
+Bash、LSP、code-server 与 IDE 终端保留宿主真实代理环境，不被卡片代理改写。安装/覆盖下载继承执行时的
+宿主代理环境，在线更新作业只构造本次下载所需的代理变量。详情见
+[Environment Daemon](environment-daemon.md#网络代理)。
 浏览器直传/下载以及 Hub、ComfyUI 自身的外部请求由各自的网络配置决定。
 
 ## 清理
