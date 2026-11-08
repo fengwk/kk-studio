@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createLspCapabilities, type LspCapabilityGroup } from '../../src/coding/lsp.js'
+import { createLspFacade, type LspCapabilityGroup, type LspFacade } from '../../src/coding/lsp.js'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -54,16 +54,30 @@ describe('Lsp Capabilities Group End-to-End', () => {
     lspRecord: DaemonConfig['lsp'],
   ): DaemonConfig {
     return {
+      environmentId: '11111111-2222-4333-8444-555555555555',
+      configVersion: 0n,
       configPath: path.join(tempDir, 'config.json'),
       dataDir: tempDir,
       tokenPath: path.join(tempDir, 'token'),
       studioUrl: 'https://example.com',
       gatewayUri: 'ws://example.com',
       bashExecutable: '/bin/bash',
-      note: null,
+      bashExecutableSetting: '/bin/bash',
       lsp: lspRecord,
+      proxyUrl: null,
       distributionDir: path.join(tempDir, 'dist'),
     }
+  }
+
+  /** 唯一装配入口：先创建稳定 facade，再显式发布初始 LSP 声明。 */
+  function createLspGroup(
+    config: DaemonConfig,
+    processes: ProcessSupervisor,
+    options?: Parameters<typeof createLspFacade>[1],
+  ): LspFacade {
+    const facade = createLspFacade(processes, options)
+    void facade.update(config.lsp)
+    return facade
   }
 
   function createContext(
@@ -129,7 +143,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('validates arguments before starting any server process', async () => {
     const transcript = path.join(tempDir, 'val-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', transcript))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
@@ -303,7 +317,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('confirms pre-send rejection and late server exit but not local cancellation after send', async () => {
     const transcript = path.join(tempDir, 'confirm-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     const gotoDef = group.capabilities['lsp.goto-definition']!
@@ -353,7 +367,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('confirms a lease failure before the target request but not as a server exit', async () => {
     const transcript = path.join(tempDir, 'no-init-confirm.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'no-init', transcript))
-    const localGroup = createLspCapabilities(config, supervisor, { initializeTimeout: 200 })
+    const localGroup = createLspGroup(config, supervisor, { initializeTimeout: 200 })
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     let confirmations = 0
@@ -388,7 +402,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       },
       close: async () => {},
     }
-    const localGroup = createLspCapabilities(config, rejecting)
+    const localGroup = createLspGroup(config, rejecting)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     let confirmations = 0
@@ -424,7 +438,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       },
       close: async () => {},
     }
-    const localGroup = createLspCapabilities(config, rejecting)
+    const localGroup = createLspGroup(config, rejecting)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     let confirmations = 0
@@ -464,7 +478,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
 
   it('confirms a no-server rejection before any process exists', async () => {
     const config = createConfig({})
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     let confirmations = 0
@@ -499,7 +513,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       },
       close: () => supervisor.close(),
     }
-    const localGroup = createLspCapabilities(config, failing, {
+    const localGroup = createLspGroup(config, failing, {
       initializeTimeout: 100,
       shutdownGrace: 50,
     })
@@ -544,7 +558,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       },
       close: () => supervisor.close(),
     }
-    const localGroup = createLspCapabilities(config, gated, {
+    const localGroup = createLspGroup(config, gated, {
       shutdownGrace: 300,
     })
     const file = path.join(tempDir, 'App.java')
@@ -597,7 +611,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
         firstMatchMarkers: jdtls.firstMatchMarkers,
       },
     })
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
@@ -679,7 +693,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('support() returns read-header probe and fileChanged refreshes document', async () => {
     const transcript = path.join(tempDir, 'support-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', transcript))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
@@ -696,7 +710,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('aborts operation when context signal is triggered', async () => {
     const transcript = path.join(tempDir, 'abort-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
@@ -724,7 +738,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
 
   it('pre-aborted context signal returns Operation cancelled error immediately', async () => {
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 't.jsonl')))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const ac = new AbortController()
     ac.abort()
@@ -750,7 +764,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   it('context signal aborted with TIMED_OUT returns Operation timed out and never reports cancelled', async () => {
     const transcript = path.join(tempDir, 'timeout-cap-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
@@ -805,7 +819,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
 
   it('rejects non-object arguments and unexpected errors across all capabilities', async () => {
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 't.jsonl')))
-    group = createLspCapabilities(config, supervisor)
+    group = createLspGroup(config, supervisor)
 
     const gotoDef = group.capabilities['lsp.goto-definition']!
     const wsSyms = group.capabilities['lsp.workspace-symbols']!
@@ -975,7 +989,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
         firstMatchMarkers: slowJdtls1.firstMatchMarkers,
       },
     })
-    const slowGroup1 = createLspCapabilities(slowConfig1, supervisor)
+    const slowGroup1 = createLspGroup(slowConfig1, supervisor)
     try {
       const acWs = new AbortController()
       const pWs = slowGroup1.capabilities['lsp.workspace-symbols']!(
@@ -1006,7 +1020,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
         firstMatchMarkers: slowJdtls2.firstMatchMarkers,
       },
     })
-    const slowGroup2 = createLspCapabilities(slowConfig2, supervisor)
+    const slowGroup2 = createLspGroup(slowConfig2, supervisor)
     try {
       const acDec = new AbortController()
       const pDec = slowGroup2.capabilities['lsp.java-decompile']!(
@@ -1037,7 +1051,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       close: async () => {},
     }
     const brokenConfig = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 'broken.jsonl')))
-    const brokenGroup = createLspCapabilities(brokenConfig, brokenSupervisor)
+    const brokenGroup = createLspGroup(brokenConfig, brokenSupervisor)
 
     const r8 = await brokenGroup.capabilities['lsp.goto-definition']!(
       {

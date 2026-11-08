@@ -103,6 +103,26 @@ export class ShutdownRuntime {
     releaseStep(this.shutdownFailures, phase, action)
   }
 
+  /**
+   * 异步释放：立即纳入 in-flight 收敛，finalize 会等待它真正结束；失败按固定阶段记录一次。
+   *
+   * <p>不能只把 Promise 交给 {@link release} 后忽略返回值，否则终止可能在候选清理完成前发布。
+   */
+  releaseTracked(phase: string, action: () => Promise<void>): void {
+    let release: Promise<void>
+    try {
+      release = action()
+    } catch (error) {
+      this.record(phase, error)
+      return
+    }
+    this.track(
+      release.catch((error: unknown) => {
+        this.record(phase, error)
+      }),
+    )
+  }
+
   record(phase: string, error: unknown): void {
     recordShutdownFailure(this.shutdownFailures, phase, error)
   }

@@ -14,6 +14,7 @@ import {
 } from './generated/control_pb.js'
 import type { EnvironmentConfigRuntime } from './environment-config.js'
 import { parseEnvironmentConfig } from './protocol/control/codec.js'
+import { ProtocolError } from './protocol.js'
 import type { ActiveConnection, ConnectionLifecycle } from './runtime-connection.js'
 import { requireInvocationId, safeMessage } from './runtime-encoding.js'
 import {
@@ -68,6 +69,8 @@ export class ControlSession {
   private ideLeaseRound = 0n
   private admissionSuspended = false
   private reconnectPending = false
+  /** 候选准备前的准入状态；仅在控制地址/代理实际变化且候选未发布时用于恢复。 */
+  private candidateSuspension: boolean | null = null
 
   constructor(private readonly options: ControlSessionOptions) {}
 
@@ -127,14 +130,15 @@ export class ControlSession {
     } catch (error) {
       const errorEnvironmentId = this.options.outbound.environmentId ?? envelope.environmentId ?? undefined
       this.options.outbound.sendErrorOn(connection, errorEnvironmentId, safeMessage(error))
-      // 初始 SETTINGS 失败时服务端尚未将会话标为 READY，不能依赖在线变更通知修复。
-      // 关闭握手并重连，下一次从平台重新读取设置；已 READY 的连接仍可接收后续修正。
+      // scope/版本冲突/非法帧是连接级协议违规，READY 后也不能只回 ERROR 继续复用；
+      // 初始 SETTINGS 失败时服务端尚未 READY，同样关闭握手让下一次重新取设置。
       if (
-        envelope.messageType === MessageType.SETTINGS &&
-        !connection.ready &&
-        this.options.connection.getActiveConnection() === connection
+        this.isFatalProtocolError(error) ||
+        (envelope.messageType === MessageType.SETTINGS && !connection.ready)
       ) {
-        this.options.connection.closeFailedHandshake(connection)
+        if (this.options.connection.getActiveConnection() === connection) {
+          this.options.connection.closeFailedHandshake(connection)
+        }
       }
     }
   }
@@ -147,6 +151,7 @@ export class ControlSession {
     this.activeIdeLeaseRound = null
     this.admissionSuspended = false
     this.reconnectPending = false
+    this.candidateSuspension = null
     // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
     this.options.ideCommands.abortAll('CONTROL_DISCONNECTED')
   }
@@ -198,6 +203,7 @@ export class ControlSession {
         this.options.connection.handleDisconnected(connection.generation)
         return
       case MessageType.UPDATE:
+        this.requireReady(envelope, 'UPDATE')
         this.options.updates.handle(envelope)
         return
       case MessageType.IDE_LEASE:
@@ -220,14 +226,16 @@ export class ControlSession {
         )
         return
       default:
-        throw new Error(`daemon must not receive ${envelope.messageType} from server`)
+        throw new ProtocolError(
+          `daemon must not receive ${MessageType[envelope.messageType] ?? envelope.messageType} from server`,
+        )
     }
   }
 
   private verifyScope(envelope: Envelope): void {
     const bound = this.options.outbound.environmentId
     if (bound !== null && envelope.environmentId && bound !== envelope.environmentId) {
-      throw new Error(`envelope environmentId does not match daemon: ${envelope.environmentId}`)
+      throw new ProtocolError(`envelope environmentId does not match daemon: ${envelope.environmentId}`)
     }
   }
 
@@ -239,14 +247,14 @@ export class ControlSession {
   private handleSettings(envelope: Envelope): void {
     const environmentId = envelope.environmentId
     if (!environmentId) {
-      throw new Error('SETTINGS must declare non-null environmentId')
+      throw new ProtocolError('SETTINGS must declare non-null environmentId')
     }
     if (environmentId !== this.options.configuration.config.environmentId) {
-      throw new Error('SETTINGS environmentId does not match daemon')
+      throw new ProtocolError('SETTINGS environmentId does not match daemon')
     }
     const bound = this.options.outbound.environmentId
     if (bound !== null && bound !== environmentId) {
-      throw new Error('SETTINGS environmentId does not match daemon')
+      throw new ProtocolError('SETTINGS environmentId does not match daemon')
     }
     const settings = envelope.payload.value as Settings
     this.options.outbound.bind(environmentId)
@@ -266,10 +274,10 @@ export class ControlSession {
   ): Promise<void> {
     const bound = this.options.outbound.environmentId
     if (bound === null || !envelope.environmentId) {
-      throw new Error('ENVIRONMENT_CONFIG requires a SETTINGS-bound connection')
+      throw new ProtocolError('ENVIRONMENT_CONFIG requires a SETTINGS-bound connection')
     }
     if (bound !== envelope.environmentId) {
-      throw new Error('ENVIRONMENT_CONFIG environmentId does not match daemon')
+      throw new ProtocolError('ENVIRONMENT_CONFIG environmentId does not match daemon')
     }
     const { version, configuration } = parseEnvironmentConfig(
       envelope.payload.value as EnvironmentConfig,
@@ -317,23 +325,54 @@ export class ControlSession {
           this.options.outbound.environmentId ?? undefined,
           safeMessage(new Error(result.message)),
         )
-        this.options.connection.closeFailedHandshake(connection)
+        // 发布不变量已破坏：自动重连会继续使用混合资源状态，必须进入 FAILED 终止。
+        this.options.stop('environment configuration is inconsistent')
         return
     }
   }
 
-  /** 配置热切换：地址/代理变化时暂停新入站写并主动用新配置重连。 */
+  /**
+   * 候选开始准备：控制地址/代理实际变化时立即暂停旧连接的新 INVOKE/IDE 写。
+   *
+   * <p>必须早于资源准备，不能等 publish 之后；候选失败由
+   * {@link onConfigurationCandidateAborted} 恢复准备前的准入状态。
+   */
+  onConfigurationCandidate(previous: DaemonConfig, candidate: DaemonConfig): void {
+    if (!this.controlEndpointChanged(previous, candidate)) {
+      return
+    }
+    if (this.candidateSuspension === null) {
+      this.candidateSuspension = this.admissionSuspended
+    }
+    this.admissionSuspended = true
+  }
+
+  /** 候选失败/放弃：恢复候选准备前的准入；成功路径保持暂停到新连接 READY。 */
+  onConfigurationCandidateAborted(previous: DaemonConfig, candidate: DaemonConfig): void {
+    if (!this.controlEndpointChanged(previous, candidate)) {
+      return
+    }
+    if (this.candidateSuspension !== null) {
+      this.admissionSuspended = this.candidateSuspension
+      this.candidateSuspension = null
+    }
+  }
+
+  /** 配置热切换：地址/代理变化时保持暂停新入站写并主动用新配置重连。 */
   onConfigurationApplied(previous: DaemonConfig, next: DaemonConfig): void {
-    if (
-      previous.gatewayUri !== next.gatewayUri ||
-      previous.proxyUrl !== next.proxyUrl
-    ) {
+    if (this.controlEndpointChanged(previous, next)) {
+      this.candidateSuspension = null
       this.admissionSuspended = true
       this.reconnectPending = true
       return
     }
+    this.candidateSuspension = null
     this.admissionSuspended = false
     this.reconnectPending = false
+  }
+
+  private controlEndpointChanged(previous: DaemonConfig, next: DaemonConfig): boolean {
+    return previous.gatewayUri !== next.gatewayUri || previous.proxyUrl !== next.proxyUrl
   }
 
   private completeReady(connection: ActiveConnection): void {
@@ -361,8 +400,22 @@ export class ControlSession {
       this.options.outbound.environmentId ?? undefined,
       safeMessage(error),
     )
-    if (!connection.ready && this.options.connection.getActiveConnection() === connection) {
+    // 未 READY 时任何配置失败都关闭握手等待修正；READY 后的连接级协议违规同样必须关闭。
+    if (
+      (!connection.ready || this.isFatalProtocolError(error)) &&
+      this.options.connection.getActiveConnection() === connection
+    ) {
       this.options.connection.closeFailedHandshake(connection)
+    }
+  }
+
+  private isFatalProtocolError(error: unknown): boolean {
+    return error instanceof ProtocolError
+  }
+
+  private requireReady(envelope: Envelope, messageType: string): void {
+    if (!this.options.outbound.isReady || !envelope.environmentId) {
+      throw new Error(`${messageType} requires a READY bound connection`)
     }
   }
 

@@ -19,6 +19,8 @@ import {
   MessageType,
   OperatingSystem,
   PresignedPutSchema,
+  ReadySchema,
+  RecoverSchema,
   ResourceBudgetsSchema,
   ResourceUploadTicketSchema,
   SettingsSchema,
@@ -129,6 +131,38 @@ function invokeEnvelope(invocationId = 'inv-1', args: Record<string, unknown> = 
 
 function sentTypes(transport: FakeTransport): MessageType[] {
   return transport.sent.map((envelope) => envelope.messageType)
+}
+
+function errorMessages(transport: FakeTransport): string[] {
+  return transport.sent
+    .filter((envelope) => envelope.messageType === MessageType.ERROR)
+    .map((envelope) => (envelope.payload.case === 'error' ? envelope.payload.value.message : ''))
+}
+
+function cancelEnvelope(invocationId: string): Envelope {
+  return create(EnvelopeSchema, {
+    messageType: MessageType.CANCEL,
+    environmentId: ENV,
+    invocationId,
+    payload: { case: 'cancel', value: create(CancelSchema, {}) },
+  })
+}
+
+function recoverEnvelope(invocationId: string): Envelope {
+  return create(EnvelopeSchema, {
+    messageType: MessageType.RECOVER,
+    environmentId: ENV,
+    invocationId,
+    payload: { case: 'recover', value: create(RecoverSchema, {}) },
+  })
+}
+
+function serverReadyEnvelope(): Envelope {
+  return create(EnvelopeSchema, {
+    messageType: MessageType.READY,
+    environmentId: ENV,
+    payload: { case: 'ready', value: create(ReadySchema, {}) },
+  })
 }
 
 async function ready(
@@ -463,6 +497,196 @@ describe('runtime inbound protocol branches', () => {
     await waitFor(() => sentTypes(transport).includes(MessageType.FAILED))
     runtime.close()
   })
+
+  // 控制地址变化必须在候选准备开始就暂停新执行；候选失败后恢复旧准入。
+  it('pauses admission from candidate preparation and restores it when the candidate fails', async () => {
+    const gate = Promise.withResolvers<void>()
+    const preparing = Promise.withResolvers<void>()
+    const executions: string[] = []
+    const { runtime, transport } = await ready({
+      capabilities: {
+        'fs.read': async (call) => {
+          executions.push(call.invocationId)
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'text', text: 'ok' }],
+          }
+        },
+      },
+      prepareConfiguration: async (config) => {
+        if (config.configVersion === 1n) {
+          preparing.resolve()
+          await gate.promise
+          throw new Error('candidate preparation failed')
+        }
+        return { config, publish() {}, retire: async () => {} }
+      },
+    })
+    try {
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { studioUrl: 'https://next.example.com' }))
+      await preparing.promise
+      transport.receive(invokeEnvelope('blocked-during-preparation'))
+      await waitFor(() => errorMessages(transport).some((message) => message.includes('switching')))
+      expect(executions).toEqual([])
+      expect(runtime.getRuntimeStatus().status.configuration.appliedVersion).toBe('0')
+
+      gate.resolve()
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.error?.version === '1')
+      transport.receive(invokeEnvelope('admitted-after-failure'))
+      await waitFor(() => executions.length === 1)
+      expect(executions).toEqual(['admitted-after-failure'])
+      expect(transport.connectCount).toBe(1)
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  // publish 期间仍在暂停；成功后保持暂停并主动重连，新连接 READY 前不得接新执行。
+  it('keeps admission paused through publish and until the reconnected environment is READY', async () => {
+    const gate = Promise.withResolvers<void>()
+    const preparing = Promise.withResolvers<void>()
+    const executions: string[] = []
+    let publishAdmissionError: string | undefined
+    const transport = new FakeTransport()
+    const { runtime } = await ready({
+      transport,
+      capabilities: {
+        'fs.read': async (call) => {
+          executions.push(call.invocationId)
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'text', text: 'ok' }],
+          }
+        },
+      },
+      prepareConfiguration: async (config) => {
+        if (config.configVersion === 1n) {
+          preparing.resolve()
+          await gate.promise
+          return {
+            config,
+            publish: () => {
+              transport.receive(invokeEnvelope('blocked-during-publish'))
+              publishAdmissionError = errorMessages(transport).find((message) => message.includes('switching'))
+            },
+            retire: async () => {},
+          }
+        }
+        return { config, publish() {}, retire: async () => {} }
+      },
+    })
+    try {
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { studioUrl: 'https://next.example.com' }))
+      await preparing.promise
+      transport.receive(invokeEnvelope('blocked-during-preparation'))
+      await waitFor(() => errorMessages(transport).some((message) => message.includes('switching')))
+      expect(executions).toEqual([])
+
+      gate.resolve()
+      await waitFor(() => transport.connectCount >= 2)
+      expect(publishAdmissionError).toContain('switching')
+      expect(executions).toEqual([])
+
+      // 新连接尚未 SETTINGS/READY：任何 INVOKE 继续被拒绝。
+      transport.receive(invokeEnvelope('blocked-while-connecting'))
+      await waitFor(() => errorMessages(transport).some((message) => message.includes('INVOKE requires a READY')))
+      expect(executions).toEqual([])
+
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { studioUrl: 'https://next.example.com' }))
+      await waitFor(() => runtime.getState() === 'READY')
+      transport.receive(invokeEnvelope('admitted-after-reconnect'))
+      await waitFor(() => executions.length === 1)
+      expect(executions).toEqual(['admitted-after-reconnect'])
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  // 连接级协议违规在 READY 后也必须关闭连接，而不是只回 ERROR 继续复用。
+  it('closes a READY connection on scope mismatch', async () => {
+    const { runtime, transport } = await ready()
+    try {
+      const first = transport.connection!
+      transport.receive(
+        create(EnvelopeSchema, {
+          messageType: MessageType.CANCEL,
+          environmentId: '99999999-2222-4333-8444-555555555555',
+          invocationId: 'scope-mismatch',
+          payload: { case: 'cancel', value: create(CancelSchema, {}) },
+        }),
+      )
+      await waitFor(() => errorMessages(transport).some((message) => message.includes('does not match daemon')))
+      await waitFor(() => !first.isOpen())
+      await waitFor(() => transport.connectCount >= 2)
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  it('closes a READY connection when the same version changes content', async () => {
+    const { runtime, transport } = await ready()
+    try {
+      const first = transport.connection!
+      transport.receive(makeEnvironmentConfigEnvelope(0n, { bashExecutable: process.execPath }))
+      await waitFor(() =>
+        errorMessages(transport).some((message) => message.includes('same environment config version')),
+      )
+      await waitFor(() => !first.isOpen())
+      expect(runtime.getRuntimeStatus().status.configuration).toMatchObject({
+        appliedVersion: '0',
+        error: null,
+      })
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  it('closes a READY connection on a frame the daemon must never receive', async () => {
+    const { runtime, transport } = await ready()
+    try {
+      const first = transport.connection!
+      transport.receive(serverReadyEnvelope())
+      await waitFor(() => errorMessages(transport).some((message) => message.includes('must not receive READY')))
+      await waitFor(() => !first.isOpen())
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  // 发布不变量破坏时不能自动重连继续使用混合资源状态，必须进入 FAILED 终止。
+  it('enters FAILED instead of reconnecting when configuration publication is inconsistent', async () => {
+    const transport = new FakeTransport()
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        prepareConfiguration: async (config) => ({
+          config,
+          publish: () => {
+            throw new Error('publish invariants broken')
+          },
+          retire: async () => {},
+        }),
+      }),
+    )
+    runtime.start()
+    await waitFor(() => transport.connection !== null)
+    transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
+    await waitFor(() => runtime.getState() === 'FAILED')
+    expect(runtime.getFailureReason()).toBe('environment configuration is inconsistent')
+    await runtime.awaitCompletion()
+    expect(transport.connectCount).toBe(1)
+  })
 })
 
 describe('runtime journal capacity recovery evidence', () => {
@@ -783,6 +1007,80 @@ describe('runtime managed update branches', () => {
   })
 })
 
+describe('runtime CONNECTING recovery admission', () => {
+  // 未 READY 只允许处理本进程确实在途的执行收尾；未知/终态事实必须等 READY 后再取回。
+  it('does not recover unknown or terminal work before READY', async () => {
+    const { runtime, transport } = await ready()
+    try {
+      transport.receive(invokeEnvelope('terminal-before-reconnect'))
+      await waitFor(() => sentTypes(transport).includes(MessageType.COMPLETED))
+
+      transport.disconnect()
+      await waitFor(() => runtime.getState() === 'DISCONNECTED')
+      await waitFor(() => transport.connectCount >= 2)
+      transport.receive(makeSettingsEnvelope())
+      expect(runtime.getState()).toBe('CONNECTING')
+
+      transport.receive(recoverEnvelope('missing'))
+      transport.receive(recoverEnvelope('terminal-before-reconnect'))
+      transport.receive(cancelEnvelope('terminal-before-reconnect'))
+      await tick()
+      expect(sentTypes(transport)).not.toContain(MessageType.RECOVER_NOT_FOUND)
+      expect(transport.sent.filter((envelope) => envelope.messageType === MessageType.COMPLETED)).toHaveLength(0)
+
+      transport.receive(makeEnvironmentConfigEnvelope())
+      await waitFor(() => runtime.getState() === 'READY')
+      transport.receive(recoverEnvelope('missing'))
+      await waitFor(() => sentTypes(transport).includes(MessageType.RECOVER_NOT_FOUND))
+      expect(transport.sent.filter((envelope) => envelope.messageType === MessageType.COMPLETED)).toHaveLength(0)
+      transport.receive(cancelEnvelope('terminal-before-reconnect'))
+      await waitFor(
+        () => transport.sent.filter((envelope) => envelope.messageType === MessageType.COMPLETED).length === 1,
+      )
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+
+  // READY 前仍可取消确属本进程在途的执行，收尾由执行器自身完成。
+  it('cancels work that is actually in flight before READY', async () => {
+    let aborted = false
+    const { runtime, transport } = await ready({
+      capabilities: {
+        'fs.read': async (_call, context) => {
+          await new Promise<void>((resolve) => {
+            context.signal.addEventListener(
+              'abort',
+              () => {
+                aborted = true
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          throw new Error('cancelled')
+        },
+      },
+    })
+    try {
+      transport.receive(invokeEnvelope('running-across-reconnect'))
+      await waitFor(() => sentTypes(transport).includes(MessageType.STARTED))
+
+      transport.disconnect()
+      await waitFor(() => runtime.getState() === 'DISCONNECTED')
+      await waitFor(() => transport.connectCount >= 2)
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(cancelEnvelope('running-across-reconnect'))
+      await waitFor(() => aborted)
+      await waitFor(() => sentTypes(transport).includes(MessageType.CANCELLED))
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
+  })
+})
+
 describe('runtime IDE branches', () => {
   it('rejects an IDE_COMMAND before READY', async () => {
     const transport = new FakeTransport()
@@ -918,6 +1216,88 @@ describe('runtime resource upload control plane', () => {
     const completed = transport.sent.find((envelope) => envelope.messageType === MessageType.COMPLETED)
     expect(JSON.stringify(completed?.payload, (_k, v) => typeof v === 'bigint' ? v.toString() : v)).toContain(uploadId)
     runtime.close()
+  })
+})
+
+describe('runtime shutdown convergence', () => {
+  // 异步释放必须纳入 in-flight：终止只能在其真正结束后发布。
+  it('waits for tracked asynchronous releases before finalizing', async () => {
+    const shutdown = new ShutdownRuntime()
+    const gate = Promise.withResolvers<void>()
+    shutdown.releaseTracked('environment config close', () => gate.promise)
+    let terminated = false
+    const finalizing = shutdown.finalize(
+      async () => {},
+      () => {
+        terminated = true
+      },
+    )
+    await tick()
+    expect(terminated).toBe(false)
+
+    gate.resolve()
+    await finalizing
+    expect(terminated).toBe(true)
+    expect(shutdown.failures).toEqual([])
+  })
+
+  // 释放失败仍要可靠记录并按阶段诊断，不能被静默 catch 吞掉。
+  it('records a tracked release failure once', async () => {
+    const failure = new Error('configuration close failed')
+    const shutdown = new ShutdownRuntime()
+    shutdown.releaseTracked('environment config close', () => Promise.reject(failure))
+    let terminated = false
+    await shutdown.finalize(
+      async () => {},
+      () => {
+        terminated = true
+      },
+    )
+    expect(terminated).toBe(true)
+    expect(shutdown.failures).toEqual([failure])
+  })
+
+  // 配置 close 等待正在准备的候选与 retire；Runtime 终止不能早于缓存清理完成。
+  it('waits for configuration close before publishing runtime termination', async () => {
+    const gate = Promise.withResolvers<void>()
+    const preparing = Promise.withResolvers<void>()
+    let retired = false
+    const { runtime, transport } = await ready({
+      prepareConfiguration: async (config) => {
+        if (config.configVersion === 1n) {
+          preparing.resolve()
+          await gate.promise
+        }
+        return {
+          config,
+          publish() {},
+          retire: async () => {
+            retired = true
+          },
+        }
+      },
+    })
+    try {
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: process.execPath }))
+      await preparing.promise
+
+      let completed = false
+      const completion = runtime.awaitCompletion().then(() => {
+        completed = true
+      })
+      runtime.close()
+      await tick(2)
+      expect(completed).toBe(false)
+      expect(retired).toBe(false)
+
+      gate.resolve()
+      await completion
+      expect(completed).toBe(true)
+      expect(retired).toBe(true)
+    } finally {
+      runtime.close()
+      await runtime.awaitCompletion()
+    }
   })
 })
 

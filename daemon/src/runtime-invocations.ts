@@ -145,23 +145,36 @@ export class InvocationRuntime {
     if (entry === undefined) {
       return
     }
-    if (isTerminalState(entry.state)) {
-      this.replay(entry)
-      return
-    }
     const invocation = this.running.get(invocationId)
     if (invocation !== undefined) {
+      // 本进程确实在途的执行允许在未 READY 时中止，由其自身 cleanup 完成收尾。
       invocation.controller.abort('CANCELLED')
+      return
+    }
+    // 未 READY 的连接不允许重放终态事实；等 READY 后服务端再取回。
+    if (!this.options.outbound.isReady) {
+      return
+    }
+    if (isTerminalState(entry.state)) {
+      this.replay(entry)
     }
   }
 
   /**
    * 同实例重连后的取回：只重放 journal 已有的事实，绝不终止执行。运行中的调用回放 STARTED 并继续执行，结果经当前连接交付；
    * 已终结的调用重放终态与独立退出确认；从未收到的调用保持静默。
+   *
+   * <p>未 READY 时只处理本进程确实在途的执行；未知调用与终态事实必须等 READY 后再取回，不能借握手阶段恢复未知工作。
    */
   handleRecover(envelope: Envelope): void {
     const invocationId = requireInvocationId(envelope)
     const entry = this.options.journal.find(invocationId)
+    if (!this.options.outbound.isReady) {
+      if (entry !== undefined && this.running.has(invocationId)) {
+        this.replay(entry)
+      }
+      return
+    }
     if (entry !== undefined) {
       this.replay(entry)
     } else {

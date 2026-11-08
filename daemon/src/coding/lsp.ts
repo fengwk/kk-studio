@@ -305,17 +305,7 @@ function retire(generation: LspGeneration): Promise<void> {
   return generation.closePromise
 }
 
-/** 兼容装配入口：以初始卡片配置创建稳定 facade。 */
-export function createLspCapabilities(
-  config: DaemonConfig,
-  processes: ProcessSupervisor,
-  options?: LspPoolOptions,
-): LspFacade {
-  const facade = new LspFacade(processes, options)
-  void facade.update(config.lsp)
-  return facade
-}
-
+/** 以初始卡片配置创建稳定 facade；调用方显式发布初始声明。 */
 export function createLspFacade(processes: ProcessSupervisor, options?: LspPoolOptions): LspFacade {
   return new LspFacade(processes, options)
 }
