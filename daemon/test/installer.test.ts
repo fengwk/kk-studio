@@ -16,12 +16,13 @@ import {
   type InstallerConfig,
   type InstallerDependencies,
 } from '../src/installer.js'
-import { applyNetworkSettings } from '../src/network.js'
+import { NetworkRuntime, type OutboundNetwork } from '../src/network.js'
 
 const operationId = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
 const environmentId = '11111111-1111-4111-8111-111111111111'
 const command = { operationId, targetVersion: '2.0.0' }
 const homes: string[] = []
+const networks: NetworkRuntime[] = []
 
 async function waitForFile(file: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -56,18 +57,40 @@ async function fixture(proxyUrl: string | null = null): Promise<{
   return { home, root, config }
 }
 
-function deps(home: string, script: string): InstallerDependencies {
+/** 当前强类型 DaemonConfig 的测试 fixture；外部边界测试可覆盖单个字段。 */
+function daemonConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
+  return {
+    environmentId,
+    configVersion: 0n,
+    configPath: '/tmp/daemon.json',
+    dataDir: '/tmp',
+    tokenPath: '/tmp/daemon.token',
+    studioUrl: 'https://studio.example',
+    gatewayUri: 'wss://studio.example',
+    bashExecutable: '/bin/bash',
+    bashExecutableSetting: null,
+    lsp: {},
+    proxyUrl: null,
+    distributionDir: '/tmp/lib',
+    ...overrides,
+  }
+}
+
+function deps(home: string, script: string, proxyUrl: string | null = null): InstallerDependencies {
+  // 出站网络只来自 NetworkRuntime；测试替换它的响应，不安装任何全局代理设置。
+  const runtime = new NetworkRuntime(proxyUrl)
+  networks.push(runtime)
+  const network: OutboundNetwork = runtime.network
+  network.withResponse = async (url, init, _signal, use) => {
+    expect(url).toBe('https://raw.githubusercontent.com/fengwk/kk-studio/v2.0.0/scripts/daemon/install.sh')
+    expect(init.redirect).toBe('error')
+    return use({ statusCode: 200, statusMessage: 'OK', headers: {}, body: Readable.from([script]), async dispose() {} })
+  }
   return {
     home,
     platform: 'linux',
     arch: 'x64',
-    network: {
-      async withResponse(url, init, _signal, use) {
-        expect(url).toBe('https://raw.githubusercontent.com/fengwk/kk-studio/v2.0.0/scripts/daemon/install.sh')
-        expect(init.redirect).toBe('error')
-        return use({ statusCode: 200, statusMessage: 'OK', headers: {}, body: Readable.from([script]), async dispose() {} })
-      },
-    },
+    network,
     async launch() {},
   }
 }
@@ -81,8 +104,8 @@ function decodeWindows(args: string[]): { registration: string; action: string }
 }
 
 afterEach(async () => {
-  applyNetworkSettings(null, '')
   vi.unstubAllEnvs()
+  await Promise.all(networks.splice(0).map(runtime => runtime.close()))
   await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })))
 })
 
@@ -90,7 +113,6 @@ describe('official installer handoff', () => {
   it.skipIf(process.platform === 'win32')('hands update only the environment identity and version to the real runner', async () => {
     // Execute the real generated runner, not an imitation of its wait/argument/cleanup logic.
     const { home, root, config } = await fixture()
-    applyNetworkSettings('http://localhost:8080', 'localhost,.internal')
     vi.stubEnv('HtTp_PrOxY', 'http://host-proxy.invalid:3128')
     const marker = join(home, 'installer-args')
     const environment = join(home, 'installer-env')
@@ -140,7 +162,7 @@ describe('official installer handoff', () => {
     // 卡片代理是本次更新下载的唯一代理决定；宿主服务环境不得改写它。
     vi.stubEnv('HTTPS_PROXY', 'http://host-proxy.invalid:3128')
     const { home, config } = await fixture('http://card-proxy.invalid:8080')
-    const adapter = deps(home, 'installer')
+    const adapter = deps(home, 'installer', config.proxyUrl)
     let args: string[] = []
     adapter.launch = async (_file, received) => {
       args = received
@@ -194,20 +216,11 @@ describe('official installer handoff', () => {
     const { config } = await fixture()
     const output = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     try {
-      const daemonConfig = {
-        environmentId: config.environmentId,
-        configVersion: 1n,
-        proxyUrl: null,
-        configPath: config.configPath,
-        tokenPath: config.tokenPath,
-        distributionDir: config.distributionDir,
-        dataDir: join(config.distributionDir, '..'),
-        studioUrl: 'https://studio.example',
-        gatewayUri: 'wss://studio.example',
-        bashExecutable: '/bin/bash',
-        lsp: {},
-      } as unknown as DaemonConfig
-      const outcome = await handleUpdate({ ...command, targetVersion: 'secret invalid' }, daemonConfig, AbortSignal.timeout(1000))
+      const outcome = await handleUpdate(
+        { ...command, targetVersion: 'secret invalid' },
+        daemonConfig({ configPath: config.configPath, tokenPath: config.tokenPath, distributionDir: config.distributionDir }),
+        AbortSignal.timeout(1000),
+      )
       expect(outcome).toEqual({ phase: 'FAILED', message: 'official installer preparation failed; check daemon logs and network' })
       expect(output).toHaveBeenCalledWith('daemon update: official installer preparation failed; check daemon logs and network\n')
     } finally {
@@ -215,13 +228,18 @@ describe('official installer handoff', () => {
     }
   })
 
-  it('rejects a parsed configuration without the frozen installation identity', () => {
-    // 缺少 environmentId/proxyUrl 时绝不允许把更新交给任意目录。
-    expect(() => toInstallerConfig({
+  it('maps the typed frozen configuration and rejects a non-canonical identity', () => {
+    // 必填强类型字段直接映射；外部边界仍只接受规范小写 UUID。
+    const config = daemonConfig({ proxyUrl: 'http://proxy.example:8080' })
+    expect(toInstallerConfig(config)).toEqual({
+      environmentId,
+      proxyUrl: 'http://proxy.example:8080',
       configPath: '/tmp/daemon.json',
       tokenPath: '/tmp/daemon.token',
       distributionDir: '/tmp/lib',
-    } as unknown as DaemonConfig)).toThrow('canonical environment identity')
+    })
+    expect(() => toInstallerConfig({ ...config, environmentId: `${environmentId.slice(0, -1)}A` }))
+      .toThrow('canonical environment identity')
   })
 
   it('observes service-manager process success and failure', async () => {
@@ -252,6 +270,61 @@ describe('official installer handoff', () => {
       await expect(stat(join(workDirectory, leftover))).rejects.toMatchObject({ code: 'ENOENT' })
     }
     await expect(stat(workDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.skipIf(process.platform === 'win32')('reports a failure it cannot persist instead of claiming success', async () => {
+    // 用真实的 runner 执行，但让它的 mv 失败：record_failure 必须输出固定诊断而不是静默成功。
+    const { home, root, config } = await fixture()
+    const bin = join(home, 'fake-bin')
+    await mkdir(bin, { recursive: true })
+    await writeFile(join(bin, 'mv'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`)
+    const adapter = deps(home, 'exit 7\n')
+    let child: ChildProcess | undefined
+    let stderr = ''
+    adapter.launch = async (_file, args) => {
+      const envIndex = args.indexOf('env')
+      child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: ['ignore', 'ignore', 'pipe'] })
+      child.stderr?.on('data', (chunk) => { stderr += chunk })
+      await waitForFile(join(args[args.indexOf('bash') + 2]!, 'ready'))
+    }
+    const prepared = await prepareInstaller(command, config, AbortSignal.timeout(5000), adapter)
+    const exit = new Promise<number | null>(resolve => child!.once('exit', resolve))
+    await prepared.releasePermit!()
+    expect(await exit).toBe(7)
+    expect(stderr).toContain('update job: could not record the installer failure')
+    expect(stderr).not.toContain('private-token')
+    await expect(stat(join(root, 'last-operation.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.skipIf(process.platform === 'win32')('reports a cleanup failure instead of claiming success', async () => {
+    // 安装器成功后 cleanup 的 rm 仍可能失败；runner 必须报错并以非零状态退出。
+    const { home, config } = await fixture()
+    const bin = join(home, 'fake-bin')
+    await mkdir(bin, { recursive: true })
+    await writeFile(join(bin, 'rm'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`)
+    const adapter = deps(home, 'exit 0\n')
+    let child: ChildProcess | undefined
+    let workDirectory = ''
+    let stderr = ''
+    adapter.launch = async (_file, args) => {
+      const envIndex = args.indexOf('env')
+      workDirectory = args[args.indexOf('bash') + 2]!
+      child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: ['ignore', 'ignore', 'pipe'] })
+      child.stderr?.on('data', (chunk) => { stderr += chunk })
+      await waitForFile(join(workDirectory, 'ready'))
+    }
+    const prepared = await prepareInstaller(command, config, AbortSignal.timeout(5000), adapter)
+    const exit = new Promise<number | null>(resolve => child!.once('exit', resolve))
+    try {
+      await prepared.releasePermit!()
+      expect(await exit).toBe(1)
+      expect(stderr).toContain('update job: could not remove the update job directory')
+      expect(stderr).not.toContain('private-token')
+    } finally {
+      await rm(workDirectory, { recursive: true, force: true })
+    }
   })
 
   it('reports a failure only for the matching operation in last-operation.json', async () => {
@@ -388,8 +461,7 @@ describe('official installer handoff', () => {
   it('uses an encoded, non-repeating Windows scheduled task with the update contract', async () => {
     // Decode both task-registration layers to verify argv and avoid shell-injection assumptions.
     const { home, config } = await fixture('http://card-proxy.invalid:8080')
-    applyNetworkSettings('http://localhost:8080', 'localhost,.internal')
-    const adapter = deps(home, 'official installer')
+    const adapter = deps(home, 'official installer', config.proxyUrl)
     adapter.platform = 'win32'
     adapter.network.withResponse = async (_url, _init, _signal, use) =>
       use({ statusCode: 200, statusMessage: 'OK', headers: {}, body: Readable.from(['installer']), async dispose() {} })

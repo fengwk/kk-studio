@@ -138,7 +138,9 @@ describe('smoke-archive.ps1 contract', () => {
     assert.ok(smoke.includes('& $node $probe $root $bashExecutable'))
     const probe = extractWindowsNativeProbe()
     assert.ok(probe.includes('const [root, bashExecutable] = process.argv.slice(2)'))
-    assert.ok(probe.includes('bashExecutable })'))
+    assert.ok(probe.includes("environmentId: '11111111-1111-4111-8111-111111111111'"))
+    assert.ok(probe.includes("version: '0'"))
+    assert.ok(probe.includes("daemonConfig: { studioUrl: 'http://127.0.0.1:59999', bashExecutable }"))
   })
 
   it('still runs the frozen checks under the empty PATH', () => {
@@ -151,8 +153,11 @@ describe('smoke-archive.ps1 contract', () => {
     for (const marker of ['--version', '--help', '--check-config']) {
       assert.ok(smoke.includes(marker), marker)
     }
-    // 无效配置用例必须保留，不得放宽。
-    for (const document of ['{"studioUrl":"not-a-url"}', '{"daemon":{"studioUrl":"http://127.0.0.1:59999"}}']) {
+    // 无效配置用例必须保留，不得放宽：旧平铺形状和外壳包装都要被真实 schema 拒绝。
+    for (const document of [
+      '{"studioUrl":"http://127.0.0.1:59999","note":"archive smoke"}',
+      '{"daemon":{"environmentId":"11111111-1111-4111-8111-111111111111","version":"0","daemonConfig":{"studioUrl":"http://127.0.0.1:59999"}}}',
+    ]) {
       assert.ok(smoke.includes(document), document)
     }
   })
@@ -171,7 +176,11 @@ describe('smoke-archive.ps1 native probe with a stub native module', { skip: !is
         assert.equal(result.status, 0, result.stderr)
         assert.equal(result.stdout.trim(), 'native directory lock ok')
         const config = JSON.parse(readFileSync(path.join(root, 'config/daemon.json'), 'utf8'))
-        assert.deepEqual(config, { studioUrl: 'http://127.0.0.1:59999', bashExecutable: bash })
+        assert.deepEqual(config, {
+          environmentId: '11111111-1111-4111-8111-111111111111',
+          version: '0',
+          daemonConfig: { studioUrl: 'http://127.0.0.1:59999', bashExecutable: bash },
+        })
       }
     }))
 })

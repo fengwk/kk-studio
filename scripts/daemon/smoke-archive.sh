@@ -233,7 +233,8 @@ case "$help" in
   *) fail "--help is missing the --check-config contract" ;;
 esac
 
-# 真实 daemon.json 就是裸配置对象本身；被外层 `daemon` 包裹的假结构必须被真实入口拒绝。
+# 真实 daemon.json 的当前 schema 是裸信封 `{environmentId, version, daemonConfig}`；旧平铺对象或被
+# 外层 `daemon` 包裹的假结构必须被真实入口拒绝。
 write_input() {
   local directory=$1 document=$2
   mkdir -p "$directory"
@@ -241,10 +242,13 @@ write_input() {
   printf '%s' 'smoke-token' >"$directory/daemon.token"
   chmod 0600 "$directory/daemon.json" "$directory/daemon.token"
 }
+smoke_config='{"environmentId":"11111111-1111-4111-8111-111111111111","version":"0","daemonConfig":{"studioUrl":"http://127.0.0.1:59999"}}'
+legacy_config='{"studioUrl":"http://127.0.0.1:59999","note":"archive smoke"}'
+wrapped_config='{"daemon":'"$smoke_config"'}'
 
 # 2) --check-config 读取配置与同目录 token，必须是发行真实 schema。
 valid_dir="$tmp/config"
-write_input "$valid_dir" '{"studioUrl":"http://127.0.0.1:59999","note":"archive smoke"}'
+write_input "$valid_dir" "$smoke_config"
 valid=$(run_isolated "$node_bin" "$main_js" --check-config "$valid_dir/daemon.json" 2>&1) ||
   fail "--check-config rejected a valid configuration: $valid"
 [ "$valid" = "Daemon configuration is valid" ] ||
@@ -252,8 +256,9 @@ valid=$(run_isolated "$node_bin" "$main_js" --check-config "$valid_dir/daemon.js
 [ ! -e "$valid_dir/daemon.lock" ] ||
   fail "--check-config must not create a data lock"
 
+# 旧平铺对象缺少 environmentId/version/daemonConfig，必须被当前 schema 拒绝。
 invalid_dir="$tmp/invalid"
-write_input "$invalid_dir" '{"studioUrl":"not-a-url"}'
+write_input "$invalid_dir" "$legacy_config"
 if invalid=$(run_isolated "$node_bin" "$main_js" --check-config "$invalid_dir/daemon.json" 2>&1); then
   fail "an invalid configuration must be rejected: $invalid"
 fi
@@ -262,9 +267,9 @@ case "$invalid" in
   *) fail "invalid configuration must fail with the stable marker: $invalid" ;;
 esac
 
-# 真实 schema 是裸对象；外层 `daemon` 包裹的假结构不能通过真实预检（防止 fixture 假绿）。
+# 真实 schema 是裸信封；外层 `daemon` 包裹的假结构不能通过真实预检（防止 fixture 假绿）。
 wrapped_dir="$tmp/wrapped"
-write_input "$wrapped_dir" '{"daemon":{"studioUrl":"http://127.0.0.1:59999"}}'
+write_input "$wrapped_dir" "$wrapped_config"
 if wrapped=$(run_isolated "$node_bin" "$main_js" --check-config "$wrapped_dir/daemon.json" 2>&1); then
   fail "a wrapped daemon object must be rejected by the real schema: $wrapped"
 fi
@@ -386,7 +391,7 @@ esac
 
 # 4) 真实入口：陪伴进程持锁后，第二个实例必须因锁冲突失败，并优雅退出。
 run_dir="$tmp/run"
-write_input "$run_dir" '{"studioUrl":"http://127.0.0.1:59999"}'
+write_input "$run_dir" "$smoke_config"
 # 直接后台启动，不经 shell 函数：这样 $! 就是 env→node 的真实 daemon 进程，收尾时能精确终止并回收。
 env -i PATH="$sandbox" HOME="$tmp/home" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
   "$node_bin" "$main_js" --config "$run_dir/daemon.json" \
