@@ -34,7 +34,12 @@ export interface ControlFixture {
 }
 
 export async function createControlServer(): Promise<ControlFixture> {
-  const peer = new FakeStudioPeer({ autoControl: true, environmentId: ENVIRONMENT_ID })
+  let peer!: FakeStudioPeer
+  peer = new FakeStudioPeer({
+    autoControl: true,
+    environmentId: ENVIRONMENT_ID,
+    studioUrl: () => peer.origin,
+  })
   await peer.start()
 
   const root = await native.ensurePrivateDirectory(mkdtempSync(join(tmpdir(), 'kk-daemon-main-')))
@@ -129,10 +134,13 @@ export async function writeConfig(
   await native.writePrivateFile(
     fixture.configPath,
     JSON.stringify({
-      studioUrl: fixture.url,
-      note: 'main acceptance',
-      ...(bash === undefined ? {} : { bashExecutable: bash }),
-      ...overrides,
+      environmentId: ENVIRONMENT_ID,
+      version: '0',
+      daemonConfig: {
+        studioUrl: fixture.url,
+        ...(bash === undefined ? {} : { bashExecutable: bash }),
+        ...overrides,
+      },
     }),
   )
   await native.writePrivateFile(fixture.tokenPath, TOKEN)

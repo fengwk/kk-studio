@@ -480,7 +480,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       }),
     )
     expect(result.error).toBe(true)
-    expect((result.contents[0] as any).text).toContain('No LSP server configured')
+    expect((result.contents[0] as any).text).toContain('LSP is not configured')
     expect(confirmations).toBe(1)
   })
 

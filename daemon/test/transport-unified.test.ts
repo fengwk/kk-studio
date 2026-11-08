@@ -15,10 +15,11 @@ import {
   createDaemonTransport,
 } from '../src/transport/index.js'
 import { Runtime } from '../src/runtime.js'
-import { applyNetworkSettings } from '../src/network.js'
 import type { DaemonConfig, IdeService, IdeStreamUpstream } from '../src/contracts.js'
 import {
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   HeartbeatSchema,
   IdeAction,
   IdeCommandSchema,
@@ -53,14 +54,17 @@ describe('Unified Transport & Control Protocol', () => {
     writeFileSync(tokenPath, 'test-secret-token\n')
 
     config = {
+      environmentId: '11111111-1111-4111-8111-111111111111',
+      configVersion: 0n,
       configPath: join(tempDir, 'daemon.json'),
       dataDir: tempDir,
       tokenPath,
       studioUrl: 'http://127.0.0.1:8080',
       gatewayUri: 'ws://127.0.0.1:8080/ws/daemon',
       bashExecutable: '/bin/bash',
-      note: 'test note',
+      bashExecutableSetting: null,
       lsp: {},
+      proxyUrl: null,
       distributionDir: tempDir,
     }
   })
@@ -130,7 +134,6 @@ describe('Unified Transport & Control Protocol', () => {
     const globalAgent = vi.spyOn(https.globalAgent, 'addRequest').mockImplementation(() => {
       throw new Error('global agent must not be used')
     })
-    applyNetworkSettings('http://127.0.0.1:1', '')
     const transport = createDaemonTransport({
       gatewayUri: `wss://127.0.0.1:${port}/ws/daemon`,
       config,
@@ -146,7 +149,6 @@ describe('Unified Transport & Control Protocol', () => {
       expect(globalAgent).not.toHaveBeenCalled()
     } finally {
       await transport.close()
-      applyNetworkSettings(null, '')
       globalAgent.mockRestore()
       vi.unstubAllEnvs()
       await new Promise<void>((resolve) => wss.close(() => server.close(() => resolve())))
@@ -655,17 +657,22 @@ describe('Unified Transport & Control Protocol', () => {
     it('performs SETTINGS -> READY, handles INVOKE and RECOVER_NOT_FOUND', async () => {
       peer = new FakeStudioPeer()
       await peer.start()
+      const runtimeConfig: DaemonConfig = {
+        ...config,
+        studioUrl: peer.origin,
+        gatewayUri: peer.gatewayUri,
+      }
 
       const transport = createDaemonTransport({
         gatewayUri: peer.gatewayUri,
-        config,
+        config: runtimeConfig,
         ide: {} as unknown as IdeService,
         daemonInstanceId: randomUUID(),
         platformKey: 'linux-amd64',
       })
 
       const runtime = new Runtime({
-        config,
+        config: runtimeConfig,
         transport,
         capabilities: {
           'test.echo': async (call) => ({
@@ -691,12 +698,24 @@ describe('Unified Transport & Control Protocol', () => {
           payload: {
             case: 'settings',
             value: create(SettingsSchema, {
-              noProxyHosts: '',
               resourceBudgets: create(ResourceBudgetsSchema, {
                 maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 3600n,
                 temporaryResourceCleanupIntervalSeconds: 60n,
               }),
+            }),
+          },
+        }),
+      )
+      peer.sendEnvelope(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: '11111111-1111-4111-8111-111111111111',
+          payload: {
+            case: 'environmentConfig',
+            value: create(EnvironmentConfigSchema, {
+              version: 0n,
+              config: create(DaemonConfigurationSchema, { studioUrl: peer.origin }),
             }),
           },
         }),

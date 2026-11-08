@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, onTestFailed, test } from 'vitest'
 import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
-import { applyNetworkSettings } from '../../src/network.js'
 import type { ManagedProcess, ProcessSupervisor } from '../../src/contracts.js'
 import { awaitGone, fixtureCommand, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
 
@@ -47,8 +46,8 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     return managed
   }
 
-  // 真实 helper 与受管进程验证显式 env 也会剥离大小写代理残留，热更仅影响后启动的进程。
-  test('passes platform proxy settings to subsequently started subprocesses', async () => {
+  // 真实 helper 与受管进程验证子进程原样继承调用方环境，平台代理不再改写通用进程。
+  test('passes the inherited environment to subsequently started subprocesses unchanged', async () => {
     const run = async (name: string) => {
       const file = join(workdir, name)
       const managed = await supervisor.start({
@@ -61,28 +60,16 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
       expect((await managed.exit).exitCode).toBe(0)
       return JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
     }
-    try {
-      applyNetworkSettings('http://proxy.invalid:8080', 'localhost')
-      const configured = await run('configured.json')
-      expect(configured.HTTP_PROXY).toBe('http://proxy.invalid:8080')
-      expect(configured.HTTPS_PROXY).toBe('http://proxy.invalid:8080')
-      expect(configured.NO_PROXY).toBe('localhost')
-      expect(configured.http_proxy).toBeUndefined()
-      expect(configured.HtTpS_PrOxY).toBeUndefined()
-      expect(configured.ALL_PROXY).toBeUndefined()
-      expect(configured.no_proxy).toBeUndefined()
-      applyNetworkSettings(null, '')
-      const cleared = await run('cleared.json')
-      expect(cleared.HTTP_PROXY).toBeUndefined()
-      expect(cleared.HTTPS_PROXY).toBeUndefined()
-      expect(cleared.http_proxy).toBeUndefined()
-      expect(cleared.HtTpS_PrOxY).toBeUndefined()
-      expect(cleared.ALL_PROXY).toBeUndefined()
-      expect(cleared.no_proxy).toBeUndefined()
-      expect(cleared.NO_PROXY).toBe('')
-    } finally {
-      applyNetworkSettings(null, '')
-    }
+    const configured = await run('configured.json')
+    expect(configured).toMatchObject({
+      http_proxy: 'host-proxy',
+      HtTpS_PrOxY: 'host-proxy',
+      ALL_PROXY: 'host-proxy',
+      no_proxy: 'host-bypass',
+    })
+    expect(configured.HTTP_PROXY).toBeUndefined()
+    expect(configured.HTTPS_PROXY).toBeUndefined()
+    expect(configured.NO_PROXY).toBeUndefined()
   }, TEST_TIMEOUT)
 
   test('natural exit still converges live descendants', async () => {

@@ -27,6 +27,8 @@ import {
   DaemonConfigurationSchema,
   ErrorSchema,
   HeartbeatSchema,
+  Architecture,
+  OperatingSystem,
   IdeAction as ProtoIdeAction,
   IdeCommandSchema,
   IdeLeaseBindingSchema,
@@ -73,12 +75,11 @@ const ENV = '11111111-2222-4333-8444-555555555555'
 const OTHER_ENV = '99999999-2222-4333-8444-555555555555'
 
 const environment = {
-  operatingSystem: 'linux' as const,
-  architecture: 'amd64' as const,
+  operatingSystem: OperatingSystem.LINUX,
+  architecture: Architecture.AMD64,
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
-  note: 'Linux environment.',
   tempDirectory: '/tmp',
 }
 
@@ -116,6 +117,23 @@ function decodeHeartbeat(payloadOrJson: any): { runtimeStatus: any; ideLeaseRoun
 
 function decodeRuntimeStatus(json: string): any {
   return JSON.parse(json)
+}
+
+function decodeConfiguration(value: any): any {
+  if (value === undefined) {
+    return undefined
+  }
+  return {
+    appliedVersion: value.appliedVersion !== undefined ? String(value.appliedVersion) : null,
+    proxyUrl: value.proxyUrl ?? null,
+    error: value.error
+      ? {
+          version: String(value.error.version),
+          code: value.error.code,
+          ...(value.error.field === undefined ? {} : { field: value.error.field }),
+        }
+      : null,
+  }
 }
 
 function sent(transport: FakeTransport): DecodedSentEnvelope[] {
@@ -192,6 +210,7 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
               downloadedBytes: Number(env.payload.value.runtimeStatus.status.update.downloadedBytes),
               totalBytes: env.payload.value.runtimeStatus.status.update.totalBytes !== undefined ? Number(env.payload.value.runtimeStatus.status.update.totalBytes) : null,
             } : null,
+            configuration: decodeConfiguration(env.payload.value.runtimeStatus?.status?.configuration),
           },
         },
       }
@@ -206,6 +225,7 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
             downloadedBytes: Number(rs.status.update.downloadedBytes),
             totalBytes: rs.status.update.totalBytes !== undefined ? Number(rs.status.update.totalBytes) : null,
           } : null,
+          configuration: decodeConfiguration(rs.status?.configuration),
         },
       }
     } else if (env.payload.case === 'heartbeat') {
@@ -220,6 +240,7 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
               downloadedBytes: Number(rs.status.update.downloadedBytes),
               totalBytes: rs.status.update.totalBytes !== undefined ? Number(rs.status.update.totalBytes) : null,
             } : null,
+            configuration: decodeConfiguration(rs?.status?.configuration),
           },
         },
         ideLeaseRound: env.payload.value.ideLeaseRound !== undefined ? String(env.payload.value.ideLeaseRound) : null,
@@ -2119,8 +2140,12 @@ describe('runtime update handling', () => {
     const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
     const initial = decodeCapabilities(ready?.payload)
     expect(initial.runtimeStatus).toEqual({
-      revision: '1',
-      status: { daemonVersion: DAEMON_VERSION, update: null },
+      revision: '2',
+      status: {
+        daemonVersion: DAEMON_VERSION,
+        update: null,
+        configuration: { appliedVersion: '0', proxyUrl: null, error: null },
+      },
     })
 
     setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
@@ -2511,7 +2536,9 @@ describe('runtime IDE commands', () => {
       await vi.advanceTimersByTimeAsync(5)
       setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV }))
       setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
-      expect(setup.runtime.getState()).toBe('READY')
+      vi.useRealTimers()
+      await waitFor(() => setup.runtime.getState() === 'READY')
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       gate.resolve()
       await vi.advanceTimersByTimeAsync(0)
       expect(oldConnection.sent.some((env) => env.invocationId === 'ide-close-disconnect')).toBe(false)

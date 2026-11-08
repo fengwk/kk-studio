@@ -9,6 +9,8 @@ import {
   Architecture,
   CancelSchema,
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   InvokeSchema,
   MessageType,
   OperatingSystem,
@@ -32,7 +34,6 @@ const environment = {
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
-  note: 'Linux environment.',
   tempDirectory: '/tmp',
 }
 
@@ -71,12 +72,24 @@ async function handshake(setup: Setup): Promise<void> {
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
-          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: 1048576n,
             temporaryResourceTtlSeconds: 60n,
             temporaryResourceCleanupIntervalSeconds: 30n,
           }),
+        }),
+      },
+    }),
+  )
+  setup.transport.receive(
+    create(EnvelopeSchema, {
+      messageType: MessageType.ENVIRONMENT_CONFIG,
+      environmentId: ENV,
+      payload: {
+        case: 'environmentConfig',
+        value: create(EnvironmentConfigSchema, {
+          version: 0n,
+          config: create(DaemonConfigurationSchema, { studioUrl: 'https://studio.example.com' }),
         }),
       },
     }),

@@ -317,23 +317,24 @@ describe('daemon main real assembly', () => {
       const readyPayload = ready.payload.value as Ready
       expect(readyPayload.daemonVersion).toBe(DAEMON_VERSION)
       expect(readyPayload.runtimeStatus?.status?.daemonVersion).toBe(DAEMON_VERSION)
-      expect(readyPayload.runtimeStatus?.revision).toBe(1n)
-      const environment = readyPayload.environment
-      expect(environment).toBeDefined()
+      expect(readyPayload.runtimeStatus?.revision).toBe(2n)
+      expect(readyPayload.runtimeStatus?.status?.configuration?.appliedVersion).toBe(0n)
+      const hostInfo = readyPayload.hostInfo
+      expect(hostInfo).toBeDefined()
       if (process.platform === 'win32') {
-        expect(environment?.operatingSystem).toBe(OperatingSystem.WINDOWS)
+        expect(hostInfo?.operatingSystem).toBe(OperatingSystem.WINDOWS)
       } else if (process.platform === 'darwin') {
-        expect(environment?.operatingSystem).toBe(OperatingSystem.MACOS)
+        expect(hostInfo?.operatingSystem).toBe(OperatingSystem.MACOS)
       } else {
-        expect([OperatingSystem.LINUX, OperatingSystem.WSL]).toContain(environment?.operatingSystem)
+        expect([OperatingSystem.LINUX, OperatingSystem.WSL]).toContain(hostInfo?.operatingSystem)
       }
       if (process.arch === 'x64') {
-        expect(environment?.architecture).toBe(Architecture.AMD64)
+        expect(hostInfo?.architecture).toBe(Architecture.AMD64)
       } else if (process.arch === 'arm64') {
-        expect(environment?.architecture).toBe(Architecture.ARM64)
+        expect(hostInfo?.architecture).toBe(Architecture.ARM64)
       }
-      expect(typeof environment?.homeDirectory).toBe('string')
-      expect(environment?.tempDirectory).toBe(tmpdir())
+      expect(typeof hostInfo?.homeDirectory).toBe('string')
+      expect(hostInfo?.tempDirectory).toBe(tmpdir())
 
       // 真实 fs.write / fs.read：文件确实落到真实私有数据目录。
       const file = join(fixture.root, 'note.txt')

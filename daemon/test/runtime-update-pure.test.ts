@@ -13,6 +13,7 @@ import {
   type UpdateResult,
 } from '../src/generated/control_pb.js'
 import type { UpdatePort } from '../src/runtime-ports.js'
+import { RuntimeStatusTracker } from '../src/runtime-status.js'
 import { UpdateRuntime, type UpdateRuntimeOptions } from '../src/runtime-update.js'
 
 function makeCommand(overrides: Partial<Update> = {}): Update {
@@ -75,8 +76,9 @@ function createTestRuntime(overrides: Partial<UpdateRuntimeOptions> = {}): TestC
   const options: UpdateRuntimeOptions = {
     update: defaultUpdate,
     ide: defaultIde as unknown as IdeService,
-    config: {} as DaemonConfig,
+    config: () => ({}) as DaemonConfig,
     daemonVersion: '1.0.0',
+    status: new RuntimeStatusTracker('1.0.0'),
     outbound: outbound as unknown as UpdateRuntimeOptions['outbound'],
     hasProtectedExecutions: () => false,
     ideCommandCount: () => 0,

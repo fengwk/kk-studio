@@ -5,7 +5,8 @@ import {
   Architecture,
   CapabilityResultSchema,
   CompletedSchema,
-  EnvironmentInfoSchema,
+  ConfigurationStatusSchema,
+  HostInfoSchema,
   EnvelopeSchema,
   IdeResultSchema,
   MessageType,
@@ -25,19 +26,21 @@ import { FakeTransport, waitFor } from './helpers.js'
 
 const ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
 
-const ENVIRONMENT = create(EnvironmentInfoSchema, {
+const ENVIRONMENT = create(HostInfoSchema, {
   operatingSystem: OperatingSystem.LINUX,
   architecture: Architecture.AMD64,
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
-  note: 'Linux environment.',
   tempDirectory: '/tmp',
 })
 
 const SNAPSHOT = create(RuntimeSnapshotSchema, {
   revision: 1n,
-  status: create(RuntimeBodySchema, { daemonVersion: '1.2.3' }),
+  status: create(RuntimeBodySchema, {
+    daemonVersion: '1.2.3',
+    configuration: create(ConfigurationStatusSchema, { appliedVersion: 0n }),
+  }),
 })
 
 interface ConnectedOutbound {
@@ -152,7 +155,8 @@ describe('outbound control', () => {
     expect(outbound.sendIdeResult('inv-1', create(IdeResultSchema, { ok: false, code: 'BUSY', message: 'busy' }))).toBe(true)
 
     expect(outbound.sendSkillState([])).toBe(false)
-    expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(false)
+    // CONNECTING 已绑定会话必须能上报运行快照（含配置错误），只是不能执行业务能力。
+    expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(true)
     expect(outbound.sendUpdateResult(preparedResult())).toBe(false)
     expect(outbound.sendError('IDE_LEASE handler failed')).toBe(false)
     expect(outbound.sendBound(create(EnvelopeSchema, { messageType: MessageType.HEARTBEAT }))).toBe(false)
