@@ -63,6 +63,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 import { entryPage } from '@/test-support/session-entry-page'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {
   AgentDTO,
   ModelDTO,
@@ -3172,6 +3173,7 @@ describe('branchDraftFromEntry environment replay', () => {
     const environment: EnvironmentDTO = {
       id: 'uuid-env-ready',
       name: 'cluster-ready',
+      daemonConfig: testDaemonConfig(),
       status: 'READY',
       statusExpiresAt: null,
       ready: true,
@@ -4502,6 +4504,7 @@ describe('AgentPane root control and child observation', () => {
     return {
       id: 'f1000000-0000-4000-8000-0000000000e1',
       name,
+      daemonConfig: testDaemonConfig(),
       status: 'READY',
       statusExpiresAt: null,
       ready: true,
@@ -5218,6 +5221,7 @@ describe('AgentPane root control mounting', () => {
     const environment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
+      daemonConfig: testDaemonConfig(),
       ready: true,
       status: 'READY',
       version: '1',
@@ -5269,6 +5273,7 @@ describe('AgentPane root control mounting', () => {
     const environment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000099',
       name: 'local-node',
+      daemonConfig: testDaemonConfig(),
       ready: true,
       status: 'READY',
       version: '1',
@@ -5282,6 +5287,7 @@ describe('AgentPane root control mounting', () => {
     const secondEnvironment: EnvironmentDTO = {
       id: 'a1000000-0000-4000-8000-000000000088',
       name: 'second-node',
+      daemonConfig: testDaemonConfig(),
       ready: true,
       status: 'READY',
       version: '1',

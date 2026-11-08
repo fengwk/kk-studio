@@ -42,19 +42,20 @@ class ConfigSyncParserTest {
       ConfigSyncFixtures.resourceYaml("model-config-block.yaml");
 
   @Test
-  void absentInstallConfigMeansClearAndDeepKnownInvalidIsNotSkipped() {
-    assertNull(
-        parser
-            .parse(
-                "environments:\n  - name: env\n    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n")
-            .environments()
-            .get(0)
-            .installConfig());
-    String valid = ConfigSyncFixtures.resourceYaml("environment-install-config.yaml");
-    assertNotNull(parser.parse(valid).environments().get(0).installConfig());
+  void daemonConfigIsRequiredAndDeepKnownInvalidIsNotSkipped() {
+    assertThrows(
+        DomainException.class,
+        () ->
+            parser.parse(
+                "environments:\n  - name: env\n    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n"));
+    String valid = ConfigSyncFixtures.resourceYaml("environment-card.yaml");
+    var environment = parser.parse(valid).environments().get(0);
+    assertNotNull(environment.daemonConfig());
+    assertEquals("日常开发环境 'quoted'", environment.note());
+    assertEquals("https://studio.example.com", environment.daemonConfig().getStudioUrl());
     for (String invalid :
         List.of(
-            valid.replace("linux", "wsl"),
+            valid.replace("http://127.0.0.1:7890", "https://proxy:7890"),
             // bashExecutable 只接受非空白字符串：即使条目另含未知字段，空白值也必须硬错。
             valid.replace("bashExecutable: /bin/bash", "bashExecutable: \"  \""),
             valid.replace("\"pom.xml\"", "\"../outside\""),
@@ -65,8 +66,45 @@ class ConfigSyncParserTest {
           DomainException.class,
           () ->
               parser.parse(
-                  invalid.replace("    installConfig:", "    bogus: true\n    installConfig:")));
+                  invalid.replace("    daemonConfig:", "    bogus: true\n    daemonConfig:")));
     }
+  }
+
+  @Test
+  void removedOldInstallShapeAndSettingsNetworkAreValidationFailures() {
+    String oldEnvironment =
+        "environments:\n"
+            + "  - name: env\n"
+            + "    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n"
+            + "    installConfig:\n"
+            + "      operatingSystem: linux\n";
+    assertThrows(DomainException.class, () -> parser.parse(oldEnvironment));
+    assertThrows(
+        DomainException.class,
+        () -> parser.parse(oldEnvironment.replace("installConfig:", "daemonConfig:")));
+    assertThrows(
+        DomainException.class,
+        () -> parser.parse("settings:\n  network:\n    proxyUrl: http://127.0.0.1:7890\n"));
+    // 一般未知字段仍保持条目级 skip 语义，不扩大为所有未知字段都硬错。
+    ConfigSyncParser.ParsedDocument skipped =
+        parser.parse(
+            ConfigSyncFixtures.resourceYaml("environment-card.yaml")
+                .replace(
+                    "    registrationTokenHash:", "    bogus: true\n    registrationTokenHash:"));
+    assertTrue(skipped.environments().isEmpty());
+    assertEquals(1, skipped.skipped().size());
+  }
+
+  @Test
+  void unknownNestedDaemonConfigFieldSkipsTheWholeEntry() {
+    ConfigSyncParser.ParsedDocument document =
+        parser.parse(
+            ConfigSyncFixtures.resourceYaml("environment-card.yaml")
+                .replace(
+                    "      bashExecutable: /bin/bash",
+                    "      bashExecutable: /bin/bash\n      bogus: 1"));
+    assertTrue(document.environments().isEmpty());
+    assertEquals(ConfigSyncKind.ENVIRONMENTS, document.skipped().get(0).getKind());
   }
 
   private static String provider(String name, String protocol) {

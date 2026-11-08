@@ -47,6 +47,20 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
         and c.lease_until > statement_timestamp()
       """;
 
+  /** runtime 快照查询允许 CONNECTING 与 READY；执行/IDE 路由仍只使用 READY 的 {@link #ROUTE_SQL}。 */
+  private static final String RUNTIME_ROUTE_SQL =
+      """
+      select c.owner_node_id as owner_node_id,
+             (c.owner_node_id = :localNodeId) as local_owner,
+             n.internal_url as internal_url,
+             (n.lease_until > statement_timestamp()) as node_usable
+      from environment_connection c
+      left join cluster_node n on n.instance_id = c.owner_node_id
+      where c.environment_id = :environmentId
+        and c.status in ('CONNECTING', 'READY')
+        and c.lease_until > statement_timestamp()
+      """;
+
   /** 本节点注册/续约：同一 instanceId upsert，internal_url 与租约一起刷新。 */
   private static final String REGISTER_SQL =
       """
@@ -113,12 +127,21 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
 
   @Override
   public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
+    return route(environmentId, ROUTE_SQL);
+  }
+
+  @Override
+  public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+    return route(environmentId, RUNTIME_ROUTE_SQL);
+  }
+
+  private Optional<ClusterOwnerRoute> route(EnvironmentId environmentId, String sql) {
     if (environmentId == null) {
       return Optional.empty();
     }
     List<OwnerRow> rows =
         jdbcClient
-            .sql(ROUTE_SQL)
+            .sql(sql)
             .param("localNodeId", localNodeId)
             .param("environmentId", environmentId.value())
             .query(OwnerRowMapper.INSTANCE)

@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -125,6 +126,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       Environment created = new Environment();
       created.setId(UUID.randomUUID());
       created.setName("notify-failure-created");
+      created.setDaemonConfig(daemonConfig());
       created.setRegistrationTokenHash(RegistrationTokens.hash("notify-failure-created-token"));
       assertThrows(
           DataAccessResourceFailureException.class,
@@ -205,6 +207,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   private static EnvironmentCreateDTO createDto(String name) {
     EnvironmentCreateDTO dto = new EnvironmentCreateDTO();
     dto.setName(name);
+    dto.setDaemonConfig(daemonConfig());
     return dto;
   }
 
@@ -212,12 +215,21 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   private UUID seedEnvironment(String name, String token, long version) {
     UUID id = UUID.randomUUID();
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token_hash, version) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), ?)",
+        "insert into environment (id, name, note, registration_token_hash, daemon_config, version)"
+            + " values (?, ?, null, encode(sha256(convert_to(?, 'UTF8')), 'hex'),"
+            + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+            + "\"lsp\":null,\"proxyUrl\":null}'::jsonb, ?)",
         id,
         name,
         token,
         version);
     return id;
+  }
+
+  private static DaemonConfigDTO daemonConfig() {
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
+    return config;
   }
 
   private void expireConnectionLease(UUID environmentId) {

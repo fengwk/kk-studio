@@ -12,10 +12,10 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
@@ -24,12 +24,13 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.Architecture;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Cancelled;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Completed;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
-import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Error;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ExecutionExited;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Failed;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Heartbeat;
+import fun.fengwk.kkstudio.platform.daemon.protocol.HostInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
@@ -75,15 +76,14 @@ final class EnvironmentDaemonServerTestSupport {
   static final String OTHER_INSTANCE_ID = "44444444-4444-4444-4444-444444444444";
   static final String DAEMON_VERSION = "1.0.9";
 
-  static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
+  static final DaemonReadyMetadata READY_METADATA =
+      new DaemonReadyMetadata(
           DAEMON_VERSION,
-          new DaemonEnvironmentInfo(
+          new DaemonHostInfo(
               DaemonOperatingSystem.LINUX,
               "Asia/Shanghai",
               "dev",
               "/home/dev",
-              "note",
               "/tmp/kk-studio",
               "amd64"));
 
@@ -117,13 +117,12 @@ final class EnvironmentDaemonServerTestSupport {
         .setReady(
             Ready.newBuilder()
                 .setDaemonVersion(DAEMON_VERSION)
-                .setEnvironment(
-                    EnvironmentInfo.newBuilder()
+                .setHostInfo(
+                    HostInfo.newBuilder()
                         .setOperatingSystem(os)
                         .setTimeZone("Asia/Shanghai")
                         .setUserName("dev")
                         .setHomeDirectory("/home/dev")
-                        .setNote("note")
                         .setTempDirectory("/tmp/kk-studio")
                         .setArchitecture(Architecture.AMD64)
                         .build())
@@ -497,8 +496,10 @@ final class EnvironmentDaemonServerTestSupport {
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
     final AtomicReference<EnvironmentServerSettings> settings =
         new AtomicReference<>(defaultSettings());
+    final Map<EnvironmentId, EnvironmentConfigSnapshot> configs = new ConcurrentHashMap<>();
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
+    Throwable configLookupFailure;
 
     final Map<FakeControlChannel, DaemonSession> sessions = new ConcurrentHashMap<>();
 
@@ -507,6 +508,8 @@ final class EnvironmentDaemonServerTestSupport {
     RuntimeException settingsFailure;
 
     Fixture() {
+      configs.put(ENVIRONMENT_ID, configSnapshot(ENVIRONMENT_ID, 0L));
+      configs.put(OTHER_ENVIRONMENT_ID, configSnapshot(OTHER_ENVIRONMENT_ID, 0L));
       this.server =
           new EnvironmentDaemonServer(
               leaseStore,
@@ -515,13 +518,14 @@ final class EnvironmentDaemonServerTestSupport {
                   throw new IllegalStateException("directory unavailable");
                 }
                 if (TOKEN.equals(token)) {
-                  return Optional.of(new DaemonRegistration(ENVIRONMENT_ID, "env-1"));
+                  return Optional.of(new DaemonRegistration(ENVIRONMENT_ID));
                 }
                 if (OTHER_TOKEN.equals(token)) {
-                  return Optional.of(new DaemonRegistration(OTHER_ENVIRONMENT_ID, "env-2"));
+                  return Optional.of(new DaemonRegistration(OTHER_ENVIRONMENT_ID));
                 }
                 return Optional.empty();
               },
+              this::findConfig,
               new EnvironmentSessionListener() {
                 @Override
                 public void onEnvironmentReady(EnvironmentId environmentId) {
@@ -553,27 +557,43 @@ final class EnvironmentDaemonServerTestSupport {
                   throw settingsFailure;
                 }
                 return settings.get();
-              });
+              },
+              Runnable::run);
+    }
+
+    private Optional<EnvironmentConfigSnapshot> findConfig(EnvironmentId environmentId) {
+      if (configLookupFailure != null) {
+        throwUnchecked(configLookupFailure);
+      }
+      return Optional.ofNullable(configs.get(environmentId));
+    }
+
+    static EnvironmentConfigSnapshot configSnapshot(EnvironmentId environmentId, long version) {
+      return new EnvironmentConfigSnapshot(
+          version,
+          DaemonConfiguration.newBuilder()
+              .setStudioUrl("https://studio.example.org")
+              .setBashExecutable("/bin/bash")
+              .build());
     }
 
     void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
       settings.set(
           new EnvironmentServerSettings(
-              Duration.ofSeconds(60),
-              16L * 1024 * 1024,
-              ttlSeconds,
-              cleanupIntervalSeconds,
-              null,
-              ""));
+              Duration.ofSeconds(60), 16L * 1024 * 1024, ttlSeconds, cleanupIntervalSeconds));
     }
 
     private static EnvironmentServerSettings defaultSettings() {
       return new EnvironmentServerSettings(
-          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, "");
+          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
     }
 
     void failRegistrationDirectory() {
       registrationDirectoryFails = true;
+    }
+
+    private static EnvironmentId environmentIdForToken(String token) {
+      return OTHER_TOKEN.equals(token) ? OTHER_ENVIRONMENT_ID : ENVIRONMENT_ID;
     }
 
     FakeControlChannel openSession(String connectionId) {
@@ -585,7 +605,8 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     FakeControlChannel openSession(String connectionId, String daemonInstanceId, String token) {
-      DaemonAdmission admission = server.admit(new DaemonHandshake(token, daemonInstanceId));
+      DaemonAdmission admission =
+          server.admit(new DaemonHandshake(environmentIdForToken(token), token, daemonInstanceId));
       if (!(admission instanceof DaemonAdmission.Admitted admitted)) {
         throw new IllegalStateException("admission failed: " + admission);
       }
@@ -610,7 +631,8 @@ final class EnvironmentDaemonServerTestSupport {
           entry.getValue().close();
         }
       }
-      DaemonAdmission admission = server.admit(new DaemonHandshake(token, daemonInstanceId));
+      DaemonAdmission admission =
+          server.admit(new DaemonHandshake(environmentIdForToken(token), token, daemonInstanceId));
       if (!(admission instanceof DaemonAdmission.Admitted admitted)) {
         throw new IllegalStateException("admission failed: " + admission);
       }
@@ -669,6 +691,7 @@ final class EnvironmentDaemonServerTestSupport {
 
   static final class FakeLeaseStore implements DaemonLeaseStore {
 
+    int heartbeatCount;
     boolean holdsReadyLease = true;
     boolean heartbeatResult = true;
     boolean activeLeaseToken = true;
@@ -679,7 +702,7 @@ final class EnvironmentDaemonServerTestSupport {
     boolean markReadyResult = true;
     boolean rejected;
     boolean retryLater;
-    DaemonCapabilities readyCapabilities;
+    DaemonReadyMetadata readyMetadata;
     final List<EnvironmentId> runtimeStatusChanges = new ArrayList<>();
     boolean runtimeStatusNotificationFails;
     boolean runtimeStatusFenceLost;
@@ -709,17 +732,18 @@ final class EnvironmentDaemonServerTestSupport {
     public boolean markReady(
         EnvironmentId environmentId,
         UUID leaseToken,
-        DaemonCapabilities capabilities,
+        DaemonReadyMetadata readyMetadata,
         Duration leaseDuration) {
       if (databaseUnavailable) {
         throw new IllegalStateException("database unavailable");
       }
-      readyCapabilities = capabilities;
+      this.readyMetadata = readyMetadata;
       return markReadyResult;
     }
 
     @Override
     public boolean heartbeat(EnvironmentId environmentId, UUID leaseToken, Duration leaseDuration) {
+      heartbeatCount++;
       return heartbeatResult;
     }
 
@@ -945,6 +969,13 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     List<MessageType> messageTypes() {
+      return envelopes.stream()
+          .map(Envelope::getMessageType)
+          .filter(type -> type != MessageType.ENVIRONMENT_CONFIG)
+          .toList();
+    }
+
+    List<MessageType> allMessageTypes() {
       return envelopes.stream().map(Envelope::getMessageType).toList();
     }
 

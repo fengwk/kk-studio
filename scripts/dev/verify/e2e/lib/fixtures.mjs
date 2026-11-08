@@ -1,6 +1,75 @@
 /** 可复用的合法请求体与配置矩阵行定义。 */
 
-import { assert, HttpError } from './http.mjs'
+import { assert, assertExactFields, HttpError } from './http.mjs'
+
+/** 卡片完整 Daemon 配置：包含全部 canonical 字段，供 API 与安装脚本往返断言。 */
+export function daemonConfigFixture(overrides = {}) {
+  return {
+    studioUrl: 'http://127.0.0.1:18081',
+    bashExecutable: '/bin/bash',
+    lsp: {
+      servers: {
+        jdtls: {
+          command: ['/usr/bin/jdtls'],
+          extensions: ['.java'],
+          rootMarkers: ['pom.xml'],
+          firstMatchMarkers: ['.git'],
+        },
+      },
+    },
+    proxyUrl: 'http://127.0.0.1:7890',
+    ...overrides,
+  }
+}
+
+/** 创建卡片：name 不可变，note 与 daemonConfig 是完整可编辑属性。 */
+export function environmentCreateBody(name, overrides = {}) {
+  return {
+    name,
+    note: 'e2e environment note',
+    daemonConfig: daemonConfigFixture(),
+    ...overrides,
+  }
+}
+
+/** 校验卡片配置的已知字段形状；HTTP 与安装脚本都必须使用同一结构。 */
+export function assertDaemonConfig(config, { exact = true } = {}) {
+  assert(config && typeof config === 'object' && !Array.isArray(config), `daemonConfig must be an object: ${JSON.stringify(config)}`)
+  if (exact) {
+    assertExactFields(config, ['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'], 'daemonConfig')
+  } else {
+    const unknown = Object.keys(config).filter(
+      (key) => !['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'].includes(key),
+    )
+    assert(unknown.length === 0, `daemonConfig has unknown fields: ${JSON.stringify(unknown)}`)
+  }
+  assert(
+    config.studioUrl === 'http://127.0.0.1:18081',
+    `studioUrl must round-trip: ${config.studioUrl}`,
+  )
+  assert(
+    config.bashExecutable === '/bin/bash',
+    `bashExecutable must round-trip: ${config.bashExecutable}`,
+  )
+  assert(
+    config.proxyUrl === 'http://127.0.0.1:7890',
+    `proxyUrl must round-trip: ${config.proxyUrl}`,
+  )
+  const jdtls = config.lsp?.servers?.jdtls
+  assert(jdtls, `jdtls server must round-trip: ${JSON.stringify(config.lsp)}`)
+  assert(
+    Array.isArray(jdtls.command)
+      && jdtls.command.length === 1
+      && jdtls.command[0] === '/usr/bin/jdtls',
+    `command must round-trip: ${JSON.stringify(jdtls.command)}`,
+  )
+  assert(
+    jdtls.extensions?.[0] === '.java'
+      && jdtls.rootMarkers?.[0] === 'pom.xml'
+      && jdtls.firstMatchMarkers?.[0] === '.git',
+    `nested marker lists must round-trip: ${JSON.stringify(jdtls)}`,
+  )
+}
 
 /**
  * 把 Model 逻辑名编码为 catalog 路径 tail：按 `/` 分段编码，保留逻辑名中的路径层级。
@@ -524,16 +593,21 @@ export function providerUpdateBody(overrides = {}) {
 }
 
 /**
- * Environment fixture：创建一次性 Environment 并返回权威资源。
+ * Environment fixture：创建一次性卡片并返回权威资源。
  *
- * <p>用例只依赖 Environment 的 id 与 CAS version；一次性 registrationToken 不进入断言，也不写入 artifact。
+ * <p>创建请求必须携带完整 daemonConfig；用例只依赖卡片的 id 与 CAS version，一次性 registrationToken
+ * 不进入断言，也不写入 artifact。
  */
-export async function createEnvironmentFixture(ctx, name) {
-  const { json } = await ctx.call('POST', '/api/platform/environments', { name })
+export async function createEnvironmentFixture(ctx, name, overrides = {}) {
+  const { json } = await ctx.call(
+    'POST',
+    '/api/platform/environments',
+    environmentCreateBody(name, overrides),
+  )
   const card = json
   assert(
-    card && typeof card === 'object' && card.id && card.version != null,
-    'created environment must expose id and version',
+    card && typeof card === 'object' && card.id && card.version != null && card.daemonConfig,
+    'created environment must expose id, version and daemonConfig',
   )
   return card
 }

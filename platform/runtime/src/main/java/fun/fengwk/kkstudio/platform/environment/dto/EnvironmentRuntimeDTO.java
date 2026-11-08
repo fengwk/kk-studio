@@ -12,4 +12,8 @@ public class EnvironmentRuntimeDTO {
   /** 无更新时必须为显式 null，而不是省略字段。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable EnvironmentUpdateProgressDTO update;
+
+  /** 当前进程配置状态；对象始终存在，内部可空字段用存在性表达无应用/直连。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private EnvironmentRuntimeConfigurationDTO configuration;
 }

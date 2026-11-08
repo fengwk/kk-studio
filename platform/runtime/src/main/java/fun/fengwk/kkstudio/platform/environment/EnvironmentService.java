@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment;
 
-import lombok.AllArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -8,17 +8,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigCodec;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.LiveEnvironmentCapabilityDTO;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
@@ -35,8 +37,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 稳定 Environment 业务服务。 */
-@AllArgsConstructor
+/** 稳定 Environment 卡片业务服务：完整配置 CAS、备注、安装码与安装脚本。 */
 @Service
 public class EnvironmentService {
 
@@ -46,6 +47,22 @@ public class EnvironmentService {
   private final EnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
+  private final String daemonReleaseVersion;
+
+  public EnvironmentService(
+      EnvironmentRepository environmentRepository,
+      EnvironmentRegistry environmentRegistry,
+      SystemSettingsSnapshot snapshot,
+      Clock clock,
+      @Qualifier("daemonReleaseVersion") String daemonReleaseVersion) {
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+    this.clock = Objects.requireNonNull(clock, "clock");
+    this.daemonReleaseVersion =
+        Objects.requireNonNull(daemonReleaseVersion, "daemonReleaseVersion");
+  }
 
   @Transactional
   public EnvironmentDTO create(EnvironmentCreateDTO dto) {
@@ -53,12 +70,16 @@ public class EnvironmentService {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String name = validateName(dto.getName());
+    String note = validateNote(dto.getNote());
+    DaemonConfigDTO daemonConfig = validateDaemonConfig(dto.getDaemonConfig());
     if (environmentRepository.existsByName(name)) {
       throw DomainException.duplicate(RESOURCE, "environment name already exists: " + name);
     }
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
     env.setName(name);
+    env.setNote(note);
+    env.setDaemonConfig(daemonConfig);
     String token = RegistrationTokens.generate();
     env.setRegistrationTokenHash(RegistrationTokens.hash(token));
     try {
@@ -107,11 +128,11 @@ public class EnvironmentService {
 
   @Transactional
   public EnvironmentDTO importEnvironment(
-      String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {
+      String name, String note, String registrationTokenHash, DaemonConfigDTO daemonConfig) {
     String canonicalName = validateName(name);
+    String canonicalNote = validateNote(note);
     String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
-    EnvironmentInstallConfigDTO config =
-        installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
+    DaemonConfigDTO config = validateDaemonConfig(daemonConfig);
     if (environmentRepository.existsByName(canonicalName)) {
       throw DomainException.duplicate(
           RESOURCE, "environment name already exists: " + canonicalName);
@@ -122,8 +143,9 @@ public class EnvironmentService {
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
     env.setName(canonicalName);
+    env.setNote(canonicalNote);
     env.setRegistrationTokenHash(tokenHash);
-    env.setInstallConfig(config);
+    env.setDaemonConfig(config);
     try {
       if (!environmentRepository.create(env)) {
         throw new IllegalStateException("create environment failed");
@@ -139,13 +161,14 @@ public class EnvironmentService {
   @Transactional
   public EnvironmentDTO updateImportedEnvironment(
       EnvironmentId id,
+      String note,
       String registrationTokenHash,
-      EnvironmentInstallConfigDTO installConfig,
+      DaemonConfigDTO daemonConfig,
       long expectedVersion) {
     Objects.requireNonNull(id, "id");
+    String canonicalNote = validateNote(note);
     String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
-    EnvironmentInstallConfigDTO config =
-        installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
+    DaemonConfigDTO config = validateDaemonConfig(daemonConfig);
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
@@ -153,12 +176,9 @@ public class EnvironmentService {
     if (env.getVersion() != expectedVersion) {
       throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
-    if (tokenHash.equals(env.getRegistrationTokenHash())
-        && Objects.equals(config, env.getInstallConfig())) {
-      return toDto(env, null);
-    }
+    env.setNote(canonicalNote);
     env.setRegistrationTokenHash(tokenHash);
-    env.setInstallConfig(config);
+    env.setDaemonConfig(config);
     try {
       if (!environmentRepository.updateById(env, expectedVersion)) {
         Environment reread = environmentRepository.getById(id.value());
@@ -175,19 +195,19 @@ public class EnvironmentService {
     return toDto(updated, null);
   }
 
+  /** 显式 PUT 整体替换可编辑属性；即使内容相同也推进版本并发布配置变更通知。 */
   @Transactional
-  public EnvironmentDTO updateInstallConfig(
-      EnvironmentId id, EnvironmentInstallConfigUpdateDTO request) {
+  public EnvironmentDTO update(EnvironmentId id, EnvironmentUpdateDTO request) {
     Objects.requireNonNull(id, "id");
     if (request == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
-    EnvironmentInstallConfigDTO config =
-        EnvironmentInstallConfigs.validate(request.getInstallConfig());
     Long expectedVersion = request.getExpectedVersion();
     if (expectedVersion == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
+    String note = validateNote(request.getNote());
+    DaemonConfigDTO config = validateDaemonConfig(request.getDaemonConfig());
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
@@ -195,10 +215,8 @@ public class EnvironmentService {
     if (env.getVersion() != expectedVersion) {
       throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
-    if (Objects.equals(config, env.getInstallConfig())) {
-      return toDto(env, null);
-    }
-    env.setInstallConfig(config);
+    env.setNote(note);
+    env.setDaemonConfig(config);
     if (!environmentRepository.updateById(env, expectedVersion)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
@@ -230,49 +248,60 @@ public class EnvironmentService {
   public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, long expectedVersion) {
     Environment env = requireInstallable(id, expectedVersion);
     String code = EnvironmentInstallCodes.generate();
-    Instant expiresAt = clock.instant().plus(Duration.ofMinutes(5));
-    if (!environmentRepository.saveInstallCode(
-        env.getId(), env.getVersion(), EnvironmentInstallCodes.hash(code), expiresAt)) {
+    Optional<Instant> expiresAt =
+        environmentRepository.saveInstallCode(
+            env.getId(), env.getVersion(), EnvironmentInstallCodes.hash(code));
+    if (expiresAt.isEmpty()) {
       throw new IllegalStateException("locked environment changed while issuing an install code");
     }
     EnvironmentInstallCodeDTO result = new EnvironmentInstallCodeDTO();
     result.setCode(code);
-    result.setExpiresAt(expiresAt);
+    result.setExpiresAt(expiresAt.get());
     return result;
   }
 
   /**
    * 兑换安装 code：为本次安装签发新凭证并写入脚本。
    *
-   * <p>锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并生成脚本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
+   * <p>公开入口必须是真实 Spring 事务代理的调用边界：锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并返回兑换后的 CAS
+   * 版本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
   @Transactional
-  public String installationScript(EnvironmentId id, String code) {
+  public String installationScript(
+      EnvironmentId id, String code, DaemonOperatingSystem operatingSystem) {
     Objects.requireNonNull(id, "id");
+    EnvironmentInstallScripts.requireInstallableOperatingSystem(operatingSystem);
     Environment env = environmentRepository.lockById(id.value());
-    if (env == null || env.getInstallConfig() == null) {
+    if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
     if (code == null) {
       throw DomainException.validation(RESOURCE, "invalid or expired install code");
     }
     String token = RegistrationTokens.generate();
-    if (!environmentRepository.redeemInstallCode(
-        env.getId(),
-        env.getVersion(),
-        EnvironmentInstallCodes.hash(code),
-        RegistrationTokens.hash(token))) {
+    Optional<Long> redeemedVersion =
+        environmentRepository.redeemInstallCode(
+            env.getId(),
+            env.getVersion(),
+            EnvironmentInstallCodes.hash(code),
+            RegistrationTokens.hash(token));
+    if (redeemedVersion.isEmpty()) {
       throw DomainException.validation(RESOURCE, "invalid or expired install code");
     }
     return EnvironmentInstallScripts.install(
-        env.getInstallConfig(), token, snapshot.get().network());
+        env.getId(),
+        redeemedVersion.get(),
+        env.getDaemonConfig(),
+        token,
+        operatingSystem,
+        daemonReleaseVersion);
   }
 
-  /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
+  /** 签发必须校验期望版本；兑换只校验 code 与目标操作系统，不接收版本。 */
   private Environment requireInstallable(EnvironmentId id, long expectedVersion) {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.lockById(id.value());
-    if (env == null || env.getInstallConfig() == null) {
+    if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
@@ -281,8 +310,13 @@ public class EnvironmentService {
     return env;
   }
 
-  public String uninstallationScript(DaemonOperatingSystem operatingSystem) {
-    return EnvironmentInstallScripts.uninstall(operatingSystem, snapshot.get().network());
+  public String uninstallationScript(EnvironmentId id, DaemonOperatingSystem operatingSystem) {
+    Objects.requireNonNull(id, "id");
+    EnvironmentInstallScripts.requireInstallableOperatingSystem(operatingSystem);
+    if (environmentRepository.getById(id.value()) == null) {
+      throw DomainException.notFound(RESOURCE);
+    }
+    return EnvironmentInstallScripts.uninstall(id.value(), operatingSystem, daemonReleaseVersion);
   }
 
   @Transactional
@@ -375,6 +409,39 @@ public class EnvironmentService {
     return trimmed;
   }
 
+  /** 卡片备注可为空；保存时去除首尾空白，拒绝控制字符与超过 512 字符的文本。 */
+  public static String validateNote(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    if (raw.codePoints().anyMatch(Character::isISOControl)
+        || raw.indexOf('\u2028') >= 0
+        || raw.indexOf('\u2029') >= 0) {
+      throw DomainException.validation(
+          RESOURCE, "environment note must not contain control characters");
+    }
+    String note = raw.strip();
+    if (note.isEmpty()) {
+      return null;
+    }
+    if (note.length() > 512) {
+      throw DomainException.validation(RESOURCE, "environment note must be <= 512 characters");
+    }
+    return note;
+  }
+
+  /** CRUD 与配置同步共用的完整 Daemon 配置校验；错误不携带提交值。 */
+  public static DaemonConfigDTO validateDaemonConfig(DaemonConfigDTO config) {
+    if (config == null) {
+      throw DomainException.validation(RESOURCE, "daemonConfig must be an object");
+    }
+    try {
+      return DaemonConfigCodec.validate(config);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, error.getMessage());
+    }
+  }
+
   /** 导入的凭证摘要必须是规范 SHA-256（64 位小写十六进制）。 */
   public static String validateRegistrationTokenHash(String raw) {
     if (!RegistrationTokens.isHash(raw)) {
@@ -389,7 +456,8 @@ public class EnvironmentService {
     EnvironmentDTO dto = new EnvironmentDTO();
     dto.setId(env.getId().toString());
     dto.setName(env.getName());
-    dto.setInstallConfig(env.getInstallConfig());
+    dto.setNote(env.getNote());
+    dto.setDaemonConfig(env.getDaemonConfig());
     dto.setRegistrationToken(token);
     dto.setVersion(env.getVersion());
     dto.setCreatedAt(env.getCreatedAt());
@@ -424,14 +492,13 @@ public class EnvironmentService {
         conn.isReady(
             now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeenAt(conn.lastSeenAt());
-    DaemonEnvironmentInfo host =
-        conn.daemonCapabilities() == null ? null : conn.daemonCapabilities().environment();
+    DaemonReadyMetadata ready = conn.readyMetadata();
+    DaemonHostInfo host = ready == null ? null : ready.hostInfo();
     dto.setOperatingSystem(host == null ? null : host.operatingSystem());
     dto.setTimeZone(host == null ? null : host.timeZone());
-    dto.setNote(host == null ? null : host.note());
     dto.setUserName(host == null ? null : host.userName());
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
-    dto.setDaemonVersion(conn.daemonVersion());
+    dto.setDaemonVersion(ready == null ? null : ready.daemonVersion());
     dto.setCapabilities(
         statusValid
             ? conn.capabilities().stream()

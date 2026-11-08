@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { acquireDirectoryLock } from '../../src/native/index.js'
+import { INSTALL_LOCK_FILE_NAME, acquireDirectoryLock, waitForDirectoryLock } from '../../src/native/index.js'
 import { awaitGone, fixturePath, isAlive } from './process-test-util.js'
 
 // 目录锁必须是内核锁：同一目录竞争时第二个持有者失败，持有进程崩溃时由内核释放。
@@ -25,6 +25,22 @@ describe.skipIf(process.platform === 'win32')('native directory lock', () => {
     await lock.close()
     const again = await acquireDirectoryLock(workdir)
     await again.close()
+  })
+
+  test('the install lock is independent from the daemon lock', async () => {
+    // 安装互斥与运行锁必须使用同一目录下的不同锁文件，安装器不能在服务运行时误判为 busy。
+    const runtime = await acquireDirectoryLock(workdir)
+    const install = await acquireDirectoryLock(workdir, INSTALL_LOCK_FILE_NAME)
+    await expect(acquireDirectoryLock(workdir, INSTALL_LOCK_FILE_NAME)).rejects.toThrow(/already locked/)
+    await install.close()
+    await runtime.close()
+  })
+
+  test('waitForDirectoryLock returns after the holder releases', async () => {
+    const lock = await acquireDirectoryLock(workdir)
+    const released = lock.close()
+    await expect(waitForDirectoryLock(workdir, 'daemon.lock', 5_000, 10)).resolves.toBeUndefined()
+    await released
   })
 
   test('close is idempotent', async () => {

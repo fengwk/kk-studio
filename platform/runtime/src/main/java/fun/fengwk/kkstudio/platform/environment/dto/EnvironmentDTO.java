@@ -9,12 +9,17 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import java.time.Instant;
 import java.util.List;
 
-/** Environment 资源：稳定配置属性与当前 live 连接投影。 */
+/** Environment 卡片资源：稳定配置属性与当前 live 连接投影。 */
 @Data
 public class EnvironmentDTO {
   private String id;
   private String name;
-  private @Nullable EnvironmentInstallConfigDTO installConfig;
+
+  /** 卡片备注；保存后立即影响展示和提示词，不依赖 Daemon READY。 */
+  private @Nullable String note;
+
+  /** 完整 Daemon 配置；GET 不回显 token。 */
+  private DaemonConfigDTO daemonConfig;
 
   /**
    * 仅在 create 与 rotate-token 响应返回新值；列表和详情省略该字段。安装通过一次性 code 兑换脚本，不读取现有 token。
@@ -54,9 +59,6 @@ public class EnvironmentDTO {
 
   /** 最近一次被接受的 READY 宿主进程用户 canonical HOME；从未 READY 时为 null。仅用于展示，不是默认 workdir。 */
   private @Nullable String homeDirectory;
-
-  /** 最近一次被接受的 READY 宿主备注；从未 READY 时为 null。 */
-  private @Nullable String note;
 
   /**
    * 最近一次被接受的 READY 上报的实际 Daemon 构建版本（JAR manifest {@code Implementation-Version}，未打包时为 {@code

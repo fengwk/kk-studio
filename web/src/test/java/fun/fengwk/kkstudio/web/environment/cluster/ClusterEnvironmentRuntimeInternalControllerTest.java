@@ -47,6 +47,8 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     authentication = mock(ClusterInternalAuthentication.class);
     when(clusterNodeRegistry.route(any()))
         .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+    when(clusterNodeRegistry.runtimeRoute(any()))
+        .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new ClusterEnvironmentRuntimeInternalController(
@@ -94,7 +96,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
 
   @Test
   void rejectsNonOwnerNode() throws Exception {
-    when(clusterNodeRegistry.route(any()))
+    when(clusterNodeRegistry.runtimeRoute(any()))
         .thenReturn(
             Optional.of(
                 ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://other.internal"))));

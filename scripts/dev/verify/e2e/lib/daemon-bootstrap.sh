@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # scripts/dev/verify/e2e/lib/daemon-bootstrap.sh
 #
-# 在隔离的 DAEMON_ROOT 下物化共享 daemon.json 与同目录 daemon.token，然后以唯一的
+# 在隔离的 DAEMON_ROOT 下物化唯一 daemon.json 本地缓存与同目录 daemon.token，然后以
 # `--config <绝对路径>` 启动 Node Daemon 编译入口 `$DAEMON_DIST/main.js`。
-# studioUrl/note（非机密）经 Node 序列化为合法 JSON 并保留 Unicode；注册凭证只经内建
-# printf 写入 owner-only 文件，绝不进入 JSON、argv 或落地后的 daemon 环境。数据目录即
-# 配置文件父目录。
+#
+# daemon.json 固定为 {environmentId,version:string,daemonConfig:{studioUrl,bashExecutable,lsp,proxyUrl}}：
+# 卡片由 DAEMON_ENVIRONMENT_ID 或 DAEMON_ENVIRONMENT_NAME 定位，Studio 数据库是配置权威；若卡片
+# studioUrl 不是本测试进程可达的 DAEMON_STUDIO_URL，则用当前 CAS version 通过卡片 API 修正后写 cache。
+# 卡片备注不进入本地 cache。注册凭证只经内建 printf 写入 owner-only 文件，绝不进入 JSON、
+# argv 或落地后的 daemon 环境。数据目录即配置文件父目录。
 set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+config_helper="$script_dir/../../../../../deploy/reliability/daemon-config-cache.mjs"
 
 root=${DAEMON_ROOT:?DAEMON_ROOT (absolute daemon root) is required}
 studio_url=${DAEMON_STUDIO_URL:?DAEMON_STUDIO_URL (http(s) origin) is required}
-note=${DAEMON_NOTE:-}
+environment_id=${DAEMON_ENVIRONMENT_ID:-}
+environment_name=${DAEMON_ENVIRONMENT_NAME:-}
 dist=${DAEMON_DIST:?DAEMON_DIST (absolute daemon distribution directory) is required}
 node_bin=${DAEMON_NODE:-}
 
@@ -20,6 +27,10 @@ unset DAEMON_REGISTRATION_TOKEN KK_STUDIO_DAEMON_REGISTRATION_TOKEN
 
 if [ -z "$token" ]; then
   echo "ERROR: DAEMON_REGISTRATION_TOKEN is required to register the daemon." >&2
+  exit 1
+fi
+if [ -z "$environment_id" ] && [ -z "$environment_name" ]; then
+  echo "ERROR: DAEMON_ENVIRONMENT_ID or DAEMON_ENVIRONMENT_NAME is required." >&2
   exit 1
 fi
 case "$root" in
@@ -40,8 +51,12 @@ if [ ! -f "$entry" ]; then
   echo "ERROR: daemon entry is missing: $entry (run: npm --prefix daemon run build)." >&2
   exit 1
 fi
+if [ ! -f "$config_helper" ]; then
+  echo "ERROR: daemon configuration helper is missing: $config_helper" >&2
+  exit 1
+fi
 
-mkdir -p "$root"
+(umask 077 && mkdir -p "$root")
 chmod 700 "$root"
 config_file="$root/daemon.json"
 token_file="$root/daemon.token"
@@ -50,18 +65,17 @@ token_file="$root/daemon.token"
 chmod 600 "$token_file"
 unset token
 
-# studioUrl/note 经环境变量交给 Node；值不参与 shell 拼接，因此不存在注入面。
-# umask 与显式 mode 保证配置文件创建时即 owner-only，而非先宽后 chmod。
-(umask 077 && DAEMON_CONFIG_STUDIO_URL="$studio_url" DAEMON_CONFIG_NOTE="$note" \
-  "$node_bin" -e 'const fs = require("fs");
-const target = process.argv[1];
-const config = { studioUrl: process.env.DAEMON_CONFIG_STUDIO_URL };
-const note = process.env.DAEMON_CONFIG_NOTE;
-if (note) {
-  config.note = note;
-}
-fs.writeFileSync(target, JSON.stringify(config) + "\n", { mode: 0o600 });' "$config_file")
+# 卡片 API 与配置序列化都交给唯一的 Node helper：值不参与 shell 拼接，错误信息不包含 token。
+# umask 与显式 mode 保证配置文件创建时即 owner-only，临时文件同目录 rename 后原子替换。
+selector_args=(--config "$config_file" --studio-url "$studio_url")
+if [ -n "$environment_id" ]; then
+  selector_args+=(--environment-id "$environment_id")
+else
+  selector_args+=(--environment-name "$environment_name")
+fi
+(umask 077 && "$node_bin" "$config_helper" "${selector_args[@]}")
 chmod 600 "$config_file"
-unset DAEMON_CONFIG_STUDIO_URL DAEMON_CONFIG_NOTE
+unset environment_id environment_name studio_url
+unset selector_args
 
 exec "$node_bin" "$entry" --config "$config_file"

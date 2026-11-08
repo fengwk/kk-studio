@@ -255,7 +255,7 @@ services:
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
       KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080
-      KK_STUDIO_DAEMON_NOTE: Isolated Docker reliability environment.
+      KK_STUDIO_DAEMON_ENVIRONMENT_NAME: ${RELIABILITY_ENV_NAME:-docker-reliability}
     volumes:
       - daemon-workspace:/workspace
     networks:

@@ -1,25 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Box, Download, KeyRound, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
+  environmentProxyText,
   filterEnvironments,
   formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
+  presentEnvironmentConfig,
   presentUpdateProgress,
 } from '@/features/environment/environment-utils'
 import { EnvironmentInstallModal } from '@/features/environment/EnvironmentInstallModal'
+import { EnvironmentConfigModal } from '@/features/environment/EnvironmentConfigModal'
+import { EnvironmentConfigStatusBadge } from '@/features/environment/EnvironmentConfigStatusBadge'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
+import { environmentRuntimeQueryOptions } from '@/features/environment/environment-runtime-query'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Button } from '@/shared/ui/controls/Button'
-import { TextInput } from '@/shared/ui/controls/TextInput'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
-import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { environmentService } from '@/features/environment/environment-service'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { isConflictError } from '@/shared/api/client'
@@ -33,13 +35,11 @@ import type {
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
 
-/**
- * runtime 进度只存在于 READY owner 内存，服务端不持久化也不为每条进度广播事件；
- * 因此只在 READY 卡片上回读当前快照，列表事实本身仍由 changed 事件驱动。
- */
-const RUNTIME_REFRESH_INTERVAL_MS = 5_000
-
 type Translate = (key: TranslationKey, values?: InterpolationValues) => string
+
+type EditorState =
+  | { mode: 'create' }
+  | { mode: 'edit'; environment: EnvironmentDTO }
 
 function formatUpdateProgress(update: EnvironmentUpdateProgressDTO, t: Translate): string {
   const progress = presentUpdateProgress(update)
@@ -79,14 +79,18 @@ function earliestStatusExpiresAt(cards: EnvironmentDTO[]): number | null {
   return earliest
 }
 
+/** 连接状态与配置状态是两个事实：READY 且租约有效才展示为 READY，过期租约明确降级。 */
+function connectionBadgeTone(ready: boolean, status: EnvironmentDTO['status']): 'success' | 'info' | 'warning' {
+  if (ready && status === 'READY') return 'success'
+  if (status === 'CONNECTING') return 'info'
+  return 'warning'
+}
+
 export function EnvironmentsPage() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [createName, setCreateName] = useState('')
-  const [createError, setCreateError] = useState<string | null>(null)
-
+  const [editor, setEditor] = useState<EditorState | null>(null)
   const [installTarget, setInstallTarget] = useState<EnvironmentDTO | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<EnvironmentDTO | null>(null)
 
@@ -121,14 +125,9 @@ export function EnvironmentsPage() {
     [environmentsQuery.data],
   )
 
-  // 运行快照只对当前 READY 的连接存在；非 READY 时直接呈现不可用，不请求端点伪造空进度。
+  // 运行快照对 READY 与有效 CONNECTING 都可读；只有 OFFLINE 没有有效 owner 租约。
   const runtimeQueries = useQueries({
-    queries: environments.map((environment) => ({
-      queryKey: queryKeys.environments.runtime(environment.id),
-      queryFn: () => environmentService.getEnvironmentRuntime(environment.id),
-      enabled: environment.ready === true,
-      refetchInterval: RUNTIME_REFRESH_INTERVAL_MS,
-    })),
+    queries: environments.map((environment) => environmentRuntimeQueryOptions(environment)),
   })
 
   // 连接失效是时间事实，不是写入事实：服务端已给出每个有效状态的截止时间，这里只按最早的截止点排一次回读，
@@ -148,29 +147,6 @@ export function EnvironmentsPage() {
     const timer = setTimeout(invalidateEnvironments, delay)
     return () => clearTimeout(timer)
   }, [statusExpiresAt, invalidateEnvironments])
-
-  const createMutation = useMutation({
-    mutationFn: async (name: string) => {
-      const card = await environmentService.createEnvironment({ name })
-      return { ...card, registrationToken: null }
-    },
-    onSuccess: (card) => {
-      setCreateModalOpen(false)
-      setCreateName('')
-      setCreateError(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-      setInstallTarget({ ...card, registrationToken: null })
-    },
-    onError: (err: unknown) => {
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setCreateModalOpen(false)
-        setCreateError(null)
-        return
-      }
-      setCreateError(err instanceof Error ? err.message : String(err))
-    },
-  })
 
   const updateMutation = useMutation({
     mutationFn: (id: string) => environmentService.startEnvironmentUpdate(id),
@@ -236,17 +212,6 @@ export function EnvironmentsPage() {
     },
   })
 
-  function handleCreateSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = createName.trim()
-    if (!trimmed) {
-      setCreateError(t('ai.environment.name'))
-      return
-    }
-    setCreateError(null)
-    createMutation.mutate(trimmed)
-  }
-
   return (
     <section className="screen active">
       <nav className="subbar">
@@ -267,201 +232,207 @@ export function EnvironmentsPage() {
         {!environmentsQuery.isLoading && (
           <ResourceGrid>
             <CreateCard
-            title={t('ai.environment.create')}
-            subtitle={t('ai.environment.createDescription')}
-            onClick={() => {
-              setCreateName('')
-              setCreateError(null)
-              setCreateModalOpen(true)
-            }}
-          />
-          {environments.map((environment, index) => {
-            const status = environment.status
-            const ready = environment.ready === true
-            const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
-            const capabilityIds = (environment.capabilities ?? [])
-              .map((capability) => capability.id)
-              .filter(Boolean)
-            const lastSeen = formatTimestamp(environment.lastSeenAt)
+              title={t('ai.environment.create')}
+              subtitle={t('ai.environment.createDescription')}
+              onClick={() => setEditor({ mode: 'create' })}
+            />
+            {environments.map((environment, index) => {
+              const status = environment.status
+              const ready = environment.ready === true
+              const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
+              const capabilityIds = (environment.capabilities ?? [])
+                .map((capability) => capability.id)
+                .filter(Boolean)
+              const lastSeen = formatTimestamp(environment.lastSeenAt)
 
-            const runtimeQuery = runtimeQueries[index]
-            const runtimeStatus = runtimeQuery.data?.status
-            const runtimeUnavailable =
-              !ready ||
-              (runtimeQuery.isError &&
-                isEnvironmentRuntimeUnavailableError(runtimeQuery.error))
-            // 当前版本只采用 Daemon 上报：live 快照优先，不可用时回退到最后一次 READY 上报值。
-            const liveDaemonVersion = runtimeStatus?.daemonVersion?.trim()
-            const lastReportedDaemonVersion = environment.daemonVersion?.trim()
-            const daemonVersion =
-              liveDaemonVersion ||
-              (runtimeStatus == null ? lastReportedDaemonVersion : undefined) ||
-              t('ai.environment.runtime.unreported')
-            let runtimeText: string
-            if (runtimeUnavailable) {
-              runtimeText = t('ai.environment.runtime.unavailable')
-            } else if (runtimeQuery.isError) {
-              const errorText =
-                runtimeQuery.error instanceof Error
-                  ? runtimeQuery.error.message.trim()
-                  : ''
-              runtimeText = errorText || t('ai.environment.runtime.loadFailed')
-            } else if (runtimeStatus == null) {
-              runtimeText = t('ai.environment.runtime.loading')
-            } else if (runtimeStatus.update) {
-              runtimeText = formatUpdateProgress(runtimeStatus.update, t)
-            } else {
-              runtimeText = t('ai.environment.update.none')
-            }
+              const runtimeQuery = runtimeQueries[index]
+              const runtimeStatus = runtimeQuery.isError ? undefined : runtimeQuery.data?.status
+              const configView = presentEnvironmentConfig(
+                environment,
+                runtimeQuery.isError ? undefined : runtimeQuery.data,
+              )
+              const runtimeUnavailable =
+                status === 'OFFLINE' ||
+                (runtimeQuery.isError &&
+                  isEnvironmentRuntimeUnavailableError(runtimeQuery.error))
+              // 当前版本只采用 Daemon 上报：live 快照优先，不可用时回退到最后一次 READY 上报值。
+              const liveDaemonVersion = runtimeStatus?.daemonVersion?.trim()
+              const lastReportedDaemonVersion = environment.daemonVersion?.trim()
+              const daemonVersion =
+                liveDaemonVersion ||
+                (runtimeStatus == null ? lastReportedDaemonVersion : undefined) ||
+                t('ai.environment.runtime.unreported')
+              let runtimeText: string
+              if (runtimeUnavailable) {
+                runtimeText = t('ai.environment.runtime.unavailable')
+              } else if (runtimeQuery.isError) {
+                const errorText =
+                  runtimeQuery.error instanceof Error
+                    ? runtimeQuery.error.message.trim()
+                    : ''
+                runtimeText = errorText || t('ai.environment.runtime.loadFailed')
+              } else if (runtimeStatus == null) {
+                runtimeText = t('ai.environment.runtime.loading')
+              } else if (runtimeStatus.update) {
+                runtimeText = formatUpdateProgress(runtimeStatus.update, t)
+              } else {
+                runtimeText = t('ai.environment.update.none')
+              }
 
-            const rows: ResourceCardMetaRow[] = []
-            rows.push([t('ai.environment.daemonVersion'), daemonVersion])
-            rows.push({
-              label: t('ai.environment.updateStatus'),
-              value: runtimeText,
-              wrap: true,
-            })
-            if (environment.userName) {
-              rows.push([t('ai.environment.userName'), environment.userName])
-            }
-            // 能力清单始终占一行：为空时留空，结构不随数据有无而变。
-            rows.push({ label: t('ai.environment.capabilities'), tags: capabilityIds })
+              const rows: ResourceCardMetaRow[] = []
+              rows.push({
+                label: t('ai.environment.config.status'),
+                value: (
+                  <span className="environment-config-status">
+                    <EnvironmentConfigStatusBadge view={configView} />
+                    {configView.error ? (
+                      <span className="field-help">
+                        {configView.error.code}
+                        {configView.error.field ? ` · ${configView.error.field}` : ''}
+                      </span>
+                    ) : null}
+                  </span>
+                ),
+                wrap: true,
+              })
+              rows.push([t('ai.environment.config.cardVersion'), environment.version])
+              rows.push([
+                t('ai.environment.config.appliedVersion'),
+                configView.appliedVersion ?? '—',
+              ])
+              rows.push([
+                t('ai.environment.config.proxy'),
+                environmentProxyText(configView, t('ai.environment.config.proxyDirect')),
+              ])
+              rows.push([t('ai.environment.daemonVersion'), daemonVersion])
+              rows.push({
+                label: t('ai.environment.updateStatus'),
+                value: runtimeText,
+                wrap: true,
+              })
+              if (environment.userName) {
+                rows.push([t('ai.environment.userName'), environment.userName])
+              }
+              if (environment.note) {
+                rows.push({ label: t('ai.environment.form.note'), value: environment.note, wrap: true })
+              }
+              // 能力清单始终占一行：为空时留空，结构不随数据有无而变。
+              rows.push({ label: t('ai.environment.capabilities'), tags: capabilityIds })
 
-            return (
-              <ResourceCard
-                key={environment.id}
-                className="environment-card"
-                icon={<Box aria-hidden="true" />}
-                title={environment.name}
-                subtitle={environment.id}
-                badge={
-                  <Badge tone={ready ? 'success' : 'warning'}>{displayStatus}</Badge>
-                }
-                meta={rows}
-                actions={
-                  <>
-                    <Button
-                      size="compact"
-                      aria-label={`${t('ai.environment.install')} ${environment.name}`}
-                      onClick={() => setInstallTarget(environment)}
-                    >
-                      <Download aria-hidden="true" />
-                      {t('ai.environment.install')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
-                      onClick={() => setUninstallTarget(environment)}
-                    >
-                      {t('ai.environment.uninstall')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      aria-label={`${t('ai.environment.manage')} ${environment.name}`}
-                      onClick={() => {
-                        setConflict(null)
-                        setManageTarget(environment)
-                      }}
-                    >
-                      <SlidersHorizontal aria-hidden="true" />
-                      {t('ai.environment.manage')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      aria-label={`${t('ai.environment.update')} ${environment.name}`}
-                      onClick={() => {
-                        setConflict(null)
-                        setUpdateError(null)
-                        setUpdateTarget(environment)
-                      }}
-                    >
-                      {t('ai.environment.update')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
-                      onClick={() => {
-                        setConflict(null)
-                        setRotateError(null)
-                        setRotateTarget(environment)
-                      }}
-                    >
-                      <KeyRound aria-hidden="true" />
-                      {t('ai.environment.rotateToken')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      danger
-                      aria-label={`${t('ai.environment.delete')} ${environment.name}`}
-                      onClick={() => {
-                        setConflict(null)
-                        setDeleteError(null)
-                        setDeleteTarget(environment)
-                      }}
-                      disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
-                    >
-                      <Trash2 aria-hidden="true" />
-                      {t('ai.catalog.action.delete')}
-                    </Button>
-                  </>
-                }
-              >
-                {lastSeen ? (
-                  <p className="inline-hint" title={lastSeen}>
-                    {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
-                  </p>
-                ) : null}
-              </ResourceCard>
-            )
-          })}
-        </ResourceGrid>
-      )}
+              return (
+                <ResourceCard
+                  key={environment.id}
+                  className="environment-card"
+                  icon={<Box aria-hidden="true" />}
+                  title={environment.name}
+                  subtitle={environment.id}
+                  badge={
+                    <Badge tone={connectionBadgeTone(ready, status)}>{displayStatus}</Badge>
+                  }
+                  meta={rows}
+                  actions={
+                    <>
+                      <Button
+                        size="compact"
+                        aria-label={`${t('ai.environment.install')} ${environment.name}`}
+                        onClick={() => setInstallTarget(environment)}
+                      >
+                        <Download aria-hidden="true" />
+                        {t('ai.environment.install')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
+                        onClick={() => setUninstallTarget(environment)}
+                      >
+                        {t('ai.environment.uninstall')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        aria-label={`${t('ai.environment.form.edit')} ${environment.name}`}
+                        onClick={() => setEditor({ mode: 'edit', environment })}
+                      >
+                        <Pencil aria-hidden="true" />
+                        {t('ai.environment.form.edit')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        aria-label={`${t('ai.environment.manage')} ${environment.name}`}
+                        onClick={() => {
+                          setConflict(null)
+                          setManageTarget(environment)
+                        }}
+                      >
+                        <SlidersHorizontal aria-hidden="true" />
+                        {t('ai.environment.manage')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        aria-label={`${t('ai.environment.update')} ${environment.name}`}
+                        onClick={() => {
+                          setConflict(null)
+                          setUpdateError(null)
+                          setUpdateTarget(environment)
+                        }}
+                      >
+                        {t('ai.environment.update')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
+                        onClick={() => {
+                          setConflict(null)
+                          setRotateError(null)
+                          setRotateTarget(environment)
+                        }}
+                      >
+                        <KeyRound aria-hidden="true" />
+                        {t('ai.environment.rotateToken')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        danger
+                        aria-label={`${t('ai.environment.delete')} ${environment.name}`}
+                        onClick={() => {
+                          setConflict(null)
+                          setDeleteError(null)
+                          setDeleteTarget(environment)
+                        }}
+                        disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
+                      >
+                        <Trash2 aria-hidden="true" />
+                        {t('ai.catalog.action.delete')}
+                      </Button>
+                    </>
+                  }
+                >
+                  {lastSeen ? (
+                    <p className="inline-hint" title={lastSeen}>
+                      {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
+                    </p>
+                  ) : null}
+                </ResourceCard>
+              )
+            })}
+          </ResourceGrid>
+        )}
       </div>
 
-      {createModalOpen && (
-        <Dialog
-          className="modal-touch-target"
-          title={t('ai.environment.create')}
-          onClose={() => setCreateModalOpen(false)}
-          pending={createMutation.isPending}
-        >
-            <form className="modal-card-form" onSubmit={handleCreateSubmit}>
-              <div className="modal-body">
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.environment.name')}</FieldLabel>
-                  <TextInput
-                    value={createName}
-                    onChange={(e) => setCreateName(e.target.value)}
-                    placeholder={t('ai.environment.namePlaceholder')}
-                    maxLength={64}
-                    required
-                    autoFocus
-                  />
-                </label>
-                {createError && <p className="field-error">{createError}</p>}
-              </div>
-              <div className="modal-footer">
-                <Button
-                  variant="ghost"
-                  onClick={() => setCreateModalOpen(false)}
-                  disabled={createMutation.isPending}
-                >
-                  {t('shared.cancel')}
-                </Button>
-                <Button
-                  type="submit"
-                  loading={createMutation.isPending}
-                >
-                  {t('shared.confirm')}
-                </Button>
-              </div>
-            </form>
-        </Dialog>
+      {editor && (
+        <EnvironmentConfigModal
+          environment={editor.mode === 'edit' ? editor.environment : undefined}
+          onClose={() => setEditor(null)}
+          onCreated={(card) => {
+            setEditor(null)
+            setInstallTarget(card)
+          }}
+        />
       )}
 
       {updateTarget && (
@@ -530,8 +501,19 @@ export function EnvironmentsPage() {
         />
       )}
 
-      {installTarget && <EnvironmentInstallModal environment={installTarget} onClose={() => setInstallTarget(null)} />}
-      {uninstallTarget && <EnvironmentInstallModal environment={uninstallTarget} uninstall onClose={() => setUninstallTarget(null)} />}
+      {installTarget && (
+        <EnvironmentInstallModal
+          environment={installTarget}
+          onClose={() => setInstallTarget(null)}
+        />
+      )}
+      {uninstallTarget && (
+        <EnvironmentInstallModal
+          environment={uninstallTarget}
+          uninstall
+          onClose={() => setUninstallTarget(null)}
+        />
+      )}
 
       {manageTarget && (
         <EnvironmentManagementModal
@@ -545,8 +527,7 @@ export function EnvironmentsPage() {
         conflict={conflict}
         onRefresh={() => {
           setConflict(null)
-          setCreateModalOpen(false)
-          setCreateError(null)
+          setEditor(null)
           setUpdateTarget(null)
           setUpdateError(null)
           setRotateTarget(null)

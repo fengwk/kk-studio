@@ -8,14 +8,15 @@ import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
@@ -40,9 +41,6 @@ public final class ControlProtocolValidator {
   /** 上传票据失败说明的字符上限。 */
   private static final int MAX_FAILURE_MESSAGE_CHARS = 512;
 
-  /** 展示名的字符上限。 */
-  private static final int MAX_DISPLAY_NAME_CHARS = 256;
-
   /** FAILED / ERROR message 的字符上限。 */
   private static final int MAX_ERROR_MESSAGE_CHARS = 4096;
 
@@ -58,6 +56,9 @@ public final class ControlProtocolValidator {
   private static final Pattern IDE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
   private static final Pattern SKILL_PACKAGE_NAME_PATTERN =
       Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*$");
+  private static final Pattern LSP_SERVER_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+$");
+  private static final Pattern CONFIG_ERROR_CODE_PATTERN =
+      Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
 
   /** 单轮期望集合与状态上报的包数上限。 */
   private static final int MAX_SKILL_PACKAGES = 512;
@@ -101,6 +102,7 @@ public final class ControlProtocolValidator {
           MessageType.IDE_LEASE,
           MessageType.SKILL_SYNC,
           MessageType.SKILL_STATE,
+          MessageType.ENVIRONMENT_CONFIG,
           MessageType.ERROR);
 
   private static final Set<MessageType> INVOCATION =
@@ -132,7 +134,8 @@ public final class ControlProtocolValidator {
           MessageType.UPDATE_RESULT,
           MessageType.IDE_LEASE,
           MessageType.SKILL_SYNC,
-          MessageType.SKILL_STATE);
+          MessageType.SKILL_STATE,
+          MessageType.ENVIRONMENT_CONFIG);
 
   private ControlProtocolValidator() {}
 
@@ -255,6 +258,10 @@ public final class ControlProtocolValidator {
         requirePayload(envelope, Envelope.PayloadCase.SKILL_STATE, "SKILL_STATE");
         validateSkillState(envelope.getSkillState());
       }
+      case ENVIRONMENT_CONFIG -> {
+        requirePayload(envelope, Envelope.PayloadCase.ENVIRONMENT_CONFIG, "ENVIRONMENT_CONFIG");
+        validateEnvironmentConfig(envelope.getEnvironmentConfig());
+      }
       case ERROR -> {
         requirePayload(envelope, Envelope.PayloadCase.ERROR, "ERROR");
         validateError(envelope.getError());
@@ -298,18 +305,115 @@ public final class ControlProtocolValidator {
         budgets.hasTemporaryResourceCleanupIntervalSeconds(),
         budgets.getTemporaryResourceCleanupIntervalSeconds(),
         "settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds");
-    requireText(
-        settings.hasNoProxyHosts(),
-        settings.getNoProxyHosts(),
-        "settings.noProxyHosts",
-        4096,
-        false);
-    if (settings.hasProxyUrl()) {
-      requireText(true, settings.getProxyUrl(), "settings.proxyUrl", 2048, true);
+  }
+
+  private static void validateEnvironmentConfig(EnvironmentConfig environmentConfig) {
+    requireInt64(
+        environmentConfig.hasVersion(),
+        environmentConfig.getVersion(),
+        "environmentConfig.version",
+        0,
+        Long.MAX_VALUE);
+    if (!environmentConfig.hasConfig()) {
+      throw new ControlProtocolException("environmentConfig.config is required");
     }
-    if (settings.hasDisplayName()) {
-      requireText(
-          true, settings.getDisplayName(), "settings.displayName", MAX_DISPLAY_NAME_CHARS, true);
+    validateDaemonConfiguration(environmentConfig.getConfig(), "environmentConfig.config");
+  }
+
+  private static void validateDaemonConfiguration(DaemonConfiguration config, String path) {
+    requireHttpOrigin(
+        requireText(true, config.getStudioUrl(), path + ".studioUrl", 2048, true),
+        path + ".studioUrl",
+        false);
+    if (config.hasBashExecutable()) {
+      requireSingleLine(true, config.getBashExecutable(), path + ".bashExecutable", 4096);
+    }
+    if (config.hasLsp()) {
+      validateLspConfiguration(config.getLsp(), path + ".lsp");
+    }
+    if (config.hasProxyUrl()) {
+      requireHttpOrigin(
+          requireText(true, config.getProxyUrl(), path + ".proxyUrl", 2048, true),
+          path + ".proxyUrl",
+          true);
+    }
+  }
+
+  private static void validateLspConfiguration(LspConfiguration lsp, String path) {
+    if (lsp.getServersCount() == 0) {
+      throw new ControlProtocolException(path + ".servers must declare at least one server");
+    }
+    Set<String> ids = new HashSet<>();
+    for (int index = 0; index < lsp.getServersCount(); index++) {
+      LspServer server = lsp.getServers(index);
+      String serverPath = path + ".servers[" + index + "]";
+      String id = requireText(true, server.getId(), serverPath + ".id", 256, true);
+      if (!LSP_SERVER_ID_PATTERN.matcher(id).matches()) {
+        throw new ControlProtocolException(serverPath + ".id must match [A-Za-z0-9_.-]+");
+      }
+      if (!ids.add(id)) {
+        throw new ControlProtocolException(path + ".servers must not repeat id");
+      }
+      validateStringList(server.getCommandList(), serverPath + ".command", true, false);
+      validateStringList(server.getExtensionsList(), serverPath + ".extensions", false, true);
+      validateStringList(server.getRootMarkersList(), serverPath + ".rootMarkers", false, false);
+      validateStringList(
+          server.getFirstMatchMarkersList(), serverPath + ".firstMatchMarkers", false, false);
+    }
+  }
+
+  private static void validateStringList(
+      List<String> values, String path, boolean required, boolean extension) {
+    if (values.isEmpty()) {
+      if (required) {
+        throw new ControlProtocolException(path + " must be a nonempty array of strings");
+      }
+      return;
+    }
+    for (int index = 0; index < values.size(); index++) {
+      String value = requireText(true, values.get(index), path + "[" + index + "]", 4096, true);
+      if (extension
+          && (value.length() < 2
+              || !value.startsWith(".")
+              || value.contains("/")
+              || value.contains("\\"))) {
+        throw new ControlProtocolException(
+            path + "[" + index + "] must be a file extension with a leading dot");
+      }
+    }
+  }
+
+  private static void requireHttpOrigin(String value, String name, boolean proxy) {
+    URI uri;
+    try {
+      uri = new URI(value);
+    } catch (URISyntaxException error) {
+      throw new ControlProtocolException(name + " must be an HTTP origin", error);
+    }
+    String scheme = uri.getScheme();
+    boolean schemeAllowed =
+        scheme != null && (scheme.equalsIgnoreCase("https") || scheme.equalsIgnoreCase("http"));
+    if (!schemeAllowed
+        || (proxy && !scheme.equalsIgnoreCase("http"))
+        || uri.getHost() == null
+        || uri.getRawUserInfo() != null
+        || uri.getRawQuery() != null
+        || uri.getRawFragment() != null
+        || (uri.getRawPath() != null
+            && !uri.getRawPath().isEmpty()
+            && !uri.getRawPath().equals("/"))) {
+      throw new ControlProtocolException(
+          name
+              + (proxy
+                  ? " must be an http://host:port proxy origin without userinfo, path, query or"
+                      + " fragment"
+                  : " must be an HTTP(S) origin without userinfo, path, query or fragment"));
+    }
+    if (proxy && uri.getPort() < 1) {
+      throw new ControlProtocolException(name + " must declare an explicit port");
+    }
+    if (uri.getPort() > 65535) {
+      throw new ControlProtocolException(name + " port is invalid");
     }
   }
 
@@ -317,10 +421,10 @@ public final class ControlProtocolValidator {
     String daemonVersion =
         requireDaemonVersion(
             ready.hasDaemonVersion(), ready.getDaemonVersion(), "ready.daemonVersion");
-    if (!ready.hasEnvironment()) {
-      throw new ControlProtocolException("ready.environment is required");
+    if (!ready.hasHostInfo()) {
+      throw new ControlProtocolException("ready.hostInfo is required");
     }
-    validateEnvironment(ready.getEnvironment());
+    validateHostInfo(ready.getHostInfo());
     if (!ready.hasRuntimeStatus()) {
       throw new ControlProtocolException("ready.runtimeStatus is required");
     }
@@ -331,32 +435,27 @@ public final class ControlProtocolValidator {
     }
   }
 
-  private static void validateEnvironment(EnvironmentInfo info) {
+  private static void validateHostInfo(HostInfo info) {
     if (info.getOperatingSystem() == OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED
         || info.getOperatingSystem() == OperatingSystem.UNRECOGNIZED) {
-      throw new ControlProtocolException("ready.environment.operatingSystem is required");
+      throw new ControlProtocolException("ready.hostInfo.operatingSystem is required");
     }
     if (info.getArchitecture() == Architecture.ARCHITECTURE_UNSPECIFIED
         || info.getArchitecture() == Architecture.UNRECOGNIZED) {
-      throw new ControlProtocolException("ready.environment.architecture is required");
+      throw new ControlProtocolException("ready.hostInfo.architecture is required");
     }
-    requireZone(info.hasTimeZone(), info.getTimeZone(), "ready.environment.timeZone");
+    requireZone(info.hasTimeZone(), info.getTimeZone(), "ready.hostInfo.timeZone");
     requireSingleLine(
-        info.hasUserName(), info.getUserName(), "ready.environment.userName", Integer.MAX_VALUE);
+        info.hasUserName(), info.getUserName(), "ready.hostInfo.userName", Integer.MAX_VALUE);
     requireSingleLine(
         info.hasHomeDirectory(),
         info.getHomeDirectory(),
-        "ready.environment.homeDirectory",
+        "ready.hostInfo.homeDirectory",
         Integer.MAX_VALUE);
-    requireSingleLine(
-        info.hasNote(),
-        info.getNote(),
-        "ready.environment.note",
-        DaemonEnvironmentInfo.MAX_NOTE_CHARS);
     requireSingleLine(
         info.hasTempDirectory(),
         info.getTempDirectory(),
-        "ready.environment.tempDirectory",
+        "ready.hostInfo.tempDirectory",
         Integer.MAX_VALUE);
   }
 
@@ -388,7 +487,39 @@ public final class ControlProtocolValidator {
     if (body.hasUpdate()) {
       validateUpdateProgress(body.getUpdate(), path + ".status.update");
     }
+    if (body.hasConfiguration()) {
+      validateConfigurationStatus(body.getConfiguration(), path + ".status.configuration");
+    }
     return snapshot;
+  }
+
+  private static void validateConfigurationStatus(ConfigurationStatus configuration, String path) {
+    if (configuration.hasAppliedVersion()) {
+      requireInt64(
+          true, configuration.getAppliedVersion(), path + ".appliedVersion", 0, Long.MAX_VALUE);
+    }
+    if (configuration.hasProxyUrl()) {
+      if (!configuration.hasAppliedVersion()) {
+        throw new ControlProtocolException(path + ".proxyUrl requires appliedVersion");
+      }
+      requireHttpOrigin(
+          requireText(true, configuration.getProxyUrl(), path + ".proxyUrl", 2048, true),
+          path + ".proxyUrl",
+          true);
+    }
+    if (configuration.hasError()) {
+      ConfigurationError error = configuration.getError();
+      requireInt64(
+          error.hasVersion(), error.getVersion(), path + ".error.version", 0, Long.MAX_VALUE);
+      String code = requireText(true, error.getCode(), path + ".error.code", 64, true);
+      if (!CONFIG_ERROR_CODE_PATTERN.matcher(code).matches()) {
+        throw new ControlProtocolException(
+            path + ".error.code must be a stable upper-snake-case identifier");
+      }
+      if (error.hasField()) {
+        requireSingleLine(true, error.getField(), path + ".error.field", 256);
+      }
+    }
   }
 
   private static void validateUpdateProgress(UpdateProgress update, String path) {
@@ -1126,7 +1257,7 @@ public final class ControlProtocolValidator {
       throw new ControlProtocolException(name + " is required");
     }
     try {
-      return DaemonCapabilities.validateDaemonVersion(value);
+      return DaemonReadyMetadata.validateDaemonVersion(value);
     } catch (IllegalArgumentException error) {
       throw new ControlProtocolException(name + " is invalid: " + error.getMessage(), error);
     }

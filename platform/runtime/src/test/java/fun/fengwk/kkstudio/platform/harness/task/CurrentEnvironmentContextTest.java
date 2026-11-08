@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 
 import java.util.UUID;
@@ -123,7 +123,7 @@ public class CurrentEnvironmentContextTest {
   public void shouldMapHostFactsAndOmitMissingFacts() {
     EnvironmentId envId = new EnvironmentId(UUID.randomUUID());
     CurrentEnvironmentContext unreported =
-        CurrentEnvironmentContext.selected(envId, "nas-dev", null);
+        CurrentEnvironmentContext.selected(envId, "nas-dev", null, null);
     assertEquals("nas-dev", unreported.environmentName());
     assertNull(unreported.operatingSystem());
     assertNull(unreported.userName());
@@ -131,17 +131,16 @@ public class CurrentEnvironmentContextTest {
     assertNull(unreported.tempDirectory());
     assertNull(unreported.note());
 
-    DaemonEnvironmentInfo hostFacts =
-        new DaemonEnvironmentInfo(
+    DaemonHostInfo hostFacts =
+        new DaemonHostInfo(
             DaemonOperatingSystem.LINUX,
             "America/Los_Angeles",
             "dev",
             "/home/dev",
-            "Linux environment.",
             "/tmp/kk-studio",
             "amd64");
     CurrentEnvironmentContext reported =
-        CurrentEnvironmentContext.selected(envId, "nas-dev", hostFacts);
+        CurrentEnvironmentContext.selected(envId, "nas-dev", "Linux environment.", hostFacts);
     assertEquals(DaemonOperatingSystem.LINUX, reported.operatingSystem());
     assertEquals("dev", reported.userName());
     assertEquals("/home/dev", reported.homeDirectory());

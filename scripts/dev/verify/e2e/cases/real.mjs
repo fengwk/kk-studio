@@ -1715,7 +1715,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY（控制 wire 7、READY 6）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 10 项 capability（9 项模型可见 + 内部 fs.edit.preview），并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
+  docs: 'Environment READY（控制协议 2）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；卡片投影完整 daemonConfig，并投影 10 项 capability（9 项模型可见 + 内部 fs.edit.preview）与宿主事实 userName/homeDirectory，且不公开产品目录、raw READY metadata、工具或凭据',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1758,13 +1758,20 @@ registerCase({
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
     // Environment 只投影公开字段；nullable 字段按 NON_NULL 规则可省略，凭据绝不属于读取结果。
     const optionalFields = [
-      'installConfig', 'lastSeenAt', 'operatingSystem', 'timeZone', 'userName',
-      'homeDirectory', 'note', 'daemonVersion',
+      'note', 'lastSeenAt', 'operatingSystem', 'timeZone', 'userName',
+      'homeDirectory', 'daemonVersion',
     ]
     assertExactFields(match, [
-      'id', 'name', 'status', 'ready', 'statusExpiresAt', 'capabilities', 'version',
+      'id', 'name', 'daemonConfig', 'status', 'ready', 'statusExpiresAt', 'capabilities', 'version',
       'createdAt', 'updatedAt', ...optionalFields.filter((key) => Object.hasOwn(match, key)),
     ], 'environment')
+    assertExactFields(
+      match.daemonConfig,
+      ['studioUrl', ...['bashExecutable', 'lsp', 'proxyUrl'].filter(
+        (key) => Object.hasOwn(match.daemonConfig, key),
+      )],
+      'environment.daemonConfig',
+    )
     assert(match.ready === true, safeDiagnosticJson(match))
     ctx.vars.daemonEnvironment = match
   },

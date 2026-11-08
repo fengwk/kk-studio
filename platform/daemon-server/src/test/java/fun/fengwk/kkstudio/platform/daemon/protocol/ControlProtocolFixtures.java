@@ -30,6 +30,7 @@ final class ControlProtocolFixtures {
     "completed.bin",
     "execution-exited.bin",
     "settings.bin",
+    "environment-config.bin",
     "ready.bin",
     "heartbeat.bin",
     "runtime-status.bin",

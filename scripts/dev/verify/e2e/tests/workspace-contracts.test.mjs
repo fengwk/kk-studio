@@ -5,17 +5,17 @@ import { runWorkspaceContractMatrix } from '../ui/workspace-contracts.mjs'
 
 // 直接执行真实 UI case ui.settings.system_contract_cas，只把 HTTP 与页面替换成纯内存替身，
 // 从而在任何环境（无网络、无服务、无 Playwright）下锁住 externalUpdate / finally restore
-// 两个显式 PUT 是否完整携带六个必填 section（含 network）并 CAS 到正确版本。
+// 两个显式 PUT 是否完整携带六个必填 section（含 backendNetwork）并 CAS 到正确版本。
 
 const CASE_ID = 'ui.settings.system_contract_cas'
-const SECTIONS = ['advanced', 'aiRuntime', 'environment', 'network', 'storageMedia', 'tool']
+const SECTIONS = ['advanced', 'aiRuntime', 'environment', 'backendNetwork', 'storageMedia', 'tool']
 const EXPECTED_KEYS = [...SECTIONS, 'expectedVersion'].sort()
 const ORIGINAL_DELAY = '2501'
 const CHANGED_DELAY = '2502'
 const EXTERNAL_DELAY = '2503'
 const STALE_DELAY = '2504'
 
-function createSettingsWorld(network) {
+function createSettingsWorld(backendNetwork) {
   let version = 7n
   const state = {
     tool: { permission: { bash: [{ pattern: '*', action: 'ASK' }] } },
@@ -26,7 +26,7 @@ function createSettingsWorld(network) {
       retryMaxDelayMillis: '60000',
     },
     environment: { maxResourceBytes: '16777216', heartbeatTimeoutMillis: '60000' },
-    network,
+    backendNetwork,
     storageMedia: { maxBytes: '1000000' },
     advanced: { resourceMaxBytes: '16777216' },
   }
@@ -99,7 +99,7 @@ function createSettingsPage(world) {
       tool: snapshot.tool,
       aiRuntime: { ...snapshot.aiRuntime, retryBaseDelayMillis: view.draft },
       environment: snapshot.environment,
-      network: snapshot.network,
+      backendNetwork: snapshot.backendNetwork,
       storageMedia: snapshot.storageMedia,
       advanced: snapshot.advanced,
       expectedVersion: view.knownVersion,
@@ -221,12 +221,12 @@ function assertFullContract(body, label) {
 }
 
 for (const scenario of [
-  { name: 'direct (proxyUrl null)', network: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1' } },
-  { name: 'explicit proxy', network: { proxyUrl: 'http://proxy.example:8080', noProxyHosts: 'localhost,127.*' } },
+  { name: 'direct (proxyUrl null)', backendNetwork: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1' } },
+  { name: 'explicit proxy', backendNetwork: { proxyUrl: 'http://proxy.example:8080', noProxyHosts: 'localhost,127.*' } },
 ]) {
-  test(`system_contract_cas carries ${scenario.name} network through external update and restore`, async () => {
-    // 测试意图：执行真实 case 的 externalUpdate 与 finally restore，断言 network 原样回传且 CAS 版本正确。
-    const world = createSettingsWorld(structuredClone(scenario.network))
+  test(`system_contract_cas carries ${scenario.name} backendNetwork through external update and restore`, async () => {
+    // 测试意图：执行真实 case 的 externalUpdate 与 finally restore，断言 backendNetwork 原样回传且 CAS 版本正确。
+    const world = createSettingsWorld(structuredClone(scenario.backendNetwork))
     const { ui, executed } = createHarness(world)
     await runWorkspaceContractMatrix(ui)
     assert.deepEqual(executed, [CASE_ID])
@@ -238,7 +238,7 @@ for (const scenario of [
     const externalPut = world.puts.find((entry) => entry.body.aiRuntime.retryBaseDelayMillis === EXTERNAL_DELAY)
     assert.ok(externalPut, 'case must PUT the external update')
     assertFullContract(externalPut.body, 'externalUpdate')
-    assert.deepEqual(externalPut.body.network, scenario.network)
+    assert.deepEqual(externalPut.body.backendNetwork, scenario.backendNetwork)
     assert.equal(externalPut.body.expectedVersion, '8')
 
     const stalePut = world.puts.find((entry) => entry.body.aiRuntime.retryBaseDelayMillis === STALE_DELAY)
@@ -248,7 +248,7 @@ for (const scenario of [
     const restorePut = world.puts.find((entry) => entry.body.aiRuntime.retryBaseDelayMillis === ORIGINAL_DELAY)
     assert.ok(restorePut, 'finally must PUT the restore')
     assertFullContract(restorePut.body, 'restore')
-    assert.deepEqual(restorePut.body.network, scenario.network)
+    assert.deepEqual(restorePut.body.backendNetwork, scenario.backendNetwork)
     assert.equal(restorePut.body.expectedVersion, '9')
     assert.equal(world.get().aiRuntime.retryBaseDelayMillis, ORIGINAL_DELAY)
   })
@@ -256,8 +256,8 @@ for (const scenario of [
 
 test('system_contract_cas still restores from the latest version when the external PUT loses CAS', async () => {
   // 测试意图：外部 PUT 因并发推进版本失败抛错时，finally 仍用重读到的最新版本恢复原值，不绕过恢复。
-  const network = { proxyUrl: 'http://proxy.example:8080', noProxyHosts: 'localhost,127.*' }
-  const world = createSettingsWorld(structuredClone(network))
+  const backendNetwork = { proxyUrl: 'http://proxy.example:8080', noProxyHosts: 'localhost,127.*' }
+  const world = createSettingsWorld(structuredClone(backendNetwork))
   world.onPut = (body) => {
     if (body.aiRuntime.retryBaseDelayMillis === EXTERNAL_DELAY) {
       world.advanceVersion()
@@ -273,7 +273,7 @@ test('system_contract_cas still restores from the latest version when the extern
   const restorePut = world.puts.find((entry) => entry.body.aiRuntime.retryBaseDelayMillis === ORIGINAL_DELAY)
   assert.ok(restorePut, 'finally must still restore after the abrupt exit')
   assertFullContract(restorePut.body, 'restore')
-  assert.deepEqual(restorePut.body.network, network)
+  assert.deepEqual(restorePut.body.backendNetwork, backendNetwork)
   assert.equal(restorePut.body.expectedVersion, '9')
   assert.equal(world.puts.length, 3, 'abrupt path must not add extra PUTs')
 })

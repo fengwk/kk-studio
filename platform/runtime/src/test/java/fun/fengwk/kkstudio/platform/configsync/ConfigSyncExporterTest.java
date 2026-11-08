@@ -140,7 +140,12 @@ class ConfigSyncExporterTest {
         (List<Map<String, Object>>) document.get("environments");
     assertEquals(
         RegistrationTokens.hash("token-env"), environments.get(0).get("registrationTokenHash"));
+    assertEquals(
+        "https://studio.example.com",
+        ((Map<?, ?>) environments.get(0).get("daemonConfig")).get("studioUrl"));
     assertFalse(environments.get(0).containsKey("installConfig"));
+    assertFalse(environments.get(0).containsKey("id"));
+    assertFalse(environments.get(0).containsKey("version"));
 
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> mcpServers = (List<Map<String, Object>>) document.get("mcpServers");
@@ -219,25 +224,28 @@ class ConfigSyncExporterTest {
   }
 
   @Test
-  void installConfigExportsAsNestedStructureAndParsesBackWithoutSecretsInConfig() {
+  void daemonConfigExportsAsNestedStructureAndParsesBackWithoutSecretsInConfig() {
     ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
     var spec =
         parser
-            .parse(ConfigSyncFixtures.resourceYaml("environment-install-config.yaml"))
+            .parse(ConfigSyncFixtures.resourceYaml("environment-card.yaml"))
             .environments()
             .get(0);
     var env = environment("env");
-    env.setInstallConfig(spec.installConfig());
+    env.setNote(spec.note());
+    env.setDaemonConfig(spec.daemonConfig());
     var state =
         snapshot(List.of(), List.of(), List.of(), List.of(), List.of(env), List.of(), List.of());
     String exported =
         exporter.export(state, List.of(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
     var imported = parser.parse(exported).environments().get(0);
-    assertEquals(spec.installConfig(), imported.installConfig());
+    assertEquals(spec.note(), imported.note());
+    assertEquals(spec.daemonConfig(), imported.daemonConfig());
     assertEquals(spec.registrationTokenHash(), imported.registrationTokenHash());
-    assertEquals("https://studio.example.com", imported.installConfig().getDaemon().getStudioUrl());
+    assertEquals("https://studio.example.com", imported.daemonConfig().getStudioUrl());
+    assertEquals("http://127.0.0.1:7890", imported.daemonConfig().getProxyUrl());
     assertFalse(
-        yaml.toMap(imported.installConfig(), "installConfig").containsKey("registrationTokenHash"));
+        yaml.toMap(imported.daemonConfig(), "daemonConfig").containsKey("registrationTokenHash"));
   }
 
   /** 插件条目只导出安装身份与普通值文本：epoch、修订、认证代际/上下文指纹与任何秘密/身份事实都不进入文件。 */

@@ -13,21 +13,21 @@ import {
 
 describe('system settings draft codec', () => {
   // 默认关闭和清空代理都必须明确发送 null；绕过列表保留为字符串，不能产生模块覆盖。
-  it('round-trips direct connections and serializes only the two global proxy fields', () => {
+  it('round-trips direct connections and serializes only the two backend proxy fields', () => {
     const dto = makeSettingsDto()
     const draft = settingsSectionsToDraft(dto)
-    expect(draft.network).toEqual({ proxyUrl: '', noProxyHosts: 'localhost,127.*,::1' })
-    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual(dto.network)
+    expect(draft.backendNetwork).toEqual({ proxyUrl: '', noProxyHosts: 'localhost,127.*,::1' })
+    expect(assembleSettingsUpdate(draft, dto.version).backendNetwork).toEqual(dto.backendNetwork)
 
-    draft.network.proxyUrl = '  http://proxy.internal:8080  '
-    draft.network.noProxyHosts = 'localhost,127.*,::1,minio,*.internal'
-    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual({
+    draft.backendNetwork.proxyUrl = '  http://proxy.internal:8080  '
+    draft.backendNetwork.noProxyHosts = 'localhost,127.*,::1,minio,*.internal'
+    expect(assembleSettingsUpdate(draft, dto.version).backendNetwork).toEqual({
       proxyUrl: 'http://proxy.internal:8080',
       noProxyHosts: 'localhost,127.*,::1,minio,*.internal',
     })
-    draft.network.proxyUrl = '   '
-    draft.network.noProxyHosts = ''
-    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual({
+    draft.backendNetwork.proxyUrl = '   '
+    draft.backendNetwork.noProxyHosts = ''
+    expect(assembleSettingsUpdate(draft, dto.version).backendNetwork).toEqual({
       proxyUrl: null,
       noProxyHosts: '',
     })
@@ -62,7 +62,7 @@ describe('system settings draft codec', () => {
     expect(update.advanced.processorLeaseDurationMillis).toBe('30000')
     // 六个 section 全部完整存在于请求体。
     expect(Object.keys(update).sort()).toEqual(
-      ['advanced', 'aiRuntime', 'environment', 'network', 'expectedVersion', 'storageMedia', 'tool'].sort(),
+      ['advanced', 'aiRuntime', 'backendNetwork', 'environment', 'expectedVersion', 'storageMedia', 'tool'].sort(),
     )
   })
 
@@ -75,7 +75,7 @@ describe('system settings draft codec', () => {
       tool: dto.tool,
       aiRuntime: dto.aiRuntime,
       environment: dto.environment,
-      network: dto.network,
+      backendNetwork: dto.backendNetwork,
       storageMedia: dto.storageMedia,
       advanced: dto.advanced,
       expectedVersion: dto.version,
@@ -100,11 +100,19 @@ describe('system settings draft codec', () => {
   })
 
   it('normalizes blank optional text to null', () => {
-    // 六节中唯一的 nullable 文本字段是全局代理地址：空白必须序列化为 null，非空保留 trim 后的值。
-    const blank = setDraftValue(settingsSectionsToDraft(makeSettingsDto()), 'network.proxyUrl', '   ')
-    expect(assembleSettingsUpdate(blank, '0').network.proxyUrl).toBeNull()
-    const trimmed = setDraftValue(blank, 'network.proxyUrl', '  http://proxy.internal:8080  ')
-    expect(assembleSettingsUpdate(trimmed, '0').network.proxyUrl).toBe(
+    // 六节中唯一的 nullable 文本字段是 Backend 代理地址：空白必须序列化为 null，非空保留 trim 后的值。
+    const blank = setDraftValue(
+      settingsSectionsToDraft(makeSettingsDto()),
+      'backendNetwork.proxyUrl',
+      '   ',
+    )
+    expect(assembleSettingsUpdate(blank, '0').backendNetwork.proxyUrl).toBeNull()
+    const trimmed = setDraftValue(
+      blank,
+      'backendNetwork.proxyUrl',
+      '  http://proxy.internal:8080  ',
+    )
+    expect(assembleSettingsUpdate(trimmed, '0').backendNetwork.proxyUrl).toBe(
       'http://proxy.internal:8080',
     )
   })

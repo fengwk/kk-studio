@@ -277,8 +277,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     checkRejected("settings: {}\n");
 
     String full = exportedSettingsYaml();
-    String missingNetwork = mutateYaml(full, document -> settingsMap(document).remove("network"));
-    checkRejected(missingNetwork);
+    String missingBackendNetwork =
+        mutateYaml(full, document -> settingsMap(document).remove("backendNetwork"));
+    checkRejected(missingBackendNetwork);
 
     String badValue =
         mutateYaml(
@@ -884,38 +885,44 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "rejected settings must not alter values or version");
   }
 
-  /** 完整 settings 参与真实 YAML 往返；仅含 network 的局部 settings 必须硬拒绝。 */
+  /** 完整 settings 参与真实 YAML 往返；仅含 backendNetwork 的局部 settings 必须硬拒绝。 */
   @Test
-  void networkSettingsRoundtripAndPartialImportsAreRejected() throws Exception {
+  void backendNetworkSettingsRoundtripAndPartialImportsAreRejected() throws Exception {
     JsonNode before = getData("/api/platform/settings");
     String original = exportedSettingsYaml();
     String configured =
         mutateYaml(
             original,
             document -> {
-              settingsSection(document, "network").put("proxyUrl", "http://127.0.0.1:9");
-              settingsSection(document, "network").put("noProxyHosts", "localhost,127.0.0.1");
+              settingsSection(document, "backendNetwork").put("proxyUrl", "http://127.0.0.1:9");
+              settingsSection(document, "backendNetwork")
+                  .put("noProxyHosts", "localhost,127.0.0.1");
             });
     try {
       JsonNode imported = importYaml(configured);
       assertEquals(0, imported.path("skipped").size());
       JsonNode current = getData("/api/platform/settings");
-      assertEquals("http://127.0.0.1:9", current.path("network").path("proxyUrl").asText());
-      assertEquals("localhost,127.0.0.1", current.path("network").path("noProxyHosts").asText());
+      assertEquals("http://127.0.0.1:9", current.path("backendNetwork").path("proxyUrl").asText());
+      assertEquals(
+          "localhost,127.0.0.1", current.path("backendNetwork").path("noProxyHosts").asText());
       assertEquals(before.path("aiRuntime"), current.path("aiRuntime"));
       assertEquals(before.path("tool"), current.path("tool"));
 
-      // 导出完整快照后再导入：network 恢复为导出的值。
+      // 导出完整快照后再导入：backendNetwork 恢复为导出的值。
       String exported = exportedSettingsYaml();
       importYaml(original);
       assertTrue(
-          getData("/api/platform/settings").path("network").path("proxyUrl").isMissingNode());
+          getData("/api/platform/settings")
+              .path("backendNetwork")
+              .path("proxyUrl")
+              .isMissingNode());
       importYaml(exported);
-      assertEquals(current.path("network"), getData("/api/platform/settings").path("network"));
+      assertEquals(
+          current.path("backendNetwork"), getData("/api/platform/settings").path("backendNetwork"));
     } finally {
       importYaml(original);
     }
-    importRejected("settings:\n  network:\n    proxyUrl: http://127.0.0.1:9\n");
+    importRejected("settings:\n  backendNetwork:\n    proxyUrl: http://127.0.0.1:9\n");
   }
 
   // ---------------------------------------------------------------- malformed / errors

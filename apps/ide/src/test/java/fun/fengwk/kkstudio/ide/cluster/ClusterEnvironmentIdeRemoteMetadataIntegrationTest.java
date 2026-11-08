@@ -110,7 +110,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             transportB,
             new IdeBootstrapTicketService(),
             new AllowGateway(),
-            new IdeViewBindingRegistry(),
+            new IdeViewBindingRegistry(transportB),
             Duration.ofSeconds(1),
             new NoopAuthorization());
 
@@ -426,7 +426,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         localTransportA,
         new IdeBootstrapTicketService(),
         new AllowGateway(),
-        new IdeViewBindingRegistry(),
+        new IdeViewBindingRegistry(localTransportA),
         Duration.ofSeconds(1),
         new NoopAuthorization());
   }
@@ -556,6 +556,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     private Optional<ClusterOwnerRoute> current = Optional.empty();
 
     @Override
+    public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+      return current;
+    }
+
+    @Override
     public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       return current;
     }
@@ -663,7 +668,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   private static final class NoopAuthorization implements IdeViewAuthorizationListener {
 
     @Override
-    public void ensureViewCapacity(EnvironmentId environmentId) {}
+    public void ensureViewCapacity(DaemonConnectionIdentity identity) {}
 
     @Override
     public void viewOpened(

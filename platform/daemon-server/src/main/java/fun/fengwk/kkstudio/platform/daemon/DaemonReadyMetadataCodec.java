@@ -15,11 +15,11 @@ import java.util.Set;
  * Daemon READY 宿主 metadata payload 的严格 codec：类型化，拒绝未知字段、重复键、尾随内容与缺失字段。
  *
  * <p>wire shape：{@code
- * {"daemonVersion":"1.0.10","environment":{"operatingSystem":...,"timeZone":...,"userName":...,"homeDirectory":...,"note":...,"tempDirectory":...,"architecture":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
+ * {"daemonVersion":"1.0.10","hostInfo":{"operatingSystem":...,"timeZone":...,"userName":...,"homeDirectory":...,"tempDirectory":...,"architecture":...}}}。两侧都只接受这一形状，任何多余字段都是协议错误。
  *
  * <p>{@code architecture} 是唯一允许 JSON null 的字段：null 表示宿主架构事实未知，非 null 时必须是有界的合法标识字符串。
  */
-public final class DaemonCapabilitiesCodec {
+public final class DaemonReadyMetadataCodec {
 
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
@@ -27,110 +27,107 @@ public final class DaemonCapabilitiesCodec {
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .build();
 
-  private static final Set<String> ROOT_FIELDS = Set.of("daemonVersion", "environment");
-  private static final Set<String> ENVIRONMENT_FIELDS =
+  private static final Set<String> ROOT_FIELDS = Set.of("daemonVersion", "hostInfo");
+  private static final Set<String> HOST_INFO_FIELDS =
       Set.of(
           "operatingSystem",
           "timeZone",
           "userName",
           "homeDirectory",
-          "note",
           "tempDirectory",
           "architecture");
 
-  public String encode(DaemonCapabilities capabilities) {
+  public String encode(DaemonReadyMetadata readyMetadata) {
     try {
-      return MAPPER.writeValueAsString(encodeObject(capabilities));
+      return MAPPER.writeValueAsString(encodeObject(readyMetadata));
     } catch (JacksonException error) {
-      throw new DaemonProtocolException("cannot encode READY capabilities payload", error);
+      throw new DaemonProtocolException("cannot encode READY metadata payload", error);
     }
   }
 
-  ObjectNode encodeObject(DaemonCapabilities capabilities) {
-    Objects.requireNonNull(capabilities, "capabilities");
+  ObjectNode encodeObject(DaemonReadyMetadata readyMetadata) {
+    Objects.requireNonNull(readyMetadata, "readyMetadata");
     ObjectNode root = MAPPER.createObjectNode();
-    root.put("daemonVersion", capabilities.daemonVersion());
-    ObjectNode environment = root.putObject("environment");
-    environment.put("operatingSystem", capabilities.environment().operatingSystem().wireValue());
-    environment.put("timeZone", capabilities.environment().timeZone());
-    environment.put("userName", capabilities.environment().userName());
-    environment.put("homeDirectory", capabilities.environment().homeDirectory());
-    environment.put("note", capabilities.environment().note());
-    environment.put("tempDirectory", capabilities.environment().tempDirectory());
-    if (capabilities.environment().architecture() == null) {
-      environment.putNull("architecture");
+    root.put("daemonVersion", readyMetadata.daemonVersion());
+    ObjectNode hostInfo = root.putObject("hostInfo");
+    hostInfo.put("operatingSystem", readyMetadata.hostInfo().operatingSystem().wireValue());
+    hostInfo.put("timeZone", readyMetadata.hostInfo().timeZone());
+    hostInfo.put("userName", readyMetadata.hostInfo().userName());
+    hostInfo.put("homeDirectory", readyMetadata.hostInfo().homeDirectory());
+    hostInfo.put("tempDirectory", readyMetadata.hostInfo().tempDirectory());
+    if (readyMetadata.hostInfo().architecture() == null) {
+      hostInfo.putNull("architecture");
     } else {
-      environment.put("architecture", capabilities.environment().architecture());
+      hostInfo.put("architecture", readyMetadata.hostInfo().architecture());
     }
     return root;
   }
 
-  public DaemonCapabilities decode(String json) {
+  public DaemonReadyMetadata decode(String json) {
     JsonNode value;
     try {
       value = MAPPER.readTree(json);
     } catch (JacksonException error) {
-      throw new DaemonProtocolException("malformed READY payload", error);
+      throw new DaemonProtocolException("malformed READY metadata payload", error);
     }
     if (!(value instanceof ObjectNode root)) {
-      throw new DaemonProtocolException("READY payload must be an object");
+      throw new DaemonProtocolException("READY metadata payload must be an object");
     }
     return decodeObject(root);
   }
 
-  DaemonCapabilities decodeObject(ObjectNode root) {
+  DaemonReadyMetadata decodeObject(ObjectNode root) {
     root.propertyNames()
         .forEach(
             field -> {
               if (!ROOT_FIELDS.contains(field)) {
-                throw new DaemonProtocolException("unexpected READY field: " + field);
+                throw new DaemonProtocolException("unexpected READY metadata field: " + field);
               }
             });
-    String daemonVersion = text(root, "daemonVersion", "READY payload");
-    DaemonEnvironmentInfo environment = decodeEnvironment(requiredObject(root, "environment"));
+    String daemonVersion = text(root, "daemonVersion", "READY metadata payload");
+    DaemonHostInfo hostInfo = decodeHostInfo(requiredObject(root, "hostInfo"));
     try {
-      return new DaemonCapabilities(daemonVersion, environment);
+      return new DaemonReadyMetadata(daemonVersion, hostInfo);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
-          "READY capabilities validation failed: " + error.getMessage(), error);
+          "READY metadata validation failed: " + error.getMessage(), error);
     }
   }
 
   private static ObjectNode requiredObject(ObjectNode root, String field) {
     JsonNode node = root.get(field);
     if (!(node instanceof ObjectNode objectNode)) {
-      throw new DaemonProtocolException("READY payload." + field + " must be an object");
+      throw new DaemonProtocolException("READY metadata." + field + " must be an object");
     }
     return objectNode;
   }
 
-  private static DaemonEnvironmentInfo decodeEnvironment(ObjectNode node) {
+  private static DaemonHostInfo decodeHostInfo(ObjectNode node) {
     node.propertyNames()
         .forEach(
             field -> {
-              if (!ENVIRONMENT_FIELDS.contains(field)) {
-                throw new DaemonProtocolException("unexpected READY environment field: " + field);
+              if (!HOST_INFO_FIELDS.contains(field)) {
+                throw new DaemonProtocolException(
+                    "unexpected READY metadata hostInfo field: " + field);
               }
             });
-    String operatingSystemText = text(node, "operatingSystem", "READY environment");
-    String timeZone = text(node, "timeZone", "READY environment");
-    String userName = text(node, "userName", "READY environment");
-    String homeDirectory = text(node, "homeDirectory", "READY environment");
-    String note = text(node, "note", "READY environment");
-    String tempDirectory = text(node, "tempDirectory", "READY environment");
-    String architecture = nullableText(node, "architecture", "READY environment");
+    String operatingSystemText = text(node, "operatingSystem", "READY metadata hostInfo");
+    String timeZone = text(node, "timeZone", "READY metadata hostInfo");
+    String userName = text(node, "userName", "READY metadata hostInfo");
+    String homeDirectory = text(node, "homeDirectory", "READY metadata hostInfo");
+    String tempDirectory = text(node, "tempDirectory", "READY metadata hostInfo");
+    String architecture = nullableText(node, "architecture", "READY metadata hostInfo");
     try {
-      return new DaemonEnvironmentInfo(
+      return new DaemonHostInfo(
           DaemonOperatingSystem.fromWireValue(operatingSystemText),
           timeZone,
           userName,
           homeDirectory,
-          note,
           tempDirectory,
           architecture);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
-          "READY environment validation failed: " + error.getMessage(), error);
+          "READY metadata hostInfo validation failed: " + error.getMessage(), error);
     }
   }
 

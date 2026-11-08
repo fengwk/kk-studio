@@ -1,5 +1,6 @@
 import { expect, test, type Page } from './fixture'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 
 const HARNESS_URL = '/browser-tests/ide-overlay-harness.html'
 const SESSION_KEY = 'kk-studio.tab-state:ide'
@@ -15,6 +16,7 @@ const CARDS: EnvironmentDTO[] = [
   {
     id: ENV_A,
     name: 'local-node',
+    daemonConfig: testDaemonConfig(),
     ready: true,
     status: 'READY',
     version: '1',
@@ -28,6 +30,7 @@ const CARDS: EnvironmentDTO[] = [
   {
     id: ENV_B,
     name: 'remote-node',
+    daemonConfig: testDaemonConfig(),
     ready: true,
     status: 'READY',
     version: '1',

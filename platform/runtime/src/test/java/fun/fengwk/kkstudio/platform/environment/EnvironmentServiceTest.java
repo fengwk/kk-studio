@@ -26,23 +26,21 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
@@ -106,10 +104,11 @@ class EnvironmentServiceTest {
             });
     when(registry.find(any())).thenReturn(Optional.empty());
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
+    create.setDaemonConfig(daemonConfig());
     EnvironmentDTO card = service.create(create);
 
     assertNotNull(card.getId());
@@ -133,10 +132,11 @@ class EnvironmentServiceTest {
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(false);
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
+    create.setDaemonConfig(daemonConfig());
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> service.create(create));
     assertTrue(error.getMessage().contains("create environment failed"), error.getMessage());
@@ -166,10 +166,11 @@ class EnvironmentServiceTest {
               return env;
             });
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
+    create.setDaemonConfig(daemonConfig());
 
     EnvironmentDTO result = service.create(create);
 
@@ -191,7 +192,9 @@ class EnvironmentServiceTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
+    env.setNote("Card note");
     env.setRegistrationTokenHash(h("secret-token"));
+    env.setDaemonConfig(daemonConfig());
     env.setVersion(0L);
     env.setCreatedAt(NOW);
     env.setUpdatedAt(NOW);
@@ -205,14 +208,13 @@ class EnvironmentServiceTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             LiveEnvironmentStatus.READY,
-            new DaemonCapabilities(
+            new DaemonReadyMetadata(
                 "1.0.9",
-                new DaemonEnvironmentInfo(
+                new DaemonHostInfo(
                     DaemonOperatingSystem.LINUX,
                     "Asia/Shanghai",
                     "dev",
                     "/home/dev",
-                    "Note",
                     "/tmp/kk-studio",
                     "amd64")),
             List.of(),
@@ -222,7 +224,7 @@ class EnvironmentServiceTest {
 
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO single = service.get(EnvironmentId.of(ENV_ID));
     assertNull(single.getRegistrationToken());
@@ -231,7 +233,7 @@ class EnvironmentServiceTest {
     assertEquals(NOW.plusSeconds(60), single.getStatusExpiresAt());
     assertEquals(DaemonOperatingSystem.LINUX, single.getOperatingSystem());
     assertEquals("Asia/Shanghai", single.getTimeZone());
-    assertEquals("Note", single.getNote());
+    assertEquals("Card note", single.getNote());
     assertEquals("dev", single.getUserName());
     assertEquals("/home/dev", single.getHomeDirectory());
     List<EnvironmentDTO> list = service.list();
@@ -260,7 +262,7 @@ class EnvironmentServiceTest {
     // 没有任何连接行：Environment 从未连接，无任何已保留事实。
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -290,7 +292,9 @@ class EnvironmentServiceTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
+    env.setNote("Card note");
     env.setRegistrationTokenHash(h("secret-token"));
+    env.setDaemonConfig(daemonConfig());
     env.setVersion(0L);
     env.setCreatedAt(NOW);
     env.setUpdatedAt(NOW);
@@ -302,14 +306,13 @@ class EnvironmentServiceTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             LiveEnvironmentStatus.CONNECTING,
-            new DaemonCapabilities(
+            new DaemonReadyMetadata(
                 "1.0.9",
-                new DaemonEnvironmentInfo(
+                new DaemonHostInfo(
                     DaemonOperatingSystem.WSL,
                     "Asia/Shanghai",
                     "dev",
                     "/home/dev",
-                    "Retained note",
                     "/tmp/kk-studio",
                     "amd64")),
             List.of(),
@@ -318,7 +321,7 @@ class EnvironmentServiceTest {
             NOW.plusSeconds(60));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -326,7 +329,7 @@ class EnvironmentServiceTest {
     assertFalse(card.isReady());
     assertEquals(DaemonOperatingSystem.WSL, card.getOperatingSystem());
     assertEquals("Asia/Shanghai", card.getTimeZone());
-    assertEquals("Retained note", card.getNote());
+    assertEquals("Card note", card.getNote());
     assertEquals("dev", card.getUserName());
     assertEquals("/home/dev", card.getHomeDirectory());
   }
@@ -335,36 +338,20 @@ class EnvironmentServiceTest {
   @Test
   void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
-    when(snapshot.get())
-        .thenReturn(
-            new SystemSettings(
-                defaults.tool(),
-                defaults.aiRuntime(),
-                defaults.environment(),
-                new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
-                defaults.storageMedia(),
-                defaults.advanced()));
-    EnvironmentService service =
-        new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
+    EnvironmentService service = service(repo);
     Environment env = environment("secret-token", 4L);
-    DaemonConfiguration daemon = new DaemonConfiguration();
-    daemon.setStudioUrl("https://studio.example.com");
-    EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
-    config.setOperatingSystem(DaemonOperatingSystem.LINUX);
-    config.setDaemon(daemon);
-    env.setInstallConfig(config);
+    env.setDaemonConfig(daemonConfig());
     when(repo.getById(ENV_ID)).thenReturn(env);
     when(repo.lockById(ENV_ID)).thenReturn(env);
 
     AtomicReference<String> savedCodeHash = new AtomicReference<>();
     AtomicReference<String> savedTokenHash = new AtomicReference<>();
-    when(repo.saveInstallCode(eq(ENV_ID), eq(4L), any(), any()))
+    Instant expiresAt = NOW.plus(Duration.ofMinutes(5));
+    when(repo.saveInstallCode(eq(ENV_ID), eq(4L), any()))
         .thenAnswer(
             invocation -> {
               savedCodeHash.set(invocation.getArgument(2));
-              return true;
+              return Optional.of(expiresAt);
             });
     when(repo.redeemInstallCode(eq(ENV_ID), eq(4L), any(), any()))
         .thenAnswer(
@@ -374,32 +361,34 @@ class EnvironmentServiceTest {
               if (Objects.equals(savedCodeHash.get(), codeHash)) {
                 savedCodeHash.set(null);
                 savedTokenHash.set(tokenHash);
-                return true;
+                return Optional.of(5L);
               }
-              return false;
+              return Optional.empty();
             });
 
     assertThrows(
         DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), 3L));
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), 4L);
-    assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
+    assertEquals(expiresAt, issued.getExpiresAt());
     verify(repo)
-        .saveInstallCode(
-            eq(ENV_ID),
-            eq(4L),
-            eq(EnvironmentInstallCodes.hash(issued.getCode())),
-            eq(NOW.plus(Duration.ofMinutes(5))));
+        .saveInstallCode(eq(ENV_ID), eq(4L), eq(EnvironmentInstallCodes.hash(issued.getCode())));
 
     String tampered =
         (issued.getCode().charAt(0) == 'A' ? "B" : "A") + issued.getCode().substring(1);
     assertThrows(
         DomainException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), tampered));
+        () ->
+            service.installationScript(
+                EnvironmentId.of(ENV_ID), tampered, DaemonOperatingSystem.LINUX));
 
-    String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
+    String script =
+        service.installationScript(
+            EnvironmentId.of(ENV_ID), issued.getCode(), DaemonOperatingSystem.LINUX);
 
-    assertTrue(script.contains("http://proxy.invalid:8080"));
-    assertTrue(script.contains("localhost,.internal"));
+    assertTrue(script.contains("--environment-id '" + ENV_ID + "'"));
+    assertTrue(script.contains("\"version\":\"5\""), "script uses the post-redeem CAS version");
+    assertTrue(script.contains("v3.0.0/scripts/daemon/install.sh"));
+    assertTrue(script.contains("\"proxyUrl\":null"));
     assertFalse(script.contains("secret-token"), "the old token is never recoverable");
     verify(repo)
         .redeemInstallCode(
@@ -412,46 +401,68 @@ class EnvironmentServiceTest {
         "the script carries the plaintext whose hash is now stored");
     assertThrows(
         DomainException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()),
+        () ->
+            service.installationScript(
+                EnvironmentId.of(ENV_ID), issued.getCode(), DaemonOperatingSystem.LINUX),
         "a redeemed code cannot be reused");
     verify(repo, never()).updateById(any(), anyLong());
     verify(repo, never()).getByRegistrationTokenHash(any());
     assertThrows(
-        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
+        DomainException.class,
+        () ->
+            service.installationScript(
+                EnvironmentId.of(ENV_ID), null, DaemonOperatingSystem.LINUX));
   }
 
-  /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
+  /** 测试意图：未知身份或无效 code 都不能返回可执行的成功空脚本。 */
   @Test
-  void installationScriptRejectsUnknownIdAndMissingConfig() {
+  void installationScriptRejectsUnknownIdAndInvalidCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service = service(repo);
     when(repo.lockById(ENV_ID)).thenReturn(null);
     assertThrows(
-        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
+        DomainException.class,
+        () ->
+            service.installationScript(
+                EnvironmentId.of(ENV_ID), "1.bad", DaemonOperatingSystem.LINUX));
 
     Environment env = environment("saved", 1L);
     when(repo.lockById(ENV_ID)).thenReturn(env);
     assertThrows(
-        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
+        DomainException.class,
+        () ->
+            service.installationScript(
+                EnvironmentId.of(ENV_ID), "1.bad", DaemonOperatingSystem.LINUX));
     verify(repo, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：卸载命令只校验操作系统，不查询仓库。 */
+  /** 测试意图：卸载命令只定位本卡片并校验操作系统，不读取 token，也不轮换凭据。 */
   @Test
-  void uninstallationScriptDoesNotTouchRepository() {
+  void uninstallationScriptTargetsTheCardWithoutToken() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service = service(repo);
+    when(repo.getById(ENV_ID)).thenReturn(environment("saved", 1L));
 
-    assertTrue(service.uninstallationScript(DaemonOperatingSystem.MACOS).contains("uninstall"));
+    String script =
+        service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.MACOS);
+    assertTrue(script.contains("uninstall --environment-id '" + ENV_ID + "'"));
+    assertTrue(script.contains("v3.0.0/scripts/daemon/install.sh"));
+    assertFalse(script.contains("daemon.token"));
     assertThrows(
-        DomainException.class, () -> service.uninstallationScript(DaemonOperatingSystem.WSL));
+        DomainException.class,
+        () -> service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.WSL));
     verify(repo, never()).getByRegistrationTokenHash(any());
+
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    assertThrows(
+        DomainException.class,
+        () -> service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.LINUX));
   }
 
   private static EnvironmentService service(EnvironmentRepository repo) {
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
-    return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
+    return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK, "3.0.0");
   }
 
   /** 测试意图：在线轮换被允许且不要求离线，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
@@ -477,7 +488,7 @@ class EnvironmentServiceTest {
     // 数据库中存在活跃租约：轮换成功且不得查询租约（在线轮换不要求离线）
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), 0L);
 
@@ -505,7 +516,7 @@ class EnvironmentServiceTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(true);
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
@@ -553,7 +564,7 @@ class EnvironmentServiceTest {
                 "environment ready"));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(connection(history)));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
     // 卡片只投影当前连接状态，且序列化后不含任何历史事件字段。
@@ -601,7 +612,7 @@ class EnvironmentServiceTest {
                             EnvironmentEvent.TYPE_DISCONNECTED,
                             "daemon connection lost")))));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
     assertEquals(2, events.size());
@@ -639,9 +650,13 @@ class EnvironmentServiceTest {
             });
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
-    EnvironmentDTO card = service.importEnvironment("imported", h("token-1"), null);
+    EnvironmentDTO card = service.importEnvironment("imported", null, h("token-1"), daemonConfig());
 
     assertEquals("imported", card.getName());
     assertNull(card.getRegistrationToken());
@@ -655,9 +670,15 @@ class EnvironmentServiceTest {
     when(repo.existsByName("dup")).thenReturn(true);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
-    assertThrows(DomainException.class, () -> service.importEnvironment("dup", h("token"), null));
+    assertThrows(
+        DomainException.class,
+        () -> service.importEnvironment("dup", null, h("token"), daemonConfig()));
   }
 
   /** 意图：registrationToken 已被占用时拒绝，且错误文本不回显 token 值。 */
@@ -668,12 +689,16 @@ class EnvironmentServiceTest {
     when(repo.getByRegistrationTokenHash(h("secret-token"))).thenReturn(new Environment());
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     DomainException error =
         assertThrows(
             DomainException.class,
-            () -> service.importEnvironment("fresh", h("secret-token"), null));
+            () -> service.importEnvironment("fresh", null, h("secret-token"), daemonConfig()));
 
     assertFalse(error.getMessage().contains("secret-token"));
   }
@@ -705,10 +730,15 @@ class EnvironmentServiceTest {
             });
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     EnvironmentDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L);
+        service.updateImportedEnvironment(
+            EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L);
     assertNull(card.getRegistrationToken());
     assertEquals(1L, card.getVersion());
 
@@ -723,7 +753,7 @@ class EnvironmentServiceTest {
         DomainException.class,
         () ->
             service.updateImportedEnvironment(
-                EnvironmentId.of(ENV_ID), h("other-token"), null, 0L));
+                EnvironmentId.of(ENV_ID), null, h("other-token"), daemonConfig(), 0L));
   }
 
   /** 意图：导入 create 返回 false 时冒泡，不留下半成品。 */
@@ -735,11 +765,15 @@ class EnvironmentServiceTest {
     when(repo.create(any())).thenReturn(false);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         IllegalStateException.class,
-        () -> service.importEnvironment("imported", h("token-1"), null));
+        () -> service.importEnvironment("imported", null, h("token-1"), daemonConfig()));
   }
 
   /** 意图：并发插入触发唯一约束竞争时映射为业务重复错误。 */
@@ -751,10 +785,15 @@ class EnvironmentServiceTest {
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
-        DomainException.class, () -> service.importEnvironment("imported", h("token-1"), null));
+        DomainException.class,
+        () -> service.importEnvironment("imported", null, h("token-1"), daemonConfig()));
   }
 
   /** 意图：目标行不存在时 lockById 返回 null 必须 404。 */
@@ -764,28 +803,43 @@ class EnvironmentServiceTest {
     when(repo.lockById(ENV_ID)).thenReturn(null);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
+            service.updateImportedEnvironment(
+                EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L));
   }
 
-  /** 意图：token 与当前值一致时幂等成功返回，且不写库。 */
+  /** 意图：即便导入内容与当前值一致也走同一写入与版本推进，不做隐式幂等短路。 */
   @Test
-  void updateImportedEnvironmentIsIdempotentWhenUnchanged() {
+  void updateImportedEnvironmentAlwaysAdvancesTheVersion() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    when(repo.lockById(ENV_ID)).thenReturn(environment("old-token", 0L));
+    Environment existing = environment("old-token", 0L);
+    Environment updated = environment("old-token", 1L);
+    when(repo.lockById(ENV_ID)).thenReturn(existing);
+    when(repo.updateById(existing, 0L)).thenReturn(true);
+    when(repo.getById(ENV_ID)).thenReturn(updated);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     EnvironmentDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, 0L);
+        service.updateImportedEnvironment(
+            EnvironmentId.of(ENV_ID), null, h("old-token"), daemonConfig(), 0L);
 
     assertNull(card.getRegistrationToken());
-    verify(repo, never()).updateById(any(), anyLong());
+    assertEquals(1L, card.getVersion());
+    verify(repo).updateById(existing, 0L);
   }
 
   /** 意图：CAS 失败且重读发现行已消失时按 404 语义失败。 */
@@ -798,12 +852,17 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(null);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
+            service.updateImportedEnvironment(
+                EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L));
   }
 
   /** 意图：CAS 失败但行仍在（版本已前进）时按版本冲突失败。 */
@@ -816,12 +875,17 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(environment("newer-token", 2L));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
+            service.updateImportedEnvironment(
+                EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L));
   }
 
   /** 意图：唯一 token 竞争触发约束异常时映射为业务重复错误。 */
@@ -833,12 +897,17 @@ class EnvironmentServiceTest {
     when(repo.updateById(env, 0L)).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
+            service.updateImportedEnvironment(
+                EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L));
   }
 
   /** 意图：CRUD 与配置同步共用的静态校验覆盖全部拒绝分支。 */
@@ -848,6 +917,15 @@ class EnvironmentServiceTest {
       assertThrows(DomainException.class, () -> EnvironmentService.validateName(invalid));
     }
     assertEquals("ok", EnvironmentService.validateName("ok"));
+    assertNull(EnvironmentService.validateNote(null));
+    assertNull(EnvironmentService.validateNote("   "));
+    assertEquals("Card note", EnvironmentService.validateNote("  Card note  "));
+    assertThrows(DomainException.class, () -> EnvironmentService.validateNote("bad\nnote"));
+    assertThrows(DomainException.class, () -> EnvironmentService.validateNote("x".repeat(513)));
+    assertThrows(DomainException.class, () -> EnvironmentService.validateDaemonConfig(null));
+    assertEquals(
+        "https://studio.example.com",
+        EnvironmentService.validateDaemonConfig(daemonConfig()).getStudioUrl());
     for (String invalid : new String[] {null, "", "token", "A".repeat(64), "a".repeat(63)}) {
       assertThrows(
           DomainException.class, () -> EnvironmentService.validateRegistrationTokenHash(invalid));
@@ -862,19 +940,21 @@ class EnvironmentServiceTest {
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     EnvironmentService service =
-        new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
+        new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK, "3.0.0");
 
     assertThrows(DomainException.class, () -> service.create(null));
 
     when(repo.existsByName("dup")).thenReturn(true);
     EnvironmentCreateDTO duplicate = new EnvironmentCreateDTO();
     duplicate.setName("dup");
+    duplicate.setDaemonConfig(daemonConfig());
     assertThrows(DomainException.class, () -> service.create(duplicate));
 
     when(repo.existsByName("fresh")).thenReturn(false);
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentCreateDTO fresh = new EnvironmentCreateDTO();
     fresh.setName("fresh");
+    fresh.setDaemonConfig(daemonConfig());
     assertThrows(DomainException.class, () -> service.create(fresh));
   }
 
@@ -884,7 +964,11 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(DomainException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
   }
@@ -895,7 +979,11 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
 
@@ -917,7 +1005,7 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     EnvironmentService service =
-        new EnvironmentService(repo, registry, mock(SystemSettingsSnapshot.class), CLOCK);
+        new EnvironmentService(repo, registry, mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
 
     assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
@@ -953,7 +1041,7 @@ class EnvironmentServiceTest {
                 connectionAt(
                     LiveEnvironmentStatus.READY, NOW.minusSeconds(120), NOW.minusSeconds(60))));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     EnvironmentDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -972,7 +1060,7 @@ class EnvironmentServiceTest {
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
 
-    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");
 
     // 心跳窗口（默认 60s）先到：截止时间取 lastSeen + heartbeatTimeout，而不是更晚的租约。
     when(registry.find(EnvironmentId.of(ENV_ID)))
@@ -1002,6 +1090,12 @@ class EnvironmentServiceTest {
     return RegistrationTokens.hash(token);
   }
 
+  private static DaemonConfigDTO daemonConfig() {
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
+    return config;
+  }
+
   /** 从脚本中找出摘要与 {@code hash} 相符的明文凭证（UUID 形态）。 */
   private static String tokenFor(String hash, String script) {
     Matcher matcher =
@@ -1020,6 +1114,7 @@ class EnvironmentServiceTest {
     env.setId(ENV_ID);
     env.setName("local-env");
     env.setRegistrationTokenHash(h(registrationToken));
+    env.setDaemonConfig(daemonConfig());
     env.setVersion(version);
     env.setCreatedAt(NOW);
     env.setUpdatedAt(NOW);
@@ -1032,14 +1127,13 @@ class EnvironmentServiceTest {
         UUID.randomUUID(),
         UUID.randomUUID(),
         LiveEnvironmentStatus.READY,
-        new DaemonCapabilities(
+        new DaemonReadyMetadata(
             "1.0.9",
-            new DaemonEnvironmentInfo(
+            new DaemonHostInfo(
                 DaemonOperatingSystem.LINUX,
                 "Asia/Shanghai",
                 "dev",
                 "/home/dev",
-                "Note",
                 "/tmp/kk-studio",
                 "amd64")),
         List.of(),
@@ -1055,14 +1149,13 @@ class EnvironmentServiceTest {
         UUID.randomUUID(),
         UUID.randomUUID(),
         status,
-        new DaemonCapabilities(
+        new DaemonReadyMetadata(
             "1.0.9",
-            new DaemonEnvironmentInfo(
+            new DaemonHostInfo(
                 DaemonOperatingSystem.LINUX,
                 "Asia/Shanghai",
                 "dev",
                 "/home/dev",
-                "Note",
                 "/tmp/kk-studio",
                 "amd64")),
         List.of(),

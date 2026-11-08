@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -7,11 +8,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,46 +18,55 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 配置的唯一结构与取值校验边界。错误只包含字段路径与规则，不包含输入值或解析器异常。
+ * 卡片 Daemon 配置的唯一结构与取值校验边界。
  *
- * <p>parse 校验 JSON 的实际类型（不做 Jackson 标量强制转换），validate 同样校验程序构造的模型， 返回独立、规范化的配置。文件读取额外拒绝重复键与尾随 JSON。
+ * <p>错误只包含字段路径与规则，不包含输入值或解析器异常。parse 严格校验 JSON 的实际类型且拒绝未知字段；validate 同样校验程序构造的模型，返回独立、 规范化的完整配置。
  */
-public final class DaemonConfigurationCodec {
+public final class DaemonConfigCodec {
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
           .build();
+  private static final ObjectMapper CANONICAL =
+      JsonMapper.builder()
+          .changeDefaultPropertyInclusion(
+              inclusion -> inclusion.withValueInclusion(JsonInclude.Include.ALWAYS))
+          .build();
 
-  private DaemonConfigurationCodec() {}
+  private DaemonConfigCodec() {}
 
-  /** 读取配置文件；语法错误与 IO 错误不泄露文件内容。 */
-  public static DaemonConfiguration read(Path file) {
+  /** 从持久化或本地信封中的 {@code daemonConfig} 对象读取配置。 */
+  public static DaemonConfigDTO read(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("daemonConfig: must be an object");
+    }
     JsonNode node;
     try {
-      node = MAPPER.readTree(Files.readAllBytes(file));
-    } catch (IOException | JacksonException error) {
-      throw invalid("daemon", "cannot read valid JSON (duplicate keys are forbidden)");
+      node = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException(
+          "daemonConfig: must be valid JSON without duplicate keys or trailing data");
     }
     return parse(node);
   }
 
-  public static DaemonConfiguration parse(JsonNode node) {
-    object(node, "daemon", Set.of("studioUrl", "note", "bashExecutable", "lsp"));
-    DaemonConfiguration config = new DaemonConfiguration();
-    config.setStudioUrl(text(node.get("studioUrl"), "daemon.studioUrl"));
-    config.setNote(text(node.get("note"), "daemon.note"));
-    config.setBashExecutable(text(node.get("bashExecutable"), "daemon.bashExecutable"));
+  public static DaemonConfigDTO parse(JsonNode node) {
+    object(node, "daemonConfig", Set.of("studioUrl", "bashExecutable", "lsp", "proxyUrl"));
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl(text(node.get("studioUrl"), "daemonConfig.studioUrl"));
+    config.setBashExecutable(text(node.get("bashExecutable"), "daemonConfig.bashExecutable"));
     JsonNode lsp = node.get("lsp");
     config.setLsp(absent(lsp) ? null : parseLspNode(lsp));
+    config.setProxyUrl(text(node.get("proxyUrl"), "daemonConfig.proxyUrl"));
     return validate(config);
   }
 
   private static DaemonLspConfiguration parseLspNode(JsonNode node) {
-    object(node, "daemon.lsp", Set.of("servers"));
+    object(node, "daemonConfig.lsp", Set.of("servers"));
     JsonNode servers = node.get("servers");
     if (servers == null || !servers.isObject()) {
-      throw invalid("daemon.lsp.servers", "must be an object");
+      throw invalid("daemonConfig.lsp.servers", "must be an object");
     }
     Map<String, DaemonLspServerConfiguration> parsed = new LinkedHashMap<>();
     servers
@@ -68,7 +75,7 @@ public final class DaemonConfigurationCodec {
             entry -> {
               String id = entry.getKey();
               serverId(id);
-              String path = "daemon.lsp.servers." + id;
+              String path = "daemonConfig.lsp.servers." + id;
               JsonNode server = entry.getValue();
               object(
                   server,
@@ -87,32 +94,57 @@ public final class DaemonConfigurationCodec {
     return config;
   }
 
-  public static DaemonConfiguration validate(DaemonConfiguration config) {
+  public static DaemonConfigDTO validate(DaemonConfigDTO config) {
     if (config == null) {
-      throw invalid("daemon", "must be an object");
+      throw invalid("daemonConfig", "must be an object");
     }
-    DaemonConfiguration result = new DaemonConfiguration();
+    DaemonConfigDTO result = new DaemonConfigDTO();
     result.setStudioUrl(origin(config.getStudioUrl()).toString());
-    String note = config.getNote();
-    if (note != null) {
-      noControls(note, "daemon.note");
-      note = note.strip();
-      if (note.isEmpty() || note.length() > 512) {
-        throw invalid("daemon.note", "must be a nonblank single line of at most 512 characters");
-      }
-    }
-    result.setNote(note);
-    String bash = config.getBashExecutable();
-    if (bash != null) {
-      nonblank(bash, "daemon.bashExecutable");
-    }
-    result.setBashExecutable(bash);
+    result.setBashExecutable(optionalNonblank(config.getBashExecutable()));
     result.setLsp(config.getLsp() == null ? null : validateLsp(config.getLsp()));
+    result.setProxyUrl(proxy(config.getProxyUrl()));
     return result;
   }
 
+  private static String optionalNonblank(String value) {
+    if (value == null) {
+      return null;
+    }
+    nonblank(value, "daemonConfig.bashExecutable");
+    return value;
+  }
+
+  private static String proxy(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String path = "daemonConfig.proxyUrl";
+    URI uri;
+    try {
+      uri = new URI(value);
+    } catch (URISyntaxException error) {
+      throw invalid(path, "must be an unauthenticated HTTP proxy origin");
+    }
+    String scheme = uri.getScheme();
+    if (scheme == null
+        || !scheme.equalsIgnoreCase("http")
+        || uri.getHost() == null
+        || uri.getRawUserInfo() != null
+        || uri.getRawQuery() != null
+        || uri.getRawFragment() != null
+        || (uri.getRawPath() != null
+            && !uri.getRawPath().isEmpty()
+            && !uri.getRawPath().equals("/"))
+        || uri.getPort() < 1
+        || uri.getPort() > 65535) {
+      throw invalid(
+          path, "must be an unauthenticated http://host:port proxy without path or query");
+    }
+    return "http://" + uri.getRawAuthority();
+  }
+
   private static URI origin(String value) {
-    String path = "daemon.studioUrl";
+    String path = "daemonConfig.studioUrl";
     nonblank(value, path);
     URI uri;
     try {
@@ -146,20 +178,20 @@ public final class DaemonConfigurationCodec {
   private static DaemonLspConfiguration validateLsp(DaemonLspConfiguration config) {
     Map<String, DaemonLspServerConfiguration> servers = config.getServers();
     if (servers == null || servers.isEmpty()) {
-      throw invalid("daemon.lsp.servers", "must declare at least one server");
+      throw invalid("daemonConfig.lsp.servers", "must declare at least one server");
     }
     Map<String, DaemonLspServerConfiguration> result = new LinkedHashMap<>();
     servers.forEach(
         (id, server) -> {
           serverId(id);
-          String path = "daemon.lsp.servers." + id;
+          String path = "daemonConfig.lsp.servers." + id;
           if (server == null) {
             throw invalid(path, "must be an object");
           }
           DaemonLspServerConfiguration value = new DaemonLspServerConfiguration();
           value.setCommand(list(server.getCommand(), path + ".command", true, false, false));
           value.setExtensions(
-              list(server.getExtensions(), path + ".extensions", true, true, false));
+              list(server.getExtensions(), path + ".extensions", false, true, false));
           value.setRootMarkers(
               list(server.getRootMarkers(), path + ".rootMarkers", false, false, true));
           value.setFirstMatchMarkers(
@@ -210,8 +242,22 @@ public final class DaemonConfigurationCodec {
 
   private static void serverId(String id) {
     if (id == null || !id.matches("[A-Za-z0-9_.-]+")) {
-      throw invalid("daemon.lsp.servers", "server IDs must match [A-Za-z0-9_.-]+");
+      throw invalid("daemonConfig.lsp.servers", "server IDs must match [A-Za-z0-9_.-]+");
     }
+  }
+
+  /** 按完整 canonical 结构写入持久化 JSON，显式的 null 表示直连或未配置。 */
+  public static String write(DaemonConfigDTO config) {
+    try {
+      return CANONICAL.writeValueAsString(validate(config));
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot serialize daemonConfig", error);
+    }
+  }
+
+  /** 按完整 canonical 结构生成 JSON 树，供安装脚本写入本地信封。 */
+  public static JsonNode tree(DaemonConfigDTO config) {
+    return CANONICAL.valueToTree(validate(config));
   }
 
   private static void object(JsonNode node, String path, Set<String> fields) {

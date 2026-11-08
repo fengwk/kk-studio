@@ -76,10 +76,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         assertTrue(rs.next(), "default row must exist");
         String configJson = rs.getString(1);
         // fresh-install 默认代理必须明确直连，required noProxyHosts 不能依靠运行期补齐。
-        JsonNode network = OBJECT_MAPPER.readTree(configJson).path("network");
-        assertTrue(network.isObject());
-        assertTrue(network.path("proxyUrl").isMissingNode());
-        assertEquals("localhost,127.*,::1", network.path("noProxyHosts").asText());
+        JsonNode backendNetwork = OBJECT_MAPPER.readTree(configJson).path("backendNetwork");
+        assertTrue(backendNetwork.isObject());
+        assertTrue(backendNetwork.path("proxyUrl").isMissingNode());
+        assertEquals("localhost,127.*,::1", backendNetwork.path("noProxyHosts").asText());
         assertEquals(
             SystemSettingsTestFixture.DEFAULT,
             new SystemSettingsCodec().decode(configJson),
@@ -194,7 +194,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           ResultSet rs = st.executeQuery("select config from system_setting where id = 1")) {
         assertTrue(rs.next(), "e2e database must carry the system_setting row");
         SystemSettings settings = new SystemSettingsCodec().decode(rs.getString(1));
-        assertEquals(SystemSettingsTestFixture.NETWORK, settings.network());
+        assertEquals(SystemSettingsTestFixture.BACKEND_NETWORK, settings.backendNetwork());
         assertEquals(
             List.of(new PermissionRule("*", PermissionAction.ASK)),
             settings.tool().permission().get("read"),
@@ -215,7 +215,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       }
 
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
-      assertEquals(SystemSettingsTestFixture.NETWORK, settings.network());
+      assertEquals(SystemSettingsTestFixture.BACKEND_NETWORK, settings.backendNetwork());
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
 
       // 重新执行 canvas-test 迁移，断言 repeatable migration 二次运行幂等且设置保持正确。

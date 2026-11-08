@@ -4,31 +4,29 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { url } from '@/shared/api/client'
-import { detectInstallOS, generateInstallCommand, generateUninstallCommand, validateInstallConfig } from './install-command'
-import type { EnvironmentInstallConfigDTO } from '@/shared/api/generated/contracts'
+import {
+  detectInstallOS,
+  generateInstallCommand,
+  generateUninstallCommand,
+} from './install-command'
 
 const origin = 'https://studio.example.com'
 const environmentId = "env/汉字'$(touch NEVER)"
 const installCode = "code'$(touch NEVER)"
 
-const config = (): EnvironmentInstallConfigDTO => ({
-  operatingSystem: 'linux',
-  daemon: {
-    studioUrl: 'https://daemon.example.com/',
-    note: "汉字 ' \" $ ` $(touch NEVER) KK_STUDIO_INSTALL",
-    bashExecutable: "/bin/汉字 '$`",
-    lsp: {
-      servers: {
-        'server-1': {
-          command: ['~/server', "quote' \"$` $(touch NEVER)"],
-          extensions: [' .java'],
-          rootMarkers: ['pom.xml'],
-          firstMatchMarkers: ['.git'],
-        },
-      },
-    },
-  },
-})
+function installScriptUrl(os: 'linux' | 'macos' | 'windows', id = environmentId) {
+  return `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
+    path: { environmentId: id },
+    query: { code: installCode, operatingSystem: os },
+  })}`
+}
+
+function uninstallScriptUrl(os: 'linux' | 'macos' | 'windows', id = environmentId) {
+  return `${origin}${url('GET /api/platform/environments/{environmentId}/uninstall-script', {
+    path: { environmentId: id },
+    query: { operatingSystem: os },
+  })}`
+}
 
 /** 用假 curl 执行实际粘贴的一行命令，记录请求 URL 并回放远端脚本。 */
 function execute(command: string, script: string, exit = 0) {
@@ -71,18 +69,14 @@ exit ${exit}
 
 describe('install command', () => {
   it.skipIf(process.platform === 'win32').each(['linux', 'macos'] as const)(
-    'runs a one-line %s install that fetches the encoded environment URL and executes the remote script',
+    'runs a one-line %s install that fetches the encoded environment URL with the target OS and executes the remote script',
     os => {
-      const input = { ...config(), operatingSystem: os }
       const command = generateInstallCommand(origin, environmentId, os, installCode)
-      const expected = `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
-        path: { environmentId },
-        query: { code: installCode },
-      })}`
+      const expected = installScriptUrl(os)
       expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
       expect(command).not.toContain('\n')
-      expect(command).not.toContain(input.daemon.studioUrl)
       expect(command).not.toContain('registrationToken')
+      expect(command).toContain('operatingSystem=')
       const { run, url: fetched } = execute(command, 'echo installed\n')
       expect(run.status).toBe(0)
       expect(run.stdout.trim()).toBe('installed')
@@ -116,14 +110,11 @@ describe('install command', () => {
   )
 
   it.skipIf(process.platform === 'win32').each(['linux', 'macos'] as const)(
-    'runs a one-line %s uninstall against the saved operating system',
+    'runs a one-line %s uninstall that locates this card and the chosen OS',
     os => {
-      const command = generateUninstallCommand(os, origin)
-      const expected = `${origin}${url(
-        'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}',
-        { path: { operatingSystem: os } },
-      )}`
-      expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected}' | bash)`)
+      const command = generateUninstallCommand(origin, environmentId, os)
+      const expected = uninstallScriptUrl(os)
+      expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
       const { run, url: fetched } = execute(command, 'echo uninstalled\n')
       expect(run.status).toBe(0)
       expect(fetched).toBe(expected)
@@ -131,13 +122,8 @@ describe('install command', () => {
   )
 
   it('quotes the Windows download and does not stage credentials on the client', () => {
-    const input = config()
-    input.operatingSystem = 'windows'
     const command = generateInstallCommand(origin, environmentId, 'windows', installCode)
-    const expected = `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
-      path: { environmentId },
-      query: { code: installCode },
-    })}`.replaceAll("'", "''")
+    const expected = installScriptUrl('windows').replaceAll("'", "''")
     expect(command).not.toContain('\n')
     expect(command.startsWith('& { Set-PSDebug -Off; ')).toBe(true)
     expect(command.endsWith(' }')).toBe(true)
@@ -149,139 +135,17 @@ describe('install command', () => {
     expect(command).not.toContain('WriteAllText')
     expect(command).not.toContain('Set-Acl')
     expect(command).not.toContain('-JavaHome')
-    const uninstall = generateUninstallCommand('windows', origin)
-    expect(uninstall).toContain(
-      `'${origin}${url('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
-        path: { operatingSystem: 'windows' },
-      })}'`,
-    )
+    const uninstall = generateUninstallCommand(origin, environmentId, 'windows')
+    expect(uninstall).toContain(`'${uninstallScriptUrl('windows').replaceAll("'", "''")}'`)
     expect(uninstall).not.toContain('registrationToken')
+    expect(uninstall).not.toContain('code=')
   })
 
-  it('normalizes like the shared codec: origin, note, extension case and marker trim', () => {
-    expect(validateInstallConfig({
-      operatingSystem: 'linux',
-      daemon: {
-        studioUrl: 'HTTPS://Host:8443/',
-        note: '  hi  ',
-        bashExecutable: ' bash ',
-        lsp: {
-          servers: {
-            Jdtls: {
-              command: [' jdtls '],
-              extensions: [' .JAVA '],
-              rootMarkers: [' pom.xml '],
-              firstMatchMarkers: ['.git'],
-            },
-          },
-        },
-      },
-    })).toEqual({
-      operatingSystem: 'linux',
-      daemon: {
-        studioUrl: 'https://host:8443',
-        note: 'hi',
-        bashExecutable: ' bash ',
-        lsp: {
-          servers: {
-            Jdtls: {
-              command: [' jdtls '],
-              extensions: ['.java'],
-              rootMarkers: ['pom.xml'],
-              firstMatchMarkers: ['.git'],
-            },
-          },
-        },
-      },
-    })
-  })
-
-  it('detects defaults without overriding saved settings', () => {
+  it('detects defaults from the browser platform', () => {
     expect(['Win32', 'MacIntel', 'Linux'].map(detectInstallOS)).toEqual(['windows', 'macos', 'linux'])
-    expect(validateInstallConfig({ operatingSystem: 'linux', daemon: { studioUrl: 'http://[::1]:8080/', note: null, bashExecutable: null } }))
-      .toEqual({ operatingSystem: 'linux',
-        daemon: { studioUrl: 'http://[::1]:8080', note: null, bashExecutable: null, lsp: null } })
   })
 
-  it.each(['ftp://host', 'https://user:pass@host', 'https://@host', 'https://host:', 'https://host:0',
-    'https://host /', 'https://host/path', 'https://host?x', 'https://host#x', 'https://host:99999',
-    'https://', 'https://host\\path', 'https://host\n', 'https://host//', 'https://[::1', 'https://host:abc',
-    'https://例え.jp'])('rejects unsafe origin %s', studioUrl => {
-    expect(() => validateInstallConfig({ ...config(), daemon: { studioUrl } }))
-      .toThrow(/daemon\.studioUrl/)
-  })
-
-  it.each([
-    { extra: 'value' },
-    { operatingSystem: 'unknown' }, { daemon: { studioUrl: '' } },
-    { daemon: { studioUrl: 'https://host', note: 'x'.repeat(513) } },
-    { daemon: { studioUrl: 'https://host', note: '' } },
-    { daemon: { studioUrl: 'https://host', note: '\u0085' } },
-    { daemon: { studioUrl: 'https://host', note: 'x\u2028y' } },
-    { daemon: { studioUrl: 'https://host', bashExecutable: 'a\nb' } },
-    { daemon: { studioUrl: 'https://host', other: 1 } }, { other: 1 },
-  ])('rejects invalid fields without echoing values %#', patch => {
-    expect(() => validateInstallConfig({ ...config(), ...patch } as unknown as EnvironmentInstallConfigDTO))
-      .toThrow(/^Invalid /)
-  })
-
-  it.each([
-    null, [], {}, { command: [] }, { command: [''] }, { command: [1] }, { command: ['x'] },
-    { command: ['x'] , extensions: [] }, { command: ['x'], extensions: ['.'] },
-    { command: ['x'], extensions: ['java'] }, { command: ['x'], extensions: ['.a/b'] },
-    { command: ['x'], extensions: ['.a', ''] }, { command: ['x'], extensions: ['.a'], unknown: [] },
-    { command: ['x'], extensions: ['.a'], rootMarkers: ['..'] },
-    { command: ['x'], extensions: ['.a'], rootMarkers: ['.'] },
-    { command: ['x'], extensions: ['.a'], rootMarkers: ['a//b'] },
-    { command: ['x'], extensions: ['.a'], rootMarkers: ['a:'] },
-    { command: ['x'], extensions: ['.a'], rootMarkers: ['/pom'] },
-    { command: ['x'], extensions: ['.a'], firstMatchMarkers: ['C:\\pom'] },
-    { command: ['x'], extensions: ['.a'], firstMatchMarkers: 'bad' },
-  ])('rejects malformed LSP server %#', server => {
-    const input = config()
-    input.daemon.lsp = { servers: { server } } as EnvironmentInstallConfigDTO['daemon']['lsp']
-    expect(() => validateInstallConfig(input)).toThrow(/^Invalid /)
-  })
-
-  it('requires extension and command arrays but keeps optional markers optional', () => {
-    const input = config()
-    input.daemon.lsp = { servers: { server: { command: ['x'], extensions: ['.ts'] } } }
-    expect(validateInstallConfig(input).daemon.lsp!.servers.server)
-      .toEqual({ command: ['x'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [] })
-  })
-
-  it.each(['__proto__', 'constructor', 'toString'])(
-    'preserves the valid LSP server id %s as an own JSON field',
-    id => {
-      // server id 是外部键，不应改变对象原型或在写入 daemon.json 时丢失。
-      const input: EnvironmentInstallConfigDTO = {
-        operatingSystem: 'linux',
-        daemon: {
-          studioUrl: 'https://studio.example.com',
-          lsp: { servers: Object.fromEntries([[id, { command: ['server'], extensions: ['.ts'] }]]) },
-        },
-      }
-      const normalized = validateInstallConfig(input)
-      const servers = normalized.daemon.lsp!.servers
-      expect(Object.getPrototypeOf(servers)).toBeNull()
-      expect(Object.hasOwn(servers, id)).toBe(true)
-      expect(Object.keys(JSON.parse(JSON.stringify(servers)))).toEqual([id])
-      expect(servers[id]).toEqual({
-        command: ['server'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [],
-      })
-      const command = generateInstallCommand(origin, id, 'linux', 'code-1')
-      expect(command).toContain(encodeURIComponent(id).replaceAll("'", "\\'"))
-      expect(command).not.toContain(JSON.stringify(normalized.daemon))
-    },
-  )
-
-  it('bounds and validates LSP map and rejects control or origin injection', () => {
-    const input = config()
-    for (const lsp of [{ servers: {} }, { servers: [] }, { servers: { 'bad id': { command: ['x'], extensions: ['.a'] } } },
-      { servers: {}, other: true }]) {
-      input.daemon.lsp = lsp as EnvironmentInstallConfigDTO['daemon']['lsp']
-      expect(() => validateInstallConfig(input)).toThrow(/^Invalid /)
-    }
+  it('bounds and validates identifiers and rejects control or origin injection', () => {
     expect(() => generateInstallCommand(origin, "x\n$(touch NEVER)", 'linux', 'code-1'))
       .toThrow('environmentId')
     expect(() => generateInstallCommand(origin, 'env-1', 'linux', "x\n$(touch NEVER)"))
@@ -291,11 +155,15 @@ describe('install command', () => {
     expect(() => generateInstallCommand('https://user:pass@studio.example.com', 'env-1', 'linux', 'code-1'))
       .toThrow('downloadOrigin')
     expect(() => generateInstallCommand(origin, 'env-1', 'wrong' as 'linux', 'code-1')).toThrow('operatingSystem')
-    expect(() => generateUninstallCommand('wrong' as 'linux', origin)).toThrow('operatingSystem')
+    expect(() => generateUninstallCommand(origin, 'env-1', 'wrong' as 'linux')).toThrow('operatingSystem')
+    expect(() => generateUninstallCommand(origin, '', 'linux')).toThrow('environmentId')
     const injected = generateInstallCommand(origin, "a'$(touch NEVER)b", 'linux', "c'$(touch NEVER)")
     const injectedUrl = `${origin}${url(
       'GET /api/platform/environments/{environmentId}/install-script',
-      { path: { environmentId: "a'$(touch NEVER)b" }, query: { code: "c'$(touch NEVER)" } },
+      {
+        path: { environmentId: "a'$(touch NEVER)b" },
+        query: { code: "c'$(touch NEVER)", operatingSystem: 'linux' },
+      },
     )}`
     expect(injected).toContain(injectedUrl.replaceAll("'", "\\'"))
     expect(injected).not.toContain('$(touch NEVER)')

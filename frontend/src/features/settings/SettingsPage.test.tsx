@@ -121,23 +121,23 @@ describe('SettingsPage general tab + notifications', () => {
     expect(mocks.update).toHaveBeenCalledWith({
       tool: dto.tool,
       aiRuntime: { ...dto.aiRuntime, retryBackoffStrategy: 'FIXED' },
-      environment: dto.environment, network: dto.network,
+      environment: dto.environment, backendNetwork: dto.backendNetwork,
       storageMedia: dto.storageMedia, advanced: dto.advanced, expectedVersion: dto.version,
     })
     await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeDisabled())
     expect(screen.queryByText('有未保存的更改')).not.toBeInTheDocument()
   })
-  // 网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
+  // Backend 网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
   it('renders every top-level settings tab with Sync after Advanced', async () => {
     renderSettings()
-    await tabByName('网络')
+    await tabByName('Backend 网络')
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '常规',
       '插件',
       'AI 运行时',
       '工具与权限',
       '环境',
-      '网络',
+      'Backend 网络',
       '存储与媒体',
       '高级',
       '同步',
@@ -287,7 +287,7 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
   it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
     renderSettings()
     expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
-    for (const name of ['AI 运行时', '工具与权限', '环境', '网络', '存储与媒体', '高级', '同步']) {
+    for (const name of ['AI 运行时', '工具与权限', '环境', 'Backend 网络', '存储与媒体', '高级', '同步']) {
       expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
     }
   })

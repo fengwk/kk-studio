@@ -13,6 +13,6 @@ public class SystemNetworkConfiguration {
 
   @Bean(name = "systemProxySelector", destroyMethod = "close")
   public SystemProxySelector systemProxySelector(SystemSettingsSnapshot snapshot) {
-    return new SystemProxySelector(() -> snapshot.get().network());
+    return new SystemProxySelector(() -> snapshot.get().backendNetwork());
   }
 }

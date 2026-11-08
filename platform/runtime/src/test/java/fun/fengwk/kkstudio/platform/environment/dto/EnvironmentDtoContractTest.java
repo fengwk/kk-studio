@@ -38,6 +38,27 @@ class EnvironmentDtoContractTest {
     assertTrue(!json.has("registrationToken"));
     assertTrue(!json.has("lastSeenAt"));
     assertTrue(!json.has("operatingSystem"));
+    assertTrue(!json.has("note"));
+    assertTrue(!json.has("daemonConfig"));
+  }
+
+  /** 卡片稳定属性固定为 note + daemonConfig；更新请求不含不可变 name。 */
+  @Test
+  void cardAndUpdateRequestsExposeOnlyEditableProperties() {
+    assertEquals(
+        List.of("expectedVersion", "note", "daemonConfig"),
+        List.of(EnvironmentUpdateDTO.class.getDeclaredFields()).stream()
+            .map(Field::getName)
+            .toList());
+    assertEquals(
+        DaemonConfigDTO.class, EnvironmentUpdateDTO.class.getDeclaredFields()[2].getType());
+    assertEquals(
+        List.of("name", "note", "daemonConfig"),
+        List.of(EnvironmentCreateDTO.class.getDeclaredFields()).stream()
+            .map(Field::getName)
+            .toList());
+    assertEquals(String.class, EnvironmentDTO.class.getDeclaredFields()[2].getType());
+    assertEquals(DaemonConfigDTO.class, EnvironmentDTO.class.getDeclaredFields()[3].getType());
   }
 
   /** 时间字段统一 *At：createdAt/updatedAt/lastSeenAt/occurredAt 是唯一 wire 名称。 */

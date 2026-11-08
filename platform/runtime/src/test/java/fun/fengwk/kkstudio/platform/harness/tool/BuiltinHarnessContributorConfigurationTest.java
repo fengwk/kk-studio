@@ -120,7 +120,7 @@ class BuiltinHarnessContributorConfigurationTest {
         SystemSettingsTestFixture.TOOL,
         aiRuntime,
         SystemSettingsTestFixture.ENVIRONMENT,
-        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.BACKEND_NETWORK,
         SystemSettingsTestFixture.STORAGE_MEDIA,
         SystemSettingsTestFixture.ADVANCED);
   }

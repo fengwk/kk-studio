@@ -121,9 +121,9 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -423,12 +423,11 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(
         ENV_A,
         List.of(),
-        new DaemonEnvironmentInfo(
+        new DaemonHostInfo(
             DaemonOperatingSystem.LINUX,
             "America/Los_Angeles",
             "dev-user",
             "/home/dev",
-            "Custom <Linux> & tools.",
             "/tmp/kk-studio",
             "amd64"));
 
@@ -439,8 +438,7 @@ class DatabaseTurnResolverTest {
     assertTrue(prompt.contains("<os>linux</os>"), prompt);
     assertTrue(prompt.contains("<user>dev-user</user>"), prompt);
     assertTrue(prompt.contains("<home>/home/dev</home>"), prompt);
-    assertTrue(
-        prompt.contains("<description>Custom &lt;Linux&gt; &amp; tools.</description>"), prompt);
+    assertTrue(prompt.contains("<description>none</description>"), prompt);
     assertFalse(prompt.contains("date"), prompt);
   }
 
@@ -457,13 +455,12 @@ class DatabaseTurnResolverTest {
     assertTrue(withoutMetadata.contains("<description>none</description>"), withoutMetadata);
     assertFalse(withoutMetadata.contains("date"), withoutMetadata);
 
-    DaemonEnvironmentInfo environmentInfo =
-        new DaemonEnvironmentInfo(
+    DaemonHostInfo environmentInfo =
+        new DaemonHostInfo(
             DaemonOperatingSystem.WSL,
             "Asia/Tokyo",
             "dev-user",
             "/home/dev",
-            "Stable WSL environment.",
             "/tmp/kk-studio",
             "amd64");
     Fixture readyFixture = new Fixture(List.of("read"), List.of(), List.of());
@@ -477,7 +474,7 @@ class DatabaseTurnResolverTest {
     assertTrue(stale.contains("<os>wsl</os>"), stale);
     assertTrue(stale.contains("<user>dev-user</user>"), stale);
     assertTrue(stale.contains("<home>/home/dev</home>"), stale);
-    assertTrue(stale.contains("<description>Stable WSL environment.</description>"), stale);
+    assertTrue(stale.contains("<description>none</description>"), stale);
     assertFalse(stale.contains("date"), stale);
   }
 
@@ -3522,20 +3519,24 @@ class DatabaseTurnResolverTest {
 
     /** CONNECTING 但保留最近一次 READY 宿主 metadata：证明断线后环境块仍按保留事实渲染。 */
     private void connectingEnvironmentWithRetainedMetadata(EnvironmentId environmentId) {
+      Environment selected = new Environment();
+      selected.setId(environmentId.value());
+      selected.setName(ENV_A_NAME);
+      selected.setNote("Retained note");
+      when(environmentRepository.getByName(ENV_A_NAME)).thenReturn(selected);
       EnvironmentConnection env =
           new EnvironmentConnection(
               environmentId,
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.CONNECTING,
-              new DaemonCapabilities(
+              new DaemonReadyMetadata(
                   "1.0.9",
-                  new DaemonEnvironmentInfo(
+                  new DaemonHostInfo(
                       DaemonOperatingSystem.WSL,
                       "UTC",
                       "dev-user",
                       "/home/dev",
-                      "Retained note",
                       "/tmp/kk-studio",
                       "amd64")),
               List.of(),
@@ -3553,26 +3554,23 @@ class DatabaseTurnResolverTest {
       readyEnvironment(
           environmentId,
           skills,
-          new DaemonEnvironmentInfo(
+          new DaemonHostInfo(
               DaemonOperatingSystem.LINUX,
               "UTC",
               "dev-user",
               "/home/dev",
-              "Linux environment.",
               "/tmp/kk-studio",
               "amd64"));
     }
 
     private void readyEnvironment(
-        EnvironmentId environmentId, List<String> skills, DaemonEnvironmentInfo environmentInfo) {
+        EnvironmentId environmentId, List<String> skills, DaemonHostInfo environmentInfo) {
       publishGlobalSkills(skills);
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW);
     }
 
     private void readyEnvironmentWithSkills(
-        EnvironmentId environmentId,
-        List<SkillName> skills,
-        DaemonEnvironmentInfo environmentInfo) {
+        EnvironmentId environmentId, List<SkillName> skills, DaemonHostInfo environmentInfo) {
       publishGlobalSkills(skills);
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW);
     }
@@ -3586,14 +3584,13 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(
+              new DaemonReadyMetadata(
                   "1.0.9",
-                  new DaemonEnvironmentInfo(
+                  new DaemonHostInfo(
                       DaemonOperatingSystem.LINUX,
                       "UTC",
                       "dev-user",
                       "/home/dev",
-                      "Linux environment.",
                       "/tmp/kk-studio",
                       "amd64")),
               skillState,
@@ -3607,12 +3604,11 @@ class DatabaseTurnResolverTest {
       readyEnvironmentWithSkills(
           environmentId,
           skills,
-          new DaemonEnvironmentInfo(
+          new DaemonHostInfo(
               DaemonOperatingSystem.LINUX,
               "UTC",
               "dev-user",
               "/home/dev",
-              "Linux environment.",
               "/tmp/kk-studio",
               "amd64"));
     }
@@ -3621,31 +3617,29 @@ class DatabaseTurnResolverTest {
     private void publishEnvironment(EnvironmentId environmentId) {
       readyEnvironmentWithSkills(
           environmentId,
-          new DaemonEnvironmentInfo(
+          new DaemonHostInfo(
               DaemonOperatingSystem.LINUX,
               "UTC",
               "dev-user",
               "/home/dev",
-              "Linux environment.",
               "/tmp/kk-studio",
               "amd64"),
           NOW);
     }
 
-    private void staleEnvironment(
-        EnvironmentId environmentId, DaemonEnvironmentInfo environmentInfo) {
+    private void staleEnvironment(EnvironmentId environmentId, DaemonHostInfo environmentInfo) {
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW.minus(Duration.ofSeconds(61)));
     }
 
     private void readyEnvironmentWithSkills(
-        EnvironmentId environmentId, DaemonEnvironmentInfo environmentInfo, Instant lastSeenAt) {
+        EnvironmentId environmentId, DaemonHostInfo environmentInfo, Instant lastSeenAt) {
       EnvironmentConnection env =
           new EnvironmentConnection(
               environmentId,
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities("1.0.9", environmentInfo),
+              new DaemonReadyMetadata("1.0.9", environmentInfo),
               List.of(),
               List.of(),
               lastSeenAt,

@@ -26,7 +26,8 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -360,13 +361,12 @@ public final class DatabaseAgentTurnContextResolver {
     EnvironmentId environmentId = EnvironmentId.of(selected.getId());
     EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
     return CurrentEnvironmentContext.selected(
-        environmentId, selected.getName(), hostFacts(connection));
+        environmentId, selected.getName(), selected.getNote(), hostFacts(connection));
   }
 
-  private static DaemonEnvironmentInfo hostFacts(EnvironmentConnection connection) {
-    return connection == null || connection.daemonCapabilities() == null
-        ? null
-        : connection.daemonCapabilities().environment();
+  private static DaemonHostInfo hostFacts(EnvironmentConnection connection) {
+    DaemonReadyMetadata ready = connection == null ? null : connection.readyMetadata();
+    return ready == null ? null : ready.hostInfo();
   }
 
   /**

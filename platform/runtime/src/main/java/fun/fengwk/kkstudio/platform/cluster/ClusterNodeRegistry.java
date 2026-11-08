@@ -17,6 +17,9 @@ public interface ClusterNodeRegistry {
   /** 返回当前可单跳交付该 Environment IDE 元数据的 owner 路由；不可路由时返回空。 */
   Optional<ClusterOwnerRoute> route(EnvironmentId environmentId);
 
+  /** 返回当前可读取运行快照的 owner 路由；允许 CONNECTING 的有效租约，不能用于执行或 IDE 路由。 */
+  Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId);
+
   /**
    * 返回指定节点实例当前未过期租约注册的可达内部 origin。
    *

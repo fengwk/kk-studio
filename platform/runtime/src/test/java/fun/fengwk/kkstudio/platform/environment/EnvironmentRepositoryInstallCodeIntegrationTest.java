@@ -20,14 +20,15 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * {@link EnvironmentRepository} 安装授权在真实 PostgreSQL 17 上的集成测试。
+ * {@link EnvironmentRepository} 安装授权在真实 PostgreSQL 上的集成测试。
  *
- * <p>验证目标包括：code 只落在 environment.install_code 且签发不推进版本、一次性原子兑换、数据库时间下的过期拒绝、摘要/版本不匹配安全性，以及兑换同时轮换
- * token 并递增版本。
+ * <p>验证目标包括：code 使用两个普通列且签发不推进版本、数据库时间五分钟失效、一次性原子兑换、摘要/版本不匹配安全性，以及兑换同时轮换 token 并递增版本。
  */
 class EnvironmentRepositoryInstallCodeIntegrationTest {
 
@@ -58,37 +59,39 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
     repository = new EnvironmentRepository(jdbcClient, mock(EnvironmentChangeNotifier.class));
   }
 
-  /** 测试意图：签发把严格对象写到 environment 行且不推进 CAS 版本；再次签发覆盖旧摘要。 */
+  /** 测试意图：签发把 hash 与数据库时间失效点写到 environment 行且不推进 CAS 版本；再次签发覆盖旧摘要。 */
   @Test
-  void saveWritesOneObjectWithoutAdvancingVersion() {
+  void saveWritesNativeColumnsWithoutAdvancingVersion() {
     UUID envId = insertEnvironment("env-alpha", "token-alpha");
     String firstHash = EnvironmentInstallCodes.hash("first-code");
     String secondHash = EnvironmentInstallCodes.hash("second-code");
-    Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-    assertThat(save(envId, 0L, firstHash, expiresAt)).isTrue();
+    Instant firstExpiry = save(envId, 0L, firstHash).orElseThrow();
+    assertThat(firstExpiry).isAfter(Instant.now().plus(4, ChronoUnit.MINUTES));
     assertThat(version(envId)).isZero();
     assertThat(installCodeHash(envId)).isEqualTo(firstHash);
+    assertThat(installCodeExpiresAt(envId)).isEqualTo(firstExpiry);
 
-    assertThat(save(envId, 0L, secondHash, expiresAt.plusSeconds(60))).isTrue();
+    assertThat(save(envId, 0L, secondHash)).isPresent();
     assertThat(version(envId)).isZero();
     assertThat(installCodeHash(envId)).isEqualTo(secondHash);
   }
 
-  /** 测试意图：成功兑换原子清空 code、轮换 token 摘要并递增版本，同一 code 不能二次兑换。 */
+  /** 测试意图：成功兑换原子清空 code、轮换 token 摘要、递增版本并返回兑换后版本，同一 code 不能二次兑换。 */
   @Test
-  void redeemOnceClearsCodeRotatesTokenAndAdvancesVersion() {
+  void redeemOnceClearsCodeRotatesTokenAndReturnsNewVersion() {
     UUID envId = insertEnvironment("env-beta", "token-beta");
     String codeHash = EnvironmentInstallCodes.hash("one-shot-code");
     String newTokenHash = RegistrationTokens.hash("rotated-token");
-    assertThat(save(envId, 0L, codeHash, Instant.now().plus(10, ChronoUnit.MINUTES))).isTrue();
+    assertThat(save(envId, 0L, codeHash)).isPresent();
 
-    assertThat(redeem(envId, 0L, codeHash, newTokenHash)).isTrue();
-    assertThat(installCode(envId)).isNull();
+    assertThat(redeem(envId, 0L, codeHash, newTokenHash)).contains(1L);
+    assertThat(installCodeHash(envId)).isNull();
+    assertThat(installCodeExpiresAt(envId)).isNull();
     assertThat(registrationTokenHash(envId)).isEqualTo(newTokenHash);
     assertThat(version(envId)).isEqualTo(1L);
 
-    assertThat(redeem(envId, 1L, codeHash, RegistrationTokens.hash("second-token"))).isFalse();
+    assertThat(redeem(envId, 1L, codeHash, RegistrationTokens.hash("second-token"))).isEmpty();
     assertThat(registrationTokenHash(envId)).isEqualTo(newTokenHash);
     assertThat(version(envId)).isEqualTo(1L);
   }
@@ -98,12 +101,27 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
   void expiredCodeIsRejectedAndPreserved() {
     UUID envId = insertEnvironment("env-gamma", "token-gamma");
     String codeHash = EnvironmentInstallCodes.hash("expired-code");
-    assertThat(save(envId, 0L, codeHash, Instant.now().minus(1, ChronoUnit.HOURS))).isTrue();
+    assertThat(save(envId, 0L, codeHash)).isPresent();
+    jdbcClient
+        .sql(
+            "update environment set install_code_expires_at = current_timestamp - interval '1 hour'"
+                + " where id = :id")
+        .param("id", envId)
+        .update();
 
-    assertThat(redeem(envId, 0L, codeHash, RegistrationTokens.hash("unused-token"))).isFalse();
+    assertThat(redeem(envId, 0L, codeHash, RegistrationTokens.hash("unused-token"))).isEmpty();
     assertThat(installCodeHash(envId)).isEqualTo(codeHash);
     assertThat(registrationTokenHash(envId)).isEqualTo(RegistrationTokens.hash("token-gamma"));
     assertThat(version(envId)).isZero();
+
+    // 源数据违反成对约束时数据库本身也拒绝只清空一列。
+    assertThatThrownBy(
+            () ->
+                jdbcClient
+                    .sql("update environment set install_code_hash = null where id = :id")
+                    .param("id", envId)
+                    .update())
+        .isInstanceOf(RuntimeException.class);
   }
 
   /** 测试意图：摘要或预期版本不匹配时拒绝且保留 code，正确摘要和版本仍可兑换。 */
@@ -111,25 +129,24 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
   void mismatchedHashOrVersionRejectedAndPreservesCode() {
     UUID envId = insertEnvironment("env-delta", "token-delta");
     String codeHash = EnvironmentInstallCodes.hash("target-code");
-    assertThat(save(envId, 0L, codeHash, Instant.now().plus(10, ChronoUnit.MINUTES))).isTrue();
+    assertThat(save(envId, 0L, codeHash)).isPresent();
 
     assertThat(redeem(envId, 0L, EnvironmentInstallCodes.hash("wrong-code"), tokenHash("wrong")))
-        .isFalse();
-    assertThat(redeem(envId, 1L, codeHash, tokenHash("stale-version"))).isFalse();
+        .isEmpty();
+    assertThat(redeem(envId, 1L, codeHash, tokenHash("stale-version"))).isEmpty();
     assertThat(installCodeHash(envId)).isEqualTo(codeHash);
     assertThat(version(envId)).isZero();
 
-    assertThat(redeem(envId, 0L, codeHash, tokenHash("correct"))).isTrue();
-    assertThat(installCode(envId)).isNull();
+    assertThat(redeem(envId, 0L, codeHash, tokenHash("correct"))).contains(1L);
+    assertThat(installCodeHash(envId)).isNull();
   }
 
   /** 测试意图：签发使用过期 CAS 版本时不得覆盖当前 code。 */
   @Test
   void saveWithStaleVersionDoesNotWrite() {
     UUID envId = insertEnvironment("env-epsilon", "token-epsilon");
-    assertThat(save(envId, 1L, EnvironmentInstallCodes.hash("stale-issue"), Instant.now()))
-        .isFalse();
-    assertThat(installCode(envId)).isNull();
+    assertThat(save(envId, 1L, EnvironmentInstallCodes.hash("stale-issue"))).isEmpty();
+    assertThat(installCodeHash(envId)).isNull();
   }
 
   /** 测试意图：安装 code 写路径与稳定行写路径一样必须处于外层事务。 */
@@ -137,29 +154,21 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
   void saveRequiresOuterTransaction() {
     UUID envId = insertEnvironment("env-zeta", "token-zeta");
     assertThatThrownBy(
-            () ->
-                repository.saveInstallCode(
-                    envId,
-                    0L,
-                    EnvironmentInstallCodes.hash("outside-tx"),
-                    Instant.now().plus(5, ChronoUnit.MINUTES)))
+            () -> repository.saveInstallCode(envId, 0L, EnvironmentInstallCodes.hash("outside-tx")))
         .isInstanceOf(IllegalStateException.class);
-    assertThat(installCode(envId)).isNull();
+    assertThat(installCodeHash(envId)).isNull();
   }
 
-  private boolean save(UUID envId, long expectedVersion, String codeHash, Instant expiresAt) {
-    return Boolean.TRUE.equals(
-        transaction.execute(
-            status -> repository.saveInstallCode(envId, expectedVersion, codeHash, expiresAt)));
+  private Optional<Instant> save(UUID envId, long expectedVersion, String codeHash) {
+    return transaction.execute(
+        status -> repository.saveInstallCode(envId, expectedVersion, codeHash));
   }
 
-  private boolean redeem(
+  private Optional<Long> redeem(
       UUID envId, long expectedVersion, String codeHash, String registrationTokenHash) {
-    return Boolean.TRUE.equals(
-        transaction.execute(
-            status ->
-                repository.redeemInstallCode(
-                    envId, expectedVersion, codeHash, registrationTokenHash)));
+    return transaction.execute(
+        status ->
+            repository.redeemInstallCode(envId, expectedVersion, codeHash, registrationTokenHash));
   }
 
   private UUID insertEnvironment(String name, String token) {
@@ -168,9 +177,11 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
         .sql(
             """
             insert into environment (
-                id, name, registration_token_hash, install_config, created_at, updated_at, version
+                id, name, note, registration_token_hash, daemon_config, created_at, updated_at, version
             ) values (
-                :id, :name, :registrationTokenHash, '{}'::jsonb, current_timestamp, current_timestamp, 0
+                :id, :name, null, :registrationTokenHash,
+                '{"studioUrl":"https://studio.example.com","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb,
+                current_timestamp, current_timestamp, 0
             )
             """)
         .param("id", id)
@@ -182,18 +193,20 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
 
   private String installCodeHash(UUID environmentId) {
     return jdbcClient
-        .sql("select install_code->>'codeHash' from environment where id = :id")
-        .param("id", environmentId)
-        .query(String.class)
-        .single();
-  }
-
-  private String installCode(UUID environmentId) {
-    return jdbcClient
-        .sql("select install_code::text from environment where id = :id")
+        .sql("select install_code_hash from environment where id = :id")
         .param("id", environmentId)
         .query(String.class)
         .optional()
+        .orElse(null);
+  }
+
+  private Instant installCodeExpiresAt(UUID environmentId) {
+    return jdbcClient
+        .sql("select install_code_expires_at from environment where id = :id")
+        .param("id", environmentId)
+        .query(OffsetDateTime.class)
+        .optional()
+        .map(OffsetDateTime::toInstant)
         .orElse(null);
   }
 

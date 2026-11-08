@@ -1,12 +1,12 @@
 /** Permanent guards for the reliability stack's Node daemon bootstrap and token boundary. */
 
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
+import { CARD_ID, runProcess, startCardServer } from '../../tests/support/card-server.mjs'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
@@ -14,14 +14,21 @@ const RELIABILITY_COMPOSE = path.join(REPOSITORY_ROOT, 'deploy/test/compose.yaml
 const RELIABILITY_ENTRYPOINT = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon-entrypoint.sh')
 const RELIABILITY_DOCKERFILE = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile')
 
+const DAEMON_CONFIG = {
+  studioUrl: 'http://127.0.0.1:8080',
+  bashExecutable: null,
+  lsp: null,
+  proxyUrl: null,
+}
+
 const mode = (file) => statSync(file).mode & 0o777
 const text = (file) => readFileSync(file, 'utf8')
 const count = (haystack, needle) => haystack.split(needle).length - 1
 
-function withTempDir(body) {
+async function withTempDir(body) {
   const directory = mkdtempSync(path.join(tmpdir(), 'kk-entrypoint-'))
   try {
-    return body(directory)
+    return await body(directory)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -30,8 +37,8 @@ function withTempDir(body) {
 /**
  * 按发行布局写一个最小 Daemon 目录：根目录入口 + 冻结运行时。
  *
- * 默认运行时是一个可执行包装脚本：`-e` 交给真实 Node（入口用它写 JSON），其它调用被记录成
- * daemon 启动参数，因此断言的是入口真实的 exec 行为而不是静态文本。
+ * 默认运行时是一个可执行包装脚本：配置 helper 交给真实 Node，其它调用被记录成 daemon 启动
+ * 参数，因此断言的是入口真实的 exec 行为而不是静态文本。
  */
 function writeNodeDist(temporary, { realNode = false } = {}) {
   const dist = path.join(temporary, 'daemon-dist')
@@ -45,7 +52,7 @@ function writeNodeDist(temporary, { realNode = false } = {}) {
     realNode
       ? `#!/bin/bash\nexec '${process.execPath}' "$@"\n`
       : '#!/bin/bash\n' +
-          `if [ "$1" = "-e" ]; then exec "${process.execPath}" "$@"; fi\n` +
+          `if [ "$1" = "-e" ] || [[ "$1" == *"/daemon-config-cache.mjs" ]]; then exec '${process.execPath}' "$@"; fi\n` +
           'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n' +
           'env >"$PROBE_ENVIRON"\n',
   )
@@ -53,18 +60,19 @@ function writeNodeDist(temporary, { realNode = false } = {}) {
   return { dist, argvFile, environFile }
 }
 
-function runEntrypoint(env, { script = RELIABILITY_ENTRYPOINT, args = [script] } = {}) {
-  return spawnSync('bash', args, { env, encoding: 'utf8' })
+function runEntrypoint(env, { args = [RELIABILITY_ENTRYPOINT] } = {}) {
+  return runProcess('bash', args, { env, timeoutMillis: 30_000 })
 }
 
-const baseEnv = () => {
+/** Remove ambient daemon inputs so a test cannot pass due to the invoking shell. */
+function baseEnv(overrides = {}) {
   const environment = { ...process.env }
   for (const name of Object.keys(environment)) {
     if (name.startsWith('KK_STUDIO_DAEMON_')) {
       delete environment[name]
     }
   }
-  return environment
+  return { ...environment, ...overrides }
 }
 
 test('test intent: compose injects only environment; the entrypoint materializes config and token', () => {
@@ -72,6 +80,8 @@ test('test intent: compose injects only environment; the entrypoint materializes
 
   assert.ok(compose.includes('KK_STUDIO_DAEMON_REGISTRATION_TOKEN'))
   assert.ok(compose.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080'))
+  assert.ok(compose.includes('KK_STUDIO_DAEMON_ENVIRONMENT_NAME: ${RELIABILITY_ENV_NAME:-docker-reliability}'))
+  assert.ok(!compose.includes('KK_STUDIO_DAEMON_NOTE'))
   assert.ok(compose.includes('e2e-token-reliability'))
   // daemon 服务保留：镜像/uid/workspace named volume/健康依赖是现存自动化基础设施。
   assert.ok(compose.includes('dockerfile: deploy/reliability/daemon.Dockerfile'))
@@ -85,6 +95,12 @@ test('test intent: the daemon image runs the frozen Node distribution only', () 
 
   assert.ok(dockerfile.includes('daemon-entrypoint.sh'))
   assert.equal(count(dockerfile, 'deploy/reliability/daemon-entrypoint.sh'), 1, '入口脚本只能被 COPY 一次')
+  assert.equal(
+    count(dockerfile, 'deploy/reliability/daemon-config-cache.mjs'),
+    1,
+    '配置 helper 只能被 COPY 一次',
+  )
+  assert.ok(dockerfile.includes('/usr/local/bin/daemon-config-cache.mjs'))
   // 发行目录由真实打包脚本产出，运行入口是归档根的 main.js。
   assert.ok(dockerfile.includes('scripts/daemon/prepare-release.sh'))
   assert.ok(dockerfile.includes('/distribution/main.js'))
@@ -104,135 +120,190 @@ test('test intent: runtime user creation uses absolute system commands', () => {
   assert.ok(runtime.includes('/usr/sbin/useradd --uid 10001'))
 })
 
-test('test intent: the entrypoint launches the distribution entry with --config only', () => {
-  // 入口必须物化共享 daemon.json/owner-only token，并用冻结 Node 运行发行根入口。
-  withTempDir((temporary) => {
-    const { dist, argvFile, environFile } = writeNodeDist(temporary)
-    const root = path.join(temporary, 'daemon-root')
-    const secret = 'probe-secret-token'
-    const studioUrl = 'https://studio.example.com'
-    const note = 'Probe note — 日本語'
+test('test intent: the entrypoint launches the distribution entry with --config only', async () => {
+  const server = await startCardServer({ name: 'docker-reliability', version: '0', daemonConfig: DAEMON_CONFIG })
+  try {
+    await withTempDir(async (temporary) => {
+      const { dist, argvFile, environFile } = writeNodeDist(temporary)
+      const root = path.join(temporary, 'daemon-root')
+      const secret = 'probe-secret-token'
 
-    const result = runEntrypoint({
-      ...baseEnv(),
-      PROBE_ARGV: argvFile,
-      PROBE_ENVIRON: environFile,
-      KK_STUDIO_DAEMON_DIST: dist,
-      KK_STUDIO_DAEMON_ROOT: root,
-      KK_STUDIO_DAEMON_STUDIO_URL: studioUrl,
-      KK_STUDIO_DAEMON_NOTE: note,
-      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: secret,
+      const result = await runEntrypoint(baseEnv({
+        PROBE_ARGV: argvFile,
+        PROBE_ENVIRON: environFile,
+        KK_STUDIO_DAEMON_DIST: dist,
+        KK_STUDIO_DAEMON_ROOT: root,
+        KK_STUDIO_DAEMON_STUDIO_URL: server.url,
+        KK_STUDIO_DAEMON_ENVIRONMENT_NAME: 'docker-reliability',
+        KK_STUDIO_DAEMON_REGISTRATION_TOKEN: secret,
+      }))
+
+      assert.equal(result.status, 0, result.stderr)
+      const argv = text(argvFile).split('\n').filter(Boolean)
+      assert.ok(argv.includes('--config'))
+      const configPath = argv[argv.indexOf('--config') + 1]
+      assert.deepEqual(argv.slice(0, 2), [path.join(dist, 'main.js'), '--config'])
+      assert.ok(path.isAbsolute(configPath))
+      assert.equal(configPath, path.join(root, 'daemon.json'))
+      assert.ok(!argv.includes(secret))
+      assert.ok(!text(environFile).includes(secret))
+      assert.ok(!(result.stderr + result.stdout).includes(secret))
+      // 凭证从不进入配置 JSON。
+      assert.ok(!text(configPath).includes(secret))
+      assert.ok(!JSON.stringify(server.calls).includes(secret))
+
+      const config = JSON.parse(text(configPath))
+      assert.deepEqual(Object.keys(config), ['environmentId', 'version', 'daemonConfig'])
+      assert.equal(config.environmentId, CARD_ID)
+      assert.equal(config.version, '1')
+      assert.deepEqual(Object.keys(config.daemonConfig), ['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'])
+      assert.equal(config.daemonConfig.studioUrl, server.url)
+      assert.equal(config.daemonConfig.bashExecutable, null)
+      assert.equal(config.daemonConfig.lsp, null)
+      assert.equal(config.daemonConfig.proxyUrl, null)
+      assert.ok(!Object.hasOwn(config, 'note'))
+      assert.ok(!Object.hasOwn(config.daemonConfig, 'note'))
+
+      assert.equal(server.card.version, '1')
+      assert.deepEqual(server.card.daemonConfig, config.daemonConfig)
+      const put = server.calls.find((call) => call.method === 'PUT')
+      assert.ok(put, 'entrypoint must correct the card studioUrl')
+      assert.equal(put.body.expectedVersion, '0')
+      assert.equal(put.body.note, null)
+      assert.deepEqual(put.body.daemonConfig, config.daemonConfig)
+
+      const tokenPath = path.join(root, 'daemon.token')
+      assert.equal(mode(root), 0o700)
+      assert.equal(mode(configPath), 0o600)
+      assert.equal(mode(tokenPath), 0o600)
+      assert.equal(text(tokenPath).trim(), secret)
     })
-
-    assert.equal(result.status, 0, result.stderr)
-    const argv = text(argvFile).split('\n').filter(Boolean)
-    assert.ok(argv.includes('--config'))
-    const configPath = argv[argv.indexOf('--config') + 1]
-    assert.deepEqual(argv.slice(0, 2), [path.join(dist, 'main.js'), '--config'])
-    assert.ok(path.isAbsolute(configPath))
-    assert.equal(configPath, path.join(root, 'daemon.json'))
-    assert.ok(!argv.includes(secret))
-    assert.ok(!text(environFile).includes(secret))
-    assert.ok(!(result.stderr + result.stdout).includes(secret))
-    // 凭证从不进入配置 JSON。
-    assert.ok(!text(configPath).includes(secret))
-
-    const config = JSON.parse(text(configPath))
-    assert.deepEqual(new Set(Object.keys(config)), new Set(['studioUrl', 'note']))
-    assert.equal(config.studioUrl, studioUrl)
-    assert.equal(config.note, note)
-
-    const tokenPath = path.join(root, 'daemon.token')
-    assert.equal(mode(root), 0o700)
-    assert.equal(mode(configPath), 0o600)
-    assert.equal(mode(tokenPath), 0o600)
-    assert.equal(text(tokenPath).trim(), secret)
-  })
+  } finally {
+    await server.close()
+  }
 })
 
-test('test intent: the config omits note when it is unset', () => {
-  withTempDir((temporary) => {
-    const { dist } = writeNodeDist(temporary, { realNode: true })
-    const root = path.join(temporary, 'daemon-root')
-    const result = runEntrypoint({
-      ...baseEnv(),
-      KK_STUDIO_DAEMON_DIST: dist,
-      KK_STUDIO_DAEMON_ROOT: root,
-      KK_STUDIO_DAEMON_STUDIO_URL: 'http://app:8080',
-      KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+test('test intent: the entrypoint does not rewrite an already reachable card', async () => {
+  const server = await startCardServer({ id: CARD_ID, name: 'docker-reliability', version: '2', daemonConfig: DAEMON_CONFIG })
+  try {
+    const reachable = { ...DAEMON_CONFIG, studioUrl: server.url }
+    const updated = await fetch(`${server.url}/api/platform/environments/${CARD_ID}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: '2', note: null, daemonConfig: reachable }),
     })
-    assert.equal(result.status, 0, result.stderr)
-    assert.deepEqual(new Set(Object.keys(JSON.parse(text(path.join(root, 'daemon.json'))))), new Set(['studioUrl']))
-  })
+    assert.equal(updated.status, 200)
+    server.calls.length = 0
+
+    await withTempDir(async (temporary) => {
+      const { dist } = writeNodeDist(temporary, { realNode: true })
+      const root = path.join(temporary, 'daemon-root')
+      const result = await runEntrypoint(baseEnv({
+        KK_STUDIO_DAEMON_DIST: dist,
+        KK_STUDIO_DAEMON_ROOT: root,
+        KK_STUDIO_DAEMON_STUDIO_URL: server.url,
+        KK_STUDIO_DAEMON_ENVIRONMENT_ID: CARD_ID,
+        KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+      }))
+      assert.equal(result.status, 0, result.stderr)
+
+      const config = JSON.parse(text(path.join(root, 'daemon.json')))
+      assert.equal(config.environmentId, CARD_ID)
+      assert.equal(config.version, '3')
+      assert.equal(config.daemonConfig.studioUrl, server.url)
+      assert.equal(server.calls.length, 1)
+      assert.equal(server.calls[0].method, 'GET')
+      assert.equal(server.calls[0].path, `/api/platform/environments/${CARD_ID}`)
+    })
+  } finally {
+    await server.close()
+  }
 })
 
-test('test intent: the entrypoint fails closed without a token', () => {
-  const result = runEntrypoint(baseEnv())
+test('test intent: the entrypoint fails closed without a token', async () => {
+  const result = await runEntrypoint(baseEnv())
   assert.notEqual(result.status, 0)
   assert.ok(result.stderr.includes('KK_STUDIO_DAEMON_REGISTRATION_TOKEN'))
 })
 
-test('test intent: the entrypoint fails closed without a studio URL', () => {
-  const result = runEntrypoint({ ...baseEnv(), KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token' })
+test('test intent: the entrypoint fails closed without a studio URL', async () => {
+  const result = await runEntrypoint(baseEnv({
+    KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+  }))
   assert.notEqual(result.status, 0)
   assert.ok(result.stderr.includes('KK_STUDIO_DAEMON_STUDIO_URL'))
 })
 
-test('test intent: the entrypoint rejects a relative root', () => {
-  const result = runEntrypoint({
-    ...baseEnv(),
+test('test intent: the entrypoint fails closed without a card selector', async () => {
+  const result = await runEntrypoint(baseEnv({
+    KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+    KK_STUDIO_DAEMON_STUDIO_URL: 'http://app:8080',
+  }))
+  assert.notEqual(result.status, 0)
+  assert.ok(result.stderr.includes('KK_STUDIO_DAEMON_ENVIRONMENT_ID'))
+  assert.ok(result.stderr.includes('KK_STUDIO_DAEMON_ENVIRONMENT_NAME'))
+})
+
+test('test intent: the entrypoint rejects a relative root', async () => {
+  const result = await runEntrypoint(baseEnv({
     KK_STUDIO_DAEMON_ROOT: 'relative/daemon-root',
     KK_STUDIO_DAEMON_STUDIO_URL: 'http://app:8080',
+    KK_STUDIO_DAEMON_ENVIRONMENT_NAME: 'docker-reliability',
     KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
-  })
+  }))
   assert.notEqual(result.status, 0)
   assert.ok(result.stderr.includes('KK_STUDIO_DAEMON_ROOT'))
   assert.ok(result.stderr.includes('absolute'))
 })
 
-test('test intent: a distribution without entry or frozen runtime is rejected, never replaced by PATH node', () => {
+test('test intent: a distribution without entry or frozen runtime is rejected, never replaced by PATH node', async () => {
   for (const missing of ['main.js', 'runtime/code-server/lib/node']) {
-    withTempDir((temporary) => {
+    await withTempDir(async (temporary) => {
       const { dist } = writeNodeDist(temporary)
       unlinkSync(path.join(dist, missing))
-      const result = runEntrypoint({
-        ...baseEnv(),
+      const result = await runEntrypoint(baseEnv({
         KK_STUDIO_DAEMON_DIST: dist,
         KK_STUDIO_DAEMON_ROOT: path.join(temporary, 'daemon-root'),
         KK_STUDIO_DAEMON_STUDIO_URL: 'http://app:8080',
+        KK_STUDIO_DAEMON_ENVIRONMENT_NAME: 'docker-reliability',
         KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
-      })
+      }))
       assert.notEqual(result.status, 0, missing)
       assert.ok(result.stderr.includes(missing), missing)
     })
   }
 })
 
-test('test intent: the config is created owner-only without relying on chmod', () => {
-  // 配置文件必须写入时即 owner-only：桩掉 chmod 并把 umask 全开也不能出现 world-readable 窗口。
-  withTempDir((temporary) => {
-    const probeDir = path.join(temporary, 'bin')
-    mkdirSync(probeDir)
-    // chmod 桩为 no-op：只有 writeFileSync 的显式 mode 与 umask 能收敛权限。
-    writeFileSync(path.join(probeDir, 'chmod'), '#!/bin/bash\nexit 0\n')
-    chmodSync(path.join(probeDir, 'chmod'), 0o755)
-    const { dist } = writeNodeDist(temporary, { realNode: true })
+test('test intent: the config is created owner-only without relying on chmod', async () => {
+  const server = await startCardServer({ name: 'docker-reliability', daemonConfig: DAEMON_CONFIG })
+  try {
+    await withTempDir(async (temporary) => {
+      const probeDir = path.join(temporary, 'bin')
+      mkdirSync(probeDir)
+      // chmod 桩为 no-op：只有写目录的 umask 与写文件的显式 mode 能收敛权限。
+      writeFileSync(path.join(probeDir, 'chmod'), '#!/bin/bash\nexit 0\n')
+      chmodSync(path.join(probeDir, 'chmod'), 0o755)
+      const { dist } = writeNodeDist(temporary, { realNode: true })
 
-    const root = path.join(temporary, 'daemon-root')
-    const result = runEntrypoint(
-      {
-        ...baseEnv(),
-        PATH: `${probeDir}${path.delimiter}${process.env.PATH ?? ''}`,
-        KK_STUDIO_DAEMON_DIST: dist,
-        KK_STUDIO_DAEMON_ROOT: root,
-        KK_STUDIO_DAEMON_STUDIO_URL: 'http://app:8080',
-        KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
-      },
-      { args: ['-c', `umask 000; exec bash '${RELIABILITY_ENTRYPOINT}'`] },
-    )
+      const root = path.join(temporary, 'daemon-root')
+      const result = await runEntrypoint(
+        baseEnv({
+          PATH: `${probeDir}${path.delimiter}${process.env.PATH ?? ''}`,
+          KK_STUDIO_DAEMON_DIST: dist,
+          KK_STUDIO_DAEMON_ROOT: root,
+          KK_STUDIO_DAEMON_STUDIO_URL: server.url,
+          KK_STUDIO_DAEMON_ENVIRONMENT_NAME: 'docker-reliability',
+          KK_STUDIO_DAEMON_REGISTRATION_TOKEN: 'probe-secret-token',
+        }),
+        { args: ['-c', `umask 000; exec bash '${RELIABILITY_ENTRYPOINT}'`] },
+      )
 
-    assert.equal(result.status, 0, result.stderr)
-    assert.equal(mode(path.join(root, 'daemon.json')), 0o600)
-    assert.equal(mode(path.join(root, 'daemon.token')), 0o600)
-  })
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(mode(root), 0o700)
+      assert.equal(mode(path.join(root, 'daemon.json')), 0o600)
+      assert.equal(mode(path.join(root, 'daemon.token')), 0o600)
+    })
+  } finally {
+    await server.close()
+  }
 })

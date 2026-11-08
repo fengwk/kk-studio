@@ -19,13 +19,13 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Architecture;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
-import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Heartbeat;
+import fun.fengwk.kkstudio.platform.daemon.protocol.HostInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.OperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Ready;
@@ -71,17 +71,11 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
   private static final String DEV_TOKEN = "notify-registry-dev-token";
   private static final String STANDBY_TOKEN = "notify-registry-standby-token";
 
-  private static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
+  private static final DaemonReadyMetadata CAPABILITIES =
+      new DaemonReadyMetadata(
           "1.0.9",
-          new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX,
-              "UTC",
-              "dev",
-              "/home/dev",
-              "notify test daemon.",
-              "/tmp/kk-studio",
-              "amd64"));
+          new DaemonHostInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "/tmp/kk-studio", "amd64"));
 
   @Autowired private EnvironmentRegistry environmentRegistry;
   @Autowired private EnvironmentDaemonServer daemonServer;
@@ -164,7 +158,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertTrue(afterHeartbeat.leaseUntil().isAfter(beforeHeartbeat.leaseUntil()));
       assertTrue(afterHeartbeat.lastSeenAt().isAfter(beforeHeartbeat.lastSeenAt()));
       assertEquals(beforeHeartbeat.status(), afterHeartbeat.status());
-      assertEquals(beforeHeartbeat.daemonCapabilities(), afterHeartbeat.daemonCapabilities());
+      assertEquals(beforeHeartbeat.readyMetadata(), afterHeartbeat.readyMetadata());
       assertEquals(beforeHeartbeat.skillState(), afterHeartbeat.skillState());
       assertEquals(beforeHeartbeat.recentEvents(), afterHeartbeat.recentEvents());
       listener.assertSilent();
@@ -204,20 +198,19 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
                   environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION))
               .leaseToken();
       listener.assertNotification(DEV.toString());
-      DaemonCapabilities changedHost =
-          new DaemonCapabilities(
+      DaemonReadyMetadata changedHost =
+          new DaemonReadyMetadata(
               "1.0.10",
-              new DaemonEnvironmentInfo(
+              new DaemonHostInfo(
                   DaemonOperatingSystem.LINUX,
                   "UTC",
                   "test",
                   "/home/test",
-                  "new host",
                   "/tmp/kk-studio",
                   "amd64"));
       assertTrue(environmentRegistry.markReady(DEV, reconnected, changedHost, LEASE_DURATION));
       listener.assertNotification(DEV.toString());
-      assertEquals(changedHost, environmentRegistry.find(DEV).orElseThrow().daemonCapabilities());
+      assertEquals(changedHost, environmentRegistry.find(DEV).orElseThrow().readyMetadata());
 
       // 过期持有者：全部围栏 0 行，连同直接改期一起保持静默。
       expireConnectionLease(DEV);
@@ -239,7 +232,8 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       DaemonAdmission.Admitted admission =
           assertInstanceOf(
               DaemonAdmission.Admitted.class,
-              daemonServer.admit(new DaemonHandshake(DEV_TOKEN, UUID.randomUUID().toString())));
+              daemonServer.admit(
+                  new DaemonHandshake(DEV, DEV_TOKEN, UUID.randomUUID().toString())));
       listener.assertNotification(DEV.toString());
       DaemonControlChannel channel = mock(DaemonControlChannel.class);
       when(channel.isOpen()).thenReturn(true);
@@ -258,15 +252,14 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
               .setReady(
                   Ready.newBuilder()
                       .setDaemonVersion("1.0.9")
-                      .setEnvironment(
-                          EnvironmentInfo.newBuilder()
+                      .setHostInfo(
+                          HostInfo.newBuilder()
                               .setOperatingSystem(OperatingSystem.LINUX)
                               .setArchitecture(Architecture.AMD64)
                               .setTimeZone("UTC")
                               .setUserName("dev")
                               .setHomeDirectory("/home/dev")
-                              .setTempDirectory("/tmp/kk-studio")
-                              .setNote("notify test daemon."))
+                              .setTempDirectory("/tmp/kk-studio"))
                       .setRuntimeStatus(snapshot(1, running)))
               .build());
       listener.assertNotification(DEV.toString());
@@ -324,7 +317,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
           () -> failingRegistry.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
       EnvironmentConnection connecting = environmentRegistry.find(DEV).orElseThrow();
       assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
-      assertNull(connecting.daemonCapabilities());
+      assertNull(connecting.readyMetadata());
       listener.assertSilent();
 
       // HEARTBEAT 不依赖通知器，发布故障不阻断续租。
@@ -366,7 +359,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
 
   private void insertEnvironment(EnvironmentId id, String name, String token) {
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token_hash, version) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
+        "insert into environment (id, name, registration_token_hash, daemon_config, version) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,\"lsp\":null,\"proxyUrl\":null}'::jsonb, 0)",
         id.value(),
         name,
         token);

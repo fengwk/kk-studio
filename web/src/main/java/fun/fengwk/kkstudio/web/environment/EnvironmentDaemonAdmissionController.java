@@ -13,6 +13,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
@@ -44,6 +45,7 @@ public class EnvironmentDaemonAdmissionController {
 
   private static final String HEADER_PROTOCOL = "KK-Daemon-Protocol";
   private static final String HEADER_INSTANCE = "KK-Daemon-Instance";
+  private static final String HEADER_ENVIRONMENT = "KK-Environment-Id";
   private static final String HEADER_PLATFORM = "KK-Daemon-Platform";
 
   private final DaemonSessions sessions;
@@ -84,6 +86,19 @@ public class EnvironmentDaemonAdmissionController {
       return;
     }
 
+    String environmentIdText = request.getHeader(HEADER_ENVIRONMENT);
+    if (environmentIdText == null || environmentIdText.isBlank()) {
+      response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing environment identifier");
+      return;
+    }
+    EnvironmentId environmentId;
+    try {
+      environmentId = EnvironmentId.parse(environmentIdText.trim());
+    } catch (IllegalArgumentException error) {
+      response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Malformed environment identifier");
+      return;
+    }
+
     String instanceId = request.getHeader(HEADER_INSTANCE);
     if (instanceId == null || instanceId.isBlank()) {
       response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing daemon instance identifier");
@@ -111,7 +126,7 @@ public class EnvironmentDaemonAdmissionController {
 
     DaemonAdmission admission;
     try {
-      DaemonHandshake handshake = new DaemonHandshake(token, instanceId);
+      DaemonHandshake handshake = new DaemonHandshake(environmentId, token, instanceId);
       admission = sessions.admit(handshake);
     } catch (IllegalArgumentException e) {
       log.warn("rejected malformed daemon handshake parameters");

@@ -13,6 +13,11 @@ import type {
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
+import {
+  testDaemonConfig,
+  testEnvironment as fixtureEnvironment,
+  testRuntimeStatus,
+} from '@/test-support/environment-test-fixtures'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -20,8 +25,8 @@ vi.mock('@/features/environment/environment-service', () => ({
     getEnvironment: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
-    saveInstallConfig: vi.fn(),
     createEnvironment: vi.fn(),
+    updateEnvironment: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
     listEnvironmentEvents: vi.fn(),
@@ -46,21 +51,12 @@ function renderPage() {
 }
 
 function environment(overrides: Partial<EnvironmentDTO>): EnvironmentDTO {
-  return {
+  return fixtureEnvironment({
     id: 'env-id-1',
     name: 'env',
-    status: 'READY',
-    ready: true,
-    statusExpiresAt: null,
     lastSeenAt: null,
-    capabilities: [],
-    userName: null,
-    homeDirectory: null,
-    version: '1',
-    createdAt: 1784505600000,
-    updatedAt: 1784505600000,
     ...overrides,
-  }
+  })
 }
 
 function runtimeStatus(
@@ -68,7 +64,7 @@ function runtimeStatus(
   update: EnvironmentUpdateProgressDTO | null = null,
   revision = '1',
 ): EnvironmentRuntimeStatusDTO {
-  return { revision, status: { daemonVersion, update } }
+  return testRuntimeStatus({ daemonVersion, update, revision })
 }
 
 function runtimeUnavailableError(): ApiError {
@@ -182,15 +178,16 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
     expect(screen.getAllByText('Capabilities').length).toBe(3)
 
-    // 验证每个环境卡片底部有「安装 / 卸载 / 管理 / 更新 / 重新生成 Token / 删除」六个动作；
+    // 验证每个环境卡片底部有「安装 / 卸载 / 编辑配置 / 管理 / 更新 / 重新生成 Token / 删除」七个动作；
     // 加载列表和打开表单都不得预取 token，仅显式生成安装命令时读取。
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(3)
     for (const card of cards) {
       const footerButtons = within(card).getAllByRole('button')
-      expect(footerButtons).toHaveLength(6)
+      expect(footerButtons).toHaveLength(7)
       expect(within(card).getByRole('button', { name: /安装 \/ 覆盖/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /卸载/ })).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /编辑配置/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /管理/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /更新 Daemon/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /重新生成 Token/ })).toBeInTheDocument()
@@ -235,39 +232,191 @@ describe('EnvironmentsPage', () => {
     expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
   })
 
-  it('creates an environment and opens installation settings without showing credentials', async () => {
+  it('creates a full card, then opens the install command without showing credentials', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-    vi.mocked(environmentService.createEnvironment).mockResolvedValue({
-      id: 'env-new',
-      name: 'new-env',
-      registrationToken: 'secret-token-12345',
-      status: 'CONNECTING',
-      ready: false,
-      statusExpiresAt: null,
-      lastSeenAt: null,
-      capabilities: [],
-      userName: null,
-      homeDirectory: null,
-      version: '1',
-      createdAt: 1784505600000,
-      updatedAt: 1784505600000,
-    })
+    vi.mocked(environmentService.createEnvironment).mockResolvedValue(
+      environment({
+        id: 'env-new',
+        name: 'new-env',
+        registrationToken: 'secret-token-12345',
+        status: 'CONNECTING',
+        ready: false,
+      }),
+    )
     const clipboard = installClipboard()
     const { queryClient } = renderPage()
 
-    const createBtn = await screen.findByRole('button', { name: '创建环境' })
-    await user.click(createBtn)
+    await user.click(await screen.findByRole('button', { name: '创建环境' }))
+    const form = await screen.findByRole('dialog', { name: '创建环境' })
+    await user.type(within(form).getByRole('textbox', { name: /环境名称/ }), 'new-env')
+    await user.type(within(form).getByRole('textbox', { name: '备注' }), 'fresh card')
+    await user.click(within(form).getByRole('button', { name: '创建环境' }))
 
-    const input = screen.getByRole('textbox', { name: /环境名称/ })
-    await user.type(input, 'new-env')
-    await user.click(screen.getByRole('button', { name: '确认' }))
-
-    expect(environmentService.createEnvironment).toHaveBeenCalledWith({ name: 'new-env' })
+    expect(environmentService.createEnvironment).toHaveBeenCalledWith({
+      name: 'new-env',
+      note: 'fresh card',
+      daemonConfig: {
+        studioUrl: window.location.origin,
+        bashExecutable: null,
+        lsp: null,
+        proxyUrl: null,
+      },
+    })
     expect(await screen.findByRole('dialog', { name: '安装/覆盖环境' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '创建环境' })).toBeNull()
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
     expect(clipboard.writeText).not.toHaveBeenCalled()
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('secret-token-12345')
+  })
+
+  it('edits a card configuration with CAS and keeps the draft when the version conflicts', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({
+        id: 'env-1',
+        name: 'my-box',
+        note: 'before',
+        version: '3',
+        daemonConfig: testDaemonConfig({
+          studioUrl: 'https://saved.example.com',
+          bashExecutable: '/bin/bash',
+          proxyUrl: null,
+        }),
+      }),
+    ])
+    vi.mocked(environmentService.updateEnvironment)
+      .mockRejectedValueOnce(
+        new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'card changed'),
+      )
+      .mockResolvedValue(environment({ id: 'env-1', name: 'my-box', version: '5' }))
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue(
+      environment({
+        id: 'env-1',
+        name: 'my-box',
+        version: '4',
+        daemonConfig: testDaemonConfig({ studioUrl: 'https://saved.example.com' }),
+      }),
+    )
+    renderPage()
+
+    const card = await screen.findByRole('article')
+    await user.click(within(card).getByRole('button', { name: '编辑配置 my-box' }))
+    const modal = await screen.findByRole('dialog', { name: '编辑环境：my-box' })
+    expect(within(modal).getByRole('textbox', { name: '环境名称' })).toBeDisabled()
+    expect(within(modal).getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
+      'https://saved.example.com',
+    )
+    await user.clear(within(modal).getByRole('textbox', { name: '备注' }))
+    await user.type(within(modal).getByRole('textbox', { name: '备注' }), 'after')
+    const proxy = within(modal).getByRole('textbox', { name: 'Daemon 代理' })
+    await user.type(proxy, 'http://127.0.0.1:7890')
+    await user.click(within(modal).getByRole('button', { name: '保存配置' }))
+
+    expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', {
+      expectedVersion: '3',
+      note: 'after',
+      daemonConfig: {
+        studioUrl: 'https://saved.example.com',
+        bashExecutable: '/bin/bash',
+        lsp: null,
+        proxyUrl: 'http://127.0.0.1:7890',
+      },
+    })
+    const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
+    await user.click(within(conflict).getByRole('button', { name: '刷新' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(within(modal).getByRole('textbox', { name: '备注' })).toHaveValue('after')
+    expect(proxy).toHaveValue('http://127.0.0.1:7890')
+    await user.click(within(modal).getByRole('button', { name: '保存配置' }))
+    await waitFor(() =>
+      expect(vi.mocked(environmentService.updateEnvironment).mock.calls[1]![1].expectedVersion).toBe('4'),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑环境：my-box' })).toBeNull())
+  })
+
+  it('derives applied, pending, failed and unavailable config states from the runtime snapshot', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-applied', name: 'applied-box', version: '3' }),
+      environment({ id: 'env-pending', name: 'pending-box', version: '3' }),
+      environment({ id: 'env-failed', name: 'failed-box', version: '3' }),
+      environment({ id: 'env-offline', name: 'offline-box', status: 'OFFLINE', ready: false }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockImplementation(async (id) => {
+      if (id === 'env-pending') {
+        return testRuntimeStatus({
+          configuration: {
+            appliedVersion: '2',
+            proxyUrl: 'http://127.0.0.1:7890',
+            error: null,
+          },
+        })
+      }
+      if (id === 'env-failed') {
+        return testRuntimeStatus({
+          configuration: {
+            appliedVersion: '2',
+            proxyUrl: null,
+            error: { version: '3', code: 'VALIDATION_FAILED', field: 'daemonConfig.proxyUrl' },
+          },
+        })
+      }
+      return testRuntimeStatus({
+        configuration: { appliedVersion: '3', proxyUrl: null, error: null },
+      })
+    })
+    renderPage()
+
+    expect(await screen.findByText('applied-box')).toBeInTheDocument()
+    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(await screen.findByText('待应用')).toBeInTheDocument()
+    expect(await screen.findByText('应用失败')).toBeInTheDocument()
+    expect(screen.getByText(/VALIDATION_FAILED/)).toBeInTheDocument()
+    expect(await screen.findByText('待连接')).toBeInTheDocument()
+    // 离线卡片没有当前运行快照，不能把卡片上的 proxy null 伪装成已直连。
+    expect(environmentService.getEnvironmentRuntime).not.toHaveBeenCalledWith('env-offline')
+    expect(screen.getAllByText('直连')).toHaveLength(2)
+  })
+
+  it('reads the runtime snapshot while CONNECTING instead of waiting for ready', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({
+        id: 'env-connecting',
+        name: 'connecting-box',
+        status: 'CONNECTING',
+        ready: false,
+        version: '2',
+      }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(
+      testRuntimeStatus({
+        configuration: { appliedVersion: '2', proxyUrl: null, error: null },
+      }),
+    )
+    renderPage()
+
+    expect(await screen.findByText('connecting-box')).toBeInTheDocument()
+    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(environmentService.getEnvironmentRuntime).toHaveBeenCalledWith('env-connecting')
+  })
+
+  it('ignores a stale configuration error once the current version is applied', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'stale-error-box', version: '4' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(
+      testRuntimeStatus({
+        configuration: {
+          appliedVersion: '4',
+          proxyUrl: null,
+          error: { version: '3', code: 'PERSIST_FAILED' },
+        },
+      }),
+    )
+    renderPage()
+
+    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(screen.queryByText('应用失败')).toBeNull()
   })
 
   // 确认后轮换并刷新列表，不展示或缓存凭据。

@@ -45,27 +45,27 @@ class SystemSettingsSchemaProviderTest {
   @Test
   void sectionOrderMatchesTheBaselineSettingsTabs() {
     // 基线 settings-tabs 顺序（General 在前端本地）：aiRuntime -> tool -> environment
-    // -> network -> storageMedia -> advanced；精确顺序断言防止重构破坏 tabs 布局。
+    // -> backendNetwork -> storageMedia -> advanced；精确顺序断言防止重构破坏 tabs 布局。
     assertEquals(
-        List.of("aiRuntime", "tool", "environment", "network", "storageMedia", "advanced"),
+        List.of("aiRuntime", "tool", "environment", "backendNetwork", "storageMedia", "advanced"),
         new SystemSettingsSchemaProvider()
             .get().getSections().stream().map(SystemSettingsSchemaDTO.SectionDTO::getKey).toList());
   }
 
   @Test
-  void networkDescribesOnlyGlobalProxyWithNextHttpRequestTimingAndTextBounds() {
+  void backendNetworkDescribesOnlyBackendProxyWithNextHttpRequestTimingAndTextBounds() {
     // 精确 schema 契约阻止运行期开关、模块覆盖或 nullable/长度边界漂移。
     SystemSettingsSchemaDTO.SectionDTO section =
         new SystemSettingsSchemaProvider().get().getSections().get(3);
-    assertEquals("network", section.getKey());
-    assertEquals("settings.tabs.network", section.getLabelKey());
-    assertEquals("settings.section.network.description", section.getDescriptionKey());
+    assertEquals("backendNetwork", section.getKey());
+    assertEquals("settings.tabs.backendNetwork", section.getLabelKey());
+    assertEquals("settings.section.backendNetwork.description", section.getDescriptionKey());
     assertFalse(section.isRestartRequired());
     assertEquals(1, section.getGroups().size());
     SystemSettingsSchemaDTO.GroupDTO group = section.getGroups().get(0);
-    assertEquals("network.proxy", group.getKey());
-    assertEquals("settings.section.network.proxy.title", group.getLabelKey());
-    assertEquals("settings.section.network.proxy.description", group.getDescriptionKey());
+    assertEquals("backendNetwork.proxy", group.getKey());
+    assertEquals("settings.section.backendNetwork.proxy.title", group.getLabelKey());
+    assertEquals("settings.section.backendNetwork.proxy.description", group.getDescriptionKey());
     assertFalse(group.isRestartRequired());
     assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_HTTP_REQUEST, group.getApplyTiming());
     assertEquals(2, group.getFields().size());
@@ -74,10 +74,10 @@ class SystemSettingsSchemaProviderTest {
       assertEquals("settings.field." + field.getPath(), field.getLabelKey());
       assertEquals(field.getLabelKey() + ".hint", field.getHintKey());
     }
-    assertEquals("network.proxyUrl", group.getFields().get(0).getPath());
+    assertEquals("backendNetwork.proxyUrl", group.getFields().get(0).getPath());
     assertEquals(true, group.getFields().get(0).isNullable());
     assertEquals(2048, group.getFields().get(0).getMax());
-    assertEquals("network.noProxyHosts", group.getFields().get(1).getPath());
+    assertEquals("backendNetwork.noProxyHosts", group.getFields().get(1).getPath());
     assertEquals(false, group.getFields().get(1).isNullable());
     assertEquals(4096, group.getFields().get(1).getMax());
   }

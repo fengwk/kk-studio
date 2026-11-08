@@ -32,7 +32,8 @@ function environmentWithoutDaemon() {
     async call(method, path, body) {
       calls.push({ method, path, body })
       if (method === 'POST' && path === '/api/platform/environments') {
-        return { json: { id: ENVIRONMENT_ID, name: body.name, version } }
+        assert.equal(body.daemonConfig?.studioUrl, 'http://127.0.0.1:18081')
+        return { json: { id: ENVIRONMENT_ID, name: body.name, note: body.note, daemonConfig: body.daemonConfig, version } }
       }
       if (method === 'GET' && path === `/api/platform/environments/${ENVIRONMENT_ID}`) {
         return { json: { id: ENVIRONMENT_ID, version } }
@@ -151,10 +152,11 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
   // 其它 canonical 错误必须原样抛出，不能被静默吞掉。
   const created = await createEnvironmentFixture(
     {
-      async call(method, path) {
+      async call(method, path, body) {
         assert.equal(method, 'POST')
         assert.equal(path, '/api/platform/environments')
-        return { json: { id: ENVIRONMENT_ID, version: '7' } }
+        assert.equal(body.daemonConfig.studioUrl, 'http://127.0.0.1:18081')
+        return { json: { id: ENVIRONMENT_ID, version: '7', daemonConfig: body.daemonConfig } }
       },
     },
     'e2e-fixture',

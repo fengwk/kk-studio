@@ -25,9 +25,9 @@ public class EnvironmentRuntimeRoutingService {
   private final ClusterNodeRegistry clusterNodeRegistry;
   private final EnvironmentRuntimeOwnerClient runtimeOwnerClient;
 
-  /** 读取 owner 的运行快照。 */
+  /** 读取 owner 的运行快照：允许 CONNECTING 的有效 owner 租约。 */
   public EnvironmentRuntimeStatusDTO runtimeStatus(EnvironmentId environmentId) {
-    ClusterOwnerRoute route = requireOwnerRoute(environmentId);
+    ClusterOwnerRoute route = requireRuntimeOwnerRoute(environmentId);
     if (route.local()) {
       return environmentUpdateService.runtimeStatus(environmentId);
     }
@@ -41,6 +41,15 @@ public class EnvironmentRuntimeRoutingService {
       return environmentUpdateService.startUpdate(environmentId);
     }
     return runtimeOwnerClient.startUpdate(route, environmentId);
+  }
+
+  private ClusterOwnerRoute requireRuntimeOwnerRoute(EnvironmentId environmentId) {
+    return clusterNodeRegistry
+        .runtimeRoute(environmentId)
+        .orElseThrow(
+            () ->
+                DomainException.unavailable(
+                    "ENVIRONMENT_UNAVAILABLE", "environment has no current owner route"));
   }
 
   private ClusterOwnerRoute requireOwnerRoute(EnvironmentId environmentId) {

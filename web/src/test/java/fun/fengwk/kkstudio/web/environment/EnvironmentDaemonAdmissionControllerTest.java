@@ -103,6 +103,31 @@ class EnvironmentDaemonAdmissionControllerTest {
   }
 
   @Test
+  void missingEnvironmentIdHeaderReturns400() throws Exception {
+    MockHttpServletRequest request = newRequest();
+    request.removeHeader("KK-Environment-Id");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(400, response.getStatus());
+    assertNoSecretLeak(response);
+  }
+
+  @Test
+  void malformedEnvironmentIdHeaderReturns400() throws Exception {
+    MockHttpServletRequest request = newRequest();
+    request.removeHeader("KK-Environment-Id");
+    request.addHeader("KK-Environment-Id", "not-a-canonical-uuid");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(400, response.getStatus());
+    assertNoSecretLeak(response);
+  }
+
+  @Test
   void missingProtocolVersionHeaderReturns400() throws Exception {
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Protocol");
@@ -216,7 +241,7 @@ class EnvironmentDaemonAdmissionControllerTest {
 
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Protocol");
-    request.addHeader("KK-Daemon-Protocol", "2");
+    request.addHeader("KK-Daemon-Protocol", "1");
     request.removeHeader("KK-Daemon-Platform");
     request.addHeader("KK-Daemon-Platform", "linux-amd64");
     MockHttpServletResponse response = new MockHttpServletResponse();
@@ -269,6 +294,20 @@ class EnvironmentDaemonAdmissionControllerTest {
     assertNoSecretLeak(response);
   }
 
+  @Test
+  void admissionReceivesCanonicalEnvironmentId() throws Exception {
+    testSessions.admission = new DaemonAdmission.Rejected();
+    MockHttpServletRequest request = newRequest();
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(401, response.getStatus());
+    assertEquals(ENV_ID, testSessions.lastHandshake.environmentId());
+    assertEquals(SECRET_TOKEN, testSessions.lastHandshake.registrationToken());
+    assertEquals(INSTANCE_ID, testSessions.lastHandshake.daemonInstanceId());
+  }
+
   private void assertNoSecretLeak(MockHttpServletResponse response) throws Exception {
     String content = response.getContentAsString();
     assertFalse(
@@ -289,6 +328,7 @@ class EnvironmentDaemonAdmissionControllerTest {
     request.addHeader("Connection", "Upgrade");
     request.addHeader("Authorization", "Bearer " + SECRET_TOKEN);
     request.addHeader("KK-Daemon-Instance", INSTANCE_ID);
+    request.addHeader("KK-Environment-Id", ENV_ID.value().toString());
     request.addHeader("KK-Daemon-Protocol", String.valueOf(ControlProtocolCodec.PROTOCOL_VERSION));
     return request;
   }
@@ -296,10 +336,12 @@ class EnvironmentDaemonAdmissionControllerTest {
   private static final class TestSessions implements DaemonSessions {
     private DaemonAdmission admission = new DaemonAdmission.Admitted(ENV_ID, INSTANCE_ID);
     private RuntimeException admitException;
+    private DaemonHandshake lastHandshake;
     private final List<DaemonAdmission.Admitted> abandoned = new ArrayList<>();
 
     @Override
     public DaemonAdmission admit(DaemonHandshake handshake) {
+      lastHandshake = handshake;
       if (admitException != null) {
         throw admitException;
       }

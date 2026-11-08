@@ -49,8 +49,10 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     this.jdbcClient = JdbcClient.create(dataSource);
     jdbcClient
         .sql(
-            "insert into environment (id, name, registration_token_hash, version)"
-                + " values (?, 'cluster-env', repeat('a', 64), 0)")
+            "insert into environment (id, name, note, registration_token_hash, daemon_config, version)"
+                + " values (?, 'cluster-env', null, repeat('a', 64),"
+                + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+                + "\"lsp\":null,\"proxyUrl\":null}'::jsonb, 0)")
         .params(ENV.value())
         .update();
   }
@@ -62,19 +64,19 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     return new JdbcClusterNodeRegistry(jdbcClient, localNodeId, properties);
   }
 
-  private void seedConnection(UUID owner, String status, String runtimeInfo, Instant leaseUntil) {
+  private void seedConnection(UUID owner, String status, String readyMetadata, Instant leaseUntil) {
     jdbcClient
         .sql(
             """
             insert into environment_connection
-                (environment_id, owner_node_id, lease_token, status, runtime_info, skill_state,
+                (environment_id, owner_node_id, lease_token, status, ready_metadata, skill_state,
                  recent_events, last_seen_at, lease_until)
             values (?, ?, ?, ?, ?::jsonb, '[]'::jsonb, '[]'::jsonb, ?, ?)
             on conflict (environment_id) do update
             set owner_node_id = excluded.owner_node_id,
                 lease_token = excluded.lease_token,
                 status = excluded.status,
-                runtime_info = excluded.runtime_info,
+                ready_metadata = excluded.ready_metadata,
                 last_seen_at = excluded.last_seen_at,
                 lease_until = excluded.lease_until
             """)
@@ -83,7 +85,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
             owner,
             UUID.randomUUID(),
             status,
-            runtimeInfo,
+            readyMetadata,
             Timestamp.from(leaseUntil.minusSeconds(5)),
             Timestamp.from(leaseUntil))
         .update();
@@ -182,7 +184,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
         .sql(
             """
             insert into environment_connection
-                (environment_id, owner_node_id, lease_token, status, runtime_info, skill_state,
+                (environment_id, owner_node_id, lease_token, status, ready_metadata, skill_state,
                  recent_events, last_seen_at, lease_until)
             values (?, ?, ?, 'READY', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
                 statement_timestamp(), statement_timestamp() + interval '1 hour')

@@ -385,6 +385,14 @@ JS
   tar -xzf "$code_server_tar" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
   local node_name=node
   if [ "$os" = windows ]; then node_name=node.exe; fi
+  # 安装操作锁 helper 与它的 native 依赖必须随发行归档交付：脚本从独立临时管理副本运行
+  # helper 取得 install.lock / 等 daemon.lock，不在用户机器上要求 Node、flock 或额外下载。
+  [ -f "$STAGING_DIR/native/lock-helper.js" ] ||
+    die "daemon build is missing native/lock-helper.js (install operation lock helper)"
+  [ -f "$STAGING_DIR/delay.js" ] ||
+    die "daemon build is missing delay.js (install operation lock helper dependency)"
+  [ -d "$STAGING_DIR/node_modules/koffi" ] ||
+    die "release archive is missing the helper native dependency: node_modules/koffi"
   [ -f "$STAGING_DIR/runtime/code-server/lib/$node_name" ] ||
     die "code-server runtime does not provide lib/$node_name for $os-$arch"
   if [ "$os" != windows ]; then

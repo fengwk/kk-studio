@@ -19,6 +19,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationErrorDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
@@ -49,6 +51,8 @@ class EnvironmentRuntimeControllerTest {
     runtimeOwnerClient = mock(EnvironmentRuntimeOwnerClient.class);
     when(clusterNodeRegistry.route(any()))
         .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+    when(clusterNodeRegistry.runtimeRoute(any()))
+        .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
 
     EnvironmentRuntimeController controller =
         new EnvironmentRuntimeController(
@@ -71,13 +75,18 @@ class EnvironmentRuntimeControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.revision").value("7"))
         .andExpect(jsonPath("$.status.daemonVersion").value("1.0.9"))
-        .andExpect(jsonPath("$.status.update").value(nullValue()));
+        .andExpect(jsonPath("$.status.update").value(nullValue()))
+        .andExpect(jsonPath("$.status.configuration.appliedVersion").value("3"))
+        .andExpect(jsonPath("$.status.configuration.proxyUrl").value(nullValue()))
+        .andExpect(jsonPath("$.status.configuration.error.version").value("4"))
+        .andExpect(jsonPath("$.status.configuration.error.code").value("INVALID_LSP_COMMAND"))
+        .andExpect(jsonPath("$.status.configuration.error.field").value("lsp"));
   }
 
   /** 意图：没有 READY owner 路由时明确返回 unavailable，不能伪造空 update 快照。 */
   @Test
   void runtimeEndpointReturnsUnavailableWithoutOwnerRoute() throws Exception {
-    when(clusterNodeRegistry.route(any())).thenReturn(Optional.empty());
+    when(clusterNodeRegistry.runtimeRoute(any())).thenReturn(Optional.empty());
 
     mockMvc
         .perform(get("/api/platform/environments/" + ENV_ID + "/runtime"))
@@ -90,7 +99,7 @@ class EnvironmentRuntimeControllerTest {
   void runtimeEndpointUsesOwnerSingleHop() throws Exception {
     ClusterOwnerRoute remote =
         ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://owner.internal"));
-    when(clusterNodeRegistry.route(any())).thenReturn(Optional.of(remote));
+    when(clusterNodeRegistry.runtimeRoute(any())).thenReturn(Optional.of(remote));
     when(runtimeOwnerClient.runtimeStatus(remote, EnvironmentId.of(ENV_ID)))
         .thenReturn(runtimeStatus(9L, "1.0.9", null));
 
@@ -139,6 +148,14 @@ class EnvironmentRuntimeControllerTest {
     EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
     status.setDaemonVersion(daemonVersion);
     status.setUpdate(update);
+    EnvironmentRuntimeConfigurationDTO configuration = new EnvironmentRuntimeConfigurationDTO();
+    configuration.setAppliedVersion(3L);
+    EnvironmentRuntimeConfigurationErrorDTO error = new EnvironmentRuntimeConfigurationErrorDTO();
+    error.setVersion(4L);
+    error.setCode("INVALID_LSP_COMMAND");
+    error.setField("lsp");
+    configuration.setError(error);
+    status.setConfiguration(configuration);
     EnvironmentRuntimeStatusDTO snapshot = new EnvironmentRuntimeStatusDTO();
     snapshot.setRevision(revision);
     snapshot.setStatus(status);

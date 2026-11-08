@@ -34,8 +34,9 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
@@ -49,6 +50,8 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonRegistrationDirectory;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonSessions;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentConfigSnapshot;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentServerSettings;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
@@ -146,7 +149,7 @@ class DaemonCrossLanguageIntegrationTest {
     registrationDirectory =
         token -> {
           if (VALID_TOKEN.equals(token)) {
-            return Optional.of(new DaemonRegistration(ENVIRONMENT_ID, "env-crosslang"));
+            return Optional.of(new DaemonRegistration(ENVIRONMENT_ID));
           }
           return Optional.empty();
         };
@@ -170,17 +173,27 @@ class DaemonCrossLanguageIntegrationTest {
     networkSettings =
         new AtomicReference<>(
             new EnvironmentServerSettings(
-                Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
+                Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L));
     Supplier<EnvironmentServerSettings> settingsSupplier = networkSettings::get;
+    EnvironmentConfigSource configSource =
+        environmentId ->
+            Optional.of(
+                new EnvironmentConfigSnapshot(
+                    1L,
+                    DaemonConfiguration.newBuilder()
+                        .setStudioUrl("https://studio.example.com")
+                        .build()));
 
     daemonServer =
         new EnvironmentDaemonServer(
             leaseStore,
             registrationDirectory,
+            configSource,
             sessionListener,
             updateListener,
             ticketService,
-            settingsSupplier);
+            settingsSupplier,
+            Runnable::run);
 
     recordingSessions = new RecordingSessions(daemonServer);
 
@@ -268,60 +281,6 @@ class DaemonCrossLanguageIntegrationTest {
                         && env.hasReady()
                         && daemonVersion.equals(env.getReady().getDaemonVersion()));
     assertTrue(hasReadyInbound, "READY envelope with correct daemon_version must be received");
-  }
-
-  /** Java SETTINGS 经真实 WebSocket/Node 运行时作用于进程，在线修改和清除无需重连。 */
-  @Test
-  void proxySettingsReachSubprocessesAcrossLanguages() throws Exception {
-    networkSettings.set(network("http://first.invalid:8080", "localhost"));
-    startDaemon(VALID_TOKEN);
-    awaitReady();
-    assertTrue(
-        proxyEnvironment()
-            .contains("http://first.invalid:8080|http://first.invalid:8080|localhost|unset|unset"));
-
-    networkSettings.set(network("http://second.invalid:8080", "internal"));
-    daemonServer.reconcileNetworkSettings();
-    assertTrue(
-        proxyEnvironment()
-            .contains(
-                "http://second.invalid:8080|http://second.invalid:8080|internal|unset|unset"));
-
-    networkSettings.set(network(null, ""));
-    daemonServer.reconcileNetworkSettings();
-    assertTrue(proxyEnvironment().contains("unset|unset||unset|unset"));
-    assertEquals(
-        1,
-        recordingSessions.inboundEnvelopes().stream()
-            .filter(envelope -> envelope.getMessageType() == MessageType.READY)
-            .count());
-  }
-
-  private EnvironmentServerSettings network(String url, String bypass) {
-    return new EnvironmentServerSettings(
-        Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, url, bypass);
-  }
-
-  private String proxyEnvironment() throws Exception {
-    String command =
-        "printf '%s|%s|%s|%s|%s' \"${HTTP_PROXY-unset}\" \"${HTTPS_PROXY-unset}\" "
-            + "\"${NO_PROXY-unset}\" \"${http_proxy-unset}\" \"${ALL_PROXY-unset}\"";
-    EnvironmentCapabilityExecutionRequest request =
-        new EnvironmentCapabilityExecutionRequest(
-            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
-            new EnvironmentCapabilityCall(
-                UUID.randomUUID().toString(),
-                "{\"command\":\""
-                    + escapeJson(command)
-                    + "\",\"workdir\":\""
-                    + escapeJson(testDataDir.toAbsolutePath().toString())
-                    + "\"}"),
-            Duration.ofSeconds(10));
-    TestListener listener = new TestListener();
-    daemonServer.invoke(ENVIRONMENT_ID, request, listener);
-    EnvironmentCapabilityResult result = listener.awaitCompleted(TIMEOUT);
-    assertFalse(result.error());
-    return extractCombinedText(result);
   }
 
   /**
@@ -633,12 +592,20 @@ class DaemonCrossLanguageIntegrationTest {
         new EnvironmentDaemonServer(
             leaseStore,
             registrationDirectory,
+            environmentId ->
+                Optional.of(
+                    new EnvironmentConfigSnapshot(
+                        1L,
+                        DaemonConfiguration.newBuilder()
+                            .setStudioUrl("https://studio.example.com")
+                            .build())),
             sessionListener,
             (envId, res) -> {},
             new FakeTicketService(),
             () ->
                 new EnvironmentServerSettings(
-                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
+                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L),
+            Runnable::run);
     recordingSessions.setDelegate(newServer);
 
     // 第一个 server 实例执行 drain()：排空控制流并释放 FakeLeaseStore 租约
@@ -1002,11 +969,11 @@ class DaemonCrossLanguageIntegrationTest {
   private static final class FakeLeaseStore implements DaemonLeaseStore {
 
     private final AtomicInteger heartbeatCalls = new AtomicInteger(0);
-    private volatile DaemonCapabilities readyCapabilities;
+    private volatile DaemonReadyMetadata readyCapabilities;
     private volatile UUID currentLeaseToken;
     private volatile boolean released;
 
-    DaemonCapabilities readyCapabilities() {
+    DaemonReadyMetadata readyCapabilities() {
       return readyCapabilities;
     }
 
@@ -1026,7 +993,7 @@ class DaemonCrossLanguageIntegrationTest {
     public boolean markReady(
         EnvironmentId environmentId,
         UUID leaseToken,
-        DaemonCapabilities capabilities,
+        DaemonReadyMetadata capabilities,
         Duration leaseDuration) {
       this.readyCapabilities = capabilities;
       return true;
