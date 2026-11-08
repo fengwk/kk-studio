@@ -577,7 +577,8 @@ try {
     $phaseLabel = "[" + [char] 0x9636 + [char] 0x6BB5 + " "
     Assert-True -Condition ($unsafeMessage.Contains($phaseLabel)) `
         -Message "failure diagnostic includes the current phase label"
-    Assert-True -Condition ($unsafeMessage -match "\[[a-z-]+\]") `
+    $phasePattern = [regex]::Escape($phaseLabel) + "([a-z-]+)\]"
+    Assert-True -Condition ($unsafeMessage -match $phasePattern) `
         -Message "failure diagnostic includes a fixed phase code"
     Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $unsafeRoot "lib"))) `
         -Message "unsafe directory receives no program"
