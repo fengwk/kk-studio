@@ -84,6 +84,15 @@ select pg_temp.assert_true('environment daemon_config accepts object',
 select pg_temp.rejects('environment daemon_config rejects array',
     $$update environment set daemon_config = '[]'::jsonb where id = pg_temp.uid(9000)$$,
     '23514', 'ck_environment_daemon_config_object');
+select pg_temp.rejects('environment daemon_config rejects SQL null',
+    $$update environment set daemon_config = null where id = pg_temp.uid(9000)$$,
+    '23502');
+select pg_temp.rejects('environment daemon_config rejects JSON null',
+    $$update environment set daemon_config = 'null'::jsonb where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_daemon_config_object');
+select pg_temp.rejects('environment note rejects blank content',
+    $$update environment set note = '  ' where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_note');
 
 -- Installation code: two nullable native columns on the Environment row, no separate table.
 update environment set install_code_hash = repeat('0123456789abcdef', 4),
