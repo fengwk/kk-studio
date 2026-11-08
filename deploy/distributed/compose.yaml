@@ -272,6 +272,9 @@ services:
     image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
     init: true
     depends_on:
+      # Bootstrap reads the card through ingress before starting the control connection.
+      app-a:
+        condition: service_healthy
       daemon-ingress:
         condition: service_started
       workspace-init:

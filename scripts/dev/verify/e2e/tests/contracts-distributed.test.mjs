@@ -18,6 +18,13 @@ const RUN_SCRIPT = read(E2E_ROOT, 'distributed.sh')
 const E2E_ENTRY = read(E2E_ROOT, 'run.sh')
 const MATRIX_RUNNER = read(E2E_ROOT, 'run-matrix.mjs')
 
+test('test intent: daemon-c waits for a healthy card API before materializing its cache', () => {
+  const daemon = COMPOSE.match(/^  daemon-c:\n([\s\S]*?)(?=^\S)/m)?.[1]
+  assert.ok(daemon, 'daemon-c service must exist')
+  assert.match(daemon, /depends_on:\n(?:[^\n]*\n)*?      app-a:\n        condition: service_healthy/)
+  assert.match(daemon, /      daemon-ingress:\n        condition: service_started/)
+})
+
 // --distributed must be an explicit orthogonal capability, off by default.
 
 test('test intent: the e2e entry keeps the single-instance path by default', () => {
