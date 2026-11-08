@@ -45,6 +45,8 @@ function chatDefaultEnvironmentFixture() {
       const environment = {
         id: nextId(),
         name: body.name,
+        note: body.note,
+        daemonConfig: body.daemonConfig,
         version: '0',
         registrationToken: `tok-${body.name}`,
       }
@@ -180,7 +182,7 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
     tool: {},
     aiRuntime: { retryBaseDelayMillis: '2500', modelHttpRetryStatusCodes: [] },
     environment: {},
-    network: { proxyUrl: null, noProxyHosts: '' },
+    backendNetwork: { proxyUrl: null, noProxyHosts: '' },
     storageMedia: {
       uploadExpiresSeconds: '3600',
       s3PresignDefaultExpiresSeconds: '900',
@@ -253,6 +255,7 @@ test('chat default environment case executes the create/replace/clear wire with 
   // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
   assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
   assert.equal(create.body.environmentName, environmentCreate.body.name)
+  assert.equal(environmentCreate.body.daemonConfig.studioUrl, 'http://127.0.0.1:18081')
 
   const chatPuts = fake.requests.filter(
     (request) => request.method === 'PUT' && request.path.startsWith('/api/chat/chats/'),

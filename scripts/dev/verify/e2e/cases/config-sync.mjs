@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto'
 import { assert, assertExactFields, cid, expectHttpError } from '../lib/http.mjs'
-import { providerCreateBody } from '../lib/fixtures.mjs'
+import {
+  assertDaemonConfig,
+  daemonConfigFixture,
+  environmentCreateBody,
+  providerCreateBody,
+} from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
-import { assertInstallConfig, linuxInstallConfig } from './environment-install-config.mjs'
 
 export const cases = []
 const registerCase = createCaseAdder(cases)
@@ -150,9 +154,11 @@ registerCase({
     let envId = null
     let latestVersion = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', {
-      name: envName,
-    })
+    const { json: createJson } = await ctx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(envName),
+    )
     const created = createJson
     envId = created.id
     const originalName = created.name
@@ -284,10 +290,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'config_sync.environment_install_config_roundtrip',
+  id: 'config_sync.environment_daemon_config_roundtrip',
   level: 'L1',
-  title: '配置同步 Environment installConfig 导出导入往返、原子更新与清除',
-  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Environment 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
+  title: '配置同步 Environment daemonConfig 导出导入往返与原子更新',
+  docs: 'Environment 导出固定为 {name,note,daemonConfig,registrationTokenHash} 且不导出临时安装码/连接信息；导入预检查只列覆盖引用；确认导入保留 note+daemonConfig；以新摘要+新 note/config 的条目原子更新（重新导出得到新摘要、Environment 读到新值）；缺少 daemonConfig 的条目 400 硬拒绝而不是清空已有配置',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
@@ -295,18 +301,25 @@ registerCase({
     const environmentPath = (id) => `/api/platform/environments/${encodeURIComponent(id)}`
     let envId = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name: envName })
+    const { json: createJson } = await ctx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(envName),
+    )
     const created = createJson
     envId = created.id
     const originalToken = created.registrationToken
     assert(envId && originalToken, `created environment must carry id and token: ${JSON.stringify(created)}`)
+    assertDaemonConfig(created.daemonConfig)
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${environmentPath(envId)}/install-settings`, {
+      const { json: putJson } = await ctx.call('PUT', environmentPath(envId), {
         expectedVersion: String(created.version),
-        installConfig: linuxInstallConfig(),
+        note: 'e2e environment note',
+        daemonConfig: daemonConfigFixture(),
       })
-      assertInstallConfig(putJson.installConfig)
+      assertDaemonConfig(putJson.daemonConfig)
+      assert(!Object.hasOwn(putJson, 'installConfig'), 'PUT response must not expose removed installConfig')
 
       const { json: exportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'environments', name: envName }],
@@ -315,9 +328,11 @@ registerCase({
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(envName), 'export yaml must contain environment name')
       assert(yaml.includes(tokenHash(originalToken)), 'export yaml must contain the registration token hash')
-      assert(yaml.includes('installConfig'), 'export yaml must contain nested installConfig')
+      assert(yaml.includes('daemonConfig'), 'export yaml must contain nested daemonConfig')
+      assert(!yaml.includes('installConfig'), 'export yaml must not contain removed installConfig')
       assert(yaml.includes('http://127.0.0.1:18081'), 'export yaml must contain studioUrl')
       assert(yaml.includes('jdtls'), 'export yaml must contain nested LSP server')
+      assert(yaml.includes('e2e environment note'), 'export yaml must contain the card note')
 
       const { json: checkJson } = await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml })
       const check = checkJson
@@ -334,13 +349,18 @@ registerCase({
         'import must report the environment',
       )
       const { json: afterImportJson } = await ctx.call('GET', environmentPath(envId))
-      assertInstallConfig(afterImportJson.installConfig)
+      assertDaemonConfig(afterImportJson.daemonConfig)
+      assert(afterImportJson.note === 'e2e environment note', 'import must keep the card note')
 
-      // 原子更新：新 token + 新配置在同一 environment 条目内一次导入生效。
-      const updatedConfig = linuxInstallConfig()
-      updatedConfig.daemon.note = 'e2e install config updated'
+      // 原子更新：新 token + 新 note/config 在同一 environment 条目内一次导入生效。
+      const updatedConfig = daemonConfigFixture({ proxyUrl: 'http://127.0.0.1:7891' })
       const updateYaml = JSON.stringify({
-        environments: [{ name: envName, registrationTokenHash: tokenHash(newToken), installConfig: updatedConfig }],
+        environments: [{
+          name: envName,
+          note: 'e2e environment note updated',
+          registrationTokenHash: tokenHash(newToken),
+          daemonConfig: updatedConfig,
+        }],
       })
       await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml: updateYaml })
       await ctx.call('POST', '/api/platform/config-sync/import', { yaml: updateYaml, allowPartial: false })
@@ -354,19 +374,29 @@ registerCase({
       )
       const { json: updatedEnvironmentJson } = await ctx.call('GET', environmentPath(envId))
       assert(
-        updatedEnvironmentJson.installConfig?.daemon?.note === 'e2e install config updated',
-        'atomic sync update must persist the new install config alongside the token',
+        updatedEnvironmentJson.note === 'e2e environment note updated',
+        'atomic sync update must persist the new note alongside the token',
+      )
+      assert(
+        updatedEnvironmentJson.daemonConfig?.proxyUrl === 'http://127.0.0.1:7891',
+        `atomic sync update must persist the new daemonConfig: ${JSON.stringify(updatedEnvironmentJson.daemonConfig)}`,
       )
 
-      // 缺少 installConfig 字段的条目必须清空已保存配置。
-      const clearYaml = JSON.stringify({
+      // daemonConfig 是必填整体属性；缺失必须 400，绝不清空已有配置。
+      const missingConfigYaml = JSON.stringify({
         environments: [{ name: envName, registrationTokenHash: tokenHash(newToken) }],
       })
-      await ctx.call('POST', '/api/platform/config-sync/import', { yaml: clearYaml, allowPartial: false })
-      const { json: clearedJson } = await ctx.call('GET', environmentPath(envId))
+      for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
+        await expectHttpError(
+          () => ctx.call('POST', path, { yaml: missingConfigYaml, allowPartial: false }),
+          { status: 400, code: 'validation' },
+        )
+      }
+      const { json: afterRejectedJson } = await ctx.call('GET', environmentPath(envId))
       assert(
-        clearedJson.installConfig == null,
-        `absent installConfig must clear saved settings: ${JSON.stringify(clearedJson.installConfig)}`,
+        afterRejectedJson.note === 'e2e environment note updated'
+          && afterRejectedJson.daemonConfig?.proxyUrl === 'http://127.0.0.1:7891',
+        `missing daemonConfig must not clear saved card state: ${JSON.stringify(afterRejectedJson)}`,
       )
     } finally {
       if (envId) {
@@ -382,27 +412,27 @@ registerCase({
 })
 
 registerCase({
-  id: 'config_sync.install_config_hard_invalid_precheck',
+  id: 'config_sync.daemon_config_hard_invalid_precheck',
   level: 'L1',
-  title: '配置同步 installConfig 硬错误预检查与零副作用',
-  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、顶层或嵌套未知字段、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
+  title: '配置同步 daemonConfig 硬错误预检查与零副作用',
+  docs: 'import/check 与 import 都必须深度校验 environment.daemonConfig：非法 studioUrl、未知字段、缺失 daemonConfig，以及旧 installConfig/operatingSystem 形状一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const name = `e2e-sync-bad-${suffix}`
     const token = `e2e-sync-bad-token-${suffix}`
-    const invalidConfigs = [
-      { operatingSystem: 'linux', daemon: { studioUrl: 'ftp://invalid' } },
-      { operatingSystem: 'linux', daemon: { studioUrl: 'http://127.0.0.1:18081', unknown: 1 } },
-      { daemon: { studioUrl: 'http://127.0.0.1:18081' } },
-      {
-        operatingSystem: 'linux',
-        unknownField: '/opt/jdk',
-        daemon: { studioUrl: 'http://127.0.0.1:18081' },
-      },
+    const invalidEntries = [
+      { installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'ftp://invalid' } } },
+      { operatingSystem: 'linux', daemonConfig: daemonConfigFixture() },
+      {},
+      { daemonConfig: null },
+      { daemonConfig: { studioUrl: 'ftp://invalid' } },
+      { daemonConfig: daemonConfigFixture({ bashExecutable: '  ' }) },
     ]
 
-    for (const installConfig of invalidConfigs) {
-      const yaml = JSON.stringify({ environments: [{ name, registrationTokenHash: tokenHash(token), installConfig }] })
+    for (const invalid of invalidEntries) {
+      const yaml = JSON.stringify({
+        environments: [{ name, registrationTokenHash: tokenHash(token), ...invalid }],
+      })
       for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
         const error = await expectHttpError(
           () => ctx.call('POST', path, { yaml, allowPartial: true }),
@@ -422,7 +452,7 @@ registerCase({
     assert(Array.isArray(list), 'environment list must be an array')
     assert(
       !list.some((environment) => environment.name === name),
-      'invalid installConfig must not create an environment',
+      'invalid daemonConfig must not create an environment',
     )
   },
 })

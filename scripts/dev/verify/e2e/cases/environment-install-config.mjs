@@ -1,126 +1,98 @@
 import { assert, assertExactFields, expectHttpError, HttpError, cid } from '../lib/http.mjs'
+import { assertDaemonConfig, daemonConfigFixture, environmentCreateBody } from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
 const registerCase = createCaseAdder(cases)
 
-/** Canonical non-trivial install settings shared by environment/configsync matrix cases. */
-export function linuxInstallConfig() {
-  return {
-    operatingSystem: 'linux',
-    daemon: {
-      studioUrl: 'http://127.0.0.1:18081',
-      note: 'e2e install config',
-      lsp: {
-        servers: {
-          jdtls: {
-            command: ['/usr/bin/jdtls'],
-            extensions: ['.java'],
-            rootMarkers: ['pom.xml'],
-            firstMatchMarkers: ['.git'],
-          },
-        },
-      },
-    },
-  }
-}
-
-export function assertInstallConfig(config) {
-  assert(config && typeof config === 'object', `installConfig must be an object: ${JSON.stringify(config)}`)
-  assert(config.operatingSystem === 'linux', `operatingSystem must be linux: ${config.operatingSystem}`)
-  assertExactFields(config, ['operatingSystem', 'daemon'], 'installConfig')
-  assert(
-    config.daemon?.studioUrl === 'http://127.0.0.1:18081',
-    `studioUrl must round-trip: ${config.daemon?.studioUrl}`,
-  )
-  assert(config.daemon?.note === 'e2e install config', `note must round-trip: ${config.daemon?.note}`)
-  const jdtls = config.daemon?.lsp?.servers?.jdtls
-  assert(jdtls, `jdtls server must round-trip: ${JSON.stringify(config.daemon?.lsp)}`)
-  assert(
-    Array.isArray(jdtls.command)
-      && jdtls.command.length === 1
-      && jdtls.command[0] === '/usr/bin/jdtls',
-    `command must round-trip: ${JSON.stringify(jdtls.command)}`,
-  )
-  assert(
-    jdtls.extensions?.[0] === '.java'
-      && jdtls.rootMarkers?.[0] === 'pom.xml'
-      && jdtls.firstMatchMarkers?.[0] === '.git',
-    `nested marker lists must round-trip: ${JSON.stringify(jdtls)}`,
-  )
-}
-
 registerCase({
-  id: 'environment.install_config_cas_roundtrip',
+  id: 'environment.card_config_cas_roundtrip',
   level: 'L1',
-  title: 'Environment installConfig PUT CAS 持久化与往返',
-  docs: 'PUT /api/platform/environments/{id}/install-settings 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/顶层或嵌套未知字段/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
+  title: 'Environment 卡片 daemonConfig PUT CAS 持久化与往返',
+  docs: 'POST /api/platform/environments 必须携带 name/note/完整 daemonConfig；PUT /api/platform/environments/{id} 用 expectedVersion 整体替换 note+daemonConfig，stale 版本 409，显式成功 PUT（含相同内容）推进版本；非法/缺失 daemonConfig、未知字段、非法 studioUrl 400 且不写入、不回显提交值；GET 返回同一卡片配置且无旧 installConfig',
   async run(ctx) {
-    const name = `e2e-install-cfg-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name })
-    const created = createJson
+    const name = `e2e-card-cfg-${cid().slice(0, 8)}`
+    const note = 'e2e environment note'
+    const { json: created } = await ctx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(name, { note }),
+    )
     const environmentId = created.id
-    assert(environmentId, `created environment must have id: ${JSON.stringify(createJson)}`)
+    assert(environmentId, `created environment must have id: ${JSON.stringify(created)}`)
+    assert(created.name === name, `created environment name mismatch: ${JSON.stringify(created)}`)
+    assert(created.note === note, `created environment note mismatch: ${JSON.stringify(created)}`)
+    assertDaemonConfig(created.daemonConfig)
     assert(
-      created.installConfig == null,
-      `new environment must not preconfigure install settings: ${JSON.stringify(created.installConfig)}`,
+      !Object.hasOwn(created, 'installConfig'),
+      `new environment must not expose removed installConfig: ${JSON.stringify(created)}`,
     )
     let version = String(created.version)
-    const path = `/api/platform/environments/${encodeURIComponent(environmentId)}/install-settings`
+    const path = `/api/platform/environments/${encodeURIComponent(environmentId)}`
 
     try {
       // stale expectedVersion must conflict before any write
       await expectHttpError(
-        () => ctx.call('PUT', path, { expectedVersion: '999999', installConfig: linuxInstallConfig() }),
+        () =>
+          ctx.call('PUT', path, {
+            expectedVersion: '999999',
+            note,
+            daemonConfig: daemonConfigFixture(),
+          }),
         { status: 409, code: 'version_conflict' },
       )
 
       const { json: putJson } = await ctx.call('PUT', path, {
         expectedVersion: version,
-        installConfig: linuxInstallConfig(),
+        note,
+        daemonConfig: daemonConfigFixture(),
       })
       const saved = putJson
-      assertInstallConfig(saved.installConfig)
+      assert(saved.id === environmentId, 'PUT must keep the card identity')
+      assertDaemonConfig(saved.daemonConfig)
       assert(
         String(saved.version) !== version,
         `persisting config must advance version (was ${version}, got ${saved.version})`,
       )
       version = String(saved.version)
 
-      // re-saving the identical config is a CAS-checked no-op
-      const { json: noopJson } = await ctx.call('PUT', path, {
+      // Every explicit successful PUT advances the version, even when note/config are unchanged.
+      const { json: repeatedJson } = await ctx.call('PUT', path, {
         expectedVersion: version,
-        installConfig: linuxInstallConfig(),
+        note,
+        daemonConfig: daemonConfigFixture(),
       })
-      const noop = noopJson
-      assertInstallConfig(noop.installConfig)
+      const repeated = repeatedJson
+      assertDaemonConfig(repeated.daemonConfig)
       assert(
-        String(noop.version) === version,
-        `identical config must not advance version (was ${version}, got ${noop.version})`,
+        String(repeated.version) === String(BigInt(version) + 1n),
+        `explicit PUT must advance version exactly once (was ${version}, got ${repeated.version})`,
       )
+      version = String(repeated.version)
 
-      const { json: getJson } = await ctx.call(
-        'GET',
-        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
-      )
-      assertInstallConfig(getJson.installConfig)
+      const { json: getJson } = await ctx.call('GET', path)
+      assertDaemonConfig(getJson.daemonConfig)
+      assert(getJson.note === note, `note must round-trip: ${JSON.stringify(getJson)}`)
 
       const invalidBodies = [
-        { expectedVersion: version, installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'ftp://nope' } } },
+        { expectedVersion: version, note, daemonConfig: null },
+        { expectedVersion: version, note },
         {
           expectedVersion: version,
-          installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'http://127.0.0.1:18081', unknown: 1 } },
+          note,
+          daemonConfig: daemonConfigFixture({ studioUrl: 'ftp://nope' }),
         },
-        { expectedVersion: version, installConfig: { daemon: { studioUrl: 'http://127.0.0.1:18081' } } },
         {
           expectedVersion: version,
-          installConfig: {
-            operatingSystem: 'linux',
-            unknownField: '/opt/jdk',
-            daemon: { studioUrl: 'http://127.0.0.1:18081' },
-          },
+          note,
+          daemonConfig: daemonConfigFixture({ unknown: '/opt/jdk' }),
         },
-        { expectedVersion: version, installConfig: null },
+        {
+          expectedVersion: version,
+          note,
+          daemonConfig: daemonConfigFixture(),
+          unknownField: '/opt/jdk',
+        },
       ]
       for (const body of invalidBodies) {
         const error = await expectHttpError(() => ctx.call('PUT', path, body), {
@@ -131,31 +103,30 @@ registerCase({
         assert(!String(error.body).includes('/opt/jdk'), 'validation error must not echo submitted values')
       }
 
-      const { json: afterJson } = await ctx.call(
-        'GET',
-        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
-      )
+      const { json: afterJson } = await ctx.call('GET', path)
       const after = afterJson
       assert(
         String(after.version) === version,
         `invalid PUT must not advance version (was ${version}, got ${after.version})`,
       )
-      assertInstallConfig(after.installConfig)
+      assertDaemonConfig(after.daemonConfig)
 
-      // stale expectedVersion after a successful write also conflicts
+      // stale expectedVersion after successful writes also conflicts
       await expectHttpError(
-        () => ctx.call('PUT', path, { expectedVersion: '0', installConfig: linuxInstallConfig() }),
+        () =>
+          ctx.call('PUT', path, {
+            expectedVersion: '0',
+            note,
+            daemonConfig: daemonConfigFixture(),
+          }),
         { status: 409, code: 'version_conflict' },
       )
     } finally {
-      const { json } = await ctx.call(
-        'GET',
-        `/api/platform/environments/${encodeURIComponent(environmentId)}`,
-      )
+      const { json } = await ctx.call('GET', path)
       const current = json
       await ctx.call(
         'DELETE',
-        `/api/platform/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+        `${path}?expectedVersion=${encodeURIComponent(String(current.version))}`,
       )
     }
   },
@@ -187,26 +158,52 @@ function assertScriptOmits(script, needle, label) {
   assert(typeof script === 'string' && !script.includes(needle), `${label} must not appear in the script`)
 }
 
-function assertInstallScript(script, { previousTokens, config }) {
+/** 从安装脚本中提取唯一写入 daemon.json 的 canonical 本地缓存信封。 */
+function installEnvelope(script) {
+  const match = /^builtin printf '%s' '(.*)' > "\$stage\/daemon\.json"$/m.exec(script)
+  assert(match, 'install script must stage one daemon.json envelope')
+  try {
+    return JSON.parse(match[1])
+  } catch {
+    assert(false, 'install script daemon.json must be valid JSON')
+  }
+}
+
+function assertInstallScript(
+  script,
+  { previousTokens, environmentId, expectedVersion, note },
+) {
   assert(typeof script === 'string' && script.length > 0, 'install script must be non-empty text')
   assert(!script.trim().startsWith('{'), 'install script must not be a Result envelope')
-  assertScriptContains(script, config.daemon.studioUrl, 'saved studioUrl')
-  assertScriptContains(script, config.daemon.note, 'saved note')
-  assertScriptContains(script, config.daemon.lsp.servers.jdtls.command[0], 'saved LSP command')
+  const envelope = installEnvelope(script)
+  assertExactFields(envelope, ['environmentId', 'version', 'daemonConfig'], 'daemon.json envelope')
+  assert(envelope.environmentId === environmentId, 'daemon.json must carry the card UUID')
+  assert(
+    envelope.version === expectedVersion,
+    `daemon.json version mismatch: expected ${expectedVersion}, got ${envelope.version}`,
+  )
+  assertDaemonConfig(envelope.daemonConfig)
+  assert(
+    !Object.hasOwn(envelope.daemonConfig, 'note'),
+    'card note must not be duplicated into daemonConfig',
+  )
+  assertScriptOmits(script, note, 'card note')
+  assertScriptContains(script, 'install --environment-id', 'install action')
+  assertScriptContains(script, environmentId, 'card UUID installer argument')
   const tokens = [...script.matchAll(/^builtin printf '%s' '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})' > "\$stage\/daemon\.token"$/gm)]
   assert(tokens.length === 1, 'install script must stage exactly one UUID registration token')
   const token = tokens[0][1]
   assert(!previousTokens.includes(token), 'redemption must generate a fresh registration token')
-  assertScriptContains(script, 'install', 'install action')
   return token
 }
 
-function assertUninstallScript(script, secrets) {
+function assertUninstallScript(script, { environmentId, secrets }) {
   assert(typeof script === 'string' && script.length > 0, 'uninstall script must be non-empty text')
   assert(!script.trim().startsWith('{'), 'uninstall script must not be a Result envelope')
-  assertScriptContains(script, 'uninstall', 'uninstall action')
+  assertScriptContains(script, 'uninstall --environment-id', 'uninstall action')
+  assertScriptContains(script, environmentId, 'uninstall card UUID')
   for (const secret of secrets) {
-    assertScriptOmits(script, secret, 'environment token or saved config')
+    assertScriptOmits(script, secret, 'environment token, note or saved config')
   }
   assertScriptOmits(script, 'studioUrl', 'saved config field')
   assertScriptOmits(script, 'jdtls', 'saved config field')
@@ -281,29 +278,36 @@ export function assertExpiresNearFiveMinutes(expiresAt, issuedAtMs) {
 registerCase({
   id: 'environment.install_script_code_roundtrip',
   level: 'L1',
-  title: 'Environment 五分钟安装 code 签发、脚本下载与 token 轮换失效',
-  docs: 'POST /api/platform/environments/{id}/install-codes 用 expectedVersion 签发一次性 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409），重签覆盖旧 code；GET /{id}/install-script?code= 兑换生成 fresh UUID token 并推进 version，保留配置且 detail 无 token；Linux UTF-8 纯文本含保存配置（no-store、nosniff，只下载不执行）；重复/缺失/篡改 code 400；POST /{id}/rotate-token 使未消费 code 失效，重签兑换 token 与此前均不同；GET /api/platform/daemon-uninstall-scripts/{linux,windows} 无 secret/配置且不需要 code，非法 OS 400',
+  title: 'Environment 五分钟安装 code 签发、按卡片脚本下载与 token 轮换失效',
+  docs: 'POST /api/platform/environments/{id}/install-codes 用 expectedVersion 签发一次性 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409），重签覆盖旧 code；GET /{id}/install-script 必须同时带 code 与 operatingSystem，兑换生成 fresh UUID token 并推进 version，保留卡片 note+daemonConfig 且 detail 无 token；Linux UTF-8 纯文本含 {environmentId,version,daemonConfig} 本地缓存信封与按卡片 install 命令（no-store、nosniff，只下载不执行）；重复/缺失/篡改 code、缺失/非法 OS 400；POST /{id}/rotate-token 使未消费 code 失效，重签兑换 token 与此前均不同；GET /{id}/uninstall-script 带 operatingSystem，无 secret/配置且不需要 code，非法 OS 400',
   async run(ctx) {
     const name = `e2e-install-code-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name })
-    const created = createJson
+    const note = 'e2e environment note'
+    const config = daemonConfigFixture()
+    const { json: created } = await ctx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(name, { note }),
+    )
     const environmentId = created.id
     const token = created.registrationToken
     assert(environmentId, 'created environment must have id')
     assert(typeof token === 'string' && token.length > 0, 'create must return a registration token')
+    assertDaemonConfig(created.daemonConfig)
     let version = String(created.version)
     const environmentPath = `/api/platform/environments/${encodeURIComponent(environmentId)}`
-    const config = linuxInstallConfig()
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${environmentPath}/install-settings`, {
+      const { json: putJson } = await ctx.call('PUT', environmentPath, {
         expectedVersion: version,
-        installConfig: config,
+        note,
+        daemonConfig: config,
       })
       const saved = putJson
-      assertInstallConfig(saved.installConfig)
+      assertDaemonConfig(saved.daemonConfig)
+      assert(saved.note === note, 'card note must round-trip through PUT')
       assert(String(saved.version) !== version, 'persisting config must advance version')
-      assert(!Object.hasOwn(saved, 'registrationToken'), 'install-config response must not carry registrationToken')
+      assert(!Object.hasOwn(saved, 'registrationToken'), 'card update response must not carry registrationToken')
       version = String(saved.version)
 
       await expectHttpError(
@@ -329,15 +333,34 @@ registerCase({
       const { json: afterIssueJson } = await ctx.call('GET', environmentPath)
       const afterIssue = afterIssueJson
       assert(String(afterIssue.version) === version, 'issuing a code must not advance version')
-      assertInstallConfig(afterIssue.installConfig)
+      assertDaemonConfig(afterIssue.daemonConfig)
       assert(
         !Object.hasOwn(afterIssue, 'registrationToken'),
         'environment detail must not include registrationToken',
       )
 
+      // operatingSystem is a mandatory install-command parameter and is validated before redemption.
+      await expectProblem(
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(code)}`,
+          ),
+        { status: 400, code: 'validation' },
+      )
+      await expectProblem(
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(code)}&operatingSystem=solaris`,
+          ),
+        { status: 400, code: 'validation' },
+      )
+
+      const redeemedVersion = String(BigInt(version) + 1n)
       const { json: script, headers: scriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${environmentPath}/install-script?code=${encodeURIComponent(code)}`,
+        `${environmentPath}/install-script?code=${encodeURIComponent(code)}&operatingSystem=linux`,
       )
       assert(typeof script === 'string', 'install download must be text, not a JSON envelope')
       assert(
@@ -353,30 +376,48 @@ registerCase({
         String(headerValue(scriptHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
         'install download must set nosniff',
       )
-      const downloadedToken = assertInstallScript(script, { previousTokens: [token], config })
+      const downloadedToken = assertInstallScript(script, {
+        previousTokens: [token],
+        environmentId,
+        expectedVersion: redeemedVersion,
+        note,
+      })
       const checkRedemption = async () => {
         const { json } = await ctx.call('GET', environmentPath)
         const detail = json
-        assert(BigInt(detail.version) === BigInt(version) + 1n, 'redemption must advance version once')
-        assertInstallConfig(detail.installConfig)
+        assert(
+          BigInt(detail.version) === BigInt(version) + 1n,
+          `redemption must advance version once (was ${version}, got ${detail.version})`,
+        )
+        assertDaemonConfig(detail.daemonConfig)
+        assert(detail.note === note, 'redemption must keep the card note')
         assert(!Object.hasOwn(detail, 'registrationToken'), 'detail must not carry registrationToken')
         version = String(detail.version)
       }
       await checkRedemption()
       await expectProblem(
-        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(code)}`),
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(code)}&operatingSystem=linux`,
+          ),
         { status: 400, code: 'validation' },
       )
 
       await expectProblem(
-        () => downloadInstallationScript(ctx, `${environmentPath}/install-script`),
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?operatingSystem=linux`,
+          ),
         { status: 400, code: 'validation' },
       )
       await expectProblem(
-        () => downloadInstallationScript(
-          ctx,
-          `${environmentPath}/install-script?code=${encodeURIComponent(`${code}x`)}`,
-        ),
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(`${code}x`)}&operatingSystem=linux`,
+          ),
         { status: 400, code: 'validation' },
       )
 
@@ -392,7 +433,11 @@ registerCase({
       const pendingCode = await issueCode()
       assert(pendingCode !== replacedCode, 'reissue must replace the pending code')
       await expectProblem(
-        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(replacedCode)}`),
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(replacedCode)}&operatingSystem=linux`,
+          ),
         { status: 400, code: 'validation' },
       )
 
@@ -408,10 +453,15 @@ registerCase({
       assert(typeof rotatedToken === 'string' && rotatedToken.length > 0 && rotatedToken !== token, 'rotation must return a new token')
       assert(String(rotated.version) !== version, 'token rotation must advance version')
       version = String(rotated.version)
-      assertInstallConfig(rotated.installConfig)
+      assertDaemonConfig(rotated.daemonConfig)
+      assert(rotated.note === note, 'token rotation must keep the card note')
 
       await expectProblem(
-        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(pendingCode)}`),
+        () =>
+          downloadInstallationScript(
+            ctx,
+            `${environmentPath}/install-script?code=${encodeURIComponent(pendingCode)}&operatingSystem=linux`,
+          ),
         { status: 400, code: 'validation' },
       )
 
@@ -426,24 +476,41 @@ registerCase({
       assert(typeof refreshedCode === 'string' && refreshedCode.length > 0 && refreshedCode !== code, 'rotation must require a new install code')
       assertExpiresNearFiveMinutes(refreshed.expiresAt, Date.now())
 
+      const refreshedVersion = String(BigInt(version) + 1n)
       const { json: refreshedScript, headers: refreshedScriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${environmentPath}/install-script?code=${encodeURIComponent(refreshedCode)}`,
+        `${environmentPath}/install-script?code=${encodeURIComponent(refreshedCode)}&operatingSystem=linux`,
       )
       assertNoStore(refreshedScriptHeaders, 'refreshed install download')
       assert(
         String(headerValue(refreshedScriptHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
         'refreshed install download must set nosniff',
       )
-      const refreshedToken = assertInstallScript(refreshedScript, { previousTokens: [token, rotatedToken, downloadedToken], config })
+      const refreshedToken = assertInstallScript(refreshedScript, {
+        previousTokens: [token, rotatedToken, downloadedToken],
+        environmentId,
+        expectedVersion: refreshedVersion,
+        note,
+      })
       await checkRedemption()
       assertScriptOmits(refreshedScript, token, 'previous registration token')
 
-      const secrets = [token, rotatedToken, downloadedToken, refreshedToken, code, replacedCode, pendingCode, refreshedCode, config.daemon.studioUrl, config.daemon.note]
+      const secrets = [
+        token,
+        rotatedToken,
+        downloadedToken,
+        refreshedToken,
+        code,
+        replacedCode,
+        pendingCode,
+        refreshedCode,
+        config.studioUrl,
+        note,
+      ]
       for (const operatingSystem of ['linux', 'windows']) {
         const { json: uninstall, headers: uninstallHeaders } = await ctx.call(
           'GET',
-          `/api/platform/daemon-uninstall-scripts/${operatingSystem}`,
+          `${environmentPath}/uninstall-script?operatingSystem=${operatingSystem}`,
         )
         assert(typeof uninstall === 'string', 'uninstall download must be text')
         assert(
@@ -459,10 +526,10 @@ registerCase({
           String(headerValue(uninstallHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
           'uninstall download must set nosniff',
         )
-        assertUninstallScript(uninstall, secrets)
+        assertUninstallScript(uninstall, { environmentId, secrets })
       }
       await expectHttpError(
-        () => ctx.call('GET', '/api/platform/daemon-uninstall-scripts/solaris'),
+        () => ctx.call('GET', `${environmentPath}/uninstall-script?operatingSystem=solaris`),
         { status: 400, code: 'validation' },
       )
     } finally {
