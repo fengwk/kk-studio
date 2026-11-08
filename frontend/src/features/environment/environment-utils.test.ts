@@ -135,6 +135,20 @@ describe('configuration status', () => {
     })
   })
 
+  it('treats an empty configuration object as not applied', () => {
+    expect(
+      presentEnvironmentConfig(
+        testEnvironment({ version: '3' }),
+        testRuntimeStatus({ configuration: {} }),
+      ),
+    ).toMatchObject({
+      state: 'pendingApply',
+      appliedVersion: null,
+      proxy: { known: false },
+      error: null,
+    })
+  })
+
   it('keeps a stale error from hiding the applied current version and never invents direct', () => {
     expect(
       presentEnvironmentConfig(
