@@ -1,13 +1,14 @@
 # Environment Daemon 安装与运行
 
-Environment Daemon 把 Studio 的文件、命令、检索与 LSP 工具调用执行在你的主机上。每个
-OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Windows 为
-`%USERPROFILE%\.kk-studio`）；单个 Daemon 实例同一时刻只绑定一个 Environment，由
-`daemon.token` 里的注册凭据决定。Daemon 只做本机安装与运行，**不执行任何远程主机操作**。
+Environment Daemon 把 Studio 的文件、命令、检索与 LSP 工具调用执行在你的主机上。**一张
+Environment 卡片就是一套独立安装**：安装目录、注册凭据、托管进程、操作锁与 OS 服务都由卡片的
+canonical UUID 限定，同一用户的多个卡片互不共享、互不影响。Daemon 只做本机安装与运行，
+**不执行任何远程主机操作**。
 
-安装设置由 Studio 的 Environment 保存：在 Web 中填写并保存配置，复制生成的安装命令，再到
-目标主机执行；执行前配置只是数据库记录，不代表已经部署。默认安装官方 GitHub Release 发行归档，
-归档内自带冻结的 Node 运行时，**不需要宿主安装 Node 或 JDK**，不需要克隆仓库，也不需要 Git 或编译工具。
+卡片配置由 Studio 保存并热下发：Web 中保存的可编辑配置不需要重装或重启 Daemon 就会生效。安装命令只
+负责在该主机上建立或覆盖这套受管安装；命令执行前配置只是数据库记录，不代表已经部署。默认安装官方
+GitHub Release 发行归档，归档内自带冻结的 Node 运行时，**不需要宿主安装 Node 或 JDK**，不需要克隆仓库，
+也不需要 Git 或编译工具。
 
 ## 前置条件与平台
 
@@ -15,11 +16,11 @@ OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Win
 LSP client 已内嵌在 Daemon 发行中。Studio 没有内置登录鉴权，入口须配置外部认证，只有可信的
 用户与 Agent 才应取得 Environment 的宿主权限。
 
-| 平台 | 额外条件 | 常驻方式 |
+| 平台 | 额外条件 | 每张卡片的常驻方式 |
 | --- | --- | --- |
-| Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
-| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `sha256sum` 或 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
-| Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析） | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
+| Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon-<UUID>.service` |
+| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `sha256sum` 或 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon.<UUID>` |
+| Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析） | 当前用户的 AtLogOn 计划任务 `kk-studio-daemon-<SID>-<UUID>`，仅在该用户交互登录期间运行 |
 
 Linux 注销后要持续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不代为开启。
 macOS 纯 SSH 会话如果没有图形登录域，不能安装 LaunchAgent。Windows 的 Bash 可来自 Git for
@@ -27,52 +28,52 @@ Windows 或兼容实现，这是命令工具的解释器要求，不需要用 Gi
 AtLogOn 任务，不是 Windows Service，重启设置只是尽力而为，Task Scheduler 也不捕获
 stdout/stderr。
 
-## 从 Web 保存并复制安装命令
+## 在 Web 中配置卡片并生成安装命令
 
-1. 在 [Environment](http://localhost:8080/environments) 页面创建目标 Environment（或使用已有
-   Environment）。
-2. 在 Environment 卡片点击**“安装 / 覆盖”**，打开安装弹窗。
-3. 填写并保存配置：
-   - **操作系统**：默认按当前浏览器平台预选，可改。
-   - **Studio 地址（仅 origin）**：默认当前 Studio origin，例如 `https://studio.example.com`；
-     不要带路径、查询或片段。
-   - 可选的 **Bash 可执行文件**、**备注**。空字段显示路径或备注示例，示例不是已填入的值。
-   - 可选的 **启用 LSP servers** 与 JSON `servers`。不需要选择本地文件路径，也没有 LSP 上传。
-     启用后空编辑器显示灰色 JSON 示例，示例不会被保存。
-4. 点击**“保存并复制安装命令”**。Studio 先校验并保存配置，再签发 **5 分钟有效**的安装 code，
-   将一行下载执行命令写入剪贴板。请在有效期内到目标主机执行。
+1. 在 [Environment](http://localhost:8080/environments) 页面创建卡片并填写配置：
+   - **名称**：创建后不可变。
+   - **备注**：卡片展示与提示词使用，保存后立即生效，不由 Daemon 消费。
+   - **Studio 地址（仅 origin）**：例如 `https://studio.example.com`，不要带路径、查询或片段。
+   - **Bash 可执行文件**：可留空，留空表示使用宿主 PATH 上的 `bash`。
+   - **LSP servers**：可留空；一旦启用须声明至少一个 server（JSON `servers`），不需要选择本地
+     文件路径，也没有 LSP 上传。
+   - **代理地址**：可留空；留空表示该 Daemon 的自身请求明确直连。
+2. 保存卡片。保存成功即写入 Studio 的完整配置快照；已安装且在线连接的 Daemon 会**全量热更新**，
+   无需重装或重启。安装或覆盖安装使用当前快照，不需要另存“安装设置”。
+3. 在卡片上点击**“安装 / 覆盖”**，打开安装弹窗。弹窗只选择**目标操作系统**（默认按当前浏览器平台
+   预选，可改），不再维护第二套安装配置草稿。
+4. 点击生成命令。Studio 先签发 **5 分钟有效**的一次性安装 code，再把一行下载执行命令写入剪贴板；
+   请在有效期内到目标主机执行。
 
-命令从当前 Studio 地址下载脚本，不在终端粘贴配置或长期注册令牌。Linux/macOS 命令形如：
+命令从当前 Studio 地址下载脚本，不在终端粘贴配置或长期注册令牌。Linux/macOS 形如：
 
 ```bash
-(set -o pipefail; curl -fsSL 'https://studio.example.com/api/platform/environments/<id>/install-script?code=<code>' | bash)
+(set -o pipefail; curl -fsSL 'https://studio.example.com/api/platform/environments/<id>/install-script?code=<code>&operatingSystem=linux' | bash)
 ```
 
-Windows 命令先完整下载脚本，再在 PowerShell 的局部作用域执行；下载或安装失败都会返回失败。
-下载执行前会关闭调试回显，避免脚本中的长期凭据进入终端输出。
-Studio 只保存注册令牌的摘要，下载脚本时为本次安装签发新令牌写入脚本，因此 code 只能使用一次：
-再次安装请重新复制命令。新令牌生效后，用旧令牌连接的 Daemon 下次握手会被拒绝；已经下载的脚本不会因 code 到期而中断。
-安装成功会提示服务已启动，再回 Studio 确认 `READY`。
+Windows 先完整下载脚本，再在 PowerShell 的局部作用域执行，下载或安装失败都会返回失败；下载执行前
+会关闭调试回显。两条命令都只携带卡片 UUID、一次性 code 与目标 OS，完整配置和本次新令牌由服务端
+在兑换脚本时写入。
 
-保存失败时不会签发 code 或复制命令。保存成功但签发或复制失败时，提示会明确说明
-**配置已保存但命令未复制，尚未部署**。CAS 版本冲突时只重基版本，保留你正在编辑的草稿。
+Studio 只保存注册令牌的摘要；兑换 code 会为本次安装签发新令牌并写进脚本，因此 code 只能使用一次：
+再次安装请重新复制命令。新令牌生效后，用旧令牌连接的 Daemon 下次握手会被拒绝；已经下载的脚本不会因
+code 到期而中断。安装脚本把 `daemon.json` 与 `daemon.token` 写在私有系统暂存目录，下载该版本 tag 的
+官方安装器并执行安装；暂存目录在命令退出时删除。
 
-> 安装命令中的 code 可下载含凭据的脚本，请勿分享。**保存不代表已应用**；覆盖只影响当前
-> OS 用户唯一的受管 Daemon，重启后它连接这次选择的 Environment，并中断原绑定 Environment
-> 的在途调用（结果不确定、已发生的命令副作用不回滚），但保留运行数据。
+保存失败时不会签发 code 或复制命令。保存成功但签发或复制失败时，提示会明确说明**配置已保存但命令
+未复制，尚未部署**。CAS 版本冲突时只重基版本，保留你正在编辑的草稿。
 
-Studio 返回的脚本在私有临时目录里以 0600 写入 `daemon.json` 与 `daemon.token`
-（两个文件必须是同目录的兄弟文件，且分别命名为 `daemon.json` 与 `daemon.token`），下载
-`install.sh` / `install.ps1` 到同一目录，再执行下面的稳定安装契约。token 只作为文件内容传递给
-安装器，不进入子进程 argv、环境变量或日志。
+> 安装命令中的 code 可下载含凭据的脚本，请勿分享。**保存不等于已应用**；安装/覆盖只影响该 UUID 的
+> 受管安装，同用户的其它卡片继续运行。重装会以本次脚本中的配置与令牌为引导缓存，随后仍由 Studio
+> 对账最新配置。
 
-Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 下载对应 OS 的脚本；
-不读取或保存环境配置，也不需要 code 或 token。
+Environment 卡片的“卸载”按钮生成一行按卡片定位的卸载命令，不读取或保存配置，也不需要 code 或
+token。
 
 如果外部入口要求浏览器登录，需允许目标主机访问这两个 GET 脚本下载路径：
 
 - `/api/platform/environments/{environmentId}/install-script`
-- `/api/platform/daemon-uninstall-scripts/{operatingSystem}`
+- `/api/platform/environments/{environmentId}/uninstall-script`
 
 安装下载由 code 校验授权；签发 code 的 POST 与其它管理 API 仍须受入口访问控制保护。
 
@@ -82,21 +83,31 @@ Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 
 
 ```text
 # Unix
-bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--version <version>]
-bash install.sh status | uninstall | help
+bash install.sh install --environment-id <UUID> --version <version> \
+                        --config-file <absolute daemon.json> --token-file <absolute daemon.token>
+bash install.sh update --environment-id <UUID> --version <version>
+bash install.sh status --environment-id <UUID>
+bash install.sh uninstall --environment-id <UUID>
+bash install.sh help
 
-# Windows (PS 5.1 与 PS7 pwsh 参数一致)
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-Version <version>]
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status|uninstall|help
+# Windows（PS 5.1 与 PS7 参数一致）
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 install -EnvironmentId <UUID> -Version <version> -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 update -EnvironmentId <UUID> -Version <version>
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status -EnvironmentId <UUID>
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 uninstall -EnvironmentId <UUID>
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 help
 ```
 
-`--version` / `-Version` 可选，值为不带 `v` 前缀的发行版本，用于把安装固定到该 tag；缺省解析
-latest 正式版本，受管在线更新即用它固定目标版本。
-只有 `install` / `status` / `uninstall` / `help` 四个动作，**没有交互提示**，未知或重复选项
-直接失败。Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有的普通文件，
-不是符号链接，内容非空且有界。Windows 的 `-ConfigFile` /
-`-TokenFile` 必须是同目录的 `daemon.json` / `daemon.token`，由当前 SID 拥有、禁用 ACL 继承、
-不含其它 SID 的 Allow ACE，且不是 reparse point。安装器只校验文件元数据，**不读取 token 内容**。
+`--version` / `-Version` 必填，值为不带 `v` 前缀的发行版本；安装器**不解析 `latest`**，也不会
+下载可变的 main 分支安装器。`install` 是唯一的引导/人工覆盖命令；`update` 只替换已有安装的程序与
+服务定义，读取当前 `daemon.json`，**不接受也不写入配置或令牌**。只有
+`install` / `update` / `status` / `uninstall` / `help` 五个动作，**没有交互提示**，未知或重复选项
+直接失败。
+
+Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有、不是符号链接且有界的普通
+文件，且必须是同目录的兄弟文件 `daemon.json` / `daemon.token`。Windows 的 `-ConfigFile` /
+`-TokenFile` 必须由当前 SID 拥有、禁用 ACL 继承、不含其它 SID 的 Allow ACE，且不是 reparse point。
+安装器只校验文件元数据并复制 token 内容，**不读取 token 文本**。
 
 `DAEMON_VERIFY_TIMEOUT_SECONDS`
 （默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖启动与稳定性验证窗口，均须十进制
@@ -106,76 +117,97 @@ latest 正式版本，受管在线更新即用它固定目标版本。
 
 安装器按固定顺序工作，全部语义校验都发生在目标写入之前：
 
-1. 检查系统服务管理器是否可用、目标服务是否属于本安装器（见[管理身份](#管理身份与冲突处理)），
+1. 检查系统服务管理器是否可用、目标服务是否属于当前卡片（见[管理身份](#管理身份与冲突处理)），
    并核验输入文件是私有、同目录、非符号链接且有界的 `daemon.json` / `daemon.token`。同名但非
    受管定义会在下载或写入前被拒绝。
-2. 在安装根内建立 0700 暂存目录（不使用 `TMPDIR`），解析 latest 官方 release tag，下载目标平台对应的发行归档
-   `kk-studio-daemon-<tag>-<os>-<arch>.tar.gz` 与 `.tar.gz.sha256` 到该目录，核对 SHA256 摘要。
-3. 把暂存配置与 token 复制为暂存目录内的 0600 快照，解压归档到该目录下的发行目录，
-   后续针对该快照做预检，避免校验与发布之间被替换。
-4. 用归档内置的冻结运行时（`runtime/code-server/lib/node`）对快照执行 `main.js --check-config` 预检：它读取配置与 token 文件，
-   校验配置结构与取值，在本机只读文件系统中把配置的（缺省为 `bash`）Bash 解析为实际可执行路径，并
-   校验内联 LSP 的结构。它**不执行** Bash 或任何其它程序，不建数据目录、不加锁、不连接、不启动
-   LSP、不做服务变更；Bash 是否真能运行、语言服务器是否完整可用都不在这里判断。失败只输出固定
-   safe marker（字段路径与规则，不含原始取值）。
-5. 预检全部通过后，备份现有配置、token 与受管服务定义，停止旧服务；Unix 在发布时把旧发行目录
-   移入 `backups/` 下的唯一个人备份目录，再把暂存目录内的新发行目录 rename 到 `lib/` 并启动服务。
-   暂存目录与新发行目录同处安装根，发布是同文件系统的原子 rename，不会出现跨文件系统的部分复制；
-   无论成功失败，安装结束都会删除该暂存目录。
+2. 解析本机平台到官方归档命名，在**本操作独占的系统临时目录**下载目标 tag 的发行归档
+   `kk-studio-daemon-<tag>-<os>-<arch>.tar.gz` 与 `.tar.gz.sha256`，核对 SHA256 摘要，并验证归档
+   结构、平台清单与 `--version` 输出。下载/解包不进入卡片目录，取得操作锁之前不存在可被另一操作
+   清理的暂存。
+3. 把安装输入复制为暂存目录内的同名 `daemon.json` / `daemon.token`，先用归档内置的冻结运行时
+   （`runtime/code-server/lib/node`）检查配置信封：根对象只允许
+   `environmentId`、`version`、`daemonConfig`，UUID 必须等于本次 `--environment-id`，`version`
+   必须是规范非负十进制字符串。随后执行 `main.js --check-config` 预检，校验配置结构、取值与同目录
+   凭据。它**不执行** Bash 或任何其它程序，不建数据目录、不加锁、不连接、不启动 LSP；Bash 与语言
+   服务器的真实解析由 Daemon 在应用配置时完成，失败会保持连接并上报字段与规则。
+4. 准备独立管理副本（冻结 Node、安装操作锁 helper 及其 native 依赖），由 helper 以内核锁取得
+   `install.lock`；该卡片已有安装操作时立即报告 busy，不排队、不猜 PID。
+5. 取得锁后清理本卡片 `.work/` 残留，把新程序解包到目标文件系统的 `.work/lib`，保证发布是同
+   文件系统 rename。
+6. 停止目标服务，并用同一内核锁确认运行进程已经退出；超时或无法确认时失败，不继续替换文件。
+7. 停服后用新程序对最终输入复检：`install` 校验本次引导快照，`update` 只校验当前
+   `daemon.json`。通过后删除旧 `lib/`、rename 新 `lib/`、更新服务定义；`install` 再原子写入配置与
+   令牌，`update` 不写两者。启动服务并验证本机进程存活。
+8. 成功结果只在受管暂存清理成功、且固定诊断记录写入成功后报告；清理失败按失败处理。
 
-预检失败时现有受管安装保持不变。**install 会整体替换程序发行目录、配置与 token，并重启服务**，保留数据
-目录与日志。发布之后的失败返回非零，**不自动回滚**。Unix 安装器会说明失败阶段、替换是否已开始及实际备份路径；
-没有创建备份时明确提示无备份。备份只包含实际保存成功的内容，不能仅凭目录存在就认定备份完整。
-检查后可按需恢复程序或配置，或修正安装设置后重新复制命令重试；**不要恢复旧 token 来解决注册失败**，
-旧凭据可能已因本次下载脚本而失效。重启会中断在途工具调用，进程内 invocation
-journal 不跨重启保留，已经发生的命令副作用不回滚。
+**安装失败时不备份、不留历史程序目录、不自动回滚。** 发布之前的失败保持现有安装不变；发布之后
+的失败可能使服务不可用，由重新执行 `install` 恢复。安装器输出失败阶段、是否已开始替换以及本机诊断
+文件位置，不创建 `backups/`、`.bak` 或按操作累积的日志目录。重启会中断在途工具调用，进程内
+invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
 
 ### Unix 安装进度
 
 终端按实际执行顺序显示七个阶段：**检查环境与输入 → 解析版本 → 下载归档 → 校验解包配置 →
-备份停止 → 发布启动 → 稳定性验证**。失败时显示停在哪一阶段，不会提前报告安装成功。
+取得操作锁 → 停止发布启动 → 稳定性验证**。失败时显示停在哪一阶段，不会提前报告安装成功。
 发行归档下载时，标准错误连接终端则显示 curl 进度条；标准错误被重定向或接入管道时只显示阶段文本，
-不输出动态进度条。
-阶段完成不等于注册成功，最后仍须回 Studio 确认 `READY`。
+不输出动态进度条。阶段完成不等于注册成功，最后仍须回 Studio 确认 `READY`。
 
-Linux 覆盖安装在启动前清除受管服务的旧失败计数，避免上一次启动限流阻挡新配置；
-仍保留 **300 秒内最多 5 次启动**的限制，不放宽限流，也不自动重试安装。
+Linux 启动前清除本卡片受管服务的旧失败计数，避免上一次启动限流阻挡新版本；仍保留 **300 秒内最多
+5 次启动**的限制，不放宽限流，也不自动重试安装。
 
 ## 固定布局与文件
 
+每张卡片在安装根 `~/.kk-studio/environments/<environmentId>/` 下拥有全部受管资源（Windows 为
+`%USERPROFILE%\.kk-studio\environments\<environmentId>\`）：
+
 | 内容 | Linux / macOS | Windows |
 | --- | --- | --- |
-| 根目录 | `~/.kk-studio`（0700） | `%USERPROFILE%\.kk-studio`（owner-only ACL） |
-| 配置 | `~/.kk-studio/daemon.json`（0600） | `%USERPROFILE%\.kk-studio\daemon.json` |
-| token | `~/.kk-studio/daemon.token`（0600，与配置同目录） | `%USERPROFILE%\.kk-studio\daemon.token` |
-| 程序发行目录 | `~/.kk-studio/lib/`（含 `main.js` 与冻结运行时） | `%USERPROFILE%\.kk-studio\lib\` |
-| 日志 | `~/.kk-studio/logs/`（macOS） | Task Scheduler 不捕获 stdout/stderr |
-| 备份 | `~/.kk-studio/backups/`（仅安装时创建） | `%USERPROFILE%\.kk-studio\backups\` |
-| 数据 | 配置文件的父目录 | 配置文件的父目录 |
+| 配置 | `daemon.json`（0600） | `daemon.json`（owner-only ACL） |
+| token | `daemon.token`（0600，与配置同目录） | `daemon.token`（owner-only ACL） |
+| 运行锁 | `daemon.lock`（内核独占建议锁） | `daemon.lock` |
+| 安装操作锁 | `install.lock`（内核锁，由独立 helper 持有） | `install.lock` |
+| 程序发行目录 | `lib/`（含 `main.js` 与冻结运行时） | `lib\` |
+| IDE 数据与恢复 | `ide/` | `ide\` |
+| 技能 | `skills/` | `skills\` |
+| 操作暂存 | `.work/`（当前锁持有者） | `.work\` |
+| 最近一次操作诊断 | `last-operation.json`（≤4 KiB） | `last-operation.json` |
+| 日志 | Linux 走 journal；macOS `daemon.stdout.log` / `daemon.stderr.log` | Task Scheduler 不捕获 stdout/stderr |
 
-`daemon.json` 就是 Web 中 `installConfig.daemon` 对象本身，只含 `studioUrl`、`note`、
-`bashExecutable` 与可选的 `lsp`，**不含** `operatingSystem`，也不含 token、gateway
-或数据目录字段。`operatingSystem` 只用于安装与生成命令，不进入运行时配置文件。
-token 是独立兄弟文件 `daemon.token`。Daemon 不做任何额外配置解析：`daemon.json` 是唯一配置
-来源，没有第二个 LSP 文件，也没有环境变量配置入口。
+安装根是代码推导的受管布局，不提供用户自定义目录或服务名。每个卡片目录独立；更新、卸载或修复
+卡片 A 不影响卡片 B 的服务、程序与锁。安装器不读取、也不修改宿主的共享目录（`HOME`、
+`~/.config`、`~/Library` 及其上级），这些目录属于用户自己的信任边界。
 
-运行数据根就是配置文件的父目录。Unix 全新安装时目录为 0700、配置与 token 为 0600。Unix 安装器只设置并
-校验**自身**资源与凭据：`~/.kk-studio` 及其 `lib/`、`logs/`、`backups/`、安装期间的下载暂存
-目录，以及私有暂存的输入目录；不安全的受管路径会被拒绝且不自动放宽权限。宿主共享目录（`HOME`、`~/.config`、
-`~/Library` 及其上级）是用户自己的信任边界，安装器不检查也不修改它们，不因 group 可写或为符号
-链接而拒绝安装，也不承诺抵御能修改这些目录的本机用户。token 是磁盘明文凭证，隐藏程度取决于
-文件权限，不等于加密存储。
-
-## 安装配置的字段与校验
-
-Web 保存的 `EnvironmentInstallConfigDTO`：
+`daemon.json` 是本地配置缓存，结构固定：
 
 ```json
 {
-  "operatingSystem": "linux",
-  "daemon": {
+  "environmentId": "00000000-0000-4000-8000-000000000001",
+  "version": "12",
+  "daemonConfig": {
     "studioUrl": "https://studio.example.com",
-    "note": null,
+    "bashExecutable": null,
+    "lsp": null,
+    "proxyUrl": null
+  }
+}
+```
+
+`environmentId` 是卡片 UUID，`version` 是最近一次被接受的卡片配置版本，`daemonConfig` 是完整可编辑
+配置。token 是独立兄弟文件 `daemon.token`，不进 JSON、命令行值、日志或错误详情。Daemon 不做额外
+配置解析：`daemon.json` 是唯一配置来源，没有第二个 LSP 文件，也没有环境变量配置入口。运行数据根
+就是配置文件的父目录；Unix 全新安装时目录为 0700、配置与 token 为 0600。token 是磁盘明文凭证，
+隐藏程度取决于文件权限，不等于加密存储。
+
+## 卡片配置字段与校验
+
+Studio 保存的完整卡片配置：
+
+```json
+{
+  "name": "archlinux",
+  "note": "日常开发环境",
+  "daemonConfig": {
+    "studioUrl": "https://studio.example.com",
     "bashExecutable": null,
     "lsp": {
       "servers": {
@@ -186,74 +218,80 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
           "firstMatchMarkers": [".git"]
         }
       }
-    }
-  }
+    },
+    "proxyUrl": "http://127.0.0.1:7890"
+  },
+  "version": "12"
 }
 ```
 
-服务端与 Daemon 分别严格校验同一配置契约，未知字段、错误类型与越界值都会被拒绝，错误只报告字段路径
-与规则、不回显输入值：
+服务端、安装脚本、本地 JSON 与控制协议使用同一份严格配置契约，未知字段、错误类型与越界值都会被
+拒绝，错误只报告字段路径与规则、不回显输入值：
 
-- `operatingSystem` 必填，取值为 `linux` / `macos` / `windows`。
-- `studioUrl` 必填，只能是 HTTP(S) origin：允许一个结尾 `/`（保存时去掉），拒绝 userinfo、
-  path、query、fragment 与非法端口。Daemon 由它派生统一连接入口
-  `ws(s)://<authority>/ws/daemon`。单条物理连接通过 HTTP/2 复用 Protobuf 控制流，
-  IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。Studio 与受管环境在可信浏览器边界
-  （非沙箱）内协作，不需独立 IDE 域名。
-- `note` 可选，trim 后单行、最长 512 字符、不含控制字符；空值保存为省略/null。
-- `bashExecutable` 可选，非空白且不含控制字符；缺省为 `bash`。
-- `lsp` 可选；一旦启用就必须声明至少一个 server，空表非法。server id 匹配
+- `studioUrl` 必填，只能是 HTTP(S) origin：拒绝 userinfo、path、query、fragment 与非法端口。
+  Daemon 由它派生统一连接入口 `ws(s)://<authority>/ws/daemon`。单条物理连接通过 HTTP/2 复用
+  Protobuf 控制流，IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。
+- `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值不能是空白或含
+  控制字符；Daemon 应用配置时把它解析为实际可执行路径，解析失败上报 `VALIDATION_FAILED`。
+- `lsp` 可选；`null` 表示禁用 LSP。一旦启用就必须声明至少一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+`，`command` 是非空字符串数组，`extensions` 必须带前导点且不含路径分隔符，
   `rootMarkers` / `firstMatchMarkers` 是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段
-  一律拒绝**，包括 `requestTimeoutMs`。
+  一律拒绝**。
+- `proxyUrl` 可选；`null` 表示该 Daemon 的自身请求明确直连。非空只接受无认证的
+  `http://host:port`，拒绝 userinfo、query、fragment 和非根 path。
+- `note` 是卡片备注，最多 512 字符，trim 后单行、不含控制字符；空值保存为 `null`。
+- 目标 OS 是生成安装命令的参数，不是卡片运行配置；实际 OS 与架构来自 READY。
 
-`PUT /api/platform/environments/{id}/install-settings` 以 `{expectedVersion, installConfig}` 保存，
-`installConfig` 不可为 null；版本不匹配返回冲突，配置未变则幂等不写行。响应 Environment 不包含 token。
-安装 UI 不读取长期 token，只请求安装 code：
+安装 UI 不读取长期 token，只请求一次性 code：
 
 | 入口 | 契约 |
 | --- | --- |
-| `POST /api/platform/environments/{id}/install-codes` | `{expectedVersion}` 校验已保存版本，返回 `{code, expiresAt}`；不改变环境版本或配置 |
-| `GET /api/platform/environments/{id}/install-script?code=...` | 校验并消费 code，轮换 token 后按保存的 OS 和配置返回 UTF-8 纯文本脚本 |
-| `GET /api/platform/daemon-uninstall-scripts/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
+| `PUT /api/platform/environments/{id}` | `{expectedVersion, note, daemonConfig}` 整体替换可编辑属性；无 `name` 字段。每次显式保存都会推进版本，即使内容相同；版本不匹配返回冲突 |
+| `POST /api/platform/environments/{id}/install-codes` | `{expectedVersion}`；返回 `{code, expiresAt}`，不改变环境版本或配置 |
+| `GET /api/platform/environments/{id}/install-script?code=...&operatingSystem=...` | 校验并消费 code，轮换 token、推进版本，返回包含卡片 UUID、兑换后版本、完整配置与新 token 的 UTF-8 纯文本脚本 |
+| `GET /api/platform/environments/{id}/uninstall-script?operatingSystem=...` | 返回只定位本卡片的卸载脚本，不含配置或凭据 |
+| `POST /api/platform/environments/{id}/rotate-token` | `{expectedVersion}`；返回一次新 token，不改变配置 |
+| `GET /api/platform/environments/{id}/runtime` | 返回当前 owner 的运行快照；CONNECTING 期间也可读取已上报的配置错误 |
+| `GET /api/platform/environments/{id}/events` | 最近 200 条以内的连接与技能同步事件 |
 
-签发与脚本响应均禁止缓存。code 是 256 bit 安全随机值，服务端只保存 SHA-256 摘要、
-5 分钟有效期及签发时的凭证代际。每个环境最多保留一张待兑换 code，新签发立即替换旧 code。
-到期、篡改、错环境、已被兑换或 token 轮换（包括导入变更）后，下载被拒绝。
-兑换在同一事务内消费 code、轮换 token 并生成脚本，失败全部回滚；临时 code 记录不参与配置导出。
+脚本响应均禁止缓存，并阻止浏览器按附件内容嗅探。code 是 256 bit 安全随机值，服务端只保存
+SHA-256 摘要与数据库时间下的 5 分钟有效期。每个环境最多保留一张待兑换 code，新签发立即替换旧
+code；到期、篡改、错环境、已被兑换，或配置/凭据变化后，下载被拒绝。兑换在同一事务内消费 code、
+轮换 token、推进版本并生成脚本，失败全部回滚；临时 code 记录不参与配置导出。
 
 ### 配置同步
 
-“设置 → 同步”导出的 `environments` 条目把 `installConfig` 与 `name`、`registrationTokenHash`（注册令牌的
-SHA-256）并列嵌套：
+“设置 → 同步”导出的 `environments` 条目把完整卡片配置与 `name`、可空 `note`、注册令牌摘要并列：
 
 ```yaml
 environments:
   - name: env
+    note: 日常开发环境
     registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42
-    installConfig:
-      operatingSystem: linux
-      daemon:
-        studioUrl: https://studio.example.com
-        bashExecutable: /bin/bash
-        lsp:
-          servers:
-            jdtls:
-              command: ["~/.local/share/nvim/mason/bin/jdtls"]
-              extensions: [".java"]
-              rootMarkers: ["pom.xml"]
-              firstMatchMarkers: [".git"]
+    daemonConfig:
+      studioUrl: https://studio.example.com
+      bashExecutable: /bin/bash
+      lsp:
+        servers:
+          jdtls:
+            command: ["~/.local/share/nvim/mason/bin/jdtls"]
+            extensions: [".java"]
+            rootMarkers: ["pom.xml"]
+            firstMatchMarkers: [".git"]
 ```
 
-条目没有 `installConfig` 表示该 Environment 未保存安装设置。导入支持新增、覆盖、清空（文件
-省略该键即清空现有设置）与令牌摘要+配置的原子更新；预检查会用同一套 codec 深度校验，已知非法值
-不会被条目级跳过。文件只含令牌摘要，不能用来冒充 Daemon；导入后已安装的 Daemon 用原令牌继续连接。
+导入按 name 匹配新增或覆盖，保留 UUID，并走与 HTTP 相同的配置写入与版本推进；文件省略 `note` 即
+清空备注。条目仍出现旧安装设置字段（`installConfig` 或 `operatingSystem`）时在预检阶段明确报
+validation，不会被“未知字段跳过”静默当成兼容导入。历史导出中的 `installConfig` 不再可用，需要
+改写为 `daemonConfig`。文件只含令牌摘要，不能用来冒充 Daemon；导入后已安装的 Daemon 用原令牌继续
+连接。
 
 ## 可选 LSP
 
 **LSP 客户端已内置在 Daemon 中**，基于 `vscode-jsonrpc` 实现，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
-服务器由你在 Web 的安装弹窗中以内联 JSON 声明；不启用时省略 `lsp`，LSP 查询返回明确的不可用
-错误，但文件、命令、检索仍可使用。没有独立的 `lsp.json` 或文件路径配置项。
+服务器由你在卡片的 `daemonConfig.lsp` 中以内联 JSON 声明；不启用时保存为 `null`，LSP 查询返回明确的
+不可用错误，但文件、命令、检索仍可使用。没有独立的 `lsp.json` 或文件路径配置项。修改 LSP 声明后
+新调用使用新 generation，在途调用按既有生命周期收敛。
 
 例如已安装 Node/npm 的开发主机可先自行安装 TypeScript 服务器：
 
@@ -311,7 +349,8 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 
 `extensions` 必须带前导点，匹配不区分大小写，同一后缀由先声明的服务器负责。项目根从目标文件
 向上查找：优先最靠上的 `rootMarkers` 命中，其次最近的 `firstMatchMarkers`，否则用文件父目录；
-不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动；文件 `path` 必须为绝对路径，不用 `workdir` 解析。
+不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动；文件 `path` 必须为绝对路径，不用
+`workdir` 解析。
 
 程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
@@ -319,112 +358,139 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 
 ## 网络代理
 
-在 Studio **系统设置 → 网络** 配置 Backend 与所有在线 Daemon 共用的代理。地址仅接受
-无认证的 `http://host:port`，留空表示直连；不支持 SOCKS、代理认证或 TLS 到代理。
-绕过列表支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（如
-`192.168.0.0/16`、`::1/128`）。CIDR 仅匹配目标 URL 中的数值 IP，不解析域名。
+代理是**卡片级**配置：`daemonConfig.proxyUrl` 只作用于该 Daemon 自身的请求，不共享给 Backend，
+也不共享给同用户的其它卡片。
 
-Daemon 就绪时及设置变化后接收当前设置，不读取宿主环境变量或操作系统代理。
-预签名 S3 上传与技能下载的新请求使用当前设置；命令、LSP 和 code-server 在启动时
-通过 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 获取设置，变更不影响已启动的进程。
-Studio 生成的安装和卸载脚本以及在线更新安装器作业也携带当前代理设置；
-未配置代理时显式直连，不继承目标主机的代理设置。
-控制连接始终直连 Studio，因此即使代理不可用仍可接收修正；宿主必须能够直连 Studio。
-确保代理地址从每个 Daemon 主机可达，并将需要直连的对象存储地址加入绕过列表。
+- Daemon 的 S3 上传、技能下载、在线更新下载与控制 WS/WSS 都使用当前已应用的卡片代理；
+  `null` 表示明确直连，即使宿主存在 `HTTP_PROXY`、`NODE_USE_ENV_PROXY` 或全局 dispatcher 也不
+  改变。
+- 代理地址仅接受无认证的 `http://host:port`；不支持 SOCKS、代理认证、TLS 到代理、绕过列表或自动
+  系统代理探测。控制连接与普通请求使用同一条策略，没有隐式直连回退。
+- Bash、LSP、code-server 与 IDE 终端等用户进程保留真实继承或调用方显式配置的环境，**不注入卡片
+  代理**。`withLoopbackResponse` 是 code-server/IDE bridge 的专用直连通道。
+- 人工安装/覆盖使用的下载命令继承执行时的宿主代理环境；在线更新的独立作业只构造本次下载所需的
+  大小写代理变量，值为当前卡片代理，`null` 时显式直连，不改 `process.env` 或通用进程监督器。
+- 修改 `studioUrl` 或 `proxyUrl` 后，Daemon 完成快照切换即按新参数主动重连；旧连接上已受理的
+  执行继续收敛。代理或地址错误可能使执行端失联，此时只能恢复原网络可达性后接收修正，或者修正卡片
+  后重新执行安装引导。没有隐式直连回退、自动恢复旧配置或额外救援连接。
+
+Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设置 → 网络**（`backendNetwork`）
+单独治理，和卡片代理互不覆盖。透明 VPN/TUN 的底层路由由宿主网络栈决定。
 
 ## 验证与 READY
 
-安装器默认最多等待 30 秒，再检查运行状态持续保持 3 秒。它验证的是服务或任务存活，**不是
-gateway 注册成功**。Linux/macOS 用 `status` 或系统命令检查主机侧状态：
+安装器默认最多等待 30 秒，再检查运行状态持续保持 3 秒。它验证的是服务或任务存活，**不是 gateway
+注册成功**，也不代表最新配置已经应用。Linux/macOS 用 `status` 或系统命令检查主机侧状态：
 
 | 平台 | 主机侧检查 | 日志 |
 | --- | --- | --- |
-| Linux | `systemctl --user is-active kk-studio-daemon.service` | `journalctl --user -u kk-studio-daemon.service -n 50 --no-pager` |
-| macOS | `launchctl print gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon` | `~/.kk-studio/logs/environment-daemon.stdout.log` 与 `.stderr.log` |
-| Windows | `install.ps1 status` 或 Task Scheduler | Task Scheduler **不捕获 stdout/stderr** |
+| Linux | `systemctl --user is-active kk-studio-daemon-<UUID>.service` | `journalctl --user -u kk-studio-daemon-<UUID>.service -n 50 --no-pager` |
+| macOS | `launchctl print gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon.<UUID>` | `~/.kk-studio/environments/<UUID>/daemon.stdout.log` 与 `.stderr.log` |
+| Windows | `install.ps1 status -EnvironmentId <UUID>` 或 Task Scheduler | Task Scheduler **不捕获 stdout/stderr** |
 
 `status` 只读，不启动服务。退出码 `0`：Linux active、macOS loaded、Windows Running；`1`：未安装
 或不是受管安装；`3`：已有受管安装但未达到上述状态（macOS loaded 甚至不保证进程仍存活）。
 
-主机侧的存活与预检都只证明本地条件；**配置是否真正生效、注册是否成功，最后必须在 Studio 的
-Environment 页面确认 `READY`**。只有 READY 才表示 Daemon 已接受当前配置并注册成功；之后可在
-Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment Tools。READY 后 Platform 会
-异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用。已选择环境时，
-未安装当前版本的技能不会进入 system prompt。
+**注册是否成功必须在 Studio 的 Environment 页面确认 `READY`**。Daemon 在收到并应用当前完整卡片
+配置后才发送 READY；SETTINGS 只绑定 scope 与平台资源预算。若当前进程尚无可应用配置、或候选校验
+失败，连接保持 CONNECTING，Daemon 仍可通过同一连接上报配置错误并等待修正；未 READY 时不接受能力
+调用、SkillSync 或 IDE 命令。
+
+连接状态与配置状态是两件事，页面分开显示：
+
+| 条件 | 展示 |
+| --- | --- |
+| 当前实例 `appliedVersion` = 卡片 `version` | 已应用 |
+| 已发送新版本、尚未完成 | 待应用 |
+| 当前配置错误的 `version` = 卡片 `version` | 应用失败，显示字段与规则 |
+| 离线且无当前快照 | 待连接 |
+| 当前 `appliedVersion` 小于卡片 `version` | 待应用 |
+
+READY 后 Platform 会异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用。已选择
+环境时，未安装当前版本的技能不会进入 system prompt。
 
 ## 管理身份与冲突处理
 
-安装器只管理当前用户且带所有权标记的服务定义：
+安装器只管理**当前用户、当前卡片**且带所有权标记的服务定义：
 
 | 平台 | 所有权检查 |
 | --- | --- |
-| Linux | unit 首行必须是 `# Managed by scripts/daemon/install.sh` |
-| macOS | plist 第二行必须是 `<!-- Managed by scripts/daemon/install.sh -->` |
-| Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; ownerSid=<当前 SID>` |
+| Linux | unit 首行必须是 `# Managed by scripts/daemon/install.sh`，且 ExecStart 指向本卡片的 `lib/` 与 `daemon.json` |
+| macOS | plist 第二行必须是 `<!-- Managed by scripts/daemon/install.sh -->`，且参数指向本卡片路径 |
+| Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; ownerSid=<当前 SID>; environmentId=<UUID>` |
 
 检查顺序在下载与写入之前。同名服务存在但标记不匹配、定义是符号链接/非普通文件、属主不是当前
-用户时，安装或卸载会拒绝并报告原因、服务定义路径或任务名，以及一条检查命令。
-确认归属后再由对应所有者处理冲突，先私密备份，保留未知程序与数据；不要直接删除系统文件。
-安装器**不会删除未知程序发行目录或数据，也不会伪造所有权标记**；标记只用于识别管理归属，不能通过手工补标记授权接管。
+用户、定义引用了其它卡片的程序或配置时，安装或卸载会拒绝并报告原因、服务定义路径或任务名，以及
+一条检查命令。安装器**不会删除未知程序发行目录或数据，也不会伪造所有权标记**；标记只用于识别管理
+归属，不能通过手工补标记授权接管。
 
-同一 OS 用户只允许一个受管 Daemon；它继承启动用户的文件与命令权限，没有文件系统沙箱。
-只把 Environment 开放给可信的 Studio 用户和 Agent；`process.exec` 的 `workdir` 是调用目录，不是权限边界，
-HOME 也不是默认工作目录。
+每张卡片独立受管，同一 OS 用户可安装多张卡片；它们各自继承启动用户的文件与命令权限，没有文件系统
+沙箱。只把 Environment 开放给可信的 Studio 用户和 Agent；`process.exec` 的 `workdir` 是调用目录，
+不是权限边界，HOME 也不是默认工作目录。
 
-## 改配置、轮换 token 与更新
+## 修改配置、轮换 token 与更新
 
-改配置与轮换 token 走 `install`：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行
-同一条 `install`，它会**整体替换程序、配置与 token 后重启**，保留数据目录与日志。
+**改配置不需要重装。** 在卡片配置中修改 Studio 地址、Bash、LSP 或代理后保存，Studio 推进版本并
+通知当前 owner；Daemon 读取完整快照、准备新网络/LSP generation、原子写入本地缓存并同步切换运行
+快照。仅版本推进而内容相同的保存只更新确认版本，不重建客户端或 LSP。配置错误时已有可用快照继续
+运行，新版本报错并等待下一次保存或重连。
 
-- 改配置：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行同一条 `install`。
-- 轮换 token：环境 ID 不变，但旧安装 code 立即失效；在 Web 重新复制并执行安装命令，
-  或安全更新 `daemon.token` 文件后重启受管服务。Daemon 每次连接准入前读取 token 文件；已被拒绝
-  而退出的进程需要重启。
+**轮换 token** 会立即使旧令牌的下次握手失效。已安装 Daemon 需要新的 `daemon.token`：可在 Web 重新
+签发安装 code 并执行安装命令，或安全替换 `daemon.token` 文件后重启受管服务。Daemon 每次连接准入前
+读取 token 文件。
 
 ### 受管在线更新
 
-已受管的安装还可以从 Web 直接触发一次**二进制在线更新**，无需重新执行安装命令：
+已受管的安装可以从 Web 直接触发一次**二进制在线更新**，无需重新复制安装命令：
 
 | 入口 | 契约 |
 | --- | --- |
 | `POST /api/platform/environments/{id}/update-daemon` | 发起一次受管更新；目标版本由运行中 Platform 的打包版本决定。响应 `{runtimeStatus, commandStatus}`，`commandStatus` 为 `CURRENT`（已是目标版本）、`IN_PROGRESS`（同一目标已在更新）或 `SENT_UNCONFIRMED`（命令已进入发送队列，Daemon 尚未确认）。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝 |
-| `GET /api/platform/environments/{id}/runtime` | 只读当前运行快照 `{revision, status:{daemonVersion, update}}`；`update` 只在正在更新时存在（否则显式 null），包含 `targetVersion`、`downloadedBytes` 与可空 `totalBytes` |
+| `GET /api/platform/environments/{id}/runtime` | 只读当前 owner 的运行快照 `{daemonVersion, update, configuration}`；`update` 只在正在更新时存在（否则显式 null），包含 `targetVersion`、`downloadedBytes` 与可空 `totalBytes`；`configuration` 包含 `appliedVersion`、`proxyUrl` 与可空 `error` |
 
-更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
-必须是非草稿、tag 匹配、五件套资产齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、
-`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该版本的官方安装脚本，
-由安装脚本校验官方归档及校验文件，并使用现有配置和令牌执行安装。
+更新目标是**运行中 Platform 版本对应的官方 GitHub Release**：必须是非草稿、tag 匹配、五件套资产
+齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、
+`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该 tag 的官方
+安装脚本，由安装脚本校验官方归档及校验文件，并以 `update` 动作替换程序。
 
 - 一个 Environment 同一时刻至多一次更新：Server 只在命令下发的短暂窗口内登记内存准入，发送返回后
-  立即释放；最终互斥由 Daemon 的本机准入门闩保证。更新期间普通 capability 调用在起点被 busy
-  拒绝，连接仍保持认证。
-- 只有官方受管安装接受更新。安装器以当前 `daemon.json` 和 `daemon.token` 为输入进行预检和快照发布；
-  配置与令牌内容、技能和数据会保留，程序与服务定义由安装器更新。
+  立即释放；最终互斥由本机 `install.lock` 保证。更新期间普通 capability 调用在起点被 busy 拒绝，
+  连接仍保持认证。
+- 只有官方受管安装接受更新：Daemon 的 config/token/distribution 路径必须等于本卡片受管目录。
 - Daemon 启动 **OS 级独立、短生命周期的任务**（Linux `systemd-run` 瞬时单元、
-  macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），由其调用官方安装脚本完成替换与重启。
-  安装器日志保存在 `~/.kk-studio/updates/<operationId>-*/install.log`；服务仍在运行时安装失败会发送安全的失败回执，
-  服务停止后可通过该日志及安装器报告的备份路径排查，不自动重试。
-- **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；阶段回执只有 `ACCEPTED`、`PREPARED`
-  （下载、校验与磁盘配置预检通过，可交给 OS 更新器）与 `FAILED`，回执本身不表达成功；
+  macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），任务在目标服务作用域之外运行，
+  服务停止后仍能继续。它先写 `ready`，收到 `permit` 后调用安装器 `update`。
+- 更新下载使用当前卡片代理（`null` 时显式直连），不读写新的配置与 token；卡片热更新在下载期间照常
+  处理，最终发布时安装器重新读取最新缓存并用新程序复检，不会被准备阶段的旧快照覆盖。
+- 阶段回执只有 `ACCEPTED`、`PREPARED`（下载、校验与磁盘配置预检通过，可交给 OS 更新器）与
+  `FAILED`，回执本身不表达成功。**最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；
   重连后 Daemon 重发仍有效的回执。
-- 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
-- 如需覆盖安装：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。数据目录、日志与既有备份保留。重新 `READY` 后才继续正常使用。
+- 持久诊断只有卡片目录的 `last-operation.json`（固定字段、≤4 KiB，匹配本次 `operationId`）；作业
+  目录与安装器、归档、runner、ready/permit 标记在完成或失败后由独立作业清理，不保留
+  `updates/<operationId>-*`、`install.log` 或历史目录。服务仍在运行时安装失败会发送安全的失败回执；
+  旧 Daemon 已退出时不承诺通过控制通道回报，卡片会离线，本地保留最近结果。
+- 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），
+  Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
 
-重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
-更新后重新确认 Studio `READY`。
+### 覆盖安装
+
+需要重新引导时，在卡片上重新“安装 / 覆盖”并复制命令，在目标主机执行。安装器先校验新发行归档、
+配置信封与安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。配置与凭据以本次脚本为
+新引导缓存，随后仍从 Studio 对账最新配置；数据目录、技能与用户数据保留，重新 `READY` 后才继续正常
+使用。重启会中断在途工具调用，已经发生的命令副作用不回滚。
 
 ## 卸载与数据保留
 
-`uninstall` 停止服务、删除受管服务定义与 `lib/` 下的程序发行目录，**保留 `daemon.json`、
-`daemon.token`、整个数据目录、日志与 `backups/`**。它是幂等的，服务管理器错误不会被吞掉。
-卸载不会删除任何 Studio Environment 记录，也不清理 token、数据与日志；彻底删除前先评估历史
-引用，并按需手动清理。
+`uninstall` 停止服务、删除受管服务定义与本卡片 `lib/` 下的程序发行目录，**保留 `daemon.json`、
+`daemon.token`、`ide/`、`skills/`、日志、`last-operation.json` 与其它用户数据**。它是幂等的：服务
+定义已经缺失但程序仍残留时继续完成清理；两者都不存在时直接报告未安装并保留数据。卸载不会删除任何
+Studio Environment 记录，也不清理 token、数据与日志；彻底删除前先评估历史引用，并按需手动清理。
 
-数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的大文本
-全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径。定时清扫（默认 30 分钟一次）
-只回收超过当前保留期（默认 3 天）且未被使用的 workspace，历史引用的全文因此在保留期后可能被自动回收。
-`skills` 保存已安装包及 `.staging-*` / `.old-*` 安装暂存与替换备份；安装器负责清理暂存，
-并保留已发布的技能包。
+数据目录持有 `daemon.lock`，同一卡片目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的
+大文本全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径。定时清扫（默认 30 分钟
+一次）只回收超过当前保留期（默认 3 天）且未被使用的 workspace，历史引用的全文因此在保留期后可能
+被自动回收。`skills` 保存已安装包及 `.staging-*` / `.old-*` 安装暂存与替换备份；安装器负责清理暂存，
+并保留已发布的技能包。安装器自身不创建 `backups/`，也不保留历史程序或配置副本。
 
 ## 参数与排错
 
@@ -433,46 +499,49 @@ HOME 也不是默认工作目录。
 
 | 动作 / 参数 | Unix | Windows | 说明 |
 | --- | --- | --- | --- |
-| install | `install` | `install` | 必填 `--config-file` / `-ConfigFile` 与 `--token-file` / `-TokenFile`；可选 `--version` / `-Version` |
+| install | `install` | `install` | 必填 `--environment-id` / `-EnvironmentId`、`--version` / `-Version`、`--config-file` / `-ConfigFile` 与 `--token-file` / `-TokenFile` |
+| update | `update` | `update` | 必填卡片 UUID 与目标版本；不接收配置或 token |
 | status | `status` | `status` | 只读；退出码 0/1/3 见上 |
-| uninstall | `uninstall` | `uninstall` | 保留配置、token、数据、日志与备份 |
+| uninstall | `uninstall` | `uninstall` | 保留配置、token、技能与用户数据 |
 | help | `help` | `help` | 输出用法 |
 
-`status` 与 `uninstall` 不接收安装参数。配置与 token 必须是同目录、名为 `daemon.json` /
-`daemon.token` 的兄弟文件。
+`status` 与 `uninstall` 只接收 `--environment-id` / `-EnvironmentId`。配置与 token 必须是同目录、
+名为 `daemon.json` / `daemon.token` 的兄弟文件。
 
 | 现象 | 处理 |
 | --- | --- |
-| 下载脚本返回 HTTP 400 | 安装 code 已过期、被修改或因 token 轮换失效；回 Studio 重新复制安装命令 |
-| GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验，旧受管安装保持不动 |
+| 下载脚本返回 HTTP 400 | 安装 code 已过期、被修改，或因配置/凭据变化失效；回 Studio 重新复制安装命令 |
+| `配置属于另一张环境卡片` | 安装输入不是本 UUID 的配置；重新从该卡片生成命令，不要复用其它卡片的暂存文件 |
+| `配置格式不是当前版本` | 输入不是 `{environmentId, version, daemonConfig}` 结构；重新生成安装命令 |
+| GitHub 下载或 SHA 校验失败 | 检查网络、宿主代理与 release 是否含成对资产；不要跳过校验，现有受管安装保持不动 |
 | `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 按[管理身份与冲突处理](#管理身份与冲突处理)确认归属，检查、导出、停止并移开非受管定义；不要伪造所有权标记 |
-| 配置或 token 文件权限失败 | Unix 确认属主与无 group/other 写权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存文件，不自动放宽规则 |
-| 输入文件名或目录不符 | 必须使用 Web 生成的暂存文件，且是私有同目录的 `daemon.json` / `daemon.token` |
-| `environment registration is rejected` 或安装器提示本次启动令牌被拒绝 | 回目标 Environment 重新生成安装命令并执行；不要重复使用旧 code 或恢复备份中的旧 token |
-| Linux 报 `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
+| `该环境的另一个安装操作正在执行` | 同一卡片已有 install/update/uninstall 持锁；等待其结束，不要删除锁文件 |
+| `服务停止后仍持有运行锁` | 目标进程未在窗口内退出；检查进程与日志后重试，不放宽检查、不强行删锁 |
+| 配置或 token 文件权限失败 | Unix 确认属主与无 group/other 权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存文件，不自动放宽规则 |
+| `服务启动失败` / `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
+| 服务存活但未 READY | 核对 studioUrl、token、网络与代理；Linux 看 journal，macOS 看卡片日志，Windows 用前台复现 |
+| 配置状态显示“应用失败” | 按错误中的字段与规则修正卡片配置后重新保存；恢复网络可达性不能替代配置修正 |
+| LSP 显示未安装或查询失败 | 检查卡片 `lsp` JSON、服务进程可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 | WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/ws/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
-| 服务存活但未 READY | 核对 studioUrl、token、网络与压缩；Linux 看 journal，macOS 看日志，Windows 用前台复现 |
-| LSP 显示未安装或查询失败 | 检查弹窗 JSON、服务进程可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 
-Unix 安装失败先按输出的阶段和下一步处理。Linux 仅在能读取启动前 journal 游标之后的新日志、
-且命中 Daemon 固定的令牌拒绝消息时，才提示本次启动的 token 原因；无法读取或没有游标时不会根据旧日志推断。
-输出的 `journalctl --since` 命令便于人工查看时间范围，但同秒旧消息仍需自行区分。
-服务状态和日志可能含敏感信息，分享前请去除 token、安装 code 与带凭据的 URL；不要开启 shell 调试回显。
+Unix 安装失败先按输出的阶段和下一步处理。服务状态和日志可能含敏感信息，分享前请去除 token、安装
+code 与带凭据的 URL；不要开启 shell 调试回显。
 
 ### 前台诊断
 
-先停止受管服务，避免数据锁冲突，再用归档内置的冻结运行时与同一份 `daemon.json` 启动程序，输出直接写控制台；
-`Ctrl-C` 结束，不提供常驻守护。`daemon.token` 必须与配置同目录：
+先停止受管服务，避免数据锁冲突，再用该卡片归档内置的冻结运行时与同一份 `daemon.json` 启动程序，
+输出直接写控制台；`Ctrl-C` 结束，不提供常驻守护。`daemon.token` 必须与配置同目录：
 
 Unix:
 ```bash
-"$HOME/.kk-studio/lib/runtime/code-server/lib/node" "$HOME/.kk-studio/lib/main.js" \
-  --config "$HOME/.kk-studio/daemon.json"
+"$HOME/.kk-studio/environments/<UUID>/lib/runtime/code-server/lib/node" \
+  "$HOME/.kk-studio/environments/<UUID>/lib/main.js" \
+  --config "$HOME/.kk-studio/environments/<UUID>/daemon.json"
 ```
 
 Windows:
 ```powershell
-& "$env:USERPROFILE\.kk-studio\lib\runtime\code-server\lib\node.exe" "$env:USERPROFILE\.kk-studio\lib\main.js" --config "$env:USERPROFILE\.kk-studio\daemon.json"
+& "$env:USERPROFILE\.kk-studio\environments\<UUID>\lib\runtime\code-server\lib\node.exe" "$env:USERPROFILE\.kk-studio\environments\<UUID>\lib\main.js" --config "$env:USERPROFILE\.kk-studio\environments\<UUID>\daemon.json"
 ```
 
 Daemon 自身 CLI 只有 `--config <绝对路径>`（及 `--check-config <绝对路径>` 预检、`--help`/`-h`、
