@@ -36,7 +36,7 @@ if [ "$timeout" -gt 3600 ]; then timeout=120; fi
 
 # 子安装器在取得操作锁之前失败时不会写卡片结果；runner 在作业最后写一条受限的本次失败记录，
 # 让仍在运行的旧 Daemon 能按 operationId 观察到结果。若安装器已写入匹配记录则绝不覆盖。
-# 只写固定字段，不重试、不备份，也不携带任何配置或凭据。
+# 只写固定字段，不重试、不备份，也不携带任何配置或凭据；真实写入失败必须显式报错而不是假装成功。
 record_failure() {
   [ -d "$envRoot" ] || return 0
   [ ! -L "$envRoot" ] || return 0
@@ -51,17 +51,22 @@ record_failure() {
     "$operationId" "$targetVersion" "$time")
   (( \${#json} <= 4096 )) || return 0
   tmp="$envRoot/.last-operation.json.tmp.$$"
-  if ! printf '%s\n' "$json" >"$tmp" 2>/dev/null; then rm -f "$tmp"; return 0; fi
-  if ! chmod 600 "$tmp" 2>/dev/null || ! mv -f "$tmp" "$current" 2>/dev/null; then
-    rm -f "$tmp"
-    return 0
+  if ! printf '%s\n' "$json" >"$tmp" 2>/dev/null ||
+     ! chmod 600 "$tmp" 2>/dev/null ||
+     ! mv -f "$tmp" "$current" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    echo 'update job: could not record the installer failure' >&2
+    return 1
   fi
 }
 
 cleanup() {
   code=$?
   trap - EXIT INT TERM
-  rm -rf "$work"
+  if ! rm -rf -- "$work"; then
+    echo 'update job: could not remove the update job directory' >&2
+    if [ "$code" -eq 0 ]; then code=1; fi
+  fi
   exit "$code"
 }
 trap cleanup EXIT INT TERM
@@ -70,7 +75,7 @@ i=0
 until [ -f "$work/permit" ]; do
   if [ "$i" -ge "$timeout" ]; then
     echo "update receipt permit timed out" >&2
-    record_failure
+    record_failure || :
     exit 1
   fi
   sleep 1
@@ -81,7 +86,7 @@ bash "$installer" "$@"
 code=$?
 set -e
 if [ "$code" -ne 0 ]; then
-  record_failure
+  record_failure || :
   exit "$code"
 fi
 `
@@ -119,23 +124,16 @@ export async function launchInstallerJob(file: string, args: string[], signal: A
 /**
  * 把解析后的 Daemon 配置收窄成安装上下文。
  *
- * <p>`environmentId` 与 `proxyUrl` 是冻结的 DaemonConfig 字段；该适配器同时校验它们在运行时确实存在，
+ * <p>`environmentId` 与 `proxyUrl` 是冻结的 DaemonConfig 必填字段，直接读取；外部边界仍校验规范 UUID，
  * 因此缺少卡片身份时在线更新显式失败，而不是更新到其它环境的目录。
  */
 export function toInstallerConfig(config: DaemonConfig): InstallerConfig {
-  const candidate = config as DaemonConfig & {
-    environmentId?: unknown
-    proxyUrl?: unknown
-  }
-  if (typeof candidate.environmentId !== 'string' || !isCanonicalUuid(candidate.environmentId)) {
+  if (!isCanonicalUuid(config.environmentId)) {
     throw new Error('the daemon configuration has no canonical environment identity')
   }
-  if (candidate.proxyUrl !== null && typeof candidate.proxyUrl !== 'string') {
-    throw new Error('the daemon configuration has no proxy decision')
-  }
   return {
-    environmentId: candidate.environmentId,
-    proxyUrl: candidate.proxyUrl,
+    environmentId: config.environmentId,
+    proxyUrl: config.proxyUrl,
     configPath: config.configPath,
     tokenPath: config.tokenPath,
     distributionDir: config.distributionDir,
