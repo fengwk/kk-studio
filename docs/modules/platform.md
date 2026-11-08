@@ -559,22 +559,30 @@ HTTP 契约见 [Web](web.md)。
 
 ## Environment
 
-Environment 的 name 不可变，UUID 用于路由；`environment_connection` 以
+Environment 的 name 创建后不可变，UUID 用于路由；`environment_connection` 以
 `environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。主动释放与零宽限期断线把
 `lease_until` 截断到语句时刻的毫秒边界，重复操作立即被围栏拒绝，其他节点可立即接管。
-READY 更新宿主 OS、时区、进程用户、HOME、note 与 Daemon 上报的 `daemonVersion`
-（生产进程取自 [`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`），断线保留最后已接受的 metadata；`daemonVersion`
-与 Environment 的 CAS 配置版本是两个不同事实。
+READY 更新 `ready_metadata`：Daemon 上报的 `daemonVersion`（生产进程取自
+[`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`）与 `HostInfo`（OS、架构、时区、进程用户、
+HOME、临时目录），断线保留最后已接受的 metadata；`daemonVersion` 与 Environment 的 CAS 配置版本是两个不同事实。
 Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
+
+每张卡片的可编辑属性是 `note` 与 `daemonConfig`（`studioUrl` 必填，`bashExecutable`、`lsp`、`proxyUrl`
+可空）。`environment` 行的 `daemon_config` 是唯一配置权威，`version` 既是 CAS 版本也是完整配置快照版本；
+每次显式 `PUT` 推进版本并发出 `environment_changed`。`EnvironmentConfigSource` 只暴露
+`{version, config}` 窄端口，owner 节点据此向 Daemon 下发完整快照并把配置应用状态投影到
+`GET /api/platform/environments/{id}/runtime` 的 `configuration`。卡片备注只在 Studio 展示与提示词中
+使用，不由 Daemon 回报；运行快照允许 CONNECTING 的有效 owner 读取，执行与 IDE 路由仍严格使用 READY。
 
 ### 安装 Code 与授权兑换
 
-`environment.install_code` 承载一次性安装授权：保持随机、高熵、五分钟有效、一次性兑换。签发和兑换在锁定同一 Environment 行的事务中执行：
+`environment.install_code_hash` / `install_code_expires_at` 承载一次性安装授权：随机、高熵、五分钟有效、
+一次性兑换，两列同时有值或同时为空。签发和兑换在锁定同一 Environment 行的事务中执行：
 
-1. 签发校验当前配置和预期版本，覆盖原 code，不修改安装配置，也不递增 CAS 版本。
-2. 兑换校验摘要与数据库时间下的有效期；不匹配或到期不产生安装授权。
-3. 成功兑换原子清空 code，生成新注册 token、更新其摘要并递增配置版本。
-4. 所有其他 token 修改路径，包括导入和轮换，都在同一事务中清空 code。
+1. 签发校验预期版本，覆盖原 code，不修改 `daemon_config`，也不递增 CAS 版本。
+2. 兑换校验摘要与数据库时间下的有效期；不匹配、到期或目标 OS 非法不产生安装授权。
+3. 成功兑换原子清空 code，生成新注册 token、更新其摘要并递增配置版本；安装脚本携带卡片 UUID、兑换后版本、完整配置、新 token 与目标 OS。
+4. 修改 `daemon_config` 或轮换 token 的路径（包括导入）在同一事务中清空 code；只修改 note 不清空。
 
 明文 token/code 不落库、不写日志，脚本响应使用 no-store。兑换响应丢失后 code 已被消费，用户重新签发。
 
@@ -710,7 +718,7 @@ OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与�
 
 `ConfigSyncService` 提供条目清单、选择导出、导入检查与 YAML 导入。清单和检查结果不含配置值；
 导出在单一只读数据库快照中沿依赖边补齐选择，循环 Subagent 去重，不做反向扩展。
-YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌的摘要、Skill Package 私有仓库访问令牌与保存的安装设置，以及 MCP headers。
+YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌的摘要与完整卡片配置、Skill Package 私有仓库访问令牌以及 MCP headers。
 Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：导出保留原值，导入按文件值覆盖或清空；清单、检查结果和普通 API 响应都不回显。
 运行态、数据库身份、版本和时间戳不进入文件。
 
@@ -718,15 +726,16 @@ Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：�
 未知或不支持内容、依赖不满足和外部准备失败可明确跳过：条目的未知字段按条目级跳过并报告
 （包括 Agent 的旧顶层 `model` / `variant`），已知字段仍先按写入路径校验，未知字段不能绕过硬错误；必填缺失、结构/类型/有效值错误、
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
-Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
-条目级跳过；条目省略该键表示清空现有安装设置。
+Environment 条目的 `daemonConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
+条目级跳过。条目仍含旧安装设置字段（`installConfig` 或 `operatingSystem`）时整份拒绝，不做别名或双读；
+条目省略 `note` 表示清空备注。
 Agent 使用 `execution: {driver, settings}` 往返，不接受顶层 `model` / `variant`。
 Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
 优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
 MCP 发现由计划阶段执行；Git Skill 在导入执行时解析分支当前 HEAD 并构建归档。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`
-时拒绝写入。Environment 的注册令牌摘要与安装设置在同一次 CAS 更新中生效，同名更新保持其 UUID 身份。
+时拒绝写入。Environment 的注册令牌摘要、备注与 `daemonConfig` 在同一次 CAS 更新中生效，同名更新保留其 UUID 身份。
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 导入复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
 配置导入具备全文件事务原子性（包含 Git 技能包）：Git 远端网络拉取与归档准备在写事务前执行，发布在同一数据库事务内完成；写入失败时整体回滚。准备阶段生成的暂存归档尽力清理，未清理的暂存对象由存储过期机制回收。
@@ -749,7 +758,7 @@ configurationSchema 归一化普通值，非法值整份拒绝。普通值可随
 [`platform/settings/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/dto/)，
 时间字段为 `createdAt`/`updatedAt`（Instant），固定取值（如 `retryBackoffStrategy`）使用领域枚举。
 
-在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
+在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、backendNetwork、
 storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
 `SystemSettingsToolSettingsProvider` 每次 preflight 读取同一内存快照，替换后立即生效，不重复读库。
@@ -757,15 +766,15 @@ storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 
-network 提供 Backend 与 Daemon 共用的全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
+backendNetwork 只作用于 Backend 自身的 HTTP 请求：`proxyUrl` 为无认证的 `http://host:port`，
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，
 支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（CIDR 只按目标 URL 中的数值 IP
 逐位匹配，不为域名解析 DNS）。
 代理选择在每次请求时现读内存快照：保存后新发起的 HTTP 请求立即使用新路由，正在执行的请求
 由其自身连接与响应流继续完成，不受影响；模型、Git、MCP、集成、媒体与 S3 统一使用该策略，
 无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，Host/SNI 与证书
-校验保留原域名。设置提交和通知回读后向本节点在线 Daemon 下发，重连与 READY 时对账；
-浏览器的网络策略独立。
+校验保留原域名。Daemon 的代理只来自各自卡片的 `daemonConfig.proxyUrl`，Backend 设置不会下发给
+Daemon；浏览器的网络策略独立。
 
 部署级设置由各 `@ConfigurationProperties` 定义，进程启动时装配：
 
