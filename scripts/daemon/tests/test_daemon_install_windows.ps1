@@ -474,6 +474,35 @@ try {
     Assert-Equal -Actual ([string] $record.type) -Expected "update" -Message "last operation type update"
     Assert-Equal -Actual ([string] $record.targetVersion) -Expected $nextVersion -Message "update target version recorded"
 
+    # A failing update after .work staging still cleans the staging area and records the failure.
+    $configBeforeFailure = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))
+    $env:KK_STUDIO_UPDATE_OPERATION_ID = "66666666-6666-4666-8666-666666666666"
+    $env:KK_TEST_DAEMON_LOCKED = "1"
+    $failedUpdate = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "update"; EnvironmentId = $environmentId; Version = $nextVersion
+        } | Out-Null
+    }
+    catch {
+        $failedUpdate = $true
+    }
+    Assert-True -Condition $failedUpdate -Message "update fails when the runtime lock is not released"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $envRoot ".work"))) `
+        -Message "failed update cleans its .work staging"
+    Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "last-operation.json")) `
+        -Message "failed update records a result"
+    $failedRecord = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
+    Assert-Equal -Actual ([string] $failedRecord.operationId) -Expected $env:KK_STUDIO_UPDATE_OPERATION_ID `
+        -Message "failed update record matches operation id"
+    Assert-Equal -Actual ([string] $failedRecord.result) -Expected "failed" -Message "failed update recorded"
+    Assert-Equal -Actual ([string] $failedRecord.errorCode) -Expected "wait-lock" -Message "failed update phase recorded"
+    Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))) `
+        -Expected $configBeforeFailure -Message "failed update keeps config"
+    $env:KK_TEST_DAEMON_LOCKED = ""
+    $env:KK_STUDIO_UPDATE_OPERATION_ID = ""
+    $script:Tasks[$taskName].State = "Running"
+
     # update refuses configuration options and never creates a missing installation.
     $rejectedUpdate = $false
     try {

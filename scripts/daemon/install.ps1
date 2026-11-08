@@ -69,6 +69,8 @@ $script:HelperProcess = $null
 $script:HelperHeld = $false
 $script:Published = $false
 $script:StopAttempted = $false
+$script:CleanupFailed = $false
+$script:WorkOwned = $false
 # The core preflight prints one trusted, value-free line for an invalid configuration;
 # only that bounded marker is surfaced, never raw diagnostics that could echo secrets.
 $script:ConfigFailureMarker = "Invalid daemon configuration: "
@@ -1073,9 +1075,11 @@ function Stop-InstallLockHelper {
             try { $process.Kill() } catch { }
             [void] $process.WaitForExit(5000)
             [Console]::Error.WriteLine("安装操作锁 helper 未能正常退出；锁由进程退出释放。")
+            $script:CleanupFailed = $true
         }
         elseif ($process.ExitCode -ne 0) {
             [Console]::Error.WriteLine("安装操作锁 helper 未能正常释放锁。")
+            $script:CleanupFailed = $true
         }
     }
     finally {
@@ -1101,8 +1105,8 @@ function Write-LastOperation {
         [Parameter(Mandatory = $true)][ValidateSet("succeeded", "failed")][string] $Result,
         [AllowNull()][string] $ErrorCode
     )
-    if (-not $script:HelperHeld) { return }
-    if (-not (Test-Path -LiteralPath $script:EnvironmentRoot -PathType Container)) { return }
+    if (-not $script:HelperHeld) { return $false }
+    if (-not (Test-Path -LiteralPath $script:EnvironmentRoot -PathType Container)) { return $false }
     $targetVersion = $null
     if (-not [string]::IsNullOrEmpty($script:TargetVersion)) {
         $targetVersion = $script:TargetVersion
@@ -1117,7 +1121,10 @@ function Write-LastOperation {
         errorCode = $ErrorCode
     }
     $json = ($record | ConvertTo-Json -Compress)
-    if ($json.Length -gt 4096) { return }
+    if ($json.Length -gt 4096) {
+        [Console]::Error.WriteLine("无法写入本机诊断记录：记录超出上限。")
+        return $false
+    }
     $temporary = Join-Path $script:EnvironmentRoot (
         ".last-operation.json.tmp." + [Guid]::NewGuid().ToString("N"))
     try {
@@ -1132,12 +1139,14 @@ function Write-LastOperation {
         else {
             [IO.File]::Move($temporary, $script:LastOperation)
         }
+        return $true
     }
     catch {
         if (Test-Path -LiteralPath $temporary) {
             Remove-Item -LiteralPath $temporary -Force
         }
         [Console]::Error.WriteLine("无法写入本机诊断记录：$($script:LastOperation)")
+        return $false
     }
 }
 
@@ -1148,9 +1157,16 @@ function Remove-ManagedTemporaryDirectory {
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     if ($full -eq $root -or -not $full.StartsWith($root + "\", [StringComparison]::OrdinalIgnoreCase)) {
         [Console]::Error.WriteLine("拒绝删除非临时目录：$Path")
+        $script:CleanupFailed = $true
         return
     }
-    Remove-Item -LiteralPath $full -Recurse -Force
+    try {
+        Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        [Console]::Error.WriteLine("无法清理临时目录：$full")
+        $script:CleanupFailed = $true
+    }
 }
 
 function Stage-WorkProgram {
@@ -1257,6 +1273,7 @@ function Invoke-InstallCommon {
     $script:Phase = "5/7 取得操作锁"
     $script:PhaseCode = "lock"
     Start-InstallLockHelper -HelperRoot $helperRoot
+    $script:WorkOwned = $true
     foreach ($directory in @($script:InstallRoot, $script:EnvironmentsRoot, $script:EnvironmentRoot)) {
         New-PrivateDirectory -Path $directory
     }
@@ -1386,6 +1403,7 @@ function Invoke-Uninstall {
     $script:Phase = "2/3 取得操作锁"
     $script:PhaseCode = "lock"
     Start-InstallLockHelper -HelperRoot $helperRoot
+    $script:WorkOwned = $true
     $script:Phase = "3/3 停止并移除服务"
     $script:PhaseCode = "stop"
     Stop-DaemonTaskAndWait -HelperRoot $helperRoot
@@ -1401,8 +1419,22 @@ function Invoke-Uninstall {
     return 0
 }
 
+function Remove-WorkDirectory {
+    if (-not (Test-Path -LiteralPath $script:WorkDirectory)) { return }
+    try {
+        Assert-PrivateDirectory -Path $script:WorkDirectory
+        Remove-Item -LiteralPath $script:WorkDirectory -Recurse -Force -ErrorAction Stop
+    }
+    catch {
+        # 清理失败必须被看见：成功结果不能建立在未清理的受管暂存之上。
+        $script:CleanupFailed = $true
+        [Console]::Error.WriteLine("受管暂存未能完全清理：$($script:WorkDirectory)")
+    }
+}
+
 function Invoke-Main {
     $code = 0
+    $failure = $null
     try {
         switch ($Command) {
             "install" { $code = Invoke-Install }
@@ -1416,34 +1448,47 @@ function Invoke-Main {
             }
         }
         if ($script:HelperHeld) {
-            Write-LastOperation -Result "succeeded" -ErrorCode $null
+            # 先清理受管暂存，再写成功结果；任何真实清理或记录错误都不能宣称成功。
+            Remove-WorkDirectory
+            if ($script:CleanupFailed) {
+                [void] (Write-LastOperation -Result "failed" -ErrorCode "cleanup")
+                [Console]::Error.WriteLine("受管暂存未能完全清理；未自动回滚。")
+                $code = 1
+            }
+            elseif (-not (Write-LastOperation -Result "succeeded" -ErrorCode $null)) {
+                $code = 1
+            }
         }
-        return $code
     }
     catch {
+        $failure = $_.Exception.Message
         if ($script:HelperHeld) {
-            Write-LastOperation -Result "failed" -ErrorCode $script:PhaseCode
-        }
-        $message = $_.Exception.Message
-        if ($script:HelperHeld) {
-            $script:HelperHeld = $false
+            [void] (Write-LastOperation -Result "failed" -ErrorCode $script:PhaseCode)
+            # 保留真实锁状态：finally 仍要清理本次暂存并释放 helper。
             if ($script:Published) {
-                $message += "`n受管程序或服务已开始替换；未自动回滚、未保留备份目录。"
+                $failure += "`n受管程序或服务已开始替换；未自动回滚、未保留备份目录。"
             }
             elseif ($script:StopAttempted) {
-                $message += "`n受管程序尚未替换；已尝试停止服务，请检查服务状态。"
+                $failure += "`n受管程序尚未替换；已尝试停止服务，请检查服务状态。"
             }
         }
-        throw [System.InvalidOperationException]::new($message)
     }
     finally {
-        if ($script:HelperHeld -and (Test-Path -LiteralPath $script:WorkDirectory)) {
-            Remove-Item -LiteralPath $script:WorkDirectory -Recurse -Force
-        }
+        # 只有本次真正持有操作锁时才清理 .work；status/help 绝不动卡片文件。
+        if ($script:WorkOwned) { Remove-WorkDirectory }
+        $script:WorkOwned = $false
         Stop-InstallLockHelper
         Remove-ManagedTemporaryDirectory -Path $script:ManagementDirectory
         Remove-ManagedTemporaryDirectory -Path $script:DownloadDirectory
+        if ($script:CleanupFailed) {
+            [Console]::Error.WriteLine("受管临时文件未能完全清理。")
+            if ($null -eq $failure -and $code -eq 0) { $code = 1 }
+        }
     }
+    if ($null -ne $failure) {
+        throw [System.InvalidOperationException]::new($failure)
+    }
+    return $code
 }
 
 if ($MyInvocation.InvocationName -ne ".") {

@@ -327,6 +327,7 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       '$code -eq 75',
       '另一个安装操作正在执行',
     ])
+    assertIncludesAll(functionBody('Remove-WorkDirectory'), ['Remove-Item -LiteralPath $script:WorkDirectory -Recurse -Force -ErrorAction Stop', '$script:CleanupFailed = $true'])
     assertIncludesAll(functionBody('Stop-InstallLockHelper'), [
       '$process.StandardInput.Close()',
       '$process.WaitForExit',
@@ -365,6 +366,14 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
     ])
   })
 
+  it('keeps the real lock state so a failed operation still cleans its staging', () => {
+    const main = functionBody('Invoke-Main')
+    assert.ok(!main.includes('$script:HelperHeld = $false'), 'the lock state must survive the catch')
+    assertIncludesAll(main, ['if ($script:WorkOwned) { Remove-WorkDirectory }', 'Stop-InstallLockHelper'])
+    assertInOrder(main, 'Remove-WorkDirectory', 'Write-LastOperation -Result "succeeded"')
+    assertIncludesAll(functionBody('Remove-WorkDirectory'), ['$script:CleanupFailed = $true'])
+  })
+
   it('records one bounded last-operation entry with fixed fields', () => {
     const body = functionBody('Write-LastOperation')
     assertIncludesAll(body, [
@@ -377,6 +386,8 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       'errorCode = $ErrorCode',
       '$json.Length -gt 4096',
       '[IO.File]::Replace',
+      'return $false',
+      'return $true',
     ])
     assertIncludesNone(body, ['token', 'ReadAllText($script:InstalledConfig'])
     assertIncludesAll(functionBody('Invoke-Main'), ['Write-LastOperation -Result "succeeded"', 'Write-LastOperation -Result "failed"'])
