@@ -314,6 +314,11 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       'Register-ScheduledTask',
       'Start-AndVerifyDaemonTask',
     )
+    // The lock helper only protects its final directory; all three roots must be created first.
+    assert.match(
+      functionBody('Invoke-InstallCommon'),
+      /foreach \(\$directory in @\(\$script:InstallRoot, \$script:EnvironmentsRoot, \$script:EnvironmentRoot\)\) \{/,
+    )
     // Only the bootstrap install writes config/token; update never does.
     assert.ok(functionBody('Invoke-InstallCommon').includes('if ($Operation -eq "install") {'))
   })
