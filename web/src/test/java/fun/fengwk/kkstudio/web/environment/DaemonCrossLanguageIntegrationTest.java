@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.environment;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.servlet.http.HttpServlet;
@@ -122,6 +123,7 @@ class DaemonCrossLanguageIntegrationTest {
   private CountDownLatch heartbeatLatch;
   private AtomicReference<DaemonRuntimeSnapshot> lastHeartbeatSnapshot;
   private AtomicReference<EnvironmentServerSettings> networkSettings;
+  private AtomicReference<EnvironmentConfigSnapshot> environmentConfig;
 
   private Path testDataDir;
   private DaemonProcess daemonProcess;
@@ -175,14 +177,8 @@ class DaemonCrossLanguageIntegrationTest {
             new EnvironmentServerSettings(
                 Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L));
     Supplier<EnvironmentServerSettings> settingsSupplier = networkSettings::get;
-    EnvironmentConfigSource configSource =
-        environmentId ->
-            Optional.of(
-                new EnvironmentConfigSnapshot(
-                    1L,
-                    DaemonConfiguration.newBuilder()
-                        .setStudioUrl("https://studio.example.com")
-                        .build()));
+    environmentConfig = new AtomicReference<>();
+    EnvironmentConfigSource configSource = environmentId -> Optional.of(environmentConfig.get());
 
     daemonServer =
         new EnvironmentDaemonServer(
@@ -225,6 +221,7 @@ class DaemonCrossLanguageIntegrationTest {
 
     server.setHandler(context);
     server.start();
+    environmentConfig.set(configuration(1L, null));
   }
 
   @AfterEach
@@ -550,6 +547,60 @@ class DaemonCrossLanguageIntegrationTest {
     assertEquals(daemonVersion, snapshot.status().daemonVersion());
   }
 
+  /** 初始配置失败仍可通过同一进程修正；相同内容的新版本只推进缓存与运行确认。 */
+  @Test
+  void connectingConfigurationFailureCanBeCorrectedWithoutRestart() throws Exception {
+    environmentConfig.set(configuration(1L, "__kk_studio_missing_bash__"));
+    CountDownLatch failed = new CountDownLatch(1);
+    CountDownLatch confirmed = new CountDownLatch(1);
+    recordingSessions.addInboundListener(
+        envelope -> {
+          if (envelope.getMessageType() != MessageType.RUNTIME_STATUS) {
+            return;
+          }
+          var status =
+              envelope.getRuntimeStatus().getRuntimeStatus().getStatus().getConfiguration();
+          if (status.hasError() && status.getError().getVersion() == 1L) {
+            failed.countDown();
+          }
+          if (status.hasAppliedVersion() && status.getAppliedVersion() == 3L) {
+            confirmed.countDown();
+          }
+        });
+    startDaemon(VALID_TOKEN);
+    assertTrue(failed.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS), diagnosticsSafe());
+    assertTrue(daemonServer.local(ENVIRONMENT_ID).isEmpty());
+    DaemonRuntimeSnapshot rejected = daemonServer.runtimeStatus(ENVIRONMENT_ID).orElseThrow();
+    assertEquals("VALIDATION_FAILED", rejected.status().configuration().error().code());
+    assertNull(rejected.status().configuration().appliedVersion());
+
+    environmentConfig.set(configuration(2L, null));
+    daemonServer.environmentChanged(ENVIRONMENT_ID);
+    awaitReady();
+    DaemonConnectionIdentity identity =
+        daemonServer.connectionIdentity(ENVIRONMENT_ID).orElseThrow();
+    assertEquals(
+        2L,
+        daemonServer
+            .runtimeStatus(ENVIRONMENT_ID)
+            .orElseThrow()
+            .status()
+            .configuration()
+            .appliedVersion());
+
+    environmentConfig.set(configuration(3L, null));
+    daemonServer.environmentChanged(ENVIRONMENT_ID);
+    assertTrue(confirmed.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS), diagnosticsSafe());
+    assertEquals(identity, daemonServer.connectionIdentity(ENVIRONMENT_ID).orElseThrow());
+    assertEquals(
+        "3",
+        JsonMapper.builder()
+            .build()
+            .readTree(Files.readString(testDataDir.resolve("daemon.json")))
+            .get("version")
+            .asString());
+  }
+
   /**
    * 范围 7：跨实例 attach 恢复。 Node Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
    * 实例与第一个实例共用同一个 leaseStore 接管路由准入并进入 READY； 第二个 server 实例通过 attach(environmentId, invocationId,
@@ -592,13 +643,7 @@ class DaemonCrossLanguageIntegrationTest {
         new EnvironmentDaemonServer(
             leaseStore,
             registrationDirectory,
-            environmentId ->
-                Optional.of(
-                    new EnvironmentConfigSnapshot(
-                        1L,
-                        DaemonConfiguration.newBuilder()
-                            .setStudioUrl("https://studio.example.com")
-                            .build())),
+            environmentId -> Optional.of(environmentConfig.get()),
             sessionListener,
             (envId, res) -> {},
             new FakeTicketService(),
@@ -641,6 +686,16 @@ class DaemonCrossLanguageIntegrationTest {
   private void startDaemon(String token) throws IOException {
     testDataDir = Files.createTempDirectory("kk-daemon-crosslang-");
     daemonProcess = DaemonProcess.start(repoRoot(), connector.getLocalPort(), token, testDataDir);
+  }
+
+  private EnvironmentConfigSnapshot configuration(long version, String bashExecutable) {
+    DaemonConfiguration.Builder config =
+        DaemonConfiguration.newBuilder()
+            .setStudioUrl("http://127.0.0.1:" + connector.getLocalPort());
+    if (bashExecutable != null) {
+      config.setBashExecutable(bashExecutable);
+    }
+    return new EnvironmentConfigSnapshot(version, config.build());
   }
 
   private void awaitReady() throws InterruptedException {
@@ -749,12 +804,18 @@ class DaemonCrossLanguageIntegrationTest {
       }
 
       Path configFile = dataDir.resolve("daemon.json");
-      String configJson = "{\"studioUrl\":\"http://127.0.0.1:" + studioPort + "\"}";
+      String configJson =
+          "{\"environmentId\":\""
+              + ENVIRONMENT_ID.value()
+              + "\",\"version\":\"0\",\"daemonConfig\":{\"studioUrl\":\"http://127.0.0.1:"
+              + studioPort
+              + "\"}}";
       Files.writeString(configFile, configJson, StandardCharsets.UTF_8);
 
       Path tokenFile = dataDir.resolve("daemon.token");
       Files.writeString(tokenFile, token, StandardCharsets.UTF_8);
       if (!isWindows) {
+        Files.setPosixFilePermissions(configFile, PosixFilePermissions.fromString("rw-------"));
         Files.setPosixFilePermissions(tokenFile, PosixFilePermissions.fromString("rw-------"));
       }
 
@@ -943,13 +1004,11 @@ class DaemonCrossLanguageIntegrationTest {
       return new DaemonSession() {
         @Override
         public void receive(Envelope envelope) {
-          System.out.println(
-              ">>> INBOUND: " + envelope.getMessageType() + " inv=" + envelope.getInvocationId());
           inboundEnvelopes.add(envelope);
+          underlying.receive(envelope);
           for (Consumer<Envelope> l : inboundListeners) {
             l.accept(envelope);
           }
-          underlying.receive(envelope);
         }
 
         @Override
