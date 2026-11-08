@@ -157,6 +157,45 @@ async function withNetwork<T>(
   }
 }
 
+interface StreamingOrigin {
+  url: string
+  started: Promise<void>
+  finish(): void
+  close(): Promise<void>
+}
+
+/** 真实分段响应：首个 chunk 发出后保持连接，证明 hot swap 等待的是仍在途的交换而非已消费的 body。 */
+async function startStreamingOrigin(): Promise<StreamingOrigin> {
+  let resolveStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve
+  })
+  let finish!: () => void
+  const server = http.createServer((request, response) => {
+    if (request.url === '/slow') {
+      response.writeHead(200, { 'content-type': 'text/plain' })
+      response.write('first-')
+      resolveStarted()
+      finish = () => response.end('second')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/plain' })
+    response.end('fast-body')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = (server.address() as net.AddressInfo).port
+  return {
+    url: `http://127.0.0.1:${port}`,
+    started,
+    finish: () => finish(),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections?.()
+        server.close(() => resolve())
+      }),
+  }
+}
+
 const cleanups: Array<() => Promise<void>> = []
 const probeChildren = new Set<ChildProcess>()
 afterEach(async () => {
@@ -431,24 +470,42 @@ describe('outbound network integration', () => {
 
   it('retires the old network only after its in-flight request releases the handle', async () => {
     const proxy = await startProxy()
-    const origin = await startOrigin('old-body')
+    const origin = await startStreamingOrigin()
     cleanups.push(proxy.close, origin.close)
     const runtime = new NetworkRuntime(proxy.url)
     try {
       const oldNetwork = runtime.network
-      const response = await oldNetwork.openResponse(origin.url, {}, new AbortController().signal)
-      let chunks = ''
-      for await (const chunk of response.body) {
-        chunks += Buffer.from(chunk as Uint8Array).toString('utf8')
-      }
-      expect(chunks).toBe('old-body')
+      const response = await oldNetwork.openResponse(`${origin.url}/slow`, {}, new AbortController().signal)
+      const reader = response.body[Symbol.asyncIterator]()
+      const first = await reader.next()
+      expect(Buffer.from(first.value as Uint8Array).toString('utf8')).toBe('first-')
+      await origin.started
+
       const retirement = runtime.update(null)
+      let retired = false
+      void retirement.then(() => {
+        retired = true
+      })
+      await Promise.resolve()
+      expect(retired).toBe(false)
+
+      origin.finish()
+      let rest = ''
+      for (;;) {
+        const chunk = await reader.next()
+        if (chunk.done) {
+          break
+        }
+        rest += Buffer.from(chunk.value as Uint8Array).toString('utf8')
+      }
+      expect(rest).toBe('second')
+      expect(retired).toBe(false)
       await response.dispose()
       await retirement
       await expect(
-        oldNetwork.openResponse(origin.url, {}, new AbortController().signal),
+        oldNetwork.openResponse(`${origin.url}/fast`, {}, new AbortController().signal),
       ).rejects.toThrow(/closed|retired/)
-      expect(await readText(runtime.network, origin.url)).toBe('old-body')
+      expect(await readText(runtime.network, `${origin.url}/fast`)).toBe('fast-body')
     } finally {
       await runtime.close()
     }

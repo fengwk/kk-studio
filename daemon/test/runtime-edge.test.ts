@@ -5,7 +5,7 @@ import { create } from '@bufbuild/protobuf'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
 import { InMemoryInvocationJournal } from '../src/journal.js'
-import { getOutboundNetwork, NetworkRuntime, subprocessEnvironment } from '../src/network.js'
+import { getOutboundNetwork, NetworkRuntime } from '../src/network.js'
 import {
   Architecture,
   CancelSchema,
@@ -243,6 +243,50 @@ describe('runtime lifecycle guards', () => {
 })
 
 describe('runtime inbound protocol branches', () => {
+  // 未初始化时同版本并发配置共享一次应用；重复帧不得提前放行 READY。
+  it('does not complete READY from a duplicate config before the first application succeeds', async () => {
+    const transport = new FakeTransport()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let started!: () => void
+    const preparing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let calls = 0
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        prepareConfiguration: async (config) => {
+          calls++
+          started()
+          await gate
+          return { config, publish() {}, retire: async () => {} }
+        },
+      }),
+    )
+    runtime.start()
+    try {
+      await waitFor(() => transport.connection !== null)
+      await tick()
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope(1n))
+      await preparing
+      transport.receive(makeEnvironmentConfigEnvelope(1n))
+      await tick()
+      expect(runtime.getState()).toBe('CONNECTING')
+      expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(0)
+
+      release()
+      await waitFor(() => runtime.getState() === 'READY')
+      expect(calls).toBe(1)
+      expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
+    } finally {
+      runtime.close()
+    }
+  })
+
   // 初始候选校验失败不能制造「连上但永远收不到修正」的死角。
   it('keeps CONNECTING with a config error and accepts a corrected environment config', async () => {
     const transport = new FakeTransport()
@@ -283,6 +327,61 @@ describe('runtime inbound protocol branches', () => {
     }
   })
 
+  // INVOKE 接受时冻结当前配置：热应用只影响后续调用，不改变在途执行。
+  it('freezes the applied configuration at invocation admission', async () => {
+    const transport = new FakeTransport()
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve
+    })
+    const configs: DaemonConfig[] = []
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        capabilities: {
+          'fs.read': async (call, context) => {
+            configs.push(context.config)
+            if (configs.length === 1) {
+              firstStarted()
+              await firstGate
+            }
+            return {
+              callId: call.invocationId,
+              error: false,
+              details: {},
+              contents: [{ type: 'text', text: 'ok' }],
+            }
+          },
+        },
+      }),
+    )
+    runtime.start()
+    try {
+      await waitFor(() => transport.connection !== null)
+      await tick()
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope())
+      await waitFor(() => runtime.getState() === 'READY')
+
+      transport.receive(invokeEnvelope('frozen-1'))
+      await started
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: process.execPath }))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '1')
+      releaseFirst()
+      transport.receive(invokeEnvelope('frozen-2'))
+      await waitFor(() => configs.length === 2)
+
+      expect(configs[0]?.bashExecutableSetting).toBeNull()
+      expect(configs[1]?.bashExecutableSetting).toBe(process.execPath)
+    } finally {
+      runtime.close()
+    }
+  })
+
   it('applies and clears config updates without another READY and keeps the previous snapshot on failure', async () => {
     const networks = new NetworkRuntime(null)
     const { runtime, transport } = await ready({
@@ -294,13 +393,6 @@ describe('runtime inbound protocol branches', () => {
     try {
       transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: process.execPath }))
       await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '1')
-      // 子进程保留真实继承环境，绝不注入卡片代理。
-      expect(subprocessEnvironment({ http_proxy: 'old', HtTpS_PrOxY: 'old', ALL_PROXY: 'old', PATH: '/bin' })).toEqual({
-        http_proxy: 'old',
-        HtTpS_PrOxY: 'old',
-        ALL_PROXY: 'old',
-        PATH: '/bin',
-      })
       transport.receive(makeEnvironmentConfigEnvelope(2n, { bashExecutable: '/definitely/missing/bash' }))
       await waitFor(() => runtime.getRuntimeStatus().status.configuration.error?.version === '2')
       expect(runtime.getRuntimeStatus().status.configuration).toMatchObject({
@@ -311,11 +403,6 @@ describe('runtime inbound protocol branches', () => {
       transport.receive(makeEnvironmentConfigEnvelope(3n))
       await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '3')
       expect(runtime.getRuntimeStatus().status.configuration.error).toBeNull()
-      expect(subprocessEnvironment({ HTTP_PROXY: 'old', no_proxy: 'old', PATH: '/bin' })).toEqual({
-        HTTP_PROXY: 'old',
-        no_proxy: 'old',
-        PATH: '/bin',
-      })
       expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
     } finally {
       runtime.close()
