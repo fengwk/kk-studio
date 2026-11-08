@@ -128,7 +128,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 播种稳定 environment 卡片
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token_hash, version) values (?, 'dev-env', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
+        "insert into environment (id, name, note, registration_token_hash, daemon_config, version)"
+            + " values (?, 'dev-env', null, encode(sha256(convert_to(?, 'UTF8')), 'hex'),"
+            + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+            + "\"lsp\":null,\"proxyUrl\":null}'::jsonb, 0)",
         DEV.value(),
         REGISTRATION_TOKEN);
 

@@ -36,8 +36,8 @@ public final class SystemSettingsTestFixture {
   public static final SystemSettings.Environment ENVIRONMENT =
       new SystemSettings.Environment(16L * 1024 * 1024, 60_000L);
 
-  public static final SystemSettings.Network NETWORK =
-      new SystemSettings.Network(null, "localhost,127.*,::1");
+  public static final SystemSettings.BackendNetwork BACKEND_NETWORK =
+      new SystemSettings.BackendNetwork(null, "localhost,127.*,::1");
 
   public static final SystemSettings.StorageMedia STORAGE_MEDIA =
       new SystemSettings.StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L);
@@ -59,7 +59,7 @@ public final class SystemSettingsTestFixture {
           1_000L);
 
   public static final SystemSettings DEFAULT =
-      new SystemSettings(TOOL, AI_RUNTIME, ENVIRONMENT, NETWORK, STORAGE_MEDIA, ADVANCED);
+      new SystemSettings(TOOL, AI_RUNTIME, ENVIRONMENT, BACKEND_NETWORK, STORAGE_MEDIA, ADVANCED);
 
   private SystemSettingsTestFixture() {}
 }

@@ -49,8 +49,8 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
         .andExpect(jsonPath("$.environment.maxResourceBytes").value("16777216"))
         .andExpect(jsonPath("$.environment.maxResourceBytes").isString())
-        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.network.noProxyHosts").value("localhost,127.*,::1"))
+        .andExpect(jsonPath("$.backendNetwork.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value("localhost,127.*,::1"))
         .andExpect(jsonPath("$.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.createdAt").exists())
         .andExpect(jsonPath("$.updatedAt").exists());
@@ -61,12 +61,12 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/platform/settings/schema"))
         .andExpect(status().isOk())
-        // section 顺序：aiRuntime -> tool -> environment -> network -> storageMedia
+        // section 顺序：aiRuntime -> tool -> environment -> backendNetwork -> storageMedia
         // -> advanced（General 是前端本地 tab，不在 server schema）。
         .andExpect(jsonPath("$.sections[0].key").value("aiRuntime"))
         .andExpect(jsonPath("$.sections[1].key").value("tool"))
         .andExpect(jsonPath("$.sections[2].key").value("environment"))
-        .andExpect(jsonPath("$.sections[3].key").value("network"))
+        .andExpect(jsonPath("$.sections[3].key").value("backendNetwork"))
         .andExpect(jsonPath("$.sections[4].key").value("storageMedia"))
         .andExpect(jsonPath("$.sections[5].key").value("advanced"))
         // 精确顺序断言：每个 section 的完整 key 序列必须与基线 tabs 完全一致。
@@ -74,7 +74,12 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
             jsonPath("$.sections[*].key")
                 .value(
                     contains(
-                        "aiRuntime", "tool", "environment", "network", "storageMedia", "advanced")))
+                        "aiRuntime",
+                        "tool",
+                        "environment",
+                        "backendNetwork",
+                        "storageMedia",
+                        "advanced")))
         // custom atomic leaf、HTTP 名单和自动压缩组的顺序与路径。
         .andExpect(jsonPath("$.sections[1].groups[0].fields[0].path").value("tool.permission"))
         .andExpect(
@@ -134,10 +139,10 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.sections[2].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.sections[2].groups.length()").value(1))
-        // network 唯一全局分组，保存后新请求生效，不暴露模块覆盖。
+        // backendNetwork 唯一全局分组，保存后新请求生效，不暴露模块覆盖。
         .andExpect(jsonPath("$.sections[3].restartRequired").value(false))
         .andExpect(jsonPath("$.sections[3].groups.length()").value(1))
-        .andExpect(jsonPath("$.sections[3].groups[0].key").value("network.proxy"))
+        .andExpect(jsonPath("$.sections[3].groups[0].key").value("backendNetwork.proxy"))
         .andExpect(jsonPath("$.sections[3].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.sections[3].groups[0].applyTiming").value("NEXT_HTTP_REQUEST"))
         .andExpect(jsonPath("$.sections[3].groups[0].fields.length()").value(2))
@@ -252,39 +257,39 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
 
   /** PUT/GET 验证代理持久化与明确直连；空 bypass 不能被折叠成默认值。 */
   @Test
-  public void networkRoundTripsAndCanReturnToDirect() throws Exception {
+  public void backendNetworkRoundTripsAndCanReturnToDirect() throws Exception {
     String proxy =
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "0");
-              update.withObject("network").put("proxyUrl", "http://proxy:3128");
-              update.withObject("network").put("noProxyHosts", "");
+              update.withObject("backendNetwork").put("proxyUrl", "http://proxy:3128");
+              update.withObject("backendNetwork").put("noProxyHosts", "");
             });
     mockMvc
         .perform(
             put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(proxy))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("1"))
-        .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
-        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.backendNetwork.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value(""));
     mockMvc
         .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
-        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.backendNetwork.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value(""));
     String direct =
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "1");
-              update.withObject("network").putNull("proxyUrl");
+              update.withObject("backendNetwork").putNull("proxyUrl");
             });
     mockMvc
         .perform(
             put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(direct))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"))
-        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.backendNetwork.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value(""));
   }
 
   /** 非法代理/凭据 fail-closed：400 消息不含敏感输入，默认行与 CAS 版本均不变。 */
@@ -301,7 +306,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
           bodyFromGet(
               update -> {
                 update.put("expectedVersion", "0");
-                update.withObject("network").put("proxyUrl", url);
+                update.withObject("backendNetwork").put("proxyUrl", url);
               });
       MvcResult result =
           mockMvc
@@ -321,24 +326,24 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"))
-        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.network.noProxyHosts").value("localhost,127.*,::1"));
+        .andExpect(jsonPath("$.backendNetwork.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value("localhost,127.*,::1"));
   }
 
-  /** 完整 wire 请求严格拒绝缺 network、缺 bypass、错误类型和额外运行期开关。 */
+  /** 完整 wire 请求严格拒绝缺 backendNetwork、缺 bypass、错误类型和额外运行期开关。 */
   @Test
   public void rejectsMissingAndMalformedNetworkWireFields() throws Exception {
     List<Consumer<ObjectNode>> invalidShapes =
         List.of(
-            update -> update.remove("network"),
-            update -> update.putNull("network"),
-            update -> update.withObject("network").remove("noProxyHosts"),
-            update -> update.withObject("network").putNull("noProxyHosts"),
-            update -> update.withObject("network").put("proxyUrl", 1),
-            update -> update.withObject("network").put("proxyUrl", true),
-            update -> update.withObject("network").put("noProxyHosts", 1),
-            update -> update.withObject("network").put("noProxyHosts", true),
-            update -> update.withObject("network").put("enabled", true));
+            update -> update.remove("backendNetwork"),
+            update -> update.putNull("backendNetwork"),
+            update -> update.withObject("backendNetwork").remove("noProxyHosts"),
+            update -> update.withObject("backendNetwork").putNull("noProxyHosts"),
+            update -> update.withObject("backendNetwork").put("proxyUrl", 1),
+            update -> update.withObject("backendNetwork").put("proxyUrl", true),
+            update -> update.withObject("backendNetwork").put("noProxyHosts", 1),
+            update -> update.withObject("backendNetwork").put("noProxyHosts", true),
+            update -> update.withObject("backendNetwork").put("enabled", true));
     for (Consumer<ObjectNode> invalid : invalidShapes) {
       String body =
           bodyFromGet(

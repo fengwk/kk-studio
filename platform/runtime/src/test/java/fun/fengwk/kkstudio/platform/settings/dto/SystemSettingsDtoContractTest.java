@@ -29,7 +29,7 @@ class SystemSettingsDtoContractTest {
     assertTrue(json.contains("\"aiRuntime\""), "aiRuntime section must serialize: " + json);
     assertTrue(json.contains("\"modelGatewayBusyRetryMillis\""));
     assertTrue(json.contains("\"permission\""));
-    assertTrue(json.contains("\"network\""));
+    assertTrue(json.contains("\"backendNetwork\""));
     assertTrue(json.contains("\"proxyUrl\""));
     assertTrue(json.contains("\"noProxyHosts\":\"localhost,127.*,::1\""));
   }
@@ -46,7 +46,7 @@ class SystemSettingsDtoContractTest {
             SystemSettingsToolDTO.PermissionRuleDTO.class,
             SystemSettingsAiRuntimeDTO.class,
             SystemSettingsEnvironmentDTO.class,
-            SystemSettingsNetworkDTO.class,
+            SystemSettingsBackendNetworkDTO.class,
             SystemSettingsStorageMediaDTO.class,
             SystemSettingsAdvancedDTO.class);
     List<String> forbidden =
@@ -153,9 +153,9 @@ class SystemSettingsDtoContractTest {
     SystemSettingsAiRuntimeDTO aiRuntime = new SystemSettingsAiRuntimeDTO();
     aiRuntime.setRetryBackoffStrategy(InvocationRetryBackoffStrategy.EXPONENTIAL);
     dto.setAiRuntime(aiRuntime);
-    SystemSettingsNetworkDTO network = new SystemSettingsNetworkDTO();
-    network.setNoProxyHosts("localhost,127.*,::1");
-    dto.setNetwork(network);
+    SystemSettingsBackendNetworkDTO backendNetwork = new SystemSettingsBackendNetworkDTO();
+    backendNetwork.setNoProxyHosts("localhost,127.*,::1");
+    dto.setBackendNetwork(backendNetwork);
     return dto;
   }
 }

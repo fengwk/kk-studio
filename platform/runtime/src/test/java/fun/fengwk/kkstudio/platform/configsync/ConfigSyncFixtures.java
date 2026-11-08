@@ -57,6 +57,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -314,7 +315,11 @@ final class ConfigSyncFixtures {
     Environment environment = new Environment();
     environment.setId(UUID.randomUUID());
     environment.setName(name);
+    environment.setNote("note-" + name);
     environment.setRegistrationTokenHash(RegistrationTokens.hash("token-" + name));
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
+    environment.setDaemonConfig(config);
     return environment;
   }
 

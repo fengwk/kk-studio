@@ -155,7 +155,7 @@ class SystemNetworkConfigurationTest {
                         new SystemSettings.Environment(
                             current.environment().maxResourceBytes(),
                             current.environment().heartbeatTimeoutMillis() + 1),
-                        current.network(),
+                        current.backendNetwork(),
                         current.storageMedia(),
                         current.advanced()));
                 assertSame(first, selector.select(TARGET).getFirst());
@@ -236,7 +236,7 @@ class SystemNetworkConfigurationTest {
         defaults.tool(),
         defaults.aiRuntime(),
         defaults.environment(),
-        new SystemSettings.Network(proxyUrl, bypass),
+        new SystemSettings.BackendNetwork(proxyUrl, bypass),
         defaults.storageMedia(),
         defaults.advanced());
   }

@@ -160,10 +160,10 @@ describe('system settings schema renderer', () => {
     expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
   })
 
-  it('renders the next-HTTP-request badge for the network proxy group', () => {
+  it('renders the next-HTTP-request badge for the backend network proxy group', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'network')
+    const section = renderSection(schema, 'backendNetwork')
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
@@ -224,8 +224,8 @@ describe('system settings schema renderer', () => {
           fields: [
             {
               path: 'advanced.syntheticFlag',
-              labelKey: 'settings.field.network.proxyUrl',
-              hintKey: 'settings.field.network.proxyUrl.hint',
+              labelKey: 'settings.field.backendNetwork.proxyUrl',
+              hintKey: 'settings.field.backendNetwork.proxyUrl.hint',
               type: 'BOOLEAN',
               nullable: false,
               min: null,
@@ -242,7 +242,7 @@ describe('system settings schema renderer', () => {
     const switchRow = screen
       .getByRole('switch', { name: '代理地址' })
       .closest('.settings-row')!
-    expect(switchRow).toHaveTextContent('Backend 与所有在线 Daemon 共用的 HTTP 代理')
+    expect(switchRow).toHaveTextContent('Backend 发起外部请求时使用的 HTTP 代理')
   })
 
   it('fail-closes on a duplicate field path', () => {
@@ -310,10 +310,10 @@ describe('system settings schema renderer', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const storageMedia = renderSection(schema, 'storageMedia')
-    const network = renderSection(schema, 'network')
+    const backendNetwork = renderSection(schema, 'backendNetwork')
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer
-        schema={{ sections: [storageMedia, network] }}
+        schema={{ sections: [storageMedia, backendNetwork] }}
         draft={draft}
         onChange={() => {}}
       />,
@@ -324,7 +324,7 @@ describe('system settings schema renderer', () => {
     const uploadExpires = container.querySelector('[data-settings-field-path="storageMedia.uploadExpiresSeconds"]')!
     expect(uploadExpires.getAttribute('data-settings-min')).toBe('1')
     expect(uploadExpires.getAttribute('data-settings-max')).toBeNull()
-    const nullableProxy = container.querySelector('[data-settings-field-path="network.proxyUrl"]')!
+    const nullableProxy = container.querySelector('[data-settings-field-path="backendNetwork.proxyUrl"]')!
     expect(nullableProxy.getAttribute('data-settings-nullable')).toBe('true')
     const enumField = container.querySelector('[data-settings-field-path="aiRuntime.retryBackoffStrategy"]')
     // 非当前 section 不渲染。

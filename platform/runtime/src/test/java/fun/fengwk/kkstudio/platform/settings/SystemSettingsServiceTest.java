@@ -42,7 +42,7 @@ class SystemSettingsServiceTest {
               SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
               SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes()),
           SystemSettingsTestFixture.ENVIRONMENT,
-          SystemSettingsTestFixture.NETWORK,
+          SystemSettingsTestFixture.BACKEND_NETWORK,
           SystemSettingsTestFixture.STORAGE_MEDIA,
           SystemSettingsTestFixture.ADVANCED);
 
@@ -51,7 +51,7 @@ class SystemSettingsServiceTest {
   private final SystemSettingsSnapshot snapshot =
       new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
   private final SystemSettingsChangeHandler changeHandler =
-      new SystemSettingsChangeHandler(repository, snapshot, event -> {});
+      new SystemSettingsChangeHandler(repository, snapshot);
   private final SystemSettingsService service =
       new SystemSettingsService(repository, codec, changeHandler);
 
@@ -181,20 +181,20 @@ class SystemSettingsServiceTest {
   @Test
   void invalidProxyFailsBeforeRepositoryAccess() {
     SystemSettingsUpdateDTO request = update(0L);
-    request.getNetwork().setProxyUrl("http://synthetic-user:synthetic-password@proxy:3128");
+    request.getBackendNetwork().setProxyUrl("http://synthetic-user:synthetic-password@proxy:3128");
     DomainException error = assertThrows(DomainException.class, () -> service.update(request));
     assertEquals(DomainErrorCode.VALIDATION, error.code());
-    assertEquals("network.proxyUrl is invalid", error.getMessage());
+    assertEquals("backendNetwork.proxyUrl is invalid", error.getMessage());
     verifyNoInteractions(repository);
     assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
-  /** GET 映射完整聚合及版本，network 的可选字段也必须保留。 */
+  /** GET 映射完整聚合及版本，backendNetwork 的可选字段也必须保留。 */
   @Test
-  void getIncludesPersistedNetworkSection() {
+  void getIncludesPersistedBackendNetworkSection() {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
-    sections.getNetwork().setProxyUrl("http://proxy:3128");
-    sections.getNetwork().setNoProxyHosts("");
+    sections.getBackendNetwork().setProxyUrl("http://proxy:3128");
+    sections.getBackendNetwork().setNoProxyHosts("");
     SystemSettings settings = codec.fromDto(sections);
     when(repository.get())
         .thenReturn(
@@ -212,7 +212,7 @@ class SystemSettingsServiceTest {
     update.setTool(sections.getTool());
     update.setAiRuntime(sections.getAiRuntime());
     update.setEnvironment(sections.getEnvironment());
-    update.setNetwork(sections.getNetwork());
+    update.setBackendNetwork(sections.getBackendNetwork());
     update.setStorageMedia(sections.getStorageMedia());
     update.setAdvanced(sections.getAdvanced());
     return update;

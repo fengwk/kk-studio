@@ -64,7 +64,7 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
       tool: update.tool,
       aiRuntime: update.aiRuntime,
       environment: update.environment,
-      network: update.network,
+      backendNetwork: update.backendNetwork,
       storageMedia: update.storageMedia,
       advanced: update.advanced,
     }
@@ -101,13 +101,13 @@ describe('system settings server editor', () => {
     mocks.update.mockImplementation(backend.update)
     renderSettings()
 
-    await userEvent.click(await serverTab('网络'))
+    await userEvent.click(await serverTab('Backend 网络'))
     const panel = screen.getByRole('tabpanel')
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
     expect(within(panel).getByText('新发起请求生效')).toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
-      '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
+      'Backend 发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
     )
     const proxy = within(panel).getByLabelText('代理地址')
     const bypass = within(panel).getByLabelText('代理绕过规则')
@@ -130,7 +130,7 @@ describe('system settings server editor', () => {
     }
     expect(mocks.update.mock.calls[0]![0]).toEqual({
       ...sections,
-      network: {
+      backendNetwork: {
         proxyUrl: 'http://proxy.internal:8080',
         noProxyHosts: 'localhost,127.*,::1,minio,*.internal',
       },
@@ -142,7 +142,7 @@ describe('system settings server editor', () => {
     await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
     expect(mocks.update.mock.calls[1]![0]).toEqual({
       ...sections,
-      network: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
+      backendNetwork: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
       expectedVersion: '1',
     })
     expect(screen.getByText('新发起请求生效')).toBeInTheDocument()
@@ -240,7 +240,7 @@ describe('system settings server editor', () => {
     expect(sent.tool).toBeDefined()
     expect(sent.aiRuntime).toBeDefined()
     expect(sent.environment).toBeDefined()
-    expect(sent.network).toBeDefined()
+    expect(sent.backendNetwork).toBeDefined()
     expect(sent.storageMedia).toBeDefined()
     expect(sent.advanced).toBeDefined()
     // 成功后 refetch：GET 至少被再次调用。

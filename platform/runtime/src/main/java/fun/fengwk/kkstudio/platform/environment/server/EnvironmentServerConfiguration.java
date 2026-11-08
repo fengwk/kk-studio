@@ -75,7 +75,7 @@ public class EnvironmentServerConfiguration {
         environment.maxResourceBytes(),
         storageMedia.temporaryResourceTtlSeconds(),
         storageMedia.temporaryResourceCleanupIntervalSeconds(),
-        settings.network().proxyUrl(),
-        settings.network().noProxyHosts());
+        settings.backendNetwork().proxyUrl(),
+        settings.backendNetwork().noProxyHosts());
   }
 }

@@ -148,7 +148,7 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
             ai.subagentMaxTurns(),
             ai.modelHttpRetryStatusCodes()),
         base.environment(),
-        base.network(),
+        base.backendNetwork(),
         base.storageMedia(),
         base.advanced());
   }
@@ -216,7 +216,7 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
         SystemSettings initialSettings) {
       this.snapshot = new SystemSettingsSnapshot(initialSettings);
       SystemSettingsChangeHandler changeHandler =
-          new SystemSettingsChangeHandler(repository, snapshot, event -> {});
+          new SystemSettingsChangeHandler(repository, snapshot);
       this.loop =
           new PostgresqlNotificationLoop(
               dataSource,

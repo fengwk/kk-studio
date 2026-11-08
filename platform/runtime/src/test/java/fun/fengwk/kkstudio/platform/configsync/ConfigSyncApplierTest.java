@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
@@ -235,6 +236,8 @@ class ConfigSyncApplierTest {
     existing.setName("old");
     existing.setVersion(2L);
     when(environmentRepository.getByName("old")).thenReturn(existing);
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
 
     applier.apply(
         plan(
@@ -243,23 +246,24 @@ class ConfigSyncApplierTest {
             List.of(),
             List.of(),
             List.of(
-                new ConfigSyncParser.EnvironmentSpec("new", "token-new", null),
-                new ConfigSyncParser.EnvironmentSpec("old", "token-old", null)),
+                new ConfigSyncParser.EnvironmentSpec("new", "new note", "token-new", config),
+                new ConfigSyncParser.EnvironmentSpec("old", null, "token-old", config)),
             List.of(),
             null),
         List.of());
 
-    verify(environmentService).importEnvironment("new", "token-new", null);
+    verify(environmentService).importEnvironment("new", "new note", "token-new", config);
     verify(environmentService)
-        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, 2L);
+        .updateImportedEnvironment(
+            EnvironmentId.of(existing.getId()), null, "token-old", config, 2L);
   }
 
   @Test
   void settingsUpdateUsesPlanVersionInsteadOfReadingNewVersion() {
     SystemSettingsSectionsDTO sections =
         new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
-    sections.getNetwork().setProxyUrl("http://127.0.0.1:9");
-    sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
+    sections.getBackendNetwork().setProxyUrl("http://127.0.0.1:9");
+    sections.getBackendNetwork().setNoProxyHosts("localhost,127.0.0.1");
     ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, 9L);
 
     applier.apply(
@@ -270,7 +274,7 @@ class ConfigSyncApplierTest {
     verify(systemSettingsService).update(captor.capture());
     assertEquals(9L, captor.getValue().getExpectedVersion());
     // 完整聚合必须携带网络设置，避免省略字段导致校验失败或丢失代理事实。
-    assertEquals(sections.getNetwork(), captor.getValue().getNetwork());
+    assertEquals(sections.getBackendNetwork(), captor.getValue().getBackendNetwork());
     // 不应再读当前版本。
     verify(systemSettingsService, never()).get();
   }

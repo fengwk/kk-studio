@@ -338,7 +338,7 @@ public class S3PresignServiceTest {
         SystemSettingsTestFixture.DEFAULT.tool(),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         storageMedia,
         SystemSettingsTestFixture.DEFAULT.advanced());
   }

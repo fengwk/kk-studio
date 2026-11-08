@@ -490,35 +490,35 @@ export const settingsCatalog = {
     'en-US': 'Environment',
     'zh-CN': '环境',
   },
-  'settings.tabs.network': {
-    'en-US': 'Network',
-    'zh-CN': '网络',
+  'settings.tabs.backendNetwork': {
+    'en-US': 'Backend Network',
+    'zh-CN': 'Backend 网络',
   },
-  'settings.section.network.description': {
-    'en-US': 'Configure the global HTTP proxy shared by the backend and all online daemons.',
-    'zh-CN': '配置 Backend 与所有在线 Daemon 共用的全局 HTTP 代理。',
+  'settings.section.backendNetwork.description': {
+    'en-US': 'Configure the HTTP proxy used by backend outbound requests.',
+    'zh-CN': '配置 Backend 发起外部请求时使用的 HTTP 代理。',
   },
-  'settings.section.network.proxy.title': {
-    'en-US': 'Global HTTP proxy',
-    'zh-CN': '全局 HTTP 代理',
+  'settings.section.backendNetwork.proxy.title': {
+    'en-US': 'Backend HTTP proxy',
+    'zh-CN': 'Backend HTTP 代理',
   },
-  'settings.section.network.proxy.description': {
-    'en-US': 'New HTTP requests use the saved proxy; in-flight requests are unaffected. The daemon control connection to Studio is always direct, and browser requests and internal requests of services such as Hub are not affected.',
-    'zh-CN': '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
+  'settings.section.backendNetwork.proxy.description': {
+    'en-US': 'New backend HTTP requests use the saved proxy; in-flight requests are unaffected. Daemon proxy settings are configured per environment card.',
+    'zh-CN': '保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 代理按环境卡片单独配置。',
   },
-  'settings.field.network.proxyUrl': {
+  'settings.field.backendNetwork.proxyUrl': {
     'en-US': 'Proxy URL',
     'zh-CN': '代理地址',
   },
-  'settings.field.network.proxyUrl.hint': {
-    'en-US': 'HTTP proxy shared by the backend and all online daemons. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected; the daemon control connection to Studio is always direct, and browser requests and internal requests of services such as Hub are not affected.',
-    'zh-CN': 'Backend 与所有在线 Daemon 共用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
+  'settings.field.backendNetwork.proxyUrl.hint': {
+    'en-US': 'HTTP proxy used by backend outbound requests. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected.',
+    'zh-CN': 'Backend 发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
   },
-  'settings.field.network.noProxyHosts': {
+  'settings.field.backendNetwork.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
     'zh-CN': '代理绕过规则',
   },
-  'settings.field.network.noProxyHosts.hint': {
+  'settings.field.backendNetwork.noProxyHosts.hint': {
     'en-US': 'Comma-separated rules, e.g. localhost,127.*,::1,192.168.0.0/16,minio,*.internal. IPv4/IPv6 CIDR matches only the target URL numeric IP, not resolved hostnames.',
     'zh-CN': '绕过规则以逗号分隔，例如 localhost,127.*,::1,192.168.0.0/16,minio,*.internal；IPv4/IPv6 CIDR 只匹配目标 URL 中的数值 IP，不解析主机名。',
   },

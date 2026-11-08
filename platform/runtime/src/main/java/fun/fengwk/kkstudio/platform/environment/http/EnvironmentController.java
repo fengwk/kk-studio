@@ -24,15 +24,15 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeRequestDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRotateTokenDTO;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Environment 资源 REST API：CRUD、安装设置、安装 code 与脚本、token 轮换。
+ * Environment 卡片 REST API：CRUD、安装 code 与按卡片脚本、token 轮换。
  *
  * <p>{@code registrationToken} 仅在 create、rotate-token 和经安装 code 授权的脚本响应中返回；这些响应均带 {@code
  * Cache-Control: no-store}，避免敏感凭据进入 HTTP 缓存。最近一次 READY 的宿主 metadata 直接随 Environment 返回，因此没有独立端点；最近
@@ -65,13 +65,20 @@ public class EnvironmentController {
     return noStore(HttpStatus.CREATED, environmentService.create(request));
   }
 
+  /** 整体替换 note 与 daemonConfig；name 不可变，期望版本缺失或冲突时不写入。 */
+  @PutMapping("/api/platform/environments/{environmentId}")
+  public EnvironmentDTO updateEnvironment(
+      @PathVariable UUID environmentId, @RequestBody EnvironmentUpdateDTO request) {
+    return environmentService.update(EnvironmentId.of(environmentId), request);
+  }
+
   /** 按时间正序返回最近的事件窗口（最多 200 条）；管理面按需轮询，不引入实时协议。 */
   @GetMapping("/api/platform/environments/{environmentId}/events")
   public List<EnvironmentEventDTO> listEnvironmentEvents(@PathVariable UUID environmentId) {
     return environmentService.listEvents(EnvironmentId.of(environmentId));
   }
 
-  /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
+  /** 签发五分钟安装 code；校验当前版本，不写环境状态。 */
   @PostMapping("/api/platform/environments/{environmentId}/install-codes")
   public ResponseEntity<EnvironmentInstallCodeDTO> issueInstallCode(
       @PathVariable UUID environmentId, @RequestBody EnvironmentInstallCodeRequestDTO request) {
@@ -81,22 +88,29 @@ public class EnvironmentController {
             EnvironmentId.of(environmentId), requireExpectedVersion(request.getExpectedVersion())));
   }
 
-  /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。 */
+  /** 校验 code 后签发新凭证并返回完整安装脚本；目标 OS 只属于本次安装命令，code 随即失效。 */
   @GetMapping(
       value = "/api/platform/environments/{environmentId}/install-script",
       produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> installationScript(
-      @PathVariable UUID environmentId, @RequestParam String code) {
-    return script(environmentService.installationScript(EnvironmentId.of(environmentId), code));
+      @PathVariable UUID environmentId,
+      @RequestParam String code,
+      @RequestParam DaemonOperatingSystem operatingSystem) {
+    return script(
+        environmentService.installationScript(
+            EnvironmentId.of(environmentId), code, operatingSystem));
   }
 
-  /** 按操作系统返回卸载脚本；不读取 token，也不改变 Environment。 */
+  /** 按卡片 UUID 与目标 OS 返回卸载脚本；不读取 token，也不改变 Environment。 */
   @GetMapping(
-      value = "/api/platform/daemon-uninstall-scripts/{operatingSystem}",
+      value = "/api/platform/environments/{environmentId}/uninstall-script",
       produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> uninstallationScript(
-      @PathVariable DaemonOperatingSystem operatingSystem) {
-    return script(environmentService.uninstallationScript(operatingSystem));
+      @PathVariable UUID environmentId,
+      @RequestParam DaemonOperatingSystem operatingSystem) {
+    return script(
+        environmentService.uninstallationScript(
+            EnvironmentId.of(environmentId), operatingSystem));
   }
 
   @PostMapping("/api/platform/environments/{environmentId}/rotate-token")
@@ -113,12 +127,6 @@ public class EnvironmentController {
   public void deleteEnvironment(
       @PathVariable UUID environmentId, @RequestParam long expectedVersion) {
     environmentService.delete(EnvironmentId.of(environmentId), expectedVersion);
-  }
-
-  @PutMapping("/api/platform/environments/{environmentId}/install-settings")
-  public EnvironmentDTO updateInstallSettings(
-      @PathVariable UUID environmentId, @RequestBody EnvironmentInstallConfigUpdateDTO request) {
-    return environmentService.updateInstallConfig(EnvironmentId.of(environmentId), request);
   }
 
   /** 脚本按原文字节返回，禁止缓存，并阻止浏览器按附件内容嗅探。 */

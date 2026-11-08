@@ -360,7 +360,7 @@ public final class DatabaseAgentTurnContextResolver {
     EnvironmentId environmentId = EnvironmentId.of(selected.getId());
     EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
     return CurrentEnvironmentContext.selected(
-        environmentId, selected.getName(), hostFacts(connection));
+        environmentId, selected.getName(), selected.getNote(), hostFacts(connection));
   }
 
   private static DaemonEnvironmentInfo hostFacts(EnvironmentConnection connection) {
