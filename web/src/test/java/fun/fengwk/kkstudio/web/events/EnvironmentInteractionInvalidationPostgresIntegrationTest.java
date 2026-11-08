@@ -44,8 +44,10 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
       UUID rootThreadId = UUID.randomUUID();
       assertNotEquals(rootThreadId, environmentId);
       jdbc.update(
-          "insert into environment (id, name, registration_token_hash) values (?, ?,"
-              + " encode(sha256(convert_to(?, 'UTF8')), 'hex'))",
+          "insert into environment (id, name, registration_token_hash, daemon_config) values (?, ?,"
+              + " encode(sha256(convert_to(?, 'UTF8')), 'hex'),"
+              + " '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,"
+              + "\"lsp\":null,\"proxyUrl\":null}'::jsonb)",
           environmentId,
           "notification-routing",
           "test-token-" + environmentId);
