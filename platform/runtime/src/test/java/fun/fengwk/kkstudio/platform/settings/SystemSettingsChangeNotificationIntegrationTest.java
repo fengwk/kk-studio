@@ -206,7 +206,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
             base.permission(), busyRetryMillis, base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         SystemSettingsTestFixture.DEFAULT.storageMedia(),
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
@@ -218,7 +218,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     update.setTool(current.getTool());
     update.setAiRuntime(current.getAiRuntime());
     update.setEnvironment(current.getEnvironment());
-    update.setNetwork(current.getNetwork());
+    update.setBackendNetwork(current.getBackendNetwork());
     update.setStorageMedia(current.getStorageMedia());
     update.setAdvanced(current.getAdvanced());
     return update;

@@ -16,7 +16,7 @@ import java.util.Objects;
  * 全局 system settings 的强类型聚合。
  *
  * <p>这是 {@code system_setting} 单行（{@code id=1}）中 {@code config} JSON 的唯一语义模型：六个必填 section （tool /
- * aiRuntime / environment / network / storageMedia / advanced）完整携带，任何一个 section 缺失都失败。所有校验都在
+ * aiRuntime / environment / backendNetwork / storageMedia / advanced）完整携带，任何一个 section 缺失都失败。所有校验都在
  * canonical constructor 中执行：字段范围与跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
  * heartbeat&lt;lease）。permission 规则数组保序；不依赖 JSON 对象键顺序。
  *
@@ -27,7 +27,7 @@ public record SystemSettings(
     Tool tool,
     AiRuntime aiRuntime,
     Environment environment,
-    Network network,
+    BackendNetwork backendNetwork,
     StorageMedia storageMedia,
     Advanced advanced) {
 
@@ -35,7 +35,7 @@ public record SystemSettings(
     tool = Objects.requireNonNull(tool, "tool");
     aiRuntime = Objects.requireNonNull(aiRuntime, "aiRuntime");
     environment = Objects.requireNonNull(environment, "environment");
-    network = Objects.requireNonNull(network, "network");
+    backendNetwork = Objects.requireNonNull(backendNetwork, "backendNetwork");
     storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     advanced = Objects.requireNonNull(advanced, "advanced");
   }
@@ -128,29 +128,31 @@ public record SystemSettings(
     }
   }
 
-  /** network section：Backend 唯一全局 HTTP 代理，保存后新发起请求生效；null 地址明确直连，不读取宿主代理。 */
-  public record Network(String proxyUrl, String noProxyHosts) {
+  /** backendNetwork section：仅 Backend 出站请求使用，保存后新发起请求生效；null 地址明确直连，不读取宿主代理。 */
+  public record BackendNetwork(String proxyUrl, String noProxyHosts) {
 
-    public Network {
+    public BackendNetwork {
       if (proxyUrl != null && proxyUrl.length() > 2048) {
-        throw new IllegalArgumentException("network.proxyUrl must not exceed 2048 characters");
+        throw new IllegalArgumentException(
+            "backendNetwork.proxyUrl must not exceed 2048 characters");
       }
       if (noProxyHosts == null) {
-        throw new IllegalArgumentException("network.noProxyHosts is required");
+        throw new IllegalArgumentException("backendNetwork.noProxyHosts is required");
       }
       if (noProxyHosts.length() > 4096) {
-        throw new IllegalArgumentException("network.noProxyHosts must not exceed 4096 characters");
+        throw new IllegalArgumentException(
+            "backendNetwork.noProxyHosts must not exceed 4096 characters");
       }
       // 分步委托同一公共解析器，给出精确字段错误；绝不传播可能携带凭据的解析消息或 cause。
       try {
         HttpProxySelector.fixed(proxyUrl, "");
       } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException("network.proxyUrl is invalid");
+        throw new IllegalArgumentException("backendNetwork.proxyUrl is invalid");
       }
       try {
         HttpProxySelector.fixed(proxyUrl, noProxyHosts);
       } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException("network.noProxyHosts is invalid");
+        throw new IllegalArgumentException("backendNetwork.noProxyHosts is invalid");
       }
     }
   }

@@ -343,7 +343,8 @@ class EnvironmentServiceTest {
                 defaults.tool(),
                 defaults.aiRuntime(),
                 defaults.environment(),
-                new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
+                new SystemSettings.BackendNetwork(
+                    "http://proxy.invalid:8080", "localhost,.internal"),
                 defaults.storageMedia(),
                 defaults.advanced()));
     EnvironmentService service =

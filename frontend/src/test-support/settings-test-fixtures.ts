@@ -43,7 +43,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
       heartbeatTimeoutMillis: '60000',
     },
-    network: {
+    backendNetwork: {
       proxyUrl: null,
       noProxyHosts: 'localhost,127.*,::1',
     },
@@ -331,22 +331,22 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         ],
       },
       {
-        key: 'network',
-        labelKey: 'settings.tabs.network',
-        descriptionKey: 'settings.section.network.description',
+        key: 'backendNetwork',
+        labelKey: 'settings.tabs.backendNetwork',
+        descriptionKey: 'settings.section.backendNetwork.description',
         restartRequired: false,
         groups: [
           {
-            key: 'network.proxy',
-            labelKey: 'settings.section.network.proxy.title',
-            descriptionKey: 'settings.section.network.proxy.description',
+            key: 'backendNetwork.proxy',
+            labelKey: 'settings.section.backendNetwork.proxy.title',
+            descriptionKey: 'settings.section.backendNetwork.proxy.description',
             restartRequired: false,
             applyTiming: 'NEXT_HTTP_REQUEST',
             fields: [
               {
-                path: 'network.proxyUrl',
-                labelKey: 'settings.field.network.proxyUrl',
-                hintKey: 'settings.field.network.proxyUrl.hint',
+                path: 'backendNetwork.proxyUrl',
+                labelKey: 'settings.field.backendNetwork.proxyUrl',
+                hintKey: 'settings.field.backendNetwork.proxyUrl.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -354,9 +354,9 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 options: null,
               },
               {
-                path: 'network.noProxyHosts',
-                labelKey: 'settings.field.network.noProxyHosts',
-                hintKey: 'settings.field.network.noProxyHosts.hint',
+                path: 'backendNetwork.noProxyHosts',
+                labelKey: 'settings.field.backendNetwork.noProxyHosts',
+                hintKey: 'settings.field.backendNetwork.noProxyHosts.hint',
                 type: 'TEXT',
                 nullable: false,
                 min: null,

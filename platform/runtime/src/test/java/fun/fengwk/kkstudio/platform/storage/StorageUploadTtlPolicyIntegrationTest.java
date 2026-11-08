@@ -211,7 +211,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
             SystemSettingsTestFixture.DEFAULT.tool(),
             SystemSettingsTestFixture.DEFAULT.aiRuntime(),
             SystemSettingsTestFixture.DEFAULT.environment(),
-            SystemSettingsTestFixture.DEFAULT.network(),
+            SystemSettingsTestFixture.DEFAULT.backendNetwork(),
             new SystemSettings.StorageMedia(
                 ttlSeconds,
                 base.s3PresignDefaultExpiresSeconds(),

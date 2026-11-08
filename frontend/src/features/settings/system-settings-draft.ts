@@ -44,7 +44,7 @@ export interface SystemSettingsEnvironmentDraft {
   heartbeatTimeoutMillis: DraftNumericField
 }
 
-export interface SystemSettingsNetworkDraft {
+export interface SystemSettingsBackendNetworkDraft {
   proxyUrl: string
   noProxyHosts: string
 }
@@ -80,7 +80,7 @@ export interface SystemSettingsSectionsDraft {
   tool: SystemSettingsToolDraft
   aiRuntime: SystemSettingsAiRuntimeDraft
   environment: SystemSettingsEnvironmentDraft
-  network: SystemSettingsNetworkDraft
+  backendNetwork: SystemSettingsBackendNetworkDraft
   storageMedia: SystemSettingsStorageMediaDraft
   advanced: SystemSettingsAdvancedDraft
 }
@@ -123,9 +123,9 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       maxResourceBytes: dto.environment.maxResourceBytes,
       heartbeatTimeoutMillis: dto.environment.heartbeatTimeoutMillis,
     },
-    network: {
-      proxyUrl: dto.network.proxyUrl ?? '',
-      noProxyHosts: dto.network.noProxyHosts,
+    backendNetwork: {
+      proxyUrl: dto.backendNetwork.proxyUrl ?? '',
+      noProxyHosts: dto.backendNetwork.noProxyHosts,
     },
     storageMedia: {
       uploadExpiresSeconds: dto.storageMedia.uploadExpiresSeconds,
@@ -238,9 +238,9 @@ export function assembleSettingsUpdate(
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
       heartbeatTimeoutMillis: requiredLong(draft.environment.heartbeatTimeoutMillis),
     },
-    network: {
-      proxyUrl: nullableText(draft.network.proxyUrl),
-      noProxyHosts: draft.network.noProxyHosts.trim(),
+    backendNetwork: {
+      proxyUrl: nullableText(draft.backendNetwork.proxyUrl),
+      noProxyHosts: draft.backendNetwork.noProxyHosts.trim(),
     },
     storageMedia: {
       uploadExpiresSeconds: requiredLong(draft.storageMedia.uploadExpiresSeconds),

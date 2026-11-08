@@ -49,7 +49,7 @@ class SystemProxySelectorTest {
   /** 供应商返回值变化立即选新路由；等值网络（含不同实例）复用同一不可变委托，避免无谓重编 bypass。 */
   @Test
   void followsSupplierAndReusesDelegateForUnchangedNetwork() {
-    AtomicReference<SystemSettings.Network> current =
+    AtomicReference<SystemSettings.BackendNetwork> current =
         new AtomicReference<>(network("http://a.example:3128", ""));
     ProxySelector previous = ProxySelector.getDefault();
     try (SystemProxySelector selector = new SystemProxySelector(current::get)) {
@@ -72,7 +72,7 @@ class SystemProxySelectorTest {
   /** 绕过规则变化后同一请求重新选路；代理关闭（null）时明确直连而非继承宿主。 */
   @Test
   void appliesBypassAndDirectNetworkChanges() {
-    AtomicReference<SystemSettings.Network> current =
+    AtomicReference<SystemSettings.BackendNetwork> current =
         new AtomicReference<>(network("http://proxy.example:3128", ""));
     ProxySelector previous = ProxySelector.getDefault();
     URI bypassed = URI.create("http://bypass.example/media");
@@ -91,7 +91,7 @@ class SystemProxySelectorTest {
   @Test
   void lockReReadsLatestNetworkWithoutRegression() {
     AtomicInteger calls = new AtomicInteger();
-    Supplier<SystemSettings.Network> supplier =
+    Supplier<SystemSettings.BackendNetwork> supplier =
         () ->
             calls.getAndIncrement() == 0
                 ? network("http://old.example:3128", "")
@@ -134,7 +134,7 @@ class SystemProxySelectorTest {
   @Test
   void overlappingContextsRestoreTheLastLiveOwner() {
     ProxySelector previous = ProxySelector.getDefault();
-    Supplier<SystemSettings.Network> supplier = () -> network(null, "");
+    Supplier<SystemSettings.BackendNetwork> supplier = () -> network(null, "");
     try {
       for (boolean firstClosesFirst : List.of(true, false)) {
         try (SystemProxySelector first = new SystemProxySelector(supplier);
@@ -156,7 +156,7 @@ class SystemProxySelectorTest {
     }
   }
 
-  private static SystemSettings.Network network(String proxyUrl, String noProxyHosts) {
-    return new SystemSettings.Network(proxyUrl, noProxyHosts);
+  private static SystemSettings.BackendNetwork network(String proxyUrl, String noProxyHosts) {
+    return new SystemSettings.BackendNetwork(proxyUrl, noProxyHosts);
   }
 }

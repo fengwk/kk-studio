@@ -31,7 +31,7 @@ public class SystemSettingsSchemaProvider {
             aiRuntimeSection(),
             toolSection(),
             environmentSection(),
-            networkSection(),
+            backendNetworkSection(),
             storageMediaSection(),
             advancedSection()));
     return schema;
@@ -259,35 +259,35 @@ public class SystemSettingsSchemaProvider {
             null));
   }
 
-  /** 网络：唯一的 Backend 全局代理。 */
-  private static SystemSettingsSchemaDTO.SectionDTO networkSection() {
+  /** 网络：仅 Backend 出站请求使用的代理。 */
+  private static SystemSettingsSchemaDTO.SectionDTO backendNetworkSection() {
     return section(
-        "network",
-        "settings.tabs.network",
-        "settings.section.network.description",
+        "backendNetwork",
+        "settings.tabs.backendNetwork",
+        "settings.section.backendNetwork.description",
         false,
         proxyGroup());
   }
 
   private static SystemSettingsSchemaDTO.GroupDTO proxyGroup() {
     return group(
-        "network.proxy",
-        "settings.section.network.proxy.title",
-        "settings.section.network.proxy.description",
+        "backendNetwork.proxy",
+        "settings.section.backendNetwork.proxy.title",
+        "settings.section.backendNetwork.proxy.description",
         false,
         ApplyTiming.NEXT_HTTP_REQUEST,
         field(
-            "network.proxyUrl",
-            "settings.field.network.proxyUrl",
-            "settings.field.network.proxyUrl.hint",
+            "backendNetwork.proxyUrl",
+            "settings.field.backendNetwork.proxyUrl",
+            "settings.field.backendNetwork.proxyUrl.hint",
             FieldType.TEXT,
             true,
             null,
             2048),
         field(
-            "network.noProxyHosts",
-            "settings.field.network.noProxyHosts",
-            "settings.field.network.noProxyHosts.hint",
+            "backendNetwork.noProxyHosts",
+            "settings.field.backendNetwork.noProxyHosts",
+            "settings.field.backendNetwork.noProxyHosts.hint",
             FieldType.TEXT,
             false,
             null,

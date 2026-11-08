@@ -38,7 +38,7 @@ public final class EnvironmentInstallScripts {
   public static String install(
       EnvironmentInstallConfigDTO config,
       String registrationToken,
-      SystemSettings.Network network) {
+      SystemSettings.BackendNetwork network) {
     EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
     text(registrationToken, "registrationToken");
     boolean windows = normalized.getOperatingSystem() == DaemonOperatingSystem.WINDOWS;
@@ -47,7 +47,7 @@ public final class EnvironmentInstallScripts {
   }
 
   public static String uninstall(
-      DaemonOperatingSystem operatingSystem, SystemSettings.Network network) {
+      DaemonOperatingSystem operatingSystem, SystemSettings.BackendNetwork network) {
     if (operatingSystem == null
         || !Set.of(
                 DaemonOperatingSystem.LINUX,
@@ -65,7 +65,7 @@ public final class EnvironmentInstallScripts {
       String action,
       String daemonJson,
       String token,
-      SystemSettings.Network network) {
+      SystemSettings.BackendNetwork network) {
     String template = windows ? WINDOWS : UNIX;
     String parameters = "";
     if (!daemonJson.isEmpty()) {

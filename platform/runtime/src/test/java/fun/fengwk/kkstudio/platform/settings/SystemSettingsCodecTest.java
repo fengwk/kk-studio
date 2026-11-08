@@ -14,7 +14,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
@@ -42,48 +42,48 @@ class SystemSettingsCodecTest {
   }
 
   @Test
-  void networkRoundTripsAndRejectsIncompleteOrNonTextCanonicalFields() throws Exception {
+  void backendNetworkRoundTripsAndRejectsIncompleteOrNonTextCanonicalFields() throws Exception {
     // proxyUrl 可省略/null；noProxyHosts 必须存在且为字符串，空字符串保留。
     SystemSettingsSectionsDTO dto = codec.toSections(SystemSettingsTestFixture.DEFAULT);
-    dto.getNetwork().setProxyUrl("http://proxy:3128");
-    dto.getNetwork().setNoProxyHosts("");
+    dto.getBackendNetwork().setProxyUrl("http://proxy:3128");
+    dto.getBackendNetwork().setNoProxyHosts("");
     SystemSettings settings = codec.fromDto(dto);
     assertEquals(dto, codec.toSections(codec.decode(codec.encode(settings))));
-    assertEquals("", settings.network().noProxyHosts());
+    assertEquals("", settings.backendNetwork().noProxyHosts());
 
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
-    ObjectNode network = (ObjectNode) root.get("network");
-    network.putNull("proxyUrl");
+    ObjectNode backendNetwork = (ObjectNode) root.get("backendNetwork");
+    backendNetwork.putNull("proxyUrl");
     assertEquals(SystemSettingsTestFixture.DEFAULT, codec.decode(root.toString()));
-    network.remove("noProxyHosts");
+    backendNetwork.remove("noProxyHosts");
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    network.putNull("noProxyHosts");
+    backendNetwork.putNull("noProxyHosts");
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    network.put("noProxyHosts", 1);
+    backendNetwork.put("noProxyHosts", 1);
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    network.put("noProxyHosts", "");
-    network.put("proxyUrl", true);
+    backendNetwork.put("noProxyHosts", "");
+    backendNetwork.put("proxyUrl", true);
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    network.remove("proxyUrl");
-    network.put("enabled", false);
+    backendNetwork.remove("proxyUrl");
+    backendNetwork.put("enabled", false);
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    root.remove("network");
+    root.remove("backendNetwork");
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
-    root.putNull("network");
+    root.putNull("backendNetwork");
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
   }
 
   @Test
-  void networkDtoRequiresSectionAndBypassWithoutDefaulting() {
+  void backendNetworkDtoRequiresSectionAndBypassWithoutDefaulting() {
     // 完整 PUT 不接受缺 section / 缺 required text；proxyUrl null 与 noProxyHosts 空串合法。
     SystemSettingsSectionsDTO dto = codec.toSections(SystemSettingsTestFixture.DEFAULT);
-    dto.getNetwork().setNoProxyHosts(null);
+    dto.getBackendNetwork().setNoProxyHosts(null);
     assertEquals(
-        "network.noProxyHosts is required",
+        "backendNetwork.noProxyHosts is required",
         assertThrows(IllegalArgumentException.class, () -> codec.fromDto(dto)).getMessage());
-    dto.setNetwork(null);
+    dto.setBackendNetwork(null);
     assertEquals(
-        "network is required",
+        "backendNetwork is required",
         assertThrows(IllegalArgumentException.class, () -> codec.fromDto(dto)).getMessage());
   }
 
@@ -94,14 +94,14 @@ class SystemSettingsCodecTest {
     int advanced = canonical.indexOf("\"advanced\"");
     int aiRuntime = canonical.indexOf("\"aiRuntime\"");
     int environment = canonical.indexOf("\"environment\"");
-    int network = canonical.indexOf("\"network\"");
+    int backendNetwork = canonical.indexOf("\"backendNetwork\"");
     int storageMedia = canonical.indexOf("\"storageMedia\"");
     int tool = canonical.indexOf("\"tool\"");
     assertTrue(
-        advanced >= 0 && aiRuntime > advanced && environment > aiRuntime,
+        advanced >= 0 && aiRuntime > advanced && backendNetwork > aiRuntime,
         "sections must be sorted: " + canonical);
     assertTrue(
-        network > environment && storageMedia > network && tool > storageMedia,
+        environment > backendNetwork && storageMedia > environment && tool > storageMedia,
         "sections must be sorted: " + canonical);
     // 规则对象键与工具名 key 也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
@@ -260,15 +260,15 @@ class SystemSettingsCodecTest {
   }
 
   @Test
-  void omittedNullableNetworkProxyStillRoundTrips() {
-    // 唯一的可空引用是 network.proxyUrl（null 即明确直连）：canonical 编码必须省略该字段，严格解码不得误报缺失，
+  void omittedNullableBackendNetworkProxyStillRoundTrips() {
+    // 唯一的可空引用是 backendNetwork.proxyUrl（null 即明确直连）：canonical 编码必须省略该字段，严格解码不得误报缺失，
     // 且重编码保持幂等。
     SystemSettings settings =
         new SystemSettings(
             SystemSettingsTestFixture.DEFAULT.tool(),
             SystemSettingsTestFixture.DEFAULT.aiRuntime(),
             SystemSettingsTestFixture.DEFAULT.environment(),
-            new SystemSettings.Network(null, "localhost,127.*,::1"),
+            new SystemSettings.BackendNetwork(null, "localhost,127.*,::1"),
             SystemSettingsTestFixture.DEFAULT.storageMedia(),
             SystemSettingsTestFixture.DEFAULT.advanced());
     String canonical = codec.encode(settings);
@@ -281,7 +281,7 @@ class SystemSettingsCodecTest {
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
-    ((ObjectNode) root.get("network")).set("proxyUrl", mapper.nullNode());
+    ((ObjectNode) root.get("backendNetwork")).set("proxyUrl", mapper.nullNode());
     assertEquals(SystemSettingsTestFixture.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
   }
 
@@ -377,13 +377,14 @@ class SystemSettingsCodecTest {
         error.getMessage());
     sections.getAiRuntime().setRetryBaseDelayMillis(2_000L);
 
-    SystemSettingsNetworkDTO network = sections.getNetwork();
-    sections.setNetwork(null);
+    SystemSettingsBackendNetworkDTO backendNetwork = sections.getBackendNetwork();
+    sections.setBackendNetwork(null);
     IllegalArgumentException missingSection =
         assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
     assertTrue(
-        missingSection.getMessage().contains("network is required"), missingSection.getMessage());
-    sections.setNetwork(network);
+        missingSection.getMessage().contains("backendNetwork is required"),
+        missingSection.getMessage());
+    sections.setBackendNetwork(backendNetwork);
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(null));
     assertEquals(SystemSettingsTestFixture.DEFAULT, codec.fromDto(sections));
   }
@@ -404,7 +405,7 @@ class SystemSettingsCodecTest {
             permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         SystemSettingsTestFixture.DEFAULT.storageMedia(),
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
