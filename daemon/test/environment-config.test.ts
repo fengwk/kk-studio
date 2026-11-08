@@ -9,6 +9,7 @@ import {
   type EnvironmentConfigRuntimeOptions,
   type PreparedEnvironmentConfig,
 } from '../src/environment-config.js'
+import type { DaemonConfiguration } from '../src/contracts.js'
 import { RuntimeStatusTracker } from '../src/runtime-status.js'
 import { testConfig } from './helpers.js'
 
@@ -20,8 +21,8 @@ afterEach(() => {
   }
 })
 
-function initialConfig() {
-  const config = testConfig()
+function initialConfig(overrides: Parameters<typeof testConfig>[0] = {}) {
+  const config = testConfig(overrides)
   roots.push(config.dataDir)
   return config
 }
@@ -174,6 +175,116 @@ describe('EnvironmentConfigRuntime', () => {
     await expect(highest).resolves.toMatchObject({ kind: 'applied', config: { configVersion: 3n } })
     expect(prepareCalls.map((config) => config.configVersion)).toEqual([1n, 3n])
     expect(runtime.appliedVersion).toBe(3n)
+  })
+
+  // 已初始化后，低版本/重复版本走 stale/confirmed，替换 pending 与活动任务时也不重建资源。
+  it('confirms equal versions and rejects stale versions after initialization', async () => {
+    const initial = initialConfig()
+    const gate = deferred()
+    const started = deferred()
+    const { runtime, prepareCalls } = runtimeFor(initial, {
+      prepare: async (config) => {
+        if (config.configVersion === 2n) {
+          started.resolve()
+          await gate.promise
+        }
+        return prepared(config)
+      },
+    })
+    const base = daemonConfigurationOf(initial)
+    const proxied = (port: string): DaemonConfiguration => ({ ...base, proxyUrl: `http://${port}.invalid:8080` })
+    await runtime.submit(0n, base)
+    const second = runtime.submit(2n, proxied('two'))
+    await started.promise
+    const fourth = runtime.submit(4n, proxied('four'))
+    const third = runtime.submit(3n, proxied('three'))
+    const fifth = runtime.submit(5n, proxied('five'))
+    await expect(fourth).resolves.toMatchObject({ kind: 'stale' })
+    await expect(third).resolves.toMatchObject({ kind: 'stale' })
+    await expect(runtime.submit(1n, proxied('one'))).resolves.toMatchObject({ kind: 'stale' })
+
+    gate.resolve()
+    await expect(second).resolves.toMatchObject({ kind: 'applied', config: { configVersion: 2n } })
+    await expect(fifth).resolves.toMatchObject({ kind: 'applied', config: { configVersion: 5n } })
+    expect(prepareCalls.map((config) => config.configVersion)).toEqual([0n, 2n, 5n])
+
+    await expect(runtime.submit(5n, proxied('five'))).resolves.toMatchObject({
+      kind: 'confirmed',
+      config: { configVersion: 5n },
+    })
+    await expect(runtime.submit(4n, proxied('four'))).resolves.toMatchObject({ kind: 'stale', config: { configVersion: 5n } })
+    await expect(runtime.submit(5n, proxied('three'))).rejects.toThrow(/same environment config version/)
+  })
+
+  // 启动缓存版本尚未真正初始化时，服务端回退到更旧版本必须明确失败，不能拿未校验缓存放行。
+  it('rejects a version older than the bootstrap cache before initialization', async () => {
+    const initial = initialConfig()
+    const stale = { ...initial, configVersion: 5n }
+    const { runtime } = runtimeFor(stale)
+
+    await expect(runtime.submit(4n, daemonConfigurationOf(stale))).resolves.toEqual({
+      kind: 'fatal',
+      message: 'Studio configuration version is older than the daemon cache',
+    })
+    expect(runtime.hasAppliedConfiguration).toBe(false)
+  })
+
+  // prepare 返回了错版本时必须清理候选并报 VALIDATION_FAILED，绝不能发布。
+  it('retires and reports a prepared candidate with the wrong version', async () => {
+    const initial = initialConfig()
+    const retire = vi.fn(async () => {})
+    const publish = vi.fn()
+    const report = vi.fn()
+    const { runtime } = runtimeFor(initial, {
+      prepare: async (config) => ({
+        config: { ...config, configVersion: config.configVersion + 1n },
+        publish,
+        retire,
+      }),
+      report,
+    })
+
+    const result = await runtime.submit(1n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://proxy.invalid:8080' })
+
+    expect(result).toMatchObject({ kind: 'failed', version: 1n, code: 'VALIDATION_FAILED' })
+    expect(retire).toHaveBeenCalledTimes(1)
+    expect(publish).not.toHaveBeenCalled()
+    expect(report).toHaveBeenCalledWith(expect.any(Error))
+    expect(runtime.hasAppliedConfiguration).toBe(false)
+  })
+
+  // publish 返回的异步清理失败必须进入诊断；publish 同步抛错则不得发布快照并清理候选。
+  it('reports asynchronous publish cleanup failures and aborts a synchronous publish failure', async () => {
+    const initial = initialConfig()
+    const cleanupError = new Error('publish cleanup boom')
+    const cleanup = runtimeFor(initial, {
+      prepare: async (config) => ({
+        config,
+        publish: () => Promise.reject(cleanupError),
+        retire: async () => {},
+      }),
+    })
+    await expect(cleanup.runtime.submit(1n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://one.invalid:8080' }))
+      .resolves.toMatchObject({ kind: 'applied', config: { configVersion: 1n } })
+    await Promise.all(cleanup.tracked)
+    expect(cleanup.report).toHaveBeenCalledWith(cleanupError)
+
+    const publishError = new Error('publish boom')
+    const retire = vi.fn(async () => {})
+    const failing = runtimeFor(initial, {
+      prepare: async (config) => ({
+        config,
+        publish: () => {
+          throw publishError
+        },
+        retire,
+      }),
+    })
+    const result = await failing.runtime.submit(2n, { ...daemonConfigurationOf(initial), proxyUrl: 'http://two.invalid:8080' })
+    expect(result).toEqual({ kind: 'fatal', message: 'prepared environment resources could not be published' })
+    expect(retire).toHaveBeenCalledTimes(1)
+    expect(failing.report).toHaveBeenCalledWith(publishError)
+    expect(failing.runtime.hasAppliedConfiguration).toBe(false)
   })
 
   // 候选校验失败必须保留旧可用快照，后续修正版本能清除错误并继续热应用。
