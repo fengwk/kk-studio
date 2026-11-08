@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
@@ -1254,6 +1255,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private JsonNode createEnvironment(String name) throws Exception {
     EnvironmentCreateDTO dto = new EnvironmentCreateDTO();
     dto.setName(name);
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
+    dto.setDaemonConfig(config);
     return postData("/api/platform/environments", dto);
   }
 

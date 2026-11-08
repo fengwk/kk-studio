@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 
 import java.util.UUID;
 
@@ -38,6 +39,9 @@ class PostgresqlJdbcClientIntegrationTest extends WebPostgresTestSupport {
     row.setId(UUID.randomUUID());
     row.setName("jdbc-client-test");
     row.setRegistrationTokenHash("0".repeat(64));
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com");
+    row.setDaemonConfig(config);
     TransactionTemplate transaction = new TransactionTemplate(transactionManager);
     assertEquals(Boolean.TRUE, transaction.execute(status -> repository.create(row)));
     assertNotNull(repository.getById(row.getId()));
