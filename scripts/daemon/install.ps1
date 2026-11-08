@@ -633,7 +633,31 @@ function Find-DaemonTask {
 
 function Assert-ManagedTask {
     param([Parameter(Mandatory = $true)] $Task)
-    if ($Task.Description -ne $script:TaskDescription) {
+    # 所有权同时核对当前用户、卡片 UUID（精确描述）与本卡片的受管程序/配置路径；
+    # 同名但指向其它程序的任务一律拒绝，且绝不改写它。
+    $actions = $null
+    $property = $Task.PSObject.Properties['Actions']
+    if ($null -ne $property) {
+        $actions = $property.Value
+    }
+    $action = $null
+    if ($null -ne $actions -and @($actions).Count -gt 0) {
+        $action = @($actions)[0]
+    }
+    else {
+        $single = $Task.PSObject.Properties['Action']
+        if ($null -ne $single) { $action = $single.Value }
+    }
+    $foreign = $Task.Description -ne $script:TaskDescription
+    if (-not $foreign) {
+        if ($null -eq $action -or
+            [string] $action.Execute -notlike "*$($script:InstalledNode)" -or
+            [string] $action.Arguments -notlike "*main.js*" -or
+            [string] $action.Arguments -notlike "*$($script:InstalledConfig)*") {
+            $foreign = $true
+        }
+    }
+    if ($foreign) {
         $name = ConvertTo-PowerShellLiteral -Value $script:TaskName
         Throw-Failure ("拒绝操作非受管计划任务 \$($script:TaskName)（缺少精确所有权标记）。未自动回滚，未知文件未变更。" +
             "`n检查：Get-ScheduledTask -TaskName $name -TaskPath '\' | Format-List TaskName, State, Description" +

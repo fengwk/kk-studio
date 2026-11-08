@@ -214,7 +214,14 @@ describe('Windows installer security: card isolation, credentials and task owner
 
   it('owns the task through an exact per-user, per-card marker', () => {
     const body = functionBody('Assert-ManagedTask')
-    assertIncludesAll(body, ['$Task.Description -ne $script:TaskDescription', '拒绝操作非受管计划任务', '不要伪造所有权标记'])
+    assertIncludesAll(body, [
+      '$Task.Description -ne $script:TaskDescription',
+      '$script:InstalledNode',
+      'main.js',
+      '$script:InstalledConfig',
+      '拒绝操作非受管计划任务',
+      '不要伪造所有权标记',
+    ])
     // Ownership assertions never touch (or repair) the conflicting task.
     assertIncludesNone(body, ['Stop-ScheduledTask', 'Unregister-ScheduledTask', 'Remove-Item', 'Register-ScheduledTask'])
   })
