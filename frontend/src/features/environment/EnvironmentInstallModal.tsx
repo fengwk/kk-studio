@@ -1,82 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { environmentService } from '@/features/environment/environment-service'
+import { Button } from '@/shared/ui/controls/Button'
+import { Select } from '@/shared/ui/controls/Select'
+import { Toast } from '@/shared/ui/feedback/Toast'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { useI18n } from '@/shared/i18n'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { Button } from '@/shared/ui/controls/Button'
-import { TextArea } from '@/shared/ui/controls/TextArea'
-import { TextInput } from '@/shared/ui/controls/TextInput'
-import { Select } from '@/shared/ui/controls/Select'
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
-import { Toast } from '@/shared/ui/feedback/Toast'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { copyTextToClipboard } from '@/shared/lib/clipboard'
+import { environmentService } from '@/features/environment/environment-service'
 import {
   INSTALL_OPERATING_SYSTEMS,
-  InstallConfigError,
   detectInstallOS,
   generateInstallCommand,
   generateUninstallCommand,
-  isInstallOperatingSystem,
-  validateInstallConfig,
   type InstallOperatingSystem,
-  type ValidatedInstallConfig,
 } from './install-command'
 import './environment-install.css'
-import type {
-  EnvironmentDTO,
-  EnvironmentInstallConfigDTO,
-} from '@/shared/api/generated/contracts'
-
-type Translate = (key: TranslationKey, values?: InterpolationValues) => string
-
-/** 元数据读取失败：传输错误可重试；已保存设置无效可重试或改用默认设置。 */
-type LoadError =
-  | { kind: 'metadata'; message: string }
-  | { kind: 'invalid'; field: string }
-
-interface Props {
-  environment: EnvironmentDTO
-  uninstall?: boolean
-  onClose: () => void
-}
-
-/** 只携带字段路径，避免把英文内部错误直接展示给用户。 */
-function fieldMessage(t: Translate, field: string): string {
-  if (field === 'daemon.studioUrl') return t('ai.environment.install.invalidOrigin')
-  if (field === 'daemon.note') return t('ai.environment.install.invalidNote')
-  if (field === 'daemon.bashExecutable') return t('ai.environment.install.invalidBash')
-  if (field.startsWith('daemon.lsp')) return t('ai.environment.install.invalidLsp')
-  if (field.endsWith('operatingSystem')) return t('ai.environment.install.invalidOs')
-  return t('ai.environment.install.invalidField', { field })
-}
-
-const blankToNull = (value: string): string | null => (value.trim() ? value : null)
-
-/** 已保存设置 → 表单字段；仅在加载成功或用户选择默认设置时应用。 */
-function formFromConfig(config: ValidatedInstallConfig) {
-  return {
-    os: config.operatingSystem,
-    studioUrl: config.daemon.studioUrl,
-    bashExecutable: config.daemon.bashExecutable ?? '',
-    note: config.daemon.note ?? '',
-    lspEnabled: config.daemon.lsp != null,
-    // 未配置 LSP 时保持空值，避免把示例当作配置提交。
-    servers: config.daemon.lsp == null ? '' : JSON.stringify(config.daemon.lsp.servers, null, 2),
-  }
-}
-
-/** 暗纹示例，不是默认值，也不会随保存提交。 */
-const LSP_EXAMPLE_TEXT = `{
-  "jdtls": {
-    "command": ["~/.local/share/nvim/mason/bin/jdtls"],
-    "extensions": [".java"],
-    "rootMarkers": ["pom.xml"]
-  }
-}`
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 /** 选择器的操作系统取值来自生成契约；名称只属于界面展示。 */
 const OPERATING_SYSTEM_LABELS: Record<InstallOperatingSystem, string> = {
@@ -84,110 +25,58 @@ const OPERATING_SYSTEM_LABELS: Record<InstallOperatingSystem, string> = {
   macos: 'macOS',
   windows: 'Windows',
 }
-const OPERATING_SYSTEM_OPTIONS = INSTALL_OPERATING_SYSTEMS.map(value => ({
+const OPERATING_SYSTEM_OPTIONS = INSTALL_OPERATING_SYSTEMS.map((value) => ({
   value,
   label: OPERATING_SYSTEM_LABELS[value],
 }))
 
-/** 路径示例只随所选操作系统变化，不检测本机、不写入表单值。 */
-const PATH_EXAMPLES: Record<InstallOperatingSystem, { bash: string }> = {
-  linux: { bash: '/bin/bash' },
-  macos: { bash: '/bin/bash' },
-  windows: { bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
+export interface EnvironmentInstallModalProps {
+  environment: EnvironmentDTO
+  uninstall?: boolean
+  onClose: () => void
 }
 
-export function EnvironmentInstallModal({ environment, uninstall = false, onClose }: Props) {
+/**
+ * 安装/卸载命令弹窗只选择目标 OS，然后签发一次性安装 code 或直接生成按卡片卸载命令。
+ * 卡片配置不在弹窗内编辑；安装脚本由服务端在兑换 code 时写入完整配置与新 token。
+ */
+export function EnvironmentInstallModal({
+  environment,
+  uninstall = false,
+  onClose,
+}: EnvironmentInstallModalProps) {
   const { t } = useI18n()
-  const queryClient = useQueryClient()
-  const savedOS = environment.installConfig?.operatingSystem
-  const defaultOS = isInstallOperatingSystem(savedOS) ? savedOS : detectInstallOS(navigator.platform)
-  const [os, setOS] = useState<InstallOperatingSystem>(defaultOS)
-  const [studioUrl, setStudioUrl] = useState(window.location.origin)
-  const [bashExecutable, setBashExecutable] = useState('')
-  const [note, setNote] = useState('')
-  const [lspEnabled, setLspEnabled] = useState(false)
-  const [servers, setServers] = useState('')
+  const [os, setOS] = useState<InstallOperatingSystem>(() => detectInstallOS(navigator.platform))
   const [version, setVersion] = useState(environment.version)
-  const [loadKey, setLoadKey] = useState(0)
-  const [loading, setLoading] = useState(!uninstall)
-  const [loadError, setLoadError] = useState<LoadError | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
-  const active = useRef(false)
+  const active = useRef(true)
   const busy = useRef(false)
-  const disabled = pending || loading || loadError !== null
+  const disabled = pending
 
   useEffect(() => {
-    active.current = true
-    let cancelled = false
-    if (uninstall) {
-      setLoading(false)
-      return () => {
-        cancelled = true
-        active.current = false
-      }
-    }
-    setLoading(true)
-    setLoadError(null)
-    environmentService
-      .getEnvironment(environment.id)
-      .then(card => {
-        if (cancelled) return
-        setVersion(card.version)
-        const config = card.installConfig
-        if (config != null) {
-          try {
-            const form = formFromConfig(validateInstallConfig(config))
-            setOS(form.os)
-            setStudioUrl(form.studioUrl)
-            setBashExecutable(form.bashExecutable)
-            setNote(form.note)
-            setLspEnabled(form.lspEnabled)
-            setServers(form.servers)
-          } catch (err) {
-            // Invalid persisted settings must be repaired, not masked as defaults.
-            setLoadError({
-              kind: 'invalid',
-              field: err instanceof InstallConfigError ? err.field : 'installConfig',
-            })
-            setLoading(false)
-            return
-          }
-        }
-        setLoading(false)
-      })
-      .catch(err => {
-        if (cancelled) return
-        setLoadError({ kind: 'metadata', message: err instanceof Error ? err.message : String(err) })
-        setLoading(false)
-      })
     return () => {
-      cancelled = true
       active.current = false
     }
-  }, [environment.id, uninstall, loadKey])
+  }, [])
 
-  /** 只刷新 CAS 版本，绝不覆盖用户草稿。 */
-  async function rebaseVersion() {
-    try {
-      const fresh = await environmentService.getEnvironment(environment.id)
-      if (active.current) setVersion(fresh.version)
-    } catch (err) {
-      if (active.current) setError(err instanceof Error ? err.message : String(err))
+  async function copyCommand(command: string) {
+    if (!active.current) return
+    const copied = await copyTextToClipboard(command)
+    if (!active.current) return
+    if (!copied) {
+      setError(t('ai.environment.install.clipboardFailed'))
+      return
     }
-  }
-
-  /** 显式放弃无效的已保存设置，改用 origin/OS 默认值；保留刚读取到的版本。 */
-  function useDefaultSettings() {
-    setOS(defaultOS)
-    setStudioUrl(window.location.origin)
-    setBashExecutable('')
-    setNote('')
-    setLspEnabled(false)
-    setServers('')
-    setLoadError(null)
+    setFeedback(
+      t(
+        uninstall
+          ? 'ai.environment.install.uninstallCopied'
+          : 'ai.environment.install.installCopied',
+      ),
+    )
   }
 
   async function submit(event: React.FormEvent) {
@@ -197,219 +86,112 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
     setPending(true)
     setError(null)
     setFeedback(null)
-    let saved = false
     try {
-      let command: string
       const downloadOrigin = window.location.origin
       if (uninstall) {
-        command = generateUninstallCommand(os, downloadOrigin)
-      } else {
-        let parsedLsp: EnvironmentInstallConfigDTO['daemon']['lsp']
-        if (lspEnabled) {
-          try {
-            parsedLsp = { servers: JSON.parse(servers) }
-          } catch {
-            throw new InstallConfigError('daemon.lsp.servers')
-          }
-        }
-        const installConfig = validateInstallConfig({
-          operatingSystem: os,
-          daemon: {
-            studioUrl,
-            bashExecutable: blankToNull(bashExecutable),
-            note: blankToNull(note),
-            lsp: parsedLsp,
-          },
-        })
-        const savedEnvironment = await environmentService.saveInstallConfig(
-          environment.id,
-          version,
-          installConfig,
-        )
-        saved = true
-        void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-        if (!active.current) return
-        setVersion(savedEnvironment.version)
-        if (savedEnvironment.installConfig == null) throw new InstallConfigError('installConfig')
-        const issued = await environmentService.createInstallCode(
-          savedEnvironment.id,
-          savedEnvironment.version,
-        )
-        if (!active.current) return
-        command = generateInstallCommand(
-          downloadOrigin,
-          savedEnvironment.id,
-          validateInstallConfig(savedEnvironment.installConfig).operatingSystem,
-          issued.code,
-        )
-      }
-      if (!active.current) return
-      const copied = await copyTextToClipboard(command)
-      if (!active.current) return
-      if (!copied) {
-        setError(
-          saved
-            ? t('ai.environment.install.savedCopyFailed')
-            : t('ai.environment.install.clipboardFailed'),
+        await copyCommand(
+          generateUninstallCommand(downloadOrigin, environment.id, os),
         )
         return
       }
-      setFeedback(
-        t(uninstall ? 'ai.environment.install.uninstallCopied' : 'ai.environment.install.savedCopied'),
+      const issued = await environmentService.createInstallCode(environment.id, version)
+      if (!active.current) return
+      await copyCommand(
+        generateInstallCommand(downloadOrigin, environment.id, os, issued.code),
       )
     } catch (err) {
       if (!active.current) return
-      // Once the PUT succeeded, any later failure is a generation/copy problem, not a draft problem.
-      if (isConflictError(err) && !saved) setConflict(presentConflict(err))
-      else if (saved) setError(t('ai.environment.install.savedCopyFailed'))
-      else if (err instanceof InstallConfigError) setError(fieldMessage(t, err.field))
-      else setError(err instanceof Error ? err.message : String(err))
+      if (!uninstall && isConflictError(err)) {
+        setConflict(presentConflict(err))
+        return
+      }
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       busy.current = false
       if (active.current) setPending(false)
     }
   }
 
+  /** 冲突刷新只更新期望版本；OS 选择保持不变，重新签发安装 code。 */
+  async function refreshVersion() {
+    try {
+      const fresh = await environmentService.getEnvironment(environment.id)
+      if (!active.current) return
+      setVersion(fresh.version)
+      setConflict(null)
+    } catch (err) {
+      if (!active.current) return
+      setConflict(null)
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <Dialog
       className="environment-install-modal modal-touch-target"
-      title={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
+      title={
+        t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')
+      }
       pending={pending}
       onClose={onClose}
     >
-        <form className="modal-card-form" onSubmit={event => void submit(event)}>
-          <div className="modal-body">
-            <p className="modal-body-text">
-              {t(uninstall ? 'ai.environment.install.uninstallNotice' : 'ai.environment.install.notice')}
+      <form className="modal-card-form" onSubmit={(event) => void submit(event)}>
+        <div className="modal-body">
+          <p className="modal-body-text">
+            {t(
+              uninstall
+                ? 'ai.environment.install.uninstallNotice'
+                : 'ai.environment.install.notice',
+            )}
+          </p>
+          {!uninstall && (
+            <p className="field-help install-notice-detail">
+              {t('ai.environment.install.noticeDetail')}
             </p>
-            {!uninstall && (
-              <p className="field-help install-notice-detail">{t('ai.environment.install.noticeDetail')}</p>
-            )}
-            {loading && !loadError && <p role="status">{t('ai.environment.loading')}</p>}
-            {loadError && (
-              <div className="field-error" role="alert">
-                <p>
-                  {loadError.kind === 'metadata'
-                    ? t('ai.environment.install.metadataFailed', { message: loadError.message })
-                    : t('ai.environment.install.invalidSaved', {
-                        reason: fieldMessage(t, loadError.field),
-                      })}
-                </p>
-                <div className="install-load-actions">
-                  <Button variant="ghost" onClick={() => setLoadKey(key => key + 1)}>
-                    {t('ai.environment.install.reload')}
-                  </Button>
-                  {loadError.kind === 'invalid' && (
-                    <Button variant="ghost" onClick={useDefaultSettings}>
-                      {t('ai.environment.install.useDefaults')}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="form-group">
-              <span>{t('ai.environment.install.os')}</span>
-              <Select
-                aria-label={t('ai.environment.install.os')}
-                value={os}
-                onChange={value => setOS(value as InstallOperatingSystem)}
-                disabled={disabled}
-                options={OPERATING_SYSTEM_OPTIONS}
-              />
-            </div>
-            {!uninstall && (
-              <>
-                <div className="install-field">
-                  <label className="form-group">
-                    <span>{t('ai.environment.install.origin')}</span>
-                    <TextInput
-                      value={studioUrl}
-                      onChange={event => setStudioUrl(event.target.value)}
-                      placeholder={t('ai.environment.install.originPlaceholder')}
-                      aria-describedby="install-origin-help"
-                      disabled={disabled}
-                      required
-                    />
-                  </label>
-                  <p id="install-origin-help" className="field-help">
-                    {t('ai.environment.install.originHelp')}
-                  </p>
-                </div>
-                <label className="form-group">
-                  <span>{t('ai.environment.install.bash')}</span>
-                  <TextInput
-                    value={bashExecutable}
-                    onChange={event => setBashExecutable(event.target.value)}
-                    placeholder={PATH_EXAMPLES[os].bash}
-                    disabled={disabled}
-                  />
-                </label>
-                <label className="form-group">
-                  <span>{t('ai.environment.install.note')}</span>
-                  <TextInput
-                    value={note}
-                    onChange={event => setNote(event.target.value)}
-                    placeholder={t('ai.environment.install.notePlaceholder')}
-                    maxLength={512}
-                    disabled={disabled}
-                  />
-                </label>
-                <Checkbox
-                  checked={lspEnabled}
-                  onChange={setLspEnabled}
-                  disabled={disabled}
-                  label={t('ai.environment.install.lsp')}
-                />
-                {lspEnabled && (
-                  <div className="install-field">
-                    <label className="form-group">
-                      <span>LSP servers</span>
-                      <TextArea
-                        rows={8}
-                        value={servers}
-                        onChange={event => setServers(event.target.value)}
-                        placeholder={LSP_EXAMPLE_TEXT}
-                        aria-describedby="install-lsp-help"
-                        disabled={disabled}
-                        spellCheck={false}
-                      />
-                    </label>
-                    <p id="install-lsp-help" className="field-help">
-                      {t('ai.environment.install.lspHelp')}
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
-            {error && (
-              <p className="field-error" role="alert">
-                {error}
-              </p>
-            )}
-            {!uninstall && (
-              <p className="field-help install-credential-note">{t('ai.environment.install.credentialNote')}</p>
-            )}
+          )}
+          <div className="form-group">
+            <span>{t('ai.environment.install.os')}</span>
+            <Select
+              aria-label={t('ai.environment.install.os')}
+              value={os}
+              onChange={(value) => setOS(value as InstallOperatingSystem)}
+              disabled={disabled}
+              options={OPERATING_SYSTEM_OPTIONS}
+            />
           </div>
-          <div className="modal-footer">
-            <Button variant="ghost" onClick={onClose}>
-              {t('ai.environment.close')}
-            </Button>
-            <Button type="submit" disabled={disabled}>
-              {t(uninstall ? 'ai.environment.install.copyUninstall' : 'ai.environment.install.saveCopy')}
-            </Button>
-          </div>
-        </form>
-        {feedback && <Toast message={feedback} onDismiss={() => setFeedback(null)} />}
-        <ConflictPresenter
-          className="modal-touch-target"
-          conflict={conflict}
-          onClose={() => setConflict(null)}
-          onRefresh={() => {
-            setConflict(null)
-            void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-            void rebaseVersion()
-          }}
-        />
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
+          {!uninstall && (
+            <p className="field-help install-credential-note">
+              {t('ai.environment.install.credentialNote')}
+            </p>
+          )}
+        </div>
+        <div className="modal-footer">
+          <Button variant="ghost" onClick={onClose}>
+            {t('ai.environment.close')}
+          </Button>
+          <Button type="submit" disabled={disabled}>
+            {t(
+              uninstall
+                ? 'ai.environment.install.copyUninstall'
+                : 'ai.environment.install.copyInstall',
+            )}
+          </Button>
+        </div>
+      </form>
+      {feedback && <Toast message={feedback} onDismiss={() => setFeedback(null)} />}
+      <ConflictPresenter
+        className="modal-touch-target"
+        conflict={conflict}
+        onClose={() => setConflict(null)}
+        onRefresh={() => {
+          void refreshVersion()
+        }}
+      />
     </Dialog>
   )
 }

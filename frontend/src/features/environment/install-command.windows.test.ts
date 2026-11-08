@@ -22,7 +22,7 @@ it.skipIf(process.platform !== 'win32').each(['powershell.exe', 'pwsh.exe'])(
     const environmentId = "env/汉字'\"$`$(New-Item NEVER)"
     const installCode = "code'汉字"
     const install = generateInstallCommand(origin, environmentId, 'windows', installCode)
-    const uninstall = generateUninstallCommand('windows', origin)
+    const uninstall = generateUninstallCommand(origin, environmentId, 'windows')
     function run(command: string, mode: 'ok' | 'download' | 'script') {
       rmSync(recordPath, { force: true })
       const payload = mode === 'script'
@@ -59,7 +59,7 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       expect(record.url).toBe(
         `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
           path: { environmentId },
-          query: { code: installCode },
+          query: { code: installCode, operatingSystem: 'windows' },
         })}`,
       )
       expect(downloaded.stdout + downloaded.stderr).not.toContain('private-synthetic-token')
@@ -76,7 +76,10 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       const removed = run(uninstall, 'ok')
       expect(removed.status).toBe(0)
       expect(JSON.parse(readFileSync(recordPath, 'utf8')).url).toBe(
-        'https://studio.example.com/api/platform/daemon-uninstall-scripts/windows',
+        `${origin}${url('GET /api/platform/environments/{environmentId}/uninstall-script', {
+          path: { environmentId },
+          query: { operatingSystem: 'windows' },
+        })}`,
       )
     } finally {
       rmSync(dir, { recursive: true, force: true })

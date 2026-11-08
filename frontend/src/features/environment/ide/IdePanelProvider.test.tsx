@@ -10,6 +10,7 @@ import type {
   EnvironmentIdeOpenViewDTO,
 } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { testEnvironment } from '@/test-support/environment-test-fixtures'
 import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
 import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
 import {
@@ -50,7 +51,7 @@ function card(
   name: string,
   ready = true,
 ): EnvironmentDTO {
-  return {
+  return testEnvironment({
     id,
     name,
     ready,
@@ -61,7 +62,7 @@ function card(
     capabilities: [],
     statusExpiresAt: null,
     lastSeenAt: null,
-  }
+  })
 }
 
 const CARD_A = card(ENV_A, 'local-node')

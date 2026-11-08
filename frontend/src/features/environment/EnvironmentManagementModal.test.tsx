@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { environmentService } from '@/features/environment/environment-service'
 import type { EnvironmentDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
+import {
+  testEnvironment as fixtureEnvironment,
+  testRuntimeStatus,
+} from '@/test-support/environment-test-fixtures'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -15,7 +19,7 @@ vi.mock('@/features/environment/environment-service', () => ({
 }))
 
 function testEnvironment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDTO {
-  return {
+  return fixtureEnvironment({
     id: 'env-test-1',
     name: 'test-environment',
     userName: 'dev-user',
@@ -24,16 +28,9 @@ function testEnvironment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDT
     timeZone: 'Asia/Shanghai',
     note: 'Production host',
     daemonVersion: '1.2.3',
-    status: 'READY',
-    ready: true,
-    statusExpiresAt: null,
     lastSeenAt: 1784512800000,
-    capabilities: [],
-    version: '1',
-    createdAt: 1784505600000,
-    updatedAt: 1784505600000,
     ...overrides,
-  }
+  })
 }
 
 function renderModal(
@@ -58,6 +55,7 @@ function renderModal(
 describe('EnvironmentManagementModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(testRuntimeStatus())
   })
 
   /**
@@ -78,6 +76,10 @@ describe('EnvironmentManagementModal', () => {
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
     expect(screen.getByText('Production host')).toBeInTheDocument()
+    // 管理面同时呈现配置状态与已应用版本，不把 READY 当成最新配置已应用。
+    expect(screen.getByText('配置')).toBeInTheDocument()
+    expect(await screen.findByText('已应用')).toBeInTheDocument()
+    expect(screen.getByText('已应用版本')).toBeInTheDocument()
     // lastSeen 使用共享固定格式（分钟精度），不直接铺 UTC 原文。
     expect(screen.getByText(/2026-07-20 \d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()

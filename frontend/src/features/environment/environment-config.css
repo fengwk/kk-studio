@@ -1,0 +1,86 @@
+.modal-card.environment-config-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.environment-config-modal .modal-header,
+.environment-config-modal .modal-footer {
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.environment-config-modal .modal-header h2 {
+  overflow-wrap: anywhere;
+}
+
+.environment-config-modal .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.environment-config-modal .modal-footer {
+  flex-wrap: wrap;
+}
+
+.environment-config-modal .field-help {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+
+.environment-config-modal .env-config-apply-note {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.environment-config-modal .env-config-lsp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.environment-config-modal .env-config-lsp textarea {
+  width: 100%;
+  min-width: 0;
+  height: 220px;
+  min-height: 160px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-weight: 400;
+  resize: vertical;
+}
+
+.environment-config-modal textarea::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
+}
+
+.environment-config-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.environment-config-status .field-help {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+
+@media (max-width: 420px), (max-height: 500px) {
+  .environment-config-modal .modal-footer button {
+    white-space: normal;
+  }
+}

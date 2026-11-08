@@ -254,10 +254,6 @@ export const environmentCatalog = {
     'en-US': "Operating system",
     'zh-CN': "操作系统",
   },
-  'ai.environment.install.origin': {
-    'en-US': "Studio address",
-    'zh-CN': "Studio 地址",
-  },
   'ai.environment.install.title': {
     'en-US': 'Install/overwrite environment',
     'zh-CN': '安装/覆盖环境',
@@ -266,65 +262,33 @@ export const environmentCatalog = {
     'en-US': 'Uninstall environment',
     'zh-CN': '卸载环境',
   },
-  'ai.environment.install.originHelp': {
-    'en-US': 'No path or query.',
-    'zh-CN': '不含路径或查询参数。',
-  },
-  'ai.environment.install.originPlaceholder': {
-    'en-US': 'https://studio.example.com',
-    'zh-CN': 'https://studio.example.com',
-  },
-  'ai.environment.install.bash': {
-    'en-US': "Bash executable",
-    'zh-CN': "Bash 可执行文件",
-  },
-  'ai.environment.install.note': {
-    'en-US': "Note",
-    'zh-CN': "备注",
-  },
-  'ai.environment.install.notePlaceholder': {
-    'en-US': 'e.g. Development workstation',
-    'zh-CN': '例如：开发工作站',
-  },
-  'ai.environment.install.lsp': {
-    'en-US': "Enable LSP servers",
-    'zh-CN': "启用 LSP servers",
-  },
-  'ai.environment.install.lspHelp': {
-    'en-US': 'Install the language server on the target host first.',
-    'zh-CN': '请先在目标主机安装对应的语言服务器。',
-  },
-  'ai.environment.install.saveCopy': {
-    'en-US': "Save and copy installation command",
-    'zh-CN': "保存并复制安装命令",
+  'ai.environment.install.copyInstall': {
+    'en-US': "Copy installation command",
+    'zh-CN': "复制安装命令",
   },
   'ai.environment.install.copyUninstall': {
     'en-US': "Copy uninstall command",
     'zh-CN': "复制卸载命令",
   },
   'ai.environment.install.notice': {
-    'en-US': 'Copy the command and run it in a terminal on the target host.',
-    'zh-CN': '复制命令后，在目标主机的终端执行。',
+    'en-US': 'Choose the target operating system, copy the command and run it in a terminal on the target host.',
+    'zh-CN': '选择目标操作系统，复制命令后，在目标主机的终端执行。',
   },
   'ai.environment.install.noticeDetail': {
-    'en-US': 'No JRE or Node installation is required; make sure Bash is available. Overwriting restarts the service and connects to this environment, interrupting tool calls in progress. Existing data is kept.',
-    'zh-CN': '无需预装 JRE 或 Node；请确保 Bash 可用。覆盖安装会重启服务并连接到此环境，中断当前工具调用；已有数据保留。',
+    'en-US': 'The command downloads the matching official installer and starts this environment service. No JRE or Node installation is required; make sure Bash is available. Overwriting interrupts tool calls in progress; local configuration and data are kept.',
+    'zh-CN': '命令会下载配套的官方安装器并启动该环境的服务。无需预装 JRE 或 Node；请确保 Bash 可用。覆盖安装会中断当前工具调用；本地配置和数据保留。',
   },
   'ai.environment.install.credentialNote': {
-    'en-US': 'The command contains credentials. Do not share it.',
-    'zh-CN': '命令含凭据，请勿分享。',
+    'en-US': 'The command contains a one-time credential. Do not share it.',
+    'zh-CN': '命令含一次性凭据，请勿分享。',
   },
   'ai.environment.install.uninstallNotice': {
-    'en-US': 'Run the command on the host you want to uninstall. The environment service is removed, and local configuration and data are kept. The environment record in Studio is not deleted.',
-    'zh-CN': '在需要卸载的主机上执行命令。环境服务会被移除，本地配置和数据保留；Studio 中的环境记录不会删除。',
+    'en-US': 'Run the command on the host where this environment is installed. The service and program for this environment are removed, while local configuration, credentials and data are kept. The environment card in Studio is not deleted.',
+    'zh-CN': '在安装该环境的主机上执行命令。该环境的服务与程序会被移除，本地配置、凭据和数据保留；Studio 中的环境卡片不会删除。',
   },
-  'ai.environment.install.savedCopied': {
+  'ai.environment.install.installCopied': {
     'en-US': 'Installation command copied. Valid for 5 minutes.',
-    'zh-CN': '安装命令已复制，5分钟内有效。',
-  },
-  'ai.environment.install.savedCopyFailed': {
-    'en-US': "Settings saved, but command generation or copying failed. Check your connection and clipboard permissions, then retry. Nothing has been deployed.",
-    'zh-CN': "配置已保存，但命令生成或复制失败。请检查网络和剪贴板权限后重试。尚未部署。",
+    'zh-CN': '安装命令已复制，5 分钟内有效。',
   },
   'ai.environment.install.uninstallCopied': {
     'en-US': 'Uninstall command copied.',
@@ -334,45 +298,165 @@ export const environmentCatalog = {
     'en-US': "Copy failed. Check clipboard permissions and retry.",
     'zh-CN': "复制失败，请检查剪贴板权限后重试。",
   },
-  'ai.environment.install.reload': {
-    'en-US': "Reload",
-    'zh-CN': "重新加载",
+  'ai.environment.config.title': {
+    'en-US': 'Configuration',
+    'zh-CN': '配置',
   },
-  'ai.environment.install.useDefaults': {
-    'en-US': "Use default settings",
-    'zh-CN': "使用默认设置",
+  'ai.environment.config.status': {
+    'en-US': 'Configuration status',
+    'zh-CN': '配置状态',
   },
-  'ai.environment.install.metadataFailed': {
-    'en-US': "Could not load environment settings: {{message}}",
-    'zh-CN': "读取环境信息失败：{{message}}",
+  'ai.environment.config.cardVersion': {
+    'en-US': 'Card version',
+    'zh-CN': '卡片版本',
   },
-  'ai.environment.install.invalidSaved': {
-    'en-US': "Saved installation settings are invalid: {{reason}}",
-    'zh-CN': "已保存的安装设置无效：{{reason}}",
+  'ai.environment.config.appliedVersion': {
+    'en-US': 'Applied version',
+    'zh-CN': '已应用版本',
   },
-  'ai.environment.install.invalidOrigin': {
-    'en-US': "Studio address is invalid: use an http(s) base host without path, query or userinfo.",
-    'zh-CN': "Studio 地址无效：请填写 http(s) base 主机，不含路径、查询或用户信息。",
+  'ai.environment.config.proxy': {
+    'en-US': 'Daemon proxy',
+    'zh-CN': 'Daemon 代理',
   },
-  'ai.environment.install.invalidNote': {
-    'en-US': "Note is invalid: a single nonblank line of at most 512 characters.",
-    'zh-CN': "备注无效：单行、非空、最多 512 字符。",
+  'ai.environment.config.proxyDirect': {
+    'en-US': 'Direct',
+    'zh-CN': '直连',
   },
-  'ai.environment.install.invalidBash': {
-    'en-US': "Bash executable is invalid: it must be nonblank without control characters.",
-    'zh-CN': "Bash 可执行文件无效：不能为空或包含控制字符。",
+  'ai.environment.config.error': {
+    'en-US': 'Application error',
+    'zh-CN': '应用错误',
   },
-  'ai.environment.install.invalidOs': {
-    'en-US': "The operating system is invalid.",
-    'zh-CN': "操作系统无效。",
+  'ai.environment.config.hotUpdateHelp': {
+    'en-US': 'Saving a card configuration is applied by the current Daemon without reinstalling or restarting it. The card shows the version the running process has actually applied.',
+    'zh-CN': '保存卡片配置后由当前 Daemon 热应用，无需重新安装或重启。卡片展示当前进程实际已应用的版本。',
   },
-  'ai.environment.install.invalidField': {
-    'en-US': "Installation setting is invalid: {{field}}",
-    'zh-CN': "安装设置无效：{{field}}",
+  'ai.environment.config.state.applied': {
+    'en-US': 'Applied',
+    'zh-CN': '已应用',
   },
-  'ai.environment.install.invalidLsp': {
-    'en-US': 'LSP servers are invalid: check server IDs, command, extensions and markers; extensions are required and must start with a dot.',
-    'zh-CN': 'LSP servers 配置无效：请检查 server ID、command、extensions 和 markers；extensions 必填并以 . 开头。',
+  'ai.environment.config.state.pendingApply': {
+    'en-US': 'Pending apply',
+    'zh-CN': '待应用',
+  },
+  'ai.environment.config.state.pendingConnect': {
+    'en-US': 'Pending connection',
+    'zh-CN': '待连接',
+  },
+  'ai.environment.config.state.failed': {
+    'en-US': 'Apply failed',
+    'zh-CN': '应用失败',
+  },
+  'ai.environment.config.state.unknown': {
+    'en-US': 'Unknown',
+    'zh-CN': '未知',
+  },
+  'ai.environment.form.edit': {
+    'en-US': 'Edit configuration',
+    'zh-CN': '编辑配置',
+  },
+  'ai.environment.form.editTitle': {
+    'en-US': 'Edit environment: {{name}}',
+    'zh-CN': '编辑环境：{{name}}',
+  },
+  'ai.environment.form.nameImmutable': {
+    'en-US': 'The name is the stable identity and cannot be changed after creation.',
+    'zh-CN': '名称是稳定身份，创建后不可修改。',
+  },
+  'ai.environment.form.note': {
+    'en-US': 'Note',
+    'zh-CN': '备注',
+  },
+  'ai.environment.form.notePlaceholder': {
+    'en-US': 'e.g. Development workstation',
+    'zh-CN': '例如：开发工作站',
+  },
+  'ai.environment.form.studioUrl': {
+    'en-US': 'Studio address',
+    'zh-CN': 'Studio 地址',
+  },
+  'ai.environment.form.studioUrlPlaceholder': {
+    'en-US': 'https://studio.example.com',
+    'zh-CN': 'https://studio.example.com',
+  },
+  'ai.environment.form.studioUrlHelp': {
+    'en-US': 'HTTP(S) origin used by the Daemon to connect to this Studio; no path, query or credentials.',
+    'zh-CN': 'Daemon 连接此 Studio 使用的 HTTP(S) 源地址；不含路径、查询参数或凭据。',
+  },
+  'ai.environment.form.bashExecutable': {
+    'en-US': 'Bash executable',
+    'zh-CN': 'Bash 可执行文件',
+  },
+  'ai.environment.form.bashHelp': {
+    'en-US': 'Leave empty to use bash from the host PATH.',
+    'zh-CN': '留空则使用宿主 PATH 中的 bash。',
+  },
+  'ai.environment.form.lsp': {
+    'en-US': 'Enable LSP servers',
+    'zh-CN': '启用 LSP servers',
+  },
+  'ai.environment.form.lspHelp': {
+    'en-US': 'Declare installed language servers. Extensions, root markers and first-match markers are optional.',
+    'zh-CN': '声明已安装的语言服务器；extensions、root markers 与 first-match markers 均可选。',
+  },
+  'ai.environment.form.proxyUrl': {
+    'en-US': 'Daemon proxy',
+    'zh-CN': 'Daemon 代理',
+  },
+  'ai.environment.form.proxyPlaceholder': {
+    'en-US': 'http://127.0.0.1:7890',
+    'zh-CN': 'http://127.0.0.1:7890',
+  },
+  'ai.environment.form.proxyHelp': {
+    'en-US': 'Leave empty for a direct connection. Only an unauthenticated http://host:port proxy without path, query or fragment is accepted.',
+    'zh-CN': '留空表示直连。仅支持无认证的 http://host:port 代理，不接受路径、查询参数或片段。',
+  },
+  'ai.environment.form.applyNotice': {
+    'en-US': 'Saved configuration is applied without reinstalling the Daemon.',
+    'zh-CN': '保存后的配置无需重装 Daemon 即可生效。',
+  },
+  'ai.environment.form.hotUpdateHelp': {
+    'en-US': 'The running Daemon receives the complete configuration immediately. Bash, LSP and network components switch to the new values for subsequent calls; the installation directory, token and identity do not change.',
+    'zh-CN': '运行中的 Daemon 会立即收到完整配置。Bash、LSP 与网络组件对后续调用使用新值；安装目录、凭据与身份不变。',
+  },
+  'ai.environment.form.save': {
+    'en-US': 'Save configuration',
+    'zh-CN': '保存配置',
+  },
+  'ai.environment.form.create': {
+    'en-US': 'Create environment',
+    'zh-CN': '创建环境',
+  },
+  'ai.environment.form.invalidName': {
+    'en-US': 'The name must be nonblank, at most 64 characters, without a slash or surrounding whitespace.',
+    'zh-CN': '名称必须非空、最多 64 字符，且不含斜杠或首尾空白。',
+  },
+  'ai.environment.form.invalidNote': {
+    'en-US': 'The note must be a single nonblank line of at most 512 characters, or empty.',
+    'zh-CN': '备注必须为单行、最多 512 字符，或留空。',
+  },
+  'ai.environment.form.invalidStudioUrl': {
+    'en-US': 'Studio address is invalid: use an HTTP(S) origin without path, query or credentials.',
+    'zh-CN': 'Studio 地址无效：请填写 HTTP(S) 源地址，不含路径、查询参数或凭据。',
+  },
+  'ai.environment.form.invalidBash': {
+    'en-US': 'Bash executable is invalid: it must be nonblank without control characters.',
+    'zh-CN': 'Bash 可执行文件无效：不能为空或包含控制字符。',
+  },
+  'ai.environment.form.invalidProxy': {
+    'en-US': 'Daemon proxy is invalid: use http://host:port without credentials, path, query or fragment.',
+    'zh-CN': 'Daemon 代理无效：请使用不含凭据、路径、查询参数或片段的 http://host:port。',
+  },
+  'ai.environment.form.invalidLsp': {
+    'en-US': 'LSP servers are invalid: check server IDs, command, extensions and markers; extensions are optional and must start with a dot when provided.',
+    'zh-CN': 'LSP servers 配置无效：请检查 server ID、command、extensions 和 markers；extensions 可省略，提供时须以 . 开头。',
+  },
+  'ai.environment.form.invalidConfig': {
+    'en-US': 'The Daemon configuration is invalid.',
+    'zh-CN': 'Daemon 配置无效。',
+  },
+  'ai.environment.form.invalidField': {
+    'en-US': 'Configuration is invalid: {{field}}',
+    'zh-CN': '配置无效：{{field}}',
   },
   'ai.environment.close': {
     'en-US': 'Close',

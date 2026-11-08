@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
@@ -8,494 +8,207 @@ import { environmentService } from '@/features/environment/environment-service'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import { ApiError, url } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import type {
-  EnvironmentDTO,
-  EnvironmentInstallConfigDTO,
-} from '@/shared/api/generated/contracts'
+import { testEnvironment } from '@/test-support/environment-test-fixtures'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     getEnvironment: vi.fn(),
-    getEnvironmentRuntime: vi.fn(),
-    startEnvironmentUpdate: vi.fn(),
-    saveInstallConfig: vi.fn(),
     createInstallCode: vi.fn(),
   },
 }))
 vi.mock('@/shared/lib/clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
-const saved: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'windows',
-  daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
-    lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'] } } } },
-}
-// Shared codec normalization adds the omitted optional marker array.
-const savedNormalized: EnvironmentInstallConfigDTO = {
-  operatingSystem: 'windows',
-  daemon: { studioUrl: 'https://saved.example.com', bashExecutable: 'bash.exe', note: 'saved note',
-    lsp: { servers: { ts: { command: ['ts-server'], extensions: ['.ts'], rootMarkers: ['pom.xml'], firstMatchMarkers: [] } } } },
-}
-const card: EnvironmentDTO = {
-  id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false, statusExpiresAt: null,
-  lastSeenAt: null, capabilities: [], createdAt: 0, updatedAt: 0, installConfig: saved,
-}
-const copyButton = () => screen.getByRole('button', { name: '保存并复制安装命令' })
-const origin = () => screen.getByRole('textbox', { name: 'Studio 地址' })
+const card = testEnvironment({ id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false })
+const copyInstall = () => screen.getByRole('button', { name: '复制安装命令' })
+const copyUninstall = () => screen.getByRole('button', { name: '复制卸载命令' })
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (err: unknown) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
   return { promise, resolve, reject }
 }
 
-function open(options: { uninstall?: boolean; environment?: EnvironmentDTO } = {}) {
+function open(options: { uninstall?: boolean; environment?: typeof card } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const close = vi.fn()
-  const environment = options.environment ?? { ...card, version: '1', installConfig: null }
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <EnvironmentInstallModal environment={environment} uninstall={options.uninstall} onClose={close} />
+      <EnvironmentInstallModal
+        environment={options.environment ?? card}
+        uninstall={options.uninstall}
+        onClose={close}
+      />
     </QueryClientProvider>,
   )
   return { ...view, queryClient, close }
 }
 
+function installCommandUrl(os: 'linux' | 'macos' | 'windows', code: string) {
+  return `${window.location.origin}${url(
+    'GET /api/platform/environments/{environmentId}/install-script',
+    { path: { environmentId: 'env-1' }, query: { code, operatingSystem: os } },
+  )}`
+}
+
+function uninstallCommandUrl(os: 'linux' | 'macos' | 'windows') {
+  return `${window.location.origin}${url(
+    'GET /api/platform/environments/{environmentId}/uninstall-script',
+    { path: { environmentId: 'env-1' }, query: { operatingSystem: os } },
+  )}`
+}
+
 describe('EnvironmentInstallModal', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
-    vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8' })
     vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: "short-code'汉字", expiresAt: 1791191100000,
+      code: "short-code'汉字",
+      expiresAt: 1_791_191_100_000,
     })
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
   })
 
-  it('loads saved defaults, saves, then copies the stable environment script URL', async () => {
+  it('issues a one-time code and copies the install command for the chosen OS', async () => {
     const user = userEvent.setup()
-    const { queryClient } = open()
-    await waitFor(() => expect(origin()).toHaveValue(saved.daemon.studioUrl))
-    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'windows')
-    expect(environmentService.getEnvironment).toHaveBeenCalled()
-    expect(screen.queryByText(/可选：Java/)).toBeNull()
-    expect(document.querySelector('details, summary')).toBeNull()
-    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('saved note')
-    expect(screen.getByRole('checkbox')).toBeChecked()
-    expect(screen.getByRole('textbox', { name: 'LSP servers' }))
-      .toHaveValue(JSON.stringify(savedNormalized.daemon.lsp!.servers, null, 2))
-    // Returned canonical OS, not the unsaved browser form, selects the script URL.
-    vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
-      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
-    await user.click(copyButton())
-    expect(await screen.findByText('安装命令已复制，5分钟内有效。')).toBeInTheDocument()
+    open()
+    await chooseSelectOption(user, '操作系统', 'macOS')
+    await user.click(copyInstall())
+    expect(environmentService.createInstallCode).toHaveBeenCalledWith('env-1', '7')
+    expect(await screen.findByText('安装命令已复制，5 分钟内有效。')).toBeInTheDocument()
     expect(screen.getByRole('status').closest('[role="dialog"]')).toBeNull()
     expect(within(screen.getByRole('dialog')).queryByRole('status')).toBeNull()
-    expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', savedNormalized)
-    expect(environmentService.createInstallCode).toHaveBeenCalledWith('env-1', '8')
-    expect(vi.mocked(environmentService.saveInstallConfig).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
     const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
-    const scriptUrl = url('GET /api/platform/environments/{environmentId}/install-script', {
-      path: { environmentId: 'env-1' },
-      query: { code: "short-code'汉字" },
-    })
     expect(copied).toBe(
-      `(set -o pipefail; curl -fsSL $'${window.location.origin}${scriptUrl.replaceAll("'", "\\'")}' | bash)`,
+      `(set -o pipefail; curl -fsSL $'${installCommandUrl('macos', "short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
     )
-    expect(copied).not.toContain('canonical.example.com')
+    expect(copied).toContain('operatingSystem=macos')
     expect(copied).not.toContain('registrationToken')
+    expect(copied).not.toContain(card.daemonConfig.studioUrl)
     expect(document.body.textContent).not.toContain('registrationToken')
-    expect(JSON.stringify([queryClient.getQueryCache().getAll(), localStorage])).not.toContain('registrationToken')
-    await user.click(copyButton())
-    expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('8')
   })
 
-  it('uses origin and OS defaults only when configuration is unset', async () => {
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
+  it('changes the OS without calling the API until copy and keeps the form usable', async () => {
+    const user = userEvent.setup()
     open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    expect(origin()).toHaveValue(window.location.origin)
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'linux')
-  })
-
-  it('preserves draft after save failure with no credential request or copy', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.saveInstallConfig).mockRejectedValue(new Error('save failed'))
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.clear(origin()); await user.type(origin(), 'https://draft.example.com')
-    await user.click(copyButton())
-    expect(await screen.findByRole('alert')).toHaveTextContent('save failed')
-    expect(origin()).toHaveValue('https://draft.example.com')
     expect(environmentService.createInstallCode).not.toHaveBeenCalled()
-    expect(copyTextToClipboard).not.toHaveBeenCalled()
+    await chooseSelectOption(user, '操作系统', 'Windows')
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
+    await user.click(copyInstall())
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain(
+      installCommandUrl('windows', "short-code'汉字").replaceAll("'", "''"),
+    )
   })
 
-  it('presents CAS conflict, preserves draft and refreshes version without replacing edited fields', async () => {
+  it('presents a CAS conflict, keeps the selected OS and rebases the expected version', async () => {
     const user = userEvent.setup()
-    vi.mocked(environmentService.saveInstallConfig).mockRejectedValueOnce(
-      new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'Install settings changed'))
+    vi.mocked(environmentService.createInstallCode).mockRejectedValueOnce(
+      new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'environment changed'),
+    )
     open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.clear(origin()); await user.type(origin(), 'https://draft.example.com')
-    await user.click(copyButton())
+    await chooseSelectOption(user, '操作系统', 'macOS')
+    await user.click(copyInstall())
     const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
-    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
+    expect(environmentService.createInstallCode).toHaveBeenCalledWith('env-1', '7')
     vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, version: '12' })
     await user.click(within(conflict).getByRole('button', { name: '刷新' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect(origin()).toHaveValue('https://draft.example.com')
-    await user.click(copyButton())
-    expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('12')
-  })
-
-  it('issues a new install code after token rotation without putting the long-lived token in the command', async () => {
-    const user = userEvent.setup()
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.click(copyButton())
-    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1))
-    const first = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
-    vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({
-      ...card, version: '9', registrationToken: 'rotated-long-token',
-    })
-    vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: 'fresh-code', expiresAt: 1791191400000,
-    })
-    await user.click(copyButton())
-    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
-    const second = vi.mocked(copyTextToClipboard).mock.calls[1]![0]
-    expect(second).not.toBe(first)
-    expect(second).toContain('code=fresh-code')
-    expect(second).not.toContain('rotated-long-token')
-    expect(environmentService.createInstallCode).toHaveBeenLastCalledWith('env-1', '9')
-  })
-
-  it.each(['code', 'clipboard', 'missing-config'] as const)('explains settings saved but not copied on %s failure', async failure => {
-    const user = userEvent.setup()
-    if (failure === 'code') vi.mocked(environmentService.createInstallCode).mockRejectedValue(new Error('code unavailable'))
-    if (failure === 'clipboard') vi.mocked(copyTextToClipboard).mockResolvedValue(false)
-    if (failure === 'missing-config') vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, installConfig: null, version: '8' })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.click(copyButton())
-    expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但命令生成或复制失败')
-    expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
-  })
-
-  it('reopens with current remote defaults rather than stale list card metadata', async () => {
-    const first = open()
-    await waitFor(() => expect(origin()).toHaveValue(saved.daemon.studioUrl))
-    first.unmount()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, version: '12',
-      installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://new.example.com' } } })
-    open()
-    await waitFor(() => expect(origin()).toHaveValue('https://new.example.com'))
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
+    await user.click(copyInstall())
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1))
+    expect(environmentService.createInstallCode).toHaveBeenLastCalledWith('env-1', '12')
   })
 
-  it.each(['metadata', 'save', 'code', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
+  it('shows the install code failure instead of pretending a command was copied', async () => {
     const user = userEvent.setup()
-    const metadata = deferred<EnvironmentDTO>()
-    const save = deferred<EnvironmentDTO>()
-    const code = deferred<{ code: string; expiresAt: number }>()
-    const clipboard = deferred<boolean>()
-    if (phase === 'metadata') vi.mocked(environmentService.getEnvironment).mockReturnValue(metadata.promise)
-    if (phase === 'save') vi.mocked(environmentService.saveInstallConfig).mockReturnValue(save.promise)
-    if (phase === 'code') vi.mocked(environmentService.createInstallCode).mockReturnValue(code.promise)
-    if (phase === 'clipboard') vi.mocked(copyTextToClipboard).mockReturnValue(clipboard.promise)
-    const view = open()
-    if (phase !== 'metadata') {
-      await waitFor(() => expect(copyButton()).toBeEnabled())
-      await user.click(copyButton())
-      if (phase === 'code') await waitFor(() => expect(environmentService.createInstallCode).toHaveBeenCalled())
-      if (phase === 'clipboard') {
-        await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
-        // 剪贴板尚未确认时，不能抢先宣布复制成功。
-        expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
-      }
-    }
-    view.unmount()
-    await act(async () => {
-      metadata.resolve(card); save.resolve(card)
-      code.resolve({ code: 'short-code', expiresAt: 1791191100000 }); clipboard.resolve(true)
-    })
-    if (phase === 'save' || phase === 'metadata') expect(copyTextToClipboard).not.toHaveBeenCalled()
-    if (phase === 'code') expect(copyTextToClipboard).not.toHaveBeenCalled()
+    vi.mocked(environmentService.createInstallCode).mockRejectedValue(new Error('code unavailable'))
+    open()
+    await user.click(copyInstall())
+    expect(await screen.findByRole('alert')).toHaveTextContent('code unavailable')
+    expect(copyTextToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('copies a card-scoped uninstall command without calling the server', async () => {
+    const user = userEvent.setup()
+    open({ uninstall: true })
+    const dialog = screen.getByRole('dialog', { name: '卸载环境' })
+    expect(dialog).toHaveTextContent('该环境的服务与程序会被移除')
+    expect(dialog).toHaveTextContent('Studio 中的环境卡片不会删除')
+    expect(dialog).not.toHaveTextContent('安装设置')
+    await chooseSelectOption(user, '操作系统', 'Windows')
+    await user.click(copyUninstall())
+    expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toBe(
+      `& { Set-PSDebug -Off; $ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri '${uninstallCommandUrl('windows').replaceAll("'", "''")}').Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script)) }`,
+    )
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
+    expect(environmentService.getEnvironment).not.toHaveBeenCalled()
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).not.toContain('code=')
+  })
+
+  it('reports clipboard rejection and never claims a command was copied', async () => {
+    const user = userEvent.setup()
+    vi.mocked(copyTextToClipboard).mockResolvedValue(false)
+    open({ uninstall: true })
+    await user.click(copyUninstall())
+    expect(await screen.findByRole('alert')).toHaveTextContent('复制失败')
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('offers reload to repair an invalid persisted configuration without masking it as defaults', async () => {
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card,
-      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://host/invalid' } } })
-    open()
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('已保存的安装设置无效')
-    expect(alert).toHaveTextContent('Studio 地址无效')
-    expect(within(alert).getByRole('button', { name: '重新加载' })).toBeInTheDocument()
-    expect(within(alert).getByRole('button', { name: '使用默认设置' })).toBeInTheDocument()
-    expect(copyButton()).toBeDisabled()
-  })
-
-  it('retries metadata transport failure and keeps a usable form', async () => {
+  it.each(['code', 'clipboard'] as const)('ignores stale %s completion after unmount', async (phase) => {
     const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment)
-      .mockRejectedValueOnce(new Error('metadata unavailable'))
-      .mockResolvedValue(card)
-    open()
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('读取环境信息失败')
-    expect(alert).toHaveTextContent('metadata unavailable')
-    expect(within(alert).queryByRole('button', { name: '使用默认设置' })).toBeNull()
-    await user.click(within(alert).getByRole('button', { name: '重新加载' }))
-    await waitFor(() => expect(origin()).toHaveValue(saved.daemon.studioUrl))
-    expect(environmentService.getEnvironment).toHaveBeenCalledTimes(2)
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-
-  it('lets the user replace an invalid saved configuration with defaults', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card,
-      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'not-an-origin' } } })
-    open()
-    const alert = await screen.findByRole('alert')
-    await user.click(within(alert).getByRole('button', { name: '使用默认设置' }))
-    expect(origin()).toHaveValue(window.location.origin)
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.click(copyButton())
-    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith(
-      'env-1', '7',
-      { operatingSystem: 'linux',
-        daemon: { studioUrl: window.location.origin, note: null, bashExecutable: null, lsp: null } },
-    ))
-  })
-
-  it('shows metadata transport failure and supports close', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockRejectedValue(new Error('metadata unavailable'))
+    const code = deferred<{ code: string; expiresAt: number }>()
+    const clipboard = deferred<boolean>()
+    if (phase === 'code') vi.mocked(environmentService.createInstallCode).mockReturnValue(code.promise)
+    if (phase === 'clipboard') vi.mocked(copyTextToClipboard).mockReturnValue(clipboard.promise)
     const view = open()
-    expect(await screen.findByRole('alert')).toHaveTextContent('metadata unavailable')
-    await user.click(screen.getAllByRole('button', { name: '关闭' })[0]!)
-    expect(view.close).toHaveBeenCalled()
+    await user.click(copyInstall())
+    if (phase === 'code') await waitFor(() => expect(environmentService.createInstallCode).toHaveBeenCalled())
+    if (phase === 'clipboard') await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
+    view.unmount()
+    await act(async () => {
+      code.resolve({ code: 'short-code', expiresAt: 1_791_191_100_000 })
+      clipboard.resolve(true)
+    })
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('validates JSON, LSP shape and origin before save with field-focused copy', async () => {
-    const user = userEvent.setup()
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
-    fireEvent.change(editor, { target: { value: 'not JSON' } })
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    // A dot-only extension is rejected by the shared codec, so the form must reject it too.
-    fireEvent.change(editor, { target: { value: '{"ts":{"command":["ts"],"extensions":["."]}}' } })
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    // Missing extensions is likewise invalid rather than silently optional.
-    fireEvent.change(editor, { target: { value: '{"ts":{"command":["ts"]}}' } })
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('checkbox'))
-    await user.clear(origin()); await user.type(origin(), 'https://host/path')
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Studio 地址无效/))
-    await user.clear(origin()); await user.type(origin(), 'https://valid.example.com/')
-    await chooseSelectOption(user, '操作系统', 'Linux')
-    const bash = screen.getByRole('textbox', { name: 'Bash 可执行文件' })
-    await user.clear(bash); await user.type(bash, ' bash ')
-    const note = screen.getByRole('textbox', { name: '备注' })
-    await user.clear(note); await user.type(note, '  note  ')
-    await user.click(copyButton())
-    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'linux',
-      daemon: { studioUrl: 'https://valid.example.com', bashExecutable: ' bash ', note: 'note', lsp: null },
-    }))
-  })
-
-  it('shows the LSP and Studio address help while editing', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card,
-      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://saved.example.com' } } })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    expect(screen.getByText('不含路径或查询参数。')).toBeInTheDocument()
-    expect(origin()).toHaveAttribute('placeholder', 'https://studio.example.com')
-    expect(screen.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveAttribute('placeholder', '/bin/bash')
-    expect(screen.getByRole('textbox', { name: '备注' })).toHaveAttribute('placeholder', '例如：开发工作站')
-    await user.click(screen.getByRole('checkbox'))
-    expect(screen.getByText('请先在目标主机安装对应的语言服务器。')).toBeInTheDocument()
-    expect(screen.queryByText(/rootMarkers/)).toBeNull()
-  })
-
-  it('states overwrite effects without implementation notes', async () => {
+  it('states the current overwrite effects without install settings or backup promises', async () => {
     open()
     const dialog = await screen.findByRole('dialog', { name: '安装/覆盖环境' })
-    expect(dialog).toHaveAccessibleName('安装/覆盖环境')
     expect(within(dialog).getByRole('heading', { name: '安装/覆盖环境' })).toBeInTheDocument()
-    expect(dialog).not.toHaveTextContent(card.name)
-    expect(dialog).toHaveTextContent('复制命令后，在目标主机的终端执行。')
+    expect(dialog).toHaveTextContent('选择目标操作系统，复制命令后，在目标主机的终端执行。')
     expect(dialog).toHaveTextContent('无需预装 JRE 或 Node；请确保 Bash 可用。')
-    expect(dialog).toHaveTextContent('覆盖安装会重启服务并连接到此环境')
-    expect(dialog).toHaveTextContent('中断当前工具调用；已有数据保留')
-    expect(dialog).toHaveTextContent('命令含凭据，请勿分享。')
-    expect(dialog).not.toHaveTextContent('HOME/.kk-studio')
-    expect(dialog).not.toHaveTextContent('Daemon')
-    expect(dialog).not.toHaveTextContent('保存不代表已应用')
+    expect(dialog).toHaveTextContent('覆盖安装会中断当前工具调用；本地配置和数据保留。')
+    expect(dialog).toHaveTextContent('命令含一次性凭据，请勿分享。')
+    expect(dialog).not.toHaveTextContent('保存安装设置')
+    expect(dialog).not.toHaveTextContent('长期备份')
+    expect(dialog).not.toHaveTextContent('Studio 地址')
+    expect(dialog).not.toHaveTextContent('Bash 可执行文件')
   })
 
-  it('keeps a fresh empty LSP editor as a placeholder and rejects enabling it without JSON', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    expect(screen.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveValue('')
-    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('')
-    expect(screen.queryByRole('textbox', { name: 'LSP servers' })).toBeNull()
-    await user.click(screen.getByRole('checkbox'))
-    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
-    const example = {
-      jdtls: {
-        command: ['~/.local/share/nvim/mason/bin/jdtls'],
-        extensions: ['.java'],
-        rootMarkers: ['pom.xml'],
-      },
-    }
-    expect(editor).toHaveValue('')
-    expect(JSON.parse(editor.getAttribute('placeholder')!)).toEqual(example)
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
-    expect(copyTextToClipboard).not.toHaveBeenCalled()
-    const real = JSON.stringify({
-      jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'] },
-    }, null, 2)
-    fireEvent.change(editor, { target: { value: real } })
-    expect(editor).toHaveValue(real)
-    await user.click(copyButton())
-    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'linux',
-      daemon: {
-        studioUrl: window.location.origin, note: null, bashExecutable: null,
-        lsp: { servers: { jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'], rootMarkers: [], firstMatchMarkers: [] } } },
-      },
-    }))
-  })
-
-  it('rejects a typed empty object instead of substituting the example', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    await user.click(screen.getByRole('checkbox'))
-    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
-    fireEvent.change(editor, { target: { value: '{}' } })
-    expect(editor).toHaveValue('{}')
-    expect(editor).toHaveAttribute('placeholder', expect.stringContaining('jdtls'))
-    await user.click(copyButton())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
-    expect(editor).toHaveValue('{}')
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
-    expect(copyTextToClipboard).not.toHaveBeenCalled()
-  })
-
-  it('shows saved LSP settings without substituting the example', async () => {
-    const servers = { jdtls: { command: ['/opt/jdtls'], extensions: ['.java'], rootMarkers: ['pom.xml'], firstMatchMarkers: ['build.gradle'] } }
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card,
-      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://saved.example.com', lsp: { servers } } } })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
-    expect(editor).toHaveValue(JSON.stringify(servers, null, 2))
-    expect((editor as HTMLTextAreaElement).value).not.toMatch(/mason/)
-  })
-
-  it('shows gray OS path examples without saving them or overwriting entered values', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
-    open()
-    await waitFor(() => expect(copyButton()).toBeEnabled())
-    const bash = screen.getByRole('textbox', { name: 'Bash 可执行文件' })
-    const note = screen.getByRole('textbox', { name: '备注' })
-    const examples = {
-      linux: { bash: '/bin/bash' },
-      macos: { bash: '/bin/bash' },
-      windows: { bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
-    }
-    expect(bash).toHaveAttribute('placeholder', examples.linux.bash)
-    expect(note).toHaveAttribute('placeholder', '例如：开发工作站')
-    expect(bash).toHaveValue('')
-    expect(note).toHaveValue('')
-    await chooseSelectOption(user, '操作系统', 'macOS')
-    expect(bash).toHaveAttribute('placeholder', examples.macos.bash)
-    expect(bash).toHaveValue('')
-    fireEvent.change(bash, { target: { value: 'D:\\custom\\bash.exe' } })
-    await user.type(note, '我的工作站')
-    await chooseSelectOption(user, '操作系统', 'Windows')
-    expect(bash).toHaveAttribute('placeholder', examples.windows.bash)
-    expect(bash).toHaveValue('D:\\custom\\bash.exe')
-    expect(note).toHaveValue('我的工作站')
-    await user.click(copyButton())
-    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
-      operatingSystem: 'windows',
-      daemon: { studioUrl: window.location.origin, bashExecutable: 'D:\\custom\\bash.exe', note: '我的工作站', lsp: null },
-    }))
-    const payload = JSON.stringify(vi.mocked(environmentService.saveInstallConfig).mock.calls[0])
-    expect(payload).not.toContain(examples.windows.bash)
-    expect(payload).not.toContain('开发工作站')
-  })
-
-  it('uses the same English title and copy placeholders', () => {
+  it('uses the same English title and copy notices', () => {
     setLocale('en-US')
     try {
       const install = open()
       const dialog = screen.getByRole('dialog', { name: 'Install/overwrite environment' })
-      expect(within(dialog).getByRole('heading', { name: 'Install/overwrite environment' })).toBeInTheDocument()
-      expect(dialog).toHaveTextContent('Copy the command and run it in a terminal on the target host.')
-      expect(dialog).toHaveTextContent('The command contains credentials. Do not share it.')
-      expect(within(dialog).getByRole('textbox', { name: 'Note' })).toHaveAttribute(
-        'placeholder', 'e.g. Development workstation')
-      expect(dialog).not.toHaveTextContent('Optional: Java')
+      expect(dialog).toHaveTextContent(
+        'Choose the target operating system, copy the command and run it in a terminal on the target host.',
+      )
+      expect(dialog).toHaveTextContent('The command contains a one-time credential. Do not share it.')
+      expect(within(dialog).getByRole('button', { name: 'Copy installation command' })).toBeInTheDocument()
       install.unmount()
       open({ uninstall: true })
       const uninstall = screen.getByRole('dialog', { name: 'Uninstall environment' })
-      expect(within(uninstall).getByRole('heading', { name: 'Uninstall environment' })).toBeInTheDocument()
-      expect(uninstall).toHaveTextContent('The environment record in Studio is not deleted.')
+      expect(uninstall).toHaveTextContent('The environment card in Studio is not deleted.')
+      expect(within(uninstall).getByRole('button', { name: 'Copy uninstall command' })).toBeInTheDocument()
     } finally {
       setLocale('zh-CN')
     }
-  })
-
-  it('defaults uninstall to the saved operating system without metadata, token or save', async () => {
-    const user = userEvent.setup()
-    open({ uninstall: true, environment: { ...card, version: '1',
-      installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://saved.example.com' } } } })
-    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
-    // 卸载作用域是当前 OS 用户唯一 Daemon，不一定是本卡片环境，且只移除服务与程序。
-    const dialog = screen.getByRole('dialog', { name: '卸载环境' })
-    expect(within(dialog).getByRole('heading', { name: '卸载环境' })).toBeInTheDocument()
-    expect(dialog).not.toHaveTextContent(card.name)
-    expect(dialog).toHaveTextContent('在需要卸载的主机上执行命令。')
-    expect(dialog).toHaveTextContent('环境服务会被移除，本地配置和数据保留')
-    expect(dialog).toHaveTextContent('Studio 中的环境记录不会删除')
-    expect(dialog).not.toHaveTextContent('HOME/.kk-studio')
-    expect(dialog).not.toHaveTextContent('Token')
-    await chooseSelectOption(user, '操作系统', 'Windows')
-    await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
-    expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
-    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain(
-      `${window.location.origin}/api/platform/daemon-uninstall-scripts/windows`,
-    )
-    expect(environmentService.getEnvironment).not.toHaveBeenCalled()
-    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
-    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).not.toContain('code=')
-    vi.mocked(copyTextToClipboard).mockResolvedValue(false)
-    await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('复制失败')
   })
 })

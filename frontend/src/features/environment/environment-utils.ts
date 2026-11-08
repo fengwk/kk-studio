@@ -5,8 +5,14 @@ import { formatByteCount } from '@/shared/lib/format-bytes'
 import type {
   EnvironmentDTO,
   EnvironmentEventLevel,
+  EnvironmentRuntimeDTO,
+  EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
+import { compareEnvironmentVersions } from '@/features/environment/environment-config-codec'
+
+type RuntimeConfiguration = NonNullable<EnvironmentRuntimeDTO['configuration']>
+type RuntimeConfigurationError = NonNullable<RuntimeConfiguration['error']>
 
 export function filterEnvironments(
   environments: EnvironmentDTO[],
@@ -76,4 +82,94 @@ export function presentUpdateProgress(
     total: update.totalBytes == null ? null : formatByteCount(update.totalBytes),
     percent: updateDownloadPercent(update.downloadedBytes, update.totalBytes),
   }
+}
+
+/**
+ * 卡片配置状态只由卡片版本与当前 owner 运行快照派生，不保存客户端状态：
+ * - 没有快照（离线或尚未建立 owner 会话）为待连接；
+ * - 快照未上报 configuration 时为未知，不能伪装成已应用或直连；
+ * - 当前版本失败优先于旧版本的已应用结果；
+ * - appliedVersion 落后为待应用，超前于数据库版本是部署/重置异常，不宣称已应用。
+ */
+export type EnvironmentConfigState =
+  | 'applied'
+  | 'pendingApply'
+  | 'pendingConnect'
+  | 'failed'
+  | 'unknown'
+
+export type EnvironmentProxyView =
+  | { known: false }
+  | { known: true; url: string | null }
+
+export interface EnvironmentConfigView {
+  state: EnvironmentConfigState
+  appliedVersion: string | null
+  proxy: EnvironmentProxyView
+  error: { code: string; field: string | null } | null
+}
+
+function unknownConfigView(): EnvironmentConfigView {
+  return {
+    state: 'unknown',
+    appliedVersion: null,
+    proxy: { known: false },
+    error: null,
+  }
+}
+
+function currentConfigError(
+  error: RuntimeConfigurationError | null,
+  cardVersion: string,
+): { code: string; field: string | null } | null {
+  if (error == null) return null
+  if (compareEnvironmentVersions(error.version, cardVersion) !== 0) return null
+  return { code: error.code, field: error.field ?? null }
+}
+
+export function presentEnvironmentConfig(
+  environment: EnvironmentDTO,
+  runtime: EnvironmentRuntimeStatusDTO | undefined,
+): EnvironmentConfigView {
+  // 没有有效连接租约时，即使 react-query 仍缓存着上一代快照，也只能显示待连接；
+  // 旧快照不能冒充当前进程仍已应用，更不能把 proxy null 说成直连。
+  if (environment.status === 'OFFLINE') {
+    return { ...unknownConfigView(), state: 'pendingConnect' }
+  }
+  if (runtime == null) {
+    return unknownConfigView()
+  }
+  const configuration: RuntimeConfiguration | null | undefined = runtime.status.configuration
+  if (configuration == null) {
+    return unknownConfigView()
+  }
+
+  const appliedVersion = configuration.appliedVersion ?? null
+  const proxy: EnvironmentProxyView =
+    appliedVersion == null
+      ? { known: false }
+      : { known: true, url: configuration.proxyUrl ?? null }
+  const error = currentConfigError(configuration.error ?? null, environment.version)
+
+  if (error != null) {
+    return { state: 'failed', appliedVersion, proxy, error }
+  }
+  if (appliedVersion == null) {
+    return { state: 'pendingApply', appliedVersion, proxy, error: null }
+  }
+
+  const order = compareEnvironmentVersions(appliedVersion, environment.version)
+  if (order === 0) {
+    return { state: 'applied', appliedVersion, proxy, error: null }
+  }
+  if (order === -1) {
+    return { state: 'pendingApply', appliedVersion, proxy, error: null }
+  }
+  return { ...unknownConfigView(), appliedVersion, proxy }
+}
+
+/** 代理只在当前进程确有已应用快照时展示；否则保持未知，不能把卡片直连意图当作已生效。 */
+export function environmentProxyText(view: EnvironmentConfigView, directLabel: string): string {
+  if (!view.proxy.known) return '—'
+  return view.proxy.url ?? directLabel
 }
