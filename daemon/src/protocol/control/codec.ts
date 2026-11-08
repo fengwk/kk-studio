@@ -51,7 +51,7 @@ import {
   requireUuid,
 } from './runtime.js'
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 const MAX_INVOCATION_ID_CHARS = 256
 const MAX_CALL_ID_CHARS = 256
 export const MAX_ARGUMENTS_JSON_UTF8_BYTES = MAX_MESSAGE_BYTES
