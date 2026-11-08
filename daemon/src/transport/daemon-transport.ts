@@ -118,12 +118,13 @@ export class DaemonWebSocketTransport implements ControlTransport {
     }
 
     // 显式直连或卡片代理；绝不使用会读取 NODE_USE_ENV_PROXY 的全局 Agent。
+    const proxyUrl = config.proxyUrl ?? null
     const agent =
-      config.proxyUrl === null
+      proxyUrl === null
         ? gatewayUri.startsWith('wss:')
           ? new https.Agent()
           : new http.Agent()
-        : new HttpsProxyAgent(config.proxyUrl)
+        : new HttpsProxyAgent(proxyUrl)
     const destroyAgent = (): void => {
       try {
         agent.destroy()

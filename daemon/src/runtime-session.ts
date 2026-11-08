@@ -250,7 +250,10 @@ export class ControlSession {
     }
     const settings = envelope.payload.value as Settings
     this.options.outbound.bind(environmentId)
-    const budgets = settings.resourceBudgets!
+    const budgets = settings.resourceBudgets
+    if (budgets === undefined) {
+      throw new Error('settings.resourceBudgets is required')
+    }
     this.maxResourceBytesValue = Number(budgets.maxResourceBytes)
     const ttl = Number(budgets.temporaryResourceTtlSeconds)
     const cleanup = Number(budgets.temporaryResourceCleanupIntervalSeconds)
