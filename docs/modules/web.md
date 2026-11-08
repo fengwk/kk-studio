@@ -89,7 +89,7 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Issue | `/api/project/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 创建、读取与删除，当前运行状态快照、注册令牌轮换、安装设置、一次性安装码与脚本、卸载脚本、受管二进制在线更新、运维 events；创建和轮换响应及安装脚本含凭据 |
+| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/uninstall-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/{id}/events` | 创建、读取与整体替换（`note` + `daemonConfig`）、当前 owner 运行快照、注册令牌轮换、一次性安装码与按卡片安装/卸载脚本、受管二进制在线更新、运维事件；创建和轮换响应及安装脚本含凭据 |
 | Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
@@ -221,7 +221,7 @@ locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
-Daemon registration token 在准入请求中绑定 Environment，通用 Environment 响应只返回安全投影。
+Daemon 准入请求同时携带卡片 UUID、进程 UUID 与协议版本，服务端先核对 UUID 与注册凭据所属卡片一致再取得租约；通用 Environment 响应只返回安全投影，不回显 token。
 Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
 Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；
