@@ -73,20 +73,7 @@ class ConfigSyncParserTest {
 
   @Test
   void daemonConfigAndNoteAreParsedInCanonicalForm() {
-    String yamlText =
-        "environments:\n"
-            + "  - name: env\n"
-            + "    note: \"  trimmed note  \"\n"
-            + "    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n"
-            + "    daemonConfig:\n"
-            + "      studioUrl: https://studio.example.com/\n"
-            + "      bashExecutable: null\n"
-            + "      proxyUrl: \"  \"\n"
-            + "      lsp:\n"
-            + "        servers:\n"
-            + "          jdtls:\n"
-            + "            command: [jdtls]\n"
-            + "            extensions: [\" .JAVA \"]\n";
+    String yamlText = ConfigSyncFixtures.resourceYaml("environment-card-normalization.yaml");
     var environment = parser.parse(yamlText).environments().get(0);
 
     assertEquals("trimmed note", environment.note());

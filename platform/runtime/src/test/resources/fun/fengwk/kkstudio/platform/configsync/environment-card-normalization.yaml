@@ -1,0 +1,13 @@
+environments:
+  - name: env
+    note: "  trimmed note  "
+    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42
+    daemonConfig:
+      studioUrl: https://studio.example.com/
+      bashExecutable: null
+      proxyUrl: "  "
+      lsp:
+        servers:
+          jdtls:
+            command: [jdtls]
+            extensions: [" .JAVA "]
