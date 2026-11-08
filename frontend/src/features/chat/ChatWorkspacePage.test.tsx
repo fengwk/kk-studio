@@ -21,6 +21,7 @@ import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/features/chat/chat-service'
 import { environmentService } from '@/features/environment/environment-service'
+import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import { harnessService } from '@/shared/api/harness-service'
 import { sessionFileService } from '@/shared/api/session-file-service'
 import {
@@ -327,6 +328,7 @@ describe('ChatWorkspacePage', () => {
     })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
       id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
+      daemonConfig: testDaemonConfig(),
       status: 'READY', version: '1', createdAt: 0, updatedAt: 0,
       capabilities: [], statusExpiresAt: null, lastSeenAt: null,
     }])
@@ -1142,6 +1144,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       {
         id: 'a1000000-0000-4000-8000-000000000001',
         name: 'env-1',
+        daemonConfig: testDaemonConfig(),
         ready: true,
         status: 'READY',
         version: '1',
@@ -1190,6 +1193,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       {
         id: 'a1000000-0000-4000-8000-000000000001',
         name: 'env-1',
+        daemonConfig: testDaemonConfig(),
         ready: true,
         status: 'READY',
         version: '1',

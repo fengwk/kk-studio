@@ -43,7 +43,7 @@ describe('validateDaemonConfig', () => {
         proxyUrl: 'http://127.0.0.1:7890/',
       }),
     ).toEqual({
-      studioUrl: 'https://host:8443',
+      studioUrl: 'https://Host:8443',
       bashExecutable: ' bash ',
       lsp: {
         servers: {
@@ -57,6 +57,21 @@ describe('validateDaemonConfig', () => {
       },
       proxyUrl: 'http://127.0.0.1:7890',
     })
+  })
+
+  it('preserves explicit default ports and host case so a canonical card is idempotent', () => {
+    // 后端保存 https://Host:443 与 http://Proxy:80；前端不能借 URL 归一化改写它们。
+    const canonical = validateDaemonConfig({
+      studioUrl: 'https://Studio.Example:443',
+      proxyUrl: 'http://Proxy.Example:80',
+    })
+    expect(canonical).toEqual({
+      studioUrl: 'https://Studio.Example:443',
+      bashExecutable: null,
+      lsp: null,
+      proxyUrl: 'http://Proxy.Example:80',
+    })
+    expect(validateDaemonConfig(canonical)).toEqual(canonical)
   })
 
   it('treats null and blank proxy values as explicit direct and keeps bash optional', () => {
@@ -77,9 +92,15 @@ describe('validateDaemonConfig', () => {
     'http://host:0',
     'http://host:99999',
     'http://user:pass@host:7890',
+    'http://user:@host:7890',
+    'http://@host:7890',
     'http://host:7890/path',
     'http://host:7890?x',
     'http://host:7890#x',
+    'http://host:7890?',
+    'http://host:7890#',
+    'http://host:7890/?',
+    'http://host:7890/#',
     'http://host:abc',
     'http://例え.jp:7890',
     'http://host:7890 /',
@@ -99,6 +120,10 @@ describe('validateDaemonConfig', () => {
     'https://host/path',
     'https://host?x',
     'https://host#x',
+    'https://host?',
+    'https://host#',
+    'https://host/?',
+    'https://host/#',
     'https://host:99999',
     'https://',
     'https://host\\path',
@@ -201,7 +226,7 @@ describe('validateDaemonConfig', () => {
         lsp: {
           servers: Object.fromEntries([
             [id, { command: ['server'], extensions: ['.ts'] }],
-          ]) as DaemonConfigDTO['lsp']['servers'],
+          ]) as NonNullable<DaemonConfigDTO['lsp']>['servers'],
         },
       })
       const servers = normalized.lsp!.servers

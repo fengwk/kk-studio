@@ -11,7 +11,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 import { compareEnvironmentVersions } from '@/features/environment/environment-config-codec'
 
-type RuntimeConfiguration = NonNullable<EnvironmentRuntimeDTO['configuration']>
+type RuntimeConfiguration = EnvironmentRuntimeDTO['configuration']
 type RuntimeConfigurationError = NonNullable<RuntimeConfiguration['error']>
 
 export function filterEnvironments(
@@ -87,7 +87,7 @@ export function presentUpdateProgress(
 /**
  * 卡片配置状态只由卡片版本与当前 owner 运行快照派生，不保存客户端状态：
  * - 没有快照（离线或尚未建立 owner 会话）为待连接；
- * - 快照未上报 configuration 时为未知，不能伪装成已应用或直连；
+ * - configuration 始终存在；appliedVersion null 表示尚未应用，不能伪装成已应用或直连；
  * - 当前版本失败优先于旧版本的已应用结果；
  * - appliedVersion 落后为待应用，超前于数据库版本是部署/重置异常，不宣称已应用。
  */
@@ -139,11 +139,7 @@ export function presentEnvironmentConfig(
   if (runtime == null) {
     return unknownConfigView()
   }
-  const configuration: RuntimeConfiguration | null | undefined = runtime.status.configuration
-  if (configuration == null) {
-    return unknownConfigView()
-  }
-
+  const configuration = runtime.status.configuration
   const appliedVersion = configuration.appliedVersion ?? null
   const proxy: EnvironmentProxyView =
     appliedVersion == null

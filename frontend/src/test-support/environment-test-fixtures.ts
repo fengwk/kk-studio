@@ -1,12 +1,10 @@
 import type {
   DaemonConfigDTO,
   EnvironmentDTO,
-  EnvironmentRuntimeDTO,
+  EnvironmentRuntimeConfigurationDTO,
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
-
-type RuntimeConfiguration = NonNullable<EnvironmentRuntimeDTO['configuration']>
 
 /** 完整卡片默认配置：studioUrl 必填，其余可空；proxy null 表示直连。 */
 export function testDaemonConfig(overrides: Partial<DaemonConfigDTO> = {}): DaemonConfigDTO {
@@ -41,7 +39,7 @@ export interface TestRuntimeOptions {
   revision?: string
   daemonVersion?: string
   update?: EnvironmentUpdateProgressDTO | null
-  configuration?: RuntimeConfiguration | null
+  configuration?: EnvironmentRuntimeConfigurationDTO
 }
 
 /** 运行快照默认与卡片 version 1 对齐；各用例可显式构造旧版本、失败或未知状态。 */
@@ -51,10 +49,11 @@ export function testRuntimeStatus(options: TestRuntimeOptions = {}): Environment
     status: {
       daemonVersion: options.daemonVersion ?? '1.2.3',
       update: options.update ?? null,
-      configuration:
-        options.configuration === undefined
-          ? { appliedVersion: '1', proxyUrl: null, error: null }
-          : options.configuration,
+      configuration: options.configuration ?? {
+        appliedVersion: '1',
+        proxyUrl: null,
+        error: null,
+      },
     },
   }
 }
