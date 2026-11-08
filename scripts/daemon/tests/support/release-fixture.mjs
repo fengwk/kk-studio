@@ -41,6 +41,47 @@ const SCRIPTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon')
 
 const MAIN_JS = `console.log("kk-studio-daemon ${DAEMON_VERSION}")\n`
 
+/**
+ * Behaviourally faithful `--check-config` stand-in for the fixture runtime: the real daemon
+ * validates a config together with its sibling daemon.token. The fixture checker therefore
+ * requires the same named pair, rejects the old/invalid envelope and verifies the credential
+ * bytes the installer promised to publish, so a configuration staged under a temporary file
+ * name cannot silently pass preflight.
+ */
+const CHECK_CONFIG_JS = `import fs from "node:fs"
+import path from "node:path"
+
+const file = process.argv[2]
+function invalid(detail) {
+  process.stderr.write("Invalid daemon configuration: " + detail + "\\n")
+  process.exit(2)
+}
+let value
+try {
+  value = JSON.parse(fs.readFileSync(file, "utf8"))
+} catch {
+  invalid("daemon: invalid JSON")
+}
+if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  invalid("daemon: expected object")
+}
+if (Object.keys(value).sort().join(",") !== "daemonConfig,environmentId,version") {
+  invalid("daemon: unknown field")
+}
+const tokenFile = path.join(path.dirname(file), "daemon.token")
+if (!fs.existsSync(tokenFile) || !fs.statSync(tokenFile).isFile() || fs.statSync(tokenFile).size === 0) {
+  invalid("daemon.token: missing sibling token")
+}
+const expected = process.env.FAKE_EXPECTED_TOKEN
+if (expected !== undefined && fs.readFileSync(tokenFile, "utf8").replace(/\\r?\\n$/, "") !== expected) {
+  invalid("daemon.token: does not match the staged credential")
+}
+if (JSON.stringify(value.daemonConfig).includes('"invalid"')) {
+  invalid("daemon.daemonConfig: unknown field")
+}
+process.stdout.write("Daemon configuration is valid\\n")
+`
+
 // The frozen runtime's lib/node is invoked as `lib/node -e ...` or
 // `lib/node <main.js> --version|--check-config <cfg>`.
 const FAKE_NODE = String.raw`#!/bin/sh
@@ -94,14 +135,8 @@ case "$2" in
     printf 'kk-studio-daemon %s\n' "$version"
     ;;
   --check-config)
-    if [ ! -s "$3" ]; then exit 2; fi
-    # 真实验收入口只接受当前 JSON 信封；这里同样拒绝非法取值与外层 "daemon" 包裹的假结构，
-    # 以免 fixture 接受真实入口会拒绝的配置而假绿。
-    if grep -q '"invalid"' "$3" || grep -q '"daemon"[[:space:]]*:' "$3"; then
-      printf 'Invalid daemon configuration: daemon.daemon: unknown field\n' >&2
-      exit 2
-    fi
-    printf 'Daemon configuration is valid\n'
+    # 与真实 daemon 相同：配置与同目录 daemon.token 成对校验，由独立的检查器读取字节。
+    exec "${process.execPath}" "$(dirname "$0")/../../../check-config.mjs" "$3"
     ;;
   *) exit 3 ;;
 esac
@@ -432,6 +467,7 @@ exit 0
         0o644,
       )
       writeText(path.join(work, 'delay.js'), 'export {}\n', 0o644)
+      writeText(path.join(work, 'check-config.mjs'), CHECK_CONFIG_JS, 0o644)
       for (const file of ['lock-helper.js', 'lock.js', 'lock-error.js', 'private-fs.js']) {
         writeText(path.join(work, 'native', file), 'export {}\n', 0o644)
       }
@@ -466,6 +502,8 @@ esac
     const tokenFile = path.join(directory, 'daemon.token')
     writeText(configFile, config ?? daemonJson({ environmentId, version }), 0o600)
     writeText(tokenFile, token, 0o600)
+    // 预检必须看到即将发布的凭据；fixture 检查器按此断言同目录 daemon.token 的字节。
+    this.expectedToken = token
     return [configFile, tokenFile]
   }
 
@@ -479,6 +517,7 @@ esac
       FAKE_TAG: RELEASE_TAG,
       FAKE_HTTP_DIR: this.httpDir,
       FAKE_SERVICE_STATE: this.state,
+      FAKE_EXPECTED_TOKEN: this.expectedToken,
       FAKE_KICKSTART_PID: String(process.pid),
       DAEMON_VERIFY_TIMEOUT_SECONDS: '1',
       DAEMON_VERIFY_STABLE_SECONDS: '0',

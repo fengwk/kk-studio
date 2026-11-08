@@ -53,6 +53,7 @@ HELPER_FIFO=
 HELPER_FD_OPEN=false
 HELPER_READY=false
 TEMP_PATHS=()
+SUCCESS_OUTPUT=
 VERIFY_TIMEOUT_SECONDS=${DAEMON_VERIFY_TIMEOUT_SECONDS:-30}
 VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 
@@ -183,37 +184,88 @@ new_operation_id() {
 }
 
 # Written only while this operation holds install.lock. Fixed fields only: no free-form message,
-# no configuration or token, no caller-supplied text. The record is atomically replaced.
+# no configuration or token, no caller-supplied text. The record is atomically replaced and any
+# real I/O failure is reported to the caller; there is no silent success and no retry/backup.
 write_last_operation() {
   local result=$1 code=$2 timestamp json temporary
-  [ -d "$ENV_ROOT" ] || return 0
+  if [ ! -d "$ENV_ROOT" ]; then
+    echo "无法写入本机诊断记录：受管目录不存在。" >&2
+    return 1
+  fi
   timestamp=$(( $(date +%s) * 1000 ))
   json=$(printf '{"operationId":"%s","type":"%s","targetVersion":%s,"phase":"%s","result":"%s","time":%s,"errorCode":%s}' \
     "$OPERATION_ID" "$ACTION" "$VERSION_JSON" "$PHASE_CODE" "$result" "$timestamp" "$code")
-  (( ${#json} <= 4096 )) || return 0
-  temporary="$ENV_ROOT/.last-operation.json.tmp.$$"
-  printf '%s\n' "$json" >"$temporary" || return 0
-  chmod 0600 "$temporary" || { rm -f "$temporary"; return 0; }
-  mv -f "$temporary" "$LAST_OPERATION" || { rm -f "$temporary"; return 0; }
-}
-cleanup() {
-  local code=$? failure=$FAILURE_REASON path error=null
-  trap - EXIT
-  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do rm -f "$path"; done
-  if [ "$HELPER_READY" = true ]; then
-    # .work/ is this card's only staging area; every operation result cleans it here.
-    if [ -n "$WORK_DIR" ]; then rm -rf "$WORK_DIR"; fi
-    if [ "$code" -ne 0 ]; then error=$(printf '"%s"' "$PHASE_CODE"); fi
-    write_last_operation "$(if [ "$code" -eq 0 ]; then echo succeeded; else echo failed; fi)" "$error"
+  if (( ${#json} > 4096 )); then
+    echo "无法写入本机诊断记录：记录超出上限。" >&2
+    return 1
   fi
-  if ! release_install_lock; then
-    if [ "$code" -eq 0 ]; then
-      echo "安装完成，但安装操作锁未能正常释放；锁由进程退出释放。" >&2
+  temporary="$ENV_ROOT/.last-operation.json.tmp.$$"
+  if ! printf '%s\n' "$json" >"$temporary"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! chmod 0600 "$temporary"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv -f "$temporary" "$LAST_OPERATION"; then
+    echo "无法写入本机诊断记录：$LAST_OPERATION" >&2
+    rm -f "$temporary"
+    return 1
+  fi
+  return 0
+}
+# 受管暂存的删除失败必须被看见：成功结果只能在清理成功后写入。
+cleanup() {
+  local code=$? failure=$FAILURE_REASON path cleanup_failed=false operation_result= operation_error=null
+  trap - EXIT
+  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
+    if ! rm -f "$path"; then cleanup_failed=true; fi
+  done
+  if [ "$HELPER_READY" = true ] && [ -n "$WORK_DIR" ]; then
+    if ! rm -rf "$WORK_DIR"; then cleanup_failed=true; fi
+  fi
+  if [ "$HELPER_READY" = true ]; then
+    if [ "$code" -eq 0 ] && [ "$cleanup_failed" = true ]; then
+      code=1
+      PHASE='清理受管暂存'
+      PHASE_CODE=cleanup
+      failure='受管暂存未能完全清理。'
+    fi
+    if [ "$code" -ne 0 ]; then
+      operation_result=failed
+      operation_error=$(printf '"%s"' "$PHASE_CODE")
+    else
+      operation_result=succeeded
+    fi
+    # 固定结果必须与清理结果一致：清理失败或记录写不进去都不能宣称成功。
+    if ! write_last_operation "$operation_result" "$operation_error"; then
       code=1
     fi
   fi
-  if [ -n "$MGMT_DIR" ]; then rm -rf "$MGMT_DIR"; fi
-  if [ -n "$BOOTSTRAP_DIR" ]; then rm -rf "$BOOTSTRAP_DIR"; fi
+  if ! release_install_lock; then
+    echo "安装操作锁未能正常释放；锁由进程退出释放。" >&2
+    code=1
+  fi
+  if [ -n "$MGMT_DIR" ]; then
+    if ! rm -rf "$MGMT_DIR"; then
+      echo "无法清理独立管理副本：$MGMT_DIR" >&2
+      code=1
+    fi
+    MGMT_DIR=
+  fi
+  if [ -n "$BOOTSTRAP_DIR" ]; then
+    if ! rm -rf "$BOOTSTRAP_DIR"; then
+      echo "无法清理系统临时目录：$BOOTSTRAP_DIR" >&2
+      code=1
+    fi
+    BOOTSTRAP_DIR=
+  fi
+  if [ "$code" -eq 0 ] && [ -n "$SUCCESS_OUTPUT" ]; then
+    printf '%s\n' "$SUCCESS_OUTPUT"
+  fi
   if [ "$code" -ne 0 ] && [ "$ACTION" != status ] && [ "$ACTION" != help ]; then
     echo "${ACTION_LABEL}失败 [${PHASE}]：${failure:-该阶段操作未完成。}" >&2
     if [ "$PUBLISHED" = true ]; then
@@ -635,6 +687,17 @@ stage_publish_file() {
   cp "$source" "$STAGED_FILE" || fail "无法复制待发布文件。"
   chmod "$mode" "$STAGED_FILE" || fail "无法设置待发布文件权限。"
 }
+# 配置与凭据必须按最终文件名成对暂存在同一个私有目录：真实 daemon 预检从配置同目录读取
+# daemon.token，临时文件名会让它读到旧凭据（重装）或不存在（首装）。
+stage_named_file() {
+  local source=$1 directory=$2 name=$3 mode=$4
+  mkdir -p "$directory"
+  chmod 0700 "$directory" || fail "无法设置待发布目录权限。"
+  STAGED_FILE="$directory/$name"
+  TEMP_PATHS+=("$STAGED_FILE")
+  cp "$source" "$STAGED_FILE" || fail "无法复制待发布文件。"
+  chmod "$mode" "$STAGED_FILE" || fail "无法设置待发布文件权限。"
+}
 # .work 是本卡片唯一暂存区：取得操作锁后先清理上一次的残留，再从已验证归档解包到目标文件系统，
 # lib 的发布因此是同文件系统 rename，而不是可能部分完成的跨文件系统复制。
 stage_program() {
@@ -786,15 +849,16 @@ cmd_install_or_update() {
   ensure_private_root "$INSTALL_ROOT/environments"
   ensure_private_root "$ENV_ROOT"
   check_managed_paths
+  stage_program
   if [ "$operation" = install ]; then
-    stage_publish_file "$STAGED_CONFIG" "$ENV_ROOT" daemon.json 0600
+    # 校验与发布使用同一份同名配对文件：.work/inputs/daemon.json + daemon.token。
+    stage_named_file "$STAGED_CONFIG" "$WORK_DIR/inputs" daemon.json 0600
     staged_config=$STAGED_FILE
-    stage_publish_file "$STAGED_TOKEN" "$ENV_ROOT" daemon.token 0600
+    stage_named_file "$STAGED_TOKEN" "$WORK_DIR/inputs" daemon.token 0600
     staged_token=$STAGED_FILE
   fi
   stage_publish_file "$BOOTSTRAP_DIR/service" "${SERVICE_PATH%/*}" service 0644
   staged_service=$STAGED_FILE
-  stage_program
   stop_service_and_wait '6/7 停止发布启动'
   # Final checks after the service is stopped: install validates the exact snapshot that will be
   # published; update re-validates the current configuration against the new program and never
@@ -824,12 +888,14 @@ cmd_install_or_update() {
   start_and_verify
   PHASE_CODE=done
   if [ "$operation" = install ]; then
-    echo "KK Studio 环境安装完成：程序/配置已写入；服务已运行。"
+    SUCCESS_OUTPUT="KK Studio 环境安装完成：程序/配置已写入；服务已运行。
+
+请返回 Studio，确认环境状态为 READY。"
   else
-    echo "KK Studio 环境更新完成：程序/服务定义已替换；配置与凭据未改动。"
+    SUCCESS_OUTPUT="KK Studio 环境更新完成：程序/服务定义已替换；配置与凭据未改动。
+
+请返回 Studio，确认环境状态为 READY。"
   fi
-  echo
-  echo "请返回 Studio，确认环境状态为 READY。"
 }
 cmd_status() {
   ACTION_LABEL=检查
@@ -889,9 +955,9 @@ cmd_uninstall() {
   rm -rf "$INSTALLED_LIB" || fail "无法移除受管程序目录。"
   if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload >/dev/null 2>&1 || true; fi
   PHASE_CODE=done
-  echo "KK Studio 环境已卸载，受管服务和程序已移除。"
-  echo
-  echo "配置、凭据、技能与用户数据已保留。"
+  SUCCESS_OUTPUT="KK Studio 环境已卸载，受管服务和程序已移除。
+
+配置、凭据、技能与用户数据已保留。"
 }
 
 main() {

@@ -154,6 +154,54 @@ describe('install.sh on Linux', () => {
       assert.notEqual(lastOperation(fixture).operationId, 'not-a-uuid')
     }))
 
+  it('reinstalls with a new credential only after validating the exact named pair that is published', () =>
+    withInstall(({ fixture, install }) => {
+      // 真实预检从配置同目录读取 daemon.token；重装时必须验证新凭据而不是旧文件。
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const [configFile, tokenFile] = fixture.makeInputs({ token: 'new-token-value' })
+      const result = install({}, { configFile, tokenFile })
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(text(path.join(root, 'daemon.token')), 'new-token-value')
+      assert.equal(text(path.join(root, 'daemon.json')), text(configFile))
+    }))
+
+  it('fails with a non-zero status when the bounded result record cannot be written', () =>
+    withInstall(({ tmp, fixture, install }) => {
+      const realMv = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim()
+      assert.ok(realMv)
+      writeExecutable(path.join(fixture.bindir, 'mv'), '#!/bin/sh\n' +
+        'case "$*" in *last-operation.json*) echo "injected mv failure" >&2; exit 1;; esac\n' +
+        `exec "${realMv}" "$@"\n`)
+      const result = install()
+      assert.notEqual(result.status, 0)
+      // 发布可能已完成，但没有可信结果记录时绝不能输出成功文案。
+      assert.doesNotMatch(result.stdout, /安装完成|READY/)
+      assert.match(result.stderr, /无法写入本机诊断记录/)
+      assert.ok(!existsSync(path.join(envRoot(fixture), 'last-operation.json')))
+    }))
+
+  it('does not report success when managed staging cannot be cleaned', () =>
+    withInstall(({ fixture, install }) => {
+      const realRm = spawnSync('which', ['rm'], { encoding: 'utf8' }).stdout.trim()
+      assert.ok(realRm)
+      const counter = path.join(fixture.state, 'rm-count')
+      writeExecutable(path.join(fixture.bindir, 'rm'), '#!/bin/sh\n' +
+        'case "$1" in -rf) case "$2" in */.work)\n' +
+        `  n=0; [ -f "'"$counter"'" ] && n=$(cat "'"$counter"'")\n` +
+        `  n=$((n + 1)); printf '%s' "$n" > "'"$counter"'"\n` +
+        '  [ "$n" -ge 2 ] && exit 1\n' +
+        'esac;; esac\n' +
+        `exec "${realRm}" "$@"\n`)
+      const result = install()
+      assert.notEqual(result.status, 0)
+      assert.doesNotMatch(result.stdout, /安装完成|READY/)
+      assert.match(result.stderr, /受管暂存未能完全清理/)
+      assert.equal(lastOperation(fixture).result, 'failed')
+      assert.equal(lastOperation(fixture).errorCode, 'cleanup')
+      assert.ok(existsSync(path.join(envRoot(fixture), '.work')))
+    }))
+
   it('update replaces only the program and service and never writes config or token', () =>
     withInstall(({ fixture, install, update }) => {
       assert.equal(install().status, 0)
