@@ -849,7 +849,7 @@ export async function runComposerMatrix(ui) {
 
           const hiddenComposer = page.locator('.composer-editor')
           assert((await hiddenComposer.count()) === 1 && !(await hiddenComposer.isVisible()), 'debug composer is not mounted and hidden')
-          assert(!(await page.locator('#chat-layout-select').isVisible()), 'debug exposes the layout selector')
+          await page.locator('#chat-layout-select').waitFor({ state: 'hidden', timeout: 10_000 })
           assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
           await expectStorage(page, draftKey, draft)
 
@@ -1858,30 +1858,37 @@ export async function expectStorage(page, key, expected) {
 
 async function expectThreadDraft(page, threadId, expected) {
   // 已绑定 Thread 的草稿与 Stop 回执原子保存在 IndexedDB，而非空 pane 的 localStorage。
-  await page.waitForFunction(async ({ id, text }) => {
-    const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('kk-studio.thread-drafts', 1)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    try {
-      const record = await new Promise((resolve, reject) => {
-        const request = db.transaction('threadDrafts', 'readonly').objectStore('threadDrafts').get(id)
+  // waitForFunction 按同步返回值的 truthiness 轮询；Promise 本身为真，不能传异步谓词。
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const persisted = await page.evaluate(async ({ id, text }) => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('kk-studio.thread-drafts', 1)
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
-      if (!record || record.threadId !== id || !Array.isArray(record.parts)
-        || !Array.isArray(record.appliedStopRequestIds)) return false
-      if (text === null) return record.parts.length === 0
-      return record.parts.length === 1
-        && record.parts[0].type === 'text'
-        && typeof record.parts[0].partId === 'string'
-        && Object.keys(record.parts[0]).sort().join(',') === 'partId,text,type'
-        && record.parts[0].text === text
-    } finally {
-      db.close()
-    }
-  }, { id: threadId, text: expected }, { timeout: 10_000 })
+      try {
+        const record = await new Promise((resolve, reject) => {
+          const request = db.transaction('threadDrafts', 'readonly').objectStore('threadDrafts').get(id)
+          request.onsuccess = () => resolve(request.result)
+          request.onerror = () => reject(request.error)
+        })
+        if (!record || record.threadId !== id || !Array.isArray(record.parts)
+          || !Array.isArray(record.appliedStopRequestIds)) return false
+        if (text === null) return record.parts.length === 0
+        return record.parts.length === 1
+          && record.parts[0].type === 'text'
+          && typeof record.parts[0].partId === 'string'
+          && Object.keys(record.parts[0]).sort().join(',') === 'partId,text,type'
+          && record.parts[0].text === text
+      } finally {
+        db.close()
+      }
+    }, { id: threadId, text: expected })
+    if (persisted) return
+    await sleep(50)
+  }
+  throw new Error(`Thread ${threadId} draft was not persisted within 10000ms`)
 }
 
 function createReadyUploadRoute() {

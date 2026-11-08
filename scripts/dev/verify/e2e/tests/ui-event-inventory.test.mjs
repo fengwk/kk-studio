@@ -53,3 +53,57 @@ test('composer storage observer retains production draft schema', async () => {
     else globalThis.localStorage = original
   }
 })
+
+test('thread draft observer waits for committed text instead of accepting an async false', async () => {
+  const original = globalThis.indexedDB
+  const threadId = '11111111-1111-4111-8111-111111111111'
+  let storedText = 'older'
+  let reads = 0
+  let closed = 0
+  const database = {
+    transaction: () => ({
+      objectStore: () => ({
+        get: (id) => {
+          assert.equal(id, threadId)
+          reads += 1
+          const request = { result: {
+            threadId, parts: [{ type: 'text', partId: 'part', text: storedText }],
+            appliedStopRequestIds: [],
+          } }
+          queueMicrotask(() => request.onsuccess())
+          return request
+        },
+      }),
+    }),
+    close: () => { closed += 1 },
+  }
+  globalThis.indexedDB = {
+    open: () => {
+      const request = { result: database }
+      queueMicrotask(() => request.onsuccess())
+      return request
+    },
+  }
+  const page = {
+    // 与 Playwright 一样，Promise 的 truthiness 不代表它最终返回 true。
+    async waitForFunction(predicate, input) {
+      const result = predicate(input)
+      assert.ok(result)
+      return result
+    },
+    async evaluate(predicate, input) { return predicate(input) },
+  }
+  try {
+    let settled = false
+    const pending = expectStorage(page, { threadId }, 'latest').then(() => { settled = true })
+    await new Promise(setImmediate)
+    assert.equal(settled, false, 'an older committed draft must not release the reload barrier')
+    storedText = 'latest'
+    await pending
+    assert.ok(reads >= 2)
+    assert.equal(closed, reads)
+  } finally {
+    if (original === undefined) delete globalThis.indexedDB
+    else globalThis.indexedDB = original
+  }
+})
