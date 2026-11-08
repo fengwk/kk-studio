@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidat
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsStorageMediaDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
@@ -174,7 +174,7 @@ public class SystemSettingsCodec {
         toTool(sections.getTool()),
         toAiRuntime(sections.getAiRuntime()),
         toEnvironment(sections.getEnvironment()),
-        toNetwork(sections.getNetwork()),
+        toBackendNetwork(sections.getBackendNetwork()),
         toStorageMedia(sections.getStorageMedia()),
         toAdvanced(sections.getAdvanced()));
   }
@@ -191,7 +191,7 @@ public class SystemSettingsCodec {
     dto.setTool(fromTool(settings.tool()));
     dto.setAiRuntime(fromAiRuntime(settings.aiRuntime()));
     dto.setEnvironment(fromEnvironment(settings.environment()));
-    dto.setNetwork(fromNetwork(settings.network()));
+    dto.setBackendNetwork(fromBackendNetwork(settings.backendNetwork()));
     dto.setStorageMedia(fromStorageMedia(settings.storageMedia()));
     dto.setAdvanced(fromAdvanced(settings.advanced()));
     return dto;
@@ -237,17 +237,19 @@ public class SystemSettingsCodec {
         requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
   }
 
-  private static SystemSettings.Network toNetwork(SystemSettingsNetworkDTO dto) {
+  private static SystemSettings.BackendNetwork toBackendNetwork(
+      SystemSettingsBackendNetworkDTO dto) {
     if (dto == null) {
-      throw new IllegalArgumentException("network is required");
+      throw new IllegalArgumentException("backendNetwork is required");
     }
-    return new SystemSettings.Network(dto.getProxyUrl(), dto.getNoProxyHosts());
+    return new SystemSettings.BackendNetwork(dto.getProxyUrl(), dto.getNoProxyHosts());
   }
 
-  private static SystemSettingsNetworkDTO fromNetwork(SystemSettings.Network network) {
-    SystemSettingsNetworkDTO dto = new SystemSettingsNetworkDTO();
-    dto.setProxyUrl(network.proxyUrl());
-    dto.setNoProxyHosts(network.noProxyHosts());
+  private static SystemSettingsBackendNetworkDTO fromBackendNetwork(
+      SystemSettings.BackendNetwork backendNetwork) {
+    SystemSettingsBackendNetworkDTO dto = new SystemSettingsBackendNetworkDTO();
+    dto.setProxyUrl(backendNetwork.proxyUrl());
+    dto.setNoProxyHosts(backendNetwork.noProxyHosts());
     return dto;
   }
 

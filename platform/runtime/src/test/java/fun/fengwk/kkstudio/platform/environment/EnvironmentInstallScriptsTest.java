@@ -45,7 +45,9 @@ class EnvironmentInstallScriptsTest {
     String token = "private-汉字'\"$`$(touch NEVER)";
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK), 0);
+            EnvironmentInstallScripts.install(
+                config, token, SystemSettingsTestFixture.BACKEND_NETWORK),
+            0);
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
@@ -75,7 +77,8 @@ class EnvironmentInstallScriptsTest {
     EnvironmentInstallConfigDTO config = config("linux");
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, "private", SystemSettingsTestFixture.NETWORK),
+            EnvironmentInstallScripts.install(
+                config, "private", SystemSettingsTestFixture.BACKEND_NETWORK),
             17);
     assertEquals(17, execution.status());
     assertFalse(texts(execution.record().get("args")).contains("--java-home"));
@@ -91,7 +94,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult result =
           run(
               EnvironmentInstallScripts.install(
-                  config("linux"), "private", SystemSettingsTestFixture.NETWORK),
+                  config("linux"), "private", SystemSettingsTestFixture.BACKEND_NETWORK),
               dir,
               Map.of());
       assertEquals(8, result.status());
@@ -110,7 +113,7 @@ class EnvironmentInstallScriptsTest {
         execute(
             EnvironmentInstallScripts.uninstall(
                 DaemonOperatingSystem.fromWireValue(operatingSystem),
-                SystemSettingsTestFixture.NETWORK),
+                SystemSettingsTestFixture.BACKEND_NETWORK),
             0);
     assertEquals(0, execution.status());
     assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
@@ -121,10 +124,10 @@ class EnvironmentInstallScriptsTest {
   @Test
   void unixInstallUsesPlatformProxyAndExplicitDirectSettings() throws Exception {
     assumeFalse(isWindows());
-    for (SystemSettings.Network network :
+    for (SystemSettings.BackendNetwork network :
         List.of(
-            new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
-            new SystemSettings.Network(null, "localhost"))) {
+            new SystemSettings.BackendNetwork("http://proxy.invalid:8080", "localhost,.internal"),
+            new SystemSettings.BackendNetwork(null, "localhost"))) {
       Execution execution =
           execute(EnvironmentInstallScripts.install(config("linux"), "token", network), 0);
       String proxy = network.proxyUrl() == null ? "" : network.proxyUrl();
@@ -141,8 +144,8 @@ class EnvironmentInstallScriptsTest {
   /** Windows 首跳按平台绕过规则选择直连，安装器仍收到完整设置。 */
   @Test
   void windowsInstallRendersPlatformProxyAndBootstrapBypass() {
-    SystemSettings.Network proxy =
-        new SystemSettings.Network("http://proxy.invalid:8080", "localhost");
+    SystemSettings.BackendNetwork proxy =
+        new SystemSettings.BackendNetwork("http://proxy.invalid:8080", "localhost");
     String command = EnvironmentInstallScripts.install(config("windows"), "token", proxy);
     assertTrue(command.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
     assertTrue(command.contains("$env:NO_PROXY = 'localhost'"));
@@ -153,7 +156,8 @@ class EnvironmentInstallScriptsTest {
         EnvironmentInstallScripts.install(
             config("windows"),
             "token",
-            new SystemSettings.Network("http://proxy.invalid:8080", "githubusercontent.com"));
+            new SystemSettings.BackendNetwork(
+                "http://proxy.invalid:8080", "githubusercontent.com"));
     assertTrue(bypass.contains("$direct = $true"));
     assertTrue(bypass.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
   }
@@ -162,7 +166,8 @@ class EnvironmentInstallScriptsTest {
   void windowsCommandProtectsAclBeforeWritingCredentials() {
     EnvironmentInstallConfigDTO config = config("windows");
     String command =
-        EnvironmentInstallScripts.install(config, "private-'$`", SystemSettingsTestFixture.NETWORK);
+        EnvironmentInstallScripts.install(
+            config, "private-'$`", SystemSettingsTestFixture.BACKEND_NETWORK);
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
     assertTrue(command.contains("[Security.AccessControl.FileSecurity]::new()"));
@@ -194,7 +199,7 @@ class EnvironmentInstallScriptsTest {
     assertFalse(invocation.contains("private"));
     String uninstall =
         EnvironmentInstallScripts.uninstall(
-            DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK);
+            DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.BACKEND_NETWORK);
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
@@ -217,7 +222,8 @@ class EnvironmentInstallScriptsTest {
       ProcessResult failed =
           runWindows(
               executable,
-              EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK),
+              EnvironmentInstallScripts.install(
+                  config, token, SystemSettingsTestFixture.BACKEND_NETWORK),
               dir,
               fixture,
               recordPath);
@@ -248,7 +254,7 @@ class EnvironmentInstallScriptsTest {
           runWindows(
               executable,
               EnvironmentInstallScripts.uninstall(
-                  DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK),
+                  DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.BACKEND_NETWORK),
               dir,
               fixture,
               recordPath);
@@ -267,24 +273,28 @@ class EnvironmentInstallScriptsTest {
     EnvironmentInstallConfigDTO config = config("linux");
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.install(config, " \n", SystemSettingsTestFixture.NETWORK));
+        () ->
+            EnvironmentInstallScripts.install(
+                config, " \n", SystemSettingsTestFixture.BACKEND_NETWORK));
     assertThrows(
         DomainException.class,
         () ->
             EnvironmentInstallScripts.install(
-                config, "token\u2028", SystemSettingsTestFixture.NETWORK));
+                config, "token\u2028", SystemSettingsTestFixture.BACKEND_NETWORK));
     // WSL 不是安装目标，卸载脚本同样拒绝。
     assertThrows(
         DomainException.class,
         () ->
             EnvironmentInstallScripts.uninstall(
-                DaemonOperatingSystem.WSL, SystemSettingsTestFixture.NETWORK));
+                DaemonOperatingSystem.WSL, SystemSettingsTestFixture.BACKEND_NETWORK));
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.uninstall(null, SystemSettingsTestFixture.NETWORK));
+        () -> EnvironmentInstallScripts.uninstall(null, SystemSettingsTestFixture.BACKEND_NETWORK));
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.install(null, "token", SystemSettingsTestFixture.NETWORK));
+        () ->
+            EnvironmentInstallScripts.install(
+                null, "token", SystemSettingsTestFixture.BACKEND_NETWORK));
   }
 
   private static Execution execute(String command, int exit) throws Exception {

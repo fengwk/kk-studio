@@ -73,7 +73,7 @@ class SystemSettingsSnapshotTest {
             SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
             SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes()),
         SystemSettingsTestFixture.ENVIRONMENT,
-        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.BACKEND_NETWORK,
         SystemSettingsTestFixture.STORAGE_MEDIA,
         SystemSettingsTestFixture.ADVANCED);
   }

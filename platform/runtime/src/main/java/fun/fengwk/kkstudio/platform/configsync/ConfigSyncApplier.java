@@ -191,7 +191,7 @@ public class ConfigSyncApplier {
     dto.setTool(sections.getTool());
     dto.setAiRuntime(sections.getAiRuntime());
     dto.setEnvironment(sections.getEnvironment());
-    dto.setNetwork(sections.getNetwork());
+    dto.setBackendNetwork(sections.getBackendNetwork());
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。

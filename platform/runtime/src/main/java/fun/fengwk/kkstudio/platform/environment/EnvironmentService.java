@@ -265,7 +265,7 @@ public class EnvironmentService {
       throw DomainException.validation(RESOURCE, "invalid or expired install code");
     }
     return EnvironmentInstallScripts.install(
-        env.getInstallConfig(), token, snapshot.get().network());
+        env.getInstallConfig(), token, snapshot.get().backendNetwork());
   }
 
   /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
@@ -282,7 +282,7 @@ public class EnvironmentService {
   }
 
   public String uninstallationScript(DaemonOperatingSystem operatingSystem) {
-    return EnvironmentInstallScripts.uninstall(operatingSystem, snapshot.get().network());
+    return EnvironmentInstallScripts.uninstall(operatingSystem, snapshot.get().backendNetwork());
   }
 
   @Transactional

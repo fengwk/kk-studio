@@ -87,7 +87,7 @@ class ToolSettingsProviderTest {
         tool,
         SystemSettingsTestFixture.AI_RUNTIME,
         SystemSettingsTestFixture.ENVIRONMENT,
-        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.BACKEND_NETWORK,
         SystemSettingsTestFixture.STORAGE_MEDIA,
         SystemSettingsTestFixture.ADVANCED);
   }

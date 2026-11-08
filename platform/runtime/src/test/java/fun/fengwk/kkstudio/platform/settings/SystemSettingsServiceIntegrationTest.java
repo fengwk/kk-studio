@@ -43,15 +43,15 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.getAiRuntime().setCompactionKeepRecentTokens(8_192);
     update.getStorageMedia().setUploadExpiresSeconds(7200L);
     // 配置只持久化；此测试不连接代理或重启任何运行实例。
-    update.getNetwork().setProxyUrl("http://proxy:3128");
-    update.getNetwork().setNoProxyHosts("localhost,*.example.test");
+    update.getBackendNetwork().setProxyUrl("http://proxy:3128");
+    update.getBackendNetwork().setNoProxyHosts("localhost,*.example.test");
 
     SystemSettingsDTO updated = systemSettingsService.update(update);
     assertEquals(1L, updated.getVersion());
     assertEquals(6000L, updated.getTool().getModelGatewayBusyRetryMillis());
     assertEquals(8_192, updated.getAiRuntime().getCompactionKeepRecentTokens());
     assertEquals(7200L, updated.getStorageMedia().getUploadExpiresSeconds());
-    assertEquals("http://proxy:3128", updated.getNetwork().getProxyUrl());
+    assertEquals("http://proxy:3128", updated.getBackendNetwork().getProxyUrl());
     // 未修改的 section 保持完整。
     assertEquals(
         systemSettingsCodec.toSections(SystemSettingsTestFixture.DEFAULT).getEnvironment(),
@@ -60,7 +60,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     // 再次读取与最新版本一致。
     SystemSettingsDTO reread = systemSettingsService.get();
     assertEquals(1L, reread.getVersion());
-    assertEquals(updated.getNetwork(), reread.getNetwork());
+    assertEquals(updated.getBackendNetwork(), reread.getBackendNetwork());
   }
 
   /** PUT 成功后 live 快照必须在事务提交后替换为最新权威聚合；提交前仍是旧值。 */
@@ -109,11 +109,11 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   public void updateRejectsMissingSectionsAndUnknownRequestFields() {
     SystemSettingsDTO current = systemSettingsService.get();
     SystemSettingsUpdateDTO update = updateFrom(current, 0L);
-    update.setNetwork(null);
+    update.setBackendNetwork(null);
     DomainException error =
         assertThrows(DomainException.class, () -> systemSettingsService.update(update));
     assertEquals(DomainErrorCode.VALIDATION, error.code());
-    assertTrue(error.getMessage().contains("network is required"), error.getMessage());
+    assertTrue(error.getMessage().contains("backendNetwork is required"), error.getMessage());
   }
 
   private static SystemSettingsUpdateDTO updateFrom(
@@ -123,7 +123,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.setTool(current.getTool());
     update.setAiRuntime(current.getAiRuntime());
     update.setEnvironment(current.getEnvironment());
-    update.setNetwork(current.getNetwork());
+    update.setBackendNetwork(current.getBackendNetwork());
     update.setStorageMedia(current.getStorageMedia());
     update.setAdvanced(current.getAdvanced());
     return update;
@@ -134,7 +134,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     sections.setTool(dto.getTool());
     sections.setAiRuntime(dto.getAiRuntime());
     sections.setEnvironment(dto.getEnvironment());
-    sections.setNetwork(dto.getNetwork());
+    sections.setBackendNetwork(dto.getBackendNetwork());
     sections.setStorageMedia(dto.getStorageMedia());
     sections.setAdvanced(dto.getAdvanced());
     return sections;

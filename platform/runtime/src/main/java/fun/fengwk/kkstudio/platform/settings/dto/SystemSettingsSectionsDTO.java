@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.settings.dto;
 import lombok.Data;
 
 /**
- * System settings 的六个强类型 section 载体（tool / aiRuntime / environment / network / storageMedia /
- * advanced），是 GET 响应数据与 PUT 请求体的公共部分。
+ * System settings 的六个强类型 section 载体（tool / aiRuntime / environment / backendNetwork / storageMedia
+ * / advanced），是 GET 响应数据与 PUT 请求体的公共部分。
  *
  * <p>插件（含 ComfyUI 与 MiniMax-H3）的运行参数不属于设置合同，只有插件 Schema 与配置同步 plugins 一个来源。
  *
@@ -21,7 +21,7 @@ public class SystemSettingsSectionsDTO {
 
   private SystemSettingsEnvironmentDTO environment;
 
-  private SystemSettingsNetworkDTO network;
+  private SystemSettingsBackendNetworkDTO backendNetwork;
 
   private SystemSettingsStorageMediaDTO storageMedia;
 

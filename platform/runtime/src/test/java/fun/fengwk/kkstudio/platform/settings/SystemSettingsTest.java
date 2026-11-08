@@ -53,8 +53,8 @@ class SystemSettingsTest {
 
     assertEquals(16L * 1024 * 1024, defaults.environment().maxResourceBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
-    assertEquals(null, defaults.network().proxyUrl());
-    assertEquals("localhost,127.*,::1", defaults.network().noProxyHosts());
+    assertEquals(null, defaults.backendNetwork().proxyUrl());
+    assertEquals("localhost,127.*,::1", defaults.backendNetwork().noProxyHosts());
 
     SystemSettings.StorageMedia storageMedia = defaults.storageMedia();
     assertEquals(86_400L, storageMedia.uploadExpiresSeconds());

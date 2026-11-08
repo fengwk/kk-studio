@@ -103,7 +103,7 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
             ai.subagentMaxTurns(),
             retryStatusCodes),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         SystemSettingsTestFixture.DEFAULT.storageMedia(),
         SystemSettingsTestFixture.DEFAULT.advanced());
   }

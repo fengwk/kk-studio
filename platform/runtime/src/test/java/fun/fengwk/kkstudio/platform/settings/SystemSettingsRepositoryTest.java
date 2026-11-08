@@ -132,7 +132,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
             base.permission(), busyRetryMillis, base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         SystemSettingsTestFixture.DEFAULT.storageMedia(),
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
@@ -147,7 +147,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
             merged, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
-        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.backendNetwork(),
         SystemSettingsTestFixture.DEFAULT.storageMedia(),
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
