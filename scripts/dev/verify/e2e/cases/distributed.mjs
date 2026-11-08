@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { assert, assertDecimalVersion, captureHttpError, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, assertExactFields, captureHttpError, expectHttpError, sleep } from '../lib/http.mjs'
 import {
   assertDistributedContext,
   ENV_A_ID,
@@ -15,7 +15,7 @@ import {
   createNewSession,
   userMessageCommand,
 } from '../lib/harness.mjs'
-import { baseModelConfig, environmentCreateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, daemonConfigFixture, environmentCreateBody } from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -94,9 +94,9 @@ export async function ensureDistributedCRouteOwner(ctx, targetNode = 'a') {
 registerCase({
   id: 'distributed.shared_state',
   level: 'L5',
-  title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
+  title: '双节点共享状态：跨节点 Environment 创建/编辑/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；node B 以最新 version PUT 完整 note+daemonConfig，node A 读取到新 version/note/config；向同一 PUT path（不使用 query expectedVersion）携带非法 name 得 400 validation 且不写入；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -176,21 +176,78 @@ registerCase({
       assertDecimalVersion(rotatedOnA.version, 'rotatedOnA.version')
       latestVersion = rotatedOnA.version
 
-      // 4c. 改名端点已彻底移除：Environment name 是不可变身份
+      // 4b. node B 用最新 version PUT 完整 note+daemonConfig，node A 必须看到共享的新配置
+      const updatedNote = 'distributed edited note'
+      const updatedConfig = daemonConfigFixture({ proxyUrl: 'http://127.0.0.1:7891' })
+      const updateOnBRes = await ctx.callNode(
+        'b',
+        'PUT',
+        `/api/platform/environments/${encodeURIComponent(createdId)}`,
+        { expectedVersion: latestVersion, note: updatedNote, daemonConfig: updatedConfig },
+      )
+      const updatedOnB = updateOnBRes.json
+      assert(updatedOnB.name === envName, 'node B update: name must stay immutable')
+      assert(updatedOnB.note === updatedNote, 'node B update: note mismatch')
+      assert(updatedOnB.version !== latestVersion, 'node B update: version must advance')
+      assertDecimalVersion(updatedOnB.version, 'updatedOnB.version')
+      latestVersion = updatedOnB.version
+
+      const getAfterUpdateRes = await ctx.callNode(
+        'a',
+        'GET',
+        `/api/platform/environments/${encodeURIComponent(createdId)}`,
+      )
+      const afterUpdateOnA = getAfterUpdateRes.json
+      assert(afterUpdateOnA.name === envName, 'node A after update: name must stay immutable')
+      assert(afterUpdateOnA.version === latestVersion, 'node A after update: version mismatch')
+      assert(afterUpdateOnA.note === updatedNote, 'node A after update: note mismatch')
+      assertExactFields(
+        afterUpdateOnA.daemonConfig,
+        ['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'],
+        'node A after update daemonConfig',
+      )
+      assert(
+        afterUpdateOnA.daemonConfig.studioUrl === updatedConfig.studioUrl,
+        'node A after update: studioUrl mismatch',
+      )
+      assert(
+        afterUpdateOnA.daemonConfig.bashExecutable === updatedConfig.bashExecutable,
+        'node A after update: bashExecutable mismatch',
+      )
+      assert(
+        afterUpdateOnA.daemonConfig.proxyUrl === updatedConfig.proxyUrl,
+        'node A after update: proxyUrl mismatch',
+      )
+      assert(
+        JSON.stringify(afterUpdateOnA.daemonConfig.lsp) === JSON.stringify(updatedConfig.lsp),
+        'node A after update: lsp mismatch',
+      )
+
+      // 4c. PUT 不接受 name：同一 PUT path 携带真实更新 body + 非法 name 必须 400 validation 且不写入
       await expectHttpError(
         () =>
           ctx.callNode(
             'a',
             'PUT',
-            `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
-            { name: `${envName}-renamed` },
+            `/api/platform/environments/${encodeURIComponent(createdId)}`,
+            {
+              expectedVersion: latestVersion,
+              note: updatedNote,
+              daemonConfig: updatedConfig,
+              name: `${envName}-renamed`,
+            },
           ),
-        { status: 405, code: 'validation' },
+        { status: 400, code: 'validation' },
       )
       const getARes = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
       const fromA = getARes.json
       assert(fromA.name === envName, 'node A verify: name must stay immutable')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
+      assert(fromA.note === updatedNote, 'node A verify: note must stay unchanged after rejected rename')
+      assert(
+        fromA.daemonConfig?.proxyUrl === updatedConfig.proxyUrl,
+        'node A verify: config must stay unchanged after rejected rename',
+      )
 
       // 5. 跨节点删除（在 node B 发起）并在两节点验证 404
       await ctx.callNode(

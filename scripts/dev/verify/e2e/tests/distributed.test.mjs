@@ -12,6 +12,7 @@ import {
   runDistributedCommand,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
+import { daemonConfigFixture } from '../lib/fixtures.mjs'
 import { problemError } from './fixtures/problem.mjs'
 import { ALL_CASES } from '../run-matrix.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
@@ -228,6 +229,159 @@ test('DB loss case keeps one 10s fault request and restores both READY projectio
     assert.equal(faultRequests, 1, 'never retry the fault request')
     assert.deepEqual(commands, ['disconnect-db-a', 'reconnect-db-a'])
   }
+})
+
+test('shared-state case edits through node B, rejects rename on the card PUT and deletes the latest version', async () => {
+  // 测试意图：stub 按真实卡片 PUT 语义解析 body/CAS，而不是只匹配 405/400 状态；证明非法 name
+  // 在携带最新 expectedVersion、note、完整 daemonConfig 时仍被 400 拒绝，且有效 node B PUT 让 node A
+  // 读到新版本与配置。
+  const environmentId = '00000000-0000-4000-8000-000000000123'
+  const environmentPath = `/api/platform/environments/${environmentId}`
+  let environmentName = null
+  let note = null
+  let daemonConfig = null
+  let version = '0'
+  let registrationToken = 'token-0'
+  let tokenSequence = 0
+  let deleted = false
+  const calls = []
+  const artifacts = []
+
+  const snapshot = () => ({ id: environmentId, name: environmentName, note, daemonConfig, version })
+
+  function requireExpectedVersion(body, requestPath) {
+    if (!body || !Object.hasOwn(body, 'expectedVersion')) {
+      throw problemError(400, 'validation', 'expectedVersion is required', requestPath)
+    }
+    if (String(body.expectedVersion) !== version) {
+      throw problemError(409, 'version_conflict', 'version conflict', requestPath)
+    }
+  }
+
+  function validateDaemonConfig(value, requestPath) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw problemError(400, 'validation', 'daemonConfig is invalid', requestPath)
+    }
+    assert.deepEqual(
+      Object.keys(value).sort(),
+      ['bashExecutable', 'lsp', 'proxyUrl', 'studioUrl'],
+      'PUT daemonConfig must be the complete canonical object',
+    )
+    assert.equal(typeof value.studioUrl, 'string')
+    assert.ok(value.studioUrl.length > 0)
+    assert.ok(value.lsp && typeof value.lsp === 'object')
+    assert.ok(value.proxyUrl === null || typeof value.proxyUrl === 'string')
+    assert.ok(value.bashExecutable === null || typeof value.bashExecutable === 'string')
+  }
+
+  const ctx = {
+    caseId: 'distributed.shared_state',
+    baseUrls: { a: 'http://node-a.test', b: 'http://node-b.test' },
+    async callNode(node, method, requestPath, body) {
+      calls.push({ node, method, path: requestPath, body })
+      const url = new URL(requestPath, 'http://node.test')
+      const pathname = url.pathname
+      if (method === 'POST' && pathname === '/api/platform/environments') {
+        environmentName = body.name
+        note = body.note
+        daemonConfig = body.daemonConfig
+        version = '0'
+        return { json: { ...snapshot(), registrationToken } }
+      }
+      if (method === 'GET' && pathname === environmentPath) {
+        if (deleted) throw problemError(404, 'not_found', 'environment not found', pathname)
+        return { json: snapshot() }
+      }
+      if (method === 'POST' && pathname === `${environmentPath}/rotate-token`) {
+        requireExpectedVersion(body, pathname)
+        registrationToken = `token-${++tokenSequence}`
+        version = String(BigInt(version) + 1n)
+        return { json: { ...snapshot(), registrationToken } }
+      }
+      if (method === 'PUT' && pathname === environmentPath) {
+        assert.equal(url.search, '', 'card PUT must not use query expectedVersion')
+        if (body && Object.hasOwn(body, 'name')) {
+          // 严格 HTTP mapper 在领域 CAS 前拒绝未知 name；这里同时证明用例提供了完整真实更新 body。
+          assert.ok(Object.hasOwn(body, 'expectedVersion'), 'rename request must include expectedVersion')
+          assert.ok(Object.hasOwn(body, 'note'), 'rename request must include note')
+          assert.ok(Object.hasOwn(body, 'daemonConfig'), 'rename request must include daemonConfig')
+          assert.notEqual(body.name, environmentName, 'rename attempt must actually change name')
+          throw problemError(400, 'validation', "unknown field 'name'", pathname)
+        }
+        if (!body || !Object.hasOwn(body, 'expectedVersion')) {
+          throw problemError(400, 'validation', 'expectedVersion is required', pathname)
+        }
+        const unknown = Object.keys(body).filter(
+          (key) => !['expectedVersion', 'note', 'daemonConfig'].includes(key),
+        )
+        if (unknown.length > 0) {
+          throw problemError(400, 'validation', `unknown field '${unknown[0]}'`, pathname)
+        }
+        requireExpectedVersion(body, pathname)
+        validateDaemonConfig(body.daemonConfig, pathname)
+        note = body.note
+        daemonConfig = body.daemonConfig
+        version = String(BigInt(version) + 1n)
+        return { json: snapshot() }
+      }
+      if (method === 'DELETE' && pathname === environmentPath) {
+        if (url.searchParams.get('expectedVersion') !== version) {
+          throw problemError(409, 'version_conflict', 'version conflict', pathname)
+        }
+        deleted = true
+        return { json: null }
+      }
+      assert.fail(`unexpected call ${method} ${requestPath}`)
+    },
+    writeArtifact(name, data) {
+      artifacts.push({ name, data })
+    },
+  }
+
+  const sharedState = ALL_CASES.find((entry) => entry.id === 'distributed.shared_state')
+  assert.ok(sharedState, 'distributed.shared_state must be registered')
+  await sharedState.run(ctx)
+
+  const puts = calls.filter((call) => call.method === 'PUT')
+  assert.equal(puts.length, 2, 'case must perform one valid edit and one rejected rename')
+  const validPut = puts.find((call) => call.node === 'b')
+  const invalidPut = puts.find((call) => call.node === 'a')
+  assert.ok(validPut, 'valid edit must go through node B')
+  assert.ok(invalidPut, 'rename rejection must go through node A')
+
+  assert.equal(validPut.path, environmentPath)
+  assert.equal(validPut.path.includes('?'), false)
+  assert.deepEqual(Object.keys(validPut.body).sort(), ['daemonConfig', 'expectedVersion', 'note'])
+  assert.equal(validPut.body.note, 'distributed edited note')
+  assert.deepEqual(validPut.body.daemonConfig, daemonConfigFixture({ proxyUrl: 'http://127.0.0.1:7891' }))
+  assert.deepEqual(
+    Object.keys(validPut.body.daemonConfig).sort(),
+    ['bashExecutable', 'lsp', 'proxyUrl', 'studioUrl'],
+  )
+
+  assert.equal(invalidPut.path, environmentPath)
+  assert.equal(invalidPut.path.includes('?'), false)
+  assert.equal(invalidPut.body.name, `${environmentName}-renamed`)
+  assert.equal(invalidPut.body.note, validPut.body.note)
+  assert.deepEqual(invalidPut.body.daemonConfig, validPut.body.daemonConfig)
+  assert.equal(
+    invalidPut.body.expectedVersion,
+    String(BigInt(validPut.body.expectedVersion) + 1n),
+    'rename request must carry the version advanced by the valid edit',
+  )
+  assert.equal(version, invalidPut.body.expectedVersion, 'rejected rename must not advance version')
+
+  const deleteCall = calls.find((call) => call.method === 'DELETE')
+  assert.ok(deleteCall, 'case must delete the environment')
+  assert.equal(deleteCall.node, 'b')
+  assert.ok(deleteCall.path.includes(`expectedVersion=${version}`), 'delete must use the edited version')
+
+  assert.equal(artifacts.length, 1)
+  const artifact = JSON.parse(artifacts[0].data)
+  assert.equal(artifact.immutableName, environmentName)
+  assert.equal(artifact.finalVersion, version)
+  assert.equal(artifact.deleted, true)
+  assert.equal(artifacts[0].data.includes(registrationToken), false)
 })
 
 test('runDistributedCommand forwards whitelisted commands with exact arguments and repoRoot', () => {
