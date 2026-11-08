@@ -247,7 +247,7 @@ export class ControlSession {
   private handleSettings(envelope: Envelope): void {
     const environmentId = envelope.environmentId
     if (!environmentId) {
-      throw new Error('SETTINGS must declare non-null environmentId')
+      throw new ProtocolError('SETTINGS must declare non-null environmentId')
     }
     if (environmentId !== this.options.configuration.config.environmentId) {
       throw new ProtocolError('SETTINGS environmentId does not match daemon')
