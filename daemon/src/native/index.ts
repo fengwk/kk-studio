@@ -6,7 +6,14 @@
 export { createProcessSupervisor, UnsupportedPlatformError } from './process-supervisor.js'
 export { ensurePrivateDirectory, writePrivateFile, verifyPrivateFile } from './private-fs.js'
 export { isRealDirectory, isRealFile } from './fs-kind.js'
-export { acquireDirectoryLock, type DirectoryLock } from './lock.js'
+export {
+  DAEMON_LOCK_FILE_NAME,
+  INSTALL_LOCK_FILE_NAME,
+  acquireDirectoryLock,
+  waitForDirectoryLock,
+  type DirectoryLock,
+} from './lock.js'
+export { DirectoryLockBusyError, DirectoryLockTimeoutError } from './lock-error.js'
 
 /** 属主独占的私有目录与文件操作端口。 */
 export interface PrivateFs {

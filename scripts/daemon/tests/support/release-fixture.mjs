@@ -43,28 +43,78 @@ const MAIN_JS = `console.log("kk-studio-daemon ${DAEMON_VERSION}")\n`
 
 // The frozen runtime's lib/node is invoked as `lib/node -e ...` or
 // `lib/node <main.js> --version|--check-config <cfg>`.
-const FAKE_NODE = `#!/bin/sh
+const FAKE_NODE = String.raw`#!/bin/sh
 # Frozen runtime Node shim used only by tests.
+# The installer still runs its real JSON envelope/manifest checks: \`-e\` scripts are delegated to
+# the host Node, because the shim only has to satisfy the daemon call shapes below.
 if [ "$1" = -e ]; then
-  # 安装器调用是 \`node -e <script> <manifest> <platform>\`。
-  if grep -q "\\"$4\\"" "$3"; then printf '%s' "$4"; exit 0; fi
-  exit 2
+  exec "${process.execPath}" "$@"
 fi
+case "$1" in
+  */native/lock-helper.js)
+    # Behaviourally faithful stand-in for the real native helper: a directory marker is an atomic
+    # mutual-exclusion primitive, and \`hold\` keeps stdin open exactly like the kernel lock does.
+    mode=$2
+    directory=$3
+    log="$FAKE_SERVICE_STATE/lock.log"
+    case "$mode" in
+      hold)
+        # The real helper first ensures the private card directory, then takes the kernel lock.
+        mkdir -p "$directory" 2>/dev/null || :
+        if ! mkdir "$directory/.fake-install-lock" 2>/dev/null; then
+          echo 'install operation lock is busy' >&2
+          exit 75
+        fi
+        echo 'hold-start' >>"$log"
+        printf 'locked\n'
+        cat >/dev/null
+        rmdir "$directory/.fake-install-lock" 2>/dev/null || :
+        echo 'hold-end' >>"$log"
+        exit 0
+        ;;
+      wait)
+        echo 'wait-runtime-lock' >>"$log"
+        if [ "$FAKE_DAEMON_LOCKED" = "1" ]; then
+          echo 'daemon runtime lock wait timed out' >&2
+          exit 76
+        fi
+        exit 0
+        ;;
+      *)
+        echo 'usage: lock-helper hold <directory> | lock-helper wait <directory> <timeout-seconds>' >&2
+        exit 2
+        ;;
+    esac
+    ;;
+esac
 case "$2" in
-  --version) printf 'kk-studio-daemon %s\\n' "\${FAKE_NODE_VERSION:-${DAEMON_VERSION}}" ;;
+  --version)
+    version=$FAKE_NODE_VERSION
+    if [ -z "$version" ]; then version=__DAEMON_VERSION__; fi
+    printf 'kk-studio-daemon %s\n' "$version"
+    ;;
   --check-config)
     if [ ! -s "$3" ]; then exit 2; fi
-    # 真实 daemon.json 是裸配置对象；这里同样拒绝非法取值与外层 "daemon" 包裹的假结构，
+    # 真实验收入口只接受当前 JSON 信封；这里同样拒绝非法取值与外层 "daemon" 包裹的假结构，
     # 以免 fixture 接受真实入口会拒绝的配置而假绿。
     if grep -q '"invalid"' "$3" || grep -q '"daemon"[[:space:]]*:' "$3"; then
-      printf 'Invalid daemon configuration: daemon.daemon: unknown field\\n' >&2
+      printf 'Invalid daemon configuration: daemon.daemon: unknown field\n' >&2
       exit 2
     fi
-    printf 'Daemon configuration is valid\\n'
+    printf 'Daemon configuration is valid\n'
     ;;
   *) exit 3 ;;
 esac
-`
+`.replaceAll('__DAEMON_VERSION__', DAEMON_VERSION)
+
+export const ENVIRONMENT_ID = '11111111-1111-4111-8111-111111111111'
+export const SECOND_ENVIRONMENT_ID = '22222222-2222-4222-8222-222222222222'
+export const ENVIRONMENT_VERSION = '0'
+
+/** The current daemon.json envelope: a bare object with the card UUID, config version and daemonConfig. */
+export function daemonJson({ environmentId = ENVIRONMENT_ID, version = ENVIRONMENT_VERSION, studioUrl = 'https://studio.example.com' } = {}) {
+  return JSON.stringify({ environmentId, version, daemonConfig: { studioUrl } })
+}
 
 export function writeExecutable(file, content) {
   mkdirSync(path.dirname(file), { recursive: true })
@@ -361,11 +411,25 @@ exit 0
   buildArchive(file, platform = null) {
     const key = platform ?? `${this.releaseOs}-${this.releaseArch}`
     const nodeName = key.startsWith('windows-') ? 'node.exe' : 'node'
+    const koffiPlatform = key.startsWith('linux-')
+      ? `linux-${key.endsWith('arm64') ? 'arm64' : 'x64'}`
+      : `darwin-${key.endsWith('arm64') ? 'arm64' : 'x64'}`
     const work = mkdtempSync(path.join(this.root, 'archive-src-'))
     try {
       writeExecutable(path.join(work, 'runtime/code-server/lib', nodeName), FAKE_NODE)
       writeText(path.join(work, 'runtime/code-server/out/node/entry.js'), '// frozen entry\n', 0o644)
       writeText(path.join(work, 'main.js'), MAIN_JS, 0o644)
+      writeText(
+        path.join(work, 'package.json'),
+        `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}","private":true,"type":"module"}\n`,
+        0o644,
+      )
+      writeText(path.join(work, 'delay.js'), 'export {}\n', 0o644)
+      for (const file of ['lock-helper.js', 'lock.js', 'lock-error.js', 'private-fs.js']) {
+        writeText(path.join(work, 'native', file), 'export {}\n', 0o644)
+      }
+      writeText(path.join(work, 'node_modules/koffi/index.js'), 'module.exports = {}\n', 0o644)
+      writeText(path.join(work, `node_modules/@koromix/koffi-${koffiPlatform}/index.js`), 'module.exports = {}\n', 0o644)
       writeText(
         path.join(work, 'runtime-manifest.json'),
         `{"daemonVersion":"${DAEMON_VERSION}","codeServer":{"${key}":{"url":"https://example.invalid"}}}\n`,
@@ -388,12 +452,12 @@ esac
 `
   }
 
-  makeInputs({ config = '{"studioUrl":"https://studio.example.com"}', token = 'token-value' } = {}) {
+  makeInputs({ environmentId = ENVIRONMENT_ID, version = ENVIRONMENT_VERSION, config = null, token = 'token-value' } = {}) {
     const directory = path.join(this.root, 'inputs')
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     const configFile = path.join(directory, 'daemon.json')
     const tokenFile = path.join(directory, 'daemon.token')
-    writeText(configFile, config, 0o600)
+    writeText(configFile, config ?? daemonJson({ environmentId, version }), 0o600)
     writeText(tokenFile, token, 0o600)
     return [configFile, tokenFile]
   }
@@ -425,6 +489,16 @@ esac
 
   get installRoot() {
     return path.join(this.home, '.kk-studio')
+  }
+
+  get envRoot() {
+    return path.join(this.installRoot, 'environments', this.environmentId ?? ENVIRONMENT_ID)
+  }
+
+  get unitPath() {
+    return this.hostOs === 'Linux'
+      ? path.join(this.home, `.config/systemd/user/kk-studio-daemon-${this.environmentId ?? ENVIRONMENT_ID}.service`)
+      : path.join(this.home, `Library/LaunchAgents/fun.fengwk.kkstudio.environment-daemon.${this.environmentId ?? ENVIRONMENT_ID}.plist`)
   }
 }
 

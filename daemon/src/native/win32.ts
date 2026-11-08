@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import { delay } from '../delay.js'
+import { DirectoryLockBusyError } from './lock-error.js'
 import type { ExitReport, LaunchSpec } from './state.js'
 import { joinCommandLine } from './windows-command-line.js'
 import { writeAllSync as writeDescriptor } from './write-all.js'
@@ -88,7 +89,6 @@ const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 const INVALID_HANDLE = 0xFFFF_FFFF_FFFF_FFFFn
 /** 命令退出轮询步长：`WaitForSingleObject(..., 0)` 之间让出事件循环，父进程消失的 IPC 收尾才可能被处理。 */
 const EXIT_POLL_INTERVAL_MILLIS = 20
-const LOCK_FILE_NAME = 'daemon.lock'
 const JOB_NAME_PREFIX = 'kk-studio-process-scope-'
 
 type Pointer = bigint
@@ -744,8 +744,8 @@ function createEnvironmentBlock(env: NodeJS.ProcessEnv): Buffer {
  * `OPEN_ALWAYS` 之后必须立刻读 `GetLastError`：只有 `ERROR_ALREADY_EXISTS` 才是既有锁文件，先确认当前用户属主再只改 DACL；
  * 本次新建的锁文件才显式设置当前用户属主。释放时无论解锁是否成功都会继续关闭句柄，并把两者的失败一起上报。
  */
-export async function lockDirectory(path: string): Promise<WindowsDirectoryLock> {
-  return lockFile(joinPath(path, LOCK_FILE_NAME))
+export async function lockDirectory(path: string, lockFileName = 'daemon.lock'): Promise<WindowsDirectoryLock> {
+  return lockFile(joinPath(path, lockFileName))
 }
 
 /**
@@ -787,7 +787,7 @@ async function lockFile(lockPath: string): Promise<WindowsDirectoryLock> {
   const overlapped = { Internal: 0n, InternalHigh: 0n, Offset: 0, OffsetHigh: 0, hEvent: null }
   if (kernel32.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, overlapped) === 0) {
     kernel32.CloseHandle(handle)
-    throw new Error(`the directory is already locked by another process: ${lockPath}`)
+    throw new DirectoryLockBusyError(`the directory is already locked by another process: ${lockPath}`)
   }
   let closed = false
   return {
