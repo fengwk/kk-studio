@@ -419,7 +419,12 @@ class ConfigSyncPlannerTest {
                 "missing_sub", "m", "      tools: []\n      skills: []\n      subagents: [ghost]\n")
             + "environments:\n"
             + "  - name: env\n"
-            + "    registrationTokenHash: 1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n";
+            + "    registrationTokenHash: 1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n"
+            + "    daemonConfig:\n"
+            + "      studioUrl: https://studio.example.com\n"
+            + "      bashExecutable: null\n"
+            + "      lsp: null\n"
+            + "      proxyUrl: null\n";
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals("missing model: x", reason(plan.skipped(), "agents", "missing_model"));
