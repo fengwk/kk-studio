@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { create } from '@bufbuild/protobuf'
@@ -6,6 +6,7 @@ import { create } from '@bufbuild/protobuf'
 import type { DaemonConfig, ProcessSupervisor, ManagedProcess, ProcessSpec, CapabilityExecutor } from '../src/contracts.js'
 import { processCapability } from '../src/coding/process.js'
 import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
+import { ensurePrivateDirectory } from '../src/native/private-fs.js'
 import type {
   ControlConnection,
   ControlTransport,
@@ -20,9 +21,30 @@ import {
 /** 测试卡片的固定 canonical UUID。 */
 export const TEST_ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
 
+/**
+ * 本测试文件的私有根：Windows 的 %TEMP% 默认 DACL 会继承给子目录，裸 mkdtemp 不是 owner-only。
+ *
+ * <p>先用生产 `ensurePrivateDirectory` 建立真实私有根，之后每个 fixture 在其下创建子目录；
+ * 子目录和文件继承真实 owner-only DACL，不模拟 ACL，也不逐 fixture 调外部 icacls 增加批量开销。
+ * 该根每个测试模块只建一次。
+ */
+const privateTestRoot = await ensurePrivateDirectory(mkdtempSync(join(tmpdir(), 'kk-daemon-private-')))
+process.once('exit', () => {
+  try {
+    rmSync(privateTestRoot, { recursive: true, force: true })
+  } catch {
+    // 进程退出阶段尽力清理；失败不改写测试结果。
+  }
+})
+
+/** 在私有测试根下创建真实 owner-only 语义的新目录。 */
+export function createPrivateTestDirectory(prefix = 'kk-daemon-test-'): string {
+  return mkdtempSync(join(privateTestRoot, prefix))
+}
+
 /** 创建一个 owner-only 的临时 daemon 根，含新结构 daemon.json 与 daemon.token。 */
 export function createDaemonRoot(token = 'test-registration-token'): { root: string; configPath: string } {
-  const root = mkdtempSync(join(tmpdir(), 'kk-daemon-test-'))
+  const root = createPrivateTestDirectory()
   const configPath = join(root, 'daemon.json')
   writeFileSync(
     configPath,

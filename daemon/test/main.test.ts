@@ -765,6 +765,8 @@ describe('daemon configuration resource preparation', () => {
   // 首次应用没有运行快照：即使启动缓存内容相同，也必须真实初始化空 facade 的 LSP。
   it('initializes the real LSP facade for the first cached-config application', async () => {
     const initial = testConfig({
+      bashExecutable: process.execPath,
+      bashExecutableSetting: process.execPath,
       lsp: {
         java: {
           command: [process.execPath],

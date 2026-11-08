@@ -34,11 +34,13 @@ export interface ControlFixture {
 }
 
 export async function createControlServer(): Promise<ControlFixture> {
+  const bash = resolveTestBash()
   let peer!: FakeStudioPeer
   peer = new FakeStudioPeer({
     autoControl: true,
     environmentId: ENVIRONMENT_ID,
     studioUrl: () => peer.origin,
+    ...(bash === undefined ? {} : { bashExecutable: bash }),
   })
   await peer.start()
 
