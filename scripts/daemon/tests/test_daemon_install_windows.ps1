@@ -24,6 +24,10 @@ $secondEnvironmentId = "22222222-2222-4222-8222-222222222222"
 
 $script:Failures = 0
 $script:Checks = 0
+# Bounded, fixture-only tar diagnostics. Never include managed credentials or arbitrary argv.
+$script:TarFailures = @()
+$script:TarFailureStderrLimit = 4096
+$script:FailNextStageTar = $false
 # Seed the real current SID while StrictMode is active before any dot-source so the fixture ACL
 # helpers never receive an undefined/empty identity.
 $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -250,6 +254,37 @@ function New-Inputs {
     return @($configPath, $tokenPath)
 }
 
+function Write-TarFailureContext {
+    param(
+        [Parameter(Mandatory = $true)][string] $Operation,
+        [Parameter(Mandatory = $true)] $Result,
+        [AllowEmptyString()][string] $WorkingDirectory,
+        [Parameter(Mandatory = $true)][string[]] $Arguments
+    )
+    $stderr = [string] $Result.Stderr
+    if ($stderr.Length -gt $script:TarFailureStderrLimit) {
+        $stderr = $stderr.Substring(0, $script:TarFailureStderrLimit)
+    }
+    $workChars = if ([string]::IsNullOrEmpty($WorkingDirectory)) { 0 } else { $WorkingDirectory.Length }
+    $archiveArg = if ($Arguments.Count -ge 2) { $Arguments[1] } else { "" }
+    $destinationArg = if ($Arguments.Count -ge 4) { $Arguments[3] } else { "" }
+    $message = (
+        "tar failure: operation={0} exitCode={1} stderrChars={2} workPathChars={3} " +
+        "archiveArgChars={4} destinationArgChars={5}"
+    ) -f $Operation, [int] $Result.ExitCode, $stderr.Length, $workChars, $archiveArg.Length, $destinationArg.Length
+    Write-Host $message
+    Write-Host "tar stderr (bounded): $stderr"
+    return [pscustomobject] @{
+        Operation = $Operation
+        ExitCode = [int] $Result.ExitCode
+        Stderr = $stderr
+        StderrChars = $stderr.Length
+        WorkPathChars = $workChars
+        ArchiveArgChars = $archiveArg.Length
+        DestinationArgChars = $destinationArg.Length
+    }
+}
+
 function Import-Installer {
     param([hashtable] $Parameters)
     # install.ps1 disables positional binding, so a string[] splat cannot turn "-ConfigFile"
@@ -279,6 +314,50 @@ function Import-Installer {
         $script:InstalledToken = Join-Path $script:EnvironmentRoot "daemon.token"
         $script:WorkDirectory = Join-Path $script:EnvironmentRoot ".work"
         $script:LastOperation = Join-Path $script:EnvironmentRoot "last-operation.json"
+    }
+    # Keep the real installer beneath a fixture wrapper so tar failures expose only bounded,
+    # controlled context. The wrapper also proves the stage invocation keeps its argv ASCII.
+    $script:RealInvokeNativeProcess = ${function:Invoke-NativeProcess}
+    function Invoke-NativeProcess {
+        param(
+            [Parameter(Mandatory = $true)][string] $Executable,
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyCollection()]
+            [AllowEmptyString()]
+            [string[]] $Arguments,
+            [AllowEmptyString()][string] $WorkingDirectory
+        )
+        $isTar = (Split-Path -Leaf $Executable) -ieq "tar.exe"
+        $isStage = $false
+        if ($isTar -and $Arguments.Count -ge 4 -and $Arguments[0] -eq "-xzf" -and
+            $Arguments[2] -eq "-C" -and -not [string]::IsNullOrEmpty($WorkingDirectory) -and
+            [IO.Path]::GetFileName($WorkingDirectory) -eq ".work") {
+            $isStage = $true
+        }
+        $effectiveArguments = $Arguments
+        if ($isStage) {
+            # The controlled stage archive is intentionally corrupted once to exercise the
+            # preparation-failure path without touching the downloaded release archive.
+            if ($script:FailNextStageTar) {
+                $script:FailNextStageTar = $false
+                $corrupt = Join-Path $WorkingDirectory "stage-corrupt.tar.gz"
+                Set-Content -LiteralPath $corrupt -Value "not a gzip archive" -Encoding ASCII
+                $effectiveArguments = @($Arguments[0], "stage-corrupt.tar.gz", $Arguments[2], $Arguments[3])
+            }
+            Assert-True -Condition ($effectiveArguments[1] -cmatch "^[\x20-\x7E]+$") `
+                -Message "stage tar archive argument is ASCII"
+            Assert-True -Condition ($effectiveArguments[3] -cmatch "^[\x20-\x7E]+$") `
+                -Message "stage tar destination argument is ASCII"
+        }
+        $result = & $script:RealInvokeNativeProcess -Executable $Executable `
+            -Arguments $effectiveArguments -WorkingDirectory $WorkingDirectory
+        if ($isTar -and $result.ExitCode -ne 0) {
+            $operation = if ($isStage) { "Stage-WorkProgram" } else { "Assert-DownloadedArchive" }
+            $context = Write-TarFailureContext -Operation $operation -Result $result `
+                -WorkingDirectory $WorkingDirectory -Arguments $effectiveArguments
+            $script:TarFailures += $context
+        }
+        return $result
     }
 }
 
@@ -466,6 +545,67 @@ try {
         -Message "last operation stays bounded"
     Assert-Equal -Actual ([string] $record.operationId) -Expected $updateOperationId -Message "supplied operation id recorded"
     $env:KK_STUDIO_UPDATE_OPERATION_ID = ""
+
+    # A tar failure while staging must happen before Stop-DaemonTaskAndWait: the running service,
+    # published config/token and old program must all remain untouched, and .work must be cleaned.
+    $configBeforeStageFailure = [Convert]::ToBase64String(
+        [IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))
+    $tokenBeforeStageFailure = [Convert]::ToBase64String(
+        [IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.token")))
+    $oldMarker = Join-Path $envRoot "lib\stage-old-marker"
+    Set-Content -LiteralPath $oldMarker -Value "old" -Encoding ASCII
+    $taskBeforeStageFailure = $script:Tasks[$taskName]
+    $taskActionBeforeStageFailure = [string] $taskBeforeStageFailure.Action.Argument
+    $taskDescriptionBeforeStageFailure = [string] $taskBeforeStageFailure.Description
+    $taskBeforeStageFailure.State = "Running"
+    $replacementConfig = '{"environmentId":"' + $environmentId +
+        '","version":"0","daemonConfig":{"studioUrl":"https://replacement.example.com"}}'
+    $replacement = New-Inputs -Config $replacementConfig -Token "replacement-token"
+    $script:TarFailures = @()
+    $script:FailNextStageTar = $true
+    $stageFailed = $false
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $environmentId; Version = $daemonVersion
+            ConfigFile = $replacement[0]; TokenFile = $replacement[1]
+        } | Out-Null
+    }
+    catch {
+        $stageFailed = $true
+    }
+    Assert-True -Condition $stageFailed -Message "stage tar failure fails the install"
+    Assert-True -Condition (-not $script:FailNextStageTar) -Message "controlled stage failure was consumed"
+    Assert-True -Condition ($script:TarFailures.Count -eq 1) -Message "stage tar failure is captured once"
+    $tarFailure = $script:TarFailures[0]
+    Assert-Equal -Actual ([string] $tarFailure.Operation) -Expected "Stage-WorkProgram" `
+        -Message "tar failure context identifies Stage-WorkProgram"
+    Assert-True -Condition ($tarFailure.ExitCode -ne 0) -Message "tar failure captures the exit code"
+    Assert-True -Condition ($tarFailure.Stderr.Length -gt 0) -Message "tar failure captures stderr"
+    Assert-True -Condition ($tarFailure.Stderr.Length -le $script:TarFailureStderrLimit) `
+        -Message "tar stderr is bounded"
+    Assert-True -Condition (-not $tarFailure.Stderr.Contains("replacement-token")) `
+        -Message "tar diagnostics do not expose the replacement token"
+    Assert-True -Condition (Test-Path -LiteralPath $oldMarker) -Message "stage failure keeps the old program"
+    Assert-Equal -Actual ([Convert]::ToBase64String(
+        [IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.json")))) `
+        -Expected $configBeforeStageFailure -Message "stage failure does not write config"
+    Assert-Equal -Actual ([Convert]::ToBase64String(
+        [IO.File]::ReadAllBytes((Join-Path $envRoot "daemon.token")))) `
+        -Expected $tokenBeforeStageFailure -Message "stage failure does not write token"
+    Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "stage failure leaves one task"
+    $taskAfterStageFailure = $script:Tasks[$taskName]
+    Assert-Equal -Actual ([string] $taskAfterStageFailure.State) -Expected "Running" `
+        -Message "stage failure does not stop the old service"
+    Assert-Equal -Actual ([string] $taskAfterStageFailure.Action.Argument) -Expected $taskActionBeforeStageFailure `
+        -Message "stage failure does not replace the task action"
+    Assert-Equal -Actual ([string] $taskAfterStageFailure.Description) -Expected $taskDescriptionBeforeStageFailure `
+        -Message "stage failure does not replace the task definition"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $envRoot ".work"))) `
+        -Message "stage failure cleans its .work staging"
+    $stageRecord = Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw | ConvertFrom-Json
+    Assert-Equal -Actual ([string] $stageRecord.result) -Expected "failed" -Message "stage failure is recorded"
+    Assert-Equal -Actual ([string] $stageRecord.phase) -Expected "stage" -Message "stage phase is recorded"
+    Assert-Equal -Actual ([string] $stageRecord.errorCode) -Expected "stage" -Message "stage error code is recorded"
 
     # Two cards of the same user stay independent.
     $secondPairs = New-Inputs -Environment $secondEnvironmentId

@@ -279,7 +279,9 @@ describe('Windows installer security: card isolation, credentials and task owner
     assertIncludesAll(body, [
       'Get-Command "tar.exe"',
       'New-PrivateDirectory -Path $script:StagedLib',
-      '-Arguments @("-xzf", $script:DownloadedArchive, "-C", $script:StagedLib)',
+      '$archiveName = Split-Path -Leaf $script:DownloadedArchive',
+      '-Arguments @("-xzf", $archiveName, "-C", "lib")',
+      'exit code $($unpack.ExitCode)',
       'is missing main.js',
       'native\\lock-helper.js',
       'node_modules\\koffi',
@@ -288,6 +290,16 @@ describe('Windows installer security: card isolation, credentials and task owner
       'daemon --version does not match resolved release tag',
     ])
     assert.ok(scriptText().includes('$script:StagedLib = Join-Path $script:DownloadDirectory "lib"'))
+  })
+
+  it('stages with ASCII relative tar arguments', () => {
+    const body = functionBody('Stage-WorkProgram')
+    assertIncludesAll(body, [
+      '-Arguments @("-xzf", "archive.tar.gz", "-C", "lib")',
+      '-WorkingDirectory $script:WorkDirectory',
+      'exit code $($unpack.ExitCode)',
+    ])
+    assertIncludesNone(body, ['-Arguments @("-xzf", $archive', '-Arguments @("-xzf", $script:'])
   })
 })
 
@@ -307,7 +319,9 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       'New-DaemonScheduledTaskDefinition',
       'New-PrivateDirectory -Path $directory',
       'Start-InstallLockHelper',
+      '$script:PhaseCode = "stage"',
       'Stage-WorkProgram',
+      '$script:PhaseCode = "stop"',
       'Stop-DaemonTaskAndWait',
       'Publish-Program',
       'Publish-PrivateFile',
@@ -461,7 +475,22 @@ describe('Windows installer native contracts: native tests run only where Window
       'ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)',
       'Assert-DirectArgumentRoundTrip',
       'real node.exe',
+      '$script:TarFailureStderrLimit = 4096',
+      'Write-TarFailureContext',
+      'tar failure: operation={0} exitCode={1} stderrChars={2}',
+      'Write-Host "tar stderr (bounded): $stderr"',
+      'stage tar archive argument is ASCII',
+      'stage tar destination argument is ASCII',
+      'stage failure does not stop the old service',
+      'stage failure does not write config',
+      'stage failure keeps the old program',
     ])
+    assertInOrder(
+      native,
+      '$script:RealInvokeNativeProcess = ${function:Invoke-NativeProcess}',
+      'function Invoke-NativeProcess {',
+      'Write-TarFailureContext -Operation $operation',
+    )
   })
 
   it('runs the native PowerShell contracts', { skip: process.platform !== 'win32' && 'native ScheduledTasks contracts require Windows' }, () => {

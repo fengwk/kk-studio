@@ -929,11 +929,14 @@ function Assert-DownloadedArchive {
         Throw-Failure "tar.exe is required to unpack the daemon release archive"
     }
     New-PrivateDirectory -Path $script:StagedLib
+    # Windows bsdtar receives narrow argv. Keep the archive and -C arguments ASCII and let the
+    # native working directory carry a Unicode profile path.
+    $archiveName = Split-Path -Leaf $script:DownloadedArchive
     $unpack = Invoke-NativeProcess -Executable $tar.Source `
-        -Arguments @("-xzf", $script:DownloadedArchive, "-C", $script:StagedLib) `
+        -Arguments @("-xzf", $archiveName, "-C", "lib") `
         -WorkingDirectory $script:DownloadDirectory
     if ($unpack.ExitCode -ne 0) {
-        Throw-Failure "downloaded daemon archive could not be unpacked"
+        Throw-Failure "downloaded daemon archive could not be unpacked (exit code $($unpack.ExitCode))"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib "main.js") -PathType Leaf)) {
         Throw-Failure "downloaded daemon archive is missing main.js"
@@ -1185,10 +1188,12 @@ function Stage-WorkProgram {
     if ($null -eq $tar) {
         Throw-Failure "tar.exe is required to unpack the daemon release archive"
     }
+    # Windows bsdtar receives narrow argv. Never pass the Unicode/spaced user-profile archive or
+    # destination paths here; make the working directory native and use ASCII relative arguments.
     $unpack = Invoke-NativeProcess -Executable $tar.Source `
-        -Arguments @("-xzf", $archive, "-C", $lib) -WorkingDirectory $script:WorkDirectory
+        -Arguments @("-xzf", "archive.tar.gz", "-C", "lib") -WorkingDirectory $script:WorkDirectory
     if ($unpack.ExitCode -ne 0) {
-        Throw-Failure "无法在卡片暂存区解包发行归档。"
+        Throw-Failure "无法在卡片暂存区解包发行归档（exit code $($unpack.ExitCode)）。"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $lib "main.js") -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $lib "runtime\code-server\lib\node.exe") -PathType Leaf)) {
@@ -1283,9 +1288,12 @@ function Invoke-InstallCommon {
     $script:WorkOwned = $true
     Assert-ManagedLayout -HasTask ($null -ne (Find-DaemonTask))
 
-    $script:Phase = "6/7 停止发布启动"
-    $script:PhaseCode = "stop"
+    $script:Phase = "6/7 暂存并停止发布启动"
+    $script:PhaseCode = "stage"
     $stagedLib = Stage-WorkProgram
+    # Staging and its expected entries are verified before the old task is stopped. A preparation
+    # failure must therefore leave the running service, config, token and old program untouched.
+    $script:PhaseCode = "stop"
     Stop-DaemonTaskAndWait -HelperRoot $helperRoot
 
     # Final checks after the service is stopped: install validates the exact snapshot that will be
