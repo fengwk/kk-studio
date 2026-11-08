@@ -1010,6 +1010,9 @@ function Start-InstallLockHelper {
             Throw-Failure "安装操作锁 helper 没有响应；本次未改动任何受管文件。"
         }
         $line = $ready.Result
+        # An immediately failing helper closes stdout without printing; wait briefly so the
+        # stable busy/failure exit code can be mapped instead of reporting a protocol error.
+        if ($null -eq $line) { [void] $process.WaitForExit(5000) }
         if ($process.HasExited) {
             $code = $process.ExitCode
             if ($code -eq 75) {

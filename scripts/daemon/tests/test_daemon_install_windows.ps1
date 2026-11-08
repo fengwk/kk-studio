@@ -237,8 +237,9 @@ function New-Inputs {
     }
     $configPath = Join-Path $directory "daemon.json"
     $tokenPath = Join-Path $directory "daemon.token"
-    Set-Content -LiteralPath $configPath -Value $Config -Encoding UTF8
-    Set-Content -LiteralPath $tokenPath -Value $Token -Encoding UTF8
+    # The real daemon.json is UTF-8 without BOM; the JSON envelope parser must see plain bytes.
+    Set-Content -LiteralPath $configPath -Value $Config -Encoding ASCII
+    Set-Content -LiteralPath $tokenPath -Value $Token -Encoding ASCII
     # Real protected ACLs: the installer rejects inherited access, and this fixture must not mock that check.
     $acl = New-PrivateAcl
     Set-Acl -LiteralPath $configPath -AclObject $acl
@@ -337,7 +338,7 @@ function Get-CurrentTaskName {
 
 try {
     # Load function definitions before the probe or ACL helper; help does not call Invoke-Main.
-    . Import-Installer -Parameters @{ Command = "help" }
+    . Import-Installer -Parameters @{ Command = "help"; EnvironmentId = $environmentId }
     Initialize-HostContext
     Assert-True -Condition ($script:CurrentSid -match "^S-") -Message "fixture keeps the real current SID"
     Assert-True -Condition ($script:InstallRoot.StartsWith($profileDir, [StringComparison]::Ordinal)) `

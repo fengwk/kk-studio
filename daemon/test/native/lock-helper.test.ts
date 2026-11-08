@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -138,8 +138,7 @@ describe.skipIf(process.platform === 'win32')('install operation lock helper', (
   })
 
   test('the module entry stays inert when imported', async () => {
-    // 直接导入不得启动 helper；导入方只会拿到可测试的命令函数。
-    await expect(runLockHelper(['-h'])).resolves.toBe(LOCK_HELPER_EXIT.usage)
-    expect(readFileSync(HELPER_ENTRY, 'utf8')).toContain('runLockHelper')
+    // 模块被导入时不得启动 helper 主流程；可测试入口仍然导出。
+    await expect(runLockHelper([])).resolves.toBe(LOCK_HELPER_EXIT.usage)
   })
 })
