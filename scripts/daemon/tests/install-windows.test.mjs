@@ -169,7 +169,7 @@ describe('Windows installer security: card isolation, credentials and task owner
     const update = functionBody('Invoke-Update')
     assertIncludesAll(update, ['Assert-OptionSet -ForCommand "update" -Allowed $script:UpdateParameterNames'])
     for (const name of ['Invoke-Status', 'Invoke-Uninstall']) {
-      assertIncludesAll(functionBody(name), [`Assert-OptionSet -ForCommand `, '-Allowed @()'])
+      assertIncludesAll(functionBody(name), [`Assert-OptionSet -ForCommand `, '-Allowed @("EnvironmentId")'])
     }
   })
 

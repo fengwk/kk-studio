@@ -1370,7 +1370,7 @@ function Invoke-Update {
 }
 
 function Invoke-Status {
-    Assert-OptionSet -ForCommand "status" -Allowed @()
+    Assert-OptionSet -ForCommand "status" -Allowed @("EnvironmentId")
     Initialize-HostContext
     $task = Find-DaemonTask
     if ($null -eq $task) {
@@ -1393,7 +1393,7 @@ function Invoke-Status {
         Format-List | Out-Host
     if (Test-Path -LiteralPath $script:LastOperation -PathType Leaf) {
         $null = Assert-PrivateFile -Path $script:LastOperation -ExpectedOwnerSid $script:CurrentSid
-        Get-Content -LiteralPath $script:LastOperation
+        Get-Content -LiteralPath $script:LastOperation | Out-Host
     }
     Write-Host (
         "Task Scheduler does not capture daemon stdout/stderr; " +
@@ -1409,7 +1409,7 @@ function Invoke-Status {
 }
 
 function Invoke-Uninstall {
-    Assert-OptionSet -ForCommand "uninstall" -Allowed @()
+    Assert-OptionSet -ForCommand "uninstall" -Allowed @("EnvironmentId")
     Initialize-HostContext
     if (-not (Test-Path -LiteralPath $script:EnvironmentRoot -PathType Container)) {
         Write-Host "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"

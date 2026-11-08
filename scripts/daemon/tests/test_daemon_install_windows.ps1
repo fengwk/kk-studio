@@ -120,8 +120,8 @@ if (argv[0] === "--check-config") {
   const value = argv[1]
   if (!value || !fs.existsSync(value)) { process.exit(2) }
   const body = fs.readFileSync(value, "utf8")
-  if (body.includes("INVALID") || /"daemon"\s*:/.test(body)) {
-    process.stderr.write("Invalid daemon configuration: daemon.daemon: unknown field\n")
+  if (body.includes("INVALID")) {
+    process.stderr.write("Invalid daemon configuration: daemonConfig.studioUrl: invalid origin\n")
     process.exit(2)
   }
   process.stdout.write("Daemon configuration is valid\n")
@@ -518,6 +518,18 @@ try {
         $rejected = $true
     }
     Assert-True -Condition $rejected -Message "unknown parameter is rejected"
+    foreach ($commandName in @("status", "uninstall")) {
+        $rejected = $false
+        try {
+            Invoke-Installer -Parameters @{
+                Command = $commandName; EnvironmentId = $environmentId; Version = $daemonVersion
+            } | Out-Null
+        }
+        catch {
+            $rejected = $true
+        }
+        Assert-True -Condition $rejected -Message "$commandName rejects install-only options"
+    }
 
     # The old flat daemon.json must fail closed before any network access.
     $flat = New-Inputs -Config '{"studioUrl":"https://studio.example.com"}'
@@ -548,9 +560,9 @@ try {
     }
     Assert-True -Condition $foreignRejected -Message "another card configuration is rejected"
 
-    # Invalid daemonConfig is rejected by the release preflight.
+    # The stub preflight rejects this sentinel; the installer must propagate that failure.
     $invalid = New-Inputs -Config ('{"environmentId":"' + $environmentId +
-        '","version":"0","daemonConfig":{"invalid":true,"studioUrl":"https://studio.example.com"}}')
+        '","version":"0","daemonConfig":{"studioUrl":"INVALID"}}')
     $invalidRejected = $false
     try {
         Invoke-Installer -Parameters @{
@@ -845,11 +857,12 @@ try {
 
     # status is read-only and distinguishes Running from stopped.
     $exit = Invoke-Installer -Parameters @{ Command = "status"; EnvironmentId = $environmentId }
-    Assert-True -Condition ($exit -eq 0) -Message "status exits 0 when Running"
+    Assert-True -Condition ($exit -is [int] -and $exit -eq 0) `
+        -Message "status returns only scalar exit 0 when Running, not last-operation text"
     Assert-True -Condition ($script:Tasks.Count -eq 2) -Message "status preserves tasks"
     $script:Tasks[$taskName].State = "Ready"
     $exit = Invoke-Installer -Parameters @{ Command = "status"; EnvironmentId = $environmentId }
-    Assert-True -Condition ($exit -eq 3) -Message "status exits 3 when stopped"
+    Assert-True -Condition ($exit -is [int] -and $exit -eq 3) -Message "status exits 3 when stopped"
 
     # uninstall removes only the target card and keeps its configuration and user data.
     $skillDir = Join-Path $envRoot "skills\skill-a"

@@ -577,7 +577,12 @@ test('the Windows installer launches main.js directly and its fixture stays insi
         // The fixture's expandable here-string interpolates $Version in PowerShell; mirror that for
         // the raw Node stub executed here.
         writeFileSync(path.join(directory, 'main.js'), `${stub.replaceAll('$Version', '1.0.14')}\n`)
-        writeFileSync(path.join(directory, 'daemon.json'), '{"studioUrl":"https://studio.example.com"}\n')
+        const currentConfig = {
+            environmentId: '11111111-1111-4111-8111-111111111111',
+            version: '0',
+            daemonConfig: { studioUrl: 'https://studio.example.com' },
+        }
+        writeFileSync(path.join(directory, 'daemon.json'), JSON.stringify(currentConfig))
         const entry = path.join(directory, 'main.js')
         const version = spawnSync(process.execPath, [entry, '--version'], { encoding: 'utf8' })
         assert.equal(version.status, 0, version.stderr)
@@ -591,11 +596,14 @@ test('the Windows installer launches main.js directly and its fixture stays insi
             encoding: 'utf8',
         })
         assert.equal(invalid.status, 2)
-        const wrappedPath = path.join(directory, 'wrapped.json')
-        writeFileSync(wrappedPath, '{"daemon":{"studioUrl":"https://studio.example.com"}}\n')
-        const wrapped = spawnSync(process.execPath, [entry, '--check-config', wrappedPath], { encoding: 'utf8' })
-        assert.equal(wrapped.status, 2)
-        assert.match(wrapped.stderr, /Invalid daemon configuration: daemon\.daemon: unknown field/u)
+        const invalidPath = path.join(directory, 'invalid.json')
+        writeFileSync(
+            invalidPath,
+            JSON.stringify({ ...currentConfig, daemonConfig: { studioUrl: 'INVALID' } }),
+        )
+        const rejected = spawnSync(process.execPath, [entry, '--check-config', invalidPath], { encoding: 'utf8' })
+        assert.equal(rejected.status, 2)
+        assert.match(rejected.stderr, /Invalid daemon configuration: daemonConfig\.studioUrl: invalid origin/u)
     } finally {
         rmSync(directory, { recursive: true, force: true })
     }
