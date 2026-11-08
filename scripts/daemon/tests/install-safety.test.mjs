@@ -134,10 +134,15 @@ describe('install.sh safety', () => {
           'fi\n',
       )
       const before = bytes(unit)
-      const result = install()
-      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
-      for (const expected of ['belongs to another user', unit, '不要伪造所有权标记']) {
-        assert.ok(result.stderr.includes(expected), expected)
+      // Run with the default locale and a C locale: Bash 3 must keep the UTF-8 diagnostic and a
+      // non-zero status without treating the adjacent punctuation as part of the variable name.
+      for (const extraEnv of [{}, { LC_ALL: 'C', LANG: 'C' }]) {
+        const result = install(extraEnv)
+        assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
+        for (const expected of ['belongs to another user', unit, '不要伪造所有权标记']) {
+          assert.ok(result.stderr.includes(expected), expected)
+        }
+        assert.ok(!result.stderr.includes('token-value'))
       }
       assert.ok(before.equals(bytes(unit)))
       assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))

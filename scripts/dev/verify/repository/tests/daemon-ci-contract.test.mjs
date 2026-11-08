@@ -555,6 +555,7 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     assert.match(fixture, /\$script:HomePath = \$profileDir/u)
     const importInstaller = fixture.match(/function Import-Installer \{[\s\S]*?\n\}/u)?.[0] ?? ''
     assert.match(importInstaller, /param\(\[hashtable\] \$Parameters\)/u)
+    assert.match(fixture, /\$script:CurrentSid = \[System\.Security\.Principal\.WindowsIdentity\]::GetCurrent\(\)\.User\.Value/u)
     assert.match(importInstaller, /\$resolvedSid = \$script:CurrentSid\r?\n\s+\. \$installer @Parameters/u)
     assert.match(importInstaller, /if \(-not \[string\]::IsNullOrEmpty\(\$resolvedSid\)\) \{\r?\n\s+\$script:CurrentSid = \$resolvedSid/u)
     assert.match(importInstaller, /\. \$installer @Parameters/u)
