@@ -53,6 +53,12 @@ const ids = [
 ]
 const environment = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,
+  daemonConfig: {
+    studioUrl: 'http://127.0.0.1:18081',
+    bashExecutable: null,
+    lsp: null,
+    proxyUrl: null,
+  },
   userName: 'test', homeDirectory: '/home/test', statusExpiresAt: Date.parse('2099-01-01T00:00:00Z'),
   version: '0', createdAt: Date.parse('2026-01-01T00:00:00Z'), updatedAt: Date.parse('2026-01-01T00:00:00Z'),
   capabilities: ids.map((id) => ({ id })),

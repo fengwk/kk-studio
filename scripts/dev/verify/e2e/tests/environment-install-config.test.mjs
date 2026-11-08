@@ -2,12 +2,19 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { problemError } from './fixtures/problem.mjs'
 
-import { linuxInstallConfig, assertInstallConfig, assertExpiresNearFiveMinutes } from '../cases/environment-install-config.mjs'
+import {
+  assertExpiresNearFiveMinutes,
+} from '../cases/environment-install-config.mjs'
+import {
+  assertDaemonConfig,
+  daemonConfigFixture,
+  environmentCreateBody,
+} from '../lib/fixtures.mjs'
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
-const CASE_ID = 'environment.install_config_cas_roundtrip'
+const CASE_ID = 'environment.card_config_cas_roundtrip'
 
-test('environment install-config case is a free L1 matrix case', () => {
+test('environment card-config case is a free L1 matrix case', () => {
   const caseDef = getCase(CASE_ID)
   assert.ok(caseDef, `case ${CASE_ID} should be found via getCase`)
   assert.ok(ALL_CASES.some((c) => c.id === CASE_ID), `case ${CASE_ID} should be in ALL_CASES`)
@@ -15,55 +22,65 @@ test('environment install-config case is a free L1 matrix case', () => {
   assert.deepEqual(Array.from(caseDef.requires), [])
 })
 
-test('canonical install config has exactly the expected top-level fields', () => {
+test('canonical daemon config has exactly the expected fields', () => {
   // 测试意图：往返断言拒绝包含任意未知字段的配置。
-  const config = linuxInstallConfig()
-  assert.doesNotThrow(() => assertInstallConfig(config))
+  const config = daemonConfigFixture()
+  assert.doesNotThrow(() => assertDaemonConfig(config))
   assert.throws(
-    () => assertInstallConfig({ ...config, unknownField: null }),
-    /installConfig/,
+    () => assertDaemonConfig({ ...config, unknownField: null }),
+    /daemonConfig/,
   )
 })
 
-test('environment install-config case exercises PUT CAS persistence, no-op and hard rejection', async () => {
-  // 测试意图：用 recorder 模拟 CAS 与环境 API，证明用例真的执行 stale 409/持久化/no-op/非法 400 且最终清理，
+test('environment card-config case exercises PUT CAS persistence, version advance and hard rejection', async () => {
+  // 测试意图：用 recorder 模拟卡片 API，证明用例真的执行 stale 409/持久化/相同内容推进/非法 400 且最终清理，
   // 而不是只做静态断言。
   const environmentId = '00000000-0000-4000-8000-000000000abc'
   let version = '0'
+  let note = null
   let saved = null
   let deleted = false
-  const versionBeforeInvalid = () => version
+  const requests = []
 
   const ctx = {
     async call(method, path, body) {
+      requests.push({ method, path, body })
       if (method === 'POST' && path === '/api/platform/environments') {
-        return { json: { id: environmentId, name: body.name, installConfig: null, version } }
+        assert.deepEqual(Object.keys(body).sort(), ['daemonConfig', 'name', 'note'])
+        assert(!Object.hasOwn(body, 'installConfig'), 'create body must not use removed installConfig')
+        note = body.note
+        saved = body.daemonConfig
+        return {
+          json: { id: environmentId, name: body.name, note, daemonConfig: saved, version },
+        }
       }
-      if (method === 'PUT' && path === `/api/platform/environments/${environmentId}/install-settings`) {
+      if (method === 'PUT' && path === `/api/platform/environments/${environmentId}`) {
         if (body.expectedVersion !== version) {
           throw problemError(409, 'version_conflict', 'version conflict', path)
         }
-        const config = body.installConfig
+        const config = body.daemonConfig
         if (
-          config == null
-          || config.operatingSystem !== 'linux'
-          || Object.keys(config).some((key) => !['operatingSystem', 'daemon'].includes(key))
-          || config.daemon?.studioUrl !== 'http://127.0.0.1:18081'
-          || Object.hasOwn(config.daemon ?? {}, 'unknown')
+          !body
+          || !Object.hasOwn(body, 'daemonConfig')
+          || !Object.hasOwn(body, 'note')
+          || Object.keys(body).some((key) => !['expectedVersion', 'note', 'daemonConfig'].includes(key))
+          || config == null
+          || typeof config !== 'object'
+          || Array.isArray(config)
+          || Object.keys(config).some((key) => !['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'].includes(key))
+          || config.studioUrl !== 'http://127.0.0.1:18081'
         ) {
-          throw problemError(400, 'validation', 'environment installConfig is invalid', path)
+          throw problemError(400, 'validation', 'environment daemonConfig is invalid', path)
         }
-        if (saved && JSON.stringify(saved) === JSON.stringify(config)) {
-          return { json: { id: environmentId, installConfig: saved, version } }
-        }
+        note = body.note
         saved = config
         version = String(BigInt(version) + 1n)
-        return { json: { id: environmentId, installConfig: saved, version } }
+        return { json: { id: environmentId, note, daemonConfig: saved, version } }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}`) {
-        return { json: { id: environmentId, installConfig: saved, version } }
+        return { json: { id: environmentId, note, daemonConfig: saved, version } }
       }
-      if (method === 'DELETE' && path.startsWith(`/api/platform/environments/${environmentId}`)) {
+      if (method === 'DELETE' && path.startsWith(`/api/platform/environments/${environmentId}?`)) {
         assert.ok(path.includes(`expectedVersion=${version}`), `delete must use current version: ${path}`)
         deleted = true
         return { json: null }
@@ -74,10 +91,19 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
 
   await getCase(CASE_ID).run(ctx)
 
-  assert.equal(version, '1', 'only the first persist should advance version (no-op must not)')
-  assert.equal(saved.daemon.lsp.servers.jdtls.command[0], '/usr/bin/jdtls')
-  assert.ok(versionBeforeInvalid() === '1')
+  assert.equal(version, '2', 'create starts at zero and both explicit PUTs advance exactly once')
+  assert.equal(saved.lsp.servers.jdtls.command[0], '/usr/bin/jdtls')
+  assert.equal(note, 'e2e environment note')
   assert.equal(deleted, true, 'case must delete the environment it created')
+  assert.equal(
+    requests.filter((request) => request.method === 'POST' && request.path === '/api/platform/environments').length,
+    1,
+    'case must create exactly one card',
+  )
+  assert.ok(
+    requests.every((request) => !Object.hasOwn(request.body ?? {}, 'installConfig')),
+    'case must never use the removed installConfig field',
+  )
 })
 
 const SCRIPT_CASE_ID = 'environment.install_script_code_roundtrip'
@@ -90,34 +116,40 @@ function scriptHeaders() {
   })
 }
 
-function installScript(token) {
+function installScript(token, envelope) {
   return [
     "bash <<'KK'",
-    `builtin printf '%s' 'http://127.0.0.1:18081' > "$stage/daemon.json"`,
-    `builtin printf '%s' 'e2e install config' >> "$stage/daemon.json"`,
-    `builtin printf '%s' '/usr/bin/jdtls' >> "$stage/daemon.json"`,
+    `builtin printf '%s' '${JSON.stringify(envelope)}' > "$stage/daemon.json"`,
     `builtin printf '%s' '${token}' > "$stage/daemon.token"`,
-    `bash "$stage/install.sh" install`,
+    `bash "$stage/install.sh" install --environment-id '${envelope.environmentId}' --version '2.0.1' --config-file "$stage/daemon.json" --token-file "$stage/daemon.token"`,
     'KK',
     '',
   ].join('\n')
 }
 
-test('environment install-script case is a free L1 matrix case', () => {
+function uninstallScript(environmentId) {
+  return `bash "$stage/install.sh" uninstall --environment-id '${environmentId}'\n`
+}
+
+test('environment install-script case is a free L1 matrix case using card UUID and OS parameter', () => {
   const caseDef = getCase(SCRIPT_CASE_ID)
+  assert.ok(caseDef, `case ${SCRIPT_CASE_ID} should be found via getCase`)
   assert.ok(ALL_CASES.some((item) => item.id === SCRIPT_CASE_ID))
   assert.equal(caseDef.level, 'L1')
   assert.deepEqual(Array.from(caseDef.requires), [])
   assert.match(caseDef.docs, /install-codes/)
-  assert.match(caseDef.docs, /daemon-uninstall-scripts/)
+  assert.match(caseDef.docs, /operatingSystem/)
+  assert.match(caseDef.docs, /uninstall-script/)
+  assert.doesNotMatch(caseDef.docs, /daemon-uninstall-scripts/)
 })
 
-test('environment install-script case checks code, headers and rotation without executing or storing secrets', async () => {
-  // 测试意图：recorder 只模拟 HTTP，证明用例覆盖签发、下载头、非法 code、轮换失效与卸载脚本，
+test('environment install-script case checks code, headers, local cache envelope and rotation without executing or storing secrets', async () => {
+  // 测试意图：recorder 只模拟 HTTP，证明用例覆盖签发、下载头、非法 code/OS、轮换失效与按卡片卸载脚本，
   // 且不执行脚本、不把 code/token/脚本写入 artifact。
   const environmentId = '00000000-0000-4000-8000-000000000def'
   const originalToken = '11111111-1111-4111-8111-111111111111'
   const rotatedToken = '22222222-2222-4222-8222-222222222222'
+  const note = 'e2e environment note'
   let version = '0'
   let saved = null
   let token = originalToken
@@ -132,6 +164,8 @@ test('environment install-script case checks code, headers and rotation without 
   const calls = []
   const secretWrites = []
 
+  const card = () => ({ id: environmentId, name: 'fixture', note, daemonConfig: saved, version })
+
   const ctx = {
     writeArtifact(name, content) {
       secretWrites.push({ name, content: String(content) })
@@ -139,21 +173,21 @@ test('environment install-script case checks code, headers and rotation without 
     async call(method, path, body) {
       calls.push(`${method} ${path.split('?')[0]}`)
       if (method === 'POST' && path === '/api/platform/environments') {
+        assert.deepEqual(Object.keys(body).sort(), ['daemonConfig', 'name', 'note'])
+        saved = body.daemonConfig
         return {
           json: {
-            id: environmentId,
+            ...card(),
             name: body.name,
             registrationToken: token,
-            installConfig: null,
-            version,
           },
         }
       }
-      if (method === 'PUT' && path === `/api/platform/environments/${environmentId}/install-settings`) {
+      if (method === 'PUT' && path === `/api/platform/environments/${environmentId}`) {
         if (body.expectedVersion !== version) throw problemError(409, 'version_conflict', 'version conflict', path)
-        saved = body.installConfig
+        saved = body.daemonConfig
         version = String(BigInt(version) + 1n)
-        return { json: { id: environmentId, installConfig: saved, version } }
+        return { json: card() }
       }
       if (method === 'POST' && path === `/api/platform/environments/${environmentId}/install-codes`) {
         if (body.expectedVersion !== version) throw problemError(409, 'version_conflict', 'version conflict', path)
@@ -169,10 +203,15 @@ test('environment install-script case checks code, headers and rotation without 
         }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}`) {
-        return { json: { id: environmentId, installConfig: saved, version } }
+        return { json: card() }
       }
-      if (method === 'GET' && path.startsWith(`/api/platform/environments/${environmentId}/install`)) {
-        const code = new URL(path, 'http://matrix.local').searchParams.get('code')
+      if (method === 'GET' && path.startsWith(`/api/platform/environments/${environmentId}/install-script?`)) {
+        const url = new URL(path, 'http://matrix.local')
+        const operatingSystem = url.searchParams.get('operatingSystem')
+        if (!operatingSystem || !['linux', 'windows'].includes(operatingSystem)) {
+          throw problemError(400, 'validation', 'operatingSystem must be linux, macos or windows', path)
+        }
+        const code = url.searchParams.get('code')
         if (!code || code !== activeCode) {
           if (invalidated.get(code) === 'replaced') replacedRejections++
           if (invalidated.get(code) === 'consumed') consumedRejections++
@@ -186,7 +225,8 @@ test('environment install-script case checks code, headers and rotation without 
           ? '33333333-3333-4333-8333-333333333333'
           : '44444444-4444-4444-8444-444444444444'
         version = String(BigInt(version) + 1n)
-        return { json: installScript(token), headers: scriptHeaders() }
+        const envelope = { environmentId, version, daemonConfig: saved }
+        return { json: installScript(token, envelope), headers: scriptHeaders() }
       }
       if (method === 'POST' && path === `/api/platform/environments/${environmentId}/rotate-token`) {
         if (body.expectedVersion !== version) throw problemError(409, 'version_conflict', 'version conflict', path)
@@ -196,20 +236,20 @@ test('environment install-script case checks code, headers and rotation without 
         activeCode = null
         version = String(BigInt(version) + 1n)
         return {
-          json: { id: environmentId, registrationToken: token, installConfig: saved, version },
+          json: { ...card(), registrationToken: token },
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
       }
-      if (method === 'GET' && path === '/api/platform/daemon-uninstall-scripts/linux') {
-        return { json: "bash <<'KK'\nbash \"$stage/install.sh\" uninstall\nKK\n", headers: scriptHeaders() }
+      if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=linux`) {
+        return { json: uninstallScript(environmentId), headers: scriptHeaders() }
       }
-      if (method === 'GET' && path === '/api/platform/daemon-uninstall-scripts/windows') {
-        return { json: "powershell -File $installer uninstall\n", headers: scriptHeaders() }
+      if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=windows`) {
+        return { json: uninstallScript(environmentId), headers: scriptHeaders() }
       }
-      if (method === 'GET' && path === '/api/platform/daemon-uninstall-scripts/solaris') {
+      if (method === 'GET' && path === `/api/platform/environments/${environmentId}/uninstall-script?operatingSystem=solaris`) {
         throw problemError(400, 'validation', 'operatingSystem must be linux, macos or windows', path)
       }
-      if (method === 'DELETE' && path.startsWith(`/api/platform/environments/${environmentId}`)) {
+      if (method === 'DELETE' && path.startsWith(`/api/platform/environments/${environmentId}?`)) {
         assert.ok(path.includes(`expectedVersion=${version}`), 'delete must use current version')
         deleted = true
         return { json: null }
@@ -227,14 +267,13 @@ test('environment install-script case checks code, headers and rotation without 
   assert.equal(consumedRejections, 1)
   assert.equal(rotatedRejections, 1)
   assert.deepEqual(secretWrites, [], 'case must not write script, token or code artifacts')
-  assert.ok(calls.includes('GET /api/platform/daemon-uninstall-scripts/linux'))
-  assert.ok(calls.includes('GET /api/platform/daemon-uninstall-scripts/windows'))
-  assert.ok(calls.includes('GET /api/platform/daemon-uninstall-scripts/solaris'))
+  assert.ok(calls.includes(`GET /api/platform/environments/${environmentId}/uninstall-script`))
+  assert.equal(calls.filter((call) => call.endsWith('/uninstall-script')).length, 3)
   assert.equal(calls.filter((call) => call.endsWith('/install-codes')).length, 5)
   assert.equal(
     calls.filter((call) => call === `GET /api/platform/environments/${environmentId}/install-script`).length,
-    7,
-    'case must redeem twice and reject missing, tampered, consumed, replaced and rotated codes',
+    9,
+    'case must redeem twice and reject missing/invalid OS, missing, tampered, consumed, replaced and rotated codes',
   )
   assert.ok(!calls.some((call) => call.includes('spawn') || call.includes('exec')))
 })
@@ -244,7 +283,8 @@ for (const failure of ['http', 'timeout']) {
     const environment = {
       id: '00000000-0000-4000-8000-000000000def',
       version: '0',
-      installConfig: null,
+      note: 'e2e environment note',
+      daemonConfig: daemonConfigFixture(),
     }
     const token = 'synthetic-registration-token'
     const code = 'synthetic-install-code'
@@ -253,11 +293,13 @@ for (const failure of ['http', 'timeout']) {
     const ctx = {
       async call(method, path, body) {
         if (method === 'POST' && path === '/api/platform/environments') {
-          return { json: { ...environment, registrationToken: token } }
+          assert.equal(body.daemonConfig.studioUrl, 'http://127.0.0.1:18081')
+          return { json: { ...environment, name: body.name, registrationToken: token } }
         }
-        if (method === 'PUT' && path === `${environmentPath}/install-settings`) {
+        if (method === 'PUT' && path === environmentPath) {
           environment.version = '1'
-          environment.installConfig = linuxInstallConfig()
+          environment.note = body.note
+          environment.daemonConfig = body.daemonConfig
           return { json: environment }
         }
         if (method === 'POST' && path === `${environmentPath}/install-codes`) {
@@ -269,6 +311,10 @@ for (const failure of ['http', 'timeout']) {
         }
         if (method === 'GET' && path === environmentPath) return { json: environment }
         if (method === 'GET' && path.startsWith(`${environmentPath}/install-script?`)) {
+          const operatingSystem = new URL(path, 'http://matrix.local').searchParams.get('operatingSystem')
+          if (!operatingSystem || !['linux', 'windows'].includes(operatingSystem)) {
+            throw problemError(400, 'validation', 'operatingSystem must be linux, macos or windows', path)
+          }
           if (failure === 'http') throw problemError(500, 'internal', token, path)
           throw new Error(`timeout GET ${path}`)
         }

@@ -6,14 +6,14 @@ import { createCaseAdder } from '../lib/registry.mjs'
 
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
 import { cases as syncCases } from '../cases/config-sync.mjs'
-import { cases as installCases } from '../cases/environment-install-config.mjs'
+import { cases as environmentCardCases } from '../cases/environment-install-config.mjs'
 
 const CASE_IDS = [
   'config_sync.inventory_contract',
   'config_sync.provider_roundtrip_same_name',
   'config_sync.environment_identity_and_token',
-  'config_sync.environment_install_config_roundtrip',
-  'config_sync.install_config_hard_invalid_precheck',
+  'config_sync.environment_daemon_config_roundtrip',
+  'config_sync.daemon_config_hard_invalid_precheck',
   'config_sync.import_precheck_and_partial_confirmation',
 ]
 
@@ -50,7 +50,7 @@ test('config sync cases are free L1 cases in the matrix', () => {
   }
 
   // 两个模块的实际数组在汇总中保持原有先后顺序。
-  assert.ok(ALL_CASES.indexOf(installCases.at(-1)) < ALL_CASES.indexOf(syncCases[0]))
+  assert.ok(ALL_CASES.indexOf(environmentCardCases.at(-1)) < ALL_CASES.indexOf(syncCases[0]))
   assert.ok(syncCases.every((entry) => getCase(entry.id) === entry))
   assert.ok(ALL_CASES.every((entry) => entry.requires instanceof Set))
   assert.equal(new Set(ALL_CASES.map((entry) => entry.id)).size, ALL_CASES.length)
@@ -188,8 +188,8 @@ test('precheck case enforces read-only checking and explicit partial import befo
   assert.equal(provider, null, 'case must clean up its provider')
 })
 
-test('install config hard-invalid precheck rejects every endpoint without side effects', async () => {
-  // 测试意图：以 recorder 证明硬非法 installConfig 在 check/import 两个端点都 400，且不创建 Environment。
+test('daemon config hard-invalid precheck rejects every endpoint without side effects', async () => {
+  // 测试意图：以 recorder 证明硬非法 daemonConfig/旧安装形状在 check/import 两个端点都 400，且不创建 Environment。
   const requests = []
   const ctx = {
     async call(method, path, body) {
@@ -200,16 +200,21 @@ test('install config hard-invalid precheck rejects every endpoint without side e
       assert.equal(method, 'POST')
       assert.ok(['/api/platform/config-sync/check-import', '/api/platform/config-sync/import'].includes(path))
       requests.push({ path, yaml: body.yaml, allowPartial: body.allowPartial })
-      throw problemError(400, 'validation', 'environment installConfig.daemon.studioUrl is invalid', path)
+      throw problemError(400, 'validation', 'environment daemonConfig is invalid', path)
     },
   }
-  await getCase('config_sync.install_config_hard_invalid_precheck').run(ctx)
-  // 4 组非法配置 × 2 个端点，全部硬拒绝。
-  assert.equal(requests.length, 8)
+  await getCase('config_sync.daemon_config_hard_invalid_precheck').run(ctx)
+  // 6 组非法条目 × 2 个端点，全部硬拒绝。
+  assert.equal(requests.length, 12)
   assert.equal(
-    requests.filter((request) => request.yaml.includes('"unknownField":"/opt/jdk"')).length,
+    requests.filter((request) => request.yaml.includes('"installConfig"')).length,
     2,
-    'unknown top-level field must be probed at both import/check and import',
+    'removed installConfig shape must be probed at both check-import and import',
+  )
+  assert.equal(
+    requests.filter((request) => request.yaml.includes('"operatingSystem"')).length,
+    4,
+    'both old installConfig and flat operatingSystem shapes must be rejected',
   )
   for (const request of requests) {
     assert.equal(request.allowPartial, true)
@@ -217,9 +222,9 @@ test('install config hard-invalid precheck rejects every endpoint without side e
   }
 })
 
-test('environment install-config roundtrip case wires PUT/export/import/clear/cleanup against real state', async () => {
+test('environment daemon-config roundtrip case wires PUT/export/import/update/cleanup against real state', async () => {
   // 测试意图：以带持久状态的 recorder 真跑该 case，证明脚本 wiring 正确：
-  // PUT install-config 参数顺序、导出往返、新 token+config 原子导入、缺失 installConfig 清空、最后按最新版本清理。
+  // PUT 参数顺序、导出往返、新 token+note/config 原子导入、缺失 daemonConfig 硬拒绝且不清空、最后按最新版本清理。
   // 严格限定 method 合法，任何把 path 当 method 的调用会立即失败（回归先前的参数顺序缺陷）。
   const LEGAL_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE'])
   const environmentId = '00000000-0000-4000-8000-0000000000cf'
@@ -238,19 +243,27 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
       assert.ok(LEGAL_METHODS.has(method), `illegal method ${JSON.stringify(method)} for ${path}`)
       calls.push({ method, path, body })
       if (method === 'POST' && path === '/api/platform/environments') {
+        assert.deepEqual(Object.keys(body).sort(), ['daemonConfig', 'name', 'note'])
         state = {
           id: environmentId,
           name: body.name,
+          note: body.note,
+          daemonConfig: body.daemonConfig,
           registrationTokenHash: sha256('e2e-token-original'),
-          installConfig: null,
           version: '0',
         }
         return { json: { ...state, registrationToken: 'e2e-token-original' } }
       }
-      if (method === 'PUT' && path === `${base}/install-settings`) {
+      if (method === 'PUT' && path === base) {
         assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
-        state = { ...state, installConfig: body.installConfig, version: String(BigInt(state.version) + 1n) }
-        return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
+        assert.deepEqual(Object.keys(body).sort(), ['daemonConfig', 'expectedVersion', 'note'])
+        state = {
+          ...state,
+          note: body.note,
+          daemonConfig: body.daemonConfig,
+          version: String(BigInt(state.version) + 1n),
+        }
+        return { json: { ...state } }
       }
       if (method === 'POST' && path === '/api/platform/config-sync/export') {
         return {
@@ -259,8 +272,9 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
               environments: [
                 {
                   name: state.name,
+                  note: state.note,
+                  daemonConfig: state.daemonConfig,
                   registrationTokenHash: state.registrationTokenHash,
-                  installConfig: state.installConfig,
                 },
               ],
             }),
@@ -268,8 +282,11 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         }
       }
       if (method === 'POST' && path === '/api/platform/config-sync/check-import') {
-        parseEntry(body)
-        // 预检查只暴露覆盖引用，绝不回显 token 或 installConfig 值。
+        const entry = parseEntry(body)
+        if (entry.daemonConfig == null) {
+          throw problemError(400, 'validation', 'daemonConfig is required', path)
+        }
+        // 预检查只暴露覆盖引用，绝不回显 token 或 daemonConfig 值。
         return {
           json: {
             created: [],
@@ -281,26 +298,33 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
       if (method === 'POST' && path === '/api/platform/config-sync/import') {
         const entry = parseEntry(body)
         assert.equal(entry.name, state.name)
-        const nextConfig = entry.installConfig ?? null
-        if (state.installConfig != null && nextConfig != null && entry.registrationTokenHash !== state.registrationTokenHash) {
+        if (entry.daemonConfig == null) {
+          throw problemError(400, 'validation', 'daemonConfig is required', path)
+        }
+        if (entry.registrationTokenHash !== state.registrationTokenHash) {
           atomicUpdateApplied = true
-          atomicUpdateNote = nextConfig.daemon?.note
+          atomicUpdateNote = entry.note
         }
         state = {
           ...state,
+          note: entry.note ?? null,
+          daemonConfig: entry.daemonConfig,
           registrationTokenHash: entry.registrationTokenHash,
-          installConfig: nextConfig,
           version: String(BigInt(state.version) + 1n),
         }
         return { json: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } }
       }
       if (method === 'GET' && path === base) {
-        return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
+        return { json: { ...state } }
       }
       if (method === 'DELETE' && path.startsWith(base)) {
         const expected = new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('expectedVersion')
         assert.equal(expected, state.version, 'DELETE must use the freshest persisted version')
-        deleteSnapshot = { tokenHash: state.registrationTokenHash, config: state.installConfig }
+        deleteSnapshot = {
+          tokenHash: state.registrationTokenHash,
+          note: state.note,
+          config: state.daemonConfig,
+        }
         deleted = true
         return { status: 204, json: null }
       }
@@ -308,18 +332,19 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
     },
   }
 
-  await getCase('config_sync.environment_install_config_roundtrip').run(ctx)
+  await getCase('config_sync.environment_daemon_config_roundtrip').run(ctx)
 
   const methods = calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)
-  assert.ok(methods.includes(`PUT ${base}/install-settings`), 'case must persist installConfig via PUT')
+  assert.ok(methods.includes(`PUT ${base}`), 'case must persist the card config via PUT')
   assert.ok(methods.includes('POST /api/platform/config-sync/export'), 'case must export the environment')
-  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/check-import').length, 2, 'roundtrip plus atomic update precheck')
-  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/import').length, 3, 'roundtrip, atomic update, and clearing import')
+  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/check-import').length, 3, 'roundtrip, atomic update and missing-config probe')
+  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/import').length, 3, 'roundtrip, atomic update and rejected missing-config import')
   assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/export').length, 2, 'roundtrip export plus re-export after the atomic update')
   assert.equal(deleted, true, 'case must delete the environment it created')
   assert.equal(atomicUpdateApplied, true, 'new token+config must be applied in a single import entry')
-  assert.equal(atomicUpdateNote, 'e2e install config updated', 'atomic update must use a legal changed daemon.note')
+  assert.equal(atomicUpdateNote, 'e2e environment note updated', 'atomic update must use the new top-level card note')
   assert.ok(deleteSnapshot, 'cleanup must have observed persisted state')
-  assert.equal(deleteSnapshot.config, null, 'absent installConfig must clear saved settings before cleanup')
+  assert.equal(deleteSnapshot.note, 'e2e environment note updated', 'missing daemonConfig must not clear the card note')
+  assert.equal(deleteSnapshot.config.proxyUrl, 'http://127.0.0.1:7891', 'missing daemonConfig must not clear the card config')
   assert.notEqual(deleteSnapshot.tokenHash, sha256('e2e-token-original'), 'cleanup must see the replaced token hash')
 })

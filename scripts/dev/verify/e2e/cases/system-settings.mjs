@@ -14,7 +14,7 @@ const SECTION_NAMES = [
   'tool',
   'aiRuntime',
   'environment',
-  'network',
+  'backendNetwork',
   'storageMedia',
   'advanced',
 ]
@@ -24,7 +24,7 @@ function updateBody(settings, expectedVersion = settings.version) {
     tool: settings.tool,
     aiRuntime: settings.aiRuntime,
     environment: settings.environment,
-    network: settings.network,
+    backendNetwork: settings.backendNetwork,
     storageMedia: settings.storageMedia,
     advanced: settings.advanced,
     expectedVersion,
@@ -59,7 +59,7 @@ registerCase({
   level: 'L1',
   title: 'SystemSettings 完整聚合、严格校验、CAS 与恢复',
   docs:
-    'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 network 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
+    'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 backendNetwork 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/platform/settings')
@@ -97,7 +97,7 @@ registerCase({
 
     const original = before.aiRuntime.retryBaseDelayMillis
     const changed = original === '2501' ? '2502' : '2501'
-    const originalNetwork = structuredClone(before.network)
+    const originalNetwork = structuredClone(before.backendNetwork)
     const originalRetryCodes = before.aiRuntime.modelHttpRetryStatusCodes.slice()
     // 选择一份与当前默认不同的合法名单，确保 CAS roundtrip 真正证明持久化。
     const changedRetryCodes = JSON.stringify(originalRetryCodes) === JSON.stringify([429, 503])
@@ -108,7 +108,7 @@ registerCase({
       update.aiRuntime.retryBaseDelayMillis = changed
       update.aiRuntime.modelHttpRetryStatusCodes = changedRetryCodes
       // 仅保存重启生效配置，不连接代理、不更改运行期客户端。
-      update.network = { proxyUrl: 'http://proxy.example.test:3128', noProxyHosts: '' }
+      update.backendNetwork = { proxyUrl: 'http://proxy.example.test:3128', noProxyHosts: '' }
       const { json } = await ctx.call('PUT', '/api/platform/settings', update)
       const saved = json
       assertDecimalVersion(saved.version, 'saved system settings version')
@@ -120,8 +120,8 @@ registerCase({
       const reread = await readSettings()
       for (const actual of [saved, reread]) {
         assert(
-          actual.network.proxyUrl === update.network.proxyUrl && actual.network.noProxyHosts === '',
-          'global network proxy did not roundtrip',
+          actual.backendNetwork.proxyUrl === update.backendNetwork.proxyUrl && actual.backendNetwork.noProxyHosts === '',
+          'global backendNetwork proxy did not roundtrip',
         )
         assert(
           JSON.stringify(actual.aiRuntime.modelHttpRetryStatusCodes) ===
@@ -138,7 +138,7 @@ registerCase({
         'http://proxy.example.test:3128/path',
       ]) {
         const invalid = updateBody(structuredClone(saved))
-        invalid.network.proxyUrl = proxyUrl
+        invalid.backendNetwork.proxyUrl = proxyUrl
         const error = await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), {
           status: 400,
           code: 'validation',
@@ -146,11 +146,11 @@ registerCase({
         assert(
           !String(error.body).includes('synthetic-user') &&
             !String(error.body).includes('synthetic-password'),
-          'network validation error must not echo proxy credentials',
+          'backendNetwork validation error must not echo proxy credentials',
         )
       }
       const missingNetwork = updateBody(structuredClone(saved))
-      delete missingNetwork.network
+      delete missingNetwork.backendNetwork
       await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', missingNetwork), {
         status: 400,
         code: 'validation',
@@ -158,9 +158,9 @@ registerCase({
       const afterInvalid = await readSettings()
       assert(
         afterInvalid.version === saved.version &&
-          afterInvalid.network.proxyUrl === saved.network.proxyUrl &&
-          afterInvalid.network.noProxyHosts === saved.network.noProxyHosts,
-        'invalid network update must leave persisted settings unchanged',
+          afterInvalid.backendNetwork.proxyUrl === saved.backendNetwork.proxyUrl &&
+          afterInvalid.backendNetwork.noProxyHosts === saved.backendNetwork.noProxyHosts,
+        'invalid backendNetwork update must leave persisted settings unchanged',
       )
       // 重试名单严格整数形状：非数组/小数/字符串/越界/重复/null 元素一律 400，且不推进版本、不改已保存名单。
       for (const invalidList of [
@@ -222,15 +222,15 @@ registerCase({
           latest.aiRuntime.retryBaseDelayMillis === original &&
           JSON.stringify(latest.aiRuntime.modelHttpRetryStatusCodes) ===
             JSON.stringify(originalRetryCodes) &&
-          (latest.network.proxyUrl ?? null) === (originalNetwork.proxyUrl ?? null) &&
-          latest.network.noProxyHosts === originalNetwork.noProxyHosts
+          (latest.backendNetwork.proxyUrl ?? null) === (originalNetwork.proxyUrl ?? null) &&
+          latest.backendNetwork.noProxyHosts === originalNetwork.noProxyHosts
         ) {
           break
         }
         const restore = updateBody(structuredClone(latest))
         restore.aiRuntime.retryBaseDelayMillis = original
         restore.aiRuntime.modelHttpRetryStatusCodes = originalRetryCodes
-        restore.network = originalNetwork
+        restore.backendNetwork = originalNetwork
         try {
           await ctx.call('PUT', '/api/platform/settings', restore)
           break
@@ -261,9 +261,9 @@ registerCase({
         `SystemSettings retry status restore retries exhausted: ${restored.aiRuntime.modelHttpRetryStatusCodes}`,
       )
       assert(
-        (restored.network.proxyUrl ?? null) === (originalNetwork.proxyUrl ?? null) &&
-          restored.network.noProxyHosts === originalNetwork.noProxyHosts,
-        'SystemSettings network restore retries exhausted',
+        (restored.backendNetwork.proxyUrl ?? null) === (originalNetwork.proxyUrl ?? null) &&
+          restored.backendNetwork.noProxyHosts === originalNetwork.noProxyHosts,
+        'SystemSettings backendNetwork restore retries exhausted',
       )
     }
   },

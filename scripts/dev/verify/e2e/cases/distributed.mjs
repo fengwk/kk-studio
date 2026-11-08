@@ -15,7 +15,7 @@ import {
   createNewSession,
   userMessageCommand,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, environmentCreateBody } from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -106,7 +106,12 @@ registerCase({
 
     try {
       // 1. 在 node A 创建临时 Environment
-      const createRes = await ctx.callNode('a', 'POST', '/api/platform/environments', { name: envName })
+      const createRes = await ctx.callNode(
+        'a',
+        'POST',
+        '/api/platform/environments',
+        environmentCreateBody(envName),
+      )
       const created = createRes.json
       assert(created?.id, 'expected created environment id')
       assert(created.name === envName, `expected name ${envName}, got ${created.name}`)

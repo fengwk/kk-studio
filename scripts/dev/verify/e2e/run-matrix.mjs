@@ -43,7 +43,7 @@ import { cases as projectCases } from './cases/project.mjs'
 import { cases as i18nCases } from './cases/i18n.mjs'
 import { cases as configMatrixCases } from './cases/config-matrix.mjs'
 import { cases as systemSettingsCases } from './cases/system-settings.mjs'
-import { cases as installConfigCases } from './cases/environment-install-config.mjs'
+import { cases as environmentCardCases } from './cases/environment-install-config.mjs'
 import { cases as configSyncCases } from './cases/config-sync.mjs'
 import { cases as runtimeIdeCases } from './cases/environment-runtime-ide.mjs'
 import { cases as appEventsCases } from './cases/app-events.mjs'
@@ -60,10 +60,10 @@ import { cases as distributedCases } from './cases/distributed.mjs'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// config-sync 原先先导入 install-config，因此其 case 排在 config-sync 前。
+// 卡片用例先于配置同步注册，保证配置同步引用的卡片 fixture/断言先就绪。
 export const ALL_CASES = [
   ...seedCases, ...crudCases, ...projectCases, ...i18nCases, ...configMatrixCases,
-  ...systemSettingsCases, ...installConfigCases, ...configSyncCases, ...runtimeIdeCases,
+  ...systemSettingsCases, ...environmentCardCases, ...configSyncCases, ...runtimeIdeCases,
   ...appEventsCases, ...modelAttemptCases, ...canvasStorageCases, ...canvasFunctionCases,
   ...chatAttachmentCases, ...canvasApiCases, ...interactionCases, ...queuedBatchCases,
   ...realCases, ...distributedCases,

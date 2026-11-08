@@ -1,5 +1,5 @@
 import { assert, assertExactFields, expectHttpError, listResults, cid } from '../lib/http.mjs'
-import { baseModelConfig, encodePathTail, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail, environmentCreateBody, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloEnabled,
   branchSettingsOf,
@@ -1187,7 +1187,9 @@ async function deleteChat(ctx, chat) {
 
 /** 创建一次性 Environment（dedicated 资源，随 case 清理），返回权威资源。 */
 async function createEnvironment(ctx, name) {
-  const environment = (await ctx.call('POST', '/api/platform/environments', { name })).json
+  const environment = (
+    await ctx.call('POST', '/api/platform/environments', environmentCreateBody(name))
+  ).json
   assert(
     environment?.id && environment?.name === name && environment?.version != null,
     `invalid Environment: ${JSON.stringify(environment)}`,

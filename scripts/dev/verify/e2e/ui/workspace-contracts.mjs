@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail, environmentCreateBody } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
   assertRootYoloEnabled,
@@ -681,7 +681,7 @@ export async function runWorkspaceContractMatrix(ui) {
         assert(after.version !== before.version, 'CAS PUT must advance the version')
         assert(after.aiRuntime.retryBaseDelayMillis === changed, `change not persisted: ${after.aiRuntime.retryBaseDelayMillis}`)
         // 完整聚合六 section + wire 形态（Long 字符串 / version 字符串）。
-        for (const section of ['tool', 'aiRuntime', 'environment', 'network', 'storageMedia', 'advanced']) {
+        for (const section of ['tool', 'aiRuntime', 'environment', 'backendNetwork', 'storageMedia', 'advanced']) {
           assert(after[section] != null, `missing section ${section} in GET response`)
         }
         assert(typeof after.version === 'string' && /^\d+$/.test(after.version), 'version must be a decimal string')
@@ -694,7 +694,7 @@ export async function runWorkspaceContractMatrix(ui) {
           tool: after.tool,
           aiRuntime: { ...after.aiRuntime, retryBaseDelayMillis: externallyChanged },
           environment: after.environment,
-          network: after.network,
+          backendNetwork: after.backendNetwork,
           storageMedia: after.storageMedia,
           advanced: after.advanced,
           expectedVersion: after.version,
@@ -736,7 +736,7 @@ export async function runWorkspaceContractMatrix(ui) {
             tool: latest.tool,
             aiRuntime: { ...latest.aiRuntime, retryBaseDelayMillis: original },
             environment: latest.environment,
-            network: latest.network,
+            backendNetwork: latest.backendNetwork,
             storageMedia: latest.storageMedia,
             advanced: latest.advanced,
             expectedVersion: latest.version,
@@ -805,9 +805,11 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
-    const environmentResponse = await apiCtx.call('POST', '/api/platform/environments', {
-      name: `offline-${suffix}`,
-    })
+    const environmentResponse = await apiCtx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(`offline-${suffix}`),
+    )
     assert(
       environmentResponse.status === 201,
       `create usage environment: ${JSON.stringify(environmentResponse)}`,
@@ -882,9 +884,11 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       intervalMs: 100,
     })
     // 切换只读 Footer 的 Environment 事实通过 branch settings 的 setEnvironmentCommand 表达。
-    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/platform/environments', {
-      name: `offline-alt-${suffix}`,
-    })
+    const otherEnvironmentResponse = await apiCtx.call(
+      'POST',
+      '/api/platform/environments',
+      environmentCreateBody(`offline-alt-${suffix}`),
+    )
     assert(
       otherEnvironmentResponse.status === 201,
       `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
