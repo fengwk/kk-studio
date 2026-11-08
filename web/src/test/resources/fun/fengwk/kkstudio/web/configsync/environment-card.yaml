@@ -1,0 +1,15 @@
+environments:
+  - name: resource-env
+    note: "resource note 'quoted'"
+    registrationTokenHash: 98956f3dc7f197ae785c16ea7017600dc33bd59e15fc27d90b8e8d43b8055bb6
+    daemonConfig:
+      studioUrl: https://studio.example.com
+      bashExecutable: /bin/bash
+      proxyUrl: http://127.0.0.1:7890
+      lsp:
+        servers:
+          jdtls:
+            command: ["jdtls", "--stdio"]
+            extensions: [".java"]
+            rootMarkers: ["pom.xml"]
+            firstMatchMarkers: [".git"]

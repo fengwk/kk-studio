@@ -46,7 +46,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -57,11 +56,6 @@ public final class EnvironmentDaemonServer
   private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
 
   private record PendingAdmission(UUID leaseToken, String registrationToken) {}
-
-  private static final class ConfigSyncState {
-    private final AtomicBoolean running = new AtomicBoolean();
-    private final AtomicBoolean dirty = new AtomicBoolean();
-  }
 
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
@@ -80,7 +74,7 @@ public final class EnvironmentDaemonServer
   private final Object inventory = new Object();
   private final Map<EnvironmentId, DaemonConnectionSession> sessions = new HashMap<>();
   private final Map<EnvironmentId, String> daemonInstances = new HashMap<>();
-  private final Map<EnvironmentId, ConfigSyncState> configSyncs = new ConcurrentHashMap<>();
+  private final ConfigSyncCoordinator configSyncs = new ConfigSyncCoordinator();
   private final Map<DaemonAdmission.Admitted, PendingAdmission> pendingAdmissions =
       new ConcurrentHashMap<>();
   private final AtomicLong connectionGenerations = new AtomicLong();
@@ -283,23 +277,20 @@ public final class EnvironmentDaemonServer
   }
 
   private void scheduleConfigSync(EnvironmentId environmentId) {
-    ConfigSyncState state =
-        configSyncs.computeIfAbsent(environmentId, ignored -> new ConfigSyncState());
-    state.dirty.set(true);
-    if (!state.running.compareAndSet(false, true)) {
+    ConfigSyncCoordinator.State state = configSyncs.schedule(environmentId);
+    if (state == null) {
       return;
     }
     try {
       configExecutor.execute(() -> runConfigSync(environmentId, state));
     } catch (RuntimeException error) {
-      state.running.set(false);
+      configSyncs.rejected(environmentId, state);
       logFailure("environment config scheduling for " + environmentId, error);
     }
   }
 
-  private void runConfigSync(EnvironmentId environmentId, ConfigSyncState state) {
-    while (true) {
-      state.dirty.set(false);
+  private void runConfigSync(EnvironmentId environmentId, ConfigSyncCoordinator.State state) {
+    while (configSyncs.begin(environmentId, state)) {
       try {
         DaemonConnectionSession session = sessionOf(environmentId);
         if (session != null) {
@@ -308,15 +299,7 @@ public final class EnvironmentDaemonServer
       } catch (RuntimeException error) {
         logFailure("environment config reconciliation for " + environmentId, error);
       }
-      if (state.dirty.get()) {
-        continue;
-      }
-      state.running.set(false);
-      if (!state.dirty.get()) {
-        configSyncs.remove(environmentId, state);
-        return;
-      }
-      if (!state.running.compareAndSet(false, true)) {
+      if (!configSyncs.repeat(environmentId, state)) {
         return;
       }
     }
