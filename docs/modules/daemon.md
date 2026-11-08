@@ -1,6 +1,6 @@
 # Environment Daemon
 
-Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；能力契约与 Platform 连接服务的协议和会话见 [Harness Environment](harness-environment.md)。
+Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。每张 Environment 卡片对应一份独立安装（独立目录、凭据、进程与服务），同一宿主可并行运行多张卡片的 Daemon；安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；能力契约与 Platform 连接服务的协议和会话见 [Harness Environment](harness-environment.md)。
 
 模块运行在 Node.js 24 运行时之上，依赖 `@bufbuild/protobuf`、`@vscode/ripgrep`、`diff`、`jsonc-parser`、`koffi`、`undici`、`vscode-jsonrpc`、`ws`、`yauzl` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。构建发行归档时使用开发依赖 `tar` 校验 code-server 归档。
 
@@ -10,24 +10,32 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
 
 命令行只支持标准 Unicode 参数，不经过二次编码包装：
 - `--help` / `-h` 与 `--version` 输出帮助或版本后以 0 状态退出，不触碰数据目录。
-- `--check-config <绝对路径>` 只读取并校验配置、同目录凭证与配置的 bash 可执行文件，不打开数据目录、不抢锁、不建立连接也不启动任何进程；校验通过输出固定信息并退出，校验失败在 stderr 输出单行安全诊断（带有稳定前缀 `Invalid daemon configuration:`，不回显输入敏感值或堆栈）。
+- `--check-config <绝对路径>` 只读取并校验引导配置结构、同目录凭证与配置信封，不打开数据目录、不抢锁、不建立连接也不启动任何进程；校验通过输出固定信息并退出，校验失败在 stderr 输出单行安全诊断（带有稳定前缀 `Invalid daemon configuration:`，不回显输入敏感值或堆栈）。Bash/LSP 的真实解析不在预检中执行。
 - `--config <绝对路径>` 加载指定配置并启动长驻服务。未知或多余参数一律失败关闭。
 
-[`DaemonConfig`](../../daemon/src/config.ts) 只消费唯一的 `--config <绝对路径>`：它指向一个只含 `studioUrl`、可选的 `note`、`bashExecutable` 与 `lsp` 的 JSON 文件（受管安装固定为同目录的 `daemon.json`），其父目录即为运行数据目录，同目录的 `daemon.token` 是属主独占的注册凭证文件（POSIX 0600 普通文件，非符号链接）。gateway 地址由配置中的 `studioUrl` 派生为 `ws(s)://<authority>/ws/daemon`，心跳与重连间隔固定为 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本参数，也不接受命令行传入的 gateway 或第二配置来源。
+[`DaemonConfig`](../../daemon/src/config.ts) 只消费唯一的 `--config <绝对路径>`：它指向托管在卡片目录下、结构固定为 `{environmentId, version, daemonConfig:{studioUrl, bashExecutable, lsp, proxyUrl}}` 的 JSON 缓存（受管安装为 `~/.kk-studio/environments/<environmentId>/daemon.json`），其父目录即为运行数据目录，同目录的 `daemon.token` 是属主独占的注册凭证文件（POSIX 0600 普通文件，非符号链接）。`version` 是 canonical 非负十进制字符串，代表最近一次被接受的卡片配置版本；`daemonConfig` 是完整可编辑配置，token 不进入 JSON。gateway 地址由配置中的 `studioUrl` 派生为 `ws(s)://<authority>/ws/daemon`，心跳与重连间隔固定为 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本参数，也不接受命令行传入的 gateway 或第二配置来源。
 
-数据目录在启动时由 [`lock.ts`](../../daemon/src/native/lock.ts) 获取目录级独占内核建议锁 `daemon.lock`（POSIX `flock(LOCK_EX | LOCK_NB)`，Windows `LockFileEx`），同一目录上的第二个进程立即失败退出。锁随打开的文件描述符存活，进程异常崩溃时由操作系统内核自动释放，不残留陈旧锁。目录布局如下：
+启动只校验连接引导结构、卡片 UUID、配置版本与 token 文件；缓存中的 Bash 暂时不存在**不会**阻断启动，Bash/LSP 的真实解析属于热应用候选校验。这样即使本地程序路径失效，Daemon 仍能建立控制通道接收修正。
+
+数据目录在启动时由 [`lock.ts`](../../daemon/src/native/lock.ts) 获取目录级独占内核建议锁 `daemon.lock`（POSIX `flock(LOCK_EX | LOCK_NB)`，Windows `LockFileEx`），同一卡片目录上的第二个进程立即失败退出。安装操作另由 `install.lock` 串行化（见安装文档），运行进程不获取该锁。锁随打开的文件描述符存活，进程异常崩溃时由操作系统内核自动释放，不残留陈旧锁。目录布局如下：
 
 ```text
-<data-dir>/
-  daemon.lock                # 内核独占建议锁（0600）
-  tmp/workspaces/<uuid>/     # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
-  skills/<package>/          # 已安装技能包
-  skills/.staging-<uuid>/    # 技能安装暂存
-  skills/.old-<uuid>/        # 技能替换备份
-  updates/<operation-id>-*/  # 受管在线更新工作目录（安装脚本、许可和日志）
+<data-dir>/                       # 即 ~/.kk-studio/environments/<environmentId>
+  daemon.json                     # 最近接受的完整配置缓存
+  daemon.token                    # 注册凭据（0600）
+  daemon.lock                     # 内核独占建议锁（0600）
+  install.lock                    # 安装操作锁，由独立 helper 持有
+  lib/                            # 程序发行目录（main.js 与冻结运行时）
+  ide/                            # code-server 数据与恢复目录
+  tmp/workspaces/<uuid>/          # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
+  skills/<package>/               # 已安装技能包
+  skills/.staging-<uuid>/         # 技能安装暂存
+  skills/.old-<uuid>/             # 技能替换备份
+  .work/                          # 安装操作独占暂存
+  last-operation.json             # 最近一次安装/更新诊断（≤4 KiB，无秘密）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。安装器不保留历史程序、备份或按操作累积的更新日志，唯一持久诊断是固定字段的 `last-operation.json`。
 
 ## 能力装配与运行时调度
 
@@ -36,16 +44,27 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
-运行时 [`Runtime`](../../daemon/src/runtime.ts) 只做装配与调用编排，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，控制会话（环境绑定、SETTINGS/READY 握手、心跳与入站信封分发）在 [`runtime-session.ts`](../../daemon/src/runtime-session.ts)，环境绑定的出站信封构造在 [`runtime-outbound.ts`](../../daemon/src/runtime-outbound.ts)，journal 去重/回放、执行、超时与退出确认在 [`runtime-invocations.ts`](../../daemon/src/runtime-invocations.ts)，受管更新准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，运行状态快照在 [`runtime-status.ts`](../../daemon/src/runtime-status.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)，停机收敛与失败聚合在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)：
+运行时 [`Runtime`](../../daemon/src/runtime.ts) 只做装配与调用编排，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，控制会话（环境绑定、SETTINGS/ENVIRONMENT_CONFIG/READY 握手、心跳与入站信封分发）在 [`runtime-session.ts`](../../daemon/src/runtime-session.ts)，环境绑定的出站信封构造在 [`runtime-outbound.ts`](../../daemon/src/runtime-outbound.ts)，卡片配置热应用在 [`environment-config.ts`](../../daemon/src/environment-config.ts)，journal 去重/回放、执行、超时与退出确认在 [`runtime-invocations.ts`](../../daemon/src/runtime-invocations.ts)，受管更新准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，运行状态快照在 [`runtime-status.ts`](../../daemon/src/runtime-status.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)，停机收敛与失败聚合在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。服务端通过 `POST /control` 请求建立双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
-- 握手流程：连接建立后服务端首先在控制流发送 Protobuf `SETTINGS` 控制信封（下发环境标识、包含最大资源字节数与临时资源 TTL/清理间隔的 `resource_budgets`，以及网络设置），Daemon 确认后向服务端回送 `READY` 控制信封公布实例与能力状态，随后进入就绪状态。应用设置不使用 HTTP/2 原生 SETTINGS 帧表达。设置变更使用后续 `SETTINGS` 信封更新代理，不重复发送 READY；控制 WSS 始终直连。
-- 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。收到 NO_ERROR `GOAWAY` 时先摘除并关闭旧代际、清理该代际的在线状态，再立即重连；随后重连失败仍按既有退避间隔增长。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
-- 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
+- 握手流程：连接准入携带卡片 UUID、进程 UUID 与协议版本 2，认证通过后取得租约。连接建立后服务端首先在控制流发送 Protobuf `SETTINGS`（只含环境标识与 `resource_budgets`），Daemon 绑定 scope 后接收 `ENVIRONMENT_CONFIG` 完整快照；**应用成功才发送 `READY`**。READY 公告实例、宿主信息与运行状态。应用设置不使用 HTTP/2 原生 SETTINGS 帧表达。
+- 配置错误与重连：SETTINGS scope 绑定后，CONNECTING 会话仍可收发配置、心跳、运行状态与协议错误，但不得执行能力调用、SkillSync 或 IDE 命令。候选校验失败时，已有可用快照继续运行并上报新版本错误；当前进程尚无可用配置时保持 CONNECTING，等待服务端修正。连接断开时按重连策略重试（1 秒至 30 秒）；收到 NO_ERROR `GOAWAY` 时先摘除并关闭旧代际、清理该代际的在线状态，再立即重连；重连后重新进行 SETTINGS / ENVIRONMENT_CONFIG / READY 协商，不改变进程内已有执行事实。
+- 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update, configuration}`：`configuration` 为 `{appliedVersion?, proxyUrl?, error?}`，`appliedVersion` 缺失表示当前进程尚无可用配置，存在时 `proxyUrl` 缺失表示该版本明确直连，`error` 为 `{version, code, field?}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
 - 任务调用与幂等恢复：`INVOKE` 经 Protobuf 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。重连后服务端发送 `RECOVER` 查询在途调用，未命中记录时回复 `RECOVER_NOT_FOUND`，命中时重放最新状态。
 - 超时与取消：invocation 运行时维护唯一的 invoke timer（`timeout === 0` 表示不设时限），超时或取消时通过同一 `context.signal` 请求停止，不提前抢占终态；由具体执行器在 cleanup 后交付真实结果。
 - 退出确认：能力在确知管理范围完全收敛时调用 `confirmExecutionExit()`，invocation 运行时随终态或独立发送 `EXECUTION_EXITED` 报文作为范围退出的正向事实证据。
 - 关停顺序：`Runtime` 依次停止定时器，逆序释放连接与在途调用、能力资源、受控临时存储与目录锁；[`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts) 收敛全部在途执行，独立释放步骤的异常通过 `AggregateError` 聚合抛出，不吞掉清理错误。
+
+## 配置热应用
+
+[`EnvironmentConfigRuntime`](../../daemon/src/environment-config.ts) 负责本进程唯一可编辑配置的串行应用，Studio 是唯一配置权威，本地 `daemon.json` 只是最近一次被接受的缓存：
+
+- 服务端每次下发完整快照，不是增量；接收队列只保留正在处理的版本与最高待处理版本。低于已接受版本的迟到消息丢弃；相同版本相同内容幂等，相同版本不同内容是协议错误。
+- 内容实际改变时依次执行：解析 Bash 与 LSP 声明、构造新网络句柄、准备新 LSP generation、以 0600 临时文件写完整缓存并 flush 后同目录 rename、同步发布不可变运行快照、异步收尾旧 generation（真实清理失败必须报告）。缓存写入失败不改变运行快照，上报 `PERSIST_FAILED`；候选校验失败上报 `VALIDATION_FAILED` 与字段路径。
+- 运行组件已初始化且候选内容与当前快照相同，只持久化新版本并推进确认，不重新解析程序、不重建网络或 LSP。
+- `studioUrl` 或 `proxyUrl` 变化时，切换开始即暂停旧连接接受新的 INVOKE/IDE 写命令，保留在途执行；完成快照切换后按新参数主动重连，新连接核对配置后才 READY。
+- 在途 Bash 执行冻结受理时的解析结果；在途普通 HTTP 请求持有旧网络句柄直至响应/清理结束；在途 LSP 调用租用旧 generation，新调用使用新 discovery/pool。code-server 的 `dataDir`/`distributionDir`/bridge 属于安装或进程资源，不因代理或 LSP 变化重启。
+- 相同失败版本不会在每条心跳或通知中无限重试；新的显式保存会推进版本，新连接首次配置处理也会用最新快照重新验证。外部代理拒绝连接、语言服务器异常退出不自动倒退配置版本。
 
 ## 本地存储与文本输出
 
@@ -55,7 +74,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 默认文本捕获预算为 1 GiB，达到预算后停止捕获文件并继续排空与统计，结果中显式标记截断。
 - 定时清扫（默认 30 分钟一次）只回收超过保留期（默认 3 天）且未持用租约的 workspace，清扫不跟随符号链接、不越出受控根目录。
 
-技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过平台代理及绕过策略从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后通过重命名替换 `skills/<package>`。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
+技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过当前卡片代理（`proxyUrl=null` 时显式直连）从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后通过重命名替换 `skills/<package>`。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
 
 ## 编码能力与原生监管
 
@@ -138,11 +157,14 @@ LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.serv
 
 二进制文件与媒体结果先向服务端申请预签名上传票据，通过 [`transport/resources.ts`](../../daemon/src/transport/resources.ts) 直接 HTTP PUT 上传对象存储，字节不经过 WebSocket 控制管道。
 
-受管更新由 [`installer.ts`](../../daemon/src/installer.ts) 驱动：UPDATE 只携带操作 ID 和目标版本。
-Daemon 从目标版本 tag 下载官方安装脚本，并创建操作系统级独立任务（Linux `systemd-run`、
-macOS `launchctl`、Windows 计划任务）。任务等待准备回执的许可后调用安装脚本，复用现有配置与令牌。
-安装脚本负责发行归档的校验、安装与服务重启；独立任务将输出写入本机日志。
-Daemon 在内存中维护当前更新状态；最终成功以目标版本 Daemon 的 READY 为准。
+受管更新由 [`installer.ts`](../../daemon/src/installer.ts) 驱动：UPDATE 只携带操作 ID 和目标版本，两个字段之外的多余内容一律拒绝。
+Daemon 从目标版本 tag 下载官方安装脚本，并在系统临时目录创建一次性作业，再注册操作系统级独立任务
+（Linux `systemd-run`、macOS `launchctl submit`、Windows 一次性计划任务）。任务先写 `ready`，收到
+Daemon 的 `permit` 后调用安装脚本的 `update` 动作；更新作业只携带卡片 UUID 与目标版本，复用当前
+`daemon.json` 与 `daemon.token`，代理取当前卡片配置（`null` 时显式直连）。
+安装脚本负责发行归档的校验、程序与服务定义替换；独立任务在完成或失败后清理安装器、归档、runner、
+ready/permit 标记与临时目录，持久结果只有卡片目录的 `last-operation.json`。
+Daemon 在内存与 `RuntimeStatusTracker` 中维护当前更新状态；最终成功以目标版本 Daemon 的 READY 为准。
 
 ## 质量守卫与验证
 
