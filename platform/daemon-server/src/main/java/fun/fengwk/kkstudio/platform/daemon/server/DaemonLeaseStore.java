@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -22,7 +22,7 @@ public interface DaemonLeaseStore {
   boolean markReady(
       EnvironmentId environmentId,
       UUID leaseToken,
-      DaemonCapabilities capabilities,
+      DaemonReadyMetadata readyMetadata,
       Duration leaseDuration);
 
   /** 续约路由租约；围栏失效返回 false。 */

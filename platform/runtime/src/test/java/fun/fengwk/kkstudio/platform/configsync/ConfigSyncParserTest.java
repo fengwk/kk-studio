@@ -81,19 +81,16 @@ class ConfigSyncParserTest {
     assertThrows(DomainException.class, () -> parser.parse(oldEnvironment));
     assertThrows(
         DomainException.class,
-        () ->
-            parser.parse(
-                oldEnvironment.replace("installConfig:", "daemonConfig:")));
+        () -> parser.parse(oldEnvironment.replace("installConfig:", "daemonConfig:")));
     assertThrows(
         DomainException.class,
-        () ->
-            parser.parse(
-                "settings:\n  network:\n    proxyUrl: http://127.0.0.1:7890\n"));
+        () -> parser.parse("settings:\n  network:\n    proxyUrl: http://127.0.0.1:7890\n"));
     // 一般未知字段仍保持条目级 skip 语义，不扩大为所有未知字段都硬错。
     ConfigSyncParser.ParsedDocument skipped =
         parser.parse(
             ConfigSyncFixtures.resourceYaml("environment-card.yaml")
-                .replace("    registrationTokenHash:", "    bogus: true\n    registrationTokenHash:"));
+                .replace(
+                    "    registrationTokenHash:", "    bogus: true\n    registrationTokenHash:"));
     assertTrue(skipped.environments().isEmpty());
     assertEquals(1, skipped.skipped().size());
   }
@@ -103,7 +100,9 @@ class ConfigSyncParserTest {
     ConfigSyncParser.ParsedDocument document =
         parser.parse(
             ConfigSyncFixtures.resourceYaml("environment-card.yaml")
-                .replace("      bashExecutable: /bin/bash", "      bashExecutable: /bin/bash\n      bogus: 1"));
+                .replace(
+                    "      bashExecutable: /bin/bash",
+                    "      bashExecutable: /bin/bash\n      bogus: 1"));
     assertTrue(document.environments().isEmpty());
     assertEquals(ConfigSyncKind.ENVIRONMENTS, document.skipped().get(0).getKind());
   }

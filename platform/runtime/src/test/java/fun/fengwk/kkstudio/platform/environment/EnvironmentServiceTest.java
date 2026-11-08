@@ -371,8 +371,7 @@ class EnvironmentServiceTest {
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), 4L);
     assertEquals(expiresAt, issued.getExpiresAt());
     verify(repo)
-        .saveInstallCode(
-            eq(ENV_ID), eq(4L), eq(EnvironmentInstallCodes.hash(issued.getCode())));
+        .saveInstallCode(eq(ENV_ID), eq(4L), eq(EnvironmentInstallCodes.hash(issued.getCode())));
 
     String tampered =
         (issued.getCode().charAt(0) == 'A' ? "B" : "A") + issued.getCode().substring(1);
@@ -445,24 +444,19 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(environment("saved", 1L));
 
     String script =
-        service.uninstallationScript(
-            EnvironmentId.of(ENV_ID), DaemonOperatingSystem.MACOS);
+        service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.MACOS);
     assertTrue(script.contains("uninstall --environment-id '" + ENV_ID + "'"));
     assertTrue(script.contains("v3.0.0/scripts/daemon/install.sh"));
     assertFalse(script.contains("daemon.token"));
     assertThrows(
         DomainException.class,
-        () ->
-            service.uninstallationScript(
-                EnvironmentId.of(ENV_ID), DaemonOperatingSystem.WSL));
+        () -> service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.WSL));
     verify(repo, never()).getByRegistrationTokenHash(any());
 
     when(repo.getById(ENV_ID)).thenReturn(null);
     assertThrows(
         DomainException.class,
-        () ->
-            service.uninstallationScript(
-                EnvironmentId.of(ENV_ID), DaemonOperatingSystem.LINUX));
+        () -> service.uninstallationScript(EnvironmentId.of(ENV_ID), DaemonOperatingSystem.LINUX));
   }
 
   private static EnvironmentService service(EnvironmentRepository repo) {
@@ -656,7 +650,11 @@ class EnvironmentServiceTest {
             });
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     EnvironmentDTO card = service.importEnvironment("imported", null, h("token-1"), daemonConfig());
 
@@ -672,9 +670,15 @@ class EnvironmentServiceTest {
     when(repo.existsByName("dup")).thenReturn(true);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
-    assertThrows(DomainException.class, () -> service.importEnvironment("dup", null, h("token"), daemonConfig()));
+    assertThrows(
+        DomainException.class,
+        () -> service.importEnvironment("dup", null, h("token"), daemonConfig()));
   }
 
   /** 意图：registrationToken 已被占用时拒绝，且错误文本不回显 token 值。 */
@@ -685,7 +689,11 @@ class EnvironmentServiceTest {
     when(repo.getByRegistrationTokenHash(h("secret-token"))).thenReturn(new Environment());
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     DomainException error =
         assertThrows(
@@ -722,11 +730,15 @@ class EnvironmentServiceTest {
             });
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     EnvironmentDTO card =
         service.updateImportedEnvironment(
-                EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L);
+            EnvironmentId.of(ENV_ID), null, h("new-token"), daemonConfig(), 0L);
     assertNull(card.getRegistrationToken());
     assertEquals(1L, card.getVersion());
 
@@ -741,7 +753,7 @@ class EnvironmentServiceTest {
         DomainException.class,
         () ->
             service.updateImportedEnvironment(
-                EnvironmentId.of(ENV_ID), h("other-token"), null, 0L));
+                EnvironmentId.of(ENV_ID), null, h("other-token"), daemonConfig(), 0L));
   }
 
   /** 意图：导入 create 返回 false 时冒泡，不留下半成品。 */
@@ -753,7 +765,11 @@ class EnvironmentServiceTest {
     when(repo.create(any())).thenReturn(false);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         IllegalStateException.class,
@@ -769,10 +785,15 @@ class EnvironmentServiceTest {
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
-        DomainException.class, () -> service.importEnvironment("imported", null, h("token-1"), daemonConfig()));
+        DomainException.class,
+        () -> service.importEnvironment("imported", null, h("token-1"), daemonConfig()));
   }
 
   /** 意图：目标行不存在时 lockById 返回 null 必须 404。 */
@@ -782,7 +803,11 @@ class EnvironmentServiceTest {
     when(repo.lockById(ENV_ID)).thenReturn(null);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
@@ -802,7 +827,11 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(updated);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     EnvironmentDTO card =
         service.updateImportedEnvironment(
@@ -823,7 +852,11 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(null);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
@@ -842,7 +875,11 @@ class EnvironmentServiceTest {
     when(repo.getById(ENV_ID)).thenReturn(environment("newer-token", 2L));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
@@ -860,7 +897,11 @@ class EnvironmentServiceTest {
     when(repo.updateById(env, 0L)).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(
         DomainException.class,
@@ -879,10 +920,8 @@ class EnvironmentServiceTest {
     assertNull(EnvironmentService.validateNote(null));
     assertNull(EnvironmentService.validateNote("   "));
     assertEquals("Card note", EnvironmentService.validateNote("  Card note  "));
-    assertThrows(
-        DomainException.class, () -> EnvironmentService.validateNote("bad\nnote"));
-    assertThrows(
-        DomainException.class, () -> EnvironmentService.validateNote("x".repeat(513)));
+    assertThrows(DomainException.class, () -> EnvironmentService.validateNote("bad\nnote"));
+    assertThrows(DomainException.class, () -> EnvironmentService.validateNote("x".repeat(513)));
     assertThrows(DomainException.class, () -> EnvironmentService.validateDaemonConfig(null));
     assertEquals(
         "https://studio.example.com",
@@ -925,7 +964,11 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(DomainException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
   }
@@ -936,7 +979,11 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentService service =
         new EnvironmentService(
-            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK, "3.0.0");
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK,
+            "3.0.0");
 
     assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
 

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -23,7 +23,7 @@ public record EnvironmentConnection(
     UUID ownerNodeId,
     UUID leaseToken,
     LiveEnvironmentStatus status,
-    DaemonCapabilities daemonCapabilities,
+    DaemonReadyMetadata readyMetadata,
     List<EnvironmentSkillState> skillState,
     List<EnvironmentEvent> recentEvents,
     Instant lastSeenAt,
@@ -38,7 +38,7 @@ public record EnvironmentConnection(
     leaseToken = Objects.requireNonNull(leaseToken, "leaseToken");
     status = Objects.requireNonNull(status, "status");
     if (status == LiveEnvironmentStatus.READY) {
-      daemonCapabilities = Objects.requireNonNull(daemonCapabilities, "READY daemonCapabilities");
+      readyMetadata = Objects.requireNonNull(readyMetadata, "READY readyMetadata");
     }
     skillState = List.copyOf(Objects.requireNonNull(skillState, "skillState"));
     recentEvents = List.copyOf(Objects.requireNonNull(recentEvents, "recentEvents"));
@@ -52,17 +52,17 @@ public record EnvironmentConnection(
 
   /** 连接行保留的最近一次 READY 宿主用户名；从未 READY 时为 null。 */
   public String userName() {
-    return daemonCapabilities == null ? null : daemonCapabilities.environment().userName();
+    return readyMetadata == null ? null : readyMetadata.hostInfo().userName();
   }
 
   /** 连接行保留的最近一次 READY 宿主 canonical home 目录；从未 READY 时为 null。 */
   public String homeDirectory() {
-    return daemonCapabilities == null ? null : daemonCapabilities.environment().homeDirectory();
+    return readyMetadata == null ? null : readyMetadata.hostInfo().homeDirectory();
   }
 
   /** 连接行保留的最近一次 READY 上报的实际 Daemon 构建版本；从未 READY 时为 null。 */
   public String daemonVersion() {
-    return daemonCapabilities == null ? null : daemonCapabilities.daemonVersion();
+    return readyMetadata == null ? null : readyMetadata.daemonVersion();
   }
 
   /** 指定 Package 的同步投影；从未同步过时为空。 */

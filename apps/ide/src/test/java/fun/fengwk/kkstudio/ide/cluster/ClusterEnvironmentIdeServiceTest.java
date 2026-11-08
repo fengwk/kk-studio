@@ -198,6 +198,11 @@ class ClusterEnvironmentIdeServiceTest {
     private int calls;
 
     @Override
+    public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+      return current;
+    }
+
+    @Override
     public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       calls++;
       return current;

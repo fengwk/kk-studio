@@ -20,8 +20,8 @@ import java.util.UUID;
  * {@code environment} 的 JdbcClient 仓库：卡片读取、两种行锁、CAS 写与硬删除；安装码使用普通列并与配置写入共享同一行锁。
  *
  * <p>所有写方法都要求调用方已开启真实外层事务。稳定 Environment 的 create/update/delete 在写入成功后于同一事务连接发布 {@code
- * environment_changed}，通知失败会连同写入一起回滚。安装码签发不推进版本；兑换在同一语句中清空 code、轮换 token 并递增版本。
- * 显式保存配置或轮换 token 会撤销未兑换安装码，仅修改备注不会。
+ * environment_changed}，通知失败会连同写入一起回滚。安装码签发不推进版本；兑换在同一语句中清空 code、轮换 token 并递增版本。 显式保存配置或轮换 token
+ * 会撤销未兑换安装码，仅修改备注不会。
  */
 @Repository
 public class EnvironmentRepository {
@@ -218,7 +218,8 @@ public class EnvironmentRepository {
         .param("codeHash", codeHash)
         .query(
             (rs, rowNum) ->
-                PostgresJdbcTypes.toInstant(rs.getObject("install_code_expires_at", OffsetDateTime.class)))
+                PostgresJdbcTypes.toInstant(
+                    rs.getObject("install_code_expires_at", OffsetDateTime.class)))
         .optional();
   }
 

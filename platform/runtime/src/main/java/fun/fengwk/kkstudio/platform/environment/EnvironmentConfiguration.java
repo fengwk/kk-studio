@@ -26,9 +26,7 @@ public class EnvironmentConfiguration {
     return UUID.randomUUID();
   }
 
-  /**
-   * 安装脚本固定到运行中 Platform 的构建版本；显式配置只用于打包外的定向测试，生产保持空值并读取 JAR manifest。
-   */
+  /** 安装脚本固定到运行中 Platform 的构建版本；显式配置只用于打包外的定向测试，生产保持空值并读取 JAR manifest。 */
   @Bean(name = "daemonReleaseVersion")
   @ConditionalOnMissingBean(name = "daemonReleaseVersion")
   public String daemonReleaseVersion(

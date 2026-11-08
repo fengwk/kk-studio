@@ -20,8 +20,7 @@ import java.util.Set;
 /**
  * 卡片 Daemon 配置的唯一结构与取值校验边界。
  *
- * <p>错误只包含字段路径与规则，不包含输入值或解析器异常。parse 严格校验 JSON 的实际类型且拒绝未知字段；validate 同样校验程序构造的模型，返回独立、
- * 规范化的完整配置。
+ * <p>错误只包含字段路径与规则，不包含输入值或解析器异常。parse 严格校验 JSON 的实际类型且拒绝未知字段；validate 同样校验程序构造的模型，返回独立、 规范化的完整配置。
  */
 public final class DaemonConfigCodec {
   private static final ObjectMapper MAPPER =

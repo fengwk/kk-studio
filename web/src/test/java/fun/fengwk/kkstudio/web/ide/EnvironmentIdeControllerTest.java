@@ -352,7 +352,7 @@ class EnvironmentIdeControllerTest {
             transport,
             new IdeBootstrapTicketService(),
             mock(IdeBrowserUseGateway.class),
-            new IdeViewBindingRegistry(),
+            new IdeViewBindingRegistry(environmentId -> Optional.empty()),
             Duration.ofSeconds(5),
             null);
     MockMvc realChain =

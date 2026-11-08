@@ -78,9 +78,7 @@ class EnvironmentInstallScriptsTest {
     assertEquals(
         "http://host-proxy.invalid:3128",
         execution.record().get("env").get("HTTPS_PROXY").asText());
-    assertEquals(
-        "localhost,.internal",
-        execution.record().get("env").get("NO_PROXY").asText());
+    assertEquals("localhost,.internal", execution.record().get("env").get("NO_PROXY").asText());
     assertEquals(
         List.of("-q", "-fsSL", installerUrl("install.sh"), "-o", stage + "/install.sh"),
         texts(execution.download().get("args")));
@@ -93,12 +91,7 @@ class EnvironmentInstallScriptsTest {
     Execution execution =
         execute(
             EnvironmentInstallScripts.install(
-                ENV_ID,
-                12L,
-                daemonConfig(),
-                "private",
-                DaemonOperatingSystem.LINUX,
-                RELEASE),
+                ENV_ID, 12L, daemonConfig(), "private", DaemonOperatingSystem.LINUX, RELEASE),
             17);
     assertEquals(17, execution.status());
     assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
@@ -113,12 +106,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult result =
           run(
               EnvironmentInstallScripts.install(
-                  ENV_ID,
-                  12L,
-                  daemonConfig(),
-                  TOKEN,
-                  DaemonOperatingSystem.LINUX,
-                  RELEASE),
+                  ENV_ID, 12L, daemonConfig(), TOKEN, DaemonOperatingSystem.LINUX, RELEASE),
               dir);
       assertEquals(8, result.status());
       assertEquals(List.of("curl"), names(dir));
@@ -170,7 +158,7 @@ class EnvironmentInstallScriptsTest {
             "throw 'Daemon command failed; review installer output and host prerequisites.'"));
     assertTrue(command.contains("finally"));
     assertTrue(command.contains("Remove-Item -LiteralPath $stage -Recurse -Force"));
-    assertTrue(command.contains("'private-''"));
+    assertTrue(command.contains("'private-汉字''\"$`$(touch NEVER)'"));
     assertTrue(command.contains("汉字"));
     assertFalse(command.contains("$env:HTTP_PROXY ="));
     assertFalse(command.contains("$env:NO_PROXY ="));
@@ -191,8 +179,7 @@ class EnvironmentInstallScriptsTest {
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(
-        uninstall.contains(
-            "-File $installer -Command uninstall -EnvironmentId '" + ENV_ID + "'"));
+        uninstall.contains("-File $installer -Command uninstall -EnvironmentId '" + ENV_ID + "'"));
     assertFalse(uninstall.contains("daemon.token"));
   }
 
@@ -281,9 +268,7 @@ class EnvironmentInstallScriptsTest {
                   "SHELLOPTS", "xtrace:verbose",
                   "BASH_FUNC_printf%%", "() { echo unsafe >&2; exit 42; }"));
       return new Execution(
-          run,
-          JSON.readTree(Files.readString(result)),
-          JSON.readTree(Files.readString(download)));
+          run, JSON.readTree(Files.readString(result)), JSON.readTree(Files.readString(download)));
     } finally {
       delete(dir);
     }

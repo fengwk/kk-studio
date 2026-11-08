@@ -263,8 +263,8 @@ public class EnvironmentService {
   /**
    * 兑换安装 code：为本次安装签发新凭证并写入脚本。
    *
-   * <p>公开入口必须是真实 Spring 事务代理的调用边界：锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并返回兑换后的
-   * CAS 版本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
+   * <p>公开入口必须是真实 Spring 事务代理的调用边界：锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并返回兑换后的 CAS
+   * 版本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
   @Transactional
   public String installationScript(
@@ -316,8 +316,7 @@ public class EnvironmentService {
     if (environmentRepository.getById(id.value()) == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    return EnvironmentInstallScripts.uninstall(
-        id.value(), operatingSystem, daemonReleaseVersion);
+    return EnvironmentInstallScripts.uninstall(id.value(), operatingSystem, daemonReleaseVersion);
   }
 
   @Transactional

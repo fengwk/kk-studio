@@ -126,6 +126,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       Environment created = new Environment();
       created.setId(UUID.randomUUID());
       created.setName("notify-failure-created");
+      created.setDaemonConfig(daemonConfig());
       created.setRegistrationTokenHash(RegistrationTokens.hash("notify-failure-created-token"));
       assertThrows(
           DataAccessResourceFailureException.class,

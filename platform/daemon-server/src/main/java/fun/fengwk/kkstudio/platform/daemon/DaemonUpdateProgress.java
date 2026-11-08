@@ -12,7 +12,7 @@ public record DaemonUpdateProgress(String targetVersion, long downloadedBytes, L
   public static final long MAX_SAFE_BYTE_COUNT = 9_007_199_254_740_991L;
 
   public DaemonUpdateProgress {
-    targetVersion = DaemonCapabilities.validateDaemonVersion(targetVersion);
+    targetVersion = DaemonReadyMetadata.validateDaemonVersion(targetVersion);
     if (downloadedBytes < 0 || downloadedBytes > MAX_SAFE_BYTE_COUNT) {
       throw new IllegalArgumentException("downloadedBytes is outside the safe integer range");
     }

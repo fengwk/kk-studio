@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
@@ -21,12 +22,12 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Architecture;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
-import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.protocol.HostInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.OperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Ready;
@@ -38,12 +39,14 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonHandshake;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.server.DatabaseEnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -57,6 +60,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** 验证基于 PostgreSQL 的多节点 Environment 路由租约、原子认领、状态围栏。 */
 class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
@@ -70,17 +75,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
   private static final Instant NOW = Instant.parse("2026-08-30T10:00:00Z");
   private static final Duration LEASE_DURATION = Duration.ofSeconds(60);
-  private static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
+  private static final DaemonReadyMetadata CAPABILITIES =
+      new DaemonReadyMetadata(
           "1.0.9",
-          new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX,
-              "UTC",
-              "dev",
-              "/home/dev",
-              "Linux environment.",
-              "/tmp/kk-studio",
-              "amd64"));
+          new DaemonHostInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "/tmp/kk-studio", "amd64"));
 
   /** 本测试只验证路由租约，不涉及资源上传；任何票据请求都是测试自身的错误。 */
   private static final DaemonResourceTicketService UNUSED_TICKET_SERVICE =
@@ -110,6 +109,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private EnvironmentDaemonServer serverNode1;
   private EnvironmentDaemonServer serverNode2;
   private EnvironmentRepository environmentRepository;
+  private ExecutorService configExecutor;
 
   @BeforeEach
   void setUp() throws SQLException {
@@ -157,29 +157,40 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};
+    EnvironmentConfigSource configSource = new DatabaseEnvironmentConfigSource(reads);
+    this.configExecutor = Executors.newSingleThreadExecutor();
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(
             registryNode1,
             environmentRepository,
+            configSource,
             sessionListener,
             new StaticObjectProvider<>(null),
             UNUSED_TICKET_SERVICE,
-            snapshot);
+            snapshot,
+            configExecutor);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
             registryNode2,
             environmentRepository,
+            configSource,
             sessionListener,
             new StaticObjectProvider<>(null),
             UNUSED_TICKET_SERVICE,
-            snapshot);
+            snapshot,
+            configExecutor);
+  }
+
+  @AfterEach
+  void tearDown() {
+    configExecutor.shutdownNow();
   }
 
   @Test
   void localHelloAcquiresRouteAndAllowsReady() {
     DaemonAdmission admission =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission);
     DaemonAdmission.Admitted admitted = (DaemonAdmission.Admitted) admission;
 
@@ -193,8 +204,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 检查是否回复 SETTINGS
     List<Envelope> envelopes = conn1.envelopes();
-    assertEquals(1, envelopes.size());
+    assertEquals(2, envelopes.size());
     assertEquals(MessageType.SETTINGS, envelopes.get(0).getMessageType());
+    assertEquals(MessageType.ENVIRONMENT_CONFIG, envelopes.get(1).getMessageType());
     assertEquals(DEV.value().toString(), envelopes.get(0).getEnvironmentId());
 
     // 发送 READY
@@ -202,13 +214,13 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
-    assertNotNull(readyEnv.daemonCapabilities());
+    assertNotNull(readyEnv.readyMetadata());
   }
 
   @Test
   void invalidRegistrationTokenFailsTerminal() {
     DaemonAdmission admission =
-        serverNode1.admit(new DaemonHandshake("wrong-token", DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, "wrong-token", DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Rejected.class, admission);
   }
 
@@ -216,7 +228,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void retryLaterWhenActiveRouteExists() {
     // 1. Node 1 成功绑定 DEV
     DaemonAdmission admission1 =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1);
     DaemonAdmission.Admitted admitted1 = (DaemonAdmission.Admitted) admission1;
     FakeControlChannel conn1 = new FakeControlChannel("conn-1");
@@ -225,7 +237,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 2. 另一个节点（Node 2）尝试绑定 DEV -> RetryLater（映射 503 暂不可准入）
     DaemonAdmission admission2 =
-        serverNode2.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode2.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission2);
 
     // Node 1 的路由依然完好
@@ -237,7 +249,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void expiredLeaseCanBeTakenOver() {
     // 1. Node 1 绑定 DEV
     DaemonAdmission admission1 =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1);
     DaemonAdmission.Admitted admitted1 = (DaemonAdmission.Admitted) admission1;
     FakeControlChannel conn1 = new FakeControlChannel("conn-1");
@@ -251,7 +263,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 3. Node 2 尝试绑定 DEV -> 成功接管
     DaemonAdmission admission2 =
-        serverNode2.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode2.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission2);
     DaemonAdmission.Admitted admitted2 = (DaemonAdmission.Admitted) admission2;
     FakeControlChannel conn2 = new FakeControlChannel("conn-2");
@@ -261,15 +273,16 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(node2, env.ownerNodeId());
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
 
-    // 检查 conn2 收到 SETTINGS
-    assertEquals(1, conn2.envelopes().size());
+    // 检查 conn2 收到 SETTINGS 与完整配置
+    assertEquals(2, conn2.envelopes().size());
     assertEquals(MessageType.SETTINGS, conn2.envelopes().get(0).getMessageType());
+    assertEquals(MessageType.ENVIRONMENT_CONFIG, conn2.envelopes().get(1).getMessageType());
   }
 
   @Test
   void routeFenceRejectsStaleTokenUpdates() {
     DaemonAdmission admission1 =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1);
     DaemonAdmission.Admitted admitted1 = (DaemonAdmission.Admitted) admission1;
     FakeControlChannel conn1 = new FakeControlChannel("conn-1");
@@ -294,7 +307,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void disconnectPreservesConnectingWithGracePeriodAndRetainsHostMetadata() {
     DaemonAdmission admission1 =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1);
     DaemonAdmission.Admitted admitted1 = (DaemonAdmission.Admitted) admission1;
     FakeControlChannel conn1 = new FakeControlChannel("conn-1");
@@ -309,7 +322,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
-    assertEquals(readyEnv.daemonCapabilities(), disconnectedEnv.daemonCapabilities());
+    assertEquals(readyEnv.readyMetadata(), disconnectedEnv.readyMetadata());
     assertEquals(readyEnv.leaseToken(), disconnectedEnv.leaseToken());
     assertEquals(node1, disconnectedEnv.ownerNodeId());
   }
@@ -321,7 +334,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void gracePeriodAllowsSameNodeReconnectWithoutManualLeaseRewindWhileBlockingOtherNode() {
     DaemonAdmission admission1 =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1);
     DaemonAdmission.Admitted admitted1 = (DaemonAdmission.Admitted) admission1;
     FakeControlChannel conn1 = new FakeControlChannel("conn-1");
@@ -341,19 +354,20 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 异节点 Node 2 在宽限期内尝试连接 -> 必须被拒绝（返回 RetryLater）
     DaemonAdmission admission2 =
-        serverNode2.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode2.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission2);
 
     // 同节点 Node 1 在宽限期内重新连接（不手工回拨 lease_until）-> 必须成功收到 SETTINGS
     DaemonAdmission admission1b =
-        serverNode1.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
+        serverNode1.admit(new DaemonHandshake(DEV, REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Admitted.class, admission1b);
     DaemonAdmission.Admitted admitted1b = (DaemonAdmission.Admitted) admission1b;
     FakeControlChannel conn1b = new FakeControlChannel("conn-1b");
     DaemonSession session1b = serverNode1.open(admitted1b, conn1b, null);
     assertFalse(conn1b.closed);
-    assertEquals(1, conn1b.envelopes().size());
+    assertEquals(2, conn1b.envelopes().size());
     assertEquals(MessageType.SETTINGS, conn1b.envelopes().get(0).getMessageType());
+    assertEquals(MessageType.ENVIRONMENT_CONFIG, conn1b.envelopes().get(1).getMessageType());
 
     // 路由成功被换发新 leaseToken
     EnvironmentConnection reconnectedEnv = registryNode1.find(DEV).orElseThrow();
@@ -375,7 +389,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection beforeRelease = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, beforeRelease.status());
-    assertNotNull(beforeRelease.daemonCapabilities());
+    assertNotNull(beforeRelease.readyMetadata());
 
     // 异节点或错误 token 释放被围栏拒绝
     UUID foreignToken = UUID.randomUUID();
@@ -391,7 +405,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 释放后状态回退为 CONNECTING，但保留原有的 runtime_info
     EnvironmentConnection afterRelease = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, afterRelease.status());
-    assertNotNull(afterRelease.daemonCapabilities(), "释放后应保留原有的 runtime_info 元数据");
+    assertNotNull(afterRelease.readyMetadata(), "释放后应保留原有的 runtime_info 元数据");
 
     // 其他节点立即 tryAcquire 成功
     var node2Bind = registryNode2.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
@@ -492,13 +506,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         .setReady(
             Ready.newBuilder()
                 .setDaemonVersion("1.0.9")
-                .setEnvironment(
-                    EnvironmentInfo.newBuilder()
+                .setHostInfo(
+                    HostInfo.newBuilder()
                         .setOperatingSystem(OperatingSystem.LINUX)
                         .setTimeZone("UTC")
                         .setUserName("dev")
                         .setHomeDirectory("/home/dev")
-                        .setNote("Linux environment.")
                         .setTempDirectory("/tmp/kk-studio")
                         .setArchitecture(Architecture.AMD64)
                         .build())

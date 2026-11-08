@@ -18,7 +18,8 @@ public final class DatabaseEnvironmentConfigSource implements EnvironmentConfigS
   private final EnvironmentRepository environmentRepository;
 
   public DatabaseEnvironmentConfigSource(EnvironmentRepository environmentRepository) {
-    this.environmentRepository = Objects.requireNonNull(environmentRepository, "environmentRepository");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
   }
 
   @Override

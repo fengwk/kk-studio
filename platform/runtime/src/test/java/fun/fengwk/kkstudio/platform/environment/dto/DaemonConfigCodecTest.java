@@ -81,11 +81,7 @@ class DaemonConfigCodecTest {
 
   @ParameterizedTest
   @ValueSource(
-      strings = {
-        "http://127.0.0.1:7890",
-        "HTTP://proxy.internal:3128/",
-        "http://[::1]:8080"
-      })
+      strings = {"http://127.0.0.1:7890", "HTTP://proxy.internal:3128/", "http://[::1]:8080"})
   void acceptsUnauthenticatedHttpProxy(String proxyUrl) {
     DaemonConfigDTO config = basic();
     config.setProxyUrl(proxyUrl);
@@ -271,7 +267,7 @@ class DaemonConfigCodecTest {
     assertTrue(node.get("bashExecutable").isNull());
     assertTrue(node.has("lsp"));
     assertTrue(node.get("lsp").isNull());
-    assertEquals("http://host", DaemonConfigCodec.read(json).getStudioUrl());
+    assertEquals("https://host", DaemonConfigCodec.read(json).getStudioUrl());
     assertFalse(json.contains("note"));
   }
 

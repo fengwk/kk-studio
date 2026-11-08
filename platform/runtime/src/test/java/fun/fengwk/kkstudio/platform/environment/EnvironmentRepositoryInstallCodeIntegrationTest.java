@@ -154,9 +154,7 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
   void saveRequiresOuterTransaction() {
     UUID envId = insertEnvironment("env-zeta", "token-zeta");
     assertThatThrownBy(
-            () ->
-                repository.saveInstallCode(
-                    envId, 0L, EnvironmentInstallCodes.hash("outside-tx")))
+            () -> repository.saveInstallCode(envId, 0L, EnvironmentInstallCodes.hash("outside-tx")))
         .isInstanceOf(IllegalStateException.class);
     assertThat(installCodeHash(envId)).isNull();
   }
@@ -170,8 +168,7 @@ class EnvironmentRepositoryInstallCodeIntegrationTest {
       UUID envId, long expectedVersion, String codeHash, String registrationTokenHash) {
     return transaction.execute(
         status ->
-            repository.redeemInstallCode(
-                envId, expectedVersion, codeHash, registrationTokenHash));
+            repository.redeemInstallCode(envId, expectedVersion, codeHash, registrationTokenHash));
   }
 
   private UUID insertEnvironment(String name, String token) {

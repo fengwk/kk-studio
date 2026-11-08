@@ -11,9 +11,11 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationError;
+import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationStatus;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
@@ -21,11 +23,14 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Architecture;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Cancel;
 import fun.fengwk.kkstudio.platform.daemon.protocol.CapabilityResult;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ConfigurationError;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ConfigurationStatus;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Content;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
-import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
+import fun.fengwk.kkstudio.platform.daemon.protocol.HostInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.JsonContent;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.OperatingSystem;
@@ -60,7 +65,6 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private final Object gate = new Object();
   private final Object stateLock = new Object();
-  private final Object networkSettingsLock = new Object();
   private final ArrayDeque<List<Runnable>> pendingCallbacks = new ArrayDeque<>();
   private boolean drainingCallbacks;
 
@@ -71,6 +75,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private final DaemonControlChannel control;
   private final EnvironmentTunnel tunnel;
   private final DaemonLeaseStore leaseStore;
+  private final EnvironmentConfigSource configSource;
   private final EnvironmentSessionListener sessionListener;
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
@@ -89,9 +94,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private DaemonRuntimeSnapshot runtimeStatus;
   private long temporaryResourceTtlSeconds;
   private long temporaryResourceCleanupIntervalSeconds;
-  private String proxyUrl;
-  private String noProxyHosts;
-  private boolean networkSettingsFailed;
+  private long lastSentVersion = -1L;
 
   DaemonConnectionSession(
       long generation,
@@ -101,6 +104,7 @@ final class DaemonConnectionSession implements DaemonSession {
       DaemonControlChannel control,
       EnvironmentTunnel tunnel,
       DaemonLeaseStore leaseStore,
+      EnvironmentConfigSource configSource,
       EnvironmentSessionListener sessionListener,
       EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
@@ -117,6 +121,7 @@ final class DaemonConnectionSession implements DaemonSession {
     this.control = Objects.requireNonNull(control, "control");
     this.tunnel = tunnel;
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
+    this.configSource = Objects.requireNonNull(configSource, "configSource");
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
     this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
@@ -207,47 +212,86 @@ final class DaemonConnectionSession implements DaemonSession {
     this.temporaryResourceTtlSeconds = initial.temporaryResourceTtlSeconds();
     this.temporaryResourceCleanupIntervalSeconds =
         initial.temporaryResourceCleanupIntervalSeconds();
-    this.proxyUrl = initial.proxyUrl();
-    this.noProxyHosts = initial.noProxyHosts();
   }
 
-  boolean reconcileNetworkSettings() {
-    boolean failed = false;
-    synchronized (networkSettingsLock) {
-      if (networkSettingsFailed || !isReady()) {
-        return false;
-      }
-      EnvironmentServerSettings current = settingsSupplier.get();
-      if (Objects.equals(proxyUrl, current.proxyUrl())
-          && Objects.equals(noProxyHosts, current.noProxyHosts())) {
-        return true;
+  /** 初始控制流：SETTINGS 之后立即下发当前完整卡片配置；缺失卡片明确报错并关闭。 */
+  void sendInitialEnvironmentConfig() {
+    Optional<EnvironmentConfigSnapshot> snapshot;
+    try {
+      snapshot = configSource.find(environmentId);
+    } catch (RuntimeException error) {
+      logFailure("initial environment config lookup for " + environmentId, error);
+      return;
+    }
+    if (snapshot.isEmpty()) {
+      failMissingEnvironmentConfig();
+      return;
+    }
+    reconcileEnvironmentConfig(snapshot.get());
+  }
+
+  /** 心跳或通知触发的权威配置回读；查询失败保留当前连接，由下一次心跳/通知继续对账。 */
+  void reconcileEnvironmentConfig() {
+    Optional<EnvironmentConfigSnapshot> snapshot;
+    try {
+      snapshot = configSource.find(environmentId);
+    } catch (RuntimeException error) {
+      logFailure("environment config lookup for " + environmentId, error);
+      return;
+    }
+    if (snapshot.isEmpty()) {
+      failMissingEnvironmentConfig();
+      return;
+    }
+    reconcileEnvironmentConfig(snapshot.get());
+  }
+
+  boolean reconcileEnvironmentConfig(EnvironmentConfigSnapshot snapshot) {
+    synchronized (stateLock) {
+      if (cleaned || snapshot.version() <= lastSentVersion) {
+        return !cleaned;
       }
       Envelope update =
           Envelope.newBuilder()
-              .setMessageType(MessageType.SETTINGS)
+              .setMessageType(MessageType.ENVIRONMENT_CONFIG)
               .setEnvironmentId(environmentId.value().toString())
-              .setSettings(EnvironmentDaemonServer.settingsMessage(current))
+              .setEnvironmentConfig(
+                  EnvironmentConfig.newBuilder()
+                      .setVersion(snapshot.version())
+                      .setConfig(snapshot.config())
+                      .build())
               .build();
       DaemonOfferResult result;
       try {
-        // 不持有 stateLock：传输可同步回调 closed()，关闭路径可能访问服务端 inventory。
         result = control.offer(update);
       } catch (RuntimeException error) {
         result = DaemonOfferResult.CLOSED;
       }
       if (result == DaemonOfferResult.ACCEPTED) {
-        proxyUrl = current.proxyUrl();
-        noProxyHosts = current.noProxyHosts();
-      } else {
-        networkSettingsFailed = true;
-        failed = true;
+        lastSentVersion = snapshot.version();
+        return true;
       }
     }
-    if (failed) {
-      close();
-      return false;
+    close();
+    return false;
+  }
+
+  private void failMissingEnvironmentConfig() {
+    Envelope.Builder builder =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.ERROR)
+            .setEnvironmentId(environmentId.value().toString());
+    builder.getErrorBuilder().setMessage("environment configuration not found");
+    try {
+      if (control.offer(builder.build()) == DaemonOfferResult.ACCEPTED) {
+        synchronized (stateLock) {
+          closeAfterFlush = true;
+        }
+      }
+    } catch (RuntimeException error) {
+      logFailure("missing environment configuration notification for " + environmentId, error);
     }
-    return isReady();
+    close();
   }
 
   @Override
@@ -366,37 +410,50 @@ final class DaemonConnectionSession implements DaemonSession {
       if (ready) {
         throw new ControlProtocolException("READY may only be sent once per connection");
       }
+      if (cleaned) {
+        throw new ControlProtocolException("route fence lost for environment " + environmentId);
+      }
     }
     Ready readyMessage = envelope.getReady();
-    EnvironmentInfo info = readyMessage.getEnvironment();
-    DaemonOperatingSystem os = toDomainOs(info.getOperatingSystem());
-    String arch = toDomainArch(info.getArchitecture());
-    DaemonEnvironmentInfo envInfo =
-        new DaemonEnvironmentInfo(
-            os,
+    HostInfo info = readyMessage.getHostInfo();
+    DaemonHostInfo hostInfo =
+        new DaemonHostInfo(
+            toDomainOs(info.getOperatingSystem()),
             info.getTimeZone(),
             info.getUserName(),
             info.getHomeDirectory(),
-            info.getNote(),
             info.getTempDirectory(),
-            arch);
-    DaemonCapabilities capabilities =
-        new DaemonCapabilities(readyMessage.getDaemonVersion(), envInfo);
-    boolean ok = leaseStore.markReady(environmentId, leaseToken, capabilities, timeout());
+            toDomainArch(info.getArchitecture()));
+    DaemonReadyMetadata readyMetadata =
+        new DaemonReadyMetadata(readyMessage.getDaemonVersion(), hostInfo);
+    boolean ok = leaseStore.markReady(environmentId, leaseToken, readyMetadata, timeout());
     if (!ok) {
       throw new ControlProtocolException("route fence lost for environment " + environmentId);
     }
+    Optional<EnvironmentConfigSnapshot> latestConfig;
+    try {
+      latestConfig = configSource.find(environmentId);
+    } catch (RuntimeException error) {
+      // READY 已提交；可选的最新配置回读失败由下一次心跳/通知继续对账。
+      logFailure("ready environment config lookup for " + environmentId, error);
+      latestConfig = null;
+    }
+    if (latestConfig != null && latestConfig.isEmpty()) {
+      throw new ControlProtocolException(
+          "environment configuration not found for " + environmentId);
+    }
+    DaemonRuntimeSnapshot readySnapshot = toDomainSnapshot(readyMessage.getRuntimeStatus());
     synchronized (stateLock) {
       if (cleaned) {
         throw new ControlProtocolException("route fence lost for environment " + environmentId);
       }
       this.ready = true;
       this.daemonVersion = readyMessage.getDaemonVersion();
-      this.daemonOperatingSystem = os;
-      this.runtimeStatus = toDomainSnapshot(readyMessage.getRuntimeStatus());
+      this.daemonOperatingSystem = hostInfo.operatingSystem();
+      mergeRuntimeStatusLocked(readySnapshot, daemonVersion);
     }
-    if (!reconcileNetworkSettings()) {
-      return;
+    if (latestConfig != null) {
+      reconcileEnvironmentConfig(latestConfig.get());
     }
     deferred.add(
         () -> {
@@ -411,39 +468,48 @@ final class DaemonConnectionSession implements DaemonSession {
   }
 
   private void handleHeartbeat(Envelope envelope, List<Runnable> deferred) {
-    requireReady();
+    requireBound();
     boolean ok = leaseStore.heartbeat(environmentId, leaseToken, timeout());
     if (!ok) {
       throw new ControlProtocolException("route fence lost for environment " + environmentId);
     }
     DaemonRuntimeSnapshot snapshot = toDomainSnapshot(envelope.getHeartbeat().getRuntimeStatus());
-    applyRuntimeStatus(snapshot);
-    reconcileTemporaryResourcePolicy();
-    DaemonConnectionIdentity identity = identity();
-    Long ideLeaseRound =
-        envelope.getHeartbeat().hasIdeLeaseRound()
-            ? envelope.getHeartbeat().getIdeLeaseRound()
-            : null;
-    deferred.add(() -> sessionListener.onHeartbeat(environmentId, identity, ideLeaseRound));
+    boolean statusChanged = applyRuntimeStatus(snapshot);
+    boolean currentlyReady = isReady();
+    if (currentlyReady) {
+      reconcileTemporaryResourcePolicy();
+      DaemonConnectionIdentity identity = identity();
+      Long ideLeaseRound =
+          envelope.getHeartbeat().hasIdeLeaseRound()
+              ? envelope.getHeartbeat().getIdeLeaseRound()
+              : null;
+      deferred.add(() -> sessionListener.onHeartbeat(environmentId, identity, ideLeaseRound));
+    }
+    if (statusChanged && currentlyReady) {
+      publishRuntimeStatusChanged();
+    }
+    reconcileEnvironmentConfig();
   }
 
   private void handleRuntimeStatus(Envelope envelope) {
-    requireReady();
-    boolean holdsReady;
+    requireBound();
+    boolean holdsLease;
     try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+      holdsLease =
+          isReady()
+              ? leaseStore.holdsReadyLease(environmentId, leaseToken)
+              : leaseStore.hasActiveLeaseToken(environmentId, leaseToken);
     } catch (RuntimeException error) {
       throw new ControlProtocolException("database unavailable: " + error.getMessage(), error);
     }
-    if (!holdsReady) {
+    if (!holdsLease) {
       throw new ControlProtocolException("route fence lost for environment " + environmentId);
     }
-    synchronized (stateLock) {
-      if (!ready || cleaned) {
-        throw new ControlProtocolException("route fence lost for environment " + environmentId);
-      }
+    boolean statusChanged =
+        applyRuntimeStatus(toDomainSnapshot(envelope.getRuntimeStatus().getRuntimeStatus()));
+    if (statusChanged && isReady()) {
+      publishRuntimeStatusChanged();
     }
-    applyRuntimeStatus(toDomainSnapshot(envelope.getRuntimeStatus().getRuntimeStatus()));
   }
 
   private void handleStarted(Envelope envelope) {
@@ -600,27 +666,55 @@ final class DaemonConnectionSession implements DaemonSession {
         Level.WARNING, "received error envelope from daemon: " + envelope.getError().getMessage());
   }
 
-  private void applyRuntimeStatus(DaemonRuntimeSnapshot snapshot) {
-    boolean changed = false;
+  private boolean applyRuntimeStatus(DaemonRuntimeSnapshot snapshot) {
     synchronized (stateLock) {
-      if (!ready || cleaned) {
-        throw new ControlProtocolException("runtimeStatus arrived after connection left READY");
+      if (cleaned) {
+        throw new ControlProtocolException("runtimeStatus arrived after connection closed");
       }
-      if (!snapshot.status().daemonVersion().equals(daemonVersion)) {
-        throw new ControlProtocolException(
-            "runtimeStatus.daemonVersion does not match the READY daemonVersion");
-      }
-      DaemonRuntimeSnapshot current = this.runtimeStatus;
-      if (current == null || snapshot.revision() > current.revision()) {
-        changed = current == null || !snapshot.status().equals(current.status());
-        this.runtimeStatus = snapshot;
-      } else if (snapshot.revision() == current.revision() && !snapshot.equals(current)) {
+      return mergeRuntimeStatusLocked(snapshot, ready ? daemonVersion : null);
+    }
+  }
+
+  /**
+   * 同一连接内按 revision 单调合并运行快照；READY 后的 daemonVersion 必须与握手绑定的版本一致。
+   *
+   * @return 状态内容实际变化时返回 true
+   */
+  private boolean mergeRuntimeStatusLocked(
+      DaemonRuntimeSnapshot snapshot, String expectedDaemonVersion) {
+    if (expectedDaemonVersion != null
+        && !snapshot.status().daemonVersion().equals(expectedDaemonVersion)) {
+      throw new ControlProtocolException(
+          "runtimeStatus.daemonVersion does not match the READY daemonVersion");
+    }
+    DaemonRuntimeSnapshot current = this.runtimeStatus;
+    if (current != null
+        && !snapshot.status().daemonVersion().equals(current.status().daemonVersion())) {
+      throw new ControlProtocolException(
+          "runtimeStatus.daemonVersion changed within one connection");
+    }
+    if (current == null) {
+      this.runtimeStatus = snapshot;
+      return true;
+    }
+    if (snapshot.revision() < current.revision()) {
+      return false;
+    }
+    if (snapshot.revision() == current.revision()) {
+      if (!snapshot.equals(current)) {
         throw new ControlProtocolException(
             "runtimeStatus revision " + snapshot.revision() + " changed without advancing");
       }
+      return false;
     }
+    boolean changed = !snapshot.status().equals(current.status());
+    this.runtimeStatus = snapshot;
+    return changed;
+  }
+
+  private void publishRuntimeStatusChanged() {
     // 快照先可读，再发布；围栏失效或发布失败均交给会话的 fail-closed 路径处理。
-    if (changed && !leaseStore.runtimeStatusChanged(environmentId, leaseToken)) {
+    if (!leaseStore.runtimeStatusChanged(environmentId, leaseToken)) {
       throw new ControlProtocolException("route fence lost for environment " + environmentId);
     }
   }
@@ -767,6 +861,14 @@ final class DaemonConnectionSession implements DaemonSession {
     }
     close();
     drainCallbacks();
+  }
+
+  private void requireBound() {
+    synchronized (stateLock) {
+      if (cleaned) {
+        throw new ControlProtocolException("daemon connection is already closed");
+      }
+    }
   }
 
   private void requireReady() {
@@ -956,6 +1058,26 @@ final class DaemonConnectionSession implements DaemonSession {
       }
       body.setUpdate(ub.build());
     }
+    if (snapshot.status().configuration() != null) {
+      DaemonConfigurationStatus status = snapshot.status().configuration();
+      ConfigurationStatus.Builder cb = ConfigurationStatus.newBuilder();
+      if (status.appliedVersion() != null) {
+        cb.setAppliedVersion(status.appliedVersion());
+      }
+      if (status.proxyUrl() != null) {
+        cb.setProxyUrl(status.proxyUrl());
+      }
+      if (status.error() != null) {
+        DaemonConfigurationError error = status.error();
+        ConfigurationError.Builder eb =
+            ConfigurationError.newBuilder().setVersion(error.version()).setCode(error.code());
+        if (error.field() != null) {
+          eb.setField(error.field());
+        }
+        cb.setError(eb.build());
+      }
+      body.setConfiguration(cb.build());
+    }
     return RuntimeSnapshot.newBuilder()
         .setRevision(snapshot.revision())
         .setStatus(body.build())
@@ -975,7 +1097,26 @@ final class DaemonConnectionSession implements DaemonSession {
               up.getDownloadedBytes(),
               up.hasTotalBytes() ? up.getTotalBytes() : null);
     }
-    return new DaemonRuntimeSnapshot(revision, new DaemonRuntimeStatus(daemonVersion, update));
+    DaemonConfigurationStatus configuration = null;
+    if (body.hasConfiguration()) {
+      ConfigurationStatus status = body.getConfiguration();
+      DaemonConfigurationError error = null;
+      if (status.hasError()) {
+        ConfigurationError protoError = status.getError();
+        error =
+            new DaemonConfigurationError(
+                protoError.getVersion(),
+                protoError.getCode(),
+                protoError.hasField() ? protoError.getField() : null);
+      }
+      configuration =
+          new DaemonConfigurationStatus(
+              status.hasAppliedVersion() ? status.getAppliedVersion() : null,
+              status.hasProxyUrl() ? status.getProxyUrl() : null,
+              error);
+    }
+    return new DaemonRuntimeSnapshot(
+        revision, new DaemonRuntimeStatus(daemonVersion, update, configuration));
   }
 
   static EnvironmentCapabilityResult toDomainResult(CapabilityResult result) {
