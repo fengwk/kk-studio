@@ -176,7 +176,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         jdbc.update(
             """
             insert into environment_connection (
-                environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until
+                environment_id, owner_node_id, lease_token, status, ready_metadata, last_seen_at, lease_until
             ) values (
                 ?, gen_random_uuid(), gen_random_uuid(), 'READY', '{}'::jsonb,
                 statement_timestamp(), statement_timestamp() + interval '1 hour'
@@ -185,7 +185,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             set owner_node_id = excluded.owner_node_id,
                 lease_token = excluded.lease_token,
                 status = excluded.status,
-                runtime_info = excluded.runtime_info,
+                ready_metadata = excluded.ready_metadata,
                 last_seen_at = excluded.last_seen_at,
                 lease_until = excluded.lease_until
             """,
@@ -595,8 +595,9 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
   private static void seedEnvironment(JdbcTemplate jdbc, EnvironmentId env) {
     jdbc.update(
         """
-        insert into environment (id, name, registration_token_hash, version)
-        values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)
+        insert into environment (id, name, note, registration_token_hash, daemon_config, version)
+        values (?, ?, null, encode(sha256(convert_to(?, 'UTF8')), 'hex'),
+            '{"studioUrl":"https://studio.example.com","bashExecutable":null,"lsp":null,"proxyUrl":null}'::jsonb, 0)
         on conflict (id) do nothing
         """,
         env.value(),
@@ -610,12 +611,12 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     seedEnvironment(jdbc, env);
     jdbc.update(
         """
-        insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until)
+        insert into environment_connection (environment_id, owner_node_id, lease_token, status, ready_metadata, last_seen_at, lease_until)
         values (?, ?, gen_random_uuid(), ?, ?::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')
         on conflict (environment_id) do update
         set owner_node_id = excluded.owner_node_id,
             status = excluded.status,
-            runtime_info = excluded.runtime_info,
+            ready_metadata = excluded.ready_metadata,
             last_seen_at = excluded.last_seen_at,
             lease_until = excluded.lease_until
         """,

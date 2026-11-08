@@ -141,7 +141,7 @@ class EnvironmentUpdateServiceTest {
   private static EnvironmentService service(EnvironmentRepository repo) {
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
-    return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
+    return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK, "3.0.0");
   }
 
   private static Environment environment(long version) {

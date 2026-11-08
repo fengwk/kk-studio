@@ -27,6 +27,7 @@ class EnvironmentConfigurationTest {
 
       assertNotNull(context.getBean("environmentClock", Clock.class));
       assertNotNull(context.getBean("nodeInstanceId", UUID.class));
+      assertNotNull(context.getBean("daemonReleaseVersion", String.class));
       assertTrue(
           context.getBeansOfType(EnvironmentSkillSyncOrchestrator.class).isEmpty(),
           "Environment 基础配置不得组合依赖 EnvironmentCapabilityTransport 的组件");
