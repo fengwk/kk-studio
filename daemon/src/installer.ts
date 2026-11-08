@@ -27,7 +27,38 @@ const UNIX_RUNNER = `#!/bin/bash
 set -eu
 work=$1
 installer=$2
-shift 2
+envRoot=$3
+operationId=$4
+targetVersion=$5
+shift 5
+timeout=\${KK_UPDATE_PERMIT_TIMEOUT_SECONDS:-120}
+case "$timeout" in ''|*[!0-9]*) timeout=120 ;; esac
+if [ "$timeout" -gt 3600 ]; then timeout=120; fi
+
+# 子安装器在取得操作锁之前失败时不会写卡片结果；runner 在作业最后写一条受限的本次失败记录，
+# 让仍在运行的旧 Daemon 能按 operationId 观察到结果。若安装器已写入匹配记录则绝不覆盖。
+# 只写固定字段，不重试、不备份，也不携带任何配置或凭据。
+record_failure() {
+  [ -d "$envRoot" ] || return 0
+  [ ! -L "$envRoot" ] || return 0
+  [[ $operationId =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 0
+  [[ $targetVersion =~ ^[0-9A-Za-z._+-]{1,64}$ ]] || return 0
+  current="$envRoot/last-operation.json"
+  if [ -f "$current" ] && grep -Fq '"operationId":"'"$operationId"'"' "$current" 2>/dev/null; then
+    return 0
+  fi
+  time=$(( $(date +%s) * 1000 ))
+  json=$(printf '{"operationId":"%s","type":"update","targetVersion":"%s","phase":"job","result":"failed","time":%s,"errorCode":"installer"}' \
+    "$operationId" "$targetVersion" "$time")
+  (( \${#json} <= 4096 )) || return 0
+  tmp="$envRoot/.last-operation.json.tmp.$$"
+  if ! printf '%s\n' "$json" >"$tmp" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if ! chmod 600 "$tmp" 2>/dev/null || ! mv -f "$tmp" "$current" 2>/dev/null; then
+    rm -f "$tmp"
+    return 0
+  fi
+}
+
 cleanup() {
   code=$?
   trap - EXIT INT TERM
@@ -38,11 +69,22 @@ trap cleanup EXIT INT TERM
 : > "$work/ready"
 i=0
 until [ -f "$work/permit" ]; do
-  if [ "$i" -ge ${PERMIT_TIMEOUT_SECONDS} ]; then echo "update receipt permit timed out" >&2; exit 1; fi
+  if [ "$i" -ge "$timeout" ]; then
+    echo "update receipt permit timed out" >&2
+    record_failure
+    exit 1
+  fi
   sleep 1
   i=$((i + 1))
 done
+set +e
 bash "$installer" "$@"
+code=$?
+set -e
+if [ "$code" -ne 0 ]; then
+  record_failure
+  exit "$code"
+fi
 `
 
 /** 在线更新只读取安装上下文与卡片代理；配置内容属于安装器/控制通道，不在这里解释。 */
@@ -158,6 +200,7 @@ async function downloadInstaller(
 function unixInvocation(
   workDirectory: string,
   installer: string,
+  environmentRoot: string,
   config: InstallerConfig,
   targetVersion: string,
   operationId: string,
@@ -178,7 +221,11 @@ function unixInvocation(
     invoke.push(`DBUS_SESSION_BUS_ADDRESS=${environment.DBUS_SESSION_BUS_ADDRESS}`)
   }
   invoke.push(`KK_STUDIO_UPDATE_OPERATION_ID=${operationId}`)
-  invoke.push('bash', join(workDirectory, 'run.sh'), workDirectory, installer)
+  if (environment.KK_UPDATE_PERMIT_TIMEOUT_SECONDS?.match(/^[0-9]{1,4}$/)) {
+    invoke.push(`KK_UPDATE_PERMIT_TIMEOUT_SECONDS=${environment.KK_UPDATE_PERMIT_TIMEOUT_SECONDS}`)
+  }
+  invoke.push('bash', join(workDirectory, 'run.sh'), workDirectory, installer,
+    environmentRoot, operationId, targetVersion)
   invoke.push('update', '--environment-id', config.environmentId, '--version', targetVersion)
   return invoke
 }
@@ -186,6 +233,7 @@ function unixInvocation(
 function windowsActionScript(
   workDirectory: string,
   installer: string,
+  environmentRoot: string,
   config: InstallerConfig,
   targetVersion: string,
   operationId: string,
@@ -197,13 +245,32 @@ function windowsActionScript(
     `Get-ChildItem Env: | Where-Object { $_.Name -match '^(http|https|all|no)_proxy$' } | Remove-Item`,
     `$env:HTTP_PROXY = ${ps(proxy)}; $env:HTTPS_PROXY = ${ps(proxy)}; $env:NO_PROXY = ''; $env:KK_DAEMON_INSTALL_PROXY_ENV = '1'`,
     `$env:KK_STUDIO_UPDATE_OPERATION_ID = ${ps(operationId)}`,
+    `$permitSeconds = 120`,
+    `if ($env:KK_UPDATE_PERMIT_TIMEOUT_SECONDS -match '^[0-9]{1,4}$') { $permitSeconds = [int] $env:KK_UPDATE_PERMIT_TIMEOUT_SECONDS }`,
+    `$failed = $true`,
     `try {`,
     `  [IO.File]::WriteAllText(${ps(join(workDirectory, 'ready'))}, '')`,
-    `  $deadline = (Get-Date).AddSeconds(${PERMIT_TIMEOUT_SECONDS})`,
+    `  $deadline = (Get-Date).AddSeconds($permitSeconds)`,
     `  while (-not (Test-Path -LiteralPath ${ps(join(workDirectory, 'permit'))})) { if ((Get-Date) -ge $deadline) { throw 'update receipt permit timed out' }; Start-Sleep -Seconds 1 }`,
     `  & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${ps(installer)} update -EnvironmentId ${ps(config.environmentId)} -Version ${ps(targetVersion)}`,
     `  if ($LASTEXITCODE -ne 0) { throw 'installer failed; see local last-operation.json' }`,
+    `  $failed = $false`,
     `} finally {`,
+    `  if ($failed) {`,
+    `    try {`,
+    `      $current = Join-Path ${ps(environmentRoot)} 'last-operation.json'`,
+    `      $recorded = $false`,
+    `      if (Test-Path -LiteralPath $current -PathType Leaf) {`,
+    `        try { $existing = Get-Content -LiteralPath $current -Raw | ConvertFrom-Json; if ($existing.operationId -eq ${ps(operationId)}) { $recorded = $true } } catch { }`,
+    `      }`,
+    `      if (-not $recorded -and (Test-Path -LiteralPath ${ps(environmentRoot)} -PathType Container)) {`,
+    `        $json = '{"operationId":' + (${ps(JSON.stringify(operationId))}) + ',"type":"update","targetVersion":' + (${ps(JSON.stringify(targetVersion))}) + ',"phase":"job","result":"failed","time":' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + ',"errorCode":"installer"}'`,
+    `        $temporary = Join-Path ${ps(environmentRoot)} ('.last-operation.json.tmp.' + [Guid]::NewGuid().ToString('N'))`,
+    `        [IO.File]::WriteAllText($temporary, $json + "\`n")`,
+    `        Move-Item -LiteralPath $temporary -Destination $current -Force`,
+    `      }`,
+    `    } catch { }`,
+    `  }`,
     `  Unregister-ScheduledTask -TaskName ${ps(unit)} -Confirm:$false -ErrorAction Continue`,
     `  Remove-Item -LiteralPath ${ps(workDirectory)} -Recurse -Force -ErrorAction Continue`,
     `}`,
@@ -244,6 +311,7 @@ export async function prepareInstaller(
   currentPlatformKey(deps.platform, deps.arch)
   requireManagedInstallation(config, deps.home, deps.platform)
 
+  const environmentRoot = managedEnvironmentRoot(deps.home, config.environmentId)
   const directory = await mkdtemp(join(tmpdir(), 'kk-studio-update-'))
   await ensurePrivateDirectory(directory)
   let jobRegistered = false
@@ -254,13 +322,13 @@ export async function prepareInstaller(
     const serviceEnvironment = process.env
     const unit = `kk-studio-daemon-update-${operationId}`
     if (deps.platform === 'win32') {
-      const action = windowsActionScript(directory, installer, config, targetVersion, operationId, unit)
+      const action = windowsActionScript(directory, installer, environmentRoot, config, targetVersion, operationId, unit)
       const registration = windowsRegistrationScript(action, unit)
       jobRegistered = true
       await deps.launch('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded(registration)], AbortSignal.any([signal, AbortSignal.timeout(15_000)]))
     } else {
       await writePrivateFile(join(directory, 'run.sh'), UNIX_RUNNER)
-      const invoke = unixInvocation(directory, installer, config, targetVersion, operationId, deps.home, serviceEnvironment)
+      const invoke = unixInvocation(directory, installer, environmentRoot, config, targetVersion, operationId, deps.home, serviceEnvironment)
       const args = deps.platform === 'darwin'
         ? ['submit', '-l', unit, '--', ...invoke]
         : ['--user', '--collect', `--unit=${unit}`, ...invoke]
@@ -279,7 +347,7 @@ export async function prepareInstaller(
       await delay(100, undefined, { signal: started })
     }
     let released = false
-    const lastOperation = join(managedEnvironmentRoot(deps.home, config.environmentId), 'last-operation.json')
+    const lastOperation = join(environmentRoot, 'last-operation.json')
     return {
       phase: 'PREPARED',
       releasePermit: async () => {

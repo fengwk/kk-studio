@@ -285,6 +285,86 @@ describe('official installer handoff', () => {
     }
   })
 
+  it.skipIf(process.platform === 'win32')('records a bounded failure when the installer fails before writing any result', async () => {
+    // 下载/取得锁之前失败时安装器不写结果；runner 必须为本次 operationId 留下受限失败记录，
+    // 否则旧 Daemon 的 watchFailure 永远看不到结果。
+    const { home, root, config } = await fixture()
+    const adapter = deps(home, 'exit 7\n')
+    let child: ChildProcess | undefined
+    let workDirectory = ''
+    adapter.launch = async (_file, args) => {
+      const envIndex = args.indexOf('env')
+      workDirectory = args[args.indexOf('bash') + 2]!
+      child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: 'ignore' })
+      await waitForFile(join(workDirectory, 'ready'))
+    }
+    const prepared = await prepareInstaller(command, config, AbortSignal.timeout(5000), adapter)
+    const reports: string[] = []
+    const stop = prepared.watchFailure!(message => reports.push(message))
+    try {
+      const exit = new Promise<number | null>(resolve => child!.once('exit', resolve))
+      await prepared.releasePermit!()
+      expect(await exit).toBe(7)
+      const record = JSON.parse(await readFile(join(root, 'last-operation.json'), 'utf8'))
+      expect(record).toMatchObject({
+        operationId, type: 'update', targetVersion: '2.0.0', phase: 'job', result: 'failed', errorCode: 'installer',
+      })
+      expect(Object.keys(record).sort()).toEqual(['errorCode', 'operationId', 'phase', 'result', 'targetVersion', 'time', 'type'])
+      for (let attempt = 0; attempt < 30 && reports.length === 0; attempt++) {
+        await sleep(100)
+      }
+      expect(reports).toEqual(['official installer failed; check local last-operation.json'])
+      await expect(stat(workDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      stop()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('records the failure when the receipt permit times out', async () => {
+    // 回执许可超时同样发生在安装器取得锁之前；作业必须放弃准入并留下本次失败结果。
+    vi.stubEnv('KK_UPDATE_PERMIT_TIMEOUT_SECONDS', '1')
+    const { home, root, config } = await fixture()
+    const adapter = deps(home, 'installer')
+    let child: ChildProcess | undefined
+    let workDirectory = ''
+    adapter.launch = async (_file, args) => {
+      const envIndex = args.indexOf('env')
+      workDirectory = args[args.indexOf('bash') + 2]!
+      child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: 'ignore' })
+      await waitForFile(join(workDirectory, 'ready'))
+    }
+    const prepared = await prepareInstaller(command, config, AbortSignal.timeout(10_000), adapter)
+    expect(prepared.phase).toBe('PREPARED')
+    const exit = new Promise<number | null>(resolve => child!.once('exit', resolve))
+    expect(await exit).toBe(1)
+    const record = JSON.parse(await readFile(join(root, 'last-operation.json'), 'utf8'))
+    expect(record).toMatchObject({ operationId, result: 'failed', errorCode: 'installer' })
+    await expect(stat(workDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.skipIf(process.platform === 'win32')('never overwrites a matching installer result with the runner fallback', async () => {
+    // 安装器已写入匹配本次 operationId 的结果时，runner 的兜底记录必须让位于真实阶段。
+    const { home, root, config } = await fixture()
+    const adapter = deps(home, [
+      `printf '%s\\n' '{"operationId":"${operationId}","type":"update","targetVersion":"2.0.0","phase":"lock","result":"failed","time":1,"errorCode":"lock"}' > '${join(root, 'last-operation.json')}'`,
+      'exit 7',
+      '',
+    ].join('\n'))
+    let child: ChildProcess | undefined
+    adapter.launch = async (_file, args) => {
+      const envIndex = args.indexOf('env')
+      const work = args[args.indexOf('bash') + 2]!
+      child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: 'ignore' })
+      await waitForFile(join(work, 'ready'))
+    }
+    const prepared = await prepareInstaller(command, config, AbortSignal.timeout(5000), adapter)
+    const exit = new Promise<number | null>(resolve => child!.once('exit', resolve))
+    await prepared.releasePermit!()
+    expect(await exit).toBe(7)
+    const record = JSON.parse(await readFile(join(root, 'last-operation.json'), 'utf8'))
+    expect(record.phase).toBe('lock')
+  })
+
   it('reports a job that never starts instead of holding admission indefinitely', async () => {
     const { home, config } = await fixture()
     await expect(prepareInstaller(command, config, AbortSignal.timeout(100), deps(home, 'installer'))).rejects.toThrow()
@@ -331,6 +411,13 @@ describe('official installer handoff', () => {
     expect(action).toContain(`$env:KK_STUDIO_UPDATE_OPERATION_ID = '${operationId}'`)
     expect(action).toContain('Unregister-ScheduledTask')
     expect(action).toContain('Remove-Item -LiteralPath')
+    // 子安装器在取得锁前失败时，作业写本次 operationId 的固定失败结果；已有匹配结果则让位。
+    expect(action).toContain('$failed = $true')
+    expect(action).toContain('$existing.operationId -eq')
+    expect(action).toContain('"phase":"job"')
+    expect(action).toContain('"errorCode":"installer"')
+    expect(action).toContain('last-operation.json')
+    expect(action).toContain('KK_UPDATE_PERMIT_TIMEOUT_SECONDS')
     expect(registration).not.toContain('New-ScheduledTaskTrigger')
     await result.releasePermit!()
   })
