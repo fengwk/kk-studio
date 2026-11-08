@@ -450,7 +450,13 @@ function Initialize-HostContext {
     }
     $script:CurrentSid = $identity.User.Value
     Assert-EnvironmentId -Value $EnvironmentId
+    # 在线更新作业传入自己的 operationId，使固定 last-operation.json 能与发起它的控制命令对应；
+    # 非法值忽略，人工命令始终使用本地生成的身份。
     $script:OperationId = [Guid]::NewGuid().ToString()
+    if (-not [string]::IsNullOrEmpty($env:KK_STUDIO_UPDATE_OPERATION_ID) -and
+        $env:KK_STUDIO_UPDATE_OPERATION_ID -cmatch $script:EnvironmentIdPattern) {
+        $script:OperationId = $env:KK_STUDIO_UPDATE_OPERATION_ID
+    }
     $script:TaskName =
         "kk-studio-daemon-$($script:CurrentSid)-$($script:TargetEnvironmentId)"
     $script:TaskDescription =

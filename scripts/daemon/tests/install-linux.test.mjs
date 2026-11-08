@@ -144,6 +144,16 @@ describe('install.sh on Linux', () => {
       assert.doesNotMatch(uninstallCommands, new RegExp(SECOND_ENVIRONMENT_ID))
     }))
 
+  it('records the operation id supplied by an online update and ignores invalid values', () =>
+    withInstall(({ fixture, install }) => {
+      const supplied = '9f1c1c5e-2f4b-4b6a-8f2e-3c4d5e6f7a8b'
+      assert.equal(install({ KK_STUDIO_UPDATE_OPERATION_ID: supplied }).status, 0)
+      assert.equal(lastOperation(fixture).operationId, supplied)
+      writeFileSync(path.join(fixture.state, 'commands'), '')
+      assert.equal(install({ KK_STUDIO_UPDATE_OPERATION_ID: 'not-a-uuid' }).status, 0)
+      assert.notEqual(lastOperation(fixture).operationId, 'not-a-uuid')
+    }))
+
   it('update replaces only the program and service and never writes config or token', () =>
     withInstall(({ fixture, install, update }) => {
       assert.equal(install().status, 0)

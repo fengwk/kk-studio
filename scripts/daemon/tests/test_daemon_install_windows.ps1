@@ -406,7 +406,10 @@ try {
     }
     Assert-True -Condition $invalidRejected -Message "invalid daemonConfig rejected by preflight"
 
-    # Full install into the UUID-scoped layout.
+    # Full install into the UUID-scoped layout. An online update supplies the operation id that
+    # the fixed last-operation.json must carry.
+    $updateOperationId = "9f1c1c5e-2f4b-4b6a-8f2e-3c4d5e6f7a8b"
+    $env:KK_STUDIO_UPDATE_OPERATION_ID = $updateOperationId
     $pairs = New-Inputs
     $script:NetworkCalls = @()
     $exit = Invoke-Installer -Parameters @{
@@ -437,6 +440,8 @@ try {
     Assert-Equal -Actual ([string] $record.result) -Expected "succeeded" -Message "last operation succeeded"
     Assert-True -Condition ((Get-Content -LiteralPath (Join-Path $envRoot "last-operation.json") -Raw).Length -le 4096) `
         -Message "last operation stays bounded"
+    Assert-Equal -Actual ([string] $record.operationId) -Expected $updateOperationId -Message "supplied operation id recorded"
+    $env:KK_STUDIO_UPDATE_OPERATION_ID = ""
 
     # Two cards of the same user stay independent.
     $secondPairs = New-Inputs -Environment $secondEnvironmentId

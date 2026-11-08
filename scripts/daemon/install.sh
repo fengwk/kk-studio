@@ -935,6 +935,12 @@ main() {
   STDOUT_LOG="$ENV_ROOT/daemon.stdout.log"
   STDERR_LOG="$ENV_ROOT/daemon.stderr.log"
   OPERATION_ID=$(new_operation_id)
+  # 在线更新作业传入自己的 operationId，使固定 last-operation.json 能与发起它的控制命令对应；
+  # 非法值忽略，人工命令始终使用本地生成的身份。
+  if [ -n "${KK_STUDIO_UPDATE_OPERATION_ID:-}" ] &&
+    [[ $KK_STUDIO_UPDATE_OPERATION_ID =~ $UUID_PATTERN ]]; then
+    OPERATION_ID=$KK_STUDIO_UPDATE_OPERATION_ID
+  fi
   if [ -n "$VERSION" ]; then VERSION_JSON=$(printf '"%s"' "$VERSION"); fi
   case "$HOST_OS" in
     Linux)
