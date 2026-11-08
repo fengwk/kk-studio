@@ -16,9 +16,9 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
@@ -42,17 +42,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   private static final String COMMIT = "0123456789abcdef".repeat(4);
   private static final String DEV_TOKEN = "token-1";
   private static final String PROD_TOKEN = "token-2";
-  private static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
+  private static final DaemonReadyMetadata CAPABILITIES =
+      new DaemonReadyMetadata(
           "1.0.9",
-          new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX,
-              "UTC",
-              "dev",
-              "/home/dev",
-              "Linux environment.",
-              "/tmp/kk-studio",
-              "amd64"));
+          new DaemonHostInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "/tmp/kk-studio", "amd64"));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();
@@ -81,11 +75,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
     // 播种底层 environment 卡片行
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token_hash, version) values (?, 'dev', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
+        "insert into environment (id, name, registration_token_hash, daemon_config, version) values (?, 'dev', encode(sha256(convert_to(?, 'UTF8')), 'hex'), '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,\"lsp\":null,\"proxyUrl\":null}'::jsonb, 0)",
         DEV.value(),
         DEV_TOKEN);
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token_hash, version) values (?, 'prod', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
+        "insert into environment (id, name, registration_token_hash, daemon_config, version) values (?, 'prod', encode(sha256(convert_to(?, 'UTF8')), 'hex'), '{\"studioUrl\":\"https://studio.example.com\",\"bashExecutable\":null,\"lsp\":null,\"proxyUrl\":null}'::jsonb, 0)",
         PROD.value(),
         PROD_TOKEN);
   }
@@ -102,7 +96,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertEquals(node1, env.ownerNodeId());
     assertEquals(acquired.leaseToken(), env.leaseToken());
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
-    assertNull(env.daemonCapabilities());
+    assertNull(env.readyMetadata());
     assertFalse(env.isReady(Instant.now(), LEASE_DURATION));
   }
 
@@ -157,7 +151,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
     EnvironmentConnection ready = registry1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, ready.status());
-    assertNotNull(ready.daemonCapabilities());
+    assertNotNull(ready.readyMetadata());
     assertTrue(ready.isReady(Instant.now(), LEASE_DURATION));
   }
 
@@ -178,14 +172,14 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
     // 围栏失效：既不能推进 READY，也不能写入任何保留事实。
     assertFalse(registry1.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
-    assertNull(registry1.find(DEV).orElseThrow().daemonCapabilities());
+    assertNull(registry1.find(DEV).orElseThrow().readyMetadata());
     assertEquals(LiveEnvironmentStatus.CONNECTING, registry1.find(DEV).orElseThrow().status());
 
     // 围栏成立：保留 metadata 与 READY 原子同生。
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
     EnvironmentConnection ready = registry1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, ready.status());
-    assertEquals(CAPABILITIES, ready.daemonCapabilities());
+    assertEquals(CAPABILITIES, ready.readyMetadata());
     Integer rows =
         jdbcTemplate.queryForObject("select count(1) from environment_connection", Integer.class);
     assertEquals(1, rows);
@@ -222,7 +216,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertTrue(registry1.disconnect(DEV, token1, LEASE_DURATION));
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
-    assertEquals(CAPABILITIES, env.daemonCapabilities());
+    assertEquals(CAPABILITIES, env.readyMetadata());
     assertEquals(token1, env.leaseToken());
   }
 
@@ -381,7 +375,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
         eventTypes(offline.recentEvents()));
     assertEquals(EnvironmentEvent.LEVEL_WARN, offline.recentEvents().get(3).level());
     // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口；历史 WARN 事件仍留在窗口内。
-    assertNotNull(offline.daemonCapabilities());
+    assertNotNull(offline.readyMetadata());
     assertEquals(1, offline.skillState().size());
     assertEquals("/home/dev/skills/dev", offline.installedSkillRoot("dev", COMMIT).orElseThrow());
     assertTrue(

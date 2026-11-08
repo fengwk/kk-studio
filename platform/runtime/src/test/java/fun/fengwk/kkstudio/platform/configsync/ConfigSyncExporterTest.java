@@ -140,7 +140,9 @@ class ConfigSyncExporterTest {
         (List<Map<String, Object>>) document.get("environments");
     assertEquals(
         RegistrationTokens.hash("token-env"), environments.get(0).get("registrationTokenHash"));
-    assertEquals("https://studio.example.com", ((Map<?, ?>) environments.get(0).get("daemonConfig")).get("studioUrl"));
+    assertEquals(
+        "https://studio.example.com",
+        ((Map<?, ?>) environments.get(0).get("daemonConfig")).get("studioUrl"));
     assertFalse(environments.get(0).containsKey("installConfig"));
     assertFalse(environments.get(0).containsKey("id"));
     assertFalse(environments.get(0).containsKey("version"));

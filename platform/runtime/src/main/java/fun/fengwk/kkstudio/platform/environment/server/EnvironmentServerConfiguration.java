@@ -33,7 +33,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Platform 只提供窄端口实现：{@link EnvironmentRegistry} 提供租约存储围栏，{@link EnvironmentRepository} 提供注册凭据解析，
  * {@link EnvironmentConfigSource} 提供权威卡片配置读取，{@link EnvironmentSessionListener} 接收 READY 事件，{@link
- * DaemonResourceTicketService} 把调用作用域上传映射到全局 Blob 上传契约，{@link SystemSettingsSnapshot} 提供每次判定现读的心跳超时与资源上限。
+ * DaemonResourceTicketService} 把调用作用域上传映射到全局 Blob 上传契约，{@link SystemSettingsSnapshot}
+ * 提供每次判定现读的心跳超时与资源上限。
  */
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentServerConfiguration {

@@ -106,11 +106,9 @@ public class EnvironmentController {
       value = "/api/platform/environments/{environmentId}/uninstall-script",
       produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> uninstallationScript(
-      @PathVariable UUID environmentId,
-      @RequestParam DaemonOperatingSystem operatingSystem) {
+      @PathVariable UUID environmentId, @RequestParam DaemonOperatingSystem operatingSystem) {
     return script(
-        environmentService.uninstallationScript(
-            EnvironmentId.of(environmentId), operatingSystem));
+        environmentService.uninstallationScript(EnvironmentId.of(environmentId), operatingSystem));
   }
 
   @PostMapping("/api/platform/environments/{environmentId}/rotate-token")

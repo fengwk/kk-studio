@@ -37,8 +37,8 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.http.EnvironmentController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
@@ -256,11 +256,11 @@ class EnvironmentControllerTest {
   void rejectsNonCanonicalExpectedVersionInBody() throws Exception {
     mockMvc
         .perform(
-            put("/api/platform/environments/" + ENV_ID + "/install-settings")
+            put("/api/platform/environments/" + ENV_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedVersion\":\" 0\",\"installConfig\":{\"operatingSystem\":\"linux\","
-                        + "\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}"))
+                    "{\"expectedVersion\":\" 0\",\"daemonConfig\":{"
+                        + "\"studioUrl\":\"https://studio.example.com\"}}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
     verifyNoInteractions(environmentService);
@@ -329,14 +329,16 @@ class EnvironmentControllerTest {
   /** 错误 code 必须保持 HTTP 400，不能按成功脚本返回。 */
   @Test
   void invalidInstallCodeReturnsValidationError() throws Exception {
-    when(environmentService.installationScript(EnvironmentId.of(ENV_ID), "expired-code"))
+    when(environmentService.installationScript(
+            EnvironmentId.of(ENV_ID), "expired-code", DaemonOperatingSystem.LINUX))
         .thenThrow(
             DomainException.validation("code", "install code is missing, expired or invalid"));
 
     mockMvc
         .perform(
             get("/api/platform/environments/" + ENV_ID + "/install-script")
-                .param("code", "expired-code"))
+                .param("code", "expired-code")
+                .param("operatingSystem", "linux"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("install code is missing, expired or invalid"))
@@ -346,15 +348,18 @@ class EnvironmentControllerTest {
   /** 意图：安装与卸载脚本以纯文本返回，带禁止缓存和禁止嗅探头，且不被 JSON 包装。 */
   @Test
   void installAndUninstallScriptsUsePlainTextHeaders() throws Exception {
-    when(environmentService.installationScript(eq(EnvironmentId.of(ENV_ID)), eq("valid-code")))
+    when(environmentService.installationScript(
+            eq(EnvironmentId.of(ENV_ID)), eq("valid-code"), eq(DaemonOperatingSystem.LINUX)))
         .thenReturn("echo 汉字 ' $ `");
-    when(environmentService.uninstallationScript(DaemonOperatingSystem.WINDOWS))
+    when(environmentService.uninstallationScript(
+            EnvironmentId.of(ENV_ID), DaemonOperatingSystem.WINDOWS))
         .thenReturn("uninstall windows");
 
     mockMvc
         .perform(
             get("/api/platform/environments/" + ENV_ID + "/install-script")
-                .param("code", "valid-code"))
+                .param("code", "valid-code")
+                .param("operatingSystem", "linux"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
@@ -362,7 +367,9 @@ class EnvironmentControllerTest {
         .andExpect(content().string("echo 汉字 ' $ `"))
         .andExpect(content().string(not(containsString("\"data\""))));
     mockMvc
-        .perform(get("/api/platform/daemon-uninstall-scripts/windows"))
+        .perform(
+            get("/api/platform/environments/" + ENV_ID + "/uninstall-script")
+                .param("operatingSystem", "windows"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
         .andExpect(content().string("uninstall windows"));
@@ -371,47 +378,54 @@ class EnvironmentControllerTest {
   /** 意图：未知身份、非法身份与非法操作系统分别返回 404/400，且错误正文不回显凭据。 */
   @Test
   void installAndUninstallFailuresDoNotEchoCredentials() throws Exception {
-    when(environmentService.installationScript(eq(EnvironmentId.of(ENV_ID)), eq("bad-code")))
+    when(environmentService.installationScript(
+            eq(EnvironmentId.of(ENV_ID)), eq("bad-code"), eq(DaemonOperatingSystem.LINUX)))
         .thenThrow(DomainException.notFound("environment"));
 
     mockMvc
         .perform(
             get("/api/platform/environments/" + ENV_ID + "/install-script")
-                .param("code", "bad-code"))
+                .param("code", "bad-code")
+                .param("operatingSystem", "linux"))
         .andExpect(status().isNotFound())
         .andExpect(content().string(not(containsString(ENV_ID.toString()))));
     mockMvc
-        .perform(get("/api/platform/environments/" + ENV_ID + "/install-script"))
+        .perform(
+            get("/api/platform/environments/" + ENV_ID + "/install-script")
+                .param("operatingSystem", "linux"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(get("/api/platform/environments/not-a-uuid/install-script").param("code", "x"))
+        .perform(
+            get("/api/platform/environments/not-a-uuid/install-script")
+                .param("code", "x")
+                .param("operatingSystem", "linux"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(get("/api/platform/daemon-uninstall-scripts/beos"))
+        .perform(
+            get("/api/platform/environments/" + ENV_ID + "/uninstall-script")
+                .param("operatingSystem", "beos"))
         .andExpect(status().isBadRequest());
   }
 
-  /** 意图：PUT .../install-settings 用类型化 DTO 整体替换安装设置，并返回更新后的 Environment。 */
+  /** 意图：PUT .../environments/{id} 用类型化 DTO 整体替换卡片设置，并返回更新后的 Environment。 */
   @Test
-  void updateInstallSettingsAcceptsTypedBody() throws Exception {
+  void updateEnvironmentAcceptsTypedBody() throws Exception {
     EnvironmentDTO environment = new EnvironmentDTO();
     environment.setId(ENV_ID.toString());
-    when(environmentService.updateInstallConfig(
-            eq(EnvironmentId.of(ENV_ID)), any(EnvironmentInstallConfigUpdateDTO.class)))
+    when(environmentService.update(eq(EnvironmentId.of(ENV_ID)), any(EnvironmentUpdateDTO.class)))
         .thenReturn(environment);
 
     mockMvc
         .perform(
-            put("/api/platform/environments/" + ENV_ID + "/install-settings")
+            put("/api/platform/environments/" + ENV_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\","
-                        + "\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}"))
+                    "{\"expectedVersion\":\"0\",\"daemonConfig\":{"
+                        + "\"studioUrl\":\"https://studio.example.com\"}}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(ENV_ID.toString()));
 
     verify(environmentService)
-        .updateInstallConfig(
-            eq(EnvironmentId.of(ENV_ID)), any(EnvironmentInstallConfigUpdateDTO.class));
+        .update(eq(EnvironmentId.of(ENV_ID)), any(EnvironmentUpdateDTO.class));
   }
 }

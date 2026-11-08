@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.environment.update;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,9 +25,11 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationError;
+import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationStatus;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
@@ -102,6 +106,28 @@ class EnvironmentUpdateServiceTest {
         releaseProvider,
         new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
         CLOCK);
+  }
+
+  @Test
+  void runtimeStatusProjectsConfigurationErrorWithoutEchoingInput() {
+    when(server.runtimeStatus(ENV))
+        .thenReturn(
+            Optional.of(
+                snapshot(
+                    CURRENT,
+                    null,
+                    new DaemonConfigurationStatus(
+                        7L,
+                        null,
+                        new DaemonConfigurationError(8L, "INVALID_LSP_COMMAND", "lsp")))));
+
+    EnvironmentRuntimeStatusDTO status = service.runtimeStatus(ENV);
+
+    assertEquals(7L, status.getStatus().getConfiguration().getAppliedVersion());
+    assertNull(status.getStatus().getConfiguration().getProxyUrl());
+    assertEquals(8L, status.getStatus().getConfiguration().getError().getVersion());
+    assertEquals("INVALID_LSP_COMMAND", status.getStatus().getConfiguration().getError().getCode());
+    assertEquals("lsp", status.getStatus().getConfiguration().getError().getField());
   }
 
   @Test
@@ -297,6 +323,12 @@ class EnvironmentUpdateServiceTest {
     return new DaemonRuntimeSnapshot(1L, new DaemonRuntimeStatus(daemonVersion, update));
   }
 
+  private static DaemonRuntimeSnapshot snapshot(
+      String daemonVersion, DaemonUpdateProgress update, DaemonConfigurationStatus configuration) {
+    return new DaemonRuntimeSnapshot(
+        1L, new DaemonRuntimeStatus(daemonVersion, update, configuration));
+  }
+
   private static EnvironmentConnection connection(String daemonVersion) {
     return connection(
         daemonVersion, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64.wireValue());
@@ -310,14 +342,13 @@ class EnvironmentUpdateServiceTest {
         UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
         LiveEnvironmentStatus.READY,
-        new DaemonCapabilities(
+        new DaemonReadyMetadata(
             daemonVersion,
-            new DaemonEnvironmentInfo(
+            new DaemonHostInfo(
                 operatingSystem,
                 "Asia/Shanghai",
                 "dev",
                 windows ? "C:\\Users\\dev" : "/home/dev",
-                "Note",
                 windows ? "C:\\Temp" : "/tmp/kk-studio",
                 architecture)),
         List.of(),

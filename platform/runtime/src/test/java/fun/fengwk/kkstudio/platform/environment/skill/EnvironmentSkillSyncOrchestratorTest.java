@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -300,7 +300,7 @@ class EnvironmentSkillSyncOrchestratorTest {
         NODE,
         LEASE_TOKEN,
         status,
-        status == LiveEnvironmentStatus.READY ? mock(DaemonCapabilities.class) : null,
+        status == LiveEnvironmentStatus.READY ? mock(DaemonReadyMetadata.class) : null,
         skillState,
         List.of(),
         NOW,

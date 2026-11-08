@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,7 +98,8 @@ class EnvironmentRepositoryIntegrationTest {
 
     Environment noteUpdate = repository.getById(id);
     noteUpdate.setNote("new note");
-    assertThat(transaction.execute(status -> repository.updateById(noteUpdate, 0L))).isTrue();
+    assertTrue(
+        Boolean.TRUE.equals(transaction.execute(status -> repository.updateById(noteUpdate, 0L))));
     assertThat(readInstallCode(id)).isEqualTo(EnvironmentInstallCodes.hash("install-code"));
 
     setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
@@ -105,14 +107,17 @@ class EnvironmentRepositoryIntegrationTest {
     DaemonConfigDTO config = configUpdate.getDaemonConfig();
     config.setBashExecutable("/bin/bash");
     configUpdate.setDaemonConfig(config);
-    assertThat(transaction.execute(status -> repository.updateById(configUpdate, 1L))).isTrue();
+    assertTrue(
+        Boolean.TRUE.equals(
+            transaction.execute(status -> repository.updateById(configUpdate, 1L))));
     assertThat(readInstallCode(id)).isNull();
     assertThat(repository.getById(id).getDaemonConfig().getBashExecutable()).isEqualTo("/bin/bash");
 
     setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
     Environment tokenUpdate = repository.getById(id);
     tokenUpdate.setRegistrationTokenHash(RegistrationTokens.hash("rotated-token"));
-    assertThat(transaction.execute(status -> repository.updateById(tokenUpdate, 2L))).isTrue();
+    assertTrue(
+        Boolean.TRUE.equals(transaction.execute(status -> repository.updateById(tokenUpdate, 2L))));
     assertThat(readInstallCode(id)).isNull();
     assertThat(repository.getById(id).getVersion()).isEqualTo(3L);
   }

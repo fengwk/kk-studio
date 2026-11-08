@@ -321,6 +321,11 @@ class RealtimePayloadClusterRoundTripTest {
   private record Registry(URI ownerOrigin) implements ClusterNodeRegistry {
 
     @Override
+    public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+      return Optional.empty();
+    }
+
+    @Override
     public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       return Optional.empty();
     }

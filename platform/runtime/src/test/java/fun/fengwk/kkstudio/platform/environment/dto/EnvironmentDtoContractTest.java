@@ -50,7 +50,8 @@ class EnvironmentDtoContractTest {
         List.of(EnvironmentUpdateDTO.class.getDeclaredFields()).stream()
             .map(Field::getName)
             .toList());
-    assertEquals(DaemonConfigDTO.class, EnvironmentUpdateDTO.class.getDeclaredFields()[2].getType());
+    assertEquals(
+        DaemonConfigDTO.class, EnvironmentUpdateDTO.class.getDeclaredFields()[2].getType());
     assertEquals(
         List.of("name", "note", "daemonConfig"),
         List.of(EnvironmentCreateDTO.class.getDeclaredFields()).stream()

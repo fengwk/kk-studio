@@ -556,6 +556,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     private Optional<ClusterOwnerRoute> current = Optional.empty();
 
     @Override
+    public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+      return current;
+    }
+
+    @Override
     public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       return current;
     }

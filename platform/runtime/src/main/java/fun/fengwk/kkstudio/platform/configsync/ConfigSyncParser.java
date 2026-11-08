@@ -378,7 +378,8 @@ public final class ConfigSyncParser {
     if (entry.contains("installConfig") || entry.contains("operatingSystem")) {
       // 旧安装设置不是可跳过的未知字段：旧格式永远不能被静默当作兼容导入。
       throw DomainException.validation(
-          RESOURCE, "environment entry uses removed installConfig/operatingSystem; use daemonConfig");
+          RESOURCE,
+          "environment entry uses removed installConfig/operatingSystem; use daemonConfig");
     }
     String tokenHash = entry.reqString("registrationTokenHash");
     String note = entry.optString("note");

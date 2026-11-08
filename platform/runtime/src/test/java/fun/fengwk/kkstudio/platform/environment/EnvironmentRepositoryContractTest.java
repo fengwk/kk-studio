@@ -23,11 +23,11 @@ class EnvironmentRepositoryContractTest {
     assertTrue(sql.contains("install_code_hash = case"), sql);
     assertTrue(sql.contains("install_code_expires_at = case"), sql);
     assertTrue(
-        sql.contains(
-            "when registration_token_hash is distinct from :registrationTokenHash"), sql);
+        sql.contains("when registration_token_hash is distinct from :registrationTokenHash"), sql);
     assertTrue(
         sql.contains(
-            "or daemon_config is distinct from cast(:daemonConfigJson as jsonb) then null"), sql);
+            "or daemon_config is distinct from cast(:daemonConfigJson as jsonb) then null"),
+        sql);
     assertTrue(sql.contains("version = version + 1"), sql);
     assertFalse(sql.contains("set name"), "environment name must never be updated: " + sql);
   }

@@ -49,8 +49,7 @@ public class EnvironmentRuntimeRoutingService {
         .orElseThrow(
             () ->
                 DomainException.unavailable(
-                    "ENVIRONMENT_UNAVAILABLE",
-                    "environment has no current owner route"));
+                    "ENVIRONMENT_UNAVAILABLE", "environment has no current owner route"));
   }
 
   private ClusterOwnerRoute requireOwnerRoute(EnvironmentId environmentId) {

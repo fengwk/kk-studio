@@ -53,8 +53,7 @@ public final class EnvironmentInstallScripts {
     String version = releaseVersion(releaseVersion);
     requireInstallableOperatingSystem(operatingSystem);
     text(registrationToken, "registrationToken");
-    String daemonJson =
-        daemonJson(environmentId, configurationVersion, daemonConfig);
+    String daemonJson = daemonJson(environmentId, configurationVersion, daemonConfig);
     boolean windows = operatingSystem == DaemonOperatingSystem.WINDOWS;
     String action =
         windows
@@ -104,8 +103,7 @@ public final class EnvironmentInstallScripts {
     String installerBase = INSTALLER_BASE.formatted(releaseVersion);
     if (windows) {
       String staging = daemonJson.isEmpty() ? "" : windowsStaging(daemonJson, token);
-      return template.formatted(
-          staging, ps(installerBase + "/install.ps1"), action);
+      return template.formatted(staging, ps(installerBase + "/install.ps1"), action);
     }
     String staging = daemonJson.isEmpty() ? "" : unixStaging(daemonJson, token);
     return template.formatted(staging, sh(installerBase + "/install.sh"), action);

@@ -356,6 +356,11 @@ class ClusterRealtimePayloadClientTest {
     private final Map<UUID, URI> origins = new HashMap<>();
 
     @Override
+    public Optional<ClusterOwnerRoute> runtimeRoute(EnvironmentId environmentId) {
+      return Optional.empty();
+    }
+
+    @Override
     public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       return Optional.empty();
     }

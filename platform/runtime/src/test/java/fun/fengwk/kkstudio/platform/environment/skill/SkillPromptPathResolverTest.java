@@ -11,9 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -38,17 +38,11 @@ class SkillPromptPathResolverTest {
   private static final String COMMIT = "a".repeat(64);
   private static final String OTHER_COMMIT = "b".repeat(64);
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
-  private static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
+  private static final DaemonReadyMetadata CAPABILITIES =
+      new DaemonReadyMetadata(
           "1.0.9",
-          new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX,
-              "UTC",
-              "dev",
-              "/home/dev",
-              "Linux environment.",
-              "/tmp/kk-studio",
-              "amd64"));
+          new DaemonHostInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "/tmp/kk-studio", "amd64"));
 
   private EnvironmentRegistry registry;
   private SkillPromptPathResolver resolver;

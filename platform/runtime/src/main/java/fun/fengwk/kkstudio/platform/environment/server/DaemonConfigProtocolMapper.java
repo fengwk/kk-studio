@@ -26,8 +26,7 @@ public final class DaemonConfigProtocolMapper {
     DaemonLspConfiguration lsp = config.getLsp();
     if (lsp != null) {
       LspConfiguration.Builder lspBuilder = LspConfiguration.newBuilder();
-      for (Map.Entry<String, DaemonLspServerConfiguration> entry :
-          lsp.getServers().entrySet()) {
+      for (Map.Entry<String, DaemonLspServerConfiguration> entry : lsp.getServers().entrySet()) {
         DaemonLspServerConfiguration server = entry.getValue();
         lspBuilder.addServers(
             LspServer.newBuilder()
