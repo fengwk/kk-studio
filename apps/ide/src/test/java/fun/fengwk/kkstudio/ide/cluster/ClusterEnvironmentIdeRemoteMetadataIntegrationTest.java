@@ -110,7 +110,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             transportB,
             new IdeBootstrapTicketService(),
             new AllowGateway(),
-            new IdeViewBindingRegistry(),
+            new IdeViewBindingRegistry(transportB),
             Duration.ofSeconds(1),
             new NoopAuthorization());
 
@@ -426,7 +426,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         localTransportA,
         new IdeBootstrapTicketService(),
         new AllowGateway(),
-        new IdeViewBindingRegistry(),
+        new IdeViewBindingRegistry(localTransportA),
         Duration.ofSeconds(1),
         new NoopAuthorization());
   }

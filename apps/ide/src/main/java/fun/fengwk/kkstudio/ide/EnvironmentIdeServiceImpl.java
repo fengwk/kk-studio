@@ -205,7 +205,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return dto;
   }
 
-  /** 授权与路由缓存只能成对发布；迟到旧实例的回执在登记前被拒绝，授权失败时该视图不得出现在任何后续命令的缓存中。 */
+  /**
+   * 授权与路由缓存只能成对发布；授权失败时该视图不得出现在任何后续命令的缓存中。
+   *
+   * <p>锁外复核只用于快速拒绝明显过期的回执；两个 Registry 还会在各自登记锁内再次复核当前实例，因此复核之后被调度挂起的旧实例回执同样无法登记或清理新代际。
+   */
   private void recordAuthorized(ViewSnapshot view) {
     IdeViewBindingRegistry.Binding binding = view.binding();
     requireCurrentGeneration(binding.daemonIdentity());
@@ -217,11 +221,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             binding.bindingEpoch(),
             view.workspacePath());
       } catch (IllegalStateException error) {
-        throw DomainException.unavailable(
-            "IDE_UNAVAILABLE", "environment IDE view capacity is exhausted", error);
+        throw authorizationUnavailable(error);
       }
     }
-    bindings.record(binding);
+    if (!bindings.record(binding)) {
+      // 授权已登记但路由登记被锁内复核拒绝：撤销本次授权，不保留半绑定。
+      revokeLocal(binding);
+      throw supersededGeneration();
+    }
   }
 
   @Override
@@ -423,7 +430,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     List<IdeViewBindingRegistry.Binding> current =
         authorized.stream().map(ViewSnapshot::binding).toList();
     revokeStaleAuthorizations(identity, current);
-    bindings.replace(identity, current);
+    if (!bindings.replace(identity, current)) {
+      throw supersededGeneration();
+    }
     return authorized;
   }
 
@@ -532,8 +541,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       viewAuthorization.ensureViewCapacity(identity);
     } catch (IllegalStateException error) {
-      throw DomainException.unavailable(
-          "IDE_UNAVAILABLE", "environment IDE view capacity is exhausted", error);
+      throw authorizationUnavailable(error);
     }
   }
 
@@ -556,7 +564,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
                 DomainException.unavailable("IDE_UNAVAILABLE", "environment daemon is not ready"));
   }
 
-  /** 回执/快照必须来自本节点当前 READY 实例；实例已被替换时旧结果不得创建或重建授权。 */
+  /** 锁外快速复核：回执/快照必须来自本节点当前 READY 实例；登记锁内还会再复核一次。 */
   private void requireCurrentGeneration(DaemonConnectionIdentity identity) {
     if (!transport
         .connectionIdentity(identity.environmentId())
@@ -565,6 +573,18 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "environment daemon instance has been replaced");
     }
+  }
+
+  /** 授权登记被拒绝（容量上界或实例已被替换）；具体原因保留在 cause 中。 */
+  private static DomainException authorizationUnavailable(IllegalStateException error) {
+    return DomainException.unavailable(
+        "IDE_UNAVAILABLE", "environment IDE view authorization is unavailable", error);
+  }
+
+  /** 锁外复核通过后实例仍可能被替换：登记锁内复核拒绝时按旧代际结果处理。 */
+  private static DomainException supersededGeneration() {
+    return DomainException.unavailable(
+        "IDE_UNAVAILABLE", "environment daemon instance has been replaced");
   }
 
   private IdeCall call(EnvironmentId environmentId, IdeCommand command) {

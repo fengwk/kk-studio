@@ -78,7 +78,7 @@ class ClusterEnvironmentIdeServiceTest {
             localTransport,
             new IdeBootstrapTicketService(),
             new AllowGateway(),
-            new IdeViewBindingRegistry(),
+            new IdeViewBindingRegistry(localTransport),
             Duration.ofSeconds(1),
             new NoopAuthorization());
     service = new ClusterEnvironmentIdeService(registry, client, local);

@@ -18,6 +18,9 @@ import java.util.stream.Collectors;
  * <p>唯一键是 (Environment, daemonInstanceId, viewId)：另一个 Daemon 进程即使复用相同 view/epoch/workspace
  * 也不会命中或覆盖当前进程的绑定。它只是 owner 从 Daemon 回执与 {@code LIST_VIEWS} 重建的路由缓存，不是权威存储。每次写命令前仍须向事件节点确认 exact
  * intent；旧 epoch 的关闭/ 目录/终端请求不得作用于新绑定。
+ *
+ * <p>写入（记录/替换）在登记锁内先向 {@link IdeCurrentGeneration} 复核身份，再清理同 Environment 的其它代际：迟到的旧实例结果即使已通过调用方的锁外
+ * 检查，也不能删除或覆盖新代际的绑定。
  */
 public final class IdeViewBindingRegistry {
 
@@ -52,13 +55,29 @@ public final class IdeViewBindingRegistry {
     }
   }
 
+  private final IdeCurrentGeneration currentGenerations;
+  private final Object lock = new Object();
   private final ConcurrentHashMap<Key, Binding> bindings = new ConcurrentHashMap<>();
 
-  /** 记录/替换一条绑定；同进程同 viewId 的新 claim 使旧绑定失效，同 Environment 其它进程的残留绑定被清除。 */
-  public void record(Binding binding) {
+  public IdeViewBindingRegistry(IdeCurrentGeneration currentGenerations) {
+    this.currentGenerations = Objects.requireNonNull(currentGenerations, "currentGenerations");
+  }
+
+  /**
+   * 记录/替换一条绑定；同进程同 viewId 的新 claim 使旧绑定失效，同 Environment 其它进程的残留绑定被清除。
+   *
+   * @return {@code false} 表示该绑定已不属于本节点当前 READY 实例，未做任何写入
+   */
+  public boolean record(Binding binding) {
     Objects.requireNonNull(binding, "binding");
-    discardOtherGenerations(binding.daemonIdentity());
-    bindings.put(key(binding.daemonIdentity(), binding.viewId()), binding);
+    synchronized (lock) {
+      if (!isCurrentGeneration(binding.daemonIdentity())) {
+        return false;
+      }
+      discardOtherGenerations(binding.daemonIdentity());
+      bindings.put(key(binding.daemonIdentity(), binding.viewId()), binding);
+      return true;
+    }
   }
 
   public Optional<Binding> find(DaemonConnectionIdentity daemonIdentity, UUID viewId) {
@@ -91,30 +110,44 @@ public final class IdeViewBindingRegistry {
    * 用权威 {@code LIST_VIEWS} 快照替换该 Daemon 进程的本地缓存，并清掉同 Environment 其它进程的残留绑定。
    *
    * <p>权威快照来自当前实例即可证明旧进程不再拥有路由，因此这里不保留旧代际条目。
+   *
+   * @return {@code false} 表示该快照已不属于本节点当前 READY 实例，未做任何写入
    */
-  public List<Binding> replace(DaemonConnectionIdentity daemonIdentity, List<Binding> current) {
+  public boolean replace(DaemonConnectionIdentity daemonIdentity, List<Binding> current) {
     Objects.requireNonNull(daemonIdentity, "daemonIdentity");
     Objects.requireNonNull(current, "current");
-    discardOtherGenerations(daemonIdentity);
-    Set<UUID> currentViewIds =
-        current.stream()
-            .filter(binding -> binding.daemonIdentity().equals(daemonIdentity))
-            .map(Binding::viewId)
-            .collect(Collectors.toSet());
-    bindings
-        .entrySet()
-        .removeIf(
-            entry -> {
-              Key key = entry.getKey();
-              return key.daemonIdentity().equals(daemonIdentity)
-                  && !currentViewIds.contains(key.viewId());
-            });
-    for (Binding binding : current) {
-      if (binding.daemonIdentity().equals(daemonIdentity)) {
-        bindings.put(key(daemonIdentity, binding.viewId()), binding);
+    synchronized (lock) {
+      if (!isCurrentGeneration(daemonIdentity)) {
+        return false;
       }
+      discardOtherGenerations(daemonIdentity);
+      Set<UUID> currentViewIds =
+          current.stream()
+              .filter(binding -> binding.daemonIdentity().equals(daemonIdentity))
+              .map(Binding::viewId)
+              .collect(Collectors.toSet());
+      bindings
+          .entrySet()
+          .removeIf(
+              entry -> {
+                Key key = entry.getKey();
+                return key.daemonIdentity().equals(daemonIdentity)
+                    && !currentViewIds.contains(key.viewId());
+              });
+      for (Binding binding : current) {
+        if (binding.daemonIdentity().equals(daemonIdentity)) {
+          bindings.put(key(daemonIdentity, binding.viewId()), binding);
+        }
+      }
+      return true;
     }
-    return current;
+  }
+
+  private boolean isCurrentGeneration(DaemonConnectionIdentity daemonIdentity) {
+    return currentGenerations
+        .current(daemonIdentity.environmentId())
+        .map(daemonIdentity::equals)
+        .orElse(false);
   }
 
   private void discardOtherGenerations(DaemonConnectionIdentity daemonIdentity) {

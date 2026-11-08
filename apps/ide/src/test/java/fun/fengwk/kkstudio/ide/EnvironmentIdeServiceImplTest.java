@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.ide.gateway.IdeBrowserSessionRegistry;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
@@ -74,7 +75,7 @@ class EnvironmentIdeServiceImplTest {
     browserUse = new FakeBrowserUse();
     authorization = new FakeAuthorization();
     tickets = new IdeBootstrapTicketService();
-    bindings = new IdeViewBindingRegistry();
+    bindings = new IdeViewBindingRegistry(transport);
     service =
         new EnvironmentIdeServiceImpl(
             transport, tickets, browserUse, bindings, Duration.ofMillis(200), authorization);
@@ -513,6 +514,119 @@ class EnvironmentIdeServiceImplTest {
     assertTrue(bindings.find(transport.identity, VIEW).isEmpty());
   }
 
+  /** 意图：旧实例的回执即使在服务侧锁外复核通过后线程被挂起，也会在 Registry 登记锁内被拒绝：新代际的授权、token 与路由绑定都不受影响。 */
+  @Test
+  void lateRegistrationFromReplacedInstanceCannotDeleteNewGeneration() throws Exception {
+    IdeBrowserSessionRegistry sessions = new IdeBrowserSessionRegistry(transport);
+    IdeViewBindingRegistry generationBindings = new IdeViewBindingRegistry(transport);
+    EnvironmentIdeServiceImpl current =
+        new EnvironmentIdeServiceImpl(
+            transport, tickets, browserUse, generationBindings, Duration.ofMillis(200), sessions);
+
+    DaemonConnectionIdentity replaced = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+    transport.prepareIdentityReadPause();
+    transport.requestSent = transport::pauseNextIdentityRead;
+    AtomicReference<Throwable> lateFailure = new AtomicReference<>();
+    Thread lateOpen =
+        new Thread(
+            () -> {
+              try {
+                current.openView(ENV, openRequest(null));
+              } catch (RuntimeException error) {
+                lateFailure.set(error);
+              }
+            });
+    lateOpen.start();
+    String liveSession;
+    try {
+      assertTrue(transport.identityReadStarted.await(2, TimeUnit.SECONDS));
+      // 新实例在挂起窗口内完成授权、路由登记、入口票据与浏览器会话。
+      transport.identity = replacement;
+      transport.replies.add(
+          openReply(
+              VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+      current.openView(ENV, openRequest(null));
+      liveSession = sessions.open(replacement, VIEW.toString(), 7L, "/daemon/ws");
+    } finally {
+      transport.identityReadResume.countDown();
+    }
+    lateOpen.join(2000);
+
+    assertFalse(lateOpen.isAlive());
+    assertTrue(
+        lateFailure.get() instanceof DomainException error
+            && "IDE_UNAVAILABLE".equals(error.reason()));
+    assertTrue(sessions.lookup(liveSession, ENV, VIEW.toString()).isPresent(), "新代际会话不得被旧实例清理");
+    assertTrue(generationBindings.find(replacement, VIEW).isPresent());
+    assertTrue(generationBindings.find(replaced, VIEW).isEmpty());
+    assertEquals(1, tickets.pendingCount(), "旧实例不得补发入口票据");
+  }
+
+  /** 意图：旧实例的 LIST_VIEWS 快照在锁外复核后被挂起，也不能在登记锁内替换掉新代际的绑定与会话。 */
+  @Test
+  void lateSnapshotFromReplacedInstanceCannotDeleteNewGeneration() throws Exception {
+    IdeBrowserSessionRegistry sessions = new IdeBrowserSessionRegistry(transport);
+    IdeViewBindingRegistry generationBindings = new IdeViewBindingRegistry(transport);
+    EnvironmentIdeServiceImpl current =
+        new EnvironmentIdeServiceImpl(
+            transport, tickets, browserUse, generationBindings, Duration.ofMillis(200), sessions);
+
+    DaemonConnectionIdentity replaced = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    transport.invocationIdentity = replaced;
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    7L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+    transport.prepareIdentityReadPause();
+    transport.requestSent = transport::pauseNextIdentityRead;
+    AtomicReference<Throwable> lateFailure = new AtomicReference<>();
+    Thread lateSnapshot =
+        new Thread(
+            () -> {
+              try {
+                current.listViews(ENV);
+              } catch (RuntimeException error) {
+                lateFailure.set(error);
+              }
+            });
+    lateSnapshot.start();
+    String liveSession;
+    try {
+      assertTrue(transport.identityReadStarted.await(2, TimeUnit.SECONDS));
+      transport.identity = replacement;
+      transport.invocationIdentity = null;
+      transport.replies.add(
+          openReply(
+              VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+      current.openView(ENV, openRequest(null));
+      liveSession = sessions.open(replacement, VIEW.toString(), 7L, "/daemon/ws");
+    } finally {
+      transport.identityReadResume.countDown();
+    }
+    lateSnapshot.join(2000);
+
+    assertFalse(lateSnapshot.isAlive());
+    assertTrue(
+        lateFailure.get() instanceof DomainException error
+            && "IDE_UNAVAILABLE".equals(error.reason()));
+    assertTrue(generationBindings.find(replacement, VIEW).isPresent());
+    assertTrue(generationBindings.find(replaced, VIEW).isEmpty());
+    assertTrue(sessions.lookup(liveSession, ENV, VIEW.toString()).isPresent());
+  }
+
   /** 意图：容量预检按本节点当前 READY 实例执行，而不是按 Environment 汇总所有代际。 */
   @Test
   void capacityPrecheckUsesCurrentDaemonInstance() {
@@ -833,16 +947,35 @@ class EnvironmentIdeServiceImplTest {
     private final Deque<IdeResult> replies = new ArrayDeque<>();
     private final AtomicBoolean neverCompletes = new AtomicBoolean();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
+    private final AtomicBoolean pauseNextIdentityRead = new AtomicBoolean();
     private volatile CountDownLatch pendingStarted;
     private volatile CompletableFuture<IdeResult> pendingReply;
-    private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+    private volatile DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
 
     /** 命令实际到达的连接身份；与 {@link #identity} 不同即模拟实例替换期间迟到的回执。 */
-    private DaemonConnectionIdentity invocationIdentity;
+    private volatile DaemonConnectionIdentity invocationIdentity;
 
-    private boolean ready = true;
+    private volatile Runnable requestSent;
+
+    private volatile CountDownLatch identityReadStarted;
+
+    private volatile CountDownLatch identityReadResume;
+
+    private volatile boolean ready = true;
 
     private int abandoned;
+
+    /** 由测试线程在启动迟到线程前准备：让暂停点可以被等待。 */
+    private void prepareIdentityReadPause() {
+      identityReadStarted = new CountDownLatch(1);
+      identityReadResume = new CountDownLatch(1);
+    }
+
+    /** 命令发出后挂号：下一次身份读取完成后挂起，模拟锁外复核完成后、登记前线程被调度挂起。 */
+    private void pauseNextIdentityRead() {
+      pauseNextIdentityRead.set(true);
+    }
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
@@ -859,12 +992,29 @@ class EnvironmentIdeServiceImplTest {
         future.complete(replies.removeFirst());
       }
       DaemonConnectionIdentity bound = invocationIdentity == null ? identity : invocationIdentity;
+      Runnable hook = requestSent;
+      requestSent = null;
+      if (hook != null) {
+        hook.run();
+      }
       return new IdeRequest(bound, UUID.randomUUID(), future);
     }
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return ready ? Optional.of(identity) : Optional.empty();
+      DaemonConnectionIdentity read = identity;
+      if (pauseNextIdentityRead.compareAndSet(true, false)) {
+        identityReadStarted.countDown();
+        try {
+          if (!identityReadResume.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("identity read pause was not released");
+          }
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("identity read pause was interrupted", error);
+        }
+      }
+      return ready ? Optional.of(read) : Optional.empty();
     }
 
     @Override
