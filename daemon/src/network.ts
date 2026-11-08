@@ -147,12 +147,12 @@ class PlatformProxyPolicy implements ProxyPolicy {
 /** 平台指定的代理和绕过列表。 */
 export const ProxyPolicy = {
   fixed(proxyUrl: string | null, noProxyHosts: string): ProxyPolicy {
-    return new PlatformProxyPolicy(proxyUrl === null ? null : parseProxy(proxyUrl), parseBypass(noProxyHosts))
+    return new PlatformProxyPolicy(proxyUrl === null ? null : parseProxyUrl(proxyUrl), parseBypass(noProxyHosts))
   },
 }
 
 /** 严格解析无认证代理 URL：只接受 {@code http://host:explicit-port}，无 path/query/fragment/userinfo。 */
-function parseProxy(value: string): string {
+export function parseProxyUrl(value: string): string {
   const match = /^http:\/\/(\[[^\]]+\]|[^/?#@[\]:]+):([0-9]{1,5})$/i.exec(value)
   if (match === null) {
     throw new ProxyConfigurationError()
@@ -438,7 +438,10 @@ class DefaultOutboundNetwork implements OutboundNetwork {
   private readonly retired = new WeakSet<Dispatcher>()
   private readonly inflight = new Set<Promise<unknown>>()
   private readonly lifetime = new AbortController()
+  private readonly idleWaiters: Array<() => void> = []
+  private activeRequests = 0
   private closed = false
+  private retiring = false
   private closePromise: Promise<void> | undefined
 
   constructor(private readonly policy: ProxyPolicy) {}
@@ -449,12 +452,18 @@ class DefaultOutboundNetwork implements OutboundNetwork {
 
   async openResponse(url: string, init: OutboundRequestInit, signal: AbortSignal): Promise<OutboundResponse> {
     this.ensureOpen()
-    const choice = await this.track(this.policy.select(url, this.combine(signal)))
-    this.ensureOpen()
-    const dispatcher = createDispatcher(choice, init.connectTimeout)
-    this.dispatchers.add(dispatcher)
-    // header 阶段也纳入 pending：关闭时必须等这次 dispatch 真正 settle。
-    return this.track(this.dispatch(dispatcher, url, init, this.combine(signal)))
+    this.activeRequests++
+    try {
+      const choice = await this.track(this.policy.select(url, this.combine(signal)))
+      this.ensureOpen()
+      const dispatcher = createDispatcher(choice, init.connectTimeout)
+      this.dispatchers.add(dispatcher)
+      // header 阶段也纳入 pending：关闭时必须等这次 dispatch 真正 settle。
+      return await this.track(this.dispatch(dispatcher, url, init, this.combine(signal)))
+    } catch (error) {
+      this.releaseRequest()
+      throw error
+    }
   }
 
   async withResponse<T>(
@@ -540,6 +549,7 @@ class DefaultOutboundNetwork implements OutboundNetwork {
           disposePromise = (async () => {
             destroyBody(response.body)
             const cleanup = await this.retire(dispatcher, false)
+            this.releaseRequest()
             if (cleanup !== undefined) {
               throw cleanup
             }
@@ -557,6 +567,42 @@ class DefaultOutboundNetwork implements OutboundNetwork {
   private ensureOpen(): void {
     if (this.closed) {
       throw new Error('outbound network is closed')
+    }
+    if (this.retiring) {
+      throw new Error('outbound network is retired')
+    }
+  }
+
+  /**
+   * 进入退休：拒绝新请求，等在途请求释放后关闭。
+   *
+   * <p>这是配置热切换的边界：旧请求必须自然完成，不能因新配置直接取消。
+   */
+  retireWhenIdle(): Promise<void> {
+    if (!this.retiring) {
+      this.retiring = true
+      if (this.activeRequests === 0) {
+        for (const resolve of this.idleWaiters.splice(0)) {
+          resolve()
+        }
+      }
+    }
+    return (async () => {
+      if (this.activeRequests > 0) {
+        await new Promise<void>((resolve) => this.idleWaiters.push(resolve))
+      }
+      await this.close()
+    })()
+  }
+
+  private releaseRequest(): void {
+    if (this.activeRequests > 0) {
+      this.activeRequests--
+    }
+    if (this.retiring && this.activeRequests === 0) {
+      for (const resolve of this.idleWaiters.splice(0)) {
+        resolve()
+      }
     }
   }
 
@@ -681,33 +727,80 @@ export interface InstalledOutboundNetwork {
 }
 
 let currentNetwork: OutboundNetwork | undefined
-let currentSettings: { proxyUrl: string | null; noProxyHosts: string } = { proxyUrl: null, noProxyHosts: '' }
-let currentPolicy: ProxyPolicy = ProxyPolicy.fixed(null, '')
 
-/** 原子替换后续请求和子进程使用的设置；非法设置不改变当前状态。 */
-export function applyNetworkSettings(proxyUrl: string | null, noProxyHosts: string): void {
-  const policy = ProxyPolicy.fixed(proxyUrl, noProxyHosts)
-  currentSettings = { proxyUrl, noProxyHosts }
-  currentPolicy = policy
+export interface PreparedNetwork {
+  /** 同步发布；返回旧句柄的异步收尾。 */
+  publish(): Promise<void>
+  /** 未发布候选的清理。 */
+  retire(): Promise<void>
 }
 
-/** 子进程只继承平台指定代理，不继承宿主环境中任意大小写的代理变量。 */
-export function subprocessEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const result = { ...environment }
-  for (const key of Object.keys(result)) {
-    if (['http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'].includes(key.toLowerCase())) {
-      delete result[key]
+/**
+ * 进程当前的卡片出站网络。
+ *
+ * <p>一次配置切换立即把新请求指向新句柄，旧句柄进入退休：不再接受新请求，等在途响应全部释放后关闭。这样
+ * 旧 HTTP 请求按冻结代理完成，新请求使用新配置，不会因为热更新被硬取消。
+ */
+export class NetworkRuntime {
+  private current: DefaultOutboundNetwork
+  private closePromise: Promise<void> | undefined
+
+  constructor(proxyUrl: string | null) {
+    this.current = createDefaultNetwork(proxyUrl)
+    currentNetwork = this.current
+  }
+
+  get network(): OutboundNetwork {
+    return this.current
+  }
+
+  /** 准备一个尚未发布的代理句柄；发布前所有请求仍使用当前配置。 */
+  prepare(proxyUrl: string | null): PreparedNetwork {
+    const candidate = createDefaultNetwork(proxyUrl)
+    return {
+      publish: () => {
+        const previous = this.current
+        this.current = candidate
+        currentNetwork = candidate
+        return previous.retireWhenIdle()
+      },
+      retire: () => candidate.close(),
     }
   }
-  if (currentSettings.proxyUrl !== null) {
-    result.HTTP_PROXY = currentSettings.proxyUrl
-    result.HTTPS_PROXY = currentSettings.proxyUrl
+
+  /** 发布新代理策略；返回旧句柄的异步收尾，不阻塞当前请求。 */
+  update(proxyUrl: string | null): Promise<void> {
+    return this.prepare(proxyUrl).publish()
   }
-  result.NO_PROXY = currentSettings.noProxyHosts
-  return result
+
+  close(): Promise<void> {
+    if (this.closePromise === undefined) {
+      this.closePromise = (async () => {
+        const closing = this.current
+        if (currentNetwork === closing) {
+          currentNetwork = undefined
+        }
+        await closing.close()
+      })()
+    }
+    return this.closePromise
+  }
 }
 
-/** 当前进程级出站网络；未安装时明确失败，绝不 runtime mock 或静默直连。 */
+function createDefaultNetwork(proxyUrl: string | null): DefaultOutboundNetwork {
+  return new DefaultOutboundNetwork(ProxyPolicy.fixed(proxyUrl, ''))
+}
+
+/**
+ * 子进程保留调用方/宿主真实环境，不注入、不删除任何代理变量。
+ *
+ * <p>卡片代理只属于 Daemon 自身请求；Bash、LSP 与 IDE 终端不得因平台代理被改写。
+ */
+export function subprocessEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...environment }
+}
+
+/** 当前进程已应用配置的出站网络；未配置时明确失败，绝不静默直连。 */
 export function getOutboundNetwork(): OutboundNetwork {
   if (currentNetwork === undefined) {
     throw new Error('outbound network is not initialized')
@@ -715,26 +808,20 @@ export function getOutboundNetwork(): OutboundNetwork {
   return currentNetwork
 }
 
-/** 安装平台代理策略；新请求现读设置，在途请求不受影响。 */
+/** 测试与早期装配使用的直连安装入口；生产配置切换使用 {@link NetworkRuntime}。 */
 export async function installOutboundNetwork(): Promise<InstalledOutboundNetwork> {
   const previous = currentNetwork
-  const previousSettings = currentSettings
-  const previousPolicy = currentPolicy
-  applyNetworkSettings(null, '')
-  const network = new DefaultOutboundNetwork({ select: (uri, signal) => currentPolicy.select(uri, signal) })
-  currentNetwork = network
+  const runtime = new NetworkRuntime(null)
   let closePromise: Promise<void> | undefined
   return {
-    network,
+    network: runtime.network,
     close(): Promise<void> {
       if (closePromise === undefined) {
         closePromise = (async () => {
-          if (currentNetwork === network) {
+          await runtime.close()
+          if (currentNetwork === undefined) {
             currentNetwork = previous
-            currentSettings = previousSettings
-            currentPolicy = previousPolicy
           }
-          await network.close()
         })()
       }
       return closePromise

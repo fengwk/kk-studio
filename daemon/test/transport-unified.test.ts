@@ -15,10 +15,11 @@ import {
   createDaemonTransport,
 } from '../src/transport/index.js'
 import { Runtime } from '../src/runtime.js'
-import { applyNetworkSettings } from '../src/network.js'
 import type { DaemonConfig, IdeService, IdeStreamUpstream } from '../src/contracts.js'
 import {
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   HeartbeatSchema,
   IdeAction,
   IdeCommandSchema,
@@ -40,6 +41,55 @@ import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
 import { FakeStudioPeer } from './support/fake-studio.js'
 import { IdeError } from '../src/ide/errors.js'
 
+interface ConnectProxy {
+  url: string
+  targets: string[]
+  close(): Promise<void>
+}
+
+/** 真实 HTTP CONNECT 代理：记录隧道目标并双向转发，验证 WS 控制连接实际经过卡片代理。 */
+async function startConnectProxy(): Promise<ConnectProxy> {
+  const targets: string[] = []
+  const sockets = new Set<net.Socket>()
+  const server = http.createServer((_request, response) => {
+    response.writeHead(405)
+    response.end()
+  })
+  server.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  })
+  server.on('connect', (request, clientSocket, head) => {
+    targets.push(request.url ?? '')
+    const [host, portText] = (request.url ?? '').split(':')
+    const upstream = net.connect(Number(portText), host, () => {
+      clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      if (head.length > 0) {
+        upstream.write(head)
+      }
+      upstream.pipe(clientSocket)
+      clientSocket.pipe(upstream)
+    })
+    sockets.add(upstream)
+    upstream.once('close', () => sockets.delete(upstream))
+    upstream.on('error', () => clientSocket.destroy())
+    clientSocket.on('error', () => upstream.destroy())
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = (server.address() as net.AddressInfo).port
+  return {
+    url: `http://127.0.0.1:${port}`,
+    targets,
+    close: () =>
+      new Promise<void>((resolve) => {
+        for (const socket of sockets) {
+          socket.destroy()
+        }
+        server.close(() => resolve())
+      }),
+  }
+}
+
 describe('Unified Transport & Control Protocol', () => {
   let tempDir: string
   let tokenPath: string
@@ -53,14 +103,17 @@ describe('Unified Transport & Control Protocol', () => {
     writeFileSync(tokenPath, 'test-secret-token\n')
 
     config = {
+      environmentId: '11111111-1111-4111-8111-111111111111',
+      configVersion: 0n,
       configPath: join(tempDir, 'daemon.json'),
       dataDir: tempDir,
       tokenPath,
       studioUrl: 'http://127.0.0.1:8080',
       gatewayUri: 'ws://127.0.0.1:8080/ws/daemon',
       bashExecutable: '/bin/bash',
-      note: 'test note',
+      bashExecutableSetting: null,
       lsp: {},
+      proxyUrl: null,
       distributionDir: tempDir,
     }
   })
@@ -111,6 +164,60 @@ describe('Unified Transport & Control Protocol', () => {
     await transport.close()
   })
 
+  // 每次 connect 读取当前配置：地址/代理热切换后重连仍使用同一 daemon instance，并携带固定环境标识。
+  it('reconnects with the current gateway and proxy while preserving the daemon instance', async () => {
+    const first = new FakeStudioPeer()
+    const second = new FakeStudioPeer()
+    const proxy = await startConnectProxy()
+    await first.start()
+    await second.start()
+    const current: DaemonConfig = {
+      ...config,
+      studioUrl: first.origin,
+      gatewayUri: first.gatewayUri,
+      proxyUrl: proxy.url,
+    }
+    const instanceId = randomUUID()
+    const transport = createDaemonTransport({
+      config: () => current,
+      ide: {} as unknown as IdeService,
+      daemonInstanceId: instanceId,
+      platformKey: 'linux-amd64',
+    })
+    const listener = {
+      onEnvelope: () => {},
+      onDisconnected: () => {},
+      onGoaway: () => {},
+      onUpgradeFailed: () => {},
+    }
+    try {
+      const firstConnect = transport.connect(listener)
+      expect((await first.openControlStream()).statusCode).toBe(200)
+      const firstConnection = await firstConnect
+      expect(first.getHandshake()).toMatchObject({ instance: instanceId })
+      expect(first.getHandshake()?.headers['kk-environment-id']).toBe(config.environmentId)
+      const firstPort = (first.server.address() as net.AddressInfo).port
+      expect(proxy.targets).toContain(`127.0.0.1:${firstPort}`)
+      firstConnection.close()
+
+      current.studioUrl = second.origin
+      current.gatewayUri = second.gatewayUri
+      current.proxyUrl = null
+      const secondConnect = transport.connect(listener)
+      expect((await second.openControlStream()).statusCode).toBe(200)
+      const secondConnection = await secondConnect
+      expect(second.getHandshake()).toMatchObject({ instance: instanceId })
+      expect(second.getHandshake()?.headers['kk-environment-id']).toBe(config.environmentId)
+      expect(proxy.targets).toHaveLength(1)
+      secondConnection.close()
+    } finally {
+      await transport.close()
+      await proxy.close()
+      await first.close()
+      await second.close()
+    }
+  })
+
   it('establishes WSS directly even when global and platform proxies are unusable', async () => {
     const key = join(tempDir, 'key.pem')
     const cert = join(tempDir, 'cert.pem')
@@ -130,7 +237,6 @@ describe('Unified Transport & Control Protocol', () => {
     const globalAgent = vi.spyOn(https.globalAgent, 'addRequest').mockImplementation(() => {
       throw new Error('global agent must not be used')
     })
-    applyNetworkSettings('http://127.0.0.1:1', '')
     const transport = createDaemonTransport({
       gatewayUri: `wss://127.0.0.1:${port}/ws/daemon`,
       config,
@@ -146,7 +252,6 @@ describe('Unified Transport & Control Protocol', () => {
       expect(globalAgent).not.toHaveBeenCalled()
     } finally {
       await transport.close()
-      applyNetworkSettings(null, '')
       globalAgent.mockRestore()
       vi.unstubAllEnvs()
       await new Promise<void>((resolve) => wss.close(() => server.close(() => resolve())))
@@ -655,17 +760,22 @@ describe('Unified Transport & Control Protocol', () => {
     it('performs SETTINGS -> READY, handles INVOKE and RECOVER_NOT_FOUND', async () => {
       peer = new FakeStudioPeer()
       await peer.start()
+      const runtimeConfig: DaemonConfig = {
+        ...config,
+        studioUrl: peer.origin,
+        gatewayUri: peer.gatewayUri,
+      }
 
       const transport = createDaemonTransport({
         gatewayUri: peer.gatewayUri,
-        config,
+        config: runtimeConfig,
         ide: {} as unknown as IdeService,
         daemonInstanceId: randomUUID(),
         platformKey: 'linux-amd64',
       })
 
       const runtime = new Runtime({
-        config,
+        config: runtimeConfig,
         transport,
         capabilities: {
           'test.echo': async (call) => ({
@@ -691,12 +801,24 @@ describe('Unified Transport & Control Protocol', () => {
           payload: {
             case: 'settings',
             value: create(SettingsSchema, {
-              noProxyHosts: '',
               resourceBudgets: create(ResourceBudgetsSchema, {
                 maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 3600n,
                 temporaryResourceCleanupIntervalSeconds: 60n,
               }),
+            }),
+          },
+        }),
+      )
+      peer.sendEnvelope(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ENVIRONMENT_CONFIG,
+          environmentId: '11111111-1111-4111-8111-111111111111',
+          payload: {
+            case: 'environmentConfig',
+            value: create(EnvironmentConfigSchema, {
+              version: 0n,
+              config: create(DaemonConfigurationSchema, { studioUrl: peer.origin }),
             }),
           },
         }),

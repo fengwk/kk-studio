@@ -15,6 +15,8 @@ import {
 } from '../../src/protocol/control/codec.js'
 import {
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   MessageType,
   ResourceBudgetsSchema,
   SettingsSchema,
@@ -42,6 +44,7 @@ export interface FakeStudioOptions {
   onHandshake?: (req: IncomingMessage, res: ServerResponse) => boolean | void
   autoControl?: boolean
   environmentId?: string
+  studioUrl?: string | (() => string)
 }
 
 export class FakeStudioPeer {
@@ -165,18 +168,36 @@ export class FakeStudioPeer {
     if (this.options.autoControl) {
       void this.openControlStream().then(({ statusCode }) => {
         if (statusCode === 200) {
+          const environmentId = this.options.environmentId ?? '4e0d3c2b-1a09-4f8e-9d7c-6b5a49382716'
           this.sendEnvelope(
             create(EnvelopeSchema, {
               messageType: MessageType.SETTINGS,
-              environmentId: this.options.environmentId ?? '4e0d3c2b-1a09-4f8e-9d7c-6b5a49382716',
+              environmentId,
               payload: {
                 case: 'settings',
                 value: create(SettingsSchema, {
-                  noProxyHosts: '',
                   resourceBudgets: create(ResourceBudgetsSchema, {
                     maxResourceBytes: 1048576n,
                     temporaryResourceTtlSeconds: 60n,
                     temporaryResourceCleanupIntervalSeconds: 30n,
+                  }),
+                }),
+              },
+            }),
+          )
+          this.sendEnvelope(
+            create(EnvelopeSchema, {
+              messageType: MessageType.ENVIRONMENT_CONFIG,
+              environmentId,
+              payload: {
+                case: 'environmentConfig',
+                value: create(EnvironmentConfigSchema, {
+                  version: 0n,
+                  config: create(DaemonConfigurationSchema, {
+                    studioUrl:
+                      typeof this.options.studioUrl === 'function'
+                        ? this.options.studioUrl()
+                        : this.options.studioUrl ?? 'https://studio.example.com',
                   }),
                 }),
               },

@@ -4,7 +4,6 @@ import type { Readable, Writable } from 'node:stream'
 import type { ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../contracts.js'
 import { ProcessScopeNotConvergedError } from '../contracts.js'
 import { delay } from '../delay.js'
-import { subprocessEnvironment } from '../network.js'
 import { resolveHelperPath } from './helper-path.js'
 import { verifyPrivateFile } from './private-fs.js'
 import * as state from './state.js'
@@ -42,7 +41,7 @@ export class WindowsProcessSupervisor implements ProcessSupervisor {
       await verifyPrivateFile(join(stateDir, state.LAUNCH_FILE))
       // 第 4 个条目是专用 IPC 通道：用户命令继承 0/1/2，不会拿到它。
       helper = spawn(process.execPath, ['--no-warnings', resolveHelperPath(), stateDir], {
-        env: subprocessEnvironment(spec.env ?? process.env),
+        env: spec.env ?? process.env,
         stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       }) as ChildProcessWithoutNullStreams
     } catch (error) {

@@ -1,7 +1,8 @@
-import type { IdeLeaseHandler } from './contracts.js'
+import type { DaemonConfig, IdeLeaseHandler } from './contracts.js'
 import {
   MessageType,
   type Envelope,
+  type EnvironmentConfig,
   type IdeCommand as ProtoIdeCommand,
   type IdeLease as ProtoIdeLease,
   type ResourceUploadTicket,
@@ -11,7 +12,8 @@ import {
   type TemporaryResourcePolicy,
   type UpgradeRequired,
 } from './generated/control_pb.js'
-import { applyNetworkSettings } from './network.js'
+import type { EnvironmentConfigRuntime } from './environment-config.js'
+import { parseEnvironmentConfig } from './protocol/control/codec.js'
 import type { ActiveConnection, ConnectionLifecycle } from './runtime-connection.js'
 import { requireInvocationId, safeMessage } from './runtime-encoding.js'
 import {
@@ -35,11 +37,14 @@ export interface ControlSessionOptions {
   invocations: InvocationRuntime
   ideCommands: IdeCommandRuntime
   updates: UpdateRuntime
+  configuration: EnvironmentConfigRuntime
   ideLease: IdeLeaseHandler | null
   temporaryResources: TemporaryResourceSweeper | null
   monotonicNow: () => number
   heartbeatIntervalMillis: number
   track(promise: Promise<void>): void
+  /** 当前连接代际主动断开重连。 */
+  reconnect(generation: number): void
   /** 进入终态失败；由装配层发布终止。 */
   stop(reason: string): void
 }
@@ -47,9 +52,10 @@ export interface ControlSessionOptions {
 /**
  * 控制会话：环境绑定、握手、心跳与入站信封分发。
  *
- * <p>连接只是消息管道。会话只裁决「这条连接代际与这个环境绑定下，哪个信封归哪个组件处理」：SETTINGS 建立绑定并回
- * READY，后续 SETTINGS 只刷新网络设置；心跳把运行状态与 IDE 使用证明轮次带给平台；出入站信封都不携带其他组件的语义。
- * 业务事实（invocation journal、更新回执、IDE 视图）由各自运行时持有，断线只重置绑定与在途请求，不取消已受理执行。
+ * <p>连接只是消息管道。会话只裁决「这条连接代际与这个环境绑定下，哪个信封归哪个组件处理」：SETTINGS 只建立绑定并装载
+ * 平台预算；完整 ENVIRONMENT_CONFIG 应用成功后才发送 READY。心跳把运行状态与 IDE 使用证明轮次带给平台；出入站信封都不
+ * 携带其他组件的语义。业务事实（invocation journal、更新回执、IDE 视图）由各自运行时持有，断线只重置绑定与在途请求，
+ * 不取消已受理执行。
  */
 export class ControlSession {
   private skillReconciler: SkillReconciler | null = null
@@ -60,6 +66,8 @@ export class ControlSession {
   private scheduledCleanupIntervalSeconds = 0
   private activeIdeLeaseRound: ActiveIdeLeaseRound | null = null
   private ideLeaseRound = 0n
+  private admissionSuspended = false
+  private reconnectPending = false
 
   constructor(private readonly options: ControlSessionOptions) {}
 
@@ -111,7 +119,7 @@ export class ControlSession {
     }
     try {
       if (envelope.messageType === MessageType.SETTINGS) {
-        this.handleSettings(connection, envelope)
+        this.handleSettings(envelope)
         return
       }
       this.verifyScope(envelope)
@@ -137,6 +145,8 @@ export class ControlSession {
     this.maxResourceBytesValue = 0
     this.options.outbound.unbind()
     this.activeIdeLeaseRound = null
+    this.admissionSuspended = false
+    this.reconnectPending = false
     // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
     this.options.ideCommands.abortAll('CONTROL_DISCONNECTED')
   }
@@ -164,8 +174,14 @@ export class ControlSession {
   }
 
   private dispatch(connection: ActiveConnection, envelope: Envelope): void {
+    if (this.admissionSuspended && this.isAdmissionMessage(envelope.messageType)) {
+      throw new Error('environment configuration is switching; new work is not admitted')
+    }
     switch (envelope.messageType) {
       case MessageType.INVOKE:
+        if (!this.options.outbound.isReady || !envelope.environmentId) {
+          throw new Error('INVOKE requires a READY bound connection')
+        }
         this.options.invocations.handleInvoke(connection, envelope)
         return
       case MessageType.CANCEL:
@@ -196,6 +212,13 @@ export class ControlSession {
       case MessageType.SKILL_SYNC:
         this.handleSkillSync(envelope)
         return
+      case MessageType.ENVIRONMENT_CONFIG:
+        this.options.track(
+          this.handleEnvironmentConfig(connection, envelope).catch((error: unknown) => {
+            this.failEnvironmentConfig(connection, error)
+          }),
+        )
+        return
       default:
         throw new Error(`daemon must not receive ${envelope.messageType} from server`)
     }
@@ -209,33 +232,111 @@ export class ControlSession {
   }
 
   /**
-   * 首次 SETTINGS 建立环境绑定并回 READY；已 READY 的后续 SETTINGS 只刷新网络设置。
+   * SETTINGS 只建立固定 UUID 的 scope 绑定并装载平台资源预算；READY 由完整配置应用完成。
    *
    * <p>SETTINGS 是本连接唯一能建立绑定的帧，因此环境标识校验就在这里完成一次，不再由通用 scope 校验重复。
    */
-  private handleSettings(connection: ActiveConnection, envelope: Envelope): void {
+  private handleSettings(envelope: Envelope): void {
     const environmentId = envelope.environmentId
     if (!environmentId) {
       throw new Error('SETTINGS must declare non-null environmentId')
+    }
+    if (environmentId !== this.options.configuration.config.environmentId) {
+      throw new Error('SETTINGS environmentId does not match daemon')
     }
     const bound = this.options.outbound.environmentId
     if (bound !== null && bound !== environmentId) {
       throw new Error('SETTINGS environmentId does not match daemon')
     }
     const settings = envelope.payload.value as Settings
-    if (settings.noProxyHosts === undefined) {
-      throw new Error('settings.noProxyHosts is required')
-    }
-    applyNetworkSettings(settings.proxyUrl ?? null, settings.noProxyHosts)
-    if (connection.ready) {
-      return
-    }
     this.options.outbound.bind(environmentId)
-    const budgets = settings.resourceBudgets!
+    const budgets = settings.resourceBudgets
+    if (budgets === undefined) {
+      throw new Error('settings.resourceBudgets is required')
+    }
     this.maxResourceBytesValue = Number(budgets.maxResourceBytes)
     const ttl = Number(budgets.temporaryResourceTtlSeconds)
     const cleanup = Number(budgets.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
+  }
+
+  private async handleEnvironmentConfig(
+    connection: ActiveConnection,
+    envelope: Envelope,
+  ): Promise<void> {
+    const bound = this.options.outbound.environmentId
+    if (bound === null || !envelope.environmentId) {
+      throw new Error('ENVIRONMENT_CONFIG requires a SETTINGS-bound connection')
+    }
+    if (bound !== envelope.environmentId) {
+      throw new Error('ENVIRONMENT_CONFIG environmentId does not match daemon')
+    }
+    const { version, configuration } = parseEnvironmentConfig(
+      envelope.payload.value as EnvironmentConfig,
+    )
+    const result = await this.options.configuration.submit(version, configuration)
+    if (this.options.connection.getActiveConnection() !== connection) {
+      return
+    }
+    switch (result.kind) {
+      case 'applied':
+        if (this.reconnectPending) {
+          this.requestReconnect(connection)
+          return
+        }
+        if (!connection.ready) {
+          this.completeReady(connection)
+        } else {
+          this.options.outbound.sendRuntimeStatus(this.options.updates.snapshot())
+        }
+        return
+      case 'confirmed':
+      case 'stale':
+        // 只有已存在可用快照时 stale/confirmed 才能放行 READY；未初始化必须等待真正应用。
+        if (!this.options.configuration.hasAppliedConfiguration) {
+          this.options.outbound.sendRuntimeStatus(this.options.updates.snapshot())
+          return
+        }
+        if (this.reconnectPending) {
+          this.requestReconnect(connection)
+          return
+        }
+        if (!connection.ready) {
+          this.completeReady(connection)
+        } else {
+          this.options.outbound.sendRuntimeStatus(this.options.updates.snapshot())
+        }
+        return
+      case 'failed':
+        // 已有可用配置继续使用；尚未 READY 时保持 CONNECTING 并上报错误，等待服务端修正。
+        this.options.outbound.sendRuntimeStatus(this.options.updates.snapshot())
+        return
+      case 'fatal':
+        this.options.outbound.sendErrorOn(
+          connection,
+          this.options.outbound.environmentId ?? undefined,
+          safeMessage(new Error(result.message)),
+        )
+        this.options.connection.closeFailedHandshake(connection)
+        return
+    }
+  }
+
+  /** 配置热切换：地址/代理变化时暂停新入站写并主动用新配置重连。 */
+  onConfigurationApplied(previous: DaemonConfig, next: DaemonConfig): void {
+    if (
+      previous.gatewayUri !== next.gatewayUri ||
+      previous.proxyUrl !== next.proxyUrl
+    ) {
+      this.admissionSuspended = true
+      this.reconnectPending = true
+      return
+    }
+    this.admissionSuspended = false
+    this.reconnectPending = false
+  }
+
+  private completeReady(connection: ActiveConnection): void {
     if (!this.options.outbound.sendReady(connection, this.options.updates.snapshot())) {
       if (this.options.connection.getActiveConnection() === connection) {
         this.options.connection.closeFailedHandshake(connection)
@@ -243,9 +344,35 @@ export class ControlSession {
       return
     }
     if (this.options.connection.markReady(connection)) {
+      this.admissionSuspended = false
       this.options.resources.onConnectionReady()
       this.options.updates.resendResults()
     }
+  }
+
+  private requestReconnect(connection: ActiveConnection): void {
+    this.reconnectPending = false
+    this.options.reconnect(connection.generation)
+  }
+
+  private failEnvironmentConfig(connection: ActiveConnection, error: unknown): void {
+    this.options.outbound.sendErrorOn(
+      connection,
+      this.options.outbound.environmentId ?? undefined,
+      safeMessage(error),
+    )
+    if (!connection.ready && this.options.connection.getActiveConnection() === connection) {
+      this.options.connection.closeFailedHandshake(connection)
+    }
+  }
+
+  private isAdmissionMessage(messageType: MessageType): boolean {
+    return (
+      messageType === MessageType.INVOKE ||
+      messageType === MessageType.IDE_COMMAND ||
+      messageType === MessageType.IDE_LEASE ||
+      messageType === MessageType.SKILL_SYNC
+    )
   }
 
   private handleTemporaryResourcePolicy(envelope: Envelope): void {
@@ -298,12 +425,16 @@ export class ControlSession {
   }
 
   private sendHeartbeat(): void {
-    if (!this.options.outbound.isReady) {
+    if (!this.options.outbound.isBound) {
       return
     }
     const runtimeStatus = this.options.updates.snapshot()
     let ideLeaseRound: bigint | undefined = undefined
-    if (this.options.ideLease !== null && this.options.ideLease.hasActiveViews()) {
+    if (
+      this.options.outbound.isReady &&
+      this.options.ideLease !== null &&
+      this.options.ideLease.hasActiveViews()
+    ) {
       this.ideLeaseRound++
       ideLeaseRound = this.ideLeaseRound
     }

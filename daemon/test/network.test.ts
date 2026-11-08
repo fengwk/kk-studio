@@ -10,9 +10,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from 'undici'
 
 import {
-  applyNetworkSettings,
   getOutboundNetwork,
-  installOutboundNetwork,
+  NetworkRuntime,
+  ProxyConfigurationError,
   withLoopbackResponse,
   type OutboundNetwork,
 } from '../src/network.js'
@@ -146,15 +146,53 @@ async function readText(network: OutboundNetwork, url: string): Promise<string> 
 }
 
 async function withNetwork<T>(
-  environment: Record<string, string | undefined>,
-  run: (network: OutboundNetwork) => Promise<T>,
+  proxyUrl: string | null,
+  run: (network: OutboundNetwork, runtime: NetworkRuntime) => Promise<T>,
 ): Promise<T> {
-  const installed = await installOutboundNetwork()
-  applyNetworkSettings(environment.http_proxy ?? environment.https_proxy ?? null, environment.no_proxy ?? '')
+  const runtime = new NetworkRuntime(proxyUrl)
   try {
-    return await run(installed.network)
+    return await run(runtime.network, runtime)
   } finally {
-    await installed.close()
+    await runtime.close()
+  }
+}
+
+interface StreamingOrigin {
+  url: string
+  started: Promise<void>
+  finish(): void
+  close(): Promise<void>
+}
+
+/** 真实分段响应：首个 chunk 发出后保持连接，证明 hot swap 等待的是仍在途的交换而非已消费的 body。 */
+async function startStreamingOrigin(): Promise<StreamingOrigin> {
+  let resolveStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve
+  })
+  let finish!: () => void
+  const server = http.createServer((request, response) => {
+    if (request.url === '/slow') {
+      response.writeHead(200, { 'content-type': 'text/plain' })
+      response.write('first-')
+      resolveStarted()
+      finish = () => response.end('second')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/plain' })
+    response.end('fast-body')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = (server.address() as net.AddressInfo).port
+  return {
+    url: `http://127.0.0.1:${port}`,
+    started,
+    finish: () => finish(),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections?.()
+        server.close(() => resolve())
+      }),
   }
 }
 
@@ -195,7 +233,7 @@ async function runProbe(
 }
 
 describe('outbound network integration', () => {
-  it('downloads skill archives through the selected proxy and bypasses it when configured', async () => {
+  it('downloads skill archives through the applied proxy and switches to direct', async () => {
     const zip = buildZipFixture([{ name: 'skill.txt', content: 'installed' }])
     const proxy = await startProxy()
     const origin = await startOrigin(zip)
@@ -203,16 +241,16 @@ describe('outbound network integration', () => {
     cleanups.push(proxy.close, origin.close, async () => rmSync(root, { recursive: true, force: true }))
     const installer = new SkillPackageInstaller(join(root, 'skills'), { privateFs: createTestPrivateFs() })
 
-    await withNetwork({ http_proxy: proxy.url }, async () => {
+    await withNetwork(proxy.url, async (_network, runtime) => {
       // 真正安装归档，确认代理选择发生在下载而非仅策略查询。
       const proxied = await installer.install('proxied', sha256Of(zip), zip.length, origin.url)
       expect(proxied.error).toBeUndefined()
       expect(proxy.requests).toHaveLength(1)
       expect(readFileSync(join(proxied.localPath!, 'skill.txt'), 'utf8')).toBe('installed')
 
-      applyNetworkSettings(proxy.url, '127.0.0.1')
-      const bypassed = await installer.install('bypassed', sha256Of(zip), zip.length, origin.url)
-      expect(bypassed.error).toBeUndefined()
+      await runtime.update(null)
+      const direct = await installer.install('direct', sha256Of(zip), zip.length, origin.url)
+      expect(direct.error).toBeUndefined()
       expect(proxy.requests).toHaveLength(1)
       expect(origin.hits).toHaveLength(2)
     })
@@ -244,48 +282,36 @@ describe('outbound network integration', () => {
     expect(origin.hits).toHaveLength(0)
   })
 
-  it('routes signed PUTs using current settings and clears proxy and bypass dynamically', async () => {
+  it('routes signed PUTs through the current applied proxy and clears it dynamically', async () => {
     const proxy = await startProxy()
     const origin = await startOrigin()
     cleanups.push(proxy.close, origin.close)
-    await withNetwork({}, async () => {
+    await withNetwork(null, async (_network, runtime) => {
       const put = createHttpPutObject()
       const ticket = { method: 'PUT', url: origin.url, headers: {}, expiresAt: '2030-01-01T00:00:00.000Z' }
       const upload = () => put(ticket, new Uint8Array([1]), new AbortController().signal)
       await upload()
       expect(proxy.requests).toHaveLength(0)
-      applyNetworkSettings(proxy.url, '')
+      await runtime.update(proxy.url)
       await upload()
       expect(proxy.requests).toHaveLength(1)
-      applyNetworkSettings(proxy.url, '127.0.0.1')
+      await runtime.update(null)
       await upload()
       expect(proxy.requests).toHaveLength(1)
-      applyNetworkSettings(null, '')
-      await upload()
-      expect(proxy.requests).toHaveLength(1)
-      expect(origin.hits).toHaveLength(4)
+      expect(origin.hits).toHaveLength(3)
     })
   })
 
-  it('routes HTTP GET through the chosen proxy and honours no_proxy', async () => {
+  it('routes HTTP GET through the chosen proxy', async () => {
     const proxy = await startProxy()
     const origin = await startOrigin()
-    const bypass = await startOrigin('bypass-body')
-    cleanups.push(proxy.close, origin.close, bypass.close)
+    cleanups.push(proxy.close, origin.close)
 
-    await withNetwork(
-      { http_proxy: proxy.url, no_proxy: `127.0.0.1:${new URL(bypass.url).port}` },
-      async (network) => {
-        expect(await readText(network, origin.url)).toBe('origin-body')
-        expect(proxy.requests).toHaveLength(1)
-        expect(proxy.requests[0]!.startsWith(origin.url)).toBe(true)
-
-        expect(await readText(network, bypass.url)).toBe('bypass-body')
-        // no_proxy 命中直连：代理不再看到 bypass，origin 自己收到。
-        expect(proxy.requests).toHaveLength(1)
-        expect(bypass.hits).toHaveLength(1)
-      },
-    )
+    await withNetwork(proxy.url, async (network) => {
+      expect(await readText(network, origin.url)).toBe('origin-body')
+      expect(proxy.requests).toHaveLength(1)
+      expect(proxy.requests[0]!.startsWith(origin.url)).toBe(true)
+    })
   })
 
   it('tunnels HTTPS through CONNECT under default TLS verification', async () => {
@@ -326,14 +352,14 @@ describe('outbound network integration', () => {
     const deadUrl = dead.url
     await dead.close()
 
-    await withNetwork({ http_proxy: deadUrl }, async (network) => {
+    await withNetwork(deadUrl, async (network) => {
       await expect(readText(network, origin.url)).rejects.toThrow()
     })
     expect(origin.hits).toHaveLength(0)
   })
 
   it('never follows redirects for a signed PUT', async () => {
-    await withNetwork({}, async () => {
+    await withNetwork(null, async () => {
       const target = await startOrigin('target-body')
       cleanups.push(target.close)
       let redirected = 0
@@ -433,7 +459,7 @@ describe('outbound network integration', () => {
     const origin = await startOrigin()
     cleanups.push(origin.close)
 
-    await withNetwork({}, async (network) => {
+    await withNetwork(null, async (network) => {
       for (let index = 0; index < 3; index++) {
         expect(await readText(network, origin.url)).toBe('origin-body')
       }
@@ -442,29 +468,59 @@ describe('outbound network integration', () => {
     expect(origin.connections).toBe(3)
   })
 
-  it('restores the previous network when an install closes', async () => {
-    const baseline = await installOutboundNetwork()
+  it('retires the old network only after its in-flight request releases the handle', async () => {
+    const proxy = await startProxy()
+    const origin = await startStreamingOrigin()
+    cleanups.push(proxy.close, origin.close)
+    const runtime = new NetworkRuntime(proxy.url)
     try {
-      const installed = await installOutboundNetwork()
-      applyNetworkSettings('http://127.0.0.1:9', '')
-      expect(getOutboundNetwork()).toBe(installed.network)
-      await installed.close()
-      expect(getOutboundNetwork()).toBe(baseline.network)
+      const oldNetwork = runtime.network
+      const response = await oldNetwork.openResponse(`${origin.url}/slow`, {}, new AbortController().signal)
+      const reader = response.body[Symbol.asyncIterator]()
+      const first = await reader.next()
+      expect(Buffer.from(first.value as Uint8Array).toString('utf8')).toBe('first-')
+      await origin.started
+
+      const retirement = runtime.update(null)
+      let retired = false
+      void retirement.then(() => {
+        retired = true
+      })
+      await Promise.resolve()
+      expect(retired).toBe(false)
+
+      origin.finish()
+      let rest = ''
+      for (;;) {
+        const chunk = await reader.next()
+        if (chunk.done) {
+          break
+        }
+        rest += Buffer.from(chunk.value as Uint8Array).toString('utf8')
+      }
+      expect(rest).toBe('second')
+      expect(retired).toBe(false)
+      await response.dispose()
+      await retirement
+      await expect(
+        oldNetwork.openResponse(`${origin.url}/fast`, {}, new AbortController().signal),
+      ).rejects.toThrow(/closed|retired/)
+      expect(await readText(runtime.network, `${origin.url}/fast`)).toBe('fast-body')
     } finally {
-      await baseline.close()
+      await runtime.close()
     }
   })
 
-  it('leaves the current network untouched when settings are invalid', async () => {
-    await withNetwork({}, async (baseline) => {
-      expect(() => applyNetworkSettings('invalid-secret', '')).toThrow(/Invalid HTTP proxy or bypass configuration/)
+  it('leaves the current network untouched when the new proxy is invalid', async () => {
+    await withNetwork(null, async (baseline) => {
+      expect(() => new NetworkRuntime('invalid-secret')).toThrow(ProxyConfigurationError)
       expect(getOutboundNetwork()).toBe(baseline)
     })
   })
 
   it('does not leak the query URL into a failed request error', async () => {
     const marker = 'SECRETMARKER_QUERY'
-    await withNetwork({}, async (network) => {
+    await withNetwork(null, async (network) => {
       let message = ''
       try {
         await network.withResponse(
@@ -486,7 +542,7 @@ describe('outbound network lifecycle and connect deadlines', () => {
   it('refuses new resources through a closed network handle', async () => {
     const origin = await startOrigin()
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork()
+    const installed = new NetworkRuntime(null)
     await installed.close()
     await expect(
       installed.network.openResponse(origin.url, {}, new AbortController().signal),
@@ -497,7 +553,7 @@ describe('outbound network lifecycle and connect deadlines', () => {
   it('converges on close with an unconsumed response body', async () => {
     const origin = await startOrigin('unconsumed-body')
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork()
+    const installed = new NetworkRuntime(null)
     const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
     expect(response.statusCode).toBe(200)
     await installed.close()
@@ -507,7 +563,7 @@ describe('outbound network lifecycle and connect deadlines', () => {
   it('waits for an in-flight retire and shares its failure across close callers', async () => {
     const origin = await startOrigin()
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork()
+    const installed = new NetworkRuntime(null)
     const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
     expect(response.statusCode).toBe(200)
     const failure = new Error('retire failed')

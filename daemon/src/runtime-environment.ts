@@ -3,25 +3,21 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
-import type { DaemonConfig } from './contracts.js'
 import {
   Architecture,
-  EnvironmentInfoSchema,
+  HostInfoSchema,
   OperatingSystem,
-  type EnvironmentInfo,
+  type HostInfo,
 } from './generated/control_pb.js'
 
-/** 采集真实进程宿主事实：OS family、时区、进程用户、canonical HOME、稳定说明与操作系统临时目录。 */
-export function detectEnvironmentInfo(config: DaemonConfig): EnvironmentInfo {
-  const operatingSystem = detectOperatingSystem()
-  const home = canonicalHomeDirectory(homedir())
-  return create(EnvironmentInfoSchema, {
-    operatingSystem,
+/** 采集真实进程宿主事实：OS family、架构、时区、进程用户、canonical HOME 与操作系统临时目录。 */
+export function detectEnvironmentInfo(): HostInfo {
+  return create(HostInfoSchema, {
+    operatingSystem: detectOperatingSystem(),
     architecture: detectArchitecture(),
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     userName: safeUserName(),
-    homeDirectory: home,
-    note: config.note ?? defaultNote(operatingSystem),
+    homeDirectory: canonicalHomeDirectory(homedir()),
     tempDirectory: tmpdir(),
   })
 }
@@ -82,21 +78,5 @@ function safeUserName(): string {
     return userInfo().username
   } catch {
     return process.env.USER ?? process.env.USERNAME ?? hostname()
-  }
-}
-
-/** 按实测 OS 生成稳定默认说明；不构成 cwd、默认 workdir 或沙箱。 */
-export function defaultNote(operatingSystem: OperatingSystem): string {
-  switch (operatingSystem) {
-    case OperatingSystem.WINDOWS:
-      return 'Windows environment.'
-    case OperatingSystem.WSL:
-      return 'WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.'
-    case OperatingSystem.LINUX:
-      return 'Linux environment.'
-    case OperatingSystem.MACOS:
-      return 'macOS environment.'
-    case OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED:
-      throw new Error('operatingSystem must not be unspecified')
   }
 }

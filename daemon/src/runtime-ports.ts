@@ -7,7 +7,8 @@ import type {
   ResourceUploader,
 } from './contracts.js'
 import type { InvocationJournal } from './journal.js'
-import type { EnvironmentInfo } from './generated/control_pb.js'
+import type { PreparedEnvironmentConfig } from './environment-config.js'
+import type { HostInfo } from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
 import type { ControlTransport } from './transport/index.js'
 import type { PresignedPutSender } from './transport/resources.js'
@@ -58,7 +59,9 @@ export interface RuntimeOptions {
   /** 子进程监督端口；由 native 片提供。 */
   processes: ProcessSupervisor
   /** READY 上报的宿主 metadata；缺省时按当前进程检测。 */
-  environment?: EnvironmentInfo
+  environment?: HostInfo
+  /** 校验并准备候选网络/LSP；缺省为无外部资源的最小实现（测试替代）。 */
+  prepareConfiguration?(config: DaemonConfig): Promise<PreparedEnvironmentConfig>
   daemonVersion?: string
   journal?: InvocationJournal
   /** 自定义资源上传端口；缺省时使用内置控制面客户端。 */

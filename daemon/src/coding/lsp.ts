@@ -4,9 +4,11 @@ import {
   textResult,
   type CapabilityCall,
   type CapabilityContext,
+  type CapabilityExecutor,
   type CapabilityGroup,
   type CapabilityResult,
   type DaemonConfig,
+  type LspServerConfig,
   type ProcessSupervisor,
 } from '../contracts.js'
 import { LspDiscovery, type LspSupport } from './lsp-discovery.js'
@@ -19,6 +21,18 @@ import { isAbortError } from '../native/abort.js'
 export interface LspCapabilityGroup extends CapabilityGroup {
   support(file: string): LspSupport
   fileChanged(file: string): void
+}
+
+interface LspGeneration {
+  service: LspService | null
+  active: number
+  retired: boolean
+  idleWaiters: Array<() => void>
+  closePromise: Promise<void> | null
+}
+
+function unavailableSupport(): LspSupport {
+  return { language: null, available: false, supported: false }
 }
 
 function isTimeout(error: unknown, signal?: AbortSignal): boolean {
@@ -93,121 +107,215 @@ async function runLspCapability<T>(
   }
 }
 
+/**
+ * LSP 热换代 facade：能力执行器对象保持稳定，每次读取当前 generation。
+ *
+ * <p>更新只替换后续调用使用的 discovery/pool；旧 generation 已接受的调用继续持有自己的租约，等这些调用全部结束后才关闭
+ * 旧 pool。禁用 LSP 时新请求明确不可用，旧调用仍按既有超时/取消生命周期收敛。
+ */
+export class LspFacade implements LspCapabilityGroup {
+  private generation: LspGeneration
+  readonly capabilities: Record<string, CapabilityExecutor>
+
+  constructor(
+    private readonly processes: ProcessSupervisor,
+    private readonly options: LspPoolOptions = {},
+  ) {
+    this.generation = openGeneration({})
+    this.capabilities = {
+      'lsp.goto-definition': (call, context) =>
+        runLspCapability(
+          call,
+          context,
+          async (args) => {
+            const realPath = await validatePath(args['path'])
+            let stat: fs.Stats
+            try {
+              stat = fs.statSync(realPath)
+            } catch {
+              throw new LspError('path must exist: ' + realPath)
+            }
+            if (stat.isDirectory()) {
+              throw new LspError('path must be a file: ' + realPath)
+            }
+
+            const rawLine = args['line']
+            if (
+              rawLine === undefined ||
+              rawLine === null ||
+              typeof rawLine !== 'number' ||
+              !Number.isInteger(rawLine) ||
+              rawLine < 1
+            ) {
+              throw new LspError('line is required and must be a positive integer')
+            }
+
+            let character = 0
+            const rawChar = args['character']
+            if (rawChar !== undefined && rawChar !== null) {
+              if (typeof rawChar !== 'number' || !Number.isInteger(rawChar) || rawChar < 0) {
+                throw new LspError('character must be a non-negative integer')
+              }
+              character = rawChar
+            }
+
+            return { realPath, line: rawLine, character }
+          },
+          ({ realPath, line, character }, signal, onExecutionExit) =>
+            this.withService((service) => service.gotoDefinition(realPath, line, character, signal, onExecutionExit), onExecutionExit),
+        ),
+      'lsp.workspace-symbols': (call, context) =>
+        runLspCapability(
+          call,
+          context,
+          async (args) => {
+            const realPath = await validatePath(args['path'])
+            const rawQuery = args['query']
+            if (rawQuery === undefined || rawQuery === null || typeof rawQuery !== 'string') {
+              throw new LspError('query is required and must be a string')
+            }
+            if (rawQuery.trim().length === 0) {
+              throw new LspError('query must not be blank')
+            }
+
+            let limit = 50
+            const rawLimit = args['limit']
+            if (rawLimit !== undefined && rawLimit !== null) {
+              if (typeof rawLimit !== 'number' || !Number.isInteger(rawLimit) || rawLimit < 0) {
+                throw new LspError('limit must be a non-negative integer')
+              }
+              if (rawLimit > 500) {
+                throw new LspError('limit must be <= 500')
+              }
+              limit = rawLimit
+            }
+
+            return { realPath, query: rawQuery, limit }
+          },
+          ({ realPath, query, limit }, signal, onExecutionExit) =>
+            this.withService((service) => service.workspaceSymbols(realPath, query, limit, signal, onExecutionExit), onExecutionExit),
+        ),
+      'lsp.java-decompile': (call, context) =>
+        runLspCapability(
+          call,
+          context,
+          async (args) => {
+            const realPath = await validatePath(args['path'])
+            const rawTarget = args['target']
+            if (rawTarget === undefined || rawTarget === null || typeof rawTarget !== 'string') {
+              throw new LspError('target is required and must be a string')
+            }
+            if (rawTarget.trim().length === 0) {
+              throw new LspError('target must not be blank')
+            }
+            return { realPath, target: rawTarget }
+          },
+          ({ realPath, target }, signal, onExecutionExit) =>
+            this.withService((service) => service.javaDecompile(realPath, target, signal, onExecutionExit), onExecutionExit),
+        ),
+    }
+  }
+
+  support(file: string): LspSupport {
+    const service = this.generation.service
+    return service === null ? unavailableSupport() : service.support(file)
+  }
+
+  fileChanged(file: string): void {
+    this.generation.service?.fileChanged(file)
+  }
+
+  /** 发布新的 LSP 声明，返回旧 generation 的收尾 Promise；不在途硬杀。 */
+  update(lsp: Record<string, LspServerConfig>): Promise<void> {
+    const prepared = this.prepare(lsp)
+    const retirement = prepared.publish()
+    return retirement ?? Promise.resolve()
+  }
+
+  /** 准备新 generation；发布前仍使用当前 facade。 */
+  prepare(lsp: Record<string, LspServerConfig>): {
+    publish(): Promise<void>
+    retire(): Promise<void>
+  } {
+    const candidate = openGeneration(lsp, this.processes, this.options)
+    return {
+      publish: () => {
+        const previous = this.generation
+        this.generation = candidate
+        previous.retired = true
+        return retire(previous)
+      },
+      retire: () => retire(candidate),
+    }
+  }
+
+  async close(): Promise<void> {
+    return this.update({})
+  }
+
+  private async withService<T>(
+    action: (service: LspService) => Promise<T>,
+    onExecutionExit: () => void,
+  ): Promise<T> {
+    const generation = this.generation
+    const service = generation.service
+    if (service === null) {
+      onExecutionExit()
+      throw new LspError('LSP is not configured for this environment')
+    }
+    generation.active++
+    try {
+      return await action(service)
+    } finally {
+      generation.active--
+      if (generation.retired && generation.active === 0) {
+        for (const resolve of generation.idleWaiters.splice(0)) {
+          resolve()
+        }
+      }
+    }
+  }
+}
+
+function openGeneration(
+  lsp: Record<string, LspServerConfig>,
+  processes?: ProcessSupervisor,
+  options: LspPoolOptions = {},
+): LspGeneration {
+  const configured = Object.keys(lsp).length > 0
+  return {
+    service: configured ? new LspService(LspDiscovery.fromConfiguration(lsp), processes!, options) : null,
+    active: 0,
+    retired: false,
+    idleWaiters: [],
+    closePromise: null,
+  }
+}
+
+function retire(generation: LspGeneration): Promise<void> {
+  if (generation.closePromise !== null) {
+    return generation.closePromise
+  }
+  generation.closePromise = (async () => {
+    if (generation.active > 0) {
+      await new Promise<void>((resolve) => generation.idleWaiters.push(resolve))
+    }
+    await generation.service?.close()
+  })()
+  return generation.closePromise
+}
+
+/** 兼容装配入口：以初始卡片配置创建稳定 facade。 */
 export function createLspCapabilities(
   config: DaemonConfig,
   processes: ProcessSupervisor,
   options?: LspPoolOptions,
-): LspCapabilityGroup {
-  const discovery = LspDiscovery.fromConfiguration(config.lsp)
-  const service = new LspService(discovery, processes, options)
+): LspFacade {
+  const facade = new LspFacade(processes, options)
+  void facade.update(config.lsp)
+  return facade
+}
 
-  const gotoDefinition = (call: CapabilityCall, context: CapabilityContext) =>
-    runLspCapability(
-      call,
-      context,
-      async (args) => {
-        const realPath = await validatePath(args['path'])
-        let stat: fs.Stats
-        try {
-          stat = fs.statSync(realPath)
-        } catch {
-          throw new LspError('path must exist: ' + realPath)
-        }
-        if (stat.isDirectory()) {
-          throw new LspError('path must be a file: ' + realPath)
-        }
-
-        const rawLine = args['line']
-        if (
-          rawLine === undefined ||
-          rawLine === null ||
-          typeof rawLine !== 'number' ||
-          !Number.isInteger(rawLine) ||
-          rawLine < 1
-        ) {
-          throw new LspError('line is required and must be a positive integer')
-        }
-
-        let character = 0
-        const rawChar = args['character']
-        if (rawChar !== undefined && rawChar !== null) {
-          if (typeof rawChar !== 'number' || !Number.isInteger(rawChar) || rawChar < 0) {
-            throw new LspError('character must be a non-negative integer')
-          }
-          character = rawChar
-        }
-
-        return { realPath, line: rawLine, character }
-      },
-      ({ realPath, line, character }, signal, onExecutionExit) =>
-        service.gotoDefinition(realPath, line, character, signal, onExecutionExit),
-    )
-
-  const workspaceSymbols = (call: CapabilityCall, context: CapabilityContext) =>
-    runLspCapability(
-      call,
-      context,
-      async (args) => {
-        const realPath = await validatePath(args['path'])
-        const rawQuery = args['query']
-        if (rawQuery === undefined || rawQuery === null || typeof rawQuery !== 'string') {
-          throw new LspError('query is required and must be a string')
-        }
-        if (rawQuery.trim().length === 0) {
-          throw new LspError('query must not be blank')
-        }
-
-        let limit = 50
-        const rawLimit = args['limit']
-        if (rawLimit !== undefined && rawLimit !== null) {
-          if (typeof rawLimit !== 'number' || !Number.isInteger(rawLimit) || rawLimit < 0) {
-            throw new LspError('limit must be a non-negative integer')
-          }
-          if (rawLimit > 500) {
-            throw new LspError('limit must be <= 500')
-          }
-          limit = rawLimit
-        }
-
-        return { realPath, query: rawQuery, limit }
-      },
-      ({ realPath, query, limit }, signal, onExecutionExit) =>
-        service.workspaceSymbols(realPath, query, limit, signal, onExecutionExit),
-    )
-
-  const javaDecompile = (call: CapabilityCall, context: CapabilityContext) =>
-    runLspCapability(
-      call,
-      context,
-      async (args) => {
-        const realPath = await validatePath(args['path'])
-        const rawTarget = args['target']
-        if (rawTarget === undefined || rawTarget === null || typeof rawTarget !== 'string') {
-          throw new LspError('target is required and must be a string')
-        }
-        if (rawTarget.trim().length === 0) {
-          throw new LspError('target must not be blank')
-        }
-        return { realPath, target: rawTarget }
-      },
-      ({ realPath, target }, signal, onExecutionExit) =>
-        service.javaDecompile(realPath, target, signal, onExecutionExit),
-    )
-
-  return {
-    capabilities: {
-      'lsp.goto-definition': gotoDefinition,
-      'lsp.workspace-symbols': workspaceSymbols,
-      'lsp.java-decompile': javaDecompile,
-    },
-    support(file: string): LspSupport {
-      return service.support(file)
-    },
-    fileChanged(file: string): void {
-      service.fileChanged(file)
-    },
-    async close(): Promise<void> {
-      await service.close()
-    },
-  }
+export function createLspFacade(processes: ProcessSupervisor, options?: LspPoolOptions): LspFacade {
+  return new LspFacade(processes, options)
 }

@@ -90,6 +90,10 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
       )
     }
     const store = await textOutputStoreFor(context.config.dataDir)
+    const bashExecutable = context.config.bashExecutable
+    if (bashExecutable === null) {
+      return errorResult(call.invocationId, 'bash executable is not available for this environment')
+    }
 
     context.signal.addEventListener('abort', onAbort, { once: true })
     if (context.signal.aborted) {
@@ -109,7 +113,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     try {
       startAttempted = true
       managed = await context.processes.start({
-        executable: context.config.bashExecutable,
+        executable: bashExecutable,
         args: ['-lc', command],
         cwd: workdir,
         signal: context.signal,
@@ -124,7 +128,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
       if (timedOut) {
         return terminatedBeforeStart(call.invocationId, 'TIMED_OUT', timeoutMillis)
       }
-      return shellStartFailure(call.invocationId, context.config.bashExecutable)
+      return shellStartFailure(call.invocationId, bashExecutable)
     }
 
     // 启动 await 之后再次设围栏：取消/超时窗口内绝不继续排空，先收敛再给出明确去向。

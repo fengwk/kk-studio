@@ -7,6 +7,7 @@ import http2, {
   type ServerHttp2Stream,
 } from 'node:http2'
 import type { Duplex } from 'node:stream'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { createWebSocketStream, WebSocket } from 'ws'
 import { fromBinary } from '@bufbuild/protobuf'
 
@@ -55,8 +56,10 @@ export interface ControlTransport {
 }
 
 export interface DaemonTransportOptions {
-  gatewayUri: string
-  config: DaemonConfig
+  /** 显式覆盖当前配置推导出的 gateway；生产不使用。 */
+  gatewayUri?: string
+  /** 每次连接前读取当前已应用配置；配置切换后同进程重连读取新地址/代理。 */
+  config: DaemonConfig | (() => DaemonConfig)
   ide: IdeService
   daemonInstanceId: string
   platformKey?: string
@@ -69,8 +72,8 @@ const DEFAULT_CONTROL_STREAM_TIMEOUT_MILLIS = 10_000
 const MAX_WS_PAYLOAD_BYTES = 1024 * 1024
 
 export class DaemonWebSocketTransport implements ControlTransport {
-  private readonly gatewayUri: string
-  private readonly config: DaemonConfig
+  private readonly explicitGatewayUri: string | null
+  private readonly configProvider: () => DaemonConfig
   private readonly ide: IdeService
   private readonly daemonInstanceId: string
   private readonly platformKey: string
@@ -82,8 +85,8 @@ export class DaemonWebSocketTransport implements ControlTransport {
   private closed = false
 
   constructor(options: DaemonTransportOptions) {
-    this.gatewayUri = options.gatewayUri
-    this.config = options.config
+    this.explicitGatewayUri = options.gatewayUri ?? null
+    this.configProvider = typeof options.config === 'function' ? options.config : () => options.config as DaemonConfig
     this.ide = options.ide
     this.daemonInstanceId = options.daemonInstanceId
     this.platformKey = options.platformKey ?? currentPlatformKey()
@@ -96,9 +99,12 @@ export class DaemonWebSocketTransport implements ControlTransport {
       throw new Error('transport is closed')
     }
 
+    // 每次连接都读取当前已应用配置：代理/地址切换后重连不再复用旧值。
+    const config = this.configProvider()
+    const gatewayUri = this.explicitGatewayUri ?? config.gatewayUri
     let token: string
     try {
-      token = readRegistrationToken(this.config)
+      token = readRegistrationToken(config)
     } catch (err) {
       throw new Error(`cannot read registration token: ${(err as Error).message}`)
     }
@@ -108,17 +114,32 @@ export class DaemonWebSocketTransport implements ControlTransport {
       'KK-Daemon-Protocol': String(PROTOCOL_VERSION),
       'KK-Daemon-Instance': this.daemonInstanceId,
       'KK-Daemon-Platform': this.platformKey,
+      'KK-Environment-Id': config.environmentId,
     }
 
-    // 不使用可能启用 NODE_USE_ENV_PROXY 的全局 Agent：控制连接必须始终能接收代理修正。
-    const directAgent = this.gatewayUri.startsWith('wss:') ? new https.Agent() : new http.Agent()
-    const ws = new WebSocket(this.gatewayUri, {
+    // 显式直连或卡片代理；绝不使用会读取 NODE_USE_ENV_PROXY 的全局 Agent。
+    const proxyUrl = config.proxyUrl ?? null
+    const agent =
+      proxyUrl === null
+        ? gatewayUri.startsWith('wss:')
+          ? new https.Agent()
+          : new http.Agent()
+        : new HttpsProxyAgent(proxyUrl)
+    const destroyAgent = (): void => {
+      try {
+        agent.destroy()
+      } catch {
+        // 清理失败不影响连接已关闭的事实。
+      }
+    }
+    const ws = new WebSocket(gatewayUri, {
       headers,
-      agent: directAgent,
+      agent,
       perMessageDeflate: false,
       maxPayload: MAX_WS_PAYLOAD_BYTES,
     })
-    ws.once('close', () => directAgent.destroy())
+    ws.once('close', destroyAgent)
+    ws.once('error', destroyAgent)
 
     this.activeWs = ws
 

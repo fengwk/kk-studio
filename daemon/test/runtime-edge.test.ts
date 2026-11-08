@@ -5,11 +5,13 @@ import { create } from '@bufbuild/protobuf'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
 import { InMemoryInvocationJournal } from '../src/journal.js'
-import { getOutboundNetwork, subprocessEnvironment } from '../src/network.js'
+import { getOutboundNetwork, NetworkRuntime } from '../src/network.js'
 import {
   Architecture,
   CancelSchema,
   EnvelopeSchema,
+  EnvironmentConfigSchema,
+  DaemonConfigurationSchema,
   ErrorSchema,
   IdeAction,
   IdeCommandSchema,
@@ -31,7 +33,6 @@ import {
 } from '../src/generated/control_pb.js'
 import { Runtime } from '../src/runtime.js'
 import {
-  defaultNote,
   detectEnvironmentInfo,
 } from '../src/runtime-environment.js'
 import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from '../src/runtime-ports.js'
@@ -47,7 +48,6 @@ const environment = {
   timeZone: 'UTC',
   userName: 'dev',
   homeDirectory: '/home/dev',
-  note: 'Linux environment.',
   tempDirectory: '/tmp',
 }
 
@@ -58,13 +58,33 @@ function makeSettingsEnvelope(overrides: Partial<Settings> = {}): Envelope {
     payload: {
       case: 'settings',
       value: create(SettingsSchema, {
-        noProxyHosts: '',
         resourceBudgets: create(ResourceBudgetsSchema, {
           maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 60n,
           temporaryResourceCleanupIntervalSeconds: 30n,
         }),
         ...overrides,
+      }),
+    },
+  })
+}
+
+function makeEnvironmentConfigEnvelope(
+  version = 0n,
+  config: { studioUrl?: string; bashExecutable?: string; proxyUrl?: string } = {},
+): Envelope {
+  return create(EnvelopeSchema, {
+    messageType: MessageType.ENVIRONMENT_CONFIG,
+    environmentId: ENV,
+    payload: {
+      case: 'environmentConfig',
+      value: create(EnvironmentConfigSchema, {
+        version,
+        config: create(DaemonConfigurationSchema, {
+          studioUrl: config.studioUrl ?? 'https://studio.example.com',
+          ...(config.bashExecutable === undefined ? {} : { bashExecutable: config.bashExecutable }),
+          ...(config.proxyUrl === undefined ? {} : { proxyUrl: config.proxyUrl }),
+        }),
       }),
     },
   })
@@ -119,6 +139,7 @@ async function ready(
   runtime.start()
   await waitFor(() => transport.connection !== null)
   transport.receive(makeSettingsEnvelope())
+  transport.receive(makeEnvironmentConfigEnvelope())
   await waitFor(() => runtime.getState() === 'READY')
   return { runtime, transport }
 }
@@ -148,6 +169,7 @@ describe('runtime constructor validation', () => {
     await waitFor(() => transport.connection !== null)
     await tick()
     transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     // 注入 uploader 后没有内部 transfer client，控制面票据帧是安全的 no-op。
     transport.receive(
@@ -214,57 +236,178 @@ describe('runtime lifecycle guards', () => {
     await waitFor(() => transport.connection !== null)
     await tick()
     transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => transport.connectCount >= 2)
     runtime.close()
   })
 })
 
 describe('runtime inbound protocol branches', () => {
-  // 初始网络配置无效时重连，不把会话卡在无法接收平台后续修正的握手中。
-  it('reconnects after an invalid initial network setting and accepts a correction', async () => {
+  // 未初始化时同版本并发配置共享一次应用；重复帧不得提前放行 READY。
+  it('does not complete READY from a duplicate config before the first application succeeds', async () => {
     const transport = new FakeTransport()
-    const runtime = new Runtime(baseOptions({ transport }))
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let started!: () => void
+    const preparing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let calls = 0
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        prepareConfiguration: async (config) => {
+          calls++
+          started()
+          await gate
+          return { config, publish() {}, retire: async () => {} }
+        },
+      }),
+    )
     runtime.start()
     try {
       await waitFor(() => transport.connection !== null)
       await tick()
-      const first = transport.connection!
-      transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://user:private@host:80' }))
-      expect(first.isOpen()).toBe(false)
-      expect(first.sent.some((message) => message.messageType === MessageType.ERROR)).toBe(true)
-      expect((first.sent[0]!.payload.value as { message: string }).message).not.toContain('private')
-      await waitFor(() => transport.connectCount >= 2)
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope(1n))
+      await preparing
+      transport.receive(makeEnvironmentConfigEnvelope(1n))
       await tick()
-      transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://proxy.invalid:8080' }))
+      expect(runtime.getState()).toBe('CONNECTING')
+      expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(0)
+
+      release()
       await waitFor(() => runtime.getState() === 'READY')
-      expect(await getOutboundNetwork().selectProxy('https://outside.invalid', new AbortController().signal))
-        .toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
+      expect(calls).toBe(1)
+      expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
     } finally {
       runtime.close()
     }
   })
 
-  it('applies and clears network updates without another READY and rejects invalid settings safely', async () => {
-    const { runtime, transport } = await ready()
-    const select = () => getOutboundNetwork().selectProxy('https://outside.invalid', new AbortController().signal)
-    transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://proxy.invalid:8080', noProxyHosts: 'localhost' }))
-    await tick()
-    expect(await select()).toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
-    expect(subprocessEnvironment({ http_proxy: 'old', HtTpS_PrOxY: 'old', ALL_PROXY: 'old', PATH: '/bin' })).toEqual({
-      PATH: '/bin', HTTP_PROXY: 'http://proxy.invalid:8080', HTTPS_PROXY: 'http://proxy.invalid:8080', NO_PROXY: 'localhost',
+  // 初始候选校验失败不能制造「连上但永远收不到修正」的死角。
+  it('keeps CONNECTING with a config error and accepts a corrected environment config', async () => {
+    const transport = new FakeTransport()
+    const networks = new NetworkRuntime(null)
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        prepareConfiguration: async (config) => {
+          const network = networks.prepare(config.proxyUrl)
+          return { config, publish: () => network.publish(), retire: network.retire }
+        },
+      }),
+    )
+    runtime.start()
+    try {
+      await waitFor(() => transport.connection !== null)
+      await tick()
+      const first = transport.connection!
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: '/definitely/missing/bash' }))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.error?.version === '1')
+      expect(first.isOpen()).toBe(true)
+      expect(runtime.getState()).toBe('CONNECTING')
+      expect(runtime.getRuntimeStatus().status.configuration).toMatchObject({
+        appliedVersion: null,
+        error: { version: '1', code: 'VALIDATION_FAILED', field: 'bashExecutable' },
+      })
+      transport.receive(makeEnvironmentConfigEnvelope(2n, { proxyUrl: 'http://proxy.invalid:8080' }))
+      await waitFor(() => transport.connectCount >= 2)
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope(2n, { proxyUrl: 'http://proxy.invalid:8080' }))
+      await waitFor(() => runtime.getState() === 'READY')
+      expect(await getOutboundNetwork().selectProxy('https://outside.invalid', new AbortController().signal))
+        .toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
+    } finally {
+      runtime.close()
+      await networks.close()
+    }
+  })
+
+  // INVOKE 接受时冻结当前配置：热应用只影响后续调用，不改变在途执行。
+  it('freezes the applied configuration at invocation admission', async () => {
+    const transport = new FakeTransport()
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
     })
-    transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://user:private@host:80' }))
-    await tick()
-    expect(sentTypes(transport)).toContain(MessageType.ERROR)
-    const error = transport.sent.find((message) => message.messageType === MessageType.ERROR)
-    expect((error?.payload.value as { message: string }).message).not.toContain('private')
-    expect(await select()).toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
-    transport.receive(makeSettingsEnvelope({ noProxyHosts: '' }))
-    await tick()
-    expect(await select()).toEqual({ kind: 'direct' })
-    expect(subprocessEnvironment({ HTTP_PROXY: 'old', no_proxy: 'old', PATH: '/bin' })).toEqual({ PATH: '/bin', NO_PROXY: '' })
-    expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
-    runtime.close()
+    let firstStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve
+    })
+    const configs: DaemonConfig[] = []
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        capabilities: {
+          'fs.read': async (call, context) => {
+            configs.push(context.config)
+            if (configs.length === 1) {
+              firstStarted()
+              await firstGate
+            }
+            return {
+              callId: call.invocationId,
+              error: false,
+              details: {},
+              contents: [{ type: 'text', text: 'ok' }],
+            }
+          },
+        },
+      }),
+    )
+    runtime.start()
+    try {
+      await waitFor(() => transport.connection !== null)
+      await tick()
+      transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope())
+      await waitFor(() => runtime.getState() === 'READY')
+
+      transport.receive(invokeEnvelope('frozen-1'))
+      await started
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: process.execPath }))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '1')
+      releaseFirst()
+      transport.receive(invokeEnvelope('frozen-2'))
+      await waitFor(() => configs.length === 2)
+
+      expect(configs[0]?.bashExecutableSetting).toBeNull()
+      expect(configs[1]?.bashExecutableSetting).toBe(process.execPath)
+    } finally {
+      runtime.close()
+    }
+  })
+
+  it('applies and clears config updates without another READY and keeps the previous snapshot on failure', async () => {
+    const networks = new NetworkRuntime(null)
+    const { runtime, transport } = await ready({
+      prepareConfiguration: async (config) => {
+        const network = networks.prepare(config.proxyUrl)
+        return { config, publish: () => network.publish(), retire: network.retire }
+      },
+    })
+    try {
+      transport.receive(makeEnvironmentConfigEnvelope(1n, { bashExecutable: process.execPath }))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '1')
+      transport.receive(makeEnvironmentConfigEnvelope(2n, { bashExecutable: '/definitely/missing/bash' }))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.error?.version === '2')
+      expect(runtime.getRuntimeStatus().status.configuration).toMatchObject({
+        appliedVersion: '1',
+        proxyUrl: null,
+        error: { version: '2', code: 'VALIDATION_FAILED', field: 'bashExecutable' },
+      })
+      transport.receive(makeEnvironmentConfigEnvelope(3n))
+      await waitFor(() => runtime.getRuntimeStatus().status.configuration.appliedVersion === '3')
+      expect(runtime.getRuntimeStatus().status.configuration.error).toBeNull()
+      expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
+    } finally {
+      runtime.close()
+      await networks.close()
+    }
   })
 
   it('rejects a resource policy before READY and validates ERROR payloads', async () => {
@@ -289,6 +432,7 @@ describe('runtime inbound protocol branches', () => {
     await tick()
     expect(sentTypes(transport)).toContain(MessageType.ERROR)
     transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     transport.receive(
       create(EnvelopeSchema, {
@@ -360,6 +504,7 @@ describe('runtime journal capacity recovery evidence', () => {
       runtime.start()
       await waitFor(() => transport.connection !== null)
       transport.receive(makeSettingsEnvelope())
+      transport.receive(makeEnvironmentConfigEnvelope())
       await waitFor(() => runtime.getState() === 'READY')
 
       // A 先真正进入执行体并停在显式 gate
@@ -457,7 +602,6 @@ describe('runtime temporary resource policy', () => {
         payload: {
           case: 'settings',
           value: create(SettingsSchema, {
-            noProxyHosts: '',
             resourceBudgets: create(ResourceBudgetsSchema, {
               maxResourceBytes: 1048576n,
               temporaryResourceTtlSeconds: 7n,
@@ -467,6 +611,7 @@ describe('runtime temporary resource policy', () => {
         },
       }),
     )
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     // 相同间隔的重复策略不重建定时器。
     transport.receive(
@@ -512,7 +657,6 @@ describe('runtime temporary resource policy', () => {
           payload: {
             case: 'settings',
             value: create(SettingsSchema, {
-              noProxyHosts: '',
               resourceBudgets: create(ResourceBudgetsSchema, {
                 maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 7n,
@@ -522,6 +666,7 @@ describe('runtime temporary resource policy', () => {
           },
         }),
       )
+      transport.receive(makeEnvironmentConfigEnvelope())
       await waitFor(() => runtime.getState() === 'READY')
       const connections = transport.connectCount
       await waitFor(() => stderr.includes('daemon temporary resource sweep failed: TypeError\n'), 3000)
@@ -625,6 +770,7 @@ describe('runtime managed update branches', () => {
     transport.disconnect()
     await waitFor(() => transport.connectCount >= 2)
     transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     await waitFor(() =>
       transport.sent.some(
@@ -725,6 +871,7 @@ describe('runtime resource upload control plane', () => {
     await waitFor(() => transport.connection !== null)
     await tick()
     transport.receive(makeSettingsEnvelope())
+    transport.receive(makeEnvironmentConfigEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     transport.receive(invokeEnvelope('inv-1'))
     await waitFor(() => transport.sent.some((envelope) => envelope.messageType === MessageType.RESOURCE_UPLOAD_REQUEST))
@@ -775,9 +922,9 @@ describe('runtime resource upload control plane', () => {
 })
 
 describe('environment detection helpers', () => {
-  it('collects host facts and stable notes', () => {
+  it('collects host facts', () => {
     const config = testConfig()
-    const info = detectEnvironmentInfo(config)
+    const info = detectEnvironmentInfo()
     expect(isAbsolute(info.homeDirectory)).toBe(true)
     expect(info.tempDirectory).toBe(tmpdir())
     expect(resolve(info.tempDirectory).startsWith(resolve(config.dataDir))).toBe(false)
@@ -787,11 +934,6 @@ describe('environment detection helpers', () => {
       OperatingSystem.LINUX,
       OperatingSystem.MACOS,
     ]).toContain(info.operatingSystem)
-    expect(defaultNote(OperatingSystem.WINDOWS)).toContain('Windows')
-    expect(defaultNote(OperatingSystem.WSL)).toContain('WSL')
-    expect(defaultNote(OperatingSystem.LINUX)).toContain('Linux')
-    expect(defaultNote(OperatingSystem.MACOS)).toContain('macOS')
-    expect(Buffer.byteLength('中文', 'utf8')).toBe(6)
   })
 
   it('detects WSL from the environment marker', () => {
@@ -800,7 +942,7 @@ describe('environment detection helpers', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
     process.env.WSL_DISTRO_NAME = 'Ubuntu'
     try {
-      expect(detectEnvironmentInfo(testConfig()).operatingSystem).toBe(OperatingSystem.WSL)
+      expect(detectEnvironmentInfo().operatingSystem).toBe(OperatingSystem.WSL)
     } finally {
       Object.defineProperty(process, 'platform', previousPlatform)
       if (previous === undefined) {
@@ -813,12 +955,12 @@ describe('environment detection helpers', () => {
 
   it('maps process.arch to the release architecture and fails closed otherwise', () => {
     expect([Architecture.AMD64, Architecture.ARM64]).toContain(
-      detectEnvironmentInfo(testConfig()).architecture,
+      detectEnvironmentInfo().architecture,
     )
     const original = Object.getOwnPropertyDescriptor(process, 'arch')
     Object.defineProperty(process, 'arch', { value: 'ia32', configurable: true })
     try {
-      expect(() => detectEnvironmentInfo(testConfig())).toThrow(/unsupported daemon architecture/)
+      expect(() => detectEnvironmentInfo()).toThrow(/unsupported daemon architecture/)
     } finally {
       if (original !== undefined) {
         Object.defineProperty(process, 'arch', original)
@@ -826,13 +968,11 @@ describe('environment detection helpers', () => {
     }
   })
 
-  it('validates environment detection edge cases and default note constraints', () => {
-    expect(() => defaultNote(OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED)).toThrow(/unspecified/)
-
+  it('validates environment detection edge cases', () => {
     const origPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
     Object.defineProperty(process, 'platform', { value: 'sunos', configurable: true })
     try {
-      expect(() => detectEnvironmentInfo(testConfig())).toThrow(/unsupported daemon operating system/)
+      expect(() => detectEnvironmentInfo()).toThrow(/unsupported daemon operating system/)
     } finally {
       Object.defineProperty(process, 'platform', origPlatform)
     }

@@ -1,8 +1,11 @@
+import type { DaemonConfig } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
 import { DAEMON_VERSION_PATTERN } from './release.js'
 import type { SkillPackageState } from './generated/control_pb.js'
+import { EnvironmentConfigRuntime } from './environment-config.js'
 import { InMemoryInvocationJournal, type InvocationJournal } from './journal.js'
 import { ConnectionLifecycle, type RuntimeState } from './runtime-connection.js'
+import { safeMessage } from './runtime-encoding.js'
 import { detectEnvironmentInfo } from './runtime-environment.js'
 import { IdeCommandRuntime } from './runtime-ide.js'
 import { InvocationRuntime } from './runtime-invocations.js'
@@ -11,7 +14,7 @@ import type { RuntimeOptions } from './runtime-ports.js'
 import { createResourceRuntime, type ResourceRuntime } from './runtime-resources.js'
 import { ControlSession } from './runtime-session.js'
 import { ShutdownRuntime } from './runtime-shutdown.js'
-import type { RuntimeStatus, RuntimeStatusUpdate } from './runtime-status.js'
+import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate } from './runtime-status.js'
 import { UpdateRuntime } from './runtime-update.js'
 import type { SkillReconciler } from './skill/reconcile.js'
 import type { ControlTransport } from './transport/index.js'
@@ -46,6 +49,8 @@ export class Runtime {
   private readonly ideCommands: IdeCommandRuntime
   private readonly updates: UpdateRuntime
   private readonly session: ControlSession
+  private readonly status: RuntimeStatusTracker
+  private readonly configuration: EnvironmentConfigRuntime
 
   constructor(options: RuntimeOptions) {
     this.transport = options.transport
@@ -53,8 +58,9 @@ export class Runtime {
     if (!DAEMON_VERSION_PATTERN.test(daemonVersion)) {
       throw new Error('daemonVersion must match [0-9A-Za-z._+-]{1,64}')
     }
-    const environment = options.environment ?? detectEnvironmentInfo(options.config)
+    const environment = options.environment ?? detectEnvironmentInfo()
     this.shutdownRuntime = new ShutdownRuntime()
+    this.status = new RuntimeStatusTracker(daemonVersion)
     const heartbeatIntervalMillis = requirePositive(
       options.heartbeatIntervalMillis ?? DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
       'heartbeatIntervalMillis',
@@ -100,7 +106,7 @@ export class Runtime {
     this.invocations = new InvocationRuntime({
       journal: options.journal ?? new InMemoryInvocationJournal(),
       capabilities: options.capabilities,
-      config: options.config,
+      config: () => this.configuration.config,
       processes: options.processes,
       outbound: this.outbound,
       maxConcurrentInvocations,
@@ -129,8 +135,9 @@ export class Runtime {
     this.updates = new UpdateRuntime({
       update: options.update ?? null,
       ide,
-      config: options.config,
+      config: () => this.configuration.config,
       daemonVersion,
+      status: this.status,
       outbound: this.outbound,
       hasProtectedExecutions: () =>
         this.invocations.runningCount > 0 || this.shutdownRuntime.hasProtectedExecutions,
@@ -142,6 +149,31 @@ export class Runtime {
         this.shutdownRuntime.collect(phase, error)
       },
     })
+    this.configuration = new EnvironmentConfigRuntime({
+      paths: {
+        configPath: options.config.configPath,
+        dataDir: options.config.dataDir,
+        tokenPath: options.config.tokenPath,
+        distributionDir: options.config.distributionDir,
+      },
+      environmentId: options.config.environmentId,
+      initial: options.config,
+      tracker: this.status,
+      prepare:
+        options.prepareConfiguration ??
+        (async (config) => ({ config, publish() {}, retire: async () => {} })),
+      onApplied: (previous, next) => this.session.onConfigurationApplied(previous, next),
+      report: (error) => {
+        try {
+          process.stderr.write(`daemon environment config: ${safeMessage(error)}\n`)
+        } catch {
+          // 诊断输出失败不影响控制连接。
+        }
+      },
+      track: (promise) => {
+        this.shutdownRuntime.track(promise)
+      },
+    })
     this.session = new ControlSession({
       connection: this.connection,
       outbound: this.outbound,
@@ -149,6 +181,7 @@ export class Runtime {
       invocations: this.invocations,
       ideCommands: this.ideCommands,
       updates: this.updates,
+      configuration: this.configuration,
       ideLease: options.ideLease ?? null,
       temporaryResources: options.temporaryResources ?? null,
       monotonicNow: options.monotonicNow ?? (() => performance.now()),
@@ -156,6 +189,7 @@ export class Runtime {
       track: (promise) => {
         this.shutdownRuntime.track(promise)
       },
+      reconnect: (generation) => this.connection.reconnect(generation),
       stop: (reason) => this.shutdown('FAILED', reason),
     })
   }
@@ -185,6 +219,11 @@ export class Runtime {
 
   getBoundEnvironmentId(): string | null {
     return this.outbound.environmentId
+  }
+
+  /** 当前已应用（或启动缓存）配置快照；transport 每次连接前读取。 */
+  getAppliedConfig(): DaemonConfig {
+    return this.configuration.config
   }
 
   setSkillReconciler(reconciler: SkillReconciler): void {
@@ -237,6 +276,9 @@ export class Runtime {
     this.invocations.cancelForShutdown()
     this.ideCommands.abortAll('SHUTDOWN')
     this.updates.abortForShutdown()
+    this.shutdownRuntime.release('environment config close', () => {
+      void this.configuration.close()
+    })
     void this.shutdownRuntime.finalize(
       () => this.transport.close(),
       () => this.connection.resolveTermination(terminalState),

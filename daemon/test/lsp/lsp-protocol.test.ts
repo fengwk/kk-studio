@@ -6,7 +6,6 @@ import { LspClient, isJdtlsCommand } from '../../src/coding/lsp-client.js'
 import { LspBootstrapError, LspError } from '../../src/coding/lsp-error.js'
 import { ProcessScopeNotConvergedError, type ProcessSupervisor } from '../../src/contracts.js'
 import { createProcessSupervisor } from '../../src/native/index.js'
-import { applyNetworkSettings } from '../../src/network.js'
 import {
   awaitEvent,
   awaitProcessGone,
@@ -75,8 +74,8 @@ describe('LspClient Protocol & Handshake', () => {
     return { client, transcript }
   }
 
-  // 实际 LspClient 与原生 supervisor 联动，验证重启后的环境来自最新设置。
-  it('starts LSP processes with current platform proxy through the native supervisor', async () => {
+  // 实际 LspClient 与原生 supervisor 联动，验证语言服务器保留宿主真实继承环境。
+  it('starts LSP processes with the inherited environment through the native supervisor', async () => {
     const native = createProcessSupervisor()
     vi.stubEnv('http_proxy', 'http://host.invalid:1')
     vi.stubEnv('ALL_PROXY', 'http://host.invalid:2')
@@ -89,18 +88,15 @@ describe('LspClient Protocol & Handshake', () => {
       return (await awaitEvent(transcript, (event) => event.event === 'proxy')).values
     }
     try {
-      applyNetworkSettings('http://proxy.invalid:8080', 'localhost')
-      expect(await launch('configured')).toEqual({
-        HTTP_PROXY: 'http://proxy.invalid:8080', HTTPS_PROXY: 'http://proxy.invalid:8080', NO_PROXY: 'localhost',
+      expect(await launch('inherited')).toMatchObject({
+        http_proxy: 'http://host.invalid:1',
+        ALL_PROXY: 'http://host.invalid:2',
       })
-      applyNetworkSettings(null, '')
-      expect(await launch('cleared')).toEqual({ NO_PROXY: '' })
     } finally {
       for (const client of clients.splice(0)) {
         await client.stop(200)
       }
       await native.close()
-      applyNetworkSettings(null, '')
       vi.unstubAllEnvs()
     }
   })

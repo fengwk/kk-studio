@@ -46,7 +46,8 @@ const ARGUMENTS_JSON_LIMITS: StrictLimits = {
 export interface InvocationRuntimeOptions {
   journal: InvocationJournal
   capabilities: Record<string, CapabilityExecutor>
-  config: DaemonConfig
+  /** 当前已应用配置；INVOKE 接受时冻结本次调用使用的快照。 */
+  config(): DaemonConfig
   processes: ProcessSupervisor
   outbound: OutboundControl
   maxConcurrentInvocations: number
@@ -113,7 +114,7 @@ export class InvocationRuntime {
       const callArguments = parsedArgs as Record<string, unknown>
 
       const controller = new AbortController()
-      const invocation = new RunningInvocation(invocationId, controller, this.options.maxResourceBytes())
+      const invocation = new RunningInvocation(invocationId, controller, this.options.maxResourceBytes(), this.options.config())
       this.running.set(invocationId, invocation)
       this.options.outbound.sendStarted(connection, invocationId, false)
       const timeoutMillis = Number(invoke.timeoutMillis)
@@ -297,7 +298,7 @@ export class InvocationRuntime {
   private capabilityContext(invocation: RunningInvocation): CapabilityContext {
     const resources = this.options.uploader()
     return {
-      config: this.options.config,
+      config: invocation.config,
       signal: invocation.controller.signal,
       processes: this.options.processes,
       resources: {
@@ -432,6 +433,7 @@ class RunningInvocation {
     readonly invocationId: string,
     readonly controller: AbortController,
     readonly maxResourceBytes: number,
+    readonly config: DaemonConfig,
   ) {}
 
   markExecutorReturned(): void {

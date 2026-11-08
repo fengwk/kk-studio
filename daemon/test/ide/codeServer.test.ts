@@ -8,7 +8,6 @@ import { dirname, join } from 'node:path'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { createCodeServerManager, idePaths, resolveCodeServerLaunch } from '../../src/ide/codeServer.js'
 import { createProcessSupervisor } from '../../src/native/index.js'
-import { applyNetworkSettings } from '../../src/network.js'
 
 /**
  * Focused tests for the code-server process manager: bundled Node launch resolution,
@@ -168,14 +167,17 @@ async function distribution(script: string): Promise<string> {
 
 function config(distributionDir: string): DaemonConfig {
   return {
+    environmentId: '11111111-2222-4333-8444-555555555555',
+    configVersion: 0n,
     configPath: join(distributionDir, 'daemon.json'),
     dataDir: join(distributionDir, 'data'),
     tokenPath: join(distributionDir, 'daemon.token'),
     studioUrl: 'http://127.0.0.1:9999',
     gatewayUri: 'ws://127.0.0.1:1/ws/daemon',
     bashExecutable: 'bash',
-    note: null,
+    bashExecutableSetting: null,
     lsp: {},
+    proxyUrl: null,
     distributionDir,
   }
 }
@@ -184,8 +186,8 @@ const credentials = { url: 'http://127.0.0.1:1', token: 'secret' }
 const signal = (): AbortSignal => new AbortController().signal
 
 describe('code-server process manager', () => {
-  // 真实 manager 通过原生 supervisor 启动两代子进程，既保留桥接凭据又清除继承代理。
-  it('passes the current platform proxy and bridge credentials to new code-server processes', async () => {
+  // 真实 manager 通过原生 supervisor 启动两代子进程：保留宿主继承代理与桥接凭据，不注入卡片代理。
+  it('passes the inherited environment and bridge credentials to new code-server processes', async () => {
     const script = READY_SERVER.replace(
       "const args = process.argv.slice(2)",
       `fs.writeFileSync('proxy-env.json', JSON.stringify({
@@ -204,22 +206,20 @@ const args = process.argv.slice(2)`,
     vi.stubEnv('ALL_PROXY', 'http://host.invalid:2')
     const environment = async () => JSON.parse(await readFile(join(idePaths(cfg).codeServerDir, 'proxy-env.json'), 'utf8'))
     try {
-      applyNetworkSettings('http://proxy.invalid:8080', 'localhost')
       await manager.ensureStarted(signal())
-      expect(await environment()).toEqual({
-        proxy: { HTTP_PROXY: 'http://proxy.invalid:8080', HTTPS_PROXY: 'http://proxy.invalid:8080', NO_PROXY: 'localhost' },
+      expect(await environment()).toMatchObject({
+        proxy: { http_proxy: 'http://host.invalid:1', ALL_PROXY: 'http://host.invalid:2' },
         bridgeUrl: credentials.url, hasBridgeToken: true, hasManagementToken: true,
       })
       await manager.stop()
-      applyNetworkSettings(null, '')
       await manager.ensureStarted(signal())
-      expect(await environment()).toEqual({
-        proxy: { NO_PROXY: '' }, bridgeUrl: credentials.url, hasBridgeToken: true, hasManagementToken: true,
+      expect(await environment()).toMatchObject({
+        proxy: { http_proxy: 'http://host.invalid:1', ALL_PROXY: 'http://host.invalid:2' },
+        bridgeUrl: credentials.url, hasBridgeToken: true, hasManagementToken: true,
       })
     } finally {
       await manager.close()
       await native.close()
-      applyNetworkSettings(null, '')
       vi.unstubAllEnvs()
     }
   })
