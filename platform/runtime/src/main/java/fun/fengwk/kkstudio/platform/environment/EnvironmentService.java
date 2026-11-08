@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment;
 
-import lombok.AllArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigCodec;
 import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.update.PlatformBuildInfo;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
@@ -38,7 +38,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** 稳定 Environment 卡片业务服务：完整配置 CAS、备注、安装码与安装脚本。 */
-@AllArgsConstructor
 @Service
 public class EnvironmentService {
 
@@ -48,6 +47,22 @@ public class EnvironmentService {
   private final EnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
+  private final String daemonReleaseVersion;
+
+  public EnvironmentService(
+      EnvironmentRepository environmentRepository,
+      EnvironmentRegistry environmentRegistry,
+      SystemSettingsSnapshot snapshot,
+      Clock clock,
+      @Qualifier("daemonReleaseVersion") String daemonReleaseVersion) {
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+    this.clock = Objects.requireNonNull(clock, "clock");
+    this.daemonReleaseVersion =
+        Objects.requireNonNull(daemonReleaseVersion, "daemonReleaseVersion");
+  }
 
   @Transactional
   public EnvironmentDTO create(EnvironmentCreateDTO dto) {
@@ -248,18 +263,12 @@ public class EnvironmentService {
   /**
    * 兑换安装 code：为本次安装签发新凭证并写入脚本。
    *
-   * <p>锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并返回兑换后的 CAS 版本；任一步失败均回滚。旧凭证的
-   * Daemon 下次握手被拒绝。
+   * <p>公开入口必须是真实 Spring 事务代理的调用边界：锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并返回兑换后的
+   * CAS 版本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
-  public String installationScript(EnvironmentId id, String code, DaemonOperatingSystem operatingSystem) {
-    return installationScript(id, code, operatingSystem, PlatformBuildInfo.version());
-  }
-
-  String installationScript(
-      EnvironmentId id,
-      String code,
-      DaemonOperatingSystem operatingSystem,
-      String releaseVersion) {
+  @Transactional
+  public String installationScript(
+      EnvironmentId id, String code, DaemonOperatingSystem operatingSystem) {
     Objects.requireNonNull(id, "id");
     EnvironmentInstallScripts.requireInstallableOperatingSystem(operatingSystem);
     Environment env = environmentRepository.lockById(id.value());
@@ -285,7 +294,7 @@ public class EnvironmentService {
         env.getDaemonConfig(),
         token,
         operatingSystem,
-        releaseVersion);
+        daemonReleaseVersion);
   }
 
   /** 签发必须校验期望版本；兑换只校验 code 与目标操作系统，不接收版本。 */
@@ -302,17 +311,13 @@ public class EnvironmentService {
   }
 
   public String uninstallationScript(EnvironmentId id, DaemonOperatingSystem operatingSystem) {
-    return uninstallationScript(id, operatingSystem, PlatformBuildInfo.version());
-  }
-
-  String uninstallationScript(
-      EnvironmentId id, DaemonOperatingSystem operatingSystem, String releaseVersion) {
     Objects.requireNonNull(id, "id");
     EnvironmentInstallScripts.requireInstallableOperatingSystem(operatingSystem);
     if (environmentRepository.getById(id.value()) == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    return EnvironmentInstallScripts.uninstall(id.value(), operatingSystem, releaseVersion);
+    return EnvironmentInstallScripts.uninstall(
+        id.value(), operatingSystem, daemonReleaseVersion);
   }
 
   @Transactional
@@ -488,13 +493,13 @@ public class EnvironmentService {
         conn.isReady(
             now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeenAt(conn.lastSeenAt());
-    DaemonHostInfo host =
-        conn.readyMetadata() == null ? null : conn.readyMetadata().hostInfo();
+    DaemonReadyMetadata ready = conn.readyMetadata();
+    DaemonHostInfo host = ready == null ? null : ready.hostInfo();
     dto.setOperatingSystem(host == null ? null : host.operatingSystem());
     dto.setTimeZone(host == null ? null : host.timeZone());
     dto.setUserName(host == null ? null : host.userName());
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
-    dto.setDaemonVersion(conn.daemonVersion());
+    dto.setDaemonVersion(ready == null ? null : ready.daemonVersion());
     dto.setCapabilities(
         statusValid
             ? conn.capabilities().stream()

@@ -35,7 +35,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
 
   @Test
   void authorizerScenarios() {
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
 
@@ -59,7 +60,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   @Test
   void handlerBootstrapSuccessAndFailure() throws IOException {
     IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
 
@@ -95,7 +97,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   void handlerBootstrapEncodesWorkspacePathWithoutFormSemantics() throws IOException {
     String workspace = "/managed/my project/a+b";
     IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
     registry.viewOpened(IDENTITY, VIEW.toString(), 1L, workspace);
@@ -122,7 +125,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   @Test
   void handlerSessionProbe() {
     IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
 
@@ -169,7 +173,8 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   @Test
   void handlerBootstrapMismatchesAndReplaced() throws IOException {
     IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
 

@@ -107,7 +107,8 @@ class IdeGatewayJettyIntegrationTest {
     wsClient.start();
 
     // 1. Session & View Authorization
-    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
     registry.viewOpened(IDENTITY, VIEW.toString(), 1L, "/managed/workspace");
     sessionCookie = registry.open(IDENTITY, VIEW.toString(), 1L, "/managed/workspace");
 

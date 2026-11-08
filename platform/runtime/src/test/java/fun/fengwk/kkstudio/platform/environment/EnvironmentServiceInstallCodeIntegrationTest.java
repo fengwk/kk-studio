@@ -12,6 +12,7 @@ import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
@@ -47,6 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>验证覆盖：摘要伪造拒绝、错环境拒绝、重复兑换拒绝、新替旧 upsert 覆盖、凭据轮换 (rotate) 及配置导入 (import) 失效；
  * 跨真实服务实例共享、并发只一次原子兑换，以及脚本渲染或凭据写失败时的真实数据库事务回滚。
  */
+@TestPropertySource(properties = "kk-studio.daemon.release-version=3.0.0")
 class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private EnvironmentService environmentService;
@@ -56,6 +58,22 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Autowired private JdbcClient jdbcClient;
   @Autowired private SystemSettingsSnapshot snapshot;
   @Autowired private PlatformTransactionManager transactionManager;
+
+  /** 测试意图：public installationScript 经 Spring 事务代理调用即可完成真实兑换，不能依赖测试包内 overload。 */
+  @Test
+  void publicInstallationScriptRunsInsideSpringTransactionAndRedeems() {
+    EnvironmentId envId = createTestEnvironment("public-entry-tx-env");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
+
+    String script = environmentService.installationScript(
+        envId, issued.getCode(), DaemonOperatingSystem.LINUX);
+
+    assertThat(script)
+        .contains("--environment-id '" + envId.value() + "'")
+        .contains("v3.0.0/scripts/daemon/install.sh");
+    assertThat(countInstallCodes(envId)).isZero();
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
+  }
 
   /** 测试意图：摘要伪造的 code 必须被拒绝且不破坏已有记录，未被篡改的真实 code 仍可成功兑换。 */
   @Test
@@ -226,7 +244,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     EnvironmentService serviceInstance2 =
         transactional(
             new EnvironmentService(
-                environmentRepository, environmentRegistry, snapshot, Clock.systemUTC()));
+                environmentRepository, environmentRegistry, snapshot, Clock.systemUTC(), "3.0.0"));
 
     EnvironmentInstallCodeDTO issued = serviceInstance1.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
@@ -357,7 +375,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     EnvironmentService failingService =
         transactional(
-            new EnvironmentService(failingRepo, environmentRegistry, snapshot, Clock.systemUTC()));
+            new EnvironmentService(failingRepo, environmentRegistry, snapshot, Clock.systemUTC(), "3.0.0"));
 
     assertThrows(
         DataAccessResourceFailureException.class,
@@ -390,7 +408,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   }
 
   private String generateScript(EnvironmentService service, EnvironmentId id, String code) {
-    return service.installationScript(id, code, DaemonOperatingSystem.LINUX, "3.0.0");
+    return service.installationScript(id, code, DaemonOperatingSystem.LINUX);
   }
 
   private DaemonConfigDTO validConfig() {

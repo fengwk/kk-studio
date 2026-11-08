@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -364,9 +365,8 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   private static DaemonHostInfo hostFacts(EnvironmentConnection connection) {
-    return connection == null || connection.readyMetadata() == null
-        ? null
-        : connection.readyMetadata().hostInfo();
+    DaemonReadyMetadata ready = connection == null ? null : connection.readyMetadata();
+    return ready == null ? null : ready.hostInfo();
   }
 
   /**
