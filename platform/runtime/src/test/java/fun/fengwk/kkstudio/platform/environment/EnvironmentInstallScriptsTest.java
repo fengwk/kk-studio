@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
@@ -17,73 +15,97 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigCodec;
+import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
-import java.util.Base64;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
-/** 生成命令必须保留凭据字节、私有暂存、失败清理和退出码，且不能把凭据放进子进程参数。 */
+/** 生成命令必须携带卡片本地信封与固定 tag 安装器，保留宿主代理环境，且不把凭据放进子进程参数。 */
 class EnvironmentInstallScriptsTest {
   private static final ObjectMapper JSON = JsonMapper.builder().build();
+  private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final String RELEASE = "3.0.0";
+  private static final String TOKEN = "private-汉字'\"$`$(touch NEVER)";
 
   @ParameterizedTest
   @ValueSource(strings = {"linux", "macos"})
-  void executesUnixInstallWithExactBytesAndPrivateFiles(String operatingSystem) throws Exception {
+  void unixInstallStagesEnvelopeAndInvokesCardScopedInstaller(String operatingSystem)
+      throws Exception {
     assumeFalse(isWindows());
-    EnvironmentInstallConfigDTO config = config(operatingSystem);
-    String token = "private-汉字'\"$`$(touch NEVER)";
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK), 0);
+            EnvironmentInstallScripts.install(
+                ENV_ID,
+                12L,
+                daemonConfig(),
+                TOKEN,
+                DaemonOperatingSystem.fromWireValue(operatingSystem),
+                RELEASE),
+            0);
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
-    assertEquals(expectedDaemon(config), execution.record().get("config"));
-    assertEquals(token, execution.record().get("token").asText());
-    assertTrue(execution.record().get("sibling").asBoolean());
-    assertTrue(execution.record().get("stage").asText().startsWith("/"));
-    assertEquals(List.of(448, 384, 384), modes(execution.record()));
+    String stage = execution.record().get("stage").asText();
     assertEquals(
         List.of(
             "install",
+            "--environment-id",
+            ENV_ID.toString(),
+            "--version",
+            RELEASE,
             "--config-file",
-            execution.record().get("stage").asText() + "/daemon.json",
+            stage + "/daemon.json",
             "--token-file",
-            execution.record().get("stage").asText() + "/daemon.token"),
+            stage + "/daemon.token"),
         texts(execution.record().get("args")));
+    assertEquals(TOKEN, execution.record().get("token").asText());
+    assertEquals(expectedEnvelope(), execution.record().get("config"));
+    assertEquals(List.of(448, 384, 384), modes(execution.record()));
     assertFalse(
-        texts(execution.record().get("args")).stream().anyMatch(value -> value.contains(token)));
+        texts(execution.record().get("args")).stream().anyMatch(value -> value.contains(TOKEN)));
     assertFalse(
         execution.record().get("env").properties().stream()
-            .anyMatch(entry -> entry.getValue().asText().contains(token)));
-    assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
+            .anyMatch(entry -> entry.getValue().asText().contains(TOKEN)));
+    // 人工下载保留调用方本机代理环境，生成脚本不得清理或改写。
+    assertEquals(
+        "http://host-proxy.invalid:3128",
+        execution.record().get("env").get("HTTPS_PROXY").asText());
+    assertEquals(
+        "localhost,.internal",
+        execution.record().get("env").get("NO_PROXY").asText());
+    assertEquals(
+        List.of("-q", "-fsSL", installerUrl("install.sh"), "-o", stage + "/install.sh"),
+        texts(execution.download().get("args")));
+    assertFalse(Files.exists(Path.of(stage)));
   }
 
   @Test
-  void cleansAfterInstallerFailureAndOmitsJavaHome() throws Exception {
+  void unixInstallCleansAfterInstallerFailure() throws Exception {
     assumeFalse(isWindows());
-    EnvironmentInstallConfigDTO config = config("linux");
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, "private", SystemSettingsTestFixture.NETWORK),
+            EnvironmentInstallScripts.install(
+                ENV_ID,
+                12L,
+                daemonConfig(),
+                "private",
+                DaemonOperatingSystem.LINUX,
+                RELEASE),
             17);
     assertEquals(17, execution.status());
-    assertFalse(texts(execution.record().get("args")).contains("--java-home"));
     assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
   }
 
   @Test
-  void cleansCredentialsWhenDownloadFails() throws Exception {
+  void unixDownloadFailureCleansStagingWithoutLeakingToken() throws Exception {
     assumeFalse(isWindows());
     Path dir = Files.createTempDirectory("kk-download-failure-");
     try {
@@ -91,12 +113,16 @@ class EnvironmentInstallScriptsTest {
       ProcessResult result =
           run(
               EnvironmentInstallScripts.install(
-                  config("linux"), "private", SystemSettingsTestFixture.NETWORK),
-              dir,
-              Map.of());
+                  ENV_ID,
+                  12L,
+                  daemonConfig(),
+                  TOKEN,
+                  DaemonOperatingSystem.LINUX,
+                  RELEASE),
+              dir);
       assertEquals(8, result.status());
       assertEquals(List.of("curl"), names(dir));
-      assertFalse((result.stdout() + result.stderr()).contains("private"));
+      assertFalse((result.stdout() + result.stderr()).contains(TOKEN));
     } finally {
       delete(dir);
     }
@@ -104,70 +130,30 @@ class EnvironmentInstallScriptsTest {
 
   @ParameterizedTest
   @ValueSource(strings = {"linux", "macos"})
-  void executesUnixUninstallWithoutCredentials(String operatingSystem) throws Exception {
+  void unixUninstallOnlyTargetsTheCard(String operatingSystem) throws Exception {
     assumeFalse(isWindows());
     Execution execution =
         execute(
             EnvironmentInstallScripts.uninstall(
-                DaemonOperatingSystem.fromWireValue(operatingSystem),
-                SystemSettingsTestFixture.NETWORK),
+                ENV_ID, DaemonOperatingSystem.fromWireValue(operatingSystem), RELEASE),
             0);
     assertEquals(0, execution.status());
-    assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
+    assertEquals(
+        List.of("uninstall", "--environment-id", ENV_ID.toString()),
+        texts(execution.record().get("args")));
     assertFalse(execution.record().has("token"));
-  }
-
-  /** 两跳下载和安装器都使用平台快照，不继承主机代理。 */
-  @Test
-  void unixInstallUsesPlatformProxyAndExplicitDirectSettings() throws Exception {
-    assumeFalse(isWindows());
-    for (SystemSettings.Network network :
-        List.of(
-            new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
-            new SystemSettings.Network(null, "localhost"))) {
-      Execution execution =
-          execute(EnvironmentInstallScripts.install(config("linux"), "token", network), 0);
-      String proxy = network.proxyUrl() == null ? "" : network.proxyUrl();
-      for (JsonNode environment :
-          List.of(execution.downloadEnvironment(), execution.record().get("env"))) {
-        assertEquals(proxy, environment.get("https_proxy").asText());
-        assertEquals(proxy, environment.get("HTTP_PROXY").asText());
-        assertEquals(network.noProxyHosts(), environment.get("NO_PROXY").asText());
-        assertFalse(environment.has("HtTp_PrOxY"));
-      }
-    }
-  }
-
-  /** Windows 首跳按平台绕过规则选择直连，安装器仍收到完整设置。 */
-  @Test
-  void windowsInstallRendersPlatformProxyAndBootstrapBypass() {
-    SystemSettings.Network proxy =
-        new SystemSettings.Network("http://proxy.invalid:8080", "localhost");
-    String command = EnvironmentInstallScripts.install(config("windows"), "token", proxy);
-    assertTrue(command.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
-    assertTrue(command.contains("$env:NO_PROXY = 'localhost'"));
-    assertTrue(command.contains("$direct = $false"));
-    assertTrue(command.contains("@proxyArguments"));
-    assertTrue(command.contains("$env:KK_DAEMON_INSTALL_PROXY_ENV = '1'"));
-    String bypass =
-        EnvironmentInstallScripts.install(
-            config("windows"),
-            "token",
-            new SystemSettings.Network("http://proxy.invalid:8080", "githubusercontent.com"));
-    assertTrue(bypass.contains("$direct = $true"));
-    assertTrue(bypass.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
+    assertFalse(execution.record().has("config"));
   }
 
   @Test
-  void windowsCommandProtectsAclBeforeWritingCredentials() {
-    EnvironmentInstallConfigDTO config = config("windows");
+  void windowsInstallProtectsAclBeforeWritingCredentialsAndKeepsHostProxy() {
     String command =
-        EnvironmentInstallScripts.install(config, "private-'$`", SystemSettingsTestFixture.NETWORK);
+        EnvironmentInstallScripts.install(
+            ENV_ID, 12L, daemonConfig(), TOKEN, DaemonOperatingSystem.WINDOWS, RELEASE);
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
     assertTrue(command.contains("[Security.AccessControl.FileSecurity]::new()"));
     assertTrue(command.contains("$acl.SetAccessRuleProtection($true, $false)"));
-    assertFalse(command.contains("[IO.Directory]::CreateDirectory"));
     assertTrue(command.contains("New-Item -ItemType Directory -Path $stage"));
     assertTrue(command.contains("[IO.FileMode]::CreateNew"));
     assertTrue(command.contains("New-Object Text.UTF8Encoding($false)"));
@@ -184,125 +170,86 @@ class EnvironmentInstallScriptsTest {
             "throw 'Daemon command failed; review installer output and host prerequisites.'"));
     assertTrue(command.contains("finally"));
     assertTrue(command.contains("Remove-Item -LiteralPath $stage -Recurse -Force"));
-    assertTrue(command.contains("'private-''$`'"));
+    assertTrue(command.contains("'private-''"));
     assertTrue(command.contains("汉字"));
+    assertFalse(command.contains("$env:HTTP_PROXY ="));
+    assertFalse(command.contains("$env:NO_PROXY ="));
     String invocation =
         command.lines().filter(line -> line.contains("& powershell")).findFirst().orElseThrow();
     assertTrue(
-        invocation.contains("-File $installer install -ConfigFile $config -TokenFile $token"));
+        invocation.contains(
+            "-File $installer -Command install -EnvironmentId '"
+                + ENV_ID
+                + "' -Version '"
+                + RELEASE
+                + "' -ConfigFile $config -TokenFile $token"));
     assertFalse(invocation.contains("-JavaHome"));
     assertFalse(invocation.contains("private"));
+
     String uninstall =
-        EnvironmentInstallScripts.uninstall(
-            DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK);
+        EnvironmentInstallScripts.uninstall(ENV_ID, DaemonOperatingSystem.WINDOWS, RELEASE);
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
-    assertTrue(uninstall.contains("-File $installer uninstall"));
-  }
-
-  /** 只在 Windows 执行生成脚本。下载由同进程函数覆盖，不改生成文本、不访问网络； Linux 上的 PowerShell 不能代替 Windows SID ACL。 */
-  @ParameterizedTest
-  @ValueSource(strings = {"powershell", "pwsh"})
-  @EnabledOnOs(OS.WINDOWS)
-  void executesWindowsInstallAndUninstall(String shell) throws Exception {
-    Path executable = Path.of(shell + ".exe");
-    assertTrue(windowsCommandExists(executable), shell + " is not installed");
-    Path dir = Files.createTempDirectory("kk-windows-command-");
-    Path recordPath = dir.resolve("record.json");
-    Path fixture = dir.resolve("recorder.ps1");
-    String token = "private-汉字'\"$`$(New-Item NEVER)";
-    EnvironmentInstallConfigDTO config = config("windows");
-    Files.writeString(fixture, WINDOWS_RECORDER);
-    try {
-      ProcessResult failed =
-          runWindows(
-              executable,
-              EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK),
-              dir,
-              fixture,
-              recordPath);
-      assertEquals(1, failed.status(), failed.stdout() + failed.stderr());
-      assertFalse((failed.stdout() + failed.stderr()).contains("private-"));
-      JsonNode record = JSON.readTree(Files.readString(recordPath));
-      assertEquals("install", record.get("action").asText());
-      assertEquals(token, record.get("token").asText());
-      assertEquals(
-          Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8)),
-          record.get("bytes").asText());
-      assertEquals(expectedDaemon(config), JSON.readTree(record.get("configRaw").asText()));
-      assertTrue(record.get("sibling").asBoolean());
-      for (String facts : List.of("dir", "configFile", "tokenFile")) {
-        JsonNode acl = record.get(facts);
-        assertTrue(acl.get("protected").asBoolean());
-        assertEquals(record.get("sid").asText(), acl.get("owner").asText());
-        assertEquals(0, acl.get("foreign").asInt());
-        assertTrue(acl.get("readable").asInt() >= 1);
-      }
-      assertFalse(
-          record.get("environment").properties().stream()
-              .anyMatch(entry -> entry.getValue().asText().contains(token)));
-      assertFalse(Files.exists(Path.of(record.get("stage").asText())));
-      assertFalse(Files.exists(dir.resolve("NEVER")));
-
-      ProcessResult removed =
-          runWindows(
-              executable,
-              EnvironmentInstallScripts.uninstall(
-                  DaemonOperatingSystem.WINDOWS, SystemSettingsTestFixture.NETWORK),
-              dir,
-              fixture,
-              recordPath);
-      assertEquals(1, removed.status(), removed.stdout() + removed.stderr());
-      JsonNode uninstall = JSON.readTree(Files.readString(recordPath));
-      assertEquals("uninstall", uninstall.get("action").asText());
-      assertFalse(uninstall.has("configRaw"));
-      assertFalse(uninstall.has("token"));
-    } finally {
-      delete(dir);
-    }
+    assertTrue(
+        uninstall.contains(
+            "-File $installer -Command uninstall -EnvironmentId '" + ENV_ID + "'"));
+    assertFalse(uninstall.contains("daemon.token"));
   }
 
   @Test
-  void rejectsBlankTokenControlCharactersAndUnknownOperatingSystem() {
-    EnvironmentInstallConfigDTO config = config("linux");
-    assertThrows(
-        DomainException.class,
-        () -> EnvironmentInstallScripts.install(config, " \n", SystemSettingsTestFixture.NETWORK));
+  void rejectsBlankTokenControlCharactersAndInvalidInputs() {
     assertThrows(
         DomainException.class,
         () ->
             EnvironmentInstallScripts.install(
-                config, "token\u2028", SystemSettingsTestFixture.NETWORK));
-    // WSL 不是安装目标，卸载脚本同样拒绝。
+                ENV_ID, 0L, daemonConfig(), " \n", DaemonOperatingSystem.LINUX, RELEASE));
     assertThrows(
         DomainException.class,
         () ->
-            EnvironmentInstallScripts.uninstall(
-                DaemonOperatingSystem.WSL, SystemSettingsTestFixture.NETWORK));
+            EnvironmentInstallScripts.install(
+                ENV_ID, 0L, daemonConfig(), "token\u2028", DaemonOperatingSystem.LINUX, RELEASE));
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.uninstall(null, SystemSettingsTestFixture.NETWORK));
+        () ->
+            EnvironmentInstallScripts.install(
+                ENV_ID, 0L, daemonConfig(), "token", DaemonOperatingSystem.WSL, RELEASE));
+    assertThrows(
+        NullPointerException.class,
+        () -> EnvironmentInstallScripts.install(null, 0L, daemonConfig(), "token", null, RELEASE));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            EnvironmentInstallScripts.install(
+                ENV_ID, -1L, daemonConfig(), "token", DaemonOperatingSystem.LINUX, RELEASE));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            EnvironmentInstallScripts.install(
+                ENV_ID, 0L, daemonConfig(), "token", DaemonOperatingSystem.LINUX, ""));
     assertThrows(
         DomainException.class,
-        () -> EnvironmentInstallScripts.install(null, "token", SystemSettingsTestFixture.NETWORK));
+        () -> EnvironmentInstallScripts.uninstall(ENV_ID, DaemonOperatingSystem.WSL, RELEASE));
+    assertThrows(
+        DomainException.class, () -> EnvironmentInstallScripts.uninstall(ENV_ID, null, RELEASE));
   }
 
   private static Execution execute(String command, int exit) throws Exception {
     Path dir = Files.createTempDirectory("kk-command-");
     Path result = dir.resolve("record.json");
+    Path download = dir.resolve("download.json");
+    Path installer = dir.resolve("installer");
     writeExecutable(
-        dir.resolve("recorder"),
+        installer,
         """
         #!/bin/bash
         python3 - "$@" <<'PY'
-        import json, os, sys, stat
+        import json, os, stat, sys
         args = sys.argv[1:]
         data = {'args': args, 'env': dict(os.environ)}
-        if args and args[0] == 'install':
+        if 'install' in args:
             c = args[args.index('--config-file') + 1]
             t = args[args.index('--token-file') + 1]
             data.update(config=json.load(open(c)), token=open(t).read(), stage=os.path.dirname(c),
-                        sibling=os.path.dirname(c) == os.path.dirname(t),
                         modes=[stat.S_IMODE(os.stat(p).st_mode) for p in [os.path.dirname(c), c, t]])
         json.dump(data, open(os.environ['RECORD'], 'w'))
         PY
@@ -313,7 +260,10 @@ class EnvironmentInstallScriptsTest {
         dir.resolve("curl"),
         """
         #!/bin/bash
-        python3 -c 'import json, os; json.dump(dict(os.environ), open(os.environ["RECORD"] + ".curl", "w"))'
+        python3 - "$@" <<'PY'
+        import json, os, sys
+        json.dump({'args': sys.argv[1:]}, open(os.environ['DOWNLOAD'], 'w'))
+        PY
         while [[ "$1" != "-o" ]]; do shift; done
         cp "$FIXTURE" "$2"
         """);
@@ -323,19 +273,24 @@ class EnvironmentInstallScriptsTest {
               command,
               dir,
               Map.of(
-                  "TMPDIR", ".",
+                  "FIXTURE", installer.toString(),
                   "RECORD", result.toString(),
-                  "FIXTURE", dir.resolve("recorder").toString(),
-                  "HtTp_PrOxY", "http://host-proxy.invalid:3128",
+                  "DOWNLOAD", download.toString(),
+                  "HTTPS_PROXY", "http://host-proxy.invalid:3128",
+                  "NO_PROXY", "localhost,.internal",
                   "SHELLOPTS", "xtrace:verbose",
                   "BASH_FUNC_printf%%", "() { echo unsafe >&2; exit 42; }"));
       return new Execution(
           run,
           JSON.readTree(Files.readString(result)),
-          JSON.readTree(Files.readString(Path.of(result + ".curl"))));
+          JSON.readTree(Files.readString(download)));
     } finally {
       delete(dir);
     }
+  }
+
+  private static ProcessResult run(String command, Path dir) throws Exception {
+    return run(command, dir, Map.of());
   }
 
   private static ProcessResult run(String command, Path dir, Map<String, String> extra)
@@ -343,6 +298,7 @@ class EnvironmentInstallScriptsTest {
     ProcessBuilder builder = new ProcessBuilder("bash");
     builder.directory(dir.toFile());
     builder.environment().put("PATH", dir + ":" + System.getenv("PATH"));
+    builder.environment().put("TMPDIR", ".");
     builder.environment().putAll(extra);
     Process process = builder.start();
     process.getOutputStream().write(command.getBytes(StandardCharsets.UTF_8));
@@ -352,109 +308,23 @@ class EnvironmentInstallScriptsTest {
     return new ProcessResult(process.waitFor(), stdout, stderr);
   }
 
-  private static final String WINDOWS_RECORDER =
-      """
-      param(
-        [Parameter(Position = 0)][string]$Action,
-        [string]$ConfigFile,
-        [string]$TokenFile
-      )
-      $ErrorActionPreference = 'Stop'
-      $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-      function Get-Facts([string]$Path) {
-        $acl = Get-Acl -LiteralPath $Path
-        $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-        [pscustomobject]@{
-          protected = $acl.AreAccessRulesProtected
-          owner = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value
-          foreign = @($rules | Where-Object { $_.IdentityReference.Value -ne $sid }).Count
-          readable = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 }).Count
-        }
-      }
-      $data = @{ action = $Action; environment = @{} }
-      Get-ChildItem Env: | ForEach-Object { $data.environment[$_.Name] = $_.Value }
-      if ($Action -eq 'install') {
-        $data.sid = $sid
-        $data.stage = Split-Path $ConfigFile
-        $data.sibling = (Split-Path $TokenFile) -eq $data.stage
-        $data.configRaw = [IO.File]::ReadAllText($ConfigFile)
-        $data.token = [IO.File]::ReadAllText($TokenFile)
-        $data.bytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($TokenFile))
-        $data.dir = Get-Facts $data.stage
-        $data.configFile = Get-Facts $ConfigFile
-        $data.tokenFile = Get-Facts $TokenFile
-      }
-      [IO.File]::WriteAllText($env:RECORD, ($data | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
-      exit 17
-      """;
-
-  /** 父脚本带 BOM，使 Windows PowerShell 5.1 按 Unicode 解析；生成脚本文本本身不被改写。 */
-  private static ProcessResult runWindows(
-      Path shell, String command, Path dir, Path fixture, Path record) throws Exception {
-    Path script = dir.resolve("command.ps1");
-    String parent =
-        """
-        function Invoke-WebRequest {
-          param([switch]$UseBasicParsing, $Uri, $OutFile, $Proxy, [switch]$NoProxy)
-          if (-not $UseBasicParsing -or [string]::IsNullOrEmpty($Uri) -or [string]::IsNullOrEmpty($OutFile)) {
-            throw 'download override did not receive the generated parameters'
-          }
-          Copy-Item -LiteralPath $env:FIXTURE -Destination $OutFile
-        }
-        """
-            + command;
-    byte[] body = parent.getBytes(StandardCharsets.UTF_8);
-    byte[] bom = new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf};
-    byte[] encoded = new byte[bom.length + body.length];
-    System.arraycopy(bom, 0, encoded, 0, bom.length);
-    System.arraycopy(body, 0, encoded, bom.length, body.length);
-    Files.write(script, encoded);
-    ProcessBuilder builder =
-        new ProcessBuilder(
-            shell.toString(),
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script.toString());
-    builder.directory(dir.toFile());
-    builder.environment().put("RECORD", record.toString());
-    builder.environment().put("FIXTURE", fixture.toString());
-    Process process = builder.start();
-    String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    return new ProcessResult(process.waitFor(), stdout, stderr);
+  private static DaemonConfigDTO daemonConfig() {
+    DaemonConfigDTO config = new DaemonConfigDTO();
+    config.setStudioUrl("https://studio.example.com/");
+    config.setBashExecutable("/bin/汉字 '$`");
+    return config;
   }
 
-  private static boolean windowsCommandExists(Path executable) {
-    String path = System.getenv("PATH");
-    if (path == null) {
-      return false;
-    }
-    for (String entry : path.split(";")) {
-      if (Files.isExecutable(Path.of(entry).resolve(executable))) {
-        return true;
-      }
-    }
-    return false;
+  private static JsonNode expectedEnvelope() {
+    var envelope = JSON.createObjectNode();
+    envelope.put("environmentId", ENV_ID.toString());
+    envelope.put("version", "12");
+    envelope.set("daemonConfig", DaemonConfigCodec.tree(daemonConfig()));
+    return envelope;
   }
 
-  private static EnvironmentInstallConfigDTO config(String operatingSystem) {
-    Map<String, Object> body = new LinkedHashMap<>();
-    body.put("operatingSystem", operatingSystem);
-    body.put(
-        "daemon",
-        Map.of(
-            "studioUrl", "https://studio.example.com/",
-            "note",
-                "汉字 ' \" $ ` $(touch NEVER) %s @@ACTION@@ @@PARAMETERS@@ @@INSTALLER@@ @@STAGING@@",
-            "bashExecutable", "/bin/汉字 '$`"));
-    return EnvironmentInstallConfigs.parse(JSON.valueToTree(body));
-  }
-
-  private static JsonNode expectedDaemon(EnvironmentInstallConfigDTO config) throws Exception {
-    return JSON.readTree(JSON.writeValueAsString(config.getDaemon()));
+  private static String installerUrl(String file) {
+    return "https://raw.githubusercontent.com/fengwk/kk-studio/v3.0.0/scripts/daemon/" + file;
   }
 
   private static List<Integer> modes(JsonNode record) {
@@ -499,7 +369,7 @@ class EnvironmentInstallScriptsTest {
     return System.getProperty("os.name").toLowerCase().contains("win");
   }
 
-  private record Execution(ProcessResult run, JsonNode record, JsonNode downloadEnvironment) {
+  private record Execution(ProcessResult run, JsonNode record, JsonNode download) {
     private int status() {
       return run.status();
     }

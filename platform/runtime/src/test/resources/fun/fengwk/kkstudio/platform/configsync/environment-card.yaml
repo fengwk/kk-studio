@@ -1,0 +1,15 @@
+environments:
+  - name: env
+    note: "日常开发环境 'quoted'"
+    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42
+    daemonConfig:
+      studioUrl: https://studio.example.com/
+      bashExecutable: /bin/bash
+      proxyUrl: http://127.0.0.1:7890
+      lsp:
+        servers:
+          jdtls:
+            command: ["~/.local/share/nvim/mason/bin/jdtls", "--stdio"]
+            extensions: [".java"]
+            rootMarkers: ["pom.xml"]
+            firstMatchMarkers: [".git"]
