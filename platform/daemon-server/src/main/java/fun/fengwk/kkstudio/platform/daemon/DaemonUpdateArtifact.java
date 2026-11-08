@@ -32,7 +32,7 @@ public final class DaemonUpdateArtifact {
 
   /** 发布 tag：{@code v<version>}。 */
   public static String tag(String version) {
-    DaemonCapabilities.validateDaemonVersion(version);
+    DaemonReadyMetadata.validateDaemonVersion(version);
     return "v" + version;
   }
 
@@ -59,7 +59,7 @@ public final class DaemonUpdateArtifact {
   /** 制品文件名：{@code kk-studio-daemon-<tag>-<os>-<arch>.tar.gz}。 */
   public static String artifactName(
       String version, DaemonOperatingSystem operatingSystem, DaemonArchitecture architecture) {
-    DaemonCapabilities.validateDaemonVersion(version);
+    DaemonReadyMetadata.validateDaemonVersion(version);
     Objects.requireNonNull(architecture, "architecture");
     if (!isSupported(operatingSystem, architecture)) {
       throw new IllegalArgumentException(

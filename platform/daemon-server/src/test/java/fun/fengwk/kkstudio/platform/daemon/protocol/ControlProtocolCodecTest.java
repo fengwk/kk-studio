@@ -122,8 +122,8 @@ class ControlProtocolCodecTest {
                 ready.toBuilder()
                     .setReady(
                         ready.getReady().toBuilder()
-                            .setEnvironment(
-                                ready.getReady().getEnvironment().toBuilder()
+                            .setHostInfo(
+                                ready.getReady().getHostInfo().toBuilder()
                                     .setOperatingSystem(
                                         OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED)))
                     .build()));
@@ -469,9 +469,6 @@ class ControlProtocolCodecTest {
             .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
             .setSettings(
                 Settings.newBuilder()
-                    .setDisplayName("dev-box")
-                    .setProxyUrl("http://proxy.invalid:8080")
-                    .setNoProxyHosts("localhost,10.0.0.0/8")
                     .setResourceBudgets(
                         ResourceBudgets.newBuilder()
                             .setMaxResourceBytes(1048576)
@@ -481,6 +478,31 @@ class ControlProtocolCodecTest {
     assertArrayEquals(
         ControlProtocolFixtures.golden("settings.bin"),
         ControlProtocolCodec.encodeBinary(settings));
+    Envelope environmentConfig =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.ENVIRONMENT_CONFIG)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setEnvironmentConfig(
+                EnvironmentConfig.newBuilder()
+                    .setVersion(4)
+                    .setConfig(
+                        DaemonConfiguration.newBuilder()
+                            .setStudioUrl("https://studio.example.com")
+                            .setBashExecutable("/usr/bin/bash")
+                            .setProxyUrl("http://127.0.0.1:7890")
+                            .setLsp(
+                                LspConfiguration.newBuilder()
+                                    .addServers(
+                                        LspServer.newBuilder()
+                                            .setId("java")
+                                            .addCommand("java")
+                                            .addExtensions(".java")
+                                            .addRootMarkers("pom.xml")
+                                            .addFirstMatchMarkers("src/main/java")))))
+            .build();
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("environment-config.bin"),
+        ControlProtocolCodec.encodeBinary(environmentConfig));
     assertArrayEquals(
         ControlProtocolFixtures.golden("invoke.bin"),
         ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.invokeEnvelope()));

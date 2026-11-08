@@ -6,10 +6,10 @@ import java.util.regex.Pattern;
 /**
  * Daemon READY 上报的宿主 metadata。
  *
- * <p>这是 READY 的宿主 metadata：Daemon 自身构建版本与一份 {@link DaemonEnvironmentInfo}。READY
- * 只描述宿主本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Environment 上的 CAS {@code version} 无关。
+ * <p>这是 READY 的宿主 metadata：Daemon 自身构建版本与一份 {@link DaemonHostInfo}。READY 只描述宿主本身，不携带任何产品目录
+ * 事实；{@code daemonVersion} 是构建事实，与 Environment 上的 CAS {@code version} 无关。
  */
-public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo environment) {
+public record DaemonReadyMetadata(String daemonVersion, DaemonHostInfo hostInfo) {
 
   /** daemon 构建版本上界；manifest 版本与 {@code development} 标记都远小于该值。 */
   public static final int MAX_DAEMON_VERSION_CHARS = 64;
@@ -18,9 +18,9 @@ public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo env
   private static final Pattern DAEMON_VERSION_PATTERN =
       Pattern.compile("[0-9A-Za-z._+-]{1," + MAX_DAEMON_VERSION_CHARS + "}");
 
-  public DaemonCapabilities {
+  public DaemonReadyMetadata {
     daemonVersion = validateDaemonVersion(daemonVersion);
-    environment = Objects.requireNonNull(environment, "environment");
+    hostInfo = Objects.requireNonNull(hostInfo, "hostInfo");
   }
 
   /**

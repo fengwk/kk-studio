@@ -5,33 +5,27 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与操作系统临时目录。
+ * READY 中冻结的类型化宿主事实：OS、CPU 架构、时区、真实进程用户、canonical HOME 与操作系统临时目录。
  *
- * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
- * escape 不能替代这一信任边界。{@code architecture}、{@code userName} 与 {@code homeDirectory} 只用于 Environment
- * 和当前 Environment Prompt 展示；{@code tempDirectory} 只用于当前 Environment Prompt 展示与工具指引，不构成 cwd、默认
- * workdir 或沙箱。
+ * <p>{@code architecture}、{@code userName} 与 {@code homeDirectory} 只用于 Environment 和当前 Environment
+ * Prompt 展示；{@code tempDirectory} 只用于当前 Environment Prompt 展示与工具指引，不构成 cwd、默认 workdir 或沙箱。
  */
-public record DaemonEnvironmentInfo(
+public record DaemonHostInfo(
     DaemonOperatingSystem operatingSystem,
     String timeZone,
     String userName,
     String homeDirectory,
-    String note,
     String tempDirectory,
     String architecture) {
-
-  public static final int MAX_NOTE_CHARS = 512;
 
   /** 宿主架构标识上界；真实 {@code os.arch} 取值远小于该值。 */
   public static final int MAX_ARCHITECTURE_CHARS = 32;
 
-  public DaemonEnvironmentInfo {
+  public DaemonHostInfo {
     operatingSystem = Objects.requireNonNull(operatingSystem, "operatingSystem");
     timeZone = validateTimeZone(timeZone);
     userName = validateUserName(userName);
     homeDirectory = validateHomeDirectory(homeDirectory, operatingSystem);
-    note = validateNote(note);
     tempDirectory = validateTempDirectory(tempDirectory);
     architecture = validateArchitecture(architecture);
   }
@@ -65,31 +59,6 @@ public record DaemonEnvironmentInfo(
                 Character.getType(codePoint) == Character.LINE_SEPARATOR
                     || Character.getType(codePoint) == Character.PARAGRAPH_SEPARATOR)) {
       throw new IllegalArgumentException("architecture must be a single line");
-    }
-    return value;
-  }
-
-  /** 校验模型可见 note 的结构边界；调用方仍必须保证内容来自可信操作者且不含凭证、秘密或不可信文本。 */
-  public static String validateNote(String value) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("note must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException("note must not have surrounding whitespace");
-    }
-    if (value.length() > MAX_NOTE_CHARS) {
-      throw new IllegalArgumentException("note exceeds " + MAX_NOTE_CHARS + " characters");
-    }
-    if (value.codePoints().anyMatch(Character::isISOControl)) {
-      throw new IllegalArgumentException("note must not contain ISO control characters");
-    }
-    if (value
-        .codePoints()
-        .anyMatch(
-            codePoint ->
-                Character.getType(codePoint) == Character.LINE_SEPARATOR
-                    || Character.getType(codePoint) == Character.PARAGRAPH_SEPARATOR)) {
-      throw new IllegalArgumentException("note must be a single line");
     }
     return value;
   }

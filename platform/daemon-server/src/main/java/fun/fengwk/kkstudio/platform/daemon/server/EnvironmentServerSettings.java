@@ -3,18 +3,15 @@ package fun.fengwk.kkstudio.platform.daemon.server;
 import java.time.Duration;
 import java.util.Objects;
 
-/** 核心每次判定现读的运行期设置。 */
+/** 核心每次判定现读的运行期设置；只包含平台资源约束。 */
 public record EnvironmentServerSettings(
     Duration heartbeatTimeout,
     long maxResourceBytes,
     long temporaryResourceTtlSeconds,
-    long temporaryResourceCleanupIntervalSeconds,
-    String proxyUrl,
-    String noProxyHosts) {
+    long temporaryResourceCleanupIntervalSeconds) {
 
   public EnvironmentServerSettings {
     heartbeatTimeout = Objects.requireNonNull(heartbeatTimeout, "heartbeatTimeout");
-    noProxyHosts = Objects.requireNonNull(noProxyHosts, "noProxyHosts");
     if (heartbeatTimeout.isZero() || heartbeatTimeout.isNegative()) {
       throw new IllegalArgumentException("heartbeatTimeout must be positive");
     }

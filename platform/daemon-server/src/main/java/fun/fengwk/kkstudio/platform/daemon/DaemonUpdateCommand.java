@@ -13,7 +13,7 @@ public record DaemonUpdateCommand(String operationId, String targetVersion) {
 
   public DaemonUpdateCommand {
     operationId = validateOperationId(operationId);
-    targetVersion = DaemonCapabilities.validateDaemonVersion(targetVersion);
+    targetVersion = DaemonReadyMetadata.validateDaemonVersion(targetVersion);
   }
 
   /**

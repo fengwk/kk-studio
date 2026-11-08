@@ -45,6 +45,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -54,7 +56,12 @@ public final class EnvironmentDaemonServer
 
   private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
 
-  private record PendingAdmission(UUID leaseToken, String registrationToken, String displayName) {}
+  private record PendingAdmission(UUID leaseToken, String registrationToken) {}
+
+  private static final class ConfigSyncState {
+    private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicBoolean dirty = new AtomicBoolean();
+  }
 
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
@@ -62,6 +69,8 @@ public final class EnvironmentDaemonServer
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settingsSupplier;
+  private final EnvironmentConfigSource configSource;
+  private final Executor configExecutor;
 
   private final DaemonInvocationTracker invocationTracker = new DaemonInvocationTracker();
   private final DaemonTransferCoordinator transferCoordinator = new DaemonTransferCoordinator();
@@ -71,6 +80,7 @@ public final class EnvironmentDaemonServer
   private final Object inventory = new Object();
   private final Map<EnvironmentId, DaemonConnectionSession> sessions = new HashMap<>();
   private final Map<EnvironmentId, String> daemonInstances = new HashMap<>();
+  private final Map<EnvironmentId, ConfigSyncState> configSyncs = new ConcurrentHashMap<>();
   private final Map<DaemonAdmission.Admitted, PendingAdmission> pendingAdmissions =
       new ConcurrentHashMap<>();
   private final AtomicLong connectionGenerations = new AtomicLong();
@@ -79,17 +89,21 @@ public final class EnvironmentDaemonServer
   public EnvironmentDaemonServer(
       DaemonLeaseStore leaseStore,
       DaemonRegistrationDirectory registrationDirectory,
+      EnvironmentConfigSource configSource,
       EnvironmentSessionListener sessionListener,
       EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
-      Supplier<EnvironmentServerSettings> settings) {
+      Supplier<EnvironmentServerSettings> settings,
+      Executor configExecutor) {
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");
+    this.configSource = Objects.requireNonNull(configSource, "configSource");
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
     this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settingsSupplier = Objects.requireNonNull(settings, "settings");
+    this.configExecutor = Objects.requireNonNull(configExecutor, "configExecutor");
   }
 
   private static void logFailure(String stage, Throwable failure) {
@@ -106,14 +120,13 @@ public final class EnvironmentDaemonServer
     }
     String token = handshake.registrationToken();
     String instanceId = handshake.daemonInstanceId();
+    EnvironmentId environmentId = handshake.environmentId();
 
     Optional<DaemonRegistration> registrationOpt =
         registrationDirectory.findByRegistrationToken(token);
-    if (registrationOpt.isEmpty()) {
+    if (registrationOpt.isEmpty() || !environmentId.equals(registrationOpt.get().environmentId())) {
       return new DaemonAdmission.Rejected();
     }
-    DaemonRegistration registration = registrationOpt.get();
-    EnvironmentId environmentId = registration.environmentId();
 
     DaemonConnectionSession existing = sessionOf(environmentId);
     if (existing != null && existing.isReady()) {
@@ -164,9 +177,7 @@ public final class EnvironmentDaemonServer
           }
         }
         DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
-        pendingAdmissions.put(
-            admitted,
-            new PendingAdmission(acquired.leaseToken(), token, registration.displayName()));
+        pendingAdmissions.put(admitted, new PendingAdmission(acquired.leaseToken(), token));
         yield admitted;
       }
     };
@@ -209,6 +220,7 @@ public final class EnvironmentDaemonServer
             control,
             tunnel,
             leaseStore,
+            configSource,
             sessionListener,
             updateListener,
             ticketService,
@@ -221,13 +233,11 @@ public final class EnvironmentDaemonServer
     EnvironmentServerSettings currentSettings = settings();
     session.initializeSettings(currentSettings);
 
-    Settings settingsMessage =
-        settingsMessage(currentSettings).setDisplayName(pending.displayName).build();
     Envelope settingsEnvelope =
         Envelope.newBuilder()
             .setMessageType(MessageType.SETTINGS)
             .setEnvironmentId(admitted.environmentId().value().toString())
-            .setSettings(settingsMessage)
+            .setSettings(settingsMessage(currentSettings))
             .build();
 
     synchronized (inventory) {
@@ -235,37 +245,79 @@ public final class EnvironmentDaemonServer
     }
     if (!session.offer(settingsEnvelope)) {
       session.close();
+      return session;
     }
+    session.sendInitialEnvironmentConfig();
     return session;
   }
 
-  static Settings.Builder settingsMessage(EnvironmentServerSettings settings) {
-    Settings.Builder result =
-        Settings.newBuilder()
-            .setResourceBudgets(
-                ResourceBudgets.newBuilder()
-                    .setMaxResourceBytes(settings.maxResourceBytes())
-                    .setTemporaryResourceTtlSeconds(settings.temporaryResourceTtlSeconds())
-                    .setTemporaryResourceCleanupIntervalSeconds(
-                        settings.temporaryResourceCleanupIntervalSeconds()))
-            .setNoProxyHosts(settings.noProxyHosts());
-    if (settings.proxyUrl() != null) {
-      result.setProxyUrl(settings.proxyUrl());
-    }
-    return result;
+  static Settings settingsMessage(EnvironmentServerSettings settings) {
+    return Settings.newBuilder()
+        .setResourceBudgets(
+            ResourceBudgets.newBuilder()
+                .setMaxResourceBytes(settings.maxResourceBytes())
+                .setTemporaryResourceTtlSeconds(settings.temporaryResourceTtlSeconds())
+                .setTemporaryResourceCleanupIntervalSeconds(
+                    settings.temporaryResourceCleanupIntervalSeconds()))
+        .build();
   }
 
-  /** 设置变更或通知重连时对本节点所有连接重新读取并下发网络设置。 */
-  public void reconcileNetworkSettings() {
-    List<DaemonConnectionSession> current;
-    synchronized (inventory) {
-      current = List.copyOf(sessions.values());
+  /** 配置变更通知：只对当前持有本地会话的 Environment 重新读取权威配置。 */
+  public void environmentChanged(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    if (sessionOf(environmentId) == null) {
+      return;
     }
-    for (DaemonConnectionSession session : current) {
+    scheduleConfigSync(environmentId);
+  }
+
+  /** LISTEN 重连或 resync：对本节点当前持有的全部会话重新读取权威配置。 */
+  public void resyncEnvironmentConfigs() {
+    List<EnvironmentId> current;
+    synchronized (inventory) {
+      current = List.copyOf(sessions.keySet());
+    }
+    for (EnvironmentId environmentId : current) {
+      scheduleConfigSync(environmentId);
+    }
+  }
+
+  private void scheduleConfigSync(EnvironmentId environmentId) {
+    ConfigSyncState state =
+        configSyncs.computeIfAbsent(environmentId, ignored -> new ConfigSyncState());
+    state.dirty.set(true);
+    if (!state.running.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      configExecutor.execute(() -> runConfigSync(environmentId, state));
+    } catch (RuntimeException error) {
+      state.running.set(false);
+      logFailure("environment config scheduling for " + environmentId, error);
+    }
+  }
+
+  private void runConfigSync(EnvironmentId environmentId, ConfigSyncState state) {
+    while (true) {
+      state.dirty.set(false);
       try {
-        session.reconcileNetworkSettings();
+        DaemonConnectionSession session = sessionOf(environmentId);
+        if (session != null) {
+          session.reconcileEnvironmentConfig();
+        }
       } catch (RuntimeException error) {
-        logFailure("network settings notification", error);
+        logFailure("environment config reconciliation for " + environmentId, error);
+      }
+      if (state.dirty.get()) {
+        continue;
+      }
+      state.running.set(false);
+      if (!state.dirty.get()) {
+        configSyncs.remove(environmentId, state);
+        return;
+      }
+      if (!state.running.compareAndSet(false, true)) {
+        return;
       }
     }
   }
@@ -522,12 +574,12 @@ public final class EnvironmentDaemonServer
   public Optional<DaemonRuntimeSnapshot> runtimeStatus(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     DaemonConnectionSession session = sessionOf(environmentId);
-    if (session == null || !session.isReady()) {
+    if (session == null) {
       return Optional.empty();
     }
     UUID leaseToken = session.leaseToken();
     try {
-      if (!leaseStore.holdsReadyLease(environmentId, leaseToken)) {
+      if (!leaseStore.hasActiveLeaseToken(environmentId, leaseToken)) {
         return Optional.empty();
       }
     } catch (RuntimeException error) {

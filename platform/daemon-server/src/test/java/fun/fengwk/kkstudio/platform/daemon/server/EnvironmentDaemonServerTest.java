@@ -142,8 +142,12 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         List.of(MessageType.SETTINGS, MessageType.INVOKE, MessageType.INVOKE),
         channel.messageTypes());
-    assertEquals(CALL_ONE.toString(), channel.envelopes().get(1).getInvocationId());
-    assertEquals(CALL_TWO.toString(), channel.envelopes().get(2).getInvocationId());
+    List<Envelope> invokes =
+        channel.envelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.INVOKE)
+            .toList();
+    assertEquals(CALL_ONE.toString(), invokes.get(0).getInvocationId());
+    assertEquals(CALL_TWO.toString(), invokes.get(1).getInvocationId());
 
     fixture.receive(channel, completedEnvelope(CALL_ONE.toString(), "one"));
     fixture.receive(channel, completedEnvelope(CALL_TWO.toString(), "two"));
@@ -220,7 +224,11 @@ class EnvironmentDaemonServerTest {
     fixture.receive(channel, completedEnvelope(CALL_ONE.toString(), "one"));
 
     assertTrue(reentered.get());
-    assertEquals(CALL_TWO.toString(), channel.envelopes().get(2).getInvocationId());
+    List<Envelope> invokes =
+        channel.envelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.INVOKE)
+            .toList();
+    assertEquals(CALL_TWO.toString(), invokes.get(1).getInvocationId());
   }
 
   /** 测试意图：listener 回调发生在核心锁外，回调中重入核心 API 不得死锁。 */
@@ -531,7 +539,12 @@ class EnvironmentDaemonServerTest {
 
     FakeControlChannel second = fixture.connectReady("channel-instance-b");
     assertEquals(List.of(MessageType.SETTINGS, MessageType.RECOVER), second.messageTypes());
-    assertEquals(CALL_ONE.toString(), second.envelopes().get(1).getInvocationId());
+    Envelope recover =
+        second.envelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.RECOVER)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(CALL_ONE.toString(), recover.getInvocationId());
     assertEquals(0, second.countOf(MessageType.INVOKE), "恢复不得重新执行在途调用");
     assertEquals(0, second.countOf(MessageType.CANCEL), "控制连接抖动不得停止仍在运行的调用");
     assertFalse(handle.isCancelled(), "恢复不得替调用表达取消意图");
@@ -876,8 +889,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(Duration.ofSeconds(60), firstHandle.terminalDeliveryGrace());
 
     fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
+        new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
     EnvironmentCapabilityExecutionHandle secondHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
     assertEquals(Duration.ofSeconds(15), secondHandle.terminalDeliveryGrace());
@@ -1658,7 +1670,8 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = new FakeControlChannel("channel-settings-busy");
     channel.busyNextOffer = true;
-    DaemonAdmission admission = fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+    DaemonAdmission admission =
+        fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     if (admission instanceof DaemonAdmission.Admitted admitted) {
       fixture.server.open(admitted, channel, null);
     }
@@ -1775,160 +1788,105 @@ class EnvironmentDaemonServerTest {
     assertEquals(1, channel.countOf(MessageType.TEMPORARY_RESOURCE_POLICY));
   }
 
-  /** 覆盖握手期间变更、在线通知与清除：每次都下发最新权威快照。 */
+  /** 覆盖初始下发、通知对账与同版本去重：SETTINGS 之后发送完整 ENVIRONMENT_CONFIG，版本推进才重发。 */
   @Test
-  void networkSettingsFollowReadyAndNotifications() {
+  void environmentConfigFollowsInitialAndNotifications() {
     Fixture fixture = new Fixture();
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", "localhost"));
-    FakeControlChannel first = fixture.openSession("network-initial");
-    assertEquals("http://proxy.invalid:8080", first.lastEnvelope().getSettings().getProxyUrl());
-    assertEquals("localhost", first.lastEnvelope().getSettings().getNoProxyHosts());
-
-    fixture.settings.set(
-        new EnvironmentServerSettings(Duration.ofSeconds(60), 1024L, 60L, 30L, null, ""));
-    fixture.server.reconcileNetworkSettings();
-    assertEquals(1, first.countOf(MessageType.SETTINGS));
-    fixture.receiveReady(first);
-    assertEquals(2, first.countOf(MessageType.SETTINGS));
-    assertFalse(first.lastEnvelope().getSettings().hasProxyUrl());
-
-    FakeControlChannel second =
-        fixture.connectReady(OTHER_ENVIRONMENT_ID, "network-second", INSTANCE_ID, OTHER_TOKEN);
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://new.invalid:8080", "10.0.0.0/8"));
-    fixture.server.reconcileNetworkSettings();
-    for (FakeControlChannel channel : List.of(first, second)) {
-      assertEquals("http://new.invalid:8080", channel.lastEnvelope().getSettings().getProxyUrl());
-      assertEquals("10.0.0.0/8", channel.lastEnvelope().getSettings().getNoProxyHosts());
-    }
-    fixture.server.reconcileNetworkSettings();
-    assertEquals(3, first.countOf(MessageType.SETTINGS));
-    assertEquals(2, second.countOf(MessageType.SETTINGS));
-  }
-
-  /** 心跳只执行既有租约与资源策略路径；网络设置由通知驱动，不增加逐次对账。 */
-  @Test
-  void heartbeatDoesNotPollNetworkSettings() {
-    Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.connectReady("network-no-heartbeat");
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60),
-            16L * 1024 * 1024,
-            259200L,
-            1800L,
-            "http://proxy.invalid:8080",
-            ""));
-
-    fixture.receive(channel, heartbeatEnvelope());
-    fixture.receive(channel, heartbeatEnvelope());
-    assertEquals(1, channel.countOf(MessageType.SETTINGS));
-    fixture.server.reconcileNetworkSettings();
-    assertEquals(2, channel.countOf(MessageType.SETTINGS));
-    fixture.receive(channel, heartbeatEnvelope());
-    assertEquals(2, channel.countOf(MessageType.SETTINGS));
-  }
-
-  /** READY 补发遭拒时必须关闭连接，不得通知其他组件使用该连接；重连读取最新值。 */
-  @Test
-  void failedReadyNetworkUpdateClosesWithoutReadyNotification() {
-    for (boolean throwsOnOffer : List.of(false, true)) {
-      Fixture fixture = new Fixture();
-      FakeControlChannel channel = fixture.openSession("network-ready-rejected");
-      fixture.settings.set(
-          new EnvironmentServerSettings(
-              Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", ""));
-      channel.busyNextOffer = !throwsOnOffer;
-      channel.failNextOffer = throwsOnOffer;
-
-      fixture.receiveReady(channel);
-      assertTrue(channel.closed());
-      assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
-      assertTrue(fixture.readyNotifications.isEmpty());
-      FakeControlChannel reconnected = fixture.reconnectReady("network-reconnected");
-      assertEquals(
-          "http://proxy.invalid:8080", reconnected.lastEnvelope().getSettings().getProxyUrl());
-      assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
-    }
-  }
-
-  /** 传输可以在 offer 内同步通知关闭：即使返回 ACCEPTED，也不能发布已关闭连接的 READY。 */
-  @Test
-  void synchronousCloseDuringReadyNetworkUpdateSuppressesReadyNotification() {
-    Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.openSession("network-synchronous-close");
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", ""));
-    channel.afterOffer = fixture.sessionOf(channel)::closed;
-
-    fixture.receiveReady(channel);
-    assertTrue(channel.closed());
-    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
-    assertTrue(fixture.readyNotifications.isEmpty());
-  }
-
-  /** 并行通知按现读顺序发送；阻塞的传输不得占住 stateLock 或 inventory。 */
-  @Test
-  void concurrentNetworkNotificationsRemainOrderedWithoutHoldingStateLock() throws Exception {
-    Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.connectReady("network-concurrent");
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://first.invalid:8080", ""));
-    channel.holdNextOffer = true;
-    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      Future<?> first = executor.submit(fixture.server::reconcileNetworkSettings);
-      assertTrue(channel.awaitOfferEntered());
-      try {
-        Future<Boolean> ready = executor.submit(() -> fixture.server.isReady(ENVIRONMENT_ID));
-        assertTrue(ready.get(2, TimeUnit.SECONDS));
-
-        fixture.settings.set(
-            new EnvironmentServerSettings(
-                Duration.ofSeconds(60), 1024L, 60L, 30L, "http://second.invalid:8080", ""));
-        CountDownLatch secondStarted = new CountDownLatch(1);
-        Future<?> second =
-            executor.submit(
-                () -> {
-                  secondStarted.countDown();
-                  fixture.server.reconcileNetworkSettings();
-                });
-        assertTrue(secondStarted.await(2, TimeUnit.SECONDS));
-        channel.releaseOffer();
-        first.get(2, TimeUnit.SECONDS);
-        second.get(2, TimeUnit.SECONDS);
-      } finally {
-        channel.releaseOffer();
-      }
-    }
+    FakeControlChannel channel = fixture.openSession("config-initial");
     assertEquals(
-        List.of("", "http://first.invalid:8080", "http://second.invalid:8080"),
-        channel.envelopes().stream()
-            .filter(envelope -> envelope.getMessageType() == MessageType.SETTINGS)
-            .map(envelope -> envelope.getSettings().getProxyUrl())
-            .toList());
+        List.of(MessageType.SETTINGS, MessageType.ENVIRONMENT_CONFIG), channel.allMessageTypes());
+    assertEquals(0L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
+    assertEquals(
+        "https://studio.example.org",
+        channel.lastEnvelope().getEnvironmentConfig().getConfig().getStudioUrl());
+
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 3L));
+    fixture.server.environmentChanged(ENVIRONMENT_ID);
+    assertEquals(2, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
+    assertEquals(3L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
+
+    fixture.server.resyncEnvironmentConfigs();
+    fixture.receive(channel, heartbeatEnvelope());
+    assertEquals(2, channel.countOf(MessageType.ENVIRONMENT_CONFIG), "同版本不重复下发");
+    assertTrue(channel.isOpen());
   }
 
-  /** 一个连接的发送失败不阻碍广播其他 READY 连接，失败连接重连后接收当前设置。 */
+  /** 源查询失败保留连接和当前快照；下一心跳恢复后追平权威版本，不扩展重试框架。 */
   @Test
-  void failedNetworkNotificationDoesNotStopOtherSessions() {
+  void environmentConfigSourceFailureKeepsSessionAndHeartbeatRetries() {
     Fixture fixture = new Fixture();
-    FakeControlChannel failed = fixture.connectReady("network-failed");
-    FakeControlChannel healthy =
-        fixture.connectReady(OTHER_ENVIRONMENT_ID, "network-healthy", INSTANCE_ID, OTHER_TOKEN);
-    failed.busyNextOffer = true;
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", "internal"));
+    FakeControlChannel channel = fixture.openSession("config-source-failure");
+    long before = channel.countOf(MessageType.ENVIRONMENT_CONFIG);
 
-    fixture.server.reconcileNetworkSettings();
+    fixture.configLookupFailure = new IllegalStateException("config source unavailable");
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 2L));
+    fixture.server.environmentChanged(ENVIRONMENT_ID);
+    assertTrue(channel.isOpen());
+    assertEquals(before, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
+
+    fixture.configLookupFailure = null;
+    fixture.receive(channel, heartbeatEnvelope());
+    assertEquals(before + 1, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
+    assertEquals(2L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
+  }
+
+  /** 卡片或配置缺失时必须明确关闭连接，不能把旧配置当成仍有效。 */
+  @Test
+  void missingEnvironmentConfigClosesExplicitly() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.openSession("config-missing-live");
+    fixture.configs.remove(ENVIRONMENT_ID);
+    fixture.server.environmentChanged(ENVIRONMENT_ID);
+
+    assertTrue(channel.closed());
+    assertEquals(MessageType.ERROR, channel.lastEnvelope().getMessageType());
+
+    Fixture initialMissing = new Fixture();
+    initialMissing.configs.remove(ENVIRONMENT_ID);
+    FakeControlChannel missing = initialMissing.openSession("config-missing-initial");
+    assertTrue(missing.closed());
+    assertEquals(List.of(MessageType.SETTINGS, MessageType.ERROR), missing.allMessageTypes());
+  }
+
+  /** 入队失败必须关闭连接；正常重连由初始下发读取最新权威版本。 */
+  @Test
+  void environmentConfigOfferFailureClosesAndReconnectGetsLatest() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.openSession("config-offer-failure");
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 4L));
+    channel.busyNextOffer = true;
+
+    fixture.server.environmentChanged(ENVIRONMENT_ID);
+    assertTrue(channel.closed());
+
+    fixture.leaseStore.activeLeaseToken = false;
+    FakeControlChannel reconnected = fixture.connectReady("config-reconnected");
+    assertTrue(reconnected.isOpen());
+    assertEquals(4L, reconnected.lastEnvelope().getEnvironmentConfig().getVersion());
+  }
+
+  /** 一个连接的配置下发失败不阻碍其它本机会话对账。 */
+  @Test
+  void failedEnvironmentConfigDoesNotStopOtherSessions() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel failed = fixture.openSession("config-failed");
+    FakeControlChannel healthy =
+        fixture.connectReady(OTHER_ENVIRONMENT_ID, "config-healthy", INSTANCE_ID, OTHER_TOKEN);
+    failed.busyNextOffer = true;
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 5L));
+
+    fixture.server.environmentChanged(ENVIRONMENT_ID);
     assertTrue(failed.closed());
-    assertEquals("http://proxy.invalid:8080", healthy.lastEnvelope().getSettings().getProxyUrl());
-    assertEquals("internal", healthy.lastEnvelope().getSettings().getNoProxyHosts());
+    assertTrue(healthy.isOpen());
+    assertEquals(0L, healthy.lastEnvelope().getEnvironmentConfig().getVersion());
   }
 
   /** 测试意图：READY 时围栏已失效不得进入 READY，必须按协议错误关闭连接。 */
@@ -2126,7 +2084,8 @@ class EnvironmentDaemonServerTest {
     FakeControlChannel first = fixture.connectReady("channel-held");
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
 
-    DaemonAdmission admission = fixture.server.admit(new DaemonHandshake(TOKEN, OTHER_INSTANCE_ID));
+    DaemonAdmission admission =
+        fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, OTHER_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission);
     assertTrue(first.isOpen());
 
@@ -2150,7 +2109,7 @@ class EnvironmentDaemonServerTest {
   void unknownRegistrationTokenIsRejected() {
     Fixture fixture = new Fixture();
     DaemonAdmission admission =
-        fixture.server.admit(new DaemonHandshake("wrong-token", INSTANCE_ID));
+        fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, "wrong-token", INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Rejected.class, admission);
     assertFalse(fixture.leaseStore.acquired);
   }
@@ -2161,13 +2120,13 @@ class EnvironmentDaemonServerTest {
     Fixture rejected = new Fixture();
     rejected.leaseStore.rejected = true;
     DaemonAdmission rejectedAdmission =
-        rejected.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+        rejected.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.Rejected.class, rejectedAdmission);
 
     Fixture retryLater = new Fixture();
     retryLater.leaseStore.retryLater = true;
     DaemonAdmission retryLaterAdmission =
-        retryLater.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+        retryLater.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, retryLaterAdmission);
   }
 
@@ -2178,7 +2137,7 @@ class EnvironmentDaemonServerTest {
     fixture.leaseStore.databaseUnavailable = true;
     assertThrows(
         IllegalStateException.class,
-        () -> fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
+        () -> fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID)));
   }
 
   /** 测试意图：注册凭据目录抛异常时握手准入必须 fail-closed 抛出异常，不建立任何绑定。 */
@@ -2188,18 +2147,28 @@ class EnvironmentDaemonServerTest {
     fixture.failRegistrationDirectory();
     assertThrows(
         IllegalStateException.class,
-        () -> fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
+        () -> fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID)));
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：READY 之前的心跳属于协议违规，必须以协议错误关闭连接。 */
+  /** 测试意图：CONNECTING 心跳只续租并缓存运行状态/配置错误，不触发 READY 回调或执行路由。 */
   @Test
-  void heartbeatBeforeReadyClosesConnection() {
+  void heartbeatBeforeReadyRenewsLeaseWithoutEnablingExecution() {
     Fixture heartbeatFirst = new Fixture();
     FakeControlChannel heartbeatChannel = heartbeatFirst.openSession("channel-heartbeat-first");
     heartbeatFirst.receive(
         heartbeatChannel, heartbeatEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
-    assertTrue(heartbeatChannel.closed());
+
+    assertTrue(heartbeatChannel.isOpen());
+    assertEquals(1, heartbeatFirst.leaseStore.heartbeatCount);
+    assertTrue(heartbeatFirst.heartbeatNotifications.isEmpty());
+    assertEquals(1L, heartbeatFirst.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
+    assertFalse(heartbeatFirst.server.isReady(ENVIRONMENT_ID));
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            heartbeatFirst.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
   }
 
   /** 测试意图：重复 READY 或握手参数非法（token/实例身份非法）都必须被拒绝。 */
@@ -2213,13 +2182,27 @@ class EnvironmentDaemonServerTest {
     assertTrue(readyChannel.closed());
     assertEquals(List.of(MessageType.SETTINGS, MessageType.ERROR), readyChannel.messageTypes());
 
-    assertThrows(IllegalArgumentException.class, () -> new DaemonHandshake("", INSTANCE_ID));
-    assertThrows(IllegalArgumentException.class, () -> new DaemonHandshake(TOKEN, ""));
+    assertThrows(NullPointerException.class, () -> new DaemonHandshake(null, TOKEN, INSTANCE_ID));
+    assertThrows(
+        IllegalArgumentException.class, () -> new DaemonHandshake(ENVIRONMENT_ID, "", INSTANCE_ID));
+    assertThrows(
+        IllegalArgumentException.class, () -> new DaemonHandshake(ENVIRONMENT_ID, TOKEN, ""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonHandshake(TOKEN, "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"));
+        () -> new DaemonHandshake(ENVIRONMENT_ID, TOKEN, "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"));
     assertThrows(
-        IllegalArgumentException.class, () -> new DaemonHandshake(TOKEN, "{" + INSTANCE_ID + "}"));
+        IllegalArgumentException.class,
+        () -> new DaemonHandshake(ENVIRONMENT_ID, TOKEN, "{" + INSTANCE_ID + "}"));
+  }
+
+  /** 测试意图：注册凭据所属卡片与握手声明的 Environment 不一致时必须拒绝，不能串用其它卡片路由。 */
+  @Test
+  void handshakeEnvironmentMustMatchRegistrationToken() {
+    Fixture fixture = new Fixture();
+    DaemonAdmission admission =
+        fixture.server.admit(new DaemonHandshake(OTHER_ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
+    assertInstanceOf(DaemonAdmission.Rejected.class, admission);
+    assertFalse(fixture.leaseStore.acquired);
   }
 
   /** 测试意图：绑定连接上的 environmentId 不匹配、或者消息类型方向错误，都以协议错误关闭连接。 */
@@ -2322,9 +2305,14 @@ class EnvironmentDaemonServerTest {
     fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
     fixture.server.sendUpdate(ENVIRONMENT_ID, command);
     assertEquals(List.of(MessageType.SETTINGS, MessageType.UPDATE), channel.messageTypes());
-    assertEquals(operationId, channel.envelopes().get(1).getUpdate().getOperationId());
-    assertEquals("1.0.9", channel.envelopes().get(1).getUpdate().getTargetVersion());
-    assertEquals(2, channel.envelopes().get(1).getUpdate().getAllFields().size());
+    Envelope update =
+        channel.envelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.UPDATE)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(operationId, update.getUpdate().getOperationId());
+    assertEquals("1.0.9", update.getUpdate().getTargetVersion());
+    assertEquals(2, update.getUpdate().getAllFields().size());
 
     channel.busyNextOffer = true;
     assertThrows(
@@ -2428,7 +2416,7 @@ class EnvironmentDaemonServerTest {
     fixture.receiveReady(channel);
 
     assertEquals(
-        EnvironmentDaemonServerTestSupport.CAPABILITIES, fixture.leaseStore.readyCapabilities);
+        EnvironmentDaemonServerTestSupport.READY_METADATA, fixture.leaseStore.readyMetadata);
     assertEquals(List.of(ENVIRONMENT_ID), fixture.readyNotifications);
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
     assertEquals(beforeReady, channel.envelopes().size());
@@ -2496,7 +2484,8 @@ class EnvironmentDaemonServerTest {
   void blankConnectionIdIsRejected() {
     Fixture fixture = new Fixture();
     DaemonAdmission.Admitted admitted =
-        (DaemonAdmission.Admitted) fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+        (DaemonAdmission.Admitted)
+            fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     assertThrows(
         NullPointerException.class,
         () -> fixture.server.open(null, new FakeControlChannel("1"), null));
@@ -2826,22 +2815,22 @@ class EnvironmentDaemonServerTest {
   void settingsRejectNonPositiveBounds() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L, null, ""));
+        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L, null, ""));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L, null, ""));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L, null, ""));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
     assertThrows(
         NullPointerException.class,
-        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L, null, ""));
+        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L, null, "")
+        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
             .heartbeatTimeout());
   }
 
@@ -3449,6 +3438,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(5L, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
 
     fixture.leaseStore.holdsReadyLease = false;
+    fixture.leaseStore.activeLeaseToken = false;
     assertTrue(fixture.server.runtimeStatus(ENVIRONMENT_ID).isEmpty());
   }
 
@@ -3536,7 +3526,8 @@ class EnvironmentDaemonServerTest {
   void abandonAdmissionReleasesLease() {
     Fixture fixture = new Fixture();
     DaemonAdmission.Admitted admitted =
-        (DaemonAdmission.Admitted) fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+        (DaemonAdmission.Admitted)
+            fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     fixture.server.abandon(admitted);
     FakeControlChannel channel = new FakeControlChannel("c1");
     assertThrows(IllegalStateException.class, () -> fixture.server.open(admitted, channel, null));
@@ -3739,7 +3730,8 @@ class EnvironmentDaemonServerTest {
     assertEquals(1, channel.drainCount());
     assertTrue(fixture.leaseStore.released);
 
-    DaemonAdmission admission = fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+    DaemonAdmission admission =
+        fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission);
 
     assertThrows(
@@ -3764,7 +3756,9 @@ class EnvironmentDaemonServerTest {
     ControlProtocolException error =
         assertThrows(
             ControlProtocolException.class,
-            () -> fixture.server.admit(new DaemonHandshake(TOKEN, OTHER_INSTANCE_ID)));
+            () ->
+                fixture.server.admit(
+                    new DaemonHandshake(ENVIRONMENT_ID, TOKEN, OTHER_INSTANCE_ID)));
     assertTrue(error.getMessage().contains("database unavailable"));
   }
 
@@ -3775,34 +3769,29 @@ class EnvironmentDaemonServerTest {
     DaemonAdmission.Admitted admitted =
         assertInstanceOf(
             DaemonAdmission.Admitted.class,
-            fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
+            fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, INSTANCE_ID)));
     fixture.leaseStore.disconnectFailure = new IllegalStateException("disconnect failed");
 
     assertDoesNotThrow(() -> fixture.server.abandon(admitted));
     assertFalse(fixture.leaseStore.disconnected);
   }
 
-  /** 广播网络设置时读取 settings 失败只影响该次通知，其他连接仍可继续收敛。 */
+  /** 配置通知读取源失败只影响该次对账，连接保持可用并由下一心跳收敛。 */
   @Test
-  void reconcileNetworkSettingsIsolatesSettingsSupplierFailure() {
+  void environmentChangedIsolatesConfigSourceFailure() {
     Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.connectReady("network-settings-failure");
-    fixture.settingsFailure = new IllegalStateException("settings unavailable");
+    FakeControlChannel channel = fixture.connectReady("config-source-isolation");
+    fixture.configLookupFailure = new IllegalStateException("config source unavailable");
 
-    assertDoesNotThrow(fixture.server::reconcileNetworkSettings);
+    assertDoesNotThrow(() -> fixture.server.environmentChanged(ENVIRONMENT_ID));
     assertFalse(channel.closed());
 
-    fixture.settingsFailure = null;
-    fixture.settings.set(
-        new EnvironmentServerSettings(
-            Duration.ofSeconds(60),
-            16L * 1024 * 1024,
-            259200L,
-            1800L,
-            "http://proxy.invalid:8080",
-            ""));
-    fixture.server.reconcileNetworkSettings();
-    assertEquals("http://proxy.invalid:8080", channel.lastEnvelope().getSettings().getProxyUrl());
+    fixture.configLookupFailure = null;
+    fixture.configs.put(
+        ENVIRONMENT_ID,
+        EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 6L));
+    fixture.receive(channel, heartbeatEnvelope());
+    assertEquals(6L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
   }
 
   /** drain 对传输 drain 与租约释放的失败都保持隔离，继续完成其余清理。 */
