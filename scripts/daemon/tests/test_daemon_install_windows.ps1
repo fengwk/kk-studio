@@ -428,7 +428,20 @@ try {
         ConfigFile = $pairs[0]; TokenFile = $pairs[1]
     }
     Assert-True -Condition ($exit -eq 0) -Message "install exits 0"
-    $envRoot = Join-Path (Join-Path (Join-Path $profileDir ".kk-studio") "environments") $environmentId
+    $installRoot = Join-Path $profileDir ".kk-studio"
+    $environmentsRoot = Join-Path $installRoot "environments"
+    $envRoot = Join-Path $environmentsRoot $environmentId
+    # A first install must create the whole managed directory chain with protected ACLs, not only
+    # the final environment root protected by the native lock helper.
+    foreach ($directory in @($installRoot, $environmentsRoot, $envRoot)) {
+        Assert-True -Condition (Test-Path -LiteralPath $directory -PathType Container) `
+            -Message "managed directory exists: $directory"
+        $chainAcl = Get-Acl -LiteralPath $directory
+        Assert-True -Condition ($chainAcl.AreAccessRulesProtected) `
+            -Message "managed directory ACL is protected: $directory"
+        Assert-True -Condition ((Convert-AccountNameToSid -AccountName $chainAcl.Owner) -eq $script:CurrentSid) `
+            -Message "managed directory is owned by the current user: $directory"
+    }
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "lib\main.js")) -Message "lib main.js published"
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $envRoot "lib\runtime\code-server\lib\node.exe")) `
         -Message "frozen node.exe published"
@@ -535,6 +548,41 @@ try {
         $missingUpdate = $true
     }
     Assert-True -Condition $missingUpdate -Message "update requires an existing installation"
+
+    # An existing directory with inherited ACL must fail closed and must not be auto-repaired.
+    $unsafeId = "66666666-6666-4666-8666-666666666666"
+    $unsafeRoot = Join-Path $environmentsRoot $unsafeId
+    New-Item -ItemType Directory -Path $unsafeRoot -Force | Out-Null
+    $unsafeAcl = New-PrivateAcl -Directory
+    $unsafeAcl.SetAccessRuleProtection($false, $true)
+    Set-Acl -LiteralPath $unsafeRoot -AclObject $unsafeAcl
+    Assert-True -Condition (-not (Get-Acl -LiteralPath $unsafeRoot).AreAccessRulesProtected) `
+        -Message "unsafe fixture directory keeps inherited ACL"
+    $unsafePairs = New-Inputs -Environment $unsafeId
+    $unsafeRejected = $false
+    $unsafeMessage = ""
+    try {
+        Invoke-Installer -Parameters @{
+            Command = "install"; EnvironmentId = $unsafeId; Version = $daemonVersion
+            ConfigFile = $unsafePairs[0]; TokenFile = $unsafePairs[1]
+        } | Out-Null
+    }
+    catch {
+        $unsafeRejected = $true
+        $unsafeMessage = $_.Exception.Message
+    }
+    Assert-True -Condition $unsafeRejected -Message "unsafe existing directory is rejected"
+    Assert-True -Condition ($unsafeMessage -match "managed directory must be current-user owned with protected ACL inheritance") `
+        -Message "unsafe directory reports the protected-ACL failure"
+    $phaseLabel = "[" + [char] 0x9636 + [char] 0x6BB5 + " "
+    Assert-True -Condition ($unsafeMessage.Contains($phaseLabel)) `
+        -Message "failure diagnostic includes the current phase label"
+    Assert-True -Condition ($unsafeMessage -match "\[[a-z-]+\]") `
+        -Message "failure diagnostic includes a fixed phase code"
+    Assert-True -Condition (-not (Test-Path -LiteralPath (Join-Path $unsafeRoot "lib"))) `
+        -Message "unsafe directory receives no program"
+    Assert-True -Condition (-not (Get-Acl -LiteralPath $unsafeRoot).AreAccessRulesProtected) `
+        -Message "unsafe directory is not repaired"
 
     # A busy card fails without touching the program.
     $busyId = "44444444-4444-4444-8444-444444444444"

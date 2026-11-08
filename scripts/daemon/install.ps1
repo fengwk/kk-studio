@@ -138,8 +138,9 @@ function Throw-Failure {
         [ValidateSet("安装", "更新", "卸载")][string] $Action = "安装"
     )
     $next = if ($Action -eq "卸载") { "处理后，重新复制并执行卸载命令" } else { "修正后，重新复制并执行对应命令" }
+    $phase = if ([string]::IsNullOrEmpty($script:PhaseCode)) { "unknown" } else { $script:PhaseCode }
     throw [System.InvalidOperationException]::new(
-        "${Action}失败：${Message}`n下一步：按上面的原因${next}。"
+        "${Action}失败 [阶段 ${phase}]：${Message}`n下一步：按上面的原因${next}。"
     )
 }
 
@@ -1272,11 +1273,14 @@ function Invoke-InstallCommon {
 
     $script:Phase = "5/7 取得操作锁"
     $script:PhaseCode = "lock"
-    Start-InstallLockHelper -HelperRoot $helperRoot
-    $script:WorkOwned = $true
+    # The native lock helper only protects its final directory; create and verify the whole managed
+    # directory chain before it so existing inherited parents are rejected and first install has
+    # private ACLs. .work and service transitions still happen only after the lock is held.
     foreach ($directory in @($script:InstallRoot, $script:EnvironmentsRoot, $script:EnvironmentRoot)) {
         New-PrivateDirectory -Path $directory
     }
+    Start-InstallLockHelper -HelperRoot $helperRoot
+    $script:WorkOwned = $true
     Assert-ManagedLayout -HasTask ($null -ne (Find-DaemonTask))
 
     $script:Phase = "6/7 停止发布启动"
