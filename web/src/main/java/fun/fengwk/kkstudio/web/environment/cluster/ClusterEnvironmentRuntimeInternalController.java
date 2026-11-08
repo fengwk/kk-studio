@@ -45,29 +45,36 @@ public class ClusterEnvironmentRuntimeInternalController {
   @GetMapping("/runtime")
   public EnvironmentRuntimeStatusDTO runtimeStatus(
       @PathVariable UUID environmentId, HttpServletRequest request) {
-    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId, true);
     return localEnvironmentUpdateService.runtimeStatus(environment);
   }
 
   @PostMapping("/update-daemon")
   public EnvironmentUpdateStartDTO startUpdate(
       @PathVariable UUID environmentId, HttpServletRequest request) {
-    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId, false);
     return localEnvironmentUpdateService.startUpdate(environment);
   }
 
-  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, UUID environmentId) {
+  private EnvironmentId authenticateAndAuthorize(
+      HttpServletRequest request, UUID environmentId, boolean runtimeRead) {
     authentication.verify(
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
     EnvironmentId environment = EnvironmentId.of(environmentId);
     boolean local =
-        clusterNodeRegistry.route(environment).filter(ClusterOwnerRoute::local).isPresent();
+        (runtimeRead
+                ? clusterNodeRegistry.runtimeRoute(environment)
+                : clusterNodeRegistry.route(environment))
+            .filter(ClusterOwnerRoute::local)
+            .isPresent();
     if (!local) {
       throw DomainException.unavailable(
           "ENVIRONMENT_UNAVAILABLE",
-          "internal runtime request does not match this node's READY owner route");
+          runtimeRead
+              ? "internal runtime request does not match this node's active owner route"
+              : "internal runtime request does not match this node's READY owner route");
     }
     return environment;
   }

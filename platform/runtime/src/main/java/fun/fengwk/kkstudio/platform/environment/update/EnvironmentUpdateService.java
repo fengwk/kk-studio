@@ -8,7 +8,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonConfigurationStatus;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
@@ -107,7 +108,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     EnvironmentConnection connection = requireReadyConnection(environmentId);
     EnvironmentRuntimeStatusDTO current = runtimeStatus(environmentId);
 
-    DaemonEnvironmentInfo host = connection.daemonCapabilities().environment();
+    DaemonHostInfo host = connection.readyMetadata().hostInfo();
     DaemonOperatingSystem operatingSystem = host.operatingSystem();
     DaemonArchitecture architecture = canonicalArchitecture(host.architecture());
     if (!DaemonUpdateArtifact.isSupported(operatingSystem, architecture)) {
@@ -231,9 +232,28 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
     status.setDaemonVersion(snapshot.status().daemonVersion());
     status.setUpdate(toProgressDto(snapshot.status().update()));
+    status.setConfiguration(toConfigurationDto(snapshot.status().configuration()));
     EnvironmentRuntimeStatusDTO dto = new EnvironmentRuntimeStatusDTO();
     dto.setRevision(snapshot.revision());
     dto.setStatus(status);
+    return dto;
+  }
+
+  private static EnvironmentRuntimeConfigurationDTO toConfigurationDto(
+      DaemonConfigurationStatus configuration) {
+    EnvironmentRuntimeConfigurationDTO dto = new EnvironmentRuntimeConfigurationDTO();
+    if (configuration == null) {
+      return dto;
+    }
+    dto.setAppliedVersion(configuration.appliedVersion());
+    dto.setProxyUrl(configuration.proxyUrl());
+    if (configuration.error() != null) {
+      EnvironmentRuntimeConfigurationErrorDTO error = new EnvironmentRuntimeConfigurationErrorDTO();
+      error.setVersion(configuration.error().version());
+      error.setCode(configuration.error().code());
+      error.setField(configuration.error().field());
+      dto.setError(error);
+    }
     return dto;
   }
 

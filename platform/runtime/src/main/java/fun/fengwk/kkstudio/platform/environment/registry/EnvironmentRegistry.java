@@ -10,8 +10,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
+import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadataCodec;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
@@ -60,7 +60,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       tried_upsert as (
           insert into environment_connection (
               environment_id, owner_node_id, lease_token,
-              status, runtime_info, recent_events, last_seen_at, lease_until
+              status, ready_metadata, recent_events, last_seen_at, lease_until
           )
           select
               id, :ownerNodeId, :leaseToken,
@@ -98,14 +98,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   /**
    * 围栏式登记 READY：推进行状态、写入最近一次被接受的宿主 metadata、清空 Skill 同步投影并追加一条 READY 事件。
    *
-   * <p>只有当前 owner + lease 且未过期的连接行才能推进 READY；围栏失效时既不推进状态也不改写 runtime_info。离线或重新 CONNECTING
+   * <p>只有当前 owner + lease 且未过期的连接行才能推进 READY；围栏失效时既不推进状态也不改写 ready_metadata。离线或重新 CONNECTING
    * 都不清空该保留事实；skill_state 每次都先清空，随后由 Skill 同步编排器全量重建。
    */
   private static final String MARK_READY_SQL =
       """
       update environment_connection
       set status = 'READY',
-          runtime_info = :runtimeInfo::jsonb,
+          ready_metadata = :readyMetadata::jsonb,
           skill_state = '[]'::jsonb,
           recent_events = case
               when jsonb_array_length(recent_events) >= :maxRecentEvents
@@ -168,7 +168,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String FIND_SQL =
       """
       select environment_id, owner_node_id, lease_token,
-             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
+             status, ready_metadata, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
       where environment_id = :environmentId
       """;
@@ -224,7 +224,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String LIST_SQL =
       """
       select environment_id, owner_node_id, lease_token,
-             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
+             status, ready_metadata, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
       order by environment_id asc
       """;
@@ -233,7 +233,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String LIST_READY_OWNED_SQL =
       """
       select environment_id, owner_node_id, lease_token,
-             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
+             status, ready_metadata, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
       where owner_node_id = :ownerNodeId
         and status = 'READY'
@@ -279,7 +279,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
   private final EnvironmentChangeNotifier notifier;
-  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+  private final DaemonReadyMetadataCodec readyMetadataCodec = new DaemonReadyMetadataCodec();
   private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
 
   public EnvironmentRegistry(
@@ -401,13 +401,13 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   public boolean markReady(
       EnvironmentId environmentId,
       UUID leaseToken,
-      DaemonCapabilities capabilities,
+      DaemonReadyMetadata readyMetadata,
       Duration leaseDuration) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
-    Objects.requireNonNull(capabilities, "capabilities");
+    Objects.requireNonNull(readyMetadata, "readyMetadata");
     Objects.requireNonNull(leaseDuration, "leaseDuration");
-    String runtimeInfoJson = capabilitiesCodec.encode(capabilities);
+    String readyMetadataJson = readyMetadataCodec.encode(readyMetadata);
     String readyEvent =
         stateCodec.encodeEvent(
             lifecycleEvent(
@@ -417,7 +417,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
         () ->
             jdbcClient
                 .sql(MARK_READY_SQL)
-                .param("runtimeInfo", runtimeInfoJson)
+                .param("readyMetadata", readyMetadataJson)
                 .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
                 .param("readyEvent", readyEvent)
                 .param("leaseMillis", leaseDuration.toMillis())
@@ -472,7 +472,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   /**
    * 连接断开时，围栏式将状态回退为 CONNECTING 并保留重连宽限租约。
    *
-   * <p>{@code runtime_info} 保留最近一次被接受的 READY 宿主 metadata，断线不清空。宽限期从释放语句时刻的毫秒边界起算；宽限期为零时租约立即过期，
+   * <p>{@code ready_metadata} 保留最近一次被接受的 READY 宿主 metadata，断线不清空。宽限期从释放语句时刻的毫秒边界起算；宽限期为零时租约立即过期，
    * 其他节点可立即接管。
    *
    * @return 围栏校验成功返回 true
@@ -708,10 +708,10 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       UUID owner = (UUID) rs.getObject("owner_node_id");
       UUID leaseToken = (UUID) rs.getObject("lease_token");
       LiveEnvironmentStatus status = LiveEnvironmentStatus.valueOf(rs.getString("status"));
-      // 保留事实：任何非 null 的 runtime_info 都可解码，与当前 status 无关。
-      String runtimeInfoJson = rs.getString("runtime_info");
-      DaemonCapabilities capabilities =
-          runtimeInfoJson == null ? null : capabilitiesCodec.decode(runtimeInfoJson);
+      // 保留事实：任何非 null 的 ready_metadata 都可解码，与当前 status 无关。
+      String readyMetadataJson = rs.getString("ready_metadata");
+      DaemonReadyMetadata readyMetadata =
+          readyMetadataJson == null ? null : readyMetadataCodec.decode(readyMetadataJson);
       // 两个 JSONB 投影同样与 status 无关：断线或重新 CONNECTING 都保留最近一次同步事实与最近事件。
       List<EnvironmentSkillState> skillState =
           stateCodec.decodeSkillState(rs.getString("skill_state"));
@@ -723,7 +723,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
           owner,
           leaseToken,
           status,
-          capabilities,
+          readyMetadata,
           skillState,
           recentEvents,
           lastSeenAt,

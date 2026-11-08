@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigCodec;
 import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
@@ -488,8 +488,8 @@ public class EnvironmentService {
         conn.isReady(
             now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeenAt(conn.lastSeenAt());
-    DaemonEnvironmentInfo host =
-        conn.daemonCapabilities() == null ? null : conn.daemonCapabilities().environment();
+    DaemonHostInfo host =
+        conn.readyMetadata() == null ? null : conn.readyMetadata().hostInfo();
     dto.setOperatingSystem(host == null ? null : host.operatingSystem());
     dto.setTimeZone(host == null ? null : host.timeZone());
     dto.setUserName(host == null ? null : host.userName());

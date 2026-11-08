@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 
 import java.util.Objects;
@@ -26,15 +26,15 @@ public record CurrentEnvironmentContext(
   public CurrentEnvironmentContext {
     environmentName = environmentName == null ? null : environmentName.strip();
     note = validateNote(note);
-    userName = userName == null ? null : DaemonEnvironmentInfo.validateUserName(userName);
+    userName = userName == null ? null : DaemonHostInfo.validateUserName(userName);
     homeDirectory =
         homeDirectory == null
             ? null
             : operatingSystem == null
-                ? DaemonEnvironmentInfo.validateHomeDirectory(homeDirectory)
-                : DaemonEnvironmentInfo.validateHomeDirectory(homeDirectory, operatingSystem);
+                ? DaemonHostInfo.validateHomeDirectory(homeDirectory)
+                : DaemonHostInfo.validateHomeDirectory(homeDirectory, operatingSystem);
     tempDirectory =
-        tempDirectory == null ? null : DaemonEnvironmentInfo.validateTempDirectory(tempDirectory);
+        tempDirectory == null ? null : DaemonHostInfo.validateTempDirectory(tempDirectory);
     if (environmentId == null) {
       if (environmentName != null
           || operatingSystem != null
@@ -59,7 +59,7 @@ public record CurrentEnvironmentContext(
       EnvironmentId environmentId,
       String environmentName,
       String note,
-      DaemonEnvironmentInfo hostFacts) {
+      DaemonHostInfo hostFacts) {
     Objects.requireNonNull(environmentId, "environmentId");
     return new CurrentEnvironmentContext(
         environmentId,
