@@ -1794,10 +1794,11 @@ describe('runtime update handling', () => {
     await tick()
     expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'RUNTIME_STATUS')).toHaveLength(statusCount)
     expect(setup.runtime.getRuntimeStatus()).toEqual(afterFailure)
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'HEARTBEAT'))
-    const heartbeat = sent(setup.transport)
-      .filter((envelope) => envelope.messageType === 'HEARTBEAT')
-      .at(-1)
+    const matchesSnapshot = (envelope: DecodedSentEnvelope): boolean =>
+      envelope.messageType === 'HEARTBEAT' &&
+      decodeHeartbeat(JSON.stringify(envelope.payload)).runtimeStatus.revision === afterFailure.revision
+    await waitFor(() => sent(setup.transport).some(matchesSnapshot))
+    const heartbeat = sent(setup.transport).find(matchesSnapshot)
     expect(decodeHeartbeat(JSON.stringify(heartbeat?.payload)).runtimeStatus).toEqual(afterFailure)
 
     // 明确失败后同一目标的新 operation 可以重试；上一轮 update Promise 不占住准入门闩。
