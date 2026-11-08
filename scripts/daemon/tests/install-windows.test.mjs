@@ -215,6 +215,19 @@ describe('Windows installer security: card isolation, credentials and task owner
   it('owns the task through an exact per-user, per-card marker', () => {
     const body = functionBody('Assert-ManagedTask')
     assertIncludesAll(body, [
+      "$Task.PSObject.Properties['Actions']",
+      '$actions.Count -ne 1',
+      '$action.Execute',
+      '$action.Arguments',
+      '$action.WorkingDirectory',
+      'IndexOf',
+      'Equals',
+      '[StringComparison]::OrdinalIgnoreCase',
+      "$Task.PSObject.Properties['Principal']",
+      'UserId',
+      'Convert-AccountNameToSid',
+      '$principalSid -ne $script:CurrentSid',
+      '$Task.TaskName -ne $script:TaskName',
       '$Task.Description -ne $script:TaskDescription',
       '$script:InstalledNode',
       'main.js',
@@ -222,6 +235,8 @@ describe('Windows installer security: card isolation, credentials and task owner
       '拒绝操作非受管计划任务',
       '不要伪造所有权标记',
     ])
+    // There is no single-Action compatibility shape and path checks are not wildcard globs.
+    assert.doesNotMatch(body, /-notlike|\$Task\.Action(?!s)/u)
     // Ownership assertions never touch (or repair) the conflicting task.
     assertIncludesNone(body, ['Stop-ScheduledTask', 'Unregister-ScheduledTask', 'Remove-Item', 'Register-ScheduledTask'])
   })
@@ -484,7 +499,18 @@ describe('Windows installer native contracts: native tests run only where Window
       'stage failure does not stop the old service',
       'stage failure does not write config',
       'stage failure keeps the old program',
+      'Arguments = $Argument',
+      'Actions = @($Action)',
+      'Principal = $Principal',
+      'UserId = $UserId',
+      '$registered.Actions',
+      '@($taskBeforeStageFailure.Actions)',
+      '@($taskAfterStageFailure.Actions)',
+      'Assert-ControlledTaskRejected',
+      'other principal',
+      'multiple actions',
     ])
+    assert.doesNotMatch(native, /Argument = \$Argument|Action = \$Action|\.Action\.(?:Argument|Execute)/u)
     assertInOrder(
       native,
       '$script:RealInvokeNativeProcess = ${function:Invoke-NativeProcess}',
