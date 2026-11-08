@@ -45,6 +45,8 @@ export interface FakeStudioOptions {
   autoControl?: boolean
   environmentId?: string
   studioUrl?: string | (() => string)
+  /** 自动 ENVIRONMENT_CONFIG 必须与启动缓存内容一致；Windows 会显式配置 Git bash。 */
+  bashExecutable?: string
 }
 
 export class FakeStudioPeer {
@@ -198,6 +200,9 @@ export class FakeStudioPeer {
                       typeof this.options.studioUrl === 'function'
                         ? this.options.studioUrl()
                         : this.options.studioUrl ?? 'https://studio.example.com',
+                    ...(this.options.bashExecutable === undefined
+                      ? {}
+                      : { bashExecutable: this.options.bashExecutable }),
                   }),
                 }),
               },

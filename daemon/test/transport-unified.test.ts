@@ -2,7 +2,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { execFileSync } from 'node:child_process'
 import net from 'node:net'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -38,6 +38,7 @@ import {
   type Envelope,
 } from '../src/generated/control_pb.js'
 import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
+import { ensurePrivateDirectory, writePrivateFile } from '../src/native/private-fs.js'
 import { FakeStudioPeer } from './support/fake-studio.js'
 import { IdeError } from '../src/ide/errors.js'
 
@@ -96,11 +97,11 @@ describe('Unified Transport & Control Protocol', () => {
   let config: DaemonConfig
   let peer: FakeStudioPeer | null = null
 
-  beforeEach(() => {
-    tempDir = join(tmpdir(), `daemon-transport-test-${randomUUID()}`)
-    mkdirSync(tempDir, { recursive: true })
+  beforeEach(async () => {
+    // Windows 的 %TEMP% 继承宽松 DACL；配置热写会严格核验父目录私有，因此 fixture 必须真实收紧。
+    tempDir = await ensurePrivateDirectory(join(tmpdir(), `daemon-transport-test-${randomUUID()}`))
     tokenPath = join(tempDir, 'daemon.token')
-    writeFileSync(tokenPath, 'test-secret-token\n')
+    await writePrivateFile(tokenPath, 'test-secret-token\n')
 
     config = {
       environmentId: '11111111-1111-4111-8111-111111111111',
