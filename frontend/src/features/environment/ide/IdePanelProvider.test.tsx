@@ -176,13 +176,25 @@ function renderPanel(options: { active?: boolean } = {}) {
   return { ...view, sockets }
 }
 
-function connect(sockets: FakeWebSocketHarness, connectionId = CONNECTION_1): FakeWebSocket {
+function connect(
+  sockets: FakeWebSocketHarness,
+  connectionId = CONNECTION_1,
+  shouldAck: (frame: { revision?: string; views?: Array<Record<string, unknown>> }) => boolean = () => true,
+): FakeWebSocket {
   const socket = sockets.openLatest()
   const originalSend = socket.send.bind(socket)
   socket.send = (data: string) => {
-    const frame = JSON.parse(data) as { type?: string; revision?: string }
+    const frame = JSON.parse(data) as {
+      type?: string
+      revision?: string
+      views?: Array<Record<string, unknown>>
+    }
     originalSend(data)
-    if (frame.type === 'ide-use' && frame.revision != null) {
+    if (
+      frame.type === 'ide-use'
+      && frame.revision != null
+      && shouldAck(frame)
+    ) {
       socket.onmessage?.({
         data: JSON.stringify({
           type: 'ide-use-accepted',
@@ -503,6 +515,88 @@ describe('IdePanelProvider recovery state machine', () => {
     expect(second).toEqual(first)
     expect(second).toMatchObject({ mode: 'create', claimId: CLAIM_A, viewId: VIEW_A })
     await screen.findByTestId('ide-iframe')
+  })
+
+  it('waits for the new resume claim usage ACK before sending OPEN', async () => {
+    seedSession(BROWSER_A, recovery({ pending: pending() }))
+    ideService.readIdeView.mockResolvedValue(snapshot({
+      viewId: VIEW_A,
+      environmentId: ENV_A,
+      browserSessionId: BROWSER_A,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_1,
+      claimId: CLAIM_A,
+      daemonInstanceId: DAEMON_A,
+      bindingEpoch: '11',
+      directory: DIRECTORY_A,
+      workspacePath: DIRECTORY_A,
+      state: 'OPEN',
+    }, { revision: '21' }))
+    let heldRevision: string | null = null
+    let socket!: FakeWebSocket
+    let resolveOpen!: (value: unknown) => void
+    let usageAtPost: Array<{ type?: string; views?: Array<{ claimId?: string }> }> = []
+    ideService.openIdeView.mockImplementationOnce(async (
+      _environmentId: string,
+      request: Record<string, unknown>,
+    ) => {
+      usageAtPost = socket.sentMessages() as Array<{
+        type?: string
+        views?: Array<{ claimId?: string }>
+      }>
+      return new Promise((resolve) => {
+        resolveOpen = (value) => resolve(value)
+        void request
+      })
+    })
+
+    const { sockets } = renderPanel()
+    socket = connect(sockets, CONNECTION_1, (frame) => {
+      const isNewClaim = (frame.views ?? []).some((view) => view.claimId !== CLAIM_A)
+      if (isNewClaim) {
+        heldRevision = frame.revision ?? null
+        return false
+      }
+      return true
+    })
+
+    await waitFor(() => {
+      expect(ideService.readIdeView).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      const nextClaim = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId
+      expect(nextClaim).toBeTruthy()
+      expect(nextClaim).not.toBe(CLAIM_A)
+    })
+    expect(heldRevision).not.toBeNull()
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+
+    await act(async () => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: 'ide-use-accepted',
+          revision: heldRevision,
+        }),
+      })
+    })
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    })
+    const nextClaim = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId
+    const [, pendingRequest] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
+    await act(async () => {
+      resolveOpen(viewDto(pendingRequest, 2))
+    })
+    const [, request] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
+    expect(request).toMatchObject({
+      mode: 'resume',
+      claimId: nextClaim,
+      expectedBindingEpoch: '11',
+    })
+    expect(usageAtPost.some((frame) => (
+      frame.type === 'ide-use'
+      && (frame.views ?? []).some((view) => view.claimId === nextClaim)
+    ))).toBe(true)
   })
 
   it('shows detached on VIEW_OWNED_BY_OTHER_SESSION without sending OPEN or replacing the view', async () => {

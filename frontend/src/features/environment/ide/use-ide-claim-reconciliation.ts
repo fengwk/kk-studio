@@ -441,11 +441,54 @@ export function useIdeClaimReconciliation({
       return
     }
     const currentIdentity = identityRef.current
+    const browserSessionId = sessionRef.current.browserSessionId
     if (currentIdentity == null || !sessionReady() || pageSuspendedRef.current) {
       setWaitingReady(environmentId, attempt)
       return
     }
-    const request = buildOpenRequest(pending, sessionRef.current.browserSessionId, currentIdentity)
+    try {
+      // OPEN 前必须用新 claim 重新登记 usage；上一次纯读的旧 claim ACK 不能代替。
+      await registerUsageNow(usageOverride(
+        environmentId,
+        pending.viewId,
+        pending.claimId,
+        pending.mode === 'resume' ? pending.expectedBindingEpoch : undefined,
+      ))
+    } catch (error) {
+      if (!mountedRef.current) {
+        return
+      }
+      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, options)
+      return
+    }
+    if (!mountedRef.current) {
+      return
+    }
+    const appliedIdentity = identityRef.current
+    const latest = viewsRef.current[environmentId]
+    if (
+      latest == null
+      || latest.attempt !== attempt
+      || appliedIdentity == null
+      || appliedIdentity.eventNodeId !== currentIdentity.eventNodeId
+      || appliedIdentity.connectionId !== currentIdentity.connectionId
+      || sessionRef.current.browserSessionId !== browserSessionId
+      || !sessionReady()
+      || pageSuspendedRef.current
+    ) {
+      if (latest != null && latest.attempt === attempt) {
+        updateView(environmentId, attempt, {
+          status: appliedIdentity == null ? 'waiting-ready' : 'reconciling',
+          pending,
+          errorMessage: undefined,
+        })
+        if (appliedIdentity != null && sessionReady() && !pageSuspendedRef.current) {
+          reconcile(environmentId, 'connection')
+        }
+      }
+      return
+    }
+    const request = buildOpenRequest(pending, browserSessionId, currentIdentity)
     try {
       const response = await openIdeView(environmentId, request)
       if (!mountedRef.current) {
@@ -494,6 +537,7 @@ export function useIdeClaimReconciliation({
         iframeLoaded: entryChanged ? false : current.iframeLoaded,
         errorMessage: undefined,
         closeError: undefined,
+        closeInFlight: false,
       })
       writeSession()
       registerUsageQuiet(usageOverride(
