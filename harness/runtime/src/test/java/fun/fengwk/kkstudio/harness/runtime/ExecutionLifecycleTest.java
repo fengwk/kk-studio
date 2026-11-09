@@ -159,12 +159,13 @@ class ExecutionLifecycleTest {
             .name("physically-running-body")
             .start(
                 () -> {
-                  handle.attachBody(Thread.currentThread());
-                  attached.countDown();
-                  try {
-                    Thread.sleep(30_000);
-                  } catch (InterruptedException error) {
-                    interrupted.countDown();
+                  if (handle.attachBody(Thread.currentThread())) {
+                    attached.countDown();
+                    try {
+                      Thread.sleep(30_000);
+                    } catch (InterruptedException error) {
+                      interrupted.countDown();
+                    }
                   }
                 });
     assertTrue(attached.await(5, TimeUnit.SECONDS));
@@ -235,6 +236,126 @@ class ExecutionLifecycleTest {
     assertFalse(journal.loadAll().records().isEmpty());
   }
 
+  @Test
+  void cancelBeforeAttachIsRememberedAndRefusesTheBody() {
+    LocalExecutionIdentity identity = identity();
+    LocalExecutionHandle handle = lifecycle.begin(identity, () -> register(identity));
+
+    handle.requestCancel();
+
+    assertFalse(handle.attachBody(Thread.currentThread()));
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+    assertEquals(1, journal.loadAll().records().size());
+
+    handle.provenExit(ExecutionExitState.NOT_STARTED);
+    assertEquals(ExecutionExitState.NOT_STARTED, stored(identity).state());
+    assertTrue(journal.loadAll().records().isEmpty());
+  }
+
+  @Test
+  void bodyAttachIsRefusedWhenNotRegisteredOrAlreadySettled() {
+    LocalExecutionHandle absent = lifecycle.begin(identity(), () -> null);
+    assertFalse(absent.attachBody(Thread.currentThread()));
+    absent.provenExit(ExecutionExitState.NOT_STARTED);
+
+    LocalExecutionIdentity identity = identity();
+    LocalExecutionHandle settled = lifecycle.begin(identity, () -> register(identity));
+    assertTrue(settled.attachBody(Thread.currentThread()));
+    settled.detachBody();
+    settled.provenExit(ExecutionExitState.STUDIO_EXITED);
+    assertFalse(settled.attachBody(Thread.currentThread()));
+  }
+
+  @Test
+  void provenExitRefusesWhileTheAttachedBodyIsStillAlive() throws Exception {
+    LocalExecutionIdentity identity = identity();
+    LocalExecutionHandle handle = lifecycle.begin(identity, () -> register(identity));
+    CountDownLatch running = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    Thread body =
+        Thread.ofPlatform()
+            .name("still-running-body")
+            .start(
+                () -> {
+                  assertTrue(handle.attachBody(Thread.currentThread()));
+                  running.countDown();
+                  try {
+                    release.await();
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                  }
+                });
+    assertTrue(running.await(5, TimeUnit.SECONDS));
+
+    assertThrows(
+        IllegalStateException.class, () -> handle.provenExit(ExecutionExitState.STUDIO_EXITED));
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+    assertEquals(1, journal.loadAll().records().size());
+
+    handle.detachBody();
+    handle.provenExit(ExecutionExitState.STUDIO_EXITED);
+    assertEquals(ExecutionExitState.STUDIO_EXITED, stored(identity).state());
+    release.countDown();
+    body.join(5_000);
+  }
+
+  @Test
+  void exitNotProvenKeepsALiveBodyInThePhysicalSetUntilItEnds() throws Exception {
+    LocalExecutionIdentity identity = identity();
+    LocalExecutionHandle handle = lifecycle.begin(identity, () -> register(identity));
+    CountDownLatch running = new CountDownLatch(1);
+    Thread body =
+        Thread.ofPlatform()
+            .name("unproven-live-body")
+            .start(
+                () -> {
+                  assertTrue(handle.attachBody(Thread.currentThread()));
+                  running.countDown();
+                  try {
+                    Thread.sleep(30_000);
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                  }
+                });
+    assertTrue(running.await(5, TimeUnit.SECONDS));
+
+    handle.exitNotProven();
+    assertEquals(1, journal.loadAll().records().size());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+    assertTrue(journal.holdRequests() >= 1);
+
+    // body 仍存活：物理句柄不能被移除，排空必须报告未结束。
+    LocalExecutionDrain liveDrain = lifecycle.drain(Duration.ZERO);
+    assertEquals(List.of(identity.executionId()), liveDrain.unfinishedExecutionIds());
+    assertTrue(liveDrain.retainsJournalLock());
+
+    body.join(5_000);
+    handle.exitNotProven();
+    LocalExecutionDrain endedDrain = lifecycle.drain(Duration.ZERO);
+    assertTrue(endedDrain.unfinishedExecutionIds().isEmpty());
+    assertTrue(endedDrain.retainsJournalLock());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+  }
+
+  @Test
+  void registrationIdentityMismatchKeepsThePhysicalHandleAndJournalLock() {
+    LocalExecutionIdentity identity = identity();
+
+    IllegalStateException mismatch =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                lifecycle.begin(
+                    identity, () -> registerWithInvocation(identity, TestIds.id(4000))));
+
+    assertTrue(mismatch.getMessage().contains("does not match"));
+    assertEquals(1, journal.loadAll().records().size());
+    assertTrue(journal.holdRequests() >= 1);
+    LocalExecutionDrain drain = lifecycle.drain(Duration.ZERO);
+    assertEquals(List.of(identity.executionId()), drain.unfinishedExecutionIds());
+    assertTrue(drain.retainsJournalLock());
+  }
+
   private LocalExecutionIdentity identity() {
     sequence++;
     return new LocalExecutionIdentity(
@@ -247,6 +368,11 @@ class ExecutionLifecycleTest {
   }
 
   private ExecutionExitFact register(LocalExecutionIdentity identity) {
+    return registerWithInvocation(identity, identity.invocationId());
+  }
+
+  private ExecutionExitFact registerWithInvocation(
+      LocalExecutionIdentity identity, UUID invocationId) {
     return store.transaction(
         tx -> {
           tx.threads().lock(identity.threadId());
@@ -255,7 +381,7 @@ class ExecutionLifecycleTest {
                   new ExecutionExitFact(
                       identity.executionId(),
                       identity.threadId(),
-                      identity.invocationId(),
+                      invocationId,
                       identity.attempt(),
                       identity.ownerLeaseToken(),
                       identity.kind(),

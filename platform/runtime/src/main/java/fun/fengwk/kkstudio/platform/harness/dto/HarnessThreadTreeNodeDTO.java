@@ -35,7 +35,7 @@ public class HarnessThreadTreeNodeDTO {
   /** 当前 head 路径生效的执行选择。 */
   private HarnessExecutionSelectionDTO execution;
 
-  /** Runtime 运行状态：{@code RUNNING / WAITING / IDLE}。 */
+  /** Runtime 运行状态：{@code RUNNING / EXIT_PENDING / WAITING / IDLE}。 */
   private ThreadRuntimeStatus status;
 
   /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */

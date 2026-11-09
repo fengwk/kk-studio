@@ -280,6 +280,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
       thread: {
         ...base.thread,
         version: '7',
+        status: 'EXIT_PENDING',
         executionControl: 'STOPPED',
       },
       unconfirmedExecutions: [{

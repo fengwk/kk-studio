@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -55,6 +56,13 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private static final Set<PosixFilePermission> FILE_PERMISSIONS =
       PosixFilePermissions.fromString("rw-------");
   private static final ObjectMapper MAPPER = HarnessJson.STRICT;
+
+  /**
+   * 进程级强引用：被 hold 的目录锁与通道必须一直可达，避免 FileChannel 的 Cleaner 在 GC 回收 journal 实例时关闭通道并提前释放内核锁。
+   *
+   * <p>这是有意的进程级保留：直到 JVM 退出由操作系统回收，不注册提前释放的 shutdown hook。
+   */
+  private static final Set<RetainedLock> RETAINED_LOCKS = ConcurrentHashMap.newKeySet();
 
   private static final Set<String> FIELDS =
       Set.of(
@@ -282,13 +290,12 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     writeLock.lock();
     try {
       if (closed) {
-        log.error(
-            "execution exit journal is already closed and cannot retain its directory lock;"
-                + " directory={}",
-            directory);
-        return;
+        throw new ExecutionExitJournalException(
+            "execution exit journal is already closed and cannot retain its directory lock: "
+                + directory);
       }
       heldUntilProcessExit = true;
+      RETAINED_LOCKS.add(new RetainedLock(lockChannel, lock));
     } finally {
       writeLock.unlock();
     }
@@ -565,6 +572,9 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       }
     }
   }
+
+  /** 进程级保留的锁与通道；只有 JVM 退出才由操作系统释放。 */
+  private record RetainedLock(FileChannel channel, FileLock lock) {}
 
   private static final class EntryReadFailure extends RuntimeException {
 

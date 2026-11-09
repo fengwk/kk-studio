@@ -115,7 +115,7 @@ public record ThreadSnapshot(
   }
 
   /**
-   * 运行时状态三态评估的共享纯值算法，供快照投影与执行树节点投影统一使用。
+   * 运行时状态四态评估的共享纯值算法，供快照投影与执行树节点投影统一使用。
    *
    * <p>输入全部是调用方已读取的客观事实；本方法不接触 Store、事务或 Runtime 内部类型。状态机内部的上下文分类必须先由 Runtime 判定，并投影为公共 {@link
    * ThreadLiveState}。
@@ -134,12 +134,19 @@ public record ThreadSnapshot(
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
+    // 只有真实活跃 Driver/Tool 与终态物化优先于残留退出；续作仍属于下一层本地义务。
+    if (hasActiveExecutionFlow(liveState)) {
+      return ThreadRuntimeStatus.RUNNING;
+    }
+    // 已登记但尚未确认退出的具体代次阻塞收敛/待启动动作；不因 RUNNABLE/STOPPED 改变，也不冒充 IDLE。
+    if (hasUnconfirmedExecution) {
+      return ThreadRuntimeStatus.EXIT_PENDING;
+    }
     boolean hasCompactionObligation =
         hasOpenOwnerCompaction(entryState, threadId) || hasIncompleteOwnerChildJoin;
     boolean hasInputDemand = hasQueuedDemand(queuedCommands) || unconsumedAppliedNotifications;
-    // 本地在途活跃执行、自身 open owner compaction 或尚未冻结的 owner 结算子 Join，以及已登记但尚未确认退出的具体代次，
-    // 都不因 STOPPED 虚构外部退出事实。
-    if (liveState.isLive() || hasCompactionObligation || hasUnconfirmedExecution) {
+    // 续作、自身 open owner compaction 与尚未冻结的 owner 结算子 Join 属于本地未结束流程。
+    if (liveState == ThreadLiveState.CONTINUATION_DUE || hasCompactionObligation) {
       return ThreadRuntimeStatus.RUNNING;
     }
     // RUNNABLE 下输入需求表达为待启动 RUNNING；STOPPED 保留通知但不自启。
@@ -151,6 +158,14 @@ public record ThreadSnapshot(
       return ThreadRuntimeStatus.WAITING;
     }
     return ThreadRuntimeStatus.IDLE;
+  }
+
+  /** 活跃 Driver/Tool 或终态物化必须优先于残留退出，避免正常执行被误报为退出待确认。 */
+  private static boolean hasActiveExecutionFlow(ThreadLiveState liveState) {
+    return switch (liveState) {
+      case DRIVER_ACTIVE, DRIVER_RESPONSE_PENDING, TOOL_ACTIVE, TOOL_TERMINAL_PENDING -> true;
+      case IDLE_OR_HISTORICAL, CONTINUATION_DUE -> false;
+    };
   }
 
   /** 当前 open Turn 是否是调用方 Thread 自己发起的 COMPACTION。 */
@@ -188,8 +203,9 @@ public record ThreadSnapshot(
   }
 
   /**
-   * 运行时状态投影为三态（{@link ThreadRuntimeStatus#RUNNING} / {@link ThreadRuntimeStatus#WAITING} / {@link
-   * ThreadRuntimeStatus#IDLE}），与持久执行控制 {@link ThreadExecutionControl} 正交。只使用当前 Entry 状态。
+   * 运行时状态投影为四态（{@link ThreadRuntimeStatus#RUNNING} / {@link ThreadRuntimeStatus#EXIT_PENDING} /
+   * {@link ThreadRuntimeStatus#WAITING} / {@link ThreadRuntimeStatus#IDLE}），与持久执行控制 {@link
+   * ThreadExecutionControl} 正交。只使用当前 Entry 状态。
    */
   public ThreadRuntimeStatus runtimeStatus() {
     return evaluateRuntimeStatus(

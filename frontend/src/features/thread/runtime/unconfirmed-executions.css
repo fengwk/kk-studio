@@ -8,6 +8,17 @@
   background: var(--danger-soft);
 }
 
+/* 正常可恢复执行中的退出待确认是信息事实，不是异常告警；仅 STOPPED 保留危险样式。 */
+.thread-unconfirmed-executions[data-execution-control='RUNNABLE'] {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.thread-unconfirmed-executions-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .thread-unconfirmed-executions-header {
   display: flex;
   flex-direction: column;

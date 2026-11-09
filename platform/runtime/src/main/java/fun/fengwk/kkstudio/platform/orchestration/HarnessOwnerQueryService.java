@@ -131,7 +131,7 @@ public class HarnessOwnerQueryService {
     dto.setName(thread.name());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
-    // 本地执行状态直接复用 Thread 快照三态投影，全部暴露 executionControl，删 processing。
+    // 本地执行状态直接复用 Thread 快照四态投影，全部暴露 executionControl，删 processing。
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status);
     dto.setExecutionControl(thread.executionControl());

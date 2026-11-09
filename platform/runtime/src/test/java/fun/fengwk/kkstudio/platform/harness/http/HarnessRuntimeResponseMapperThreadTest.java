@@ -17,6 +17,9 @@ import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
@@ -89,7 +92,7 @@ class HarnessRuntimeResponseMapperThreadTest {
 
   @Test
   void projectsEveryReachableRuntimeStatusFromThreadSnapshot() {
-    // 测试意图：对外状态严格收敛为三态（RUNNING / WAITING / IDLE），与持久 executionControl 正交。
+    // 测试意图：对外状态严格收敛为四态（RUNNING / EXIT_PENDING / WAITING / IDLE），与持久 executionControl 正交。
     ThreadSnapshot idle = HarnessRuntimeTestFixtures.idleSnapshot();
     ThreadSnapshot waiting =
         snapshot(
@@ -105,9 +108,36 @@ class HarnessRuntimeResponseMapperThreadTest {
             List.of(),
             false);
     ThreadSnapshot running = modelSnapshot(GenerationStatus.RUNNING);
+    ThreadSnapshot exitPending =
+        snapshot(
+            idle.thread(),
+            new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(
+                new ExecutionExitFact(
+                    id(70),
+                    idle.thread().id(),
+                    id(71),
+                    1,
+                    id(72),
+                    ExecutionExitKind.TOOL,
+                    null,
+                    null,
+                    ExecutionExitState.UNCONFIRMED,
+                    NOW,
+                    null,
+                    null)),
+            false);
 
     Map<ThreadRuntimeStatus, ThreadSnapshot> cases = new LinkedHashMap<>();
     cases.put(ThreadRuntimeStatus.IDLE, idle);
+    cases.put(ThreadRuntimeStatus.EXIT_PENDING, exitPending);
     cases.put(ThreadRuntimeStatus.WAITING, waiting);
     cases.put(ThreadRuntimeStatus.RUNNING, running);
     assertEquals(Set.of(ThreadRuntimeStatus.values()), cases.keySet());
@@ -185,6 +215,23 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertEquals(1, nodes.get(1).getTurnCount());
     assertNull(nodes.get(1).getOutcome());
     assertEquals(continuing.thread().updatedAt(), nodes.get(1).getUpdatedAt());
+  }
+
+  @Test
+  void treeNodesProjectExitPendingWithoutFabricatingOutcome() {
+    // 测试意图：执行树节点能把未确认退出投影为 EXIT_PENDING，非 IDLE 不伪造 outcome。
+    ThreadTreeNode exitPending =
+        new ThreadTreeNode(
+            HarnessRuntimeTestFixtures.completedTurnSnapshot(id(3)).thread(),
+            new BranchSettings(
+                "demo-agent", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null),
+            ThreadRuntimeStatus.EXIT_PENDING,
+            null,
+            new EntryPathMetrics(1, 0));
+    HarnessThreadTreeNodeDTO node =
+        HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(exitPending)).getFirst();
+    assertEquals(ThreadRuntimeStatus.EXIT_PENDING, node.getStatus());
+    assertNull(node.getOutcome());
   }
 
   @Test

@@ -76,7 +76,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@link ThreadSnapshot#runtimeStatus()} 统一三态运行时状态投影测试。
+ * {@link ThreadSnapshot#runtimeStatus()} 统一四态运行时状态投影测试。
  *
  * <p>使用 {@link InMemoryBuiltinHarnessStore} 种子读取真实本地上下文，并构造直接子 Join 与输入需求事实验证快照投影。 真正破坏不变量的形状（例如
  * Model 不属于本 Thread）才 fail-closed。
@@ -610,7 +610,7 @@ class ThreadSnapshotTest {
 
   @Test
   void evaluateRuntimeStatusValidatesInputsAndIsControlSensitive() {
-    // 测试意图：三态纯值投影对 null 控制与非负子 Join 计数 fail-fast；输入需求只在 RUNNABLE 下表达为 RUNNING。
+    // 测试意图：四态纯值投影对 null 控制与非负子 Join 计数 fail-fast；输入需求只在 RUNNABLE 下表达为 RUNNING。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
     assertThrows(
@@ -666,8 +666,91 @@ class ThreadSnapshotTest {
   }
 
   @Test
+  void unconfirmedExecutionProjectsExitPendingInsteadOfRunningOrIdle() {
+    // 测试意图：没有真实活跃流程时，未确认退出在 RUNNABLE/STOPPED 下都投影 EXIT_PENDING，不冒充 RUNNING 或 IDLE。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    for (ThreadExecutionControl control : ThreadExecutionControl.values()) {
+      assertEquals(
+          ThreadRuntimeStatus.EXIT_PENDING,
+          ThreadSnapshot.evaluateRuntimeStatus(
+              control,
+              ThreadLiveState.IDLE_OR_HISTORICAL,
+              base.entryState(),
+              baseline.threadId(),
+              List.of(),
+              false,
+              0,
+              false,
+              true),
+          control.name());
+    }
+  }
+
+  @Test
+  void activeDriverAndToolFlowsTakePrecedenceOverExitPendingButContinuationDoesNot() {
+    // 测试意图：活跃 Driver/Tool 与终态物化属于真实在途流程；续作/输入/compaction 不能盖住未确认退出。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    for (ThreadLiveState active :
+        List.of(
+            ThreadLiveState.DRIVER_ACTIVE,
+            ThreadLiveState.DRIVER_RESPONSE_PENDING,
+            ThreadLiveState.TOOL_ACTIVE,
+            ThreadLiveState.TOOL_TERMINAL_PENDING)) {
+      assertEquals(
+          ThreadRuntimeStatus.RUNNING,
+          ThreadSnapshot.evaluateRuntimeStatus(
+              ThreadExecutionControl.RUNNABLE,
+              active,
+              base.entryState(),
+              baseline.threadId(),
+              List.of(),
+              false,
+              0,
+              false,
+              true),
+          active.name());
+    }
+    assertEquals(
+        ThreadRuntimeStatus.EXIT_PENDING,
+        ThreadSnapshot.evaluateRuntimeStatus(
+            ThreadExecutionControl.RUNNABLE,
+            ThreadLiveState.CONTINUATION_DUE,
+            base.entryState(),
+            baseline.threadId(),
+            List.of(),
+            false,
+            0,
+            false,
+            true));
+    assertEquals(
+        ThreadRuntimeStatus.EXIT_PENDING,
+        ThreadSnapshot.evaluateRuntimeStatus(
+            ThreadExecutionControl.RUNNABLE,
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            base.entryState(),
+            baseline.threadId(),
+            List.of(
+                new ThreadCommand(
+                    baseline.threadId(),
+                    1L,
+                    userMessagePayload("queued"),
+                    TestIds.id(3),
+                    "0".repeat(64),
+                    null,
+                    null,
+                    null,
+                    T5)),
+            false,
+            2,
+            true,
+            true));
+  }
+
+  @Test
   void evaluateRuntimeStatusTreatsEveryLiveStateExceptIdleAsRunning() {
-    // 测试意图：live state 只有 IDLE_OR_HISTORICAL 非 live；其余活跃阶段一律投影为 RUNNING，不回退为 IDLE/WAITING。
+    // 测试意图：无未确认退出时，除 IDLE_OR_HISTORICAL 外的活跃/续作阶段一律投影为 RUNNING，不回退为 IDLE/WAITING。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
     for (ThreadLiveState liveState : ThreadLiveState.values()) {
@@ -692,10 +775,14 @@ class ThreadSnapshotTest {
   }
 
   @Test
-  void runtimeStatusValuesAreExactlyTheThreePublicStates() {
-    // 测试意图：对外运行时状态只有 RUNNING / WAITING / IDLE 三态，与 executionControl 正交。
+  void runtimeStatusValuesAreExactlyTheFourPublicStates() {
+    // 测试意图：对外运行时状态只有 RUNNING / EXIT_PENDING / WAITING / IDLE 四态，与 executionControl 正交。
     assertEquals(
-        Set.of(ThreadRuntimeStatus.RUNNING, ThreadRuntimeStatus.WAITING, ThreadRuntimeStatus.IDLE),
+        Set.of(
+            ThreadRuntimeStatus.RUNNING,
+            ThreadRuntimeStatus.EXIT_PENDING,
+            ThreadRuntimeStatus.WAITING,
+            ThreadRuntimeStatus.IDLE),
         Set.of(ThreadRuntimeStatus.values()));
   }
 
@@ -752,15 +839,16 @@ class ThreadSnapshotTest {
   }
 
   @Test
-  void unconfirmedExecutionKeepsStoppedThreadRunning() {
-    // 测试意图：已登记但尚未确认退出的具体代次不因 STOPPED 虚构外部退出事实，快照投影保持 RUNNING。
+  void unconfirmedExecutionProjectsExitPendingRegardlessOfStoppedControl() {
+    // 测试意图：已登记但尚未确认退出的具体代次投影 EXIT_PENDING，不因 STOPPED 虚构退出，也不冒充 RUNNING/IDLE。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
     registerUnconfirmedExecution(baseline.threadId(), TestIds.id(1));
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(1, snapshot.unconfirmedExecutions().size());
     assertTrue(snapshot.hasUnconfirmedExecution());
-    assertEquals(ThreadRuntimeStatus.RUNNING, snapshot.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.EXIT_PENDING, snapshot.runtimeStatus());
+    assertNull(snapshot.outcome());
   }
 
   @Test

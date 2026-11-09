@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +28,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -904,6 +907,20 @@ class FileExecutionExitJournalTest {
     }
   }
 
+  /** test-only 子进程入口：尝试打开已被 hold 的 journal 目录，报告是否仍被锁住。 */
+  public static final class LockAttemptProbe {
+
+    private LockAttemptProbe() {}
+
+    public static void main(String[] args) {
+      try (FileExecutionExitJournal ignored = new FileExecutionExitJournal(Path.of(args[0]))) {
+        System.out.println("ACQUIRED");
+      } catch (ExecutionExitJournalException expected) {
+        System.out.println("BLOCKED");
+      }
+    }
+  }
+
   private static void assertNoTemporaryFiles(Path directory) throws IOException {
     try (var files = Files.list(directory)) {
       assertTrue(
@@ -977,6 +994,93 @@ class FileExecutionExitJournalTest {
     // 仍有无法证明退出的物理执行：锁必须保留到 JVM 退出，新进程不得接管同一目录。
     assertThrows(
         ExecutionExitJournalException.class, () -> new FileExecutionExitJournal(directory));
+  }
+
+  @Test
+  void heldLockSurvivesGarbageCollectionAndStillBlocksAnotherProcess(@TempDir Path directory)
+      throws Exception {
+    WeakReference<FileExecutionExitJournal> reference = holdCloseAndForget(directory);
+    // 进程级强引用必须保留锁与通道；journal 实例本身可以被回收。
+    assertTrue(retainedLockCount() >= 1, "held lock and channel must stay strongly reachable");
+    for (int attempt = 0; attempt < 50 && reference.get() != null; attempt++) {
+      System.gc();
+      System.runFinalization();
+      Thread.sleep(20);
+    }
+    assertEquals("BLOCKED", runLockAttemptProbe(directory));
+  }
+
+  @Test
+  void holdAfterCloseThrowsInsteadOfPretendingTheLockIsHeld(@TempDir Path directory) {
+    FileExecutionExitJournal journal = new FileExecutionExitJournal(directory);
+    journal.close();
+    assertThrows(ExecutionExitJournalException.class, journal::holdUntilProcessExit);
+  }
+
+  @Test
+  void remotePreparedJournalEntryIsRejectedOnDecode(@TempDir Path directory) throws IOException {
+    UUID executionId = UUID.randomUUID();
+    ExecutionExitJournalRecord remote =
+        new ExecutionExitJournalRecord(
+            executionId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.REMOTE,
+            UUID.randomUUID(),
+            EnvironmentId.of(UUID.randomUUID()),
+            ExecutionExitJournalStage.EXIT_PROOF,
+            ExecutionExitState.REMOTE_ACKNOWLEDGED,
+            T0);
+    Path entry = directory.resolve(executionId + ".json");
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(remote);
+      String json = Files.readString(entry);
+      Files.writeString(
+          entry,
+          json.replace("\"stage\":\"EXIT_PROOF\"", "\"stage\":\"PREPARED\"")
+              .replace("\"targetState\":\"REMOTE_ACKNOWLEDGED\"", "\"targetState\":null")
+              .replace("\"confirmedAt\":\"" + T0 + "\"", "\"confirmedAt\":null"));
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
+      assertTrue(Files.exists(entry));
+    }
+  }
+
+  private static WeakReference<FileExecutionExitJournal> holdCloseAndForget(Path directory)
+      throws IOException {
+    FileExecutionExitJournal journal = new FileExecutionExitJournal(directory);
+    try {
+      journal.write(prepared(UUID.randomUUID()));
+      journal.holdUntilProcessExit();
+    } finally {
+      journal.close();
+    }
+    return new WeakReference<>(journal);
+  }
+
+  private static int retainedLockCount() throws Exception {
+    Field field = FileExecutionExitJournal.class.getDeclaredField("RETAINED_LOCKS");
+    field.setAccessible(true);
+    return ((Collection<?>) field.get(null)).size();
+  }
+
+  private static String runLockAttemptProbe(Path directory) throws Exception {
+    String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    String classpath =
+        System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+    Process process =
+        new ProcessBuilder(
+                java, "-cp", classpath, LockAttemptProbe.class.getName(), directory.toString())
+            .redirectErrorStream(true)
+            .start();
+    if (!process.waitFor(30, TimeUnit.SECONDS)) {
+      process.destroyForcibly();
+      throw new IllegalStateException("journal lock attempt probe did not exit");
+    }
+    String output =
+        new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+    return output.lines().findFirst().orElse("");
   }
 
   private static ExecutionExitJournalRecord prepared(UUID executionId) {

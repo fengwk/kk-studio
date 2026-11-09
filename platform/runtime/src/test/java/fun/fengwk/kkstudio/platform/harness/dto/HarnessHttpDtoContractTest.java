@@ -175,6 +175,33 @@ class HarnessHttpDtoContractTest {
   }
 
   @Test
+  void threadRuntimeStatusWireIncludesExitPending() throws Exception {
+    HarnessThreadDTO thread =
+        MAPPER.readValue(
+            """
+            {
+              "threadId": "t-1",
+              "name": "main",
+              "sessionId": "s-1",
+              "headEntryId": "e-1",
+              "rootThreadId": "t-1",
+              "yoloEnabled": false,
+              "nextCommandSequence": "1",
+              "version": "7",
+              "status": "EXIT_PENDING",
+              "executionControl": "STOPPED"
+            }
+            """,
+            HarnessThreadDTO.class);
+    assertEquals(ThreadRuntimeStatus.EXIT_PENDING, thread.getStatus());
+    assertEquals(
+        Set.of("RUNNING", "EXIT_PENDING", "WAITING", "IDLE"),
+        Arrays.stream(ThreadRuntimeStatus.values())
+            .map(status -> status.name())
+            .collect(Collectors.toSet()));
+  }
+
+  @Test
   void toolEnvironmentWaitFieldsStayExplicitlyNullable() throws Exception {
     assertEquals(
         String.class,

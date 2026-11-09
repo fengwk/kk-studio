@@ -158,7 +158,7 @@ function positiveFinite(value: number | undefined): number | null {
 }
 
 /**
- * 格式化 Thread 运行状态（RUNNING / WAITING / IDLE）。
+ * 格式化 Thread 运行状态（RUNNING / EXIT_PENDING / WAITING / IDLE）。
  */
 export function formatThreadStatusLabel(
   status?: string | null,
@@ -170,6 +170,8 @@ export function formatThreadStatusLabel(
   switch (status) {
     case 'RUNNING':
       return t('ai.runtime.thread.status.RUNNING')
+    case 'EXIT_PENDING':
+      return t('ai.runtime.thread.status.EXIT_PENDING')
     case 'WAITING':
       return t('ai.runtime.thread.status.WAITING')
     case 'IDLE':
@@ -177,4 +179,14 @@ export function formatThreadStatusLabel(
     default:
       return status
   }
+}
+
+/** EXIT_PENDING 是“等待执行退出确认”的显式事实，不等同空闲或普通运行中。 */
+export function isExitPendingStatus(status?: string | null): boolean {
+  return status === 'EXIT_PENDING'
+}
+
+/** 所有非 IDLE 状态都仍有工作/待收敛事实；新增非空闲状态不得被误当空闲。 */
+export function isThreadActiveStatus(status?: string | null): boolean {
+  return status != null && status !== 'IDLE'
 }
