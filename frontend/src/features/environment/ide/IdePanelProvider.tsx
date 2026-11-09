@@ -164,27 +164,29 @@ export function IdePanelProvider({
     onStorageStatusChange: handleStorageStatusChange,
   })
 
-  cloneHandlerRef.current = (browserSessionId) => {
-    claimReconciliation.resetForClone()
-    const next = clearRuntimePresentation(presentationRef.current)
-    presentationRef.current = next
-    setPresentationState(next)
-    setActiveEnvironmentId(null)
-    const saved = saveIdePresentation(
-      browserSessionId,
-      next,
-      {},
-      storage,
-    )
-    setStorageUnavailable(!saved.sessionSaved)
-  }
-  restoreHandlerRef.current = () => {
-    claimReconciliation.restoreUsage()
-    claimReconciliation.reconcileAll()
-  }
-  suspendHandlerRef.current = () => {
-    claimReconciliation.withdrawUsage()
-  }
+  useEffect(() => {
+    cloneHandlerRef.current = (browserSessionId) => {
+      claimReconciliation.resetForClone()
+      const next = clearRuntimePresentation(presentationRef.current)
+      presentationRef.current = next
+      setPresentationState(next)
+      setActiveEnvironmentId(null)
+      const saved = saveIdePresentation(
+        browserSessionId,
+        next,
+        {},
+        storage,
+      )
+      setStorageUnavailable(!saved.sessionSaved)
+    }
+    restoreHandlerRef.current = () => {
+      claimReconciliation.restoreUsage()
+      claimReconciliation.reconcileAll()
+    }
+    suspendHandlerRef.current = () => {
+      claimReconciliation.withdrawUsage()
+    }
+  })
 
   const commitPresentation = useCallback((
     next: IdePresentation,

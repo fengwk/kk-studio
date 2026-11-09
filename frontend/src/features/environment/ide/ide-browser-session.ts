@@ -106,49 +106,58 @@ export function useIdeBrowserSession({
   const mountedRef = useRef(false)
   const sessionRef = useRef(initial.browserSessionId)
 
-  callbacksRef.current = { onClone, onRestore, onSuspend }
-  initialRef.current = initial
-  storageRef.current = storage
+  useEffect(() => {
+    callbacksRef.current = { onClone, onRestore, onSuspend }
+    initialRef.current = initial
+    storageRef.current = storage
+  })
 
   const acquire = useCallback((browserSessionId: string, clone: boolean, sessionSaved = true) => {
-    const generation = generationRef.current + 1
-    generationRef.current = generation
-    currentLockRef.current?.release()
-    const lock = acquireBrowserSessionLock(browserSessionId)
-    currentLockRef.current = lock
-    void lock.acquired.then((acquired) => {
-      if (!mountedRef.current || generationRef.current !== generation) {
-        lock.release()
-        return
-      }
-      if (!acquired) {
-        if (clone) {
-          setState({ browserSessionId, status: 'unavailable', sessionSaved })
+    const start = (candidateId: string, candidateClone: boolean, candidateSaved: boolean) => {
+      const generation = generationRef.current + 1
+      generationRef.current = generation
+      currentLockRef.current?.release()
+      const lock = acquireBrowserSessionLock(candidateId)
+      currentLockRef.current = lock
+      void lock.acquired.then((acquired) => {
+        if (!mountedRef.current || generationRef.current !== generation) {
+          lock.release()
           return
         }
-        // 复制 tab 继承同一 sessionStorage；原页面仍持有锁时生成独立会话。
-        const clonedId = createUuid()
-        const saved = saveIdeSession(
-          clonedId,
-          initialRef.current.presentation,
-          {},
-          storageRef.current,
-        )
-        acquire(clonedId, true, saved)
-        return
-      }
-      sessionRef.current = browserSessionId
-      setState({
-        browserSessionId,
-        status: clone ? 'cloned' : 'ready',
-        sessionSaved,
+        if (!acquired) {
+          if (candidateClone) {
+            setState({
+              browserSessionId: candidateId,
+              status: 'unavailable',
+              sessionSaved: candidateSaved,
+            })
+            return
+          }
+          // 复制 tab 继承同一 sessionStorage；原页面仍持有锁时生成独立会话。
+          const clonedId = createUuid()
+          const saved = saveIdeSession(
+            clonedId,
+            initialRef.current.presentation,
+            {},
+            storageRef.current,
+          )
+          start(clonedId, true, saved)
+          return
+        }
+        sessionRef.current = candidateId
+        setState({
+          browserSessionId: candidateId,
+          status: candidateClone ? 'cloned' : 'ready',
+          sessionSaved: candidateSaved,
+        })
+        if (candidateClone) {
+          callbacksRef.current.onClone(candidateId)
+        } else {
+          callbacksRef.current.onRestore()
+        }
       })
-      if (clone) {
-        callbacksRef.current.onClone(browserSessionId)
-      } else {
-        callbacksRef.current.onRestore()
-      }
-    })
+    }
+    start(browserSessionId, clone, sessionSaved)
   }, [])
 
   useEffect(() => {

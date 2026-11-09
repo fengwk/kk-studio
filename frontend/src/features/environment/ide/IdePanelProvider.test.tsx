@@ -34,12 +34,10 @@ const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
 const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
-const DAEMON_B = 'd2000000-0000-4000-8000-000000000002'
 const EVENT_NODE = 'e1000000-0000-4000-8000-000000000001'
 const CONNECTION_1 = 'f1000000-0000-4000-8000-000000000001'
 const CONNECTION_2 = 'f1000000-0000-4000-8000-000000000002'
 const BROWSER_A = 'b1000000-0000-4000-8000-000000000001'
-const BROWSER_B = 'b2000000-0000-4000-8000-000000000002'
 const CLAIM_A = 'e1000000-0000-4000-8000-000000000011'
 const DIRECTORY_A = '/workspace/projects/a'
 
@@ -481,6 +479,29 @@ describe('IdePanelProvider recovery state machine', () => {
     expect(ideService.openIdeView.mock.calls.some(([, request]) => (
       (request as Record<string, unknown>).mode === 'create'
     ))).toBe(false)
+    await screen.findByTestId('ide-iframe')
+  })
+
+  it('reads the authoritative view after an unknown OPEN result before replaying the same pending claim', async () => {
+    seedSession(BROWSER_A, recovery({
+      bindingEpoch: undefined,
+      pending: pending({ mode: 'create', expectedBindingEpoch: '0' }),
+    }))
+    ideService.openIdeView.mockRejectedValueOnce(
+      new ApiError('network interrupted', undefined, 'network_error'),
+    )
+
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
+    })
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(2)
+    const first = ideService.openIdeView.mock.calls[0]?.[1] as Record<string, unknown>
+    const second = ideService.openIdeView.mock.calls[1]?.[1] as Record<string, unknown>
+    expect(second).toEqual(first)
+    expect(second).toMatchObject({ mode: 'create', claimId: CLAIM_A, viewId: VIEW_A })
     await screen.findByTestId('ide-iframe')
   })
 

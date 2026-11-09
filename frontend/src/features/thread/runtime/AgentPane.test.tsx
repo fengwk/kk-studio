@@ -5289,7 +5289,7 @@ describe('AgentPane root control mounting', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5355,7 +5355,7 @@ describe('AgentPane root control mounting', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { rerender } = render(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5383,7 +5383,7 @@ describe('AgentPane root control mounting', () => {
 
     rerender(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}

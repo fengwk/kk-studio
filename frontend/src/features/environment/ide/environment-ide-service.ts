@@ -1,14 +1,18 @@
 import { request } from '@/shared/api/client'
 import type {
+  ApiRoutes,
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
   EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeOpenViewDTO,
-  EnvironmentIdeReadViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
   EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
+
+type ReadViewQuery = ApiRoutes[
+  'GET /api/ide/environments/{environmentId}/views/{viewId}'
+] extends { query: infer Query } ? Query : never
 
 /** 打开或恢复 view：claimId 与 mode 由调用方持有，失败后只允许纯读对账。 */
 export function openIdeView(
@@ -28,7 +32,7 @@ export function openIdeView(
 export function readIdeView(
   environmentId: string,
   viewId: string,
-  query: EnvironmentIdeReadViewDTO,
+  query: ReadViewQuery,
 ): Promise<EnvironmentIdeViewSnapshotDTO> {
   return request('GET /api/ide/environments/{environmentId}/views/{viewId}', {
     path: { environmentId, viewId },

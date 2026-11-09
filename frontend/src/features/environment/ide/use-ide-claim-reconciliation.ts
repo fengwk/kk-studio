@@ -9,7 +9,6 @@ import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/pro
 import type {
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
-  EnvironmentIdeReadViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
   EnvironmentIdeViewSnapshotDTO,
@@ -113,6 +112,7 @@ export function useIdeClaimReconciliation({
   const operationGenerationRef = useRef(0)
   const operationQueueRef = useRef<Array<() => Promise<void>>>([])
   const sessionRef = useRef(session)
+  const lastSessionStatusRef = useRef(session.status)
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
   const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
@@ -258,14 +258,13 @@ export function useIdeClaimReconciliation({
       try {
         await task()
       } finally {
-        if (operationGenerationRef.current !== generation) {
-          return
-        }
-        bindingRef.current = false
-        operationConnectionRef.current = null
-        const next = operationQueueRef.current.shift()
-        if (next != null && mountedRef.current) {
-          runExclusive(next)
+        if (operationGenerationRef.current === generation) {
+          bindingRef.current = false
+          operationConnectionRef.current = null
+          const next = operationQueueRef.current.shift()
+          if (next != null && mountedRef.current) {
+            runExclusive(next)
+          }
         }
       }
     })()
@@ -549,7 +548,7 @@ export function useIdeClaimReconciliation({
       reconcile(environmentId, 'connection')
       return
     }
-    const query: EnvironmentIdeReadViewDTO = {
+    const query = {
       browserSessionId: sessionRef.current.browserSessionId,
       eventNodeId: currentIdentity.eventNodeId,
       connectionId: currentIdentity.connectionId,
@@ -701,7 +700,7 @@ export function useIdeClaimReconciliation({
       reconcile(environmentId, 'connection')
       return
     }
-    const query: EnvironmentIdeReadViewDTO = {
+    const query = {
       browserSessionId: sessionRef.current.browserSessionId,
       eventNodeId: currentIdentity.eventNodeId,
       connectionId: currentIdentity.connectionId,
@@ -1367,6 +1366,15 @@ export function useIdeClaimReconciliation({
     actionsRef.current?.reconcileAll()
     // identity/connectionId 是网络绑定的全部身份；其余状态由操作自身推进。
   }, [identity, session.browserSessionId, session.status])
+
+  useEffect(() => {
+    const previous = lastSessionStatusRef.current
+    lastSessionStatusRef.current = session.status
+    // BFCache 恢复时 onRestore 早于 React 提交 ready 状态；等 sessionRef 更新后再对账。
+    if (session.status === 'ready' && previous === 'suspended') {
+      actionsRef.current?.reconcileAll()
+    }
+  }, [session.status])
 
   useEffect(() => {
     const previous = lastActiveEnvironmentRef.current

@@ -453,7 +453,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await openHarness(page, state)
     await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
-    const epoch = String(state.openCalls[0]!.body.expectedBindingEpoch)
+    const epoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
     const beforeReads = state.readCalls.length
 
     await page.reload()
@@ -646,8 +646,13 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await page.getByTestId('other-link').click()
     const other = page.getByTestId('other-page')
     await expect(other).toBeVisible()
-    await expect(page.getByTestId('chat-ide-workspace')).toBeHidden()
+    const host = page.getByTestId('chat-ide-workspace')
+    await expect(host).toBeHidden()
+    await expect(host).toHaveAttribute('hidden', '')
+    expect(await host.evaluate((element) => (element as HTMLElement).inert)).toBe(true)
+    expect(await host.evaluate((element) => element.contains(document.activeElement))).toBe(false)
     await expect(page.getByTestId('ide-overlay-panel')).toBeHidden()
+    await expect(page.getByRole('button', { name: '打开命令表' })).toHaveCount(0)
     const otherBox = await other.boundingBox()
     expect(otherBox).not.toBeNull()
     expect(Math.abs((otherBox!.x + otherBox!.width) - 1440)).toBeLessThanOrEqual(2)
