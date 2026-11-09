@@ -520,6 +520,43 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
+  void failedProofUpgradePreservesPreparedAndCanResumeAfterStorageIsWritable(
+      @TempDir Path directory) throws Exception {
+    // 两阶段升级不能在写 proof 失败时丢失 PREPARED，也不能留下被误作 canonical 的临时文件。
+    assumePosixNonRoot(directory);
+    ExecutionExitJournalRecord proof =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    LocalExecutionIdentity identity =
+        new LocalExecutionIdentity(
+            proof.executionId(),
+            proof.threadId(),
+            proof.invocationId(),
+            proof.attempt(),
+            proof.ownerLeaseToken(),
+            proof.kind());
+    ExecutionExitJournalRecord prepared = ExecutionExitJournalRecord.prepared(identity);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(prepared);
+      try (AutoCloseable restore = directoryPermissions(directory, "r-x------")) {
+        assertThrows(ExecutionExitJournalException.class, () -> journal.write(proof));
+        assertEquals(List.of(prepared), journal.loadAll().records());
+        assertNoTemporaryFiles(directory);
+      }
+      assertEquals(proof, journal.write(proof));
+      assertEquals(List.of(proof), journal.loadAll().records());
+      assertNoTemporaryFiles(directory);
+    }
+    try (FileExecutionExitJournal reopened = new FileExecutionExitJournal(directory)) {
+      assertEquals(List.of(proof), reopened.loadAll().records());
+    }
+  }
+
+  @Test
   void postRenameForceFailureKeepsRecordAndRepeatsForceForExistingProof(@TempDir Path directory)
       throws Exception {
     assumePosixNonRoot(directory);
