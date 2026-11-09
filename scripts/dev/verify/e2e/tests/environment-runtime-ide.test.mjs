@@ -59,7 +59,7 @@ function environmentWithoutDaemon() {
       if (path.includes('/api/ide/environments/')) {
         throw new HttpError(
           409,
-          canonicalErrorBody(409, 'unavailable', 'environment IDE owner route is unavailable', 'IDE_UNAVAILABLE'),
+          canonicalErrorBody(409, 'unavailable', 'environment IDE owner route is unavailable', 'DAEMON_NOT_READY'),
           path,
         )
       }
@@ -101,20 +101,28 @@ test('runtime absence case rejects with the canonical code and never fabricates 
 })
 
 test('IDE view case checks no-READY-owner rejection for canonical view commands', async () => {
-  // 以 HTTP recorder 执行 IDE case，检查无 READY owner 时各命令的 409 unavailable + IDE_UNAVAILABLE 断言；
+  // 以 HTTP recorder 执行 IDE case，检查无 READY owner 时各命令的 409 unavailable + DAEMON_NOT_READY 断言；
   // 不返回任何绑定结果，并且非 canonical environmentId 走 400 validation。
   const { ctx, calls, isDeleted } = environmentWithoutDaemon()
 
   await getCase(IDE_CASE_ID).run(ctx)
 
   const ideCalls = calls.filter((call) => call.path.includes('/api/ide/environments/'))
-  assert.equal(ideCalls.length, 7, `IDE case must exercise seven IDE requests: ${JSON.stringify(ideCalls)}`)
+  assert.equal(ideCalls.length, 8, `IDE case must exercise eight IDE requests: ${JSON.stringify(ideCalls)}`)
   const viewsPath = `/api/ide/environments/${ENVIRONMENT_ID}/views`
   const open = ideCalls.find((call) => call.method === 'POST' && call.path === viewsPath)
-  for (const field of ['viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId']) {
+  for (const field of ['viewId', 'browserSessionId', 'eventNodeId', 'connectionId', 'claimId', 'expectedDaemonInstanceId']) {
     assert.match(open.body[field], /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
   }
   assert.equal(open.body.mode, 'create')
+  assert.equal(open.body.expectedBindingEpoch, '0')
+  assert.equal(Object.hasOwn(open.body, 'documentId'), false)
+  const read = ideCalls.find((call) => call.method === 'GET' && call.path.includes(`/views/${open.body.viewId}?`))
+  assert.ok(read, 'IDE case must exercise pure-read recovery')
+  const query = new URL(read.path, 'http://fixture').searchParams
+  for (const field of ['browserSessionId', 'eventNodeId', 'connectionId', 'claimId', 'expectedDaemonInstanceId']) {
+    assert.equal(query.get(field), open.body[field])
+  }
   assert.equal(
     ideCalls.filter((call) => call.method === 'POST' && call.path === viewsPath).length,
     1,

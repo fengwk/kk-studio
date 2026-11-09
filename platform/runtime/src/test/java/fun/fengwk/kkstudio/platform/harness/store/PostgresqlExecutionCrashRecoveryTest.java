@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -43,6 +45,7 @@ import java.util.stream.Stream;
  * 完成，随后第三个 JVM 重复恢复不得重复确认或改写已落账的证据。PG 容器与测试库由 {@link PostgresqlHarnessStoreFixture} 独占提供，子进程只从 0600
  * 配置文件拿到本容器测试库的连接信息。
  */
+@EnabledOnOs({OS.LINUX, OS.MAC})
 class PostgresqlExecutionCrashRecoveryTest {
 
   private static final String WRITER = "writer";
