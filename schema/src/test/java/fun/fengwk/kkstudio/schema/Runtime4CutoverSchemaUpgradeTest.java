@@ -203,6 +203,9 @@ class Runtime4CutoverSchemaUpgradeTest {
         constraintDefinitionIn(
             database, "shadow.harness_execution_exit", "ck_harness_execution_exit_state");
     assertFalse(shadowStateDefinitionBefore.contains("OWNER_EXITED"));
+    ExecResult startupSearchPath =
+        runPsql(database, "shadow,public", "-A", "-t", "-c", "select current_schema()");
+    assertEquals("shadow", startupSearchPath.getStdout().trim(), startupSearchPath.getStderr());
 
     // 启动时 search_path 先指向 shadow；脚本必须在事务内固定回 pg_catalog, public。
     ExecResult result = runCutover(database, "shadow,public");
@@ -586,34 +589,20 @@ class Runtime4CutoverSchemaUpgradeTest {
   }
 
   private static ExecResult runCutover(String database, String searchPath) throws Exception {
+    return runPsql(database, searchPath, "-f", CONTAINER_CUTOVER_SCRIPT);
+  }
+
+  private static ExecResult runPsql(String database, String searchPath, String... arguments)
+      throws Exception {
+    List<String> command = new ArrayList<>();
     if (searchPath != null) {
-      return POSTGRES.execInContainer(
-          "env",
-          "PGOPTIONS=-c search_path=" + searchPath,
-          "psql",
-          "-X",
-          "-q",
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-U",
-          USERNAME,
-          "-d",
-          database,
-          "-f",
-          CONTAINER_CUTOVER_SCRIPT);
+      command.add("env");
+      command.add("PGOPTIONS=-c search_path=" + searchPath);
     }
-    return POSTGRES.execInContainer(
-        "psql",
-        "-X",
-        "-q",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        USERNAME,
-        "-d",
-        database,
-        "-f",
-        CONTAINER_CUTOVER_SCRIPT);
+    command.add("psql");
+    command.addAll(List.of("-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", USERNAME, "-d", database));
+    command.addAll(List.of(arguments));
+    return POSTGRES.execInContainer(command.toArray(String[]::new));
   }
 
   private static void migrate(String database, String location) {
