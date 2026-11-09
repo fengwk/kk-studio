@@ -31,6 +31,7 @@ import { setLocale } from '@/shared/i18n'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDTO,
+  ChatDTO,
   ModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessSessionEntryDTO,
@@ -251,13 +252,20 @@ function renderWorkspaceRouter(
     ],
     { initialEntries },
   )
-  return render(
+  const activateChatEnvironment = vi.fn()
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
-      <IdePanelContext.Provider value={{ openEnvironment, togglePanel, panelVisible: false }}>
+      <IdePanelContext.Provider value={{
+        openEnvironment,
+        togglePanel,
+        panelVisible: false,
+        activateChatEnvironment,
+      }}>
         <RouterProvider router={router} />
       </IdePanelContext.Provider>
     </QueryClientProvider>,
   )
+  return { ...rendered, router, activateChatEnvironment }
 }
 
 function renderWorkspace(chatId = CHAT_ID) {
@@ -340,6 +348,33 @@ describe('ChatWorkspacePage', () => {
     expect(togglePanel).toHaveBeenCalledWith({
       id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
     })
+  })
+
+  it('withdraws the previous Chat environment while the next Chat is loading', async () => {
+    const environment = { id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true }
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'local-node',
+      yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+    })
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
+      ...environment, daemonConfig: testDaemonConfig(), status: 'READY', version: '1',
+      createdAt: 0, updatedAt: 0, capabilities: [], statusExpiresAt: null, lastSeenAt: null,
+    }])
+    const { router, activateChatEnvironment } = renderWorkspaceRouter([`/chats/${CHAT_ID}`])
+    await waitFor(() => expect(activateChatEnvironment).toHaveBeenLastCalledWith(environment))
+    let loaded!: (chat: ChatDTO) => void
+    vi.mocked(chatService.getChat).mockImplementationOnce(() => new Promise((resolve) => { loaded = resolve }))
+
+    await act(async () => { await router.navigate('/chats/no-environment') })
+    expect(activateChatEnvironment).toHaveBeenLastCalledWith(null)
+    await act(async () => {
+      loaded({
+        id: 'no-environment', title: 'No environment', agentName: 'assistant', environmentName: null,
+        yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+      })
+    })
+    await screen.findByRole('heading', { name: 'No environment' })
+    expect(activateChatEnvironment).toHaveBeenLastCalledWith(null)
   })
 
   it('restores layout and pane targets from one bounded tab snapshot', async () => {
@@ -1135,11 +1170,15 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
   })
 
-  it('does not retain a hidden pane after IDE was opened because the global panel owns the view', async () => {
+  it('does not retain a hidden pane after the Chat IDE host opens', async () => {
     const user = userEvent.setup()
-    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
+    const togglePanel = vi.fn()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'env-1',
+      yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+    })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         id: 'a1000000-0000-4000-8000-000000000001',
@@ -1157,22 +1196,24 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       },
     ])
 
-    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, vi.fn(), togglePanel)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
-    await user.click(plusButtons[1]!)
-    await user.click((await screen.findAllByText('files'))[0]!)
-    await waitFor(() => {
-      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
+    const ideToggle = screen.getByTestId('chat-ide-toggle')
+    await waitFor(() => expect(ideToggle).toBeEnabled())
+    await user.click(ideToggle)
+    expect(togglePanel).toHaveBeenCalledWith({
+      id: 'a1000000-0000-4000-8000-000000000001',
+      name: 'env-1',
+      ready: true,
     })
 
     const layoutTrigger = screen.getByRole('button', { name: '布局' })
     await user.click(layoutTrigger)
     await user.click(screen.getByRole('option', { name: '1' }))
 
-    // 全局面板脱离 pane 生命周期；隐藏 pane 不因 IDE 曾打开而继续挂载。
+    // Chat IDE 宿主脱离 pane 生命周期；隐藏 pane 不因 IDE 曾打开而继续挂载。
     expect(document.querySelectorAll('.chat-pane')).toHaveLength(1)
 
     const dialog = await openBranchDialogFromTree(user)
@@ -1186,9 +1227,13 @@ describe('ChatWorkspacePage 新建分支路由', () => {
 
   it('navigates away without a pane-owned IDE leave confirmation or close request', async () => {
     const user = userEvent.setup()
-    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
+    const togglePanel = vi.fn()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'env-1',
+      yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+    })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         id: 'a1000000-0000-4000-8000-000000000001',
@@ -1206,21 +1251,19 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       },
     ])
 
-    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, vi.fn(), togglePanel)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
-    await user.click(plusButtons[1]!)
-    await user.click((await screen.findAllByText('files'))[0]!)
-    await waitFor(() => {
-      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
-    })
+    const ideToggle = screen.getByTestId('chat-ide-toggle')
+    await waitFor(() => expect(ideToggle).toBeEnabled())
+    await user.click(ideToggle)
+    expect(togglePanel).toHaveBeenCalledTimes(1)
 
     await user.click(screen.getByRole('link', { name: '回到对话' }))
     await screen.findByText('Chats List')
     expect(screen.queryByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).not.toBeInTheDocument()
-    expect(openEnvironment).toHaveBeenCalledTimes(1)
+    expect(togglePanel).toHaveBeenCalledTimes(1)
   })
 
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费
