@@ -34,7 +34,16 @@ export function safeMessage(error: unknown): string {
   return 'ide request failed'
 }
 
-export function failureReply(error: unknown): IdeReply {
+/** Snapshot fields are permitted on a failed IDE result only as a complete `{revision, views}` fact. */
+export function failureReply(
+  error: unknown,
+  snapshot?: Pick<IdeReply, 'revision' | 'views'>,
+): IdeReply {
   const code = error instanceof IdeError ? error.code : error instanceof Error && error.name === 'AbortError' ? 'BUSY' : 'UNAVAILABLE'
-  return { ok: false, code, message: safeMessage(error) }
+  return {
+    ok: false,
+    code,
+    message: safeMessage(error),
+    ...(snapshot === undefined ? {} : { revision: snapshot.revision, views: snapshot.views }),
+  }
 }

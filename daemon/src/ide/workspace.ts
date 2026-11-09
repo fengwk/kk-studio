@@ -1,12 +1,13 @@
 import { opendir, readdir, readFile, stat, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
-import type { DaemonConfig, IdeReply } from '../contracts.js'
+import type { DaemonConfig, IdeCommand, IdeReply } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { isCanonicalUuid } from '../protocol/uuid.js'
 import { LONG_MAX } from '../validation-constants.js'
 import { IdeError } from './errors.js'
 
 const EPOCH_PATTERN = /^[1-9][0-9]*$/
+const EXPECTED_EPOCH_PATTERN = /^(?:0|[1-9][0-9]*)$/
 
 export function validateUuid(value: string, field = 'id'): string {
   if (!isCanonicalUuid(value)) {
@@ -27,6 +28,24 @@ export function validateBindingEpoch(value: string): string {
     throw new IdeError('bindingEpoch is out of range')
   }
   return value
+}
+
+/** OPEN creates with 0 and resumes with the last confirmed positive revision. */
+export function validateExpectedBindingEpoch(value: string): string {
+  if (typeof value !== 'string' || !EXPECTED_EPOCH_PATTERN.test(value)) {
+    throw new IdeError('expectedBindingEpoch must be a non-negative decimal string')
+  }
+  if (BigInt(value) > LONG_MAX) {
+    throw new IdeError('expectedBindingEpoch is out of range')
+  }
+  return value
+}
+
+/** Every binding-visible command carries the actual process instance it was addressed to. */
+export function requireDaemonInstance(command: IdeCommand, daemonInstanceId: string): void {
+  if (command.expectedDaemonInstanceId !== daemonInstanceId) {
+    throw new IdeError('daemon instance changed', 'VIEW_GONE')
+  }
 }
 
 /** Resolves the host HOME used when OPEN_VIEW is called without a directory. */
