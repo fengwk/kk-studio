@@ -90,25 +90,25 @@ public final class IdeBrowserUseClient {
     this.maxResponseBytes = maxResponseBytes;
   }
 
-  /** 精确查询该连接/document 是否仍存活并登记了相同的 environment/view/claim 意图。 */
+  /** 精确查询该连接/browser session 是否仍存活并登记了相同的 environment/view/claim 意图。 */
   public boolean findExactIntent(
       ConnectionIdentity identity,
-      UUID documentId,
+      UUID browserSessionId,
       EnvironmentId environmentId,
       UUID viewId,
       UUID claimId) {
     Objects.requireNonNull(identity, "identity");
-    Objects.requireNonNull(documentId, "documentId");
+    Objects.requireNonNull(browserSessionId, "browserSessionId");
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(claimId, "claimId");
     if (isLocal(identity)) {
       return localRegistry
-          .findExactIntent(identity, documentId, environmentId, viewId, claimId)
+          .findExactIntent(identity, browserSessionId, environmentId, viewId, claimId)
           .isPresent();
     }
     IdeBrowserUseIntentQuery query =
-        IdeBrowserUseIntentQuery.of(identity, documentId, environmentId, viewId, claimId);
+        IdeBrowserUseIntentQuery.of(identity, browserSessionId, environmentId, viewId, claimId);
     String path = IdeBrowserUsePaths.intentPath();
     byte[] payload = writeJson(query);
     Response response = exchange("POST", path, identity.eventNodeId(), payload);
@@ -118,14 +118,15 @@ public final class IdeBrowserUseClient {
     return readJson(response.body(), IdeBrowserUseIntentReply.class).matched();
   }
 
-  /** 返回该连接/document 当前可续租的已绑定持有项；没有时返回空，不允许把缺失当成传输成功。 */
-  public Optional<IdeBrowserUse> activeBoundProofs(ConnectionIdentity identity, UUID documentId) {
+  /** 返回该连接/browser session 当前可续租的已绑定持有项；没有时返回空，不允许把缺失当成传输成功。 */
+  public Optional<IdeBrowserUse> activeBoundProofs(
+      ConnectionIdentity identity, UUID browserSessionId) {
     Objects.requireNonNull(identity, "identity");
-    Objects.requireNonNull(documentId, "documentId");
+    Objects.requireNonNull(browserSessionId, "browserSessionId");
     if (isLocal(identity)) {
-      return localRegistry.activeBoundProofs(identity, documentId);
+      return localRegistry.activeBoundProofs(identity, browserSessionId);
     }
-    String path = IdeBrowserUsePaths.activeProofsPath(identity, documentId);
+    String path = IdeBrowserUsePaths.activeProofsPath(identity, browserSessionId);
     Response response = exchange("GET", path, identity.eventNodeId(), null);
     Problem problem = ClusterInternalErrors.parse(objectMapper, response.body());
     if (response.status() == 404 && "not_found".equals(problem.code())) {
@@ -137,7 +138,7 @@ public final class IdeBrowserUseClient {
     IdeBrowserUseSnapshot snapshot = readJson(response.body(), IdeBrowserUseSnapshot.class);
     if (!snapshot.eventNodeId().equals(identity.eventNodeId().toString())
         || !snapshot.connectionId().equals(identity.connectionId().toString())
-        || !snapshot.documentId().equals(documentId.toString())) {
+        || !snapshot.browserSessionId().equals(browserSessionId.toString())) {
       throw DomainException.unavailable(
           "IDE_UNAVAILABLE", "browser event node returned a mismatched usage snapshot");
     }

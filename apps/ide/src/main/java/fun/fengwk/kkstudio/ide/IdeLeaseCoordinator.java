@@ -25,8 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 在 owner 上把 Daemon 的一轮 {@code ideLeaseRound} 翻译为一次 {@code IDE_LEASE}。
  *
- * <p>流程固定为：{@code LIST_VIEWS} 读取 Daemon 当前绑定 → 按 eventNode/connection/document 分组查询事件节点已确认的使用列表 →
- * 只保留 viewId/documentId/bindingEpoch 完全匹配的条目。事件节点查询失败、快照缺失或控制代际已换代都不续租；Daemon 心跳本身永远不被当作浏览器活跃证明。
+ * <p>流程固定为：{@code LIST_VIEWS} 读取 Daemon 当前绑定 → 按 eventNode/connection/browser session
+ * 分组查询事件节点已确认的使用列表 → 只保留 viewId/browserSessionId/bindingEpoch
+ * 完全匹配的条目。事件节点查询失败、快照缺失或控制代际已换代都不续租；Daemon 心跳本身永远不被当作浏览器活跃证明。
  *
  * <p>每个 Environment 至多一个在途轮次；同一轮不会重放，下一轮由下一次正常心跳触发。回调只投递到有界执行器，不阻塞会话核心。
  */
@@ -111,7 +112,7 @@ public final class IdeLeaseCoordinator {
             new Group(
                 Uuids.parseCanonical(view.getEventNodeId(), "eventNodeId"),
                 Uuids.parseCanonical(view.getConnectionId(), "connectionId"),
-                Uuids.parseCanonical(view.getDocumentId(), "documentId"));
+                Uuids.parseCanonical(view.getBrowserSessionId(), "browserSessionId"));
         groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(view);
       } catch (IllegalArgumentException error) {
         // UI 服务返回的 DTO 已在写入时校验；这里仍然 fail-closed 地跳过坏条目。
@@ -125,7 +126,8 @@ public final class IdeLeaseCoordinator {
       Optional<IdeBrowserUseGateway.Proofs> proofs;
       try {
         proofs =
-            browserUse.activeBoundProofs(group.eventNodeId, group.connectionId, group.documentId);
+            browserUse.activeBoundProofs(
+                group.eventNodeId, group.connectionId, group.browserSessionId);
       } catch (RuntimeException error) {
         // 事件节点不可达/查询失败：该组不续租，不把失败当成不活跃以外的任何事实。
         log.warn(
@@ -141,10 +143,11 @@ public final class IdeLeaseCoordinator {
       for (EnvironmentIdeViewDTO view : entry.getValue()) {
         try {
           UUID viewId = Uuids.parseCanonical(view.getViewId(), "viewId");
-          UUID documentId = Uuids.parseCanonical(view.getDocumentId(), "documentId");
+          UUID browserSessionId =
+              Uuids.parseCanonical(view.getBrowserSessionId(), "browserSessionId");
           long epoch = requirePositiveEpoch(view.getBindingEpoch());
-          if (hasExactProof(proofs.get(), environmentId, viewId, documentId, epoch)) {
-            bindings.add(new DaemonIdeLease.Binding(viewId, documentId, epoch));
+          if (hasExactProof(proofs.get(), environmentId, viewId, browserSessionId, epoch)) {
+            bindings.add(new DaemonIdeLease.Binding(viewId, browserSessionId, epoch));
           }
         } catch (IllegalArgumentException error) {
           // 无有效 epoch 的意图不构成使用证明。
@@ -176,12 +179,12 @@ public final class IdeLeaseCoordinator {
       IdeBrowserUseGateway.Proofs proofs,
       EnvironmentId environmentId,
       UUID viewId,
-      UUID documentId,
+      UUID browserSessionId,
       long bindingEpoch) {
     for (IdeBrowserUseGateway.Proof proof : proofs.views()) {
       if (proof.environmentId().equals(environmentId)
           && proof.viewId().equals(viewId)
-          && proof.documentId().equals(documentId)
+          && proof.browserSessionId().equals(browserSessionId)
           && proof.bindingEpoch() == bindingEpoch) {
         return true;
       }
@@ -189,5 +192,5 @@ public final class IdeLeaseCoordinator {
     return false;
   }
 
-  private record Group(UUID eventNodeId, UUID connectionId, UUID documentId) {}
+  private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId) {}
 }

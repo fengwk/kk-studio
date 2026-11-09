@@ -54,6 +54,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -118,6 +119,10 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private BrowserDriver browserDriver;
 
+  private final Map<UUID, String> daemonInstances = new ConcurrentHashMap<>();
+
+  private final Map<UUID, Long> bindingEpochs = new ConcurrentHashMap<>();
+
   private Path browserTempDir;
 
   private Path testRecordsDir;
@@ -176,15 +181,17 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(1)
   void servesRealManagedCodeServerViewsThroughTheProductionDataPlane() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID firstView = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, firstView, firstClaim, null)));
+          browserSessionId,
+          1L,
+          List.of(new IntentView(environmentId, firstView, firstClaim, null)));
 
-      JsonNode first = openView(environmentId, firstView, documentId, identity, firstClaim);
+      JsonNode first = openView(environmentId, firstView, browserSessionId, identity, firstClaim);
       long firstEpoch = Long.parseLong(first.path("bindingEpoch").asText("0"));
       String firstEntry = first.path("entryUrl").asText();
       assertTrue(firstEpoch > 0, "OPEN_VIEW must return a binding epoch");
@@ -213,12 +220,13 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       UUID secondView = UUID.randomUUID();
       UUID secondClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId,
+          browserSessionId,
           2L,
           List.of(
               new IntentView(environmentId, firstView, firstClaim, firstEpoch),
               new IntentView(environmentId, secondView, secondClaim, null)));
-      JsonNode second = openView(environmentId, secondView, documentId, identity, secondClaim);
+      JsonNode second =
+          openView(environmentId, secondView, browserSessionId, identity, secondClaim);
       long secondEpoch = Long.parseLong(second.path("bindingEpoch").asText("0"));
       assertTrue(secondEpoch > 0, "the second OPEN_VIEW must return a binding epoch");
       String secondCookie = bootstrap(environmentId, secondView, second.path("entryUrl").asText());
@@ -228,14 +236,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           "the second view must return the code-server workbench HTML");
 
       // 关闭第一个视图：第一个视图必须立即失效，第二个视图必须继续可用
-      closeView(environmentId, firstView, documentId, firstEpoch);
+      closeView(environmentId, firstView, browserSessionId, firstEpoch);
       assertViewRejected(environmentId, firstView, firstCookie, "a closed view must stop serving");
       String survivingSecond = fetchView(environmentId, secondView, secondCookie, "/");
       assertTrue(
           survivingSecond.toLowerCase().contains("<html"),
           "closing one view must not take the other view down");
 
-      closeView(environmentId, secondView, documentId, secondEpoch);
+      closeView(environmentId, secondView, browserSessionId, secondEpoch);
       assertViewRejected(
           environmentId, secondView, secondCookie, "the second closed view must stop serving");
     }
@@ -246,22 +254,22 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(2)
   void closesTheManagedViewThroughTheRestApi() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
 
-      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, claimId);
       long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
       String cookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
       assertTrue(
           fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"),
           "the opened view must serve the workbench before close");
 
-      closeView(environmentId, viewId, documentId, bindingEpoch);
+      closeView(environmentId, viewId, browserSessionId, bindingEpoch);
       assertViewRejected(
           environmentId, viewId, cookie, "the closed view must reject further requests");
 
@@ -278,15 +286,15 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(3)
   void resumeIssuesANewBindingAndInvalidatesTheOldEpoch() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
 
-      JsonNode opened = openView(environmentId, viewId, documentId, identity, firstClaim);
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, firstClaim);
       long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
       String firstCookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
       assertTrue(
@@ -295,9 +303,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
       UUID secondClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId, 2L, List.of(new IntentView(environmentId, viewId, secondClaim, null)));
+          browserSessionId, 2L, List.of(new IntentView(environmentId, viewId, secondClaim, null)));
       JsonNode resumed =
-          openView(environmentId, viewId, documentId, identity, secondClaim, "resume");
+          openView(environmentId, viewId, browserSessionId, identity, secondClaim, "resume");
       long secondEpoch = Long.parseLong(resumed.path("bindingEpoch").asText());
       assertTrue(
           secondEpoch > firstEpoch,
@@ -307,14 +315,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           fetchView(environmentId, viewId, secondCookie, "/").toLowerCase().contains("<html"),
           "the resumed epoch must serve the workbench");
 
-      Response staleClose = deleteView(environmentId, viewId, documentId, firstEpoch);
+      Response staleClose = deleteView(environmentId, viewId, browserSessionId, firstEpoch);
       try (staleClose) {
         assertEquals(409, staleClose.code(), "closing with the old epoch must be rejected");
       }
       assertViewRejected(
           environmentId, viewId, firstCookie, "the old epoch cookie must be rejected");
 
-      closeView(environmentId, viewId, documentId, secondEpoch);
+      closeView(environmentId, viewId, browserSessionId, secondEpoch);
       assertViewRejected(
           environmentId, viewId, secondCookie, "the closed resumed view must stop serving");
     }
@@ -325,15 +333,15 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   @Order(4)
   void invalidatesTheOldBindingAfterTheManagedCodeServerCrashes() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
 
-      JsonNode opened = openView(environmentId, viewId, documentId, identity, firstClaim);
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, firstClaim);
       long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
       String firstCookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
       assertTrue(
@@ -343,7 +351,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       daemon.crashCodeServer();
       awaitViewReleased(environmentId, viewId);
 
-      Response staleClose = deleteView(environmentId, viewId, documentId, firstEpoch);
+      Response staleClose = deleteView(environmentId, viewId, browserSessionId, firstEpoch);
       try (staleClose) {
         String text = staleClose.body().string();
         assertEquals(
@@ -358,8 +366,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       UUID freshView = UUID.randomUUID();
       UUID freshClaim = UUID.randomUUID();
       events.registerUsage(
-          documentId, 2L, List.of(new IntentView(environmentId, freshView, freshClaim, null)));
-      JsonNode reopened = openView(environmentId, freshView, documentId, identity, freshClaim);
+          browserSessionId,
+          2L,
+          List.of(new IntentView(environmentId, freshView, freshClaim, null)));
+      JsonNode reopened =
+          openView(environmentId, freshView, browserSessionId, identity, freshClaim);
       long freshEpoch = Long.parseLong(reopened.path("bindingEpoch").asText("0"));
       assertTrue(freshEpoch > 0, "a new view after the crash must carry a binding epoch");
       assertTrue(
@@ -369,7 +380,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertTrue(
           fetchView(environmentId, freshView, freshCookie, "/").toLowerCase().contains("<html"),
           "the replacement code-server must serve the new view");
-      closeView(environmentId, freshView, documentId, freshEpoch);
+      closeView(environmentId, freshView, browserSessionId, freshEpoch);
     }
   }
 
@@ -388,15 +399,15 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Files.writeString(
         workspace.resolve("editable.txt"), "initial text in workspace\n", StandardCharsets.UTF_8);
 
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
 
-      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, claimId);
       long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
       String entryUrl = opened.path("entryUrl").asText();
 
@@ -409,8 +420,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
               baseUrl(),
               "environmentId",
               environmentId,
-              "documentId",
-              documentId.toString(),
+              "browserSessionId",
+              browserSessionId.toString(),
               "workspaceDirectory",
               workspace.toString(),
               "browserTempDirectory",
@@ -452,7 +463,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           "saved file must contain appended text from Monaco UI: " + saved);
 
       // 保存后的编辑器已无未保存修改：正常关闭必须直接成功，不等待原生对话框也不取消。
-      CloseResult savedClose = normalCloseStatus(environmentId, viewId, documentId, bindingEpoch);
+      CloseResult savedClose =
+          normalCloseStatus(environmentId, viewId, browserSessionId, bindingEpoch);
       assertTrue(
           savedClose.status() == 200 || savedClose.status() == 204,
           "normal close of the saved view must succeed: "
@@ -508,21 +520,21 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Files.createDirectory(workspace.resolve(".vscode"));
     Files.writeString(workspace.resolve(".vscode/settings.json"), "{\"files.autoSave\":\"off\"}\n");
 
-    UUID documentId = UUID.randomUUID();
+    UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
       events.registerUsage(
-          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
-      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, claimId);
       long epoch = Long.parseLong(opened.path("bindingEpoch").asText());
       browserDriver = BrowserDriver.start(node, recordsDir());
       browserDriver.send(
           Map.ofEntries(
               Map.entry("playwrightModule", playwright.toString()), Map.entry("baseUrl", baseUrl()),
               Map.entry("environmentId", environmentId),
-                  Map.entry("documentId", documentId.toString()),
+                  Map.entry("browserSessionId", browserSessionId.toString()),
               Map.entry("workspaceDirectory", workspace.toString()),
                   Map.entry("browserTempDirectory", browserTempDir.toString()),
               Map.entry("entryUrl", opened.path("entryUrl").asText()),
@@ -531,7 +543,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                   Map.entry("scenario", "dirty-close")));
       browserDriver.await("workbench-ready");
       browserDriver.await("editor-ready");
-      String binding = "{\"documentId\":\"" + documentId + "\",\"bindingEpoch\":\"" + epoch + "\"}";
+      String binding =
+          "{\"browserSessionId\":\""
+              + browserSessionId
+              + "\",\"bindingEpoch\":\""
+              + epoch
+              + "\",\"expectedDaemonInstanceId\":\""
+              + expectedDaemonInstance(viewId)
+              + "\"}";
       Request mobile =
           new Request.Builder()
               .url(
@@ -563,7 +582,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       ExecutorService executor = Executors.newSingleThreadExecutor();
       try {
         Future<CloseResult> first =
-            executor.submit(() -> normalCloseStatus(environmentId, viewId, documentId, epoch));
+            executor.submit(
+                () -> normalCloseStatus(environmentId, viewId, browserSessionId, epoch));
         try {
           browserDriver.await("close-prompt");
         } catch (AssertionError failure) {
@@ -589,7 +609,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().stream()
                 .anyMatch(view -> viewId.toString().equals(view.getViewId())));
         Future<CloseResult> second =
-            executor.submit(() -> normalCloseStatus(environmentId, viewId, documentId, epoch));
+            executor.submit(
+                () -> normalCloseStatus(environmentId, viewId, browserSessionId, epoch));
         browserDriver.await("close-prompt");
         browserDriver.proceed();
         browserDriver.await("dialog-answered");
@@ -611,10 +632,10 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private record CloseResult(int status, String body) {}
 
   private CloseResult normalCloseStatus(
-      String environmentId, UUID viewId, UUID documentId, long epoch) throws IOException {
+      String environmentId, UUID viewId, UUID browserSessionId, long epoch) throws IOException {
     String body =
-        "{\"documentId\":\""
-            + documentId
+        "{\"browserSessionId\":\""
+            + browserSessionId
             + "\",\"bindingEpoch\":\""
             + epoch
             + "\",\"discard\":false}";
@@ -687,18 +708,32 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             + daemon.stderrLog());
   }
 
+  private String expectedDaemonInstance(UUID viewId) {
+    String daemonInstance = daemonInstances.get(viewId);
+    assertFalse(
+        daemonInstance == null || daemonInstance.isBlank(),
+        "close/change must use the daemon instance returned by OPEN_VIEW");
+    return daemonInstance;
+  }
+
   private String openViewBody(
       String environmentId,
       UUID viewId,
-      UUID documentId,
+      UUID browserSessionId,
       EventIdentity identity,
       UUID claimId,
       String mode)
       throws IOException {
+    String daemonInstance = daemonInstances.get(viewId);
+    if (daemonInstance == null) {
+      daemonInstance =
+          discoverDaemonInstance(environmentId, viewId, browserSessionId, identity, claimId);
+    }
+    long expectedBindingEpoch = bindingEpochs.getOrDefault(viewId, 0L);
     return "{\"viewId\":\""
         + viewId
-        + "\",\"documentId\":\""
-        + documentId
+        + "\",\"browserSessionId\":\""
+        + browserSessionId
         + "\",\"eventNodeId\":\""
         + identity.eventNodeId()
         + "\",\"connectionId\":\""
@@ -707,37 +742,82 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         + claimId
         + "\",\"mode\":\""
         + mode
+        + "\",\"expectedBindingEpoch\":\""
+        + expectedBindingEpoch
+        + "\",\"expectedDaemonInstanceId\":\""
+        + daemonInstance
         + "\",\"directory\":\""
         + daemon.workspaceDirectory()
         + "\"}";
   }
 
-  private JsonNode openView(
-      String environmentId, UUID viewId, UUID documentId, EventIdentity identity, UUID claimId)
+  /** 创建前必须通过纯读 GET 发现当前 Daemon 实例；不能猜测或用空值回退。 */
+  private String discoverDaemonInstance(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId)
       throws IOException {
-    return openView(environmentId, viewId, documentId, identity, claimId, "create");
+    String url =
+        baseUrl()
+            + "/api/ide/environments/"
+            + environmentId
+            + "/views/"
+            + viewId
+            + "?browserSessionId="
+            + browserSessionId
+            + "&eventNodeId="
+            + identity.eventNodeId()
+            + "&connectionId="
+            + identity.connectionId()
+            + "&claimId="
+            + claimId;
+    Response response = browser.newCall(new Request.Builder().url(url).get().build()).execute();
+    try (response) {
+      String text = response.body().string();
+      assertEquals(200, response.code(), "IDE view discovery must succeed: " + text);
+      String daemonInstance =
+          JsonMapper.builder().build().readTree(text).path("daemonInstanceId").asText();
+      assertFalse(daemonInstance.isBlank(), "IDE view discovery must return a daemon instance");
+      return daemonInstance;
+    }
   }
 
   private JsonNode openView(
       String environmentId,
       UUID viewId,
-      UUID documentId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId)
+      throws IOException {
+    return openView(environmentId, viewId, browserSessionId, identity, claimId, "create");
+  }
+
+  private JsonNode openView(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
       EventIdentity identity,
       UUID claimId,
       String mode)
       throws IOException {
-    Response response = postOpenView(environmentId, viewId, documentId, identity, claimId, mode);
+    Response response =
+        postOpenView(environmentId, viewId, browserSessionId, identity, claimId, mode);
     try (response) {
       String text = response.body().string();
       assertEquals(200, response.code(), "OPEN_VIEW (" + mode + ") must succeed");
-      return JsonMapper.builder().build().readTree(text);
+      JsonNode result = JsonMapper.builder().build().readTree(text);
+      daemonInstances.put(viewId, result.path("daemonInstanceId").asText());
+      bindingEpochs.put(viewId, Long.parseLong(result.path("bindingEpoch").asText()));
+      return result;
     }
   }
 
   private Response postOpenView(
       String environmentId,
       UUID viewId,
-      UUID documentId,
+      UUID browserSessionId,
       EventIdentity identity,
       UUID claimId,
       String mode)
@@ -748,19 +828,23 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                 .url(baseUrl() + "/api/ide/environments/" + environmentId + "/views")
                 .post(
                     RequestBody.create(
-                        openViewBody(environmentId, viewId, documentId, identity, claimId, mode),
+                        openViewBody(
+                            environmentId, viewId, browserSessionId, identity, claimId, mode),
                         JSON))
                 .build())
         .execute();
   }
 
-  private void closeView(String environmentId, UUID viewId, UUID documentId, long bindingEpoch)
+  private void closeView(
+      String environmentId, UUID viewId, UUID browserSessionId, long bindingEpoch)
       throws IOException {
     String body =
-        "{\"documentId\":\""
-            + documentId
+        "{\"browserSessionId\":\""
+            + browserSessionId
             + "\",\"bindingEpoch\":\""
             + bindingEpoch
+            + "\",\"expectedDaemonInstanceId\":\""
+            + expectedDaemonInstance(viewId)
             + "\",\"discard\":true}";
     Response response =
         browser
@@ -784,13 +868,16 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  private Response deleteView(String environmentId, UUID viewId, UUID documentId, long bindingEpoch)
+  private Response deleteView(
+      String environmentId, UUID viewId, UUID browserSessionId, long bindingEpoch)
       throws IOException {
     String body =
-        "{\"documentId\":\""
-            + documentId
+        "{\"browserSessionId\":\""
+            + browserSessionId
             + "\",\"bindingEpoch\":\""
             + bindingEpoch
+            + "\",\"expectedDaemonInstanceId\":\""
+            + expectedDaemonInstance(viewId)
             + "\",\"discard\":true}";
     return browser
         .newCall(
@@ -1090,10 +1177,10 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           frame.path("eventNodeId").asText(), frame.path("connectionId").asText());
     }
 
-    void registerUsage(UUID documentId, long revision, List<IntentView> views)
+    void registerUsage(UUID browserSessionId, long revision, List<IntentView> views)
         throws InterruptedException {
       StringBuilder builder = new StringBuilder();
-      builder.append("{\"type\":\"ide-use\",\"documentId\":\"").append(documentId);
+      builder.append("{\"type\":\"ide-use\",\"browserSessionId\":\"").append(browserSessionId);
       builder.append("\",\"revision\":\"").append(revision).append("\",\"views\":[");
       for (int index = 0; index < views.size(); index++) {
         IntentView view = views.get(index);

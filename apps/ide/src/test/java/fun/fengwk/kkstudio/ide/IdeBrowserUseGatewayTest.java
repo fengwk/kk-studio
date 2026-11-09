@@ -80,7 +80,7 @@ class IdeBrowserUseGatewayTest {
     IdeBrowserUseGateway.Proofs proofs =
         gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).orElseThrow();
 
-    assertEquals(DOCUMENT, proofs.documentId());
+    assertEquals(DOCUMENT, proofs.browserSessionId());
     assertEquals(4L, proofs.revision());
     assertEquals(List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, 7L)), proofs.views());
     verifyNoMoreInteractions(nodes);
