@@ -20,6 +20,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -361,6 +364,36 @@ class HarnessRuntimeLifecycleTest {
 
     assertNotNull(cleanup, "background cleanup must execute on its own thread");
     assertFalse(cleanup.isAlive(), "background cleanup must finish after the test releases it");
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {1, 2, 3})
+  void localFailureNeverSkipsClosingThePhysicalLifecycle(int failingStage) {
+    // 两次 drain 与 close 的任何本地故障都须上报，且不能绕过目录锁保留的 close。
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    LocalExecutionLifecycle physical = mock(LocalExecutionLifecycle.class);
+    HarnessRuntimeLifecycle lifecycle =
+        defaultLifecycle(
+            true, dispatcher, physical, mock(ToolProcessor.class), provider(null), Duration.ZERO);
+    IllegalStateException failure = new IllegalStateException("local lifecycle failure");
+    AtomicInteger drains = new AtomicInteger();
+    when(physical.drain(any()))
+        .thenAnswer(
+            invocation -> {
+              if (drains.incrementAndGet() == failingStage) {
+                throw failure;
+              }
+              return new LocalExecutionDrain(List.of(), false);
+            });
+    if (failingStage == 3) {
+      doThrow(failure).when(physical).close();
+    }
+    lifecycle.start();
+
+    assertSame(failure, assertThrows(IllegalStateException.class, lifecycle::stop));
+    verify(physical, times(2)).drain(any());
+    verify(physical).close();
+    assertFalse(lifecycle.isRunning());
   }
 
   @Test
