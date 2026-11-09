@@ -186,7 +186,7 @@ class PostgresqlModelLeaseRecoveryTest {
         scheduler,
         Runnable::run,
         Runnable::run,
-        ExecutionExitTestSupport.confirmer(store, Clock.systemUTC()));
+        ExecutionExitTestSupport.lifecycle(store, Clock.systemUTC()));
   }
 
   /** 在开放 TURN_START 之后追加 USER Entry 并推进 Thread head。 */

@@ -26,6 +26,10 @@ import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionHandle;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionRegistration;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
@@ -76,6 +80,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
   private final HarnessStore store;
   private final ExecutionExitConfirmer exitConfirmer;
+  private final LocalExecutionLifecycle lifecycle;
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
   private final UUID invocationId;
@@ -83,8 +88,8 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   private final UUID threadId;
   private final int attempt;
 
-  /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
-  private volatile ExecutionExitFact registered;
+  /** PREPARED 之后、登记事务提交后由生命周期端口返回的物理句柄。 */
+  private volatile LocalExecutionHandle localHandle;
 
   /** 本代次已成功登记的远端事实；发送前写入，确认时直接复用原始 registeredAt，不在确认事务中重新拼接。 */
   private final ConcurrentMap<UUID, ExecutionExitFact> registeredRemotes =
@@ -122,9 +127,11 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       Consumer<ToolExecution> ownerRelease,
+      LocalExecutionLifecycle lifecycle,
       ExecutionExitConfirmer exitConfirmer,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
     this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.claim = Objects.requireNonNull(claim, "claim");
@@ -204,7 +211,8 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
     private void confirmRemote(UUID remoteExecutionId, ExecutionExitState state) {
       Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
-      if (registered == null) {
+      LocalExecutionHandle handle = localHandle;
+      if (handle == null || !handle.registered()) {
         throw new IllegalStateException(
             "remote execution " + remoteExecutionId + " has no registered local generation");
       }
@@ -242,11 +250,20 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   }
 
   /**
-   * Gateway admission 返回 Admitted 后调用：先持久化 {@code READY -> RUNNING}（失败也必须在同一窗口 close），再启动执行线程。 run
-   * 的关闭责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
+   * Gateway admission 返回 Admitted 后调用：先持久化 PREPARED 并在事务内登记 {@code READY -> RUNNING}，事务提交成功才启动执行线程。
+   * run 的关闭责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
    */
   public ProcessResult start(ToolGateway.Run run) {
-    return launch(run, this::markRunning, "running");
+    LocalExecutionHandle handle;
+    try {
+      handle = beginLocal(this::registerRunning);
+    } catch (RuntimeException failure) {
+      log.warn("cannot prepare tool running state for {}", invocationId, failure);
+      closeStrict(run);
+      abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    return launch(run, handle);
   }
 
   /**
@@ -254,21 +271,42 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
    * attempt，不调用 markRunning（状态已是 RUNNING）。随后启动执行线程。
    */
   public ProcessResult startReattach(ToolGateway.Run run, ExecutionExitFact remoteFact) {
-    return launch(run, () -> registerReattach(remoteFact), "reattach");
+    LocalExecutionHandle handle;
+    try {
+      handle = beginLocal(this::registerReattach);
+      if (handle.registered()) {
+        registeredRemotes.put(remoteFact.executionId(), remoteFact);
+      }
+    } catch (RuntimeException failure) {
+      log.warn("cannot prepare tool reattach state for {}", invocationId, failure);
+      closeStrict(run);
+      abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    return launch(run, handle);
   }
 
-  private ProcessResult launch(ToolGateway.Run run, BooleanSupplier persist, String phase) {
-    boolean committed;
-    try {
-      committed = persist.getAsBoolean();
-    } catch (RuntimeException failure) {
-      log.warn("cannot persist tool {} state for {}", phase, invocationId, failure);
-      committed = false;
-    }
-    if (!committed || abandoned.get()) {
+  /** 在 PREPARED 已落盘后执行登记事务，并保存端口返回的物理句柄；PREPARED 写失败时不返回 handle。 */
+  private LocalExecutionHandle beginLocal(LocalExecutionRegistration registration) {
+    LocalExecutionHandle handle = lifecycle.begin(localIdentity(), registration);
+    localHandle = handle;
+    return handle;
+  }
+
+  private LocalExecutionIdentity localIdentity() {
+    return new LocalExecutionIdentity(
+        executionId, threadId, invocationId, attempt, claim.leaseToken(), ExecutionExitKind.TOOL);
+  }
+
+  private ProcessResult launch(ToolGateway.Run run, LocalExecutionHandle handle) {
+    if (handle == null || !handle.registered() || abandoned.get()) {
       boolean closed = closeStrict(run);
-      if (committed && closed) {
-        confirmNotStarted();
+      if (handle != null) {
+        if (closed) {
+          handle.provenExit(ExecutionExitState.NOT_STARTED);
+        } else {
+          handle.exitNotProven();
+        }
       }
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
@@ -277,7 +315,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
     } catch (RuntimeException | Error failure) {
       if (closeStrict(run)) {
-        confirmNotStarted();
+        handle.provenExit(ExecutionExitState.NOT_STARTED);
+      } else {
+        handle.exitNotProven();
       }
       abandon();
       throw failure;
@@ -317,6 +357,8 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
         } else {
           confirmNotStarted();
         }
+      } else {
+        exitNotProven();
       }
       abandon();
     }
@@ -338,9 +380,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     }
   }
 
-  /** RUNNING 已登记但执行线程确定没有进入 body。登记失败时不确认。 */
+  /** 已持有 PREPARED 或已登记但执行线程确定没有进入 body；资源释放成功后结束该代次。 */
   private void confirmNotStarted() {
-    if (registered != null) {
+    if (localHandle != null) {
       confirm(ExecutionExitState.NOT_STARTED);
     }
   }
@@ -350,22 +392,26 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     confirm(ExecutionExitState.STUDIO_EXITED);
   }
 
+  /** 无法证明退出：保留 PREPARED 与未确认事实，并要求日志目录锁保留到 JVM 退出。 */
+  private void exitNotProven() {
+    LocalExecutionHandle handle = localHandle;
+    if (handle != null) {
+      handle.exitNotProven();
+    }
+  }
+
   private void confirm(ExecutionExitState state) {
-    ExecutionExitFact local = registered;
-    if (local == null) {
+    LocalExecutionHandle handle = localHandle;
+    if (handle == null) {
       log.warn("tool execution {} was not registered and remains unconfirmed", executionId);
       return;
     }
     try {
-      ExecutionExitConfirmer.Result result = exitConfirmer.confirm(local, state);
-      if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
-        // 合法深删已先提交，不回写该 Thread；缺失本身不构成退出证据。
-        return;
-      }
+      handle.provenExit(state);
     } catch (RuntimeException failure) {
       log.warn(
           "cannot confirm tool execution exit for {}; phase=TOOL_EXIT_CONFIRM; exception={}",
-          local.executionId(),
+          executionId,
           failure.getClass().getSimpleName());
     }
   }
@@ -379,10 +425,11 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     return bodyStarted;
   }
 
-  /** 声明执行体开始；abandon 已获胜时返回 false（工具绝不被调用）。 */
+  /** 声明执行体开始；已取消或取消早于 attach 时返回 false（工具绝不被调用）。 */
   private boolean enterBody() {
     synchronized (monitor) {
-      if (abandoned.get()) {
+      LocalExecutionHandle handle = localHandle;
+      if (abandoned.get() || handle == null || !handle.attachBody(Thread.currentThread())) {
         return false;
       }
       inBody = true;
@@ -393,27 +440,30 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     }
   }
 
-  /** 声明执行体退出，并清除可能已投递的 interrupt：此后 abandon 不会再打断本线程。 */
+  /** 声明执行体退出，并清除可能已投递的 interrupt；此后 abandon 不会再打断本线程。 */
   private void exitBody() {
     synchronized (monitor) {
       inBody = false;
       progressOpen = false;
       bodyThread = null;
+      LocalExecutionHandle handle = localHandle;
+      if (handle != null) {
+        handle.detachBody();
+      }
       Thread.interrupted();
     }
   }
 
-  /** 停止 heartbeat、从 registry 释放，并在执行体运行期间 interrupt 执行线程；幂等，且不反写任何持久化状态。 */
+  /** 停止 heartbeat、请求取消物理 body（含迟到 attach）并从 registry 释放；幂等，且不反写任何持久化状态。 */
   @Override
   public void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
       return;
     }
     heartbeat.stop();
-    synchronized (monitor) {
-      if (inBody) {
-        bodyThread.interrupt();
-      }
+    LocalExecutionHandle handle = localHandle;
+    if (handle != null) {
+      handle.requestCancel();
     }
     ownerRelease.accept(this);
   }
@@ -426,13 +476,17 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   }
 
   /**
-   * 排空移交：停止本地执行体（不写 durable 状态），在 deadline 之前等待执行线程退出，再 release TOOL Work claim，使其他节点立即可以认领。
-   * 执行线程退出时由 execute() 的 finally 自行以 STUDIO_EXITED 确认 TOOL 事实；超时则保持 UNCONFIRMED。
+   * 排空移交：停止本地执行体（不写 durable 状态），在剩余预算内等待执行线程退出，再 release TOOL Work claim，使其他节点立即可以认领。 执行线程退出时由
+   * execute() 的 finally 自行以 STUDIO_EXITED 确认 TOOL 事实；超时则保持 UNCONFIRMED。
    *
    * @return 若不满足移交条件返回 false，成功移交返回 true
    */
-  public boolean handover(Instant deadline) {
-    Objects.requireNonNull(deadline, "deadline");
+  public boolean handover(Duration remaining) {
+    Objects.requireNonNull(remaining, "remaining");
+    if (remaining.isNegative()) {
+      throw new IllegalArgumentException("handover remaining must not be negative");
+    }
+    long deadlineNanos = System.nanoTime() + remaining.toNanos();
     Thread targetThread;
     synchronized (monitor) {
       if (!inBody || abandoned.get() || registeredRemotes.isEmpty()) {
@@ -442,10 +496,10 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     }
     abandon();
     if (targetThread != null && targetThread != Thread.currentThread()) {
-      Duration remaining = Duration.between(Instant.now(), deadline);
-      if (!remaining.isNegative() && !remaining.isZero()) {
+      long remainingNanos = deadlineNanos - System.nanoTime();
+      if (remainingNanos > 0) {
         try {
-          targetThread.join(remaining);
+          targetThread.join(Duration.ofNanos(remainingNanos));
         } catch (InterruptedException error) {
           Thread.currentThread().interrupt();
         }
@@ -554,76 +608,65 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     return null;
   }
 
-  /** READY -&gt; RUNNING（attempt+1）+ version+1：副作用之前的持久执行意图，要求 claim 仍 owned 且 attempt 匹配。 */
-  private boolean markRunning() {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              Instant now = tx.now();
-              ThreadState thread = tx.threads().lock(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt - 1) {
-                return false;
-              }
-              tx.tools().update(List.of(tool.markRunning(now)));
-              tx.threads().update(thread.touchVersion(now));
-              registered =
-                  ExecutionExitLedger.register(
-                      tx,
-                      executionId(),
-                      threadId,
-                      invocationId,
-                      attempt,
-                      claim.leaseToken(),
-                      ExecutionExitKind.TOOL,
-                      null);
-              return true;
-            }));
+  /** READY -&gt; RUNNING（attempt+1）+ version+1 并登记退出事实；事务提交成功但未登记时返回 {@code null}。 */
+  private ExecutionExitFact registerRunning() {
+    return store.transaction(
+        tx -> {
+          Instant now = tx.now();
+          ThreadState thread = tx.threads().lock(threadId).orElse(null);
+          if (thread == null) {
+            return null;
+          }
+          ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+          if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+            return null;
+          }
+          if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt - 1) {
+            return null;
+          }
+          tx.tools().update(List.of(tool.markRunning(now)));
+          tx.threads().update(thread.touchVersion(now));
+          return ExecutionExitLedger.register(
+              tx,
+              executionId(),
+              threadId,
+              invocationId,
+              attempt,
+              claim.leaseToken(),
+              ExecutionExitKind.TOOL,
+              null);
+        });
   }
 
   /**
    * 挂接执行体在事务内锁 Thread -> Tool -> Work 登记本节点的 TOOL 事实： 同一 attempt、新 executionId、本 claim token。不调用
-   * markRunning，不修改 version。提交成功后将原 REMOTE 事实放入 registeredRemotes，以便统一退出确认与排空移交判定。
+   * markRunning，不修改 version。提交成功后由 {@link #startReattach} 将原 REMOTE 事实放入
+   * registeredRemotes，以便统一确认与排空移交判定。
    */
-  private boolean registerReattach(ExecutionExitFact remoteFact) {
-    Objects.requireNonNull(remoteFact, "remoteFact");
-    boolean committed =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  ThreadState thread = tx.threads().lock(threadId).orElse(null);
-                  if (thread == null) {
-                    return false;
-                  }
-                  ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-                  if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                    return false;
-                  }
-                  if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                    return false;
-                  }
-                  registered =
-                      ExecutionExitLedger.register(
-                          tx,
-                          executionId(),
-                          threadId,
-                          invocationId,
-                          attempt,
-                          claim.leaseToken(),
-                          ExecutionExitKind.TOOL,
-                          null);
-                  return true;
-                }));
-    if (committed) {
-      registeredRemotes.put(remoteFact.executionId(), remoteFact);
-    }
-    return committed;
+  private ExecutionExitFact registerReattach() {
+    return store.transaction(
+        tx -> {
+          ThreadState thread = tx.threads().lock(threadId).orElse(null);
+          if (thread == null) {
+            return null;
+          }
+          ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+          if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+            return null;
+          }
+          if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+            return null;
+          }
+          return ExecutionExitLedger.register(
+              tx,
+              executionId(),
+              threadId,
+              invocationId,
+              attempt,
+              claim.leaseToken(),
+              ExecutionExitKind.TOOL,
+              null);
+        });
   }
 
   /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */

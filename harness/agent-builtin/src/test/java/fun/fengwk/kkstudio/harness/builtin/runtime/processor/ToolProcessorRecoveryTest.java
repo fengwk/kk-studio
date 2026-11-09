@@ -701,6 +701,7 @@ class ToolProcessorRecoveryTest {
             fixture.clock,
             hooked,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
@@ -877,6 +878,7 @@ class ToolProcessorRecoveryTest {
                 fixture.clock,
                 fixture.scheduler,
                 Runnable::run,
+                ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
                 TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
                 ToolProcessorTestSupport.STABLE_MATERIALIZER));
     new ToolProcessorConfig(
@@ -912,6 +914,7 @@ class ToolProcessorRecoveryTest {
             fixture.clock,
             dead,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
@@ -1107,6 +1110,7 @@ class ToolProcessorRecoveryTest {
             fixture.scheduler,
             Runnable::run,
             ignored -> releases.incrementAndGet(),
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     ToolProcessorTestSupport.FakeRun run =

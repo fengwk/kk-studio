@@ -456,7 +456,7 @@ class HarnessWorkDispatcherHandoffTest {
             processorScheduler,
             Runnable::run,
             Runnable::run,
-            ExecutionExitTestSupport.confirmer(store, clock));
+            ExecutionExitTestSupport.lifecycle(store, clock));
     ToolProcessor toolProcessor =
         new ToolProcessor(
             store,
@@ -471,6 +471,7 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
+            ExecutionExitTestSupport.lifecycle(store, clock),
             ExecutionExitTestSupport.confirmer(store, clock),
             (sessionId, toolName, result) -> result);
     HarnessWorkDispatcher dispatcher =
@@ -567,7 +568,7 @@ class HarnessWorkDispatcherHandoffTest {
             processorScheduler,
             Runnable::run,
             Runnable::run,
-            ExecutionExitTestSupport.confirmer(store, clock));
+            ExecutionExitTestSupport.lifecycle(store, clock));
     ToolProcessor toolProcessor =
         new ToolProcessor(
             store,
@@ -582,6 +583,7 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
+            ExecutionExitTestSupport.lifecycle(store, clock),
             ExecutionExitTestSupport.confirmer(store, clock),
             (sessionId, toolName, result) -> result);
     CopyOnWriteArrayList<UUID> threadHandoffs = new CopyOnWriteArrayList<>();
