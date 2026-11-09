@@ -1,6 +1,6 @@
 # 系统设计
 
-`kk-studio` 3.0.0 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
+`kk-studio` 4.0.0 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
 [`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
 文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
 

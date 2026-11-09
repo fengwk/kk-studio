@@ -140,11 +140,13 @@ services:
     build: *app-build
     image: ${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}
     init: true
-    # stop_grace_period (60s) 必须大于 drain-timeout (10s) + dispatcher lease-duration (10s) + 余量，
-    # 确保节点优雅关闭时有充分时间排空并主动释放路由租约与 Work。
-    stop_grace_period: 60s
+    # stop_grace_period (120s) 覆盖 Spring shutdown phase (100s)；本栈保留既有的短
+    # drain-timeout (10s) + dispatcher lease-duration (10s) 预算，确保优雅关闭时有充分时间
+    # 排空并主动释放路由租约与 Work，同时不会被容器运行时提前 SIGKILL。
+    stop_grace_period: 120s
     environment: &app-environment
       SPRING_PROFILES_ACTIVE: e2e
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 100s
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/kk_studio_distributed
       KK_STUDIO_DB_USER: kk_studio
       KK_STUDIO_DB_PASSWORD: kk_studio
@@ -182,7 +184,7 @@ services:
     build: *app-build
     image: ${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}
     init: true
-    stop_grace_period: 60s
+    stop_grace_period: 120s
     environment: *app-environment
     ports:
       - "127.0.0.1:${DISTRIBUTED_APP_B_PORT:-18083}:8080"
