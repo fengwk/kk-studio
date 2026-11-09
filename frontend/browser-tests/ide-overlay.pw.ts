@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './fixture'
+import { expect, test, tokenColor, type Locator, type Page } from './fixture'
 import type { Route } from '@playwright/test'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
@@ -722,5 +722,93 @@ test.describe('Chat-scoped persistent IDE host', () => {
         '[data-testid="ide-fixture-draft"]',
       )?.value
     ))).toBe('unsaved IDE text')
+  })
+})
+
+/** 目录复制反馈不得移动面板：工具栏、正文、按钮几何与面板行数在复制前后必须完全一致。 */
+async function copyLayout(page: Page): Promise<{
+  toolbar: string
+  body: string
+  button: string
+  rows: number
+}> {
+  const box = async (locator: Locator): Promise<string> => {
+    const value = await locator.boundingBox()
+    expect(value).not.toBeNull()
+    return [value!.x, value!.y, value!.width, value!.height]
+      .map((part) => part.toFixed(2))
+      .join(',')
+  }
+  return {
+    toolbar: await box(page.getByTestId('ide-toolbar')),
+    body: await box(page.getByTestId('ide-panel-body')),
+    button: await box(page.getByTestId('ide-copy-directory-btn')),
+    rows: await page.getByTestId('ide-overlay-panel').evaluate((element) => element.children.length),
+  }
+}
+
+test.describe('IDE directory copy feedback', () => {
+  test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
+
+  test('confirms the copy on the button itself without adding a toolbar row', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+
+    const button = page.getByTestId('ide-copy-directory-btn')
+    const status = page.locator('.ide-toolbar [role="status"]')
+    const before = await copyLayout(page)
+
+    await button.click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(DIRECTORY_A)
+
+    // 成功反馈留在按钮原地：✓ 图标、悬停说明与读屏状态同步，没有新增横幅行。
+    await expect(button.locator('svg.lucide-check')).toHaveCount(1)
+    await expect(button).toHaveAttribute('title', '目录路径已复制')
+    await expect(button).toHaveAttribute('aria-label', '复制目录路径')
+    await expect(status).toHaveText('目录路径已复制')
+    await expect(status).toHaveCSS('position', 'absolute')
+    await expect(page.locator('.ide-panel-warning-banner', { hasText: '目录路径已复制' })).toHaveCount(0)
+    expect(await copyLayout(page)).toEqual(before)
+
+    // 1.5 秒后自动回到空闲图标；面板几何仍然不变。
+    await expect(button.locator('svg.lucide-copy')).toHaveCount(1)
+    await expect(button).toHaveAttribute('title', '复制目录路径')
+    await expect(status).toBeEmpty()
+    expect(await copyLayout(page)).toEqual(before)
+  })
+
+  test('shows the red failure icon in place when the clipboard and fallback both fail', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error('denied')) },
+      })
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: () => false,
+      })
+    })
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+
+    const button = page.getByTestId('ide-copy-directory-btn')
+    const before = await copyLayout(page)
+    const danger = await tokenColor(page, '--danger')
+
+    await button.click()
+    await expect(button.locator('svg.lucide-circle-alert')).toHaveCount(1)
+    await expect(button).toHaveClass(/is-copy-failed/)
+    await expect(button).toHaveCSS('color', danger)
+    await expect(button).toHaveAttribute('title', '无法复制目录路径')
+    await expect(page.locator('.ide-toolbar [role="status"]')).toHaveText('无法复制目录路径')
+    await expect(page.locator('.ide-panel-warning-banner', { hasText: '无法复制目录路径' })).toHaveCount(0)
+    expect(await copyLayout(page)).toEqual(before)
+
+    // 3 秒后回到空闲态，失败提示不残留。
+    await expect(button).toHaveAttribute('title', '复制目录路径')
+    await expect(button.locator('svg.lucide-copy')).toHaveCount(1)
+    expect(await copyLayout(page)).toEqual(before)
   })
 })
