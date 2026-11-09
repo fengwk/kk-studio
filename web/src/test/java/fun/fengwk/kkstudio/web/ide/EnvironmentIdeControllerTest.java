@@ -132,7 +132,7 @@ class EnvironmentIdeControllerTest {
   void readViewForwardsExplicitQueryAndReturnsSnapshotWithoutEntryUrl() throws Exception {
     EnvironmentIdeViewDTO view = view("/workspace");
     EnvironmentIdeViewSnapshotDTO snapshot = new EnvironmentIdeViewSnapshotDTO();
-    snapshot.setDaemonInstanceId("daemon-instance");
+    snapshot.setDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     snapshot.setRevision(9L);
     snapshot.setView(view);
     when(environmentIdeService.readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
@@ -145,9 +145,9 @@ class EnvironmentIdeControllerTest {
                 .param("eventNodeId", "11111111-1111-4111-8111-111111111111")
                 .param("connectionId", "22222222-2222-4222-8222-222222222222")
                 .param("claimId", "33333333-3333-4333-8333-333333333333")
-                .param("expectedDaemonInstanceId", "daemon-instance"))
+                .param("expectedDaemonInstanceId", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.daemonInstanceId").value("daemon-instance"))
+        .andExpect(jsonPath("$.daemonInstanceId").value("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         .andExpect(jsonPath("$.revision").value(9))
         .andExpect(jsonPath("$.view.viewId").value(VIEW_ID))
         .andExpect(jsonPath("$.view.entryUrl").doesNotExist());
@@ -157,7 +157,8 @@ class EnvironmentIdeControllerTest {
     verify(environmentIdeService)
         .readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
     assertEquals(DOCUMENT_ID, request.getValue().getBrowserSessionId());
-    assertEquals("daemon-instance", request.getValue().getExpectedDaemonInstanceId());
+    assertEquals(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", request.getValue().getExpectedDaemonInstanceId());
   }
 
   /** 意图：OPEN_VIEW 返回 200 与受控 entryUrl，并把路径中的 environmentId 与请求体原样转发给服务。 */
@@ -411,7 +412,7 @@ class EnvironmentIdeControllerTest {
     openRequest.setClaimId(UUID.randomUUID().toString());
     openRequest.setMode(EnvironmentIdeOpenMode.CREATE);
     openRequest.setExpectedBindingEpoch(0L);
-    openRequest.setExpectedDaemonInstanceId("daemon-instance");
+    openRequest.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     openRequest.setDirectory(directory);
     realChain
         .perform(
@@ -426,7 +427,7 @@ class EnvironmentIdeControllerTest {
     EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
     changeRequest.setBrowserSessionId(DOCUMENT_ID);
     changeRequest.setBindingEpoch(7L);
-    changeRequest.setExpectedDaemonInstanceId("daemon-instance");
+    changeRequest.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     changeRequest.setDirectory(directory);
     realChain
         .perform(
@@ -462,7 +463,7 @@ class EnvironmentIdeControllerTest {
     request.setClaimId(UUID.randomUUID().toString());
     request.setMode(EnvironmentIdeOpenMode.CREATE);
     request.setExpectedBindingEpoch(0L);
-    request.setExpectedDaemonInstanceId("daemon-instance");
+    request.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     request.setDirectory(directory);
     return OBJECT_MAPPER.writeValueAsString(request);
   }

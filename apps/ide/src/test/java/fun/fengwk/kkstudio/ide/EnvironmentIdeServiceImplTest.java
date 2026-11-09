@@ -56,7 +56,10 @@ class EnvironmentIdeServiceImplTest {
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
-  private static final String DAEMON_INSTANCE = "daemon-instance";
+  private static final String DAEMON_INSTANCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String REPLACEMENT_INSTANCE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  private static final String OLD_INSTANCE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  private static final String NEW_INSTANCE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
   private FakeTransport transport;
   private FakeBrowserUse browserUse;
@@ -114,13 +117,69 @@ class EnvironmentIdeServiceImplTest {
   @Test
   void mismatchedExpectedDaemonInstanceIsViewGoneWithoutSendingCommand() {
     EnvironmentIdeOpenViewDTO request = openRequest("create", 0L, null);
-    request.setExpectedDaemonInstanceId("other-daemon");
+    request.setExpectedDaemonInstanceId(REPLACEMENT_INSTANCE);
 
     DomainException error =
         assertThrows(DomainException.class, () -> service.openView(ENV, request));
 
     assertEquals("VIEW_GONE", error.reason());
     assertTrue(transport.commands.isEmpty());
+  }
+
+  @Test
+  void invalidExpectedDaemonInstanceIdIsValidationBeforeAnyCommand() {
+    String invalid = "daemon-instance";
+    EnvironmentIdeOpenViewDTO open = openRequest("create", 0L, null);
+    open.setExpectedDaemonInstanceId(invalid);
+    DomainException openError =
+        assertThrows(DomainException.class, () -> service.openView(ENV, open));
+    assertEquals("validation", openError.code().code());
+    assertTrue(transport.commands.isEmpty());
+
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    int before = transport.commands.size();
+
+    EnvironmentIdeChangeDirectoryDTO change = new EnvironmentIdeChangeDirectoryDTO();
+    change.setBrowserSessionId(BROWSER_SESSION.toString());
+    change.setBindingEpoch(7L);
+    change.setExpectedDaemonInstanceId(invalid);
+    change.setDirectory("/next");
+    assertEquals(
+        "validation",
+        assertThrows(
+                DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change))
+            .code()
+            .code());
+
+    EnvironmentIdeCloseViewDTO close = closeRequest(false);
+    close.setExpectedDaemonInstanceId(invalid);
+    assertEquals(
+        "validation",
+        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close))
+            .code()
+            .code());
+
+    EnvironmentIdeViewBindingDTO focus = binding(7L);
+    focus.setExpectedDaemonInstanceId(invalid);
+    assertEquals(
+        "validation",
+        assertThrows(
+                DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), focus))
+            .code()
+            .code());
+
+    EnvironmentIdeViewBindingDTO apply = binding(7L);
+    apply.setExpectedDaemonInstanceId(invalid);
+    assertEquals(
+        "validation",
+        assertThrows(
+                DomainException.class, () -> service.collapseMobile(ENV, VIEW.toString(), apply))
+            .code()
+            .code());
+
+    assertEquals(before, transport.commands.size());
+    assertEquals(1, tickets.pendingCount());
   }
 
   @Test
@@ -199,7 +258,7 @@ class EnvironmentIdeServiceImplTest {
             DomainException.class,
             () -> service.readView(ENV, VIEW.toString(), readRequest(BROWSER_SESSION)));
 
-    assertEquals("VIEW_GONE", error.reason());
+    assertEquals("STALE_BINDING", error.reason());
     assertTrue(transport.commands.isEmpty());
   }
 
@@ -328,7 +387,7 @@ class EnvironmentIdeServiceImplTest {
   void daemonGenerationReplacementInvalidatesCachedBindings() {
     transport.replies.add(openSnapshot(5L, 7L));
     service.openView(ENV, openRequest("create", 0L, null));
-    transport.replaceCurrent(new DaemonConnectionIdentity(ENV, "replacement-daemon"));
+    transport.replaceCurrent(new DaemonConnectionIdentity(ENV, REPLACEMENT_INSTANCE));
 
     DomainException error =
         assertThrows(
@@ -342,7 +401,7 @@ class EnvironmentIdeServiceImplTest {
   void lateSnapshotFromReplacedInstanceIsRejectedWithoutReplacingCurrentCache() {
     transport.replies.add(openSnapshot(5L, 7L));
     service.openView(ENV, openRequest("create", 0L, null));
-    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    DaemonConnectionIdentity replacement = new DaemonConnectionIdentity(ENV, REPLACEMENT_INSTANCE);
     transport.replaceCurrent(replacement);
     transport.replyAs(new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE));
     transport.replies.add(snapshot(6L, summary(7L, CLAIM)));
@@ -505,15 +564,35 @@ class EnvironmentIdeServiceImplTest {
         assertThrows(
             DomainException.class, () -> service.openView(ENV, openRequest("create", 0L, null)));
 
-    assertEquals("VIEW_GONE", error.reason());
+    assertEquals("STALE_BINDING", error.reason());
     assertTrue(transport.commands.isEmpty());
     assertEquals(0, tickets.pendingCount());
   }
 
   @Test
+  void missingIntentDoesNotDeleteExistingViewOrDispatchWriteCommand() {
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    int before = transport.commands.size();
+    assertTrue(snapshots.current(ENV).orElseThrow().find(VIEW).isPresent());
+    assertEquals(1, tickets.pendingCount());
+
+    browserUse.matched = false;
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> service.closeView(ENV, VIEW.toString(), closeRequest(false)));
+
+    assertEquals("STALE_BINDING", error.reason());
+    assertEquals(before, transport.commands.size());
+    assertTrue(snapshots.current(ENV).orElseThrow().find(VIEW).isPresent());
+    assertEquals(1, tickets.pendingCount());
+  }
+
+  @Test
   void lateOpenReplyFromReplacedInstanceIsNotStoredOrTicketIssued() {
     transport.replies.add(openSnapshot(5L, 7L));
-    transport.replyAs(new DaemonConnectionIdentity(ENV, "old-daemon"));
+    transport.replyAs(new DaemonConnectionIdentity(ENV, OLD_INSTANCE));
 
     DomainException error =
         assertThrows(
@@ -528,7 +607,7 @@ class EnvironmentIdeServiceImplTest {
   void reconcileOpenAfterInstanceReplacementReturnsViewGone() {
     transport.failNext.set(IdeAction.OPEN_VIEW);
     transport.failHook =
-        () -> transport.replaceCurrent(new DaemonConnectionIdentity(ENV, "new-daemon"));
+        () -> transport.replaceCurrent(new DaemonConnectionIdentity(ENV, NEW_INSTANCE));
 
     DomainException error =
         assertThrows(

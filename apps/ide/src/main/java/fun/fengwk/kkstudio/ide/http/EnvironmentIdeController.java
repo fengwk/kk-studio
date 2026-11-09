@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.ide.http;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -49,7 +48,18 @@ public class EnvironmentIdeController {
   public EnvironmentIdeViewSnapshotDTO readView(
       @PathVariable UUID environmentId,
       @PathVariable UUID viewId,
-      @ModelAttribute EnvironmentIdeReadViewDTO request) {
+      @RequestParam("browserSessionId") UUID browserSessionId,
+      @RequestParam("eventNodeId") UUID eventNodeId,
+      @RequestParam("connectionId") UUID connectionId,
+      @RequestParam("claimId") UUID claimId,
+      @RequestParam(value = "expectedDaemonInstanceId", required = false)
+          String expectedDaemonInstanceId) {
+    EnvironmentIdeReadViewDTO request = new EnvironmentIdeReadViewDTO();
+    request.setBrowserSessionId(browserSessionId.toString());
+    request.setEventNodeId(eventNodeId.toString());
+    request.setConnectionId(connectionId.toString());
+    request.setClaimId(claimId.toString());
+    request.setExpectedDaemonInstanceId(expectedDaemonInstanceId);
     return environmentIdeService.readView(
         EnvironmentId.of(environmentId), viewId.toString(), request);
   }
