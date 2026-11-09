@@ -53,7 +53,7 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
-| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 并标记停止；2) 轮询等待本机 Model/Tool 完成（≤ `drainTimeout`）；3) `EnvironmentDaemonServer.drain()` GOAWAY 与释放环境租约；4) `ToolProcessor.drain()` 移交远端工具执行并 release TOOL Work。`workersEnabled=false` 时不启动 dispatcher |
+| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 与本地执行准入并标记排空；2) 按 `LocalExecutionLifecycle` 的物理句柄在 `drainTimeout` 内等待 body 与资源结束；3) 使用同一总 deadline 的剩余预算中断未结束的本地 body、`EnvironmentDaemonServer.drain()` GOAWAY 并释放环境租约、交由 `ToolProcessor.drain()` 移交可 reattach 的远端工具并 release TOOL Work；4) 已产生的退出证据先持久化，无法证明退出时保留日志目录锁到 JVM 退出。默认 `60s + 30s = 90s`，下层不得各自重开预算；`workersEnabled=false` 时不启动 dispatcher |
 | `issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
 | `canvasFunctionDispatcherLifecycle` | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
@@ -128,7 +128,7 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/harness/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
-派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost`，以及快照级 `stopReceipts`；
+派生的 `thread.status`（`RUNNING` / `EXIT_PENDING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost`，以及快照级 `stopReceipts`；
 `unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）。
 可选的 `afterEntryId`（canonical UUID，否则 400）请求增量历史：游标是当前 head 的祖先时，`baseEntryId` 等于游标，
 `entries` 只含游标之后的 Entry（游标即 head 时为空）；游标未知、位于其它分支或 Session 时返回完整历史，`baseEntryId` 为 null。
@@ -145,7 +145,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 
 ### 请求诊断与预览
 
-`GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updatedAt` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `EXIT_PENDING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updatedAt` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 `POST /api/harness/builtin/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configuration`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
@@ -275,11 +275,13 @@ Environment 的连接状态不做推送：Environment 的 `status` / `statusExpi
 `min(leaseUntil, lastSeenAt + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
 非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
 
-IDE 使用证明走同一条通道：客户端发送 `ide-use`，携带 `documentId`、同一连接内单调递增的 `revision`
+IDE 使用证明走同一条通道：客户端发送 `ide-use`，携带 `browserSessionId`、同一连接内单调递增的 `revision`
 与 `views[]`（每项是 `environmentId`、`viewId`、`claimId`，已绑定视图再带 `bindingEpoch`）；
 服务端回 `ide-use-accepted` 只确认 revision。帧字段集精确，多余或未知字段一律拒绝；
 同一 revision 的相同内容幂等，不同内容是连接级冲突错误，更高 revision 原子替换整份列表。
-缺 `bindingEpoch` 的项只是使用意图，不能用于续租；每个连接的 `documentId` 固定。
+`revision` 只是同一连接内的 usage 序号，不是 Daemon 的视图快照 revision。缺 `bindingEpoch` 的项
+只是使用意图，不能用于续租；一个连接被接受后 `browserSessionId` 固定。该身份与当前
+`eventNodeId` / `connectionId` 只证明当前页面连接的使用意图，不是绕过认证的授权凭据。
 
 AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
 完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。

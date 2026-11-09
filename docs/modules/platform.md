@@ -140,7 +140,8 @@ Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大�
 （当前生产仅 TOOL 使用）；Thread 的执行根与父关系创建时固定，
 只有执行根可设置 `yolo_enabled`。所有时间列使用毫秒精度，版本与业务 ID 由应用生成。
 执行退出事实按具体执行代次登记，`UNCONFIRMED` 可推进为真实退出或显式 `ABANDONED`，
-真实证据可替换放弃；事实保留到 Thread 深删除，不设 TTL。
+真实证据可替换放弃；本地 `DRIVER` / `TOOL` 的 `OWNER_EXITED` 只由重启恢复确认，`REMOTE` 只能取得远端 ACK，
+事实保留到 Thread 深删除，不设 TTL。
 
 `loadBySession` 与 `loadPageBySession` 按 `harness_entry.entry_seq`（存储追加序）升序读取；
 写入先校验完整父链，因此父节点的追加序必小于子节点。分页以最后一条 Entry 的 id 为 keyset 游标，

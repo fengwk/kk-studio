@@ -121,14 +121,19 @@ Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
 [`thread-events.ts`](../../frontend/src/features/thread/runtime/thread-events.ts) 将 Entry、活动
-Invocation 与 attempt failure 投影为时间线记录。Thread 活动只有 `RUNNING`、`WAITING`、`IDLE`：
-RUNNING 表示本地流程未结束（包括审批、问卷及环境阻塞），WAITING 仅表示本地已让出执行，
-等待直接异步 system-reminder 结果，IDLE 表示本地已收敛。
+Invocation 与 attempt failure 投影为时间线记录。Thread 活动有四态：`RUNNING`、`EXIT_PENDING`、`WAITING` 与 `IDLE`。
+RUNNING 表示本地流程未结束（包括审批、问卷、环境阻塞、终态物化与续作）；EXIT_PENDING 表示没有活跃流程，
+但仍有已登记且未确认退出的执行代次阻塞收敛或待启动动作；WAITING 仅表示本地已让出执行并等待直接异步
+system-reminder 结果；IDLE 表示本地义务及直接异步结果都已收敛。
 `executionControl` 是正交的持久执行控制（`RUNNABLE` / `STOPPED`），停止不代表调用已物理退出。
-工作条按真实 model/tool invocation 展示执行动画；阻塞、单纯运行中及等待异步结果只显示静态事实。
-STOPPED 不遮盖尚在途的 model/tool。委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
-STOPPED Thread 的 Snapshot 另携带 `unconfirmedExecutions`；只有 `executionControl=STOPPED` 且列表非空时，
-Thread 面板逐个列出 kind、attempt 与完整 executionId，RUNNABLE 的未知/活跃执行不混入该列表。
+工作条按真实 model/tool invocation 展示执行动画；EXIT_PENDING 显示“等待执行退出确认”，不转 loading 动画；
+阻塞、单纯运行中及等待异步结果只显示静态事实。STOPPED 不遮盖尚在途的 model/tool，也不隐藏退出待确认详情。
+委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影；所有非 IDLE 状态都计入活跃，任何新增非空闲状态
+都不得被误当空闲或已完成。
+
+Snapshot 的 `unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行。只有 `EXIT_PENDING` 才展示详情：
+RUNNABLE 时提供“停止并处理”的既有 Stop 入口，不开放放弃确认；`STOPPED` 时才允许逐项“放弃等待”。
+正常正在执行且带有 UNCONFIRMED 事实的 RUNNING Thread 不作为异常告警展示。
 “放弃等待”按单个 executionId 与当前 `expectedVersion` 显式确认，不自动批量；确认文案必须说明它只停止
 等待退出确认，不终止本地或远端执行，执行可能继续产生副作用，恢复也可能与其重叠。成功以服务端完整快照
 刷新投影与执行树，命令可用性随快照更新；失败保留原事实并显示友好错误，409 只回读最新事实让用户重新选择，
@@ -286,7 +291,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 - **来源优先级与持久化结构**：优先从持久化的 `approval.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更；不从旧/新参数在前端伪造 diff。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
-RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
+RUNNING、EXIT_PENDING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
 树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
 直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈
@@ -427,29 +432,47 @@ Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准�
 失败时优先展示后端 `detail`，缺失时展示错误消息。
 文案键集中在 `ai.skillPackages.*`，按钮与标题不使用括号补充说明。
 
-### tab 全局 IDE 面板
+### Chat IDE 工作区
 
-IDE 是应用外壳内与页面并列的 tab 全局面板：[`IdePanelProvider`](../../frontend/src/features/environment/ide/IdePanelProvider.tsx)
-负责 Context、顶层状态及持久分栏；内部职责明确拆分为纯 Claim 状态机（[`ide-claim-reducer`](../../frontend/src/features/environment/ide/ide-claim-reducer.ts)）、单点存储适配（[`ide-tab-state`](../../frontend/src/features/environment/ide/ide-tab-state.ts)）与连接身份对账（[`use-ide-claim-reconciliation`](../../frontend/src/features/environment/ide/use-ide-claim-reconciliation.ts)）。一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
-路由及环境切换不重建已打开的 iframe。桌面分隔线支持拖动和键盘调整并记住宽度，空间不足时 IDE 全屏；
-Chat 的布局栏可切换已有面板，首次打开使用当前对话环境，未选择环境时禁用。
-Chat 入口经 [`ide-panel-context`](../../frontend/src/features/environment/ide/ide-panel-context.ts)
-请求面板聚焦已有视图，不预创建 iframe，也不在入口处声明目录。
+IDE 只属于 Chat 详情页，不再由应用外壳的全局面板包装。应用路由组合层为 `/chats/:chatId` 保留一个持久的
+ChatIdeWorkspace：切换 Chat 时卸载当前页面内容，但 IDE view/iframe 停放在同一 DOM，不移动 portal 或更换父根；
+离开 Chat 后宿主 hidden + inert，无布局占位、分隔条、焦点与快捷键。非 Chat 页面使用独立全宽布局，Chat 列表、
+`/threads/:threadId` 独立页、设置、Environment 与 Canvas 均不显示 IDE；非 Chat 根 AgentPane 不保留只改变隐藏状态
+的 IDE 命令入口。路由变化不是 CLOSE_VIEW，只有显式关闭才触发原生 dirty 保存 / 不保存 / 取消流程。
+
+每个浏览器 tab 一个 Chat IDE 会话；同一 Environment 的 view 可在 Chat 间复用。切换到另一个 Chat 时按该 Chat
+的 Environment 匹配：已有打开 view 就聚焦，没有则不自动创建；无 Environment 的 Chat 不展示无关环境面板；
+后台 view 不因切换关闭。返回 Chat 恢复同一 iframe，内部导航不重新 bootstrap，usage 可以继续维持已有编辑会话。
+
+sessionStorage 保存 `browserSessionId`、`viewId`、`daemonInstanceId`、最后确认的 `bindingEpoch`、目录与尚未完成
+操作的冻结描述；claim 发出前先写恢复描述，存储失败显式报错，不承诺可跨刷新恢复。localStorage 只保存非运行态
+展示偏好，不保存 view、连接或窗口身份。entryUrl、bootstrap token 与 cookie 不进入任一持久化快照。
+
+同一 `browserSessionId` 使用浏览器 Web Locks 做同源独占，不实现 localStorage 心跳或超时猜测：刷新复用会话；
+复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留展示偏好。锁是会话互斥，不是网络
+在线判据。页面销毁由浏览器释放锁；pagehide 只撤回或暂停使用证明，是优化而不是服务端恢复正确性的前提。
+BFCache pageshow 必须重新确认锁与权威绑定；所有权冲突时停止发送旧 proof，不用旧 iframe 回调关闭新绑定。
+Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。
+
+前端恢复状态统一为 waiting-ready / reconciling / binding / ready / detached / gone / error；READY、连接身份变化
+与 BFCache 返回都进入同一对账入口。明确拒绝与结果未知分开，不添加轮询抢占、固定延时接管或任意重试。连接内
+只允许一个在途绑定操作；旧响应必须经 claim、连接、实例与 epoch 复核，不触发目录切换、终端新建等副作用。
+结果未知时先纯读 `/api/ide/environments/{id}/views/{viewId}`：已提交 claim 采用已确认结果；同 owner 但连接或
+epoch 变化时用权威 epoch 重新绑定；尚无 view 只按原 viewId、owner 与目录恢复幂等 create；被更新绑定取代返回
+`STALE_BINDING`；Daemon 已换代进入 `VIEW_GONE`，不用旧凭据自动复活。视图属于其它 browserSessionId 时
+（`VIEW_OWNED_BY_OTHER_SESSION`）不抢占，用户可显式打开独立视图；恢复线索保留，不静默替换成随机新视图。
 
 视图绑定跟随事件通道的连接身份：前端先用 `connected` 帧的 `eventNodeId` 与 `connectionId` 登记
-IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment、view 与 claim 全部匹配才建立绑定。
-迟到的成功来自旧连接时，视图保留原 `viewId` 并按 resume 重新绑定到当前连接。
+IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment、view、browserSession、claim 与 expected epoch
+全部匹配才建立绑定。迟到的成功来自旧连接时，视图保留原 `viewId` 并按 resume 重新绑定到当前连接。
 入口 URL 必须是同源 bootstrap 路径（`/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`），
 前端逐项校验后用普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。
 本地开发环境由 Vite 的 `/ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin
 并透传 WebSocket。
 
-恢复身份只保存在 sessionStorage：`viewId`、`daemonInstanceId` 与目录；
-epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展示意图（面板是否展开、当前选定与
-已打开环境），供新 tab 继承同一 scope 的最后状态，不提供 `viewId` 或任何运行身份。
-固定键前缀为 `kk-studio.tab-state:`（sessionStorage）与 `kk-studio.last-state:`（localStorage），后缀为 `chat:<chatId>` 或 `ide`，单 scope 文档限制 64 KiB 并严格校验。
-副作用恢复记录（`PendingAcceptance`、`BoundPendingMessage`、Stop 重试身份）独立持有原始请求身份，不复制进 session/local 默认快照，不因初始化或切换重新提交操作。
-页面触发 `pagehide` 时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。仅切换到后台或收起面板不撤回证明。
+测试入口：[`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide) 的状态机、存储与
+对账单测，以及 [`AgentPane.test.tsx`](../../frontend/src/features/thread/runtime/AgentPane.test.tsx) 对非 Chat 入口
+隐藏与 Chat 宿主的守护。真实浏览器回归还需覆盖 reload、旧 WS 重叠、复制 tab 与 BFCache。
 
 目录选择器是 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) 内的惰性目录树
 （[`OpenDirectoryModal`](../../frontend/src/features/environment/ide/OpenDirectoryModal.tsx)）：
@@ -460,10 +483,6 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 换根、切换 Environment 与关闭弹窗都会推进请求代际并中止在途请求，迟到的目录响应不覆盖当前树；
 宿主返回的权限或不存在等原因原样展示，超过上限的列表标注截断。移动端弹窗全屏，
 行、展开、帮助与上级按钮的可点击区域不小于 44px；目录说明由可访问的 `?` 提示展开，不使用括号补说明。
-
-视图被其它连接占用（`VIEW_IN_USE`）时，前端保留原 `viewId` 与目录，绝不静默替换成新视图：
-面板只提供“重试恢复”（以新 claimId 恢复同一视图）与“打开新视图”两个人工动作，由用户明确选择。
-其余不确定结果（视图消失、结果未知）同样保留恢复线索，替代视图必须由用户显式打开。
 
 ### 会话文件面板
 

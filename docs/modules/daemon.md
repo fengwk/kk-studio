@@ -110,13 +110,32 @@ Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` �
 - WebSocket 连接通过 RFC 8441 Extended CONNECT 隧道建立，双向数据流直接穿透映射至本地 code-server 的 WebSocket 端口；
 - 数据流以 `/ide/{viewId}/{bindingEpoch}/...` 进入 Daemon，校验有效视图绑定后转发到本地 code-server 的私有路径 `/__kk/ide/view/{viewId}/{bindingEpoch}/...`。
 
-视图权威在 Daemon 进程内（[`service.ts`](../../daemon/src/ide/service.ts)）：每个 Environment 最多 64 个视图，
-OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件系统工作之前占用额度。绑定身份是
-`viewId` + `documentId` + `bindingEpoch`，`bindingEpoch` 由 Daemon 在成功绑定时递增。
-`mode=create` 未指定目录时使用宿主 HOME，`mode=resume` 不隐式创建视图也不改目录；相同 `claimId` 的完全相同请求返回同一绑定，
-参数漂移被拒绝。失败回执只携带安全大写 code 与去敏 message（如 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`）。
+视图权威在 Daemon 进程内（[`service.ts`](../../daemon/src/ide/service.ts)）：每个 Environment 进程最多 64 个视图，
+OPEN、CLOSING 与创建预留共同占用容量，claim 在任何进程或文件系统工作之前预留额度；已有视图的 resume 不创建新资源，
+不占新 view 容量。视图 owner 是 `browserSessionId`，`eventNodeId` / `connectionId` 只证明当前浏览器连接的使用意图，
+`claimId` 是一次冻结绑定操作的幂等身份，`bindingEpoch` 是 Daemon 已提交的绑定代次。
 
-使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
+Daemon 只维护一个 IDE revision 序列：create/resume 在原生注册前从同一序列提前分配候选 `bindingEpoch`，创建、绑定、
+目录变更、关闭、进入 CLOSING 与到期删除等可见状态提交时再推进 revision，因此允许间隙且始终 `bindingEpoch <= revision`。
+快照同步冻结当前已提交视图，不等待其它 view 的在途绑定，也不含心跳时间、票据或用户文件；`views` 按
+`viewId` 排序，同一 revision 必须是同一内容。绑定 CAS 尚未提交时，新数据流与使用证明不得 attach；旧流、旧命令与旧凭据
+不得作用于新绑定。
+
+`mode=create` 必须携带 `expectedBindingEpoch=0`，未指定目录时使用宿主 HOME；同一已提交 claim 的完全相同请求返回同一绑定，
+参数漂移为 `CLAIM_CONFLICT`。已有 view 由同一 owner 以不同 claim 再次 create 时返回 `STALE_BINDING`，不会创建第二个
+workspace，调用方应先纯读再 resume。`mode=resume` 必须携带最后确认的正 epoch，不隐式创建视图也不改目录；不同
+`browserSessionId` 不得借租约到期接管。OPEN 与所有绑定操作先核对 `expectedDaemonInstanceId`，迟到的旧 claim/epoch、
+旧关闭或旧证明只作用于精确旧代次，不能覆盖或撤销新绑定。
+
+进程退出使该实例的全部视图、epoch、cookie 与票据失效；新实例不复用旧运行身份。崩溃后若无法证明原生清理完成，保留
+CLOSING、`cleanupFailed` 与容量并拒绝替换，直到显式重试或人工处理。失败回执只携带安全大写 code 与去敏 message，
+例如 `VIEW_GONE`、`VIEW_OWNED_BY_OTHER_SESSION`、`STALE_BINDING`、`CLAIM_CONFLICT`、`IDE_CAPACITY_EXCEEDED`、
+`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`。
+
+使用证明只来自 `IDE_LEASE` 批次：租约按 Daemon 发出的轮次开始时间生效，只接受当前 OPEN、非绑定中且
+`(browserSessionId, viewId, bindingEpoch)` 完全匹配的绑定。缺失有效证明从最后一次被接受的使用时刻起 600 秒进入到期
+检查；不存在 45 秒无证明即可抢占的窗口。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时
+保留视图等待显式操作，期间继续占用视图配额。
 正常关闭不预拒绝 dirty，直接等待 IDE 原生保存、不保存或取消，不设交互超时。取消、控制连接断开或关闭结果未知均保留视图与终端，不采用迟到回执；只有状态未知或桥接不可达时才允许显式强制关闭。原生关闭成功后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server。
 强制关闭前尝试将普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。

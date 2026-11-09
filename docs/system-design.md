@@ -159,9 +159,12 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 | `unauthorized` | 401 | 集群内部认证失败 |
 | `internal` | 500 | 未预期错误 |
 
-`conflict` 带 `reason`，客户端据此区分 Harness 与 Canvas 的不同冲突；环境与 IDE 的 `unavailable`
-分别使用 `ENVIRONMENT_UNAVAILABLE` 和 `IDE_UNAVAILABLE`。用户取消关闭 IDE 使用
-`validation` / `IDE_CLOSE_CANCELLED`。框架异常保持其 HTTP 状态，并按状态归入相应类别：400、405、406、
+`conflict` 带 `reason`，客户端据此区分 Harness、Canvas 与 IDE 的不同冲突；环境不可用使用
+`ENVIRONMENT_UNAVAILABLE`。IDE 边界保留精确事实，至少包括 `DAEMON_NOT_READY`、`VIEW_GONE`、
+`VIEW_OWNED_BY_OTHER_SESSION`、`STALE_BINDING`、`CLAIM_CONFLICT`、`IDE_CAPACITY_EXCEEDED`、
+`IDE_OUTCOME_UNKNOWN` 与 `IDE_CLEANUP_FAILED`；用户取消关闭 IDE 使用 `validation` /
+`IDE_CLOSE_CANCELLED`。409 本身不决定重试策略，reason 与确定的执行阶段才决定；网络断线或 5xx
+只能表示结果可能未知，不能由文案升级为已失败或已成功。框架异常保持其 HTTP 状态，并按状态归入相应类别：400、405、406、
 413、415、422 为 `validation`，401、403 为 `unauthorized`，404 为 `not_found`，409 为 `conflict`，
 502、504 为 `upstream_failed`，503 为 `unavailable`，其余为 `internal`。
 `/internal/**` 同样使用此格式，集群客户端按 `code`、`reason` 和 `detail` 处理错误。
@@ -389,9 +392,10 @@ vfs:/
 文与严格 codec），只依赖 JDK、`common` 与 Jackson 流式 API，插件通过它贡献函数。Runtime 拥有节点模型、typed
 command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按类型从插件目录快照取出画布函数贡献。
 
-**IDE**：`apps/ide` 拥有视图服务与 `IdeCommandTransport` 端口、同源数据面代理（HTTP 转发与 WebSocket
-隧道）、浏览器使用身份、跨节点路由，以及 IDE 的 HTTP 接口与 DTO；`web` 只保留组合装配与全局错误映射。视图
-生命周期为打开、续租、关闭与强制关闭，目录列举只返回直接子目录，详见 [IDE](modules/ide.md)。
+**IDE**：`apps/ide` 拥有视图服务与 `IdeCommandTransport` 端口、唯一权威快照缓存、同源数据面代理（HTTP 转发与
+WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 IDE 的 HTTP 接口与 DTO；`web` 只保留组合装配与全局
+错误映射。视图生命周期为幂等创建或恢复、切换目录、关闭与强制关闭；每个 Daemon 进程最多 64 个视图，快照 revision
+与绑定 epoch 由同一序列推进，目录列举只返回直接子目录，详见 [IDE](modules/ide.md)。
 
 **插件**：构建期注册安装定义与配置 Schema，实例按类型交出 Harness 贡献与产品贡献；插件目录快照在启动时校验依赖
 与名称并冻结，失败候选释放资源。MCP 不通过插件接入，由平台用 Streamable HTTP 发现与执行，预算与取消见
@@ -415,12 +419,14 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 成功后回报 `RuntimeSnapshot.configuration`（`appliedVersion`、`proxyUrl`、可空 `error`）。卡片版本由服务端持有，
 当前运行快照只存在于 owner 会话内存，不另建状态表。
 
-跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领、排空本机执行、向 Daemon
-发送 GOAWAY 并释放路由租约、移交在途远端工具，最后反注册。`/ws/events` 的跨节点载荷与 IDE 集群接口走内部路径。
+跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领与本地执行准入，按物理句柄在
+同一个总 deadline（默认 `60s + 30s`）内排空本机执行，向 Daemon 发送 GOAWAY 并释放路由租约、移交可 reattach 的
+远端工具，最后反注册；无法证明退出时保留退出日志与目录锁到 JVM 退出。`/ws/events` 的跨节点载荷与 IDE 集群接口
+走内部路径。
 
 ### 控制面与主机能力
 
-Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf
+Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf（控制协议 v3）
 Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
 `CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
 （`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
@@ -448,13 +454,20 @@ Daemon 逐个处理期望集合内的包：摘要与本地标记一致就跳过�
 ### IDE 服务
 
 Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、
-`CLOSE_VIEW`、`LIST_VIEWS`、`LIST_DIRECTORIES`、`COLLAPSE_MOBILE`；续租走独立心跳帧，只有当前绑定的新鲜证明
-才延长视图。
+`CLOSE_VIEW`、`LIST_VIEWS`、`LIST_DIRECTORIES`、`COLLAPSE_MOBILE`。每个 Daemon 进程最多 64 个视图；owner 是
+`browserSessionId`，`eventNodeId` / `connectionId` 只证明当前连接的使用意图，`claimId` 只承担绑定幂等。
 
+- `OPEN_VIEW` 在同一入口内完成“确保 view 资源”和“绑定当前连接”：create 携带 `expectedBindingEpoch=0`，resume
+  携带最后确认的正 epoch，两者都核对 `expectedDaemonInstanceId`；同一 claim 重放不分配新 epoch，已有 view 的
+  resume 不创建新资源、不占新容量，旧 claim/epoch 只返回 `STALE_BINDING`。
+- create、绑定、目录变更、关闭、进入 CLOSING 与到期删除都推进同一 IDE revision；`bindingEpoch` 从同一序列提前
+  分配，允许间隙且不大于快照 revision。OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 返回完整 `{revision, views}`；
+  快照按 `viewId` 排序、同步冻结当前已提交状态，不含票据、用户文件内容或心跳时间。
 - 正常关闭经 bridge 触发原生关闭，用户在 IDE 内选择保存、不保存或取消；等待期间数据面保持可用，取消则视图回到
   打开状态，只有全部关闭且清理完成才释放资源。
 - 强制关闭只在 bridge 不可达或状态未知时可用：先把未保存文档备份到恢复配额内，再关闭并清理。
-- 视图过期时不直接关闭：只有 bridge 报告没有未保存修改才自动回收，否则保留视图等待用户决定。
+- 视图自最后一次被接受的使用证明起 600 秒才进入到期检查，不存在 45 秒占用窗口；到期时只有 bridge 报告没有未保存
+  修改才自动回收，否则保留视图等待用户决定。
 - 目录列举只返回某个目录下的直接子目录名，按名称排序并有数量上限；窄屏布局由 bridge 执行收起侧栏与面板的命令，不
   修改用户设置。
 
@@ -554,8 +567,8 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 - 生成契约 [`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts) 由 web 测试源码的生成器产出，
   用 [`write.sh`](../scripts/dev/verify/generated-contracts/write.sh) 重新生成，漂移由 `TsContractArtifactTest`
   拦截。
-- IDE 面板是外壳级分栏：iframe 常驻挂载，切换路由不重建；拖拽只改变分栏宽度并持久化，空间不足时改为全屏，页面内容
-  按容器宽度响应。
+- IDE 是仅属于 Chat 详情页的持久宿主：`/chats/:chatId` 保留同一 iframe，离开 Chat 时隐藏并 inert，无布局占位；
+  非 Chat 页面使用独立全宽布局，不被 IDE shell 包装。切换 Chat 时按 Environment 聚焦已有视图，不自动创建。
 - `shared/app-events` 是唯一的事件通道客户端：严格 codec、重连退避、按资源同步的 hook；页面只消费资源信号。
 
 ## 数据模型
