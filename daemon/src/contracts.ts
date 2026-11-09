@@ -150,7 +150,12 @@ export type IdeAction =
 export type IdeOpenMode = 'create' | 'resume'
 export type IdeViewState = 'OPEN' | 'CLOSING'
 
-/** 视图的 owner 身份与本机资源快照；这类身份只随命令/列表回执返回，不进入浏览器持久存储。 */
+/**
+ * 视图的 owner 身份与本机资源快照。
+ *
+ * <p>`daemonInstanceId`、`bindingEpoch`、`viewId` 与目录可作为恢复身份持久化；
+ * entryUrl、bootstrap token、cookie 与连接证明不得进入浏览器持久存储。
+ */
 export interface IdeViewSummary {
   viewId: string
   browserSessionId: string

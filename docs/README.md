@@ -9,14 +9,14 @@
 | --- | --- |
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
-| 核对 Environment、Daemon、IDE 与 tab 工作状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
+| 核对 Environment、Daemon、Chat IDE 与会话恢复状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Plugins](modules/plugins.md) 与 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
-| Schema 不匹配时的数据库重建与恢复 | [部署与运行：Schema 不匹配时的数据库重建与恢复](operations/deployment.md#schema-不匹配时的数据库重建与恢复) |
+| 已有业务库升级到 4.0.0 的一次性切换 | [部署与运行：已有业务库的 4.0.0 一次性切换](operations/deployment.md#已有业务库的-400-一次性切换) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
 | 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas](modules/canvas.md) 与 [Project](modules/project.md) |
@@ -62,7 +62,7 @@
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
 | [Chat](modules/chat.md) | 对话集合如何持久化、分页，并持有与深删除 Harness Session？ |
 | [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
-| [IDE](modules/ide.md) | 同源 code-server 视图如何经 Daemon 命令通道与复用数据连接打开和转发？ |
+| [IDE](modules/ide.md) | Chat 内同源 code-server 视图如何经 Daemon 命令通道、权威快照与复用数据连接打开、恢复和转发？ |
 
 ### 组合根与前端
 

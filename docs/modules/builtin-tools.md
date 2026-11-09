@@ -77,7 +77,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 ### 持久义务与交付
 
-Thread 的活动状态与执行控制正交：本地流程未结束、存在未确认退出的执行或 owner 压缩结算义务时为 `RUNNING`；本地已让出执行且等待直接 `NOTIFY_PARENT` 子 Join 异步结果时为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。状态与 Join 结算使用同一收敛判据，子任务自底向上逐层结算并通知父；单轮 `TURN_END` 本身不足以保证整次委派可交付。
+Thread 的活动状态与执行控制正交：本地流程未结束、续作或 owner 压缩结算义务时为 `RUNNING`；没有上述活跃流程、但仍有已登记且未确认退出的执行阻塞收敛或待启动动作时为 `EXIT_PENDING`；本地已让出执行且等待直接 `NOTIFY_PARENT` 子 Join 异步结果时为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。`EXIT_PENDING` 不等同空闲，不放宽 Join 或输入门禁。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。状态与 Join 结算使用同一收敛判据，子任务自底向上逐层结算并通知父；单轮 `TURN_END` 本身不足以保证整次委派可交付。
 
 内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、源命令、冻结的终态/最终回答 Entry 与投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 

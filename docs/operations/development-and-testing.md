@@ -89,6 +89,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | Studio 与 Environment Daemon 跨语言集成测试（Java 生产核心与 Node 24 Daemon 产物，真实 WebSocket + HTTP/2，需先构建 Daemon） | 先 `npm --prefix daemon ci && npm --prefix daemon run build`，再 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=DaemonCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 受管 code-server 真实视图验收（需冻结发行目录，默认跳过） | `KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> npm --prefix daemon run test -- test/ide/acceptance.test.ts`（Node 24；未设置该变量时用例整组跳过） |
 | Studio → 生产 Daemon → code-server 真实链路（需 Node 24、Docker、已构建 Daemon 与发行目录） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeProductionChainAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false -Dkk-studio.it.ide.node="$(command -v node)" -Dkk-studio.it.ide.code-server-release=<absolute-release-dir>`；追加 `-Dkk-studio.it.ide.playwright-module=<absolute-frontend/node_modules/@playwright/test>` 运行真实 Chromium，用例不拦截网络；显式无效路径使测试失败 |
+| IDE 协议、revision 与绑定生命周期 | `npm --prefix daemon run test -- test/protocol/control-codec.test.ts test/ide/lifecycle.test.ts`；后端快照/服务定向测试用 `env JAVA_HOME="$JAVA_HOME_21" mvn -pl apps/ide -am test -Dtest=IdeViewSnapshotStoreTest,EnvironmentIdeServiceImplTest` |
+| 3.0.0 业务库的 4.0.0 离线切换 | `env JAVA_HOME="$JAVA_HOME_21" mvn -pl schema -am test -Dtest=Runtime4CutoverSchemaUpgradeTest -Dsurefire.failIfNoSpecifiedTests=false`（需 Docker/PG 17；只使用隔离数据库） |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）
@@ -110,6 +112,21 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 Canvas E2E 创建的画布不会通过 HTTP 删除，应使用可丢弃的测试数据环境。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
+
+### 真实 IDE 与 Daemon 验收
+
+真实链路不使用 mock `/views`，也不依靠假时钟等待占用窗口。快协议与 Daemon 生命周期回归先运行上表的
+`control-codec.test.ts`、`lifecycle.test.ts` 与 `IdeViewSnapshotStoreTest`；
+受管 code-server 的本机工作台验收使用 [`daemon/test/ide/acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts)
+并显式提供 `KK_STUDIO_IDE_ACCEPTANCE_DIR`，未提供时整组跳过，不能记作已通过。
+
+Studio → 生产 Daemon → code-server 的跨语言入口是
+[`IdeProductionChainAcceptanceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)，
+命令见上表。它需要显式 `-Dkk-studio.it.ide.node` 与 `-Dkk-studio.it.ide.code-server-release`；再提供
+`-Dkk-studio.it.ide.playwright-module` 后才运行真实 Chromium。该入口使用真实控制连接、WEB 数据面和浏览器页面，
+不拦截 `/views`，并以服务端权威快照验证绑定。浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 等场景必须使用同一
+真实浏览器入口验证；只有实际完成并报告的场景才算覆盖，不预设或编造用例数。显式给出无效 Node、发行目录或
+Playwright 路径必须使测试失败，不能降级为 skipped 或本地 stub。
 
 ### CI 验证与镜像发布
 
@@ -410,7 +427,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 `environment.runtime_absent_unavailable` 验证无本代 READY 时返回
 `409` / `code: unavailable` / `reason: ENVIRONMENT_UNAVAILABLE`，而不是伪造空快照；
 `environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭
-在无 READY owner 时的 `409` / `code: unavailable` / `reason: IDE_UNAVAILABLE`，并验证非 canonical
+在无 READY owner 时的 `409` / `code: unavailable` / `reason: DAEMON_NOT_READY`，并验证非 canonical
 environmentId 返回 `400` / `code: validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
