@@ -2,7 +2,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import { CopyTextButton } from '@/shared/ui/controls/CopyTextButton'
 import { useI18n } from '@/shared/i18n'
 import { Link } from 'react-router'
-import { shortThreadId, type ThreadPresentation } from './thread-presentation'
+import type { ThreadPresentation } from './thread-presentation'
 
 /**
  * 子代理视图顶栏动作：返回父 agent，身份（agent · model），再补前 8 位 thread ID 与复制按钮。
@@ -26,8 +26,9 @@ export function ThreadPresentationActions({ view }: { view: ThreadPresentation |
         : null}
       {subagentThreadId ? (
         <>
+          {/* 只展示前 8 位：完整 ID 留在悬停提示与复制目标里，路由不受影响。 */}
           <span className="workspace-view-short-id" title={subagentThreadId}>
-            {shortThreadId(subagentThreadId)}
+            {subagentThreadId.slice(0, 8)}
           </span>
           <CopyTextButton
             source={subagentThreadId}

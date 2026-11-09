@@ -6,10 +6,11 @@
   min-height: 36px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 5px 14px 5px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-hover);
+  container: pane-title / inline-size;
 }
 
 .agent-pane-thread-title {
@@ -23,4 +24,15 @@
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 狭窄 pane 优先压缩模型身份，保留标题、返回入口与短 ID 复制动作。 */
+@container pane-title (max-width: 560px) {
+  .workspace-view-identity {
+    max-width: 5ch;
+  }
+
+  .agent-pane-thread-title {
+    min-width: 4ch;
+  }
 }

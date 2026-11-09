@@ -145,6 +145,19 @@
   .chat-files-toggle-label {
     display: none;
   }
+
+  /* 窄屏顶栏：身份文字先让位，短 ID 与复制保持完整，名称仍占一行并保留省略号。 */
+  .chat-workspace-header .chat-workspace-title {
+    gap: 6px;
+  }
+
+  .chat-workspace-title .workspace-view-identity {
+    max-width: 5ch;
+  }
+
+  .chat-workspace-title h1 {
+    min-width: 4ch;
+  }
 }
 
 .chat-workspace-title {

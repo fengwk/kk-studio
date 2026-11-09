@@ -422,6 +422,37 @@ test('the hidden inert root ignores Escape and cannot be clicked', async ({ page
   expect(recorded.commandRequests).toEqual([])
 })
 
+// 身份只在进入子代理后展示；窄屏也必须保留返回、标题和完整 ID 的复制入口。
+for (const scenario of ['thread-child', 'pane-child']) {
+  test(`subagent identity remains usable in narrow headers: ${scenario}`, async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await installPaneApi(page)
+    await page.goto(`${HARNESS_URL}?scenario=${scenario}`)
+    const header = page.locator(scenario === 'thread-child'
+      ? '.chat-workspace-header' : '.agent-pane-thread-heading')
+    const shortId = header.locator('.workspace-view-short-id')
+    const copy = header.getByRole('button', { name: '复制 thread ID' })
+    const title = header.locator(scenario === 'thread-child' ? 'h1' : '.agent-pane-thread-title')
+
+    for (const width of [1280, 480, 390, 320]) {
+      await page.setViewportSize({ width, height: 820 })
+      await expect(shortId).toHaveText(CHILD_ID.slice(0, 8))
+      await expect(shortId).toHaveAttribute('title', CHILD_ID)
+      await expect(copy).toBeVisible()
+      await expect(title).toBeVisible()
+      // 实际几何而非仅 DOM 文本：标题不能被新 ID 控件压成 0 宽。
+      await expect.poll(() => title.boundingBox().then((box) => box?.width ?? 0)).toBeGreaterThan(20)
+      expect(await header.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      const first = header.locator('a, button').first()
+      await expect(first).toHaveText('回到父 agent')
+    }
+    await copy.click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(CHILD_ID)
+    await page.screenshot({ path: test.info().outputPath(`${scenario}-short-id-mobile.png`) })
+  })
+}
+
 test('a child thread address mounts no composer at all', async ({ page }) => {
   const recorded = await installPaneApi(page)
   await page.setViewportSize({ width: 1440, height: 900 })

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
-import { paneTargetViewKey, shortThreadId, threadIdentity, useThreadPresentation } from './thread-presentation'
+import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type { ModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
@@ -217,9 +217,7 @@ describe('visible thread presentation', () => {
     const { result } = renderHook(useThreadPresentation, { initialProps: initial })
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
 
-    expect(shortThreadId(threadId)).toBe('0f3c9a2e')
-    const shortId = screen.getByText('0f3c9a2e')
-    expect(shortId).toHaveAttribute('title', threadId)
+    expect(screen.getByText('0f3c9a2e')).toHaveAttribute('title', threadId)
     // 完整 UUID 不作为可见文本铺开，短 ID 也不进入任何路由地址。
     expect(document.body.textContent).not.toContain('1111-4000')
     expect(screen.queryByRole('link')).toBeNull()
