@@ -13,9 +13,9 @@ import java.time.Instant;
  * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code version} 为 durable snapshot
  * cursor（非负整数）。
  *
- * <p>{@code status} 直接来自 Thread 快照的本地 runtime 状态投影，只有三态（{@code RUNNING / WAITING / IDLE}）， 不属于
- * durable 列，也不由调用方拼装；{@code executionControl} 是持久执行控制（{@code RUNNABLE / STOPPED}），与 {@code status}
- * 正交；{@code branchSettings} 是 head Entry 分支的完整设置快照。
+ * <p>{@code status} 直接来自 Thread 快照的本地 runtime 状态投影，只有四态（{@code RUNNING / EXIT_PENDING / WAITING /
+ * IDLE}）， 不属于 durable 列，也不由调用方拼装；{@code executionControl} 是持久执行控制（{@code RUNNABLE / STOPPED}），与
+ * {@code status} 正交；{@code branchSettings} 是 head Entry 分支的完整设置快照。
  *
  * <p>{@code parentThreadId} 是该 Thread 不可变执行父关系的展示投影（根 Thread 为 null）；它只表达执行关系，Session 历史仍然按 Entry
  * 路径读取，不因父关系而混入其他 Thread 的对话。
@@ -50,7 +50,7 @@ public class HarnessThreadDTO {
   /** PostgreSQL authoritative durable projection cursor (non-negative bigint)。 */
   private Long version;
 
-  /** 展示状态（派生）：{@code RUNNING / WAITING / IDLE}。只描述该 Thread 自身与直接委派，不递归整树。 */
+  /** 展示状态（派生）：{@code RUNNING / EXIT_PENDING / WAITING / IDLE}。只描述该 Thread 自身与直接委派，不递归整树。 */
   private ThreadRuntimeStatus status;
 
   /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */

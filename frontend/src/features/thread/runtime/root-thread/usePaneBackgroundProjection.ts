@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { isThreadActiveStatus } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 
 /**
@@ -79,6 +80,5 @@ export function usePaneBackgroundProjection(boundThreadId: string): void {
 }
 
 function needsBackgroundProjection(snapshot: HarnessThreadSnapshotDTO | undefined): boolean {
-  return snapshot != null
-    && (snapshot.thread.status === 'RUNNING' || snapshot.thread.status === 'WAITING')
+  return snapshot != null && isThreadActiveStatus(snapshot.thread.status)
 }

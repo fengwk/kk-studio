@@ -1122,6 +1122,9 @@ public final class ControlProtocolValidator {
           requirePresent(
               result.hasWorkspacePath(), result.getWorkspacePath(), "ideResult.workspacePath"),
           "ideResult.workspacePath");
+      if (result.hasRevision()) {
+        validateSnapshotBinding(result);
+      }
       return;
     }
     if (result.hasDirectory()) {
@@ -1150,6 +1153,10 @@ public final class ControlProtocolValidator {
     for (int index = 0; index < result.getViewsCount(); index++) {
       IdeViewSummary view = result.getViews(index);
       validateView(view, "ideResult.views[" + index + "]");
+      if (view.getBindingEpoch() > result.getRevision()) {
+        throw new ControlProtocolException(
+            "ideResult.views[" + index + "].bindingEpoch must not exceed ideResult.revision");
+      }
       if (!viewIds.add(view.getViewId())) {
         throw new ControlProtocolException("ideResult.views must not repeat viewId");
       }
@@ -1158,6 +1165,32 @@ public final class ControlProtocolValidator {
       }
       previousViewId = view.getViewId();
     }
+  }
+
+  /**
+   * top-level 完整绑定与同一快照中的 summary 必须一致，防止旧绑定套在新 revision 快照上。
+   *
+   * <p>没有快照的简单回执（例如 FOCUS_TERMINAL/COLLAPSE_MOBILE 只带 viewId）不经过本校验。
+   */
+  private static void validateSnapshotBinding(IdeResult result) {
+    for (IdeViewSummary view : result.getViewsList()) {
+      if (!view.getViewId().equals(result.getViewId())) {
+        continue;
+      }
+      if (!view.getBrowserSessionId().equals(result.getBrowserSessionId())
+          || !view.getEventNodeId().equals(result.getEventNodeId())
+          || !view.getConnectionId().equals(result.getConnectionId())
+          || !view.getClaimId().equals(result.getClaimId())
+          || view.getBindingEpoch() != result.getBindingEpoch()
+          || !view.getDirectory().equals(result.getDirectory())
+          || !view.getWorkspacePath().equals(result.getWorkspacePath())) {
+        throw new ControlProtocolException(
+            "ideResult snapshot view must match the top-level binding");
+      }
+      return;
+    }
+    throw new ControlProtocolException(
+        "ideResult snapshot must contain the top-level binding view");
   }
 
   private static void validateView(IdeViewSummary view, String path) {

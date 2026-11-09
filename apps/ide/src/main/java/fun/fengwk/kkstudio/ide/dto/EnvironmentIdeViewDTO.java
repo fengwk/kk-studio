@@ -7,8 +7,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * IDE 视图响应：只包含 Daemon 确认的绑定身份、目录与受管 workspace。
  *
- * <p>{@code bindingEpoch} 是正整数；{@code daemonInstanceId}/{@code bindingEpoch}
- * 只进入内存路由与短期入口，不进入浏览器持久存储。
+ * <p>{@code bindingEpoch} 是正整数；{@code daemonInstanceId}/{@code bindingEpoch} 可作为恢复身份进入
+ * sessionStorage。{@code entryUrl}、bootstrap token 与 cookie 属于运行凭据，不进入任何可持久化快照。
  */
 @Data
 public class EnvironmentIdeViewDTO {

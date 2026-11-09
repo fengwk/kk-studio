@@ -115,7 +115,7 @@ class ExecutionExitSettlementTest {
         assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
         assertTrue(runtime.getThreadSnapshot(leafId).hasUnconfirmedExecution());
         assertEquals(
-            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+            ThreadRuntimeStatus.EXIT_PENDING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         UUID executionId =
             fixture.store.transaction(
                 tx -> tx.exits().loadUnconfirmed(leafId).get(0).executionId());
@@ -183,7 +183,7 @@ class ExecutionExitSettlementTest {
             ThreadExecutionControl.STOPPED,
             runtime.getThreadSnapshot(leafId).thread().executionControl());
         assertEquals(
-            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+            ThreadRuntimeStatus.EXIT_PENDING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         long leafVersionAfterStop = version(fixture.store, leafId);
         long rootVersionAfterStop = version(fixture.store, rootId);
 
@@ -294,7 +294,7 @@ class ExecutionExitSettlementTest {
             fixture.store.transaction(
                 tx -> tx.exits().find(heldExecutionId).orElseThrow().state()));
         assertEquals(
-            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+            ThreadRuntimeStatus.EXIT_PENDING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
         assertEquals(0, notificationCount(fixture.store, parentId));
 
@@ -315,7 +315,7 @@ class ExecutionExitSettlementTest {
                       ExecutionExitState.UNCONFIRMED,
                       state,
                       "failed confirmation must preserve the exit fact"),
-              () -> assertEquals(ThreadRuntimeStatus.RUNNING, after.runtimeStatus()),
+              () -> assertEquals(ThreadRuntimeStatus.EXIT_PENDING, after.runtimeStatus()),
               () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
               () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
               () -> assertEquals(0, notificationCount(fixture.store, parentId)));
