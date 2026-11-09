@@ -55,7 +55,10 @@ export function CopyTextButton({
     requestRef.current = request
     clearTimer()
     setFeedback(null)
-    void copyTextToClipboard(source).then((copied) => {
+    void copyTextToClipboard(source, {
+      // 目标已切换、组件已卸载或有更新的点击时，旧请求不得再走 DOM 兜底插入 textarea 抢焦点。
+      shouldFallback: () => request === requestRef.current,
+    }).then((copied) => {
       // 旧目标的异步结果不得覆盖当前目标的反馈。
       if (request !== requestRef.current) {
         return
