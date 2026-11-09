@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.flywaydb.core.api.MigrationInfo;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Container.ExecResult;
@@ -88,6 +89,11 @@ class Runtime4CutoverSchemaUpgradeTest {
         MountableFile.forHostPath(CUTOVER_SCRIPT), CONTAINER_CUTOVER_SCRIPT);
   }
 
+  @AfterAll
+  static void stopIsolatedPostgres() {
+    POSTGRES.close();
+  }
+
   @Test
   void guardChecksumIsTheRealFlywayChecksumOfThe3_0_0Baseline() throws Exception {
     String database = createDatabase();
@@ -164,6 +170,70 @@ class Runtime4CutoverSchemaUpgradeTest {
     assertEquals("23514", rejected.getSQLState());
     assertTrue(rejected.getMessage().contains("ck_harness_execution_exit_owner_exited"));
     assertEquals("UNCONFIRMED", queryString(database, stateOf(REMOTE_EXIT_ID)));
+  }
+
+  @Test
+  void fixedSearchPathOnlyTouchesPublicTables() throws Exception {
+    String database = createDatabase();
+    migrate(database, OLD_MIGRATION_LOCATION);
+    insertSentinelRows(database);
+    execute(
+        database,
+        "create schema shadow",
+        "create table shadow.flyway_schema_history "
+            + "(like public.flyway_schema_history including all)",
+        "insert into shadow.flyway_schema_history select * from public.flyway_schema_history",
+        "create table shadow.harness_execution_exit "
+            + "(like public.harness_execution_exit including all)",
+        """
+        insert into shadow.harness_execution_exit (
+            execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind,
+            state, registered_at
+        ) values ('%s', '%s', '%s', 1, '%s', 'TOOL', 'UNCONFIRMED', %s)
+        """
+            .formatted(uuid(1500), THREAD_ID, uuid(1501), uuid(1502), REGISTERED_AT),
+        "comment on column shadow.harness_execution_exit.state is 'shadow sentinel comment'");
+    int historyChecksumBefore = historyChecksum(database);
+    String publicExitRowsBefore = snapshotRows(database, "harness_execution_exit", "execution_id");
+    String publicBusinessRowsBefore = businessSnapshot(database);
+    String shadowHistoryBefore = snapshotRows(database, "shadow.flyway_schema_history", "version");
+    String shadowExitRowsBefore =
+        snapshotRows(database, "shadow.harness_execution_exit", "execution_id");
+    String shadowStateDefinitionBefore =
+        constraintDefinitionIn(
+            database, "shadow.harness_execution_exit", "ck_harness_execution_exit_state");
+    assertFalse(shadowStateDefinitionBefore.contains("OWNER_EXITED"));
+    ExecResult startupSearchPath =
+        runPsql(database, "shadow,public", "-A", "-t", "-c", "select current_schema()");
+    assertEquals("shadow", startupSearchPath.getStdout().trim(), startupSearchPath.getStderr());
+
+    // 启动时 search_path 先指向 shadow；脚本必须在事务内固定回 pg_catalog, public。
+    ExecResult result = runCutover(database, "shadow,public");
+    assertEquals(0, result.getExitCode(), () -> result.getStdout() + result.getStderr());
+
+    assertTrue(hasConstraint(database, "ck_harness_execution_exit_owner_exited"));
+    assertFalse(
+        hasConstraintIn(
+            database, "shadow.harness_execution_exit", "ck_harness_execution_exit_owner_exited"));
+    assertTrue(
+        constraintDefinition(database, "ck_harness_execution_exit_state").contains("OWNER_EXITED"));
+    assertEquals(
+        shadowStateDefinitionBefore,
+        constraintDefinitionIn(
+            database, "shadow.harness_execution_exit", "ck_harness_execution_exit_state"));
+    assertEquals(NEW_STATE_COMMENT, stateComment(database));
+    assertEquals(
+        "shadow sentinel comment",
+        columnComment(database, "shadow.harness_execution_exit", "state"));
+    assertEquals(historyChecksumBefore, historyChecksum(database));
+    assertEquals(
+        publicExitRowsBefore, snapshotRows(database, "harness_execution_exit", "execution_id"));
+    assertEquals(publicBusinessRowsBefore, businessSnapshot(database));
+    assertEquals(
+        shadowHistoryBefore, snapshotRows(database, "shadow.flyway_schema_history", "version"));
+    assertEquals(
+        shadowExitRowsBefore,
+        snapshotRows(database, "shadow.harness_execution_exit", "execution_id"));
   }
 
   @Test
@@ -421,10 +491,17 @@ class Runtime4CutoverSchemaUpgradeTest {
   }
 
   private static String stateOf(UUID executionId) {
-    return "select state from harness_execution_exit where execution_id = '" + executionId + "'";
+    return "select state from public.harness_execution_exit where execution_id = '"
+        + executionId
+        + "'";
   }
 
   private static boolean hasConstraint(String database, String constraintName) throws SQLException {
+    return hasConstraintIn(database, "public.harness_execution_exit", constraintName);
+  }
+
+  private static boolean hasConstraintIn(String database, String table, String constraintName)
+      throws SQLException {
     return "1"
         .equals(
             queryStringOrNull(
@@ -432,43 +509,56 @@ class Runtime4CutoverSchemaUpgradeTest {
                 """
                 select '1'
                 from pg_constraint
-                where conrelid = 'public.harness_execution_exit'::regclass
+                where conrelid = '%s'::regclass
                     and conname = '%s'
                 """
-                    .formatted(constraintName)));
+                    .formatted(table, constraintName)));
   }
 
   private static String constraintDefinition(String database, String constraintName)
+      throws SQLException {
+    return constraintDefinitionIn(database, "public.harness_execution_exit", constraintName);
+  }
+
+  private static String constraintDefinitionIn(String database, String table, String constraintName)
       throws SQLException {
     return queryString(
         database,
         """
         select pg_get_constraintdef(oid)
         from pg_constraint
-        where conrelid = 'public.harness_execution_exit'::regclass
+        where conrelid = '%s'::regclass
             and conname = '%s'
         """
-            .formatted(constraintName));
+            .formatted(table, constraintName));
   }
 
   private static String stateComment(String database) throws SQLException {
+    return columnComment(database, "public.harness_execution_exit", "state");
+  }
+
+  private static String columnComment(String database, String table, String column)
+      throws SQLException {
     return queryString(
         database,
         """
-        select col_description('public.harness_execution_exit'::regclass, attnum)
+        select col_description('%s'::regclass, attnum)
         from pg_attribute
-        where attrelid = 'public.harness_execution_exit'::regclass
-            and attname = 'state'
-        """);
+        where attrelid = '%s'::regclass
+            and attname = '%s'
+        """
+            .formatted(table, table, column));
   }
 
   private static int historyChecksum(String database) throws SQLException {
     return Integer.parseInt(
-        queryString(database, "select checksum from flyway_schema_history where version = '1'"));
+        queryString(
+            database, "select checksum from public.flyway_schema_history where version = '1'"));
   }
 
   private static int historyCount(String database) throws SQLException {
-    return Integer.parseInt(queryString(database, "select count(*) from flyway_schema_history"));
+    return Integer.parseInt(
+        queryString(database, "select count(*) from public.flyway_schema_history"));
   }
 
   private static String queryString(String database, String sql) throws SQLException {
@@ -495,18 +585,24 @@ class Runtime4CutoverSchemaUpgradeTest {
   }
 
   private static ExecResult runCutover(String database) throws Exception {
-    return POSTGRES.execInContainer(
-        "psql",
-        "-X",
-        "-q",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-U",
-        USERNAME,
-        "-d",
-        database,
-        "-f",
-        CONTAINER_CUTOVER_SCRIPT);
+    return runCutover(database, null);
+  }
+
+  private static ExecResult runCutover(String database, String searchPath) throws Exception {
+    return runPsql(database, searchPath, "-f", CONTAINER_CUTOVER_SCRIPT);
+  }
+
+  private static ExecResult runPsql(String database, String searchPath, String... arguments)
+      throws Exception {
+    List<String> command = new ArrayList<>();
+    if (searchPath != null) {
+      command.add("env");
+      command.add("PGOPTIONS=-c search_path=" + searchPath);
+    }
+    command.add("psql");
+    command.addAll(List.of("-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", USERNAME, "-d", database));
+    command.addAll(List.of(arguments));
+    return POSTGRES.execInContainer(command.toArray(String[]::new));
   }
 
   private static void migrate(String database, String location) {
