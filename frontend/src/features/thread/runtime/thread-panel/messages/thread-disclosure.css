@@ -1,0 +1,190 @@
+/*
+ * 只读消息统一容器。复合选择器优先于全局 `.thread-block` 的 padding/border/background
+ * 重置（与 ThinkingBlock 相同），并把色调收拢为单一来源。
+ */
+.thread-block.thread-disclosure {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
+}
+
+.thread-block.thread-disclosure.is-pending {
+  border-color: var(--warning-border);
+  background:
+    linear-gradient(var(--warning-soft), var(--warning-soft)),
+    var(--surface);
+}
+
+.thread-block.thread-disclosure.is-success {
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(var(--accent-soft), var(--accent-soft)),
+    var(--surface);
+}
+
+.thread-block.thread-disclosure.is-error {
+  border-color: var(--danger-border);
+  background:
+    linear-gradient(var(--danger-soft), var(--danger-soft)),
+    var(--surface);
+}
+
+.thread-block.thread-disclosure.is-info {
+  border-color: var(--info-border);
+  background:
+    linear-gradient(var(--info-soft), var(--info-soft)),
+    var(--surface);
+}
+
+.thread-block.thread-disclosure.is-neutral {
+  border-color: var(--border);
+  background: var(--scrim);
+}
+
+.thread-disclosure-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thread-disclosure-header-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 收起时最多两行（HEADER_COLLAPSED_LINES）；展开时完整折行。 */
+.thread-disclosure-header-text.is-clamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.thread-disclosure-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+}
+
+.thread-disclosure-toggle {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.thread-disclosure-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-disclosure-toggle:hover {
+  background: var(--stage-dot);
+}
+
+.thread-disclosure-toggle:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.thread-disclosure-preview,
+.thread-disclosure-body {
+  min-width: 0;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  overflow-anchor: none;
+}
+
+/* 提示行与错误块是只读消息的通用交互，不绑定具体工具。 */
+.thread-disclosure-hint {
+  display: block;
+  margin: 2px 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-disclosure-hint:hover {
+  color: var(--fg);
+}
+
+.thread-disclosure-hint:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.thread-disclosure-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--danger);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.thread-disclosure-error-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.thread-disclosure-error-text {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.thread-disclosure-collapse {
+  display: inline-flex;
+  align-self: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.thread-disclosure-collapse svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-disclosure-collapse:hover {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-disclosure-collapse:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}

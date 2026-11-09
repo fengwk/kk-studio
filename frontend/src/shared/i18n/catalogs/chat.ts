@@ -1016,6 +1016,58 @@ export const chatCatalog = {
   'ai.runtime.tool.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
   'ai.runtime.tool.cancelled': { 'en-US': 'Stopped', 'zh-CN': '已停止' },
   'ai.runtime.tool.unknown': { 'en-US': 'Execution outcome unknown', 'zh-CN': '执行结果未知' },
+  // 只读消息容器：提示行在中英文界面使用同一英文文案。
+  'ai.runtime.disclosure.expandDetails': { 'en-US': 'Expand details', 'zh-CN': '展开详情' },
+  'ai.runtime.disclosure.collapseDetails': { 'en-US': 'Collapse details', 'zh-CN': '收起详情' },
+  'ai.runtime.disclosure.collapse': { 'en-US': 'Collapse', 'zh-CN': '收起' },
+  'ai.runtime.disclosure.truncated': {
+    'en-US': '… truncated',
+    'zh-CN': '… truncated',
+  },
+  'ai.runtime.disclosure.moreLine': {
+    'en-US': '… {{count}} more line',
+    'zh-CN': '… {{count}} more line',
+  },
+  'ai.runtime.disclosure.moreLines': {
+    'en-US': '… {{count}} more lines',
+    'zh-CN': '… {{count}} more lines',
+  },
+  'ai.runtime.disclosure.moreLineTruncated': {
+    'en-US': '… {{count}} more line, truncated',
+    'zh-CN': '… {{count}} more line, truncated',
+  },
+  'ai.runtime.disclosure.moreLinesTruncated': {
+    'en-US': '… {{count}} more lines, truncated',
+    'zh-CN': '… {{count}} more lines, truncated',
+  },
+  'ai.runtime.disclosure.earlierLine': {
+    'en-US': '… {{count}} earlier line',
+    'zh-CN': '… {{count}} earlier line',
+  },
+  'ai.runtime.disclosure.earlierLines': {
+    'en-US': '… {{count}} earlier lines',
+    'zh-CN': '… {{count}} earlier lines',
+  },
+  'ai.runtime.disclosure.earlierLineTruncated': {
+    'en-US': '… {{count}} earlier line, truncated',
+    'zh-CN': '… {{count}} earlier line, truncated',
+  },
+  'ai.runtime.disclosure.earlierLinesTruncated': {
+    'en-US': '… {{count}} earlier lines, truncated',
+    'zh-CN': '… {{count}} earlier lines, truncated',
+  },
+  'ai.runtime.disclosure.viewSubagentExecution': {
+    'en-US': 'View subagent execution',
+    'zh-CN': '查看 subagent 执行',
+  },
+  'ai.runtime.disclosure.viewSubagentExecutionShort': {
+    'en-US': 'View execution',
+    'zh-CN': '查看执行',
+  },
+  'ai.runtime.disclosure.waitingForAnswer': {
+    'en-US': 'This tool call needs your answer',
+    'zh-CN': '此工具调用需要你回答',
+  },
   'ai.interaction.defaultApprovalReason': {
     'en-US': 'Permission rules require approval',
     'zh-CN': '权限规则要求审批',
