@@ -5055,7 +5055,10 @@ describe('AgentPane root control mounting', () => {
     const source = await screen.findByRole('button', { name: 'Chat' })
     expect(source).toHaveTextContent('Chat')
     expect(screen.queryByText(unknownSourceId)).toBeNull()
-    expect(document.querySelector(`a[href="/threads/${unknownSourceId}"]`)).toBeNull()
+    // 归属标签不冒充来源 Thread；来源入口另用 subagent 词条指向真实调用线程。
+    expect(source).not.toHaveTextContent(unknownSourceId)
+    expect(screen.getByRole('link', { name: '打开 subagent' }))
+      .toHaveAttribute('href', `/threads/${unknownSourceId}`)
   })
 
   it('keeps the full root interaction pagination reachable through load more', async () => {

@@ -3,9 +3,12 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
-import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
+import { paneTargetViewKey, shortThreadId, threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type { ModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
+
+vi.mock('@/shared/lib/clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
 const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
@@ -199,5 +202,42 @@ describe('visible thread presentation', () => {
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(screen.queryByRole('button', { name: '查看 subagent 执行' })).toBeNull()
     expect(document.querySelector('.workspace-view-identity')).toBeNull()
+    expect(document.querySelector('.workspace-view-short-id')).toBeNull()
+  })
+
+  it('shows the first eight characters of the real thread id and copies the full one', async () => {
+    // 测试意图：子代理顶栏只展示 8 位短 ID，完整 ID 只在悬停提示与复制目标里，不参与路由。
+    setLocale('zh-CN')
+    const threadId = '0f3c9a2e-1111-4000-8000-000000000001'
+    const initial = {
+      ...options(),
+      threadId,
+      projection: { thread: { ...thread, threadId }, models: [model] },
+    }
+    const { result } = renderHook(useThreadPresentation, { initialProps: initial })
+    render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
+
+    expect(shortThreadId(threadId)).toBe('0f3c9a2e')
+    const shortId = screen.getByText('0f3c9a2e')
+    expect(shortId).toHaveAttribute('title', threadId)
+    // 完整 UUID 不作为可见文本铺开，短 ID 也不进入任何路由地址。
+    expect(document.body.textContent).not.toContain('1111-4000')
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.getByRole('button', { name: '回到父 agent' })).toBeInTheDocument()
+
+    vi.mocked(copyTextToClipboard).mockResolvedValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '复制 thread ID' }))
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(threadId))
+  })
+
+  it('keeps the short id and copy action out of non-subagent thread headers', () => {
+    // 测试意图：根 thread 顶栏不需要自身 ID，也没有“回到父 agent”语义。
+    const initial = options()
+    const { result } = renderHook(useThreadPresentation, { initialProps: {
+      ...initial, projection: { ...initial.projection, thread: { ...thread, parentThreadId: null } },
+    } })
+    render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
+    expect(document.querySelector('.workspace-view-short-id')).toBeNull()
+    expect(screen.queryByRole('button', { name: '复制 thread ID' })).toBeNull()
   })
 })
