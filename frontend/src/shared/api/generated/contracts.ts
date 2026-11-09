@@ -3237,6 +3237,7 @@ export interface ApiRoutes {
   }
   'GET /api/ide/environments/{environmentId}/views/{viewId}': {
     path: { environmentId: string; viewId: string }
+    query: { browserSessionId: string; claimId: string; connectionId: string; eventNodeId: string; expectedDaemonInstanceId?: string }
     response: EnvironmentIdeViewSnapshotDTO
   }
   'GET /api/platform/agents': {
