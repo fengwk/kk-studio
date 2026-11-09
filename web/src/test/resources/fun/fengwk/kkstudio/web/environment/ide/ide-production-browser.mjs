@@ -5,19 +5,24 @@
 //
 // Protocol (stdin): the first line is the JSON configuration:
 //   {playwrightModule, baseUrl, environmentId, browserSessionId, workspaceDirectory,
-//    browserTempDirectory, entryUrl, viewId, bindingEpoch}
-// later lines are {"continue":true} for synchronization.
+//    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?}
+// later lines are {"continue":true} for synchronization; the refresh-preserves-dirty scenario
+// additionally accepts {"navigate":{"entryUrl":"..."}} after the IndexedDB backup is committed.
 //
 // Protocol (stdout): newline delimited JSON only:
 //   {"event":"stage","stage":"<safe fixed name>"}
 //   {"event":"workbench-ready"}
+//   {"event":"editor-ready"}
+//   {"event":"dirty-backed-up","cookie":"<session-cookie>"}
+//   {"event":"entry-restored"}
+//   {"event":"reload-restored"}
 //   {"event":"terminal-success"}
 //   {"event":"file-saved"}
 //   {"event":"done"}
 //   {"event":"failure","stage":"<safe fixed name>","detail":"<error class or HTTP code>"}
 
 import { watch } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -140,6 +145,79 @@ function awaitFile(filePath, predicate, timeoutMs = FILE_TIMEOUT) {
 }
 
 /**
+ * Waits until the visible Monaco model contains the expected text.
+ */
+async function waitForEditorText(page, text, timeoutMs = EDITOR_TIMEOUT) {
+  await page.waitForFunction(
+    (expected) =>
+      document
+        .querySelector('.monaco-editor .view-lines')
+        ?.textContent?.replaceAll('\u00a0', ' ')
+        .includes(expected),
+    text,
+    { timeout: timeoutMs },
+  )
+}
+
+/**
+ * Opens editable.txt through the explorer and waits until Monaco shows its original text.
+ */
+async function openEditableEditor(page, fileRow) {
+  await fileRow.dblclick()
+  const editor = page.locator('.monaco-editor .view-lines').first()
+  await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+  await waitForEditorText(page, 'initial text in workspace')
+  return editor
+}
+
+/** Observe the remote workbench's working-copy backup, never save the edited file. */
+async function waitForWorkingCopyBackup(workspaceDirectory, marker) {
+  const userData = join(dirname(workspaceDirectory), 'distribution', 'data', 'ide', 'code-server', 'user-data')
+  const inspect = async () => {
+    const entries = await readdir(userData, { recursive: true, withFileTypes: true })
+    for (const entry of entries) {
+      const path = join(entry.parentPath, entry.name)
+      if (!entry.isFile() || !/[\\/]backups[\\/]/i.test(path)) continue
+      const content = await readFile(path, 'utf8')
+      if (content.includes('editable.txt') && content.includes(marker)) return true
+    }
+    return false
+  }
+  await new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      watcher.close()
+      if (error) reject(error)
+      else resolve()
+    }
+    const scan = () => {
+      void inspect().then((found) => { if (found) finish() }, finish)
+    }
+    const watcher = watch(userData, { recursive: true }, scan)
+    watcher.on('error', finish)
+    const timer = setTimeout(() => finish(namedError('WorkingCopyBackupTimeout')), EDITOR_TIMEOUT)
+    scan()
+  })
+}
+
+/**
+ * Waits for a reloaded workbench to restore the dirty model and keep its dirty tab.
+ */
+async function waitForRestoredEditor(page, marker) {
+  // Workbench editor-layout persistence is separate from working-copy backup. Reopen the
+  // same file through the UI so restoration does not depend on an unload-time layout write.
+  const fileRow = page
+    .locator('.explorer-folders-view .monaco-list-row', { hasText: 'editable.txt' }).first()
+  await fileRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+  await openEditableEditor(page, fileRow)
+  await waitForEditorText(page, marker)
+  await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+}
+
+/**
  * Ensures terminal is opened through workbench UI interactions.
  */
 async function openTerminalThroughUi(page) {
@@ -227,25 +305,14 @@ async function run(config, lines) {
 
     if (config.scenario === 'dirty-close') {
       stage('dirty-editor')
-      await fileRow.dblclick()
-      const editor = page.locator('.monaco-editor .view-lines').first()
-      await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
-      await page.waitForFunction(
-        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('initial text in workspace'),
-        undefined,
-        { timeout: EDITOR_TIMEOUT },
-      )
+      const editor = await openEditableEditor(page, fileRow)
       emit({ event: 'editor-ready' })
       const ready = await lines.next()
       if (ready.done || JSON.parse(ready.value).continue !== true) throw namedError('ProtocolError')
       await editor.click()
       await page.keyboard.press('End')
       await page.keyboard.type(' dirty acceptance')
-      await page.waitForFunction(
-        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('dirty acceptance'),
-        undefined,
-        { timeout: EDITOR_TIMEOUT },
-      )
+      await waitForEditorText(page, 'dirty acceptance')
       try {
         await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
       } catch (error) {
@@ -268,6 +335,87 @@ async function run(config, lines) {
       }
       const next = await lines.next()
       if (next.done || JSON.parse(next.value).continue !== true) throw namedError('ProtocolError')
+      await browser.close()
+      browser = null
+      emit({ event: 'done' })
+      return
+    }
+
+    if (config.scenario === 'refresh-preserves-dirty') {
+      const editablePath = join(config.workspaceDirectory, 'editable.txt')
+      const initialText = 'initial text in workspace\n'
+      const marker = 'refresh-preserves-dirty'
+
+      stage('editor-open-file')
+      const editor = await openEditableEditor(page, fileRow)
+      emit({ event: 'editor-ready' })
+      const ready = await lines.next()
+      if (ready.done || JSON.parse(ready.value).continue !== true) throw namedError('ProtocolError')
+
+      stage('editor-type')
+      await editor.click()
+      await page.keyboard.press('End')
+      await page.keyboard.type(` ${marker}`, { delay: 20 })
+      await waitForEditorText(page, marker)
+      await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+
+      // The remote workbench stores working-copy backups on its managed host.
+      stage('editor-backup')
+      await waitForWorkingCopyBackup(config.workspaceDirectory, marker)
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      const cookies = await context.cookies()
+      const cookie = cookies.find((item) => item.name === 'kk_ide_session')
+      if (!cookie) throw namedError('MissingSessionCookie')
+      emit({ event: 'dirty-backed-up', cookie: cookie.value })
+
+      stage('await-refresh')
+      const refresh = await lines.next()
+      if (refresh.done || refresh.value.trim().length === 0) throw namedError('ProtocolError')
+      const refreshMessage = JSON.parse(refresh.value)
+      const refreshEntryUrl = refreshMessage?.navigate?.entryUrl
+      if (typeof refreshEntryUrl !== 'string' || refreshEntryUrl.length === 0) {
+        throw namedError('ProtocolError')
+      }
+
+      // Programmatic navigation can be guarded by the browser's beforeunload confirmation; the
+      // workbench's in-page dirty dialog is handled by the daemon path and is not involved here.
+      page.on('dialog', (dialog) => {
+        void dialog.accept()
+      })
+
+      stage('workbench-navigate')
+      await page.goto(new URL(refreshEntryUrl, config.baseUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: WORKBENCH_TIMEOUT,
+      })
+      await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+      await waitForRestoredEditor(page, marker)
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      emit({ event: 'entry-restored' })
+
+      const afterEntry = await lines.next()
+      if (afterEntry.done || JSON.parse(afterEntry.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+
+      stage('workbench-reload')
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: WORKBENCH_TIMEOUT })
+      await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+      await waitForRestoredEditor(page, marker)
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      emit({ event: 'reload-restored' })
+
+      const afterReload = await lines.next()
+      if (afterReload.done || JSON.parse(afterReload.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+      stage('closing-browser')
       await browser.close()
       browser = null
       emit({ event: 'done' })
@@ -311,20 +459,7 @@ async function run(config, lines) {
 
     // 3. File editing interaction: open file, type in Monaco editor, save with Ctrl+S, assert fs
     stage('editor-open-file')
-    await fileRow.dblclick()
-
-    stage('editor-monaco-lines')
-    const editor = page.locator('.monaco-editor .view-lines').first()
-    await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
-    await page.waitForFunction(
-      () =>
-        document
-          .querySelector('.monaco-editor .view-lines')
-          ?.textContent?.replaceAll('\u00a0', ' ')
-          .includes('initial text in workspace'),
-      undefined,
-      { timeout: EDITOR_TIMEOUT },
-    )
+    const editor = await openEditableEditor(page, fileRow)
 
     stage('editor-type')
     await editor.click()
@@ -332,15 +467,7 @@ async function run(config, lines) {
     await page.keyboard.press('Enter')
     const appendText = 'appended by playwright in monaco editor'
     await page.keyboard.type(appendText, { delay: 20 })
-    await page.waitForFunction(
-      (text) =>
-        document
-          .querySelector('.monaco-editor .view-lines')
-          ?.textContent?.replaceAll('\u00a0', ' ')
-          .includes(text),
-      appendText,
-      { timeout: EDITOR_TIMEOUT },
-    )
+    await waitForEditorText(page, appendText)
 
     stage('editor-save')
     await editor.click()

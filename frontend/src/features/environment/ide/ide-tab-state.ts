@@ -1,26 +1,42 @@
-import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import { hasExactKeys, isRecord, utf8ByteLength } from '@/shared/lib/value'
 import {
   loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
   TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
   type TabStorage, type TabStorageArea,
 } from '@/shared/lib/tab-storage'
+import type { EnvironmentIdeOpenMode } from '@/shared/api/generated/contracts'
 
-/** 每个浏览器 tab 唯一一份 IDE 呈现状态；新 tab 可继承同 scope 的最后状态。 */
+/** 每个浏览器 tab 唯一一份 IDE 呈现状态；local 只保存非运行态展示偏好。 */
 export interface IdePresentation {
   panelVisible: boolean
   selectedEnvironmentId: string | null
   openedEnvironmentIds: string[]
 }
 
-/** 只存在 sessionStorage 的运行身份；epoch、claimId、iframe 与票据永不持久化。 */
+/** claim 发出前冻结的恢复描述；entryUrl、cookie 和票据永不进入这里。 */
+export interface IdePendingClaim {
+  mode: EnvironmentIdeOpenMode
+  viewId: string
+  claimId: string
+  /** create 固定 '0'；resume 为已确认的正 epoch。 */
+  expectedBindingEpoch: string
+  expectedDaemonInstanceId: string
+  directory?: string | null
+}
+
+/** 只存在 sessionStorage 的运行身份；刷新复用，复制 tab 由 Web Locks 隔离。 */
 export interface IdeRecovery {
   viewId: string
   daemonInstanceId: string
-  directory: string
+  /** 已确认的绑定 epoch；首次 create 发现资源后仍未绑定时缺省。 */
+  bindingEpoch?: string
+  directory?: string
+  pending?: IdePendingClaim
 }
 
 export interface IdeTabSnapshot {
+  browserSessionId: string
   presentation: IdePresentation
   recoveryByEnvironment: Record<string, IdeRecovery>
 }
@@ -35,6 +51,7 @@ export type IdeTabStorage = TabStorage
 export type IdeSnapshotSource = 'session' | 'local' | 'default'
 
 export interface IdeTabLoadResult {
+  browserSessionId: string
   presentation: IdePresentation
   recoveryByEnvironment: Record<string, IdeRecovery>
   source: IdeSnapshotSource
@@ -55,6 +72,9 @@ export const IDE_MAX_OPEN_ENVIRONMENTS = 64
 export const IDE_MAX_DIRECTORY_CHARS = 4096
 export const IDE_MAX_RECENT_DIRECTORIES = 8
 
+const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
+const POSITIVE_DECIMAL = /^[1-9][0-9]*$/
+
 function hasControlCharacters(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0
@@ -63,6 +83,15 @@ function hasControlCharacters(value: string): boolean {
     }
   }
   return false
+}
+
+export function isIdeDirectory(value: unknown): value is string {
+  return (
+    typeof value === 'string'
+    && value.length > 0
+    && value.length <= IDE_MAX_DIRECTORY_CHARS
+    && !hasControlCharacters(value)
+  )
 }
 
 export function createDefaultIdePresentation(): IdePresentation {
@@ -106,23 +135,71 @@ function parsePresentation(value: unknown): IdePresentation | null {
   }
 }
 
+function parsePending(value: unknown, viewId: string): IdePendingClaim | null {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, [
+      'mode', 'viewId', 'claimId', 'expectedBindingEpoch',
+      'expectedDaemonInstanceId', 'directory',
+    ])
+    || (value.mode !== 'create' && value.mode !== 'resume')
+    || value.viewId !== viewId
+    || !isCanonicalUuid(value.claimId)
+    || typeof value.expectedBindingEpoch !== 'string'
+    || !CANONICAL_DECIMAL.test(value.expectedBindingEpoch)
+    || !isCanonicalUuid(value.expectedDaemonInstanceId)
+  ) {
+    return null
+  }
+  if (value.mode === 'create' && value.expectedBindingEpoch !== '0') {
+    return null
+  }
+  if (value.mode === 'resume' && !POSITIVE_DECIMAL.test(value.expectedBindingEpoch)) {
+    return null
+  }
+  if (value.directory !== null && !isIdeDirectory(value.directory)) {
+    return null
+  }
+  return {
+    mode: value.mode,
+    viewId,
+    claimId: value.claimId,
+    expectedBindingEpoch: value.expectedBindingEpoch,
+    expectedDaemonInstanceId: value.expectedDaemonInstanceId,
+    ...(value.directory === null ? {} : { directory: value.directory }),
+  }
+}
+
 function parseRecovery(value: unknown): IdeRecovery | null {
   if (
     !isRecord(value)
-    || !hasExactKeys(value, ['viewId', 'daemonInstanceId', 'directory'])
+    || !hasExactKeys(value, [
+      'viewId', 'daemonInstanceId', 'bindingEpoch', 'directory', 'pending',
+    ])
     || !isCanonicalUuid(value.viewId)
     || !isCanonicalUuid(value.daemonInstanceId)
-    || typeof value.directory !== 'string'
-    || value.directory.length === 0
-    || value.directory.length > IDE_MAX_DIRECTORY_CHARS
-    || hasControlCharacters(value.directory)
   ) {
+    return null
+  }
+  if (
+    value.bindingEpoch !== null
+    && (typeof value.bindingEpoch !== 'string' || !CANONICAL_DECIMAL.test(value.bindingEpoch))
+  ) {
+    return null
+  }
+  if (value.directory !== null && !isIdeDirectory(value.directory)) {
+    return null
+  }
+  const pending = value.pending === null ? null : parsePending(value.pending, value.viewId)
+  if (value.pending !== null && pending == null) {
     return null
   }
   return {
     viewId: value.viewId,
     daemonInstanceId: value.daemonInstanceId,
-    directory: value.directory,
+    ...(value.bindingEpoch === null ? {} : { bindingEpoch: value.bindingEpoch }),
+    ...(value.directory === null ? {} : { directory: value.directory }),
+    ...(pending == null ? {} : { pending }),
   }
 }
 
@@ -148,41 +225,81 @@ function parseRecoveryMap(
   return recovery
 }
 
-function parseSnapshot(
-  value: unknown,
-  kind: 'session' | 'local',
-): { presentation: IdePresentation; recoveryByEnvironment: Record<string, IdeRecovery> } | null {
-  if (!isRecord(value)) {
+function parseSession(value: unknown): IdeTabSnapshot | null {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ['browserSessionId', 'presentation', 'recoveryByEnvironment'])
+    || !isCanonicalUuid(value.browserSessionId)
+  ) {
     return null
   }
-  if (kind === 'local') {
-    if (!hasExactKeys(value, ['presentation'])) return null
-    const presentation = parsePresentation(value.presentation)
-    return presentation == null ? null : { presentation, recoveryByEnvironment: {} }
-  }
-  if (!hasExactKeys(value, ['presentation', 'recoveryByEnvironment'])) return null
   const presentation = parsePresentation(value.presentation)
-  if (presentation == null) return null
+  if (presentation == null) {
+    return null
+  }
   const recoveryByEnvironment = parseRecoveryMap(value.recoveryByEnvironment, presentation)
-  return recoveryByEnvironment == null ? null : { presentation, recoveryByEnvironment }
-}
-
-function serializeSession(
-  presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
-): string | null {
-  const snapshot: IdeTabSnapshot = {
+  if (recoveryByEnvironment == null) {
+    return null
+  }
+  return {
+    browserSessionId: value.browserSessionId,
     presentation,
     recoveryByEnvironment,
   }
-  return serializeTabSnapshot(snapshot, (value) => parseSnapshot(value, 'session'))
+}
+
+function parseLocal(value: unknown): IdeLastSnapshot | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['presentation'])) {
+    return null
+  }
+  const presentation = parsePresentation(value.presentation)
+  return presentation == null ? null : { presentation }
+}
+
+function encodePending(pending: IdePendingClaim): Record<string, unknown> {
+  return {
+    mode: pending.mode,
+    viewId: pending.viewId,
+    claimId: pending.claimId,
+    expectedBindingEpoch: pending.expectedBindingEpoch,
+    expectedDaemonInstanceId: pending.expectedDaemonInstanceId,
+    directory: pending.directory ?? null,
+  }
+}
+
+function encodeRecovery(recovery: IdeRecovery): Record<string, unknown> {
+  return {
+    viewId: recovery.viewId,
+    daemonInstanceId: recovery.daemonInstanceId,
+    bindingEpoch: recovery.bindingEpoch ?? null,
+    directory: recovery.directory ?? null,
+    pending: recovery.pending == null ? null : encodePending(recovery.pending),
+  }
+}
+
+function serializeSession(
+  browserSessionId: string,
+  presentation: IdePresentation,
+  recoveryByEnvironment: Record<string, IdeRecovery>,
+): string | null {
+  const snapshot = {
+    browserSessionId,
+    presentation,
+    recoveryByEnvironment: Object.fromEntries(
+      Object.entries(recoveryByEnvironment).map(([environmentId, recovery]) => [
+        environmentId,
+        encodeRecovery(recovery),
+      ]),
+    ),
+  }
+  return serializeTabSnapshot(snapshot, parseSession)
 }
 
 function serializeLocal(presentation: IdePresentation): string | null {
   const snapshot: IdeLastSnapshot = {
     presentation,
   }
-  return serializeTabSnapshot(snapshot, (value) => parseSnapshot(value, 'local'))
+  return serializeTabSnapshot(snapshot, parseLocal)
 }
 
 /**
@@ -190,27 +307,32 @@ function serializeLocal(presentation: IdePresentation): string | null {
  *
  * <p>初始化只把选定快照写回 sessionStorage；localStorage 只作为输入读取，绝不在加载、
  * 刷新恢复或无效引用清理时被覆盖。没有有效 session 时，local 只提供展示意图，不提供
- * viewId、epoch 或任何运行身份。
+ * browserSessionId、viewId、epoch 或任何运行身份。browserSessionId 在首次初始化时生成，
+ * 刷新复用；复制 tab 的隔离由 Web Locks 决定，不由本地时间或心跳猜测。
  */
 export function initializeIdeTabState(storage?: IdeTabStorage): IdeTabLoadResult {
   const stores = resolveTabStorage(storage)
-  const { value, source } = loadTabSnapshot(
-    stores, IDE_TAB_SESSION_KEY, IDE_TAB_LAST_KEY,
-    (snapshot) => parseSnapshot(snapshot, 'session'),
-    (snapshot) => parseSnapshot(snapshot, 'local'),
+  const { value, source } = loadTabSnapshot<IdeTabSnapshot | IdeLastSnapshot>(
+    stores, IDE_TAB_SESSION_KEY, IDE_TAB_LAST_KEY, parseSession, parseLocal,
   )
+  const browserSessionId = value != null && 'browserSessionId' in value
+    ? value.browserSessionId
+    : createUuid()
   const presentation = value?.presentation ?? createDefaultIdePresentation()
-  const recoveryByEnvironment = value?.recoveryByEnvironment ?? {}
+  const recoveryByEnvironment = value != null && 'recoveryByEnvironment' in value
+    ? value.recoveryByEnvironment
+    : {}
   const sessionSaved = writeTabSnapshot(
     stores.session,
     IDE_TAB_SESSION_KEY,
-    serializeSession(presentation, recoveryByEnvironment),
+    serializeSession(browserSessionId, presentation, recoveryByEnvironment),
   )
-  return { presentation, recoveryByEnvironment, source, sessionSaved }
+  return { browserSessionId, presentation, recoveryByEnvironment, source, sessionSaved }
 }
 
 /** 用户显式操作：完整本 tab 快照写 session，剔除运行身份后的快照写 local。 */
 export function saveIdePresentation(
+  browserSessionId: string,
   presentation: IdePresentation,
   recoveryByEnvironment: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
@@ -220,14 +342,15 @@ export function saveIdePresentation(
     sessionSaved: writeTabSnapshot(
       session,
       IDE_TAB_SESSION_KEY,
-      serializeSession(presentation, recoveryByEnvironment),
+      serializeSession(browserSessionId, presentation, recoveryByEnvironment),
     ),
     localSaved: writeTabSnapshot(local, IDE_TAB_LAST_KEY, serializeLocal(presentation)),
   }
 }
 
-/** 异步 claim 成功只补写 session 的 viewId 恢复索引，不伪造新的用户操作。 */
+/** 异步恢复只补写 session 的浏览器会话与恢复索引，不伪造新的用户操作。 */
 export function saveIdeSession(
+  browserSessionId: string,
   presentation: IdePresentation,
   recoveryByEnvironment: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
@@ -236,20 +359,10 @@ export function saveIdeSession(
   return writeTabSnapshot(
     session,
     IDE_TAB_SESSION_KEY,
-    serializeSession(presentation, recoveryByEnvironment),
+    serializeSession(browserSessionId, presentation, recoveryByEnvironment),
   )
 }
 
-function isDirectoryPath(value: unknown): value is string {
-  return (
-    typeof value === 'string'
-    && value.length > 0
-    && value.length <= IDE_MAX_DIRECTORY_CHARS
-    && !hasControlCharacters(value)
-  )
-}
-
-/** 最近目录只是目录选择器的展示便利数据；损坏或越界的条目逐条丢弃，不影响视图身份。 */
 function parseRecentDirectories(raw: string | null): Record<string, string[]> {
   if (raw == null || utf8ByteLength(raw) > IDE_TAB_STATE_MAX_BYTES) {
     return {}
@@ -270,7 +383,7 @@ function parseRecentDirectories(raw: string | null): Record<string, string[]> {
       }
       const directories: string[] = []
       for (const entry of entries) {
-        if (!isDirectoryPath(entry) || directories.includes(entry)) {
+        if (!isIdeDirectory(entry) || directories.includes(entry)) {
           continue
         }
         directories.push(entry)
@@ -313,7 +426,7 @@ export function recordRecentDirectory(
   directory: string,
   storage?: IdeTabStorage,
 ): string[] {
-  if (!isCanonicalUuid(environmentId) || !isDirectoryPath(directory)) {
+  if (!isCanonicalUuid(environmentId) || !isIdeDirectory(directory)) {
     return readRecentDirectories(environmentId, storage)
   }
   const { local } = resolveTabStorage(storage)

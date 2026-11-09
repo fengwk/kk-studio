@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmationRetry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
@@ -177,7 +179,7 @@ public class HarnessProcessorConfiguration {
   }
 
   /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
-  @Bean(destroyMethod = "close")
+  @Bean(destroyMethod = "shutdown")
   public ExecutorService harnessModelExecutionExecutor(
       ContextSnapshotFactory contextSnapshotFactory) {
     return ContextExecutorService.wrap(
@@ -197,6 +199,15 @@ public class HarnessProcessorConfiguration {
     return new ExecutionExitConfirmer(store, executionExitJournal, clock);
   }
 
+  /** 本地物理执行生命周期：首个 dispatcher 启动前完成 journal 恢复，Model/Tool Processor 共用同一物理集合。 */
+  @Bean(destroyMethod = "close")
+  public LocalExecutionLifecycle localExecutionLifecycle(
+      HarnessStore store,
+      ExecutionExitJournal executionExitJournal,
+      ExecutionExitConfirmer executionExitConfirmer) {
+    return new ExecutionLifecycle(store, executionExitJournal, executionExitConfirmer);
+  }
+
   /** 每秒从 journal 派发一次重放；JDBC 只在 worker 线程执行，关闭时有界取消。 */
   @Bean(initMethod = "start", destroyMethod = "close")
   public ExecutionExitConfirmationRetry executionExitConfirmationRetry(
@@ -214,7 +225,7 @@ public class HarnessProcessorConfiguration {
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       @Qualifier("harnessModelExecutionExecutor") ExecutorService executionExecutor,
-      ExecutionExitConfirmer executionExitConfirmer) {
+      LocalExecutionLifecycle localExecutionLifecycle) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -224,7 +235,7 @@ public class HarnessProcessorConfiguration {
         scheduler,
         heartbeatWorker,
         executionExecutor,
-        executionExitConfirmer);
+        localExecutionLifecycle);
   }
 
   @Bean(destroyMethod = "close")
@@ -236,6 +247,7 @@ public class HarnessProcessorConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
+      LocalExecutionLifecycle localExecutionLifecycle,
       ExecutionExitConfirmer executionExitConfirmer,
       ToolResultHistoryMaterializer materializer) {
     return new ToolProcessor(
@@ -246,6 +258,7 @@ public class HarnessProcessorConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
+        localExecutionLifecycle,
         executionExitConfirmer,
         materializer);
   }

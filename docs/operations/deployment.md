@@ -102,7 +102,9 @@ docker run -d --name kk-studio-app -p 127.0.0.1:8080:8080 \
   -e 'KK_STUDIO_STORAGE_S3_ACCESS_KEY=<access-key>' \
   -e 'KK_STUDIO_STORAGE_S3_SECRET_KEY=<secret-key>' \
   -e KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY=/app/execution-exits \
+  -e SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s \
   -v kk-studio-execution-exits:/app/execution-exits \
+  --stop-timeout 120 \
   kk-studio-app:production
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -179,17 +181,49 @@ Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[Harness Model：用量与计价](../modules/harness-model.md#协议来源)。
 
-同版本日常升级且数据面兼容时，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，接手节点通过重新挂接在途远端调用（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#processor)）继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
+同版本日常升级且数据面兼容时，App 节点可以逐个替换。节点收到 SIGTERM 后先停止 claim 与本地执行准入，按物理句柄在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`（默认 60s）内等待本机 body 与资源结束；剩余同一总 deadline 用于中断未结束的本地 body、向 Daemon 发送 GOAWAY、释放路由租约，并移交可 reattach 的远端工具（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#processor)）。总预算默认是 `60s + 30s = 90s`，下层不得各自重新开启 30 秒；仍有物理执行或本地资源时，退出证明与日志目录锁保留到 JVM 退出。容器或进程管理器必须给足 Spring 100s 与容器 120s（例如 `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s`、Docker Compose `stop_grace_period: 120s`、`docker run --stop-timeout 120`），否则会被提前 SIGKILL，在途执行只能按崩溃恢复处理。不得用无界 `ExecutorService.close` 等待替代显式 deadline。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
 
-Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_history` 或用 `repair` 伪造 checksum
-会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
-它通过产品配置导出、数据库备份与重建、当前 Schema 初始化和产品导入恢复配置，不是自动迁移。
+Flyway 校验失败时停止切换并查明差异。标准 `repair` 只用于已经执行并核对过一次性 DDL 后的 V1 checksum 更新；
+手工修改 `flyway_schema_history` 或用 `repair` 绕过结构差异、伪造 checksum 会破坏校验依据，不能使用。
+有数据的数据库不能重放 V1，也不能依靠运行时兼容层启动。需要空库时走独立的
+[共享数据库重建](development-and-testing.md#共享数据库重建)，它通过产品配置导出、数据库备份与重建、当前 Schema
+初始化和产品导入恢复配置，不是自动迁移。
 
-### Schema 不匹配时的数据库重建与恢复
+### 已有业务库的 4.0.0 一次性切换
 
-Flyway 只接受 V1 与当前基线一致的数据库；V1 校验不同的数据库
-在校验阶段被拒绝，且表数据、迁移历史与结构保持不变。仓库不提供自动 DDL 修补或
-`repair` 路径；不得让 Flyway 在结构不一致的现有库上强行重放 V1，也不得在现有部署或共享数据库上直接手工改表。
+4.0.0 的 V1 与 3.0.0 的 V1 checksum 不同，但仓库仍只保留一个 V1，不提供 V2、旧格式解析器或运行时迁移兼容。
+保留已有业务数据必须停机执行一次性离线 DDL，不能无备份自动 apply/repair，也不能默认清库：
+
+1. 在旧版本仍可运行时完成“设置 → 同步”配置导出，另存 App/Daemon 镜像、运行配置与密钥文件、全库 dump 与
+   S3 业务对象，并验证备份可恢复。停止全部 Studio App、Worker、preview 写入与 Daemon 写入，等待在途操作收敛；
+   **新 bind mount 不会自动搬运旧容器内的 journal**，先保存旧 journal 目录，再逐条治理旧 `UNCONFIRMED` 执行。
+   有旧 owner 的 Stop/退出证据按原身份确认；没有旧 owner 证据的只保留未确认事实或走显式放弃，不能批量猜成成功。
+2. 确认目标库是 3.0.0 基线、只有一条成功的 V1 记录、对象位于 `public` schema，且没有其它客户端会话。不要终止
+   其它会话；先由对应客户端主动断开。执行前把连接 `search_path` 固定为 `pg_catalog,public`。
+3. 由操作者在停机窗口执行
+   [`runtime4-cutover.sql`](../../scripts/ops/runtime4-cutover.sql)：
+
+   ```bash
+   PGOPTIONS='-c search_path=pg_catalog,public' \
+     psql -X -v ON_ERROR_STOP=1 -d <target-database> \
+     -f scripts/ops/runtime4-cutover.sql
+   ```
+
+   脚本以单事务 guard 核对唯一成功 V1 的版本、脚本名与 3.0.0 checksum、旧退出约束、无活动客户端会话和未切换状态；
+   任一不符即整体失败且不改数据库。它只调整 `harness_execution_exit` 的状态 CHECK、增加本地 `OWNER_EXITED` 约束并
+   更新列注释，不读写业务行，不改 `flyway_schema_history`/checksum，不终止会话，也不执行 Flyway repair。
+4. DDL 提交后，操作者必须显式用同一 4.0.0 发行物的标准 Flyway repair 更新目标库的 V1 checksum，再执行 validate
+   或由唯一 Flyway owner 启动并完成校验。repair 前后都应确认 history 仍只有成功 baseline 1；不得手工
+   `UPDATE`/`DELETE` history 或伪造 checksum，也不得把 repair 配置成启动时自动执行。
+5. validate 通过后再启动 4.0.0，检查健康、关键业务操作、旧退出事实与 Daemon 重连；任何一步失败都停止切换并从
+   已验证的备份回退。隔离 PostgreSQL 上的一次性切换由
+   [`Runtime4CutoverSchemaUpgradeTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/Runtime4CutoverSchemaUpgradeTest.java)
+   守护 guard 拒绝、业务行保留、重复执行、会话不终止和显式 repair 后才恢复 validate。
+
+没有既有业务数据、且数据所有者明确授权重建时，才走下一节的空库重建；它不是本次切换的默认路径，也不会自动迁移
+旧会话、运行历史或 Blob 引用。
+
+### 空库重建与恢复
 
 数据库重构或灾难恢复只能在数据所有者批准后通过配置导出与空库重建执行：
 
@@ -307,8 +341,8 @@ DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
 
-两节点配置 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT=10s`、`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION=10s` 与
-`stop_grace_period: 60s`，支持在优雅停止时主动排空在途工具并释放路由租约。
+两节点配置 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT=10s`、`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION=10s`、
+`SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s` 与 `stop_grace_period: 120s`，支持在优雅停止时主动排空在途工具并释放路由租约。
 distributed.sh 提供受控命令集：`disconnect-db-a` / `reconnect-db-a` 注入 DB 网络断开；
 `stop-app-a` / `stop-app-b`、`start-app-a` / `start-app-b`、`kill-app-a` / `kill-app-b` 与
 `restart-daemon-c` 编排滚动发布排空与故障接管。
@@ -377,6 +411,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher/runtime | `KK_STUDIO_HARNESS_DISPATCHER_*`、`KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` |
+| App 容器停止预算 | shutdown/SIGTERM | `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE`（默认部署模板 100s）、Compose `stop_grace_period` / `docker run --stop-timeout` 120s；Harness 总 deadline 默认 `60s + 30s` |
 | local/test/reliability/distributed/NAS App | execution-exit journal | `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（每个 App 实例独立持久卷） |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
@@ -507,7 +542,10 @@ tag 不同：
 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（例如 `/app/execution-exits`），保证挂载后的 POSIX 目录及既有
 `.lock` 文件归应用 UID `10001` 所有，并允许应用设置目录 `0700`、文件 `0600`；仅 group 或 ACL 可写不足，
 镜像自身的 `chown` 也不代替挂载卷的初始化。该卷不与任何其它 Studio 实例共享，保存退出确认 journal
-供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。
+供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。外部 Compose 还需设置
+`SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s` 与 `stop_grace_period: 120s`，让 `60s + 30s`
+的 Harness deadline 在容器被强制终止前完成；首次新增 bind mount 不会搬运旧容器内的 journal，切换前按
+[已有业务库切换](#已有业务库的-400-一次性切换) 保存并治理旧记录。
 
 镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志由 Platform 的
 [`logback-spring.xml`](../../platform/runtime/src/main/resources/logback-spring.xml) 与运行环境共同配置。
@@ -522,7 +560,7 @@ tag 不同：
 `kk-studio.cluster.secret`。节点用既有 15 秒心跳续租 `cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
 只有某个 Thread 在其它节点存在有效订阅时，该 Thread 的普通 realtime 才写 NOTIFY。正常退出删除本节点订阅，
 异常退出由租约到期收敛；未配置内部 origin/secret 的节点保持单节点模式，不登记订阅，也不发布 realtime NOTIFY。
-节点优雅退出时自动执行排空流程：停止新 claim 派发，等待在途执行（至多 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`，默认 60s），向远端 Daemon 发送 GOAWAY 并释放环境路由租约，移交在途远端工具执行并 release 对应的 TOOL Work，由接手节点重新挂接（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#processor)），最后反注册节点并清理订阅。
+节点优雅退出时先停止新 claim 与本地执行准入，按物理句柄在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`（默认 60s）内排空本机执行，再用同一总 deadline 的剩余预算向远端 Daemon 发送 GOAWAY、释放环境路由租约、移交可 reattach 的远端工具并 release 对应 TOOL Work；接手节点不重发 INVOKE，只在 reattach 窗口内等待终态（详见 [Harness Runtime](../modules/harness-runtime.md#processor)），最后反注册节点并清理订阅。总预算默认 `60s + 30s`，仍有物理执行或本地资源时退出证明与 journal 锁保留到 JVM 退出。
 
 ### 本机 preview 与 NAS 数据面
 

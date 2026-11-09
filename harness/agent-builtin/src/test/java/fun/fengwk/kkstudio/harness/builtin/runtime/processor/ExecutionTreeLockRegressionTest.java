@@ -144,7 +144,8 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             Runnable::run,
             ignored -> {},
-            TestExecutionExitConfirmer.create(recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
+            ToolProcessorTestSupport.testLifecycle(
+                recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -248,7 +249,8 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             Runnable::run,
             ignored -> {},
-            TestExecutionExitConfirmer.create(recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
+            ToolProcessorTestSupport.testLifecycle(
+                recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
     recordingStore.clearLogs();
@@ -301,6 +303,7 @@ class ExecutionTreeLockRegressionTest {
             fixture.scheduler,
             Runnable::run,
             ignored -> {},
+            ToolProcessorTestSupport.testLifecycle(recordingStore, fixture.clock),
             TestExecutionExitConfirmer.create(recordingStore, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
 

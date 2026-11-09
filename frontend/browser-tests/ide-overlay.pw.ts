@@ -1,11 +1,10 @@
 import { expect, test, type Page } from './fixture'
+import type { Route } from '@playwright/test'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 
 const HARNESS_URL = '/browser-tests/ide-overlay-harness.html'
 const SESSION_KEY = 'kk-studio.tab-state:ide'
-const LAST_KEY = 'kk-studio.last-state:ide'
-const RECENT_KEY = 'kk-studio.recent-directories:ide'
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const DIRECTORY_A = '/workspace/a'
@@ -43,35 +42,41 @@ const CARDS: EnvironmentDTO[] = [
   },
 ]
 
+interface ViewRecord {
+  viewId: string
+  environmentId: string
+  browserSessionId: string
+  eventNodeId: string
+  connectionId: string
+  claimId: string
+  daemonInstanceId: string
+  bindingEpoch: string
+  directory: string
+  workspacePath: string
+  state: 'OPEN' | 'CLOSING'
+  entryUrl: string
+}
+
 interface OpenCall {
   environmentId: string
   body: Record<string, unknown>
-}
-
-interface CloseCall {
-  environmentId: string
-  viewId: string
-  body: Record<string, unknown>
-}
-
-interface UsageFrame {
-  documentId: string
-  revision: string
-  views: Array<Record<string, unknown>>
+  pendingAtPost: Record<string, unknown> | null
+  sessionBrowserIdAtPost: string | null
 }
 
 interface TransportState {
+  views: Record<string, ViewRecord>
+  revision: number
+  epoch: number
   openCalls: OpenCall[]
-  closeCalls: CloseCall[]
-  terminalCalls: Array<{ environmentId: string; viewId: string; body: Record<string, unknown> }>
-  directoryCalls: Array<{ environmentId: string; viewId: string; body: Record<string, unknown> }>
-  directoryListCalls: Array<{ environmentId: string; path: string | null }>
-  usageFrames: UsageFrame[]
+  readCalls: Array<{ environmentId: string; viewId: string; query: Record<string, string> }>
+  usageFrames: Array<{ browserSessionId: string; connectionId: string; revision: string; views: unknown[] }>
+  closedConnections: Set<string>
   iframeRequests: Record<string, number>
   eventConnectionIds: string[]
-  failNextOpen: 'network' | 'view-in-use' | 'view-gone' | null
-  dirtyCloseOnce: boolean
-  epoch: number
+  failNextOpen: 'STALE_BINDING' | 'DAEMON_NOT_READY' | 'VIEW_OWNED_BY_OTHER_SESSION' | null
+  holdNextOpen: boolean
+  heldOpen: { route: Route; body: Record<string, unknown>; epoch: string } | null
 }
 
 function connectionId(index: number): string {
@@ -88,53 +93,56 @@ function directory(environmentId: string): string {
   return environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B
 }
 
-interface DirectoryFixture {
-  parentPath: string | null
-  children: Array<{ name: string; path: string }>
-  truncated?: boolean
-  denied?: boolean
+function entryUrl(environmentId: string, viewId: string, epoch: string): string {
+  return `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${epoch}`
 }
 
-/** 只包含宿主真实会返回的直接子目录；logs 用于验证展开时的权限错误展示。 */
-const DIRECTORY_FIXTURES: Record<string, DirectoryFixture> = {
-  [DIRECTORY_A]: {
-    parentPath: '/workspace',
-    children: [
-      { name: 'projects', path: `${DIRECTORY_A}/projects` },
-      { name: 'logs', path: `${DIRECTORY_A}/logs` },
-    ],
-    truncated: true,
-  },
-  [`${DIRECTORY_A}/projects`]: {
-    parentPath: DIRECTORY_A,
-    children: [{ name: 'kk-studio', path: `${DIRECTORY_A}/projects/kk-studio` }],
-  },
-  [`${DIRECTORY_A}/logs`]: {
-    parentPath: DIRECTORY_A,
-    children: [],
-    denied: true,
-  },
-  '/workspace': {
-    parentPath: '/',
-    children: [
-      { name: 'a', path: DIRECTORY_A },
-      { name: 'b', path: DIRECTORY_B },
-    ],
-  },
-  '/': {
-    parentPath: null,
-    children: [{ name: 'workspace', path: '/workspace' }],
-  },
-  [DIRECTORY_B]: {
-    parentPath: '/workspace',
-    children: [{ name: 'reports', path: `${DIRECTORY_B}/reports` }],
-  },
+function viewResponse(view: ViewRecord): Record<string, unknown> {
+  return {
+    ...view,
+    entryUrl: view.entryUrl,
+  }
+}
+
+function snapshotView(view: ViewRecord): Record<string, unknown> {
+  return {
+    ...view,
+    entryUrl: null,
+  }
+}
+
+function problem(status: number, reason: string, title: string): Record<string, unknown> {
+  return {
+    type: 'about:blank',
+    status,
+    code: status === 409 ? 'unavailable' : 'conflict',
+    reason,
+    title,
+  }
+}
+
+async function pendingAtPost(page: Page): Promise<{
+  pending: Record<string, unknown> | null
+  browserSessionId: string | null
+}> {
+  return page.evaluate((key) => {
+    const snapshot = JSON.parse(sessionStorage.getItem(key) ?? '{}') as {
+      browserSessionId?: string
+      recoveryByEnvironment?: Record<string, { pending?: Record<string, unknown> }>
+    }
+    const entries = Object.values(snapshot.recoveryByEnvironment ?? {})
+    return {
+      pending: entries.find((entry) => entry.pending != null)?.pending ?? null,
+      browserSessionId: snapshot.browserSessionId ?? null,
+    }
+  }, SESSION_KEY)
 }
 
 async function installTransport(page: Page, state: TransportState): Promise<void> {
   await page.routeWebSocket(/\/ws\/events$/, (socket) => {
-    state.eventConnectionIds.push(connectionId(state.eventConnectionIds.length + 1))
-    const currentConnection = state.eventConnectionIds.at(-1)!
+    const currentConnection = connectionId(state.eventConnectionIds.length + 1)
+    state.eventConnectionIds.push(currentConnection)
+    socket.onClose(() => { state.closedConnections.add(currentConnection) })
     let connected = false
     socket.onMessage((raw) => {
       const message = JSON.parse(String(raw)) as Record<string, unknown>
@@ -153,7 +161,12 @@ async function installTransport(page: Page, state: TransportState): Promise<void
           cursor: '0',
         }))
       } else if (message.type === 'ide-use') {
-        state.usageFrames.push(message as unknown as UsageFrame)
+        state.usageFrames.push({ ...message, connectionId: currentConnection } as unknown as {
+          browserSessionId: string
+          connectionId: string
+          revision: string
+          views: unknown[]
+        })
         socket.send(JSON.stringify({
           type: 'ide-use-accepted',
           revision: message.revision,
@@ -173,138 +186,176 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
+    const readMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)$/)
+    if (method === 'GET' && readMatch != null) {
+      const environmentId = decodeURIComponent(readMatch[1]!)
+      const viewId = decodeURIComponent(readMatch[2]!)
+      state.readCalls.push({
+        environmentId,
+        viewId,
+        query: Object.fromEntries(parsed.searchParams.entries()),
+      })
+      if (!hasUsageIntent(state, environmentId, viewId, Object.fromEntries(parsed.searchParams.entries()))) {
+        await route.fulfill({
+          status: 409,
+          json: problem(409, 'STALE_BINDING', 'browser usage intent is not confirmed'),
+        })
+        return
+      }
+      state.revision += 1
+      const view = state.views[viewId]
+      await route.fulfill({
+        json: {
+          daemonInstanceId: daemonId(environmentId),
+          revision: String(state.revision),
+          view: view == null ? null : snapshotView(view),
+        },
+      })
+      return
+    }
+
     const openMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views$/)
     if (method === 'POST' && openMatch != null) {
       const environmentId = decodeURIComponent(openMatch[1]!)
       const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
-      state.openCalls.push({ environmentId, body })
-      const failure = state.failNextOpen
-      state.failNextOpen = null
-      if (failure === 'network') {
-        await route.abort('failed')
-        return
-      }
-      if (failure === 'view-in-use' || failure === 'view-gone') {
+      const pending = await pendingAtPost(page)
+      state.openCalls.push({
+        environmentId,
+        body,
+        pendingAtPost: pending.pending,
+        sessionBrowserIdAtPost: pending.browserSessionId,
+      })
+      if (!hasUsageIntent(state, environmentId, String(body.viewId), body)) {
         await route.fulfill({
           status: 409,
-          contentType: 'application/problem+json',
-          json: {
-            type: 'about:blank',
-            status: 409,
-            code: 'unavailable',
-            reason: 'IDE_UNAVAILABLE',
-            title: failure === 'view-in-use'
-              ? 'IDE view is in use'
-              : 'IDE view is gone; open a new view before retrying',
-            detail: failure === 'view-in-use' ? 'VIEW_IN_USE' : 'VIEW_GONE',
-          },
+          json: problem(409, 'STALE_BINDING', 'browser usage intent is not confirmed'),
         })
         return
       }
-      state.epoch += 1
+      if (state.holdNextOpen) {
+        state.holdNextOpen = false
+        state.epoch += 1
+        state.heldOpen = { route, body, epoch: String(state.epoch + 10) }
+        return
+      }
+      const failure = state.failNextOpen
+      state.failNextOpen = null
+      if (failure === 'STALE_BINDING') {
+        const existing = state.views[String(body.viewId)]
+        if (existing != null) {
+          state.epoch += 1
+          existing.bindingEpoch = String(state.epoch + 10)
+        }
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'STALE_BINDING', 'binding changed'),
+        })
+        return
+      }
+      if (failure === 'DAEMON_NOT_READY') {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'DAEMON_NOT_READY', 'daemon not ready'),
+        })
+        return
+      }
+      if (failure === 'VIEW_OWNED_BY_OTHER_SESSION') {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'VIEW_OWNED_BY_OTHER_SESSION', 'view owned by another browser session'),
+        })
+        return
+      }
+
       const viewId = String(body.viewId)
-      const response = {
-        ...body,
+      const mode = String(body.mode)
+      const existing = state.views[viewId]
+      if (mode === 'resume' && existing == null) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'VIEW_GONE', 'view gone'),
+        })
+        return
+      }
+      if (
+        existing != null
+        && existing.browserSessionId !== String(body.browserSessionId)
+      ) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'VIEW_OWNED_BY_OTHER_SESSION', 'view owned by another browser session'),
+        })
+        return
+      }
+      if (existing != null && existing.claimId === body.claimId
+        && existing.connectionId === body.connectionId && existing.eventNodeId === body.eventNodeId) {
+        await route.fulfill({ json: viewResponse(existing) })
+        return
+      }
+      if (
+        mode === 'resume'
+        && existing != null
+        && existing.bindingEpoch !== String(body.expectedBindingEpoch)
+      ) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/problem+json',
+          json: problem(409, 'STALE_BINDING', 'binding changed'),
+        })
+        return
+      }
+      const view: ViewRecord = existing ?? {
+        viewId,
         environmentId,
+        browserSessionId: String(body.browserSessionId),
+        eventNodeId: String(body.eventNodeId),
+        connectionId: String(body.connectionId),
+        claimId: String(body.claimId),
         daemonInstanceId: daemonId(environmentId),
-        bindingEpoch: String(state.epoch + 10),
+        bindingEpoch: '',
         directory: directory(environmentId),
         workspacePath: directory(environmentId),
         state: 'OPEN',
-        entryUrl: `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${state.epoch}`,
+        entryUrl: '',
       }
-      await route.fulfill({ json: response })
+      if (mode === 'create' && existing == null) {
+        state.epoch += 1
+        view.bindingEpoch = String(state.epoch + 10)
+        if (typeof body.directory === 'string') {
+          view.directory = body.directory
+          view.workspacePath = body.directory
+        }
+      } else {
+        state.epoch += 1
+        view.bindingEpoch = String(state.epoch + 10)
+        view.eventNodeId = String(body.eventNodeId)
+        view.connectionId = String(body.connectionId)
+        view.claimId = String(body.claimId)
+        view.browserSessionId = String(body.browserSessionId)
+      }
+      view.entryUrl = entryUrl(environmentId, viewId, view.bindingEpoch)
+      state.views[viewId] = view
+      await route.fulfill({ json: viewResponse(view) })
       return
     }
 
     const terminalMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/focus-terminal$/)
     if (method === 'POST' && terminalMatch != null) {
-      state.terminalCalls.push({
-        environmentId: decodeURIComponent(terminalMatch[1]!),
-        viewId: decodeURIComponent(terminalMatch[2]!),
-        body: (request.postDataJSON() as Record<string, unknown> | null) ?? {},
-      })
       await route.fulfill({ status: 204 })
-      return
-    }
-
-    const directoryListMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/directories$/)
-    if (method === 'GET' && directoryListMatch != null) {
-      const environmentId = decodeURIComponent(directoryListMatch[1]!)
-      const requestedPath = parsed.searchParams.get('path')
-      state.directoryListCalls.push({ environmentId, path: requestedPath })
-      const targetPath = requestedPath ?? directory(environmentId)
-      const fixture = DIRECTORY_FIXTURES[targetPath]
-      if (fixture == null || fixture.denied === true) {
-        await route.fulfill({
-          status: 403,
-          contentType: 'application/problem+json',
-          json: {
-            type: 'about:blank',
-            status: 403,
-            code: 'unauthorized',
-            title: `permission denied: ${targetPath}`,
-          },
-        })
-        return
-      }
-      await route.fulfill({
-        json: {
-          path: targetPath,
-          parentPath: fixture.parentPath,
-          children: fixture.children,
-          truncated: fixture.truncated === true,
-        },
-      })
-      return
-    }
-
-    const directoryMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/directory$/)
-    if (method === 'PUT' && directoryMatch != null) {
-      const environmentId = decodeURIComponent(directoryMatch[1]!)
-      const viewId = decodeURIComponent(directoryMatch[2]!)
-      const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
-      state.directoryCalls.push({ environmentId, viewId, body })
-      const targetDirectory = String(body.directory)
-      await route.fulfill({
-        json: {
-            viewId,
-            environmentId,
-            documentId: body.documentId,
-            eventNodeId: EVENT_NODE,
-            connectionId: state.eventConnectionIds.at(-1),
-            claimId: '91000000-0000-4000-8000-000000000001',
-            daemonInstanceId: daemonId(environmentId),
-            bindingEpoch: body.bindingEpoch,
-            directory: targetDirectory,
-            workspacePath: targetDirectory,
-            state: 'OPEN',
-            entryUrl: null,
-        },
-      })
       return
     }
 
     const closeMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/close$/)
     if (method === 'POST' && closeMatch != null) {
-      const environmentId = decodeURIComponent(closeMatch[1]!)
-      const viewId = decodeURIComponent(closeMatch[2]!)
       const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
-      state.closeCalls.push({ environmentId, viewId, body })
-      if (state.dirtyCloseOnce && body.discard !== true) {
-        state.dirtyCloseOnce = false
-        await route.fulfill({
-          status: 409,
-          contentType: 'application/problem+json',
-          json: {
-            type: 'about:blank',
-            status: 409,
-            code: 'unavailable',
-            reason: 'IDE_UNAVAILABLE',
-            title: 'IDE bridge unavailable',
-          },
-        })
-        return
+      if (body.discard === true) {
+        const viewId = decodeURIComponent(closeMatch[2]!)
+        delete state.views[viewId]
       }
       await route.fulfill({ status: 204 })
       return
@@ -313,15 +364,13 @@ async function installTransport(page: Page, state: TransportState): Promise<void
     await route.fulfill({
       status: 404,
       contentType: 'application/problem+json',
-      json: { type: 'about:blank', status: 404, code: 'not_found', title: `Unexpected harness request: ${method} ${path}` },
+      json: problem(404, 'NOT_FOUND', `Unexpected harness request: ${method} ${path}`),
     })
   })
 
   await page.route('**/ide/**/__ide/bootstrap*', async (route) => {
     const parsed = new URL(route.request().url())
-    const match = parsed.pathname.match(
-      /^\/ide\/([^/]+)\/([^/]+)\/__ide\/bootstrap$/,
-    )
+    const match = parsed.pathname.match(/^\/ide\/([^/]+)\/([^/]+)\/__ide\/bootstrap$/)
     if (match == null) {
       await route.fulfill({ status: 404 })
       return
@@ -347,19 +396,42 @@ async function installTransport(page: Page, state: TransportState): Promise<void
   })
 }
 
+/** 模拟真实 Backend：本连接最新已 ACK 的 usage 必须包含精确 owner/view/claim。 */
+function hasUsageIntent(
+  state: TransportState,
+  environmentId: string,
+  viewId: string,
+  request: Record<string, unknown>,
+): boolean {
+  if (request.eventNodeId !== EVENT_NODE || state.closedConnections.has(String(request.connectionId))) {
+    return false
+  }
+  for (let index = state.usageFrames.length - 1; index >= 0; index -= 1) {
+    const frame = state.usageFrames[index]!
+    if (frame.connectionId !== request.connectionId) continue
+    return frame.browserSessionId === request.browserSessionId && frame.views.some((value) => {
+      if (typeof value !== 'object' || value == null) return false
+      const view = value as Record<string, unknown>
+      return view.environmentId === environmentId && view.viewId === viewId && view.claimId === request.claimId
+    })
+  }
+  return false
+}
+
 function createState(): TransportState {
   return {
+    views: {},
+    revision: 1000,
+    epoch: 0,
     openCalls: [],
-    closeCalls: [],
-    terminalCalls: [],
-    directoryCalls: [],
-    directoryListCalls: [],
+    readCalls: [],
     usageFrames: [],
+    closedConnections: new Set(),
     iframeRequests: {},
     eventConnectionIds: [],
     failNextOpen: null,
-    dirtyCloseOnce: false,
-    epoch: 0,
+    holdNextOpen: false,
+    heldOpen: null,
   }
 }
 
@@ -369,491 +441,286 @@ async function openHarness(page: Page, state: TransportState): Promise<void> {
   await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
 }
 
-async function openEnvironment(page: Page, which: 'A' | 'B'): Promise<void> {
-  await page.getByTestId(which === 'A' ? 'pane-1-open-a' : 'pane-2-open-b').click()
+async function openA(page: Page): Promise<void> {
+  await page.getByTestId('pane-1-open-a').click()
+  await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
   await expect(page.getByTestId('ide-overlay-panel')).toBeVisible()
 }
 
-async function session(page: Page): Promise<{
-  presentation: { openedEnvironmentIds: string[]; selectedEnvironmentId: string | null }
-  recoveryByEnvironment: Record<string, { viewId: string; daemonInstanceId: string; directory: string }>
+async function storedSession(page: Page): Promise<{
+  browserSessionId: string
+  recoveryByEnvironment: Record<string, {
+    viewId: string
+    daemonInstanceId: string
+    bindingEpoch?: string
+    pending?: Record<string, unknown>
+  }>
 }> {
   return page.evaluate((key) => JSON.parse(sessionStorage.getItem(key) ?? '{}'), SESSION_KEY)
 }
 
-test.describe('tab-global IDE panel', () => {
-  test('refresh resumes the same view from session without rewriting local last state', async ({ page }) => {
+async function saveFrame(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const win = window as unknown as { __ideFrame?: Element | null }
+    win.__ideFrame = document.querySelector('[data-testid="ide-iframe"]')
+  })
+}
+
+async function sameFrame(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const win = window as unknown as { __ideFrame?: Element | null }
+    return win.__ideFrame != null
+      && win.__ideFrame === document.querySelector('[data-testid="ide-iframe"]')
+  })
+}
+
+test.describe('Chat-scoped persistent IDE host', () => {
+  test('persists the create claim before POST and opens one stable view', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
+    await openA(page)
 
-    await openEnvironment(page, 'A')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(1)
-    const first = state.openCalls[0]!
-    const viewId = String(first.body.viewId)
-    expect(first.body.mode).toBe('create')
-    expect(first.body).not.toHaveProperty('directory')
-
-    const before = await session(page)
-    expect(before.recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
-    const localBefore = await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)
-    expect(localBefore).not.toContain(viewId)
-
-    await page.reload()
-    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(2)
-
-    const resume = state.openCalls[1]!
-    expect(resume.environmentId).toBe(ENV_A)
-    expect(resume.body.mode).toBe('resume')
-    expect(resume.body.viewId).toBe(viewId)
-    expect(resume.body).not.toHaveProperty('directory')
-    expect(state.iframeRequests[viewId]).toBe(2)
-    expect(await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)).toBe(localBefore)
-    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
-  })
-
-  test('opens a new view in the environment last confirmed directory', async ({ page }) => {
-    // 无视图时优先使用最近确认目录；没有记录时首屏请求不带 directory，由 Daemon 使用宿主主目录。
-    const state = createState()
-    const recent = `${DIRECTORY_A}/projects`
-    await installTransport(page, state)
-    await page.addInitScript(({ key, value }) => {
-      localStorage.setItem(key, value)
-    }, {
-      key: RECENT_KEY,
-      value: JSON.stringify({ byEnvironment: { [ENV_A]: [recent] } }),
-    })
-    await page.goto(HARNESS_URL)
-    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
-
-    await openEnvironment(page, 'A')
-    await expect.poll(() => state.openCalls.length).toBe(1)
-    expect(state.openCalls[0]!.body).toMatchObject({
+    expect(state.openCalls).toHaveLength(1)
+    const call = state.openCalls[0]!
+    expect(call.body.mode).toBe('create')
+    expect(call.pendingAtPost).toMatchObject({
       mode: 'create',
-      directory: recent,
+      viewId: call.body.viewId,
+      claimId: call.body.claimId,
+      expectedBindingEpoch: '0',
+      expectedDaemonInstanceId: daemonId(ENV_A),
     })
+    expect(call.sessionBrowserIdAtPost).toBe(call.body.browserSessionId)
+    expect(call.body).not.toHaveProperty('entryUrl')
+    expect(call.body).not.toHaveProperty('token')
+    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId)
+      .toBe(call.body.viewId)
   })
 
-  test('keeps both environment iframes mounted and switches visibility without recreating views', async ({ page }) => {
+  test('refresh resumes the same view immediately from a pure read without replaying create', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
-    await page.setViewportSize({ width: 2560, height: 900 })
+    await openA(page)
+    const viewId = String(state.openCalls[0]!.body.viewId)
+    const epoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
+    const beforeReads = state.readCalls.length
 
-    await openEnvironment(page, 'A')
+    await page.reload()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await openEnvironment(page, 'B')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(2)
     await expect.poll(() => state.openCalls.length).toBe(2)
 
-    const viewA = String(state.openCalls[0]!.body.viewId)
-    const viewB = String(state.openCalls[1]!.body.viewId)
-    const layerA = page.locator(`[data-testid="ide-view-layer"][data-ide-environment="${ENV_A}"]`)
-    const layerB = page.locator(`[data-testid="ide-view-layer"][data-ide-environment="${ENV_B}"]`)
-    await expect(layerA).toHaveAttribute('hidden')
-    await expect(layerB).not.toHaveAttribute('hidden')
-
-    const panelBox = await page.getByTestId('ide-overlay-panel').boundingBox()
-    expect(panelBox).not.toBeNull()
-    expect(Math.abs((panelBox!.x + panelBox!.width) - 2560)).toBeLessThanOrEqual(2)
-    expect(Math.abs(panelBox!.width - 720)).toBeLessThanOrEqual(2)
-    const contentBox = await page.getByTestId('ide-harness-root').boundingBox()
-    expect(contentBox!.width + panelBox!.width + 8).toBeCloseTo(2560, 0)
-
-    await page.evaluate(([environmentA, environmentB]) => {
-      const win = window as unknown as {
-        __ideFrames?: Record<string, Element | null>
-      }
-      win.__ideFrames = {
-        [environmentA!]: document.querySelector(
-          `[data-testid="ide-view-layer"][data-ide-environment="${environmentA}"] iframe`,
-        ),
-        [environmentB!]: document.querySelector(
-          `[data-testid="ide-view-layer"][data-ide-environment="${environmentB}"] iframe`,
-        ),
-      }
-    }, [ENV_A, ENV_B])
-
-    await openEnvironment(page, 'A')
-    await expect(layerA).not.toHaveAttribute('hidden')
-    await expect(layerB).toHaveAttribute('hidden')
-    expect(state.openCalls.length).toBe(2)
-
-    const sameFrames = await page.evaluate(([environmentA, environmentB]) => {
-      const win = window as unknown as {
-        __ideFrames?: Record<string, Element | null>
-      }
-      return win.__ideFrames?.[environmentA!] === document.querySelector(
-        `[data-testid="ide-view-layer"][data-ide-environment="${environmentA}"] iframe`,
-      ) && win.__ideFrames?.[environmentB!] === document.querySelector(
-        `[data-testid="ide-view-layer"][data-ide-environment="${environmentB}"] iframe`,
-      )
-    }, [ENV_A, ENV_B])
-    expect(sameFrames).toBe(true)
-    expect(state.iframeRequests[viewA]).toBe(1)
-    expect(state.iframeRequests[viewB]).toBe(1)
-
-    await expect(page.getByTestId('composer-input-pane-1')).toHaveValue('pane 1 initial text')
-    await page.getByTestId('composer-input-pane-1').fill('pane one edited')
-    await expect(page.getByTestId('composer-input-pane-2')).toHaveValue('pane 2 initial text')
-
-    const stored = await page.evaluate((key) => localStorage.getItem(key) ?? '', LAST_KEY)
-    expect(stored).not.toContain(viewA)
-    expect(stored).not.toContain(viewB)
-    expect(stored).not.toContain('daemonInstanceId')
-    expect(stored).not.toContain('bindingEpoch')
-    expect(await page.evaluate((key) => sessionStorage.getItem(key) ?? '', SESSION_KEY))
-      .toContain(viewA)
-  })
-
-  test('resizes the persistent shell, remembers width, and covers mobile safely', async ({ page }, testInfo) => {
-    const state = createState()
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await openHarness(page, state)
-    await openEnvironment(page, 'A')
-    const frame = page.getByTestId('ide-iframe')
-    await expect(frame).toHaveCount(1)
-    await page.evaluate(() => {
-      ;(window as unknown as { savedFrame: Element | null }).savedFrame = document.querySelector('[data-testid="ide-iframe"]')
-      const iframe = document.querySelector<HTMLIFrameElement>('[data-testid="ide-iframe"]')
-      iframe?.contentDocument?.body.setAttribute('data-state', 'preserved')
+    expect(state.readCalls.length).toBeGreaterThan(beforeReads)
+    expect(state.readCalls.at(-1)).toMatchObject({
+      environmentId: ENV_A,
+      viewId,
     })
-    const divider = page.getByRole('separator', { name: '调整 IDE 面板宽度' })
-    await divider.focus()
-    await page.keyboard.press('Home')
-    expect((await page.getByTestId('ide-overlay-panel').boundingBox())!.width).toBe(360)
-    await page.keyboard.press('End')
-    expect((await page.getByTestId('ide-harness-root').boundingBox())!.width).toBe(320)
-    // 回到默认宽度后检查指针与键盘增量。
-    const maxBox = (await divider.boundingBox())!
-    await page.mouse.move(maxBox.x + maxBox.width / 2, maxBox.y + maxBox.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(720, maxBox.y + maxBox.height / 2)
-    await page.mouse.up()
-    const initialRenders = await page.getByTestId('ide-harness-root').getAttribute('data-renders')
-    const box = (await divider.boundingBox())!
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(box.x + 160, box.y + box.height / 2, { steps: 8 })
-    await page.mouse.up()
-    const panel = page.getByTestId('ide-overlay-panel')
-    expect((await panel.boundingBox())!.width).toBeCloseTo(560, -1)
-    expect(await page.getByTestId('ide-harness-root').getAttribute('data-renders')).toBe(initialRenders)
-    await divider.focus()
-    await page.keyboard.press('ArrowLeft')
-    const chosenWidth = (await panel.boundingBox())!.width
-    expect(chosenWidth).toBeCloseTo(570, -1)
-    await page.screenshot({ path: testInfo.outputPath('ide-desktop.png') })
-
-    await page.getByRole('link', { name: '其他页面' }).click()
-    await expect(page.getByRole('link', { name: '返回对话' })).toBeVisible()
-    expect(await page.evaluate(() =>
-      (window as unknown as { savedFrame: Element }).savedFrame === document.querySelector('[data-testid="ide-iframe"]'),
-    )).toBe(true)
-    await page.getByRole('link', { name: '返回对话' }).click()
-    await page.getByTestId('toggle-a').click()
-    await expect(panel).toBeHidden()
-    await page.getByTestId('toggle-a').click()
-    await expect(panel).toBeVisible()
-    expect(await page.evaluate(() =>
-      (window as unknown as { savedFrame: Element }).savedFrame === document.querySelector('[data-testid="ide-iframe"]'),
-    )).toBe(true)
-    expect(state.iframeRequests[String(state.openCalls[0]!.body.viewId)]).toBe(1)
-    expect(await frame.evaluate((element: HTMLIFrameElement) => element.contentDocument?.body.getAttribute('data-state')))
-      .toBe('preserved')
-
-    await page.setViewportSize({ width: 840, height: 900 })
-    expect((await panel.boundingBox())!.width).toBe(512)
-    await page.setViewportSize({ width: 390, height: 844 })
-    expect((await panel.boundingBox())!.width).toBe(390)
-    await expect(divider).toBeHidden()
-    const mobileTargets = [
-      ...['ide-terminal-btn', 'ide-collapse-btn', 'ide-close-btn', 'ide-copy-directory-btn', 'ide-open-directory-btn']
-        .map((id) => page.getByTestId(id)),
-      page.getByRole('button', { name: '环境' }),
-    ]
-    for (const control of mobileTargets) {
-      const target = (await control.boundingBox())!
-      expect(target.width).toBeGreaterThanOrEqual(44)
-      expect(target.height).toBeGreaterThanOrEqual(44)
-    }
-    await page.screenshot({ path: testInfo.outputPath('ide-mobile.png') })
-    await page.getByTestId('ide-open-directory-btn').click()
-    const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
-    await expect(dialog.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
-    const modalBox = (await dialog.boundingBox())!
-    expect(modalBox.width).toBe(390)
-    expect(modalBox.height).toBe(844)
-    // 目录弹窗在移动端全屏，行、展开、帮助与上级按钮都不小于 44px 触区。
-    const directoryTargets = [
-      dialog.getByTestId('ide-directory-up'),
-      dialog.getByTestId('ide-directory-help'),
-      dialog.getByTestId('ide-directory-toggle').first(),
-      dialog.getByTestId('ide-directory-entry').first(),
-    ]
-    for (const control of directoryTargets) {
-      const target = (await control.boundingBox())!
-      expect(target.width).toBeGreaterThanOrEqual(44)
-      expect(target.height).toBeGreaterThanOrEqual(44)
-    }
-    await dialog.getByTestId('ide-directory-help').click()
-    await expect(dialog.getByRole('note')).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('ide-mobile-directory.png') })
-    await page.getByRole('button', { name: '取消' }).click()
-    state.dirtyCloseOnce = true
-    await page.getByTestId('ide-close-btn').click()
-    const confirmation = page.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
-    await expect(confirmation).toBeVisible()
-    for (const label of ['取消', '强制关闭']) {
-      const target = (await confirmation.getByRole('button', { name: label }).boundingBox())!
-      expect(target.width).toBeGreaterThanOrEqual(44)
-      expect(target.height).toBeGreaterThanOrEqual(44)
-    }
-    await confirmation.getByRole('button', { name: '取消' }).click()
-    await page.getByTestId('ide-collapse-btn').click()
-    await expect(panel).toBeHidden()
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await page.getByTestId('toggle-a').click()
-    expect((await panel.boundingBox())!.width).toBeCloseTo(chosenWidth, 0)
-    await page.reload()
-    await expect(frame).toHaveCount(1)
-    expect((await panel.boundingBox())!.width).toBeCloseTo(chosenWidth, 0)
+    expect(state.openCalls[1]!.body).toMatchObject({
+      mode: 'resume',
+      viewId,
+      expectedBindingEpoch: epoch,
+      expectedDaemonInstanceId: daemonId(ENV_A),
+    })
+    expect(state.openCalls[1]!.body.claimId).not.toBe(state.openCalls[0]!.body.claimId)
+    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
   })
 
-  test('expands the host directory tree lazily and switches to the confirmed directory', async ({ page }, testInfo) => {
+  test('a new websocket connection resumes immediately and keeps the same iframe', async ({ page }) => {
     const state = createState()
-    await page.setViewportSize({ width: 1440, height: 900 })
     await openHarness(page, state)
-    await openEnvironment(page, 'A')
+    await openA(page)
+    const viewId = String(state.openCalls[0]!.body.viewId)
+    await saveFrame(page)
+    const firstConnection = state.eventConnectionIds[0]
+
+    await page.getByTestId('disconnect-events').click()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'false')
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+    await expect.poll(() => state.openCalls.length).toBe(2)
+
+    expect(state.openCalls[1]!.body).toMatchObject({
+      mode: 'resume',
+      viewId,
+      connectionId: state.eventConnectionIds[1],
+    })
+    expect(state.openCalls[1]!.body.connectionId).not.toBe(firstConnection)
+    expect(await sameFrame(page)).toBe(true)
+    await expect.poll(() => state.iframeRequests[viewId]).toBe(2)
+    await expect(page.getByTestId('ide-retry-claim-btn')).toHaveCount(0)
+  })
+
+  test('a late response from a replaced connection cannot overwrite the current binding', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+    const viewId = String(state.openCalls[0]!.body.viewId)
+    await saveFrame(page)
+
+    state.holdNextOpen = true
+    await page.getByTestId('disconnect-events').click()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'false')
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+    await expect.poll(() => state.openCalls.length).toBe(2)
+    await expect.poll(() => state.heldOpen != null).toBe(true)
+    const held = state.heldOpen!
+    expect(held.body.connectionId).toBe(state.eventConnectionIds[1])
+
+    await page.getByTestId('disconnect-events').click()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'false')
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+    await expect.poll(() => state.openCalls.length).toBe(3)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
 
-    await page.getByTestId('ide-open-directory-btn').click()
-    const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
-    await expect(dialog.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
-    // 首次只读取宿主主目录，展开前不请求任何子目录。
-    expect(state.directoryListCalls).toEqual([{ environmentId: ENV_A, path: null }])
-    await expect(dialog.getByTestId('ide-directory-truncated')).toBeVisible()
-
-    await dialog.getByRole('button', { name: '展开 projects' }).click()
-    await expect(dialog.getByText('kk-studio')).toBeVisible()
-    expect(state.directoryListCalls[1]).toEqual({
-      environmentId: ENV_A,
-      path: `${DIRECTORY_A}/projects`,
+    const currentEpoch = state.views[viewId]!.bindingEpoch
+    await held.route.fulfill({
+      json: {
+        ...state.views[viewId],
+        connectionId: held.body.connectionId,
+        eventNodeId: held.body.eventNodeId,
+        browserSessionId: held.body.browserSessionId,
+        claimId: held.body.claimId,
+        bindingEpoch: held.epoch,
+        entryUrl: entryUrl(ENV_A, viewId, held.epoch),
+      },
     })
+    await page.waitForTimeout(150)
 
-    // 展开不可读目录时展示后端原因，而不是空列表。
-    await dialog.getByRole('button', { name: '展开 logs' }).click()
-    const nodeError = dialog.getByTestId('ide-directory-node-error')
-    await expect(nodeError).toContainText('目录加载失败')
-    await expect(nodeError).toContainText(`permission denied: ${DIRECTORY_A}/logs`)
-
-    // 逐级向上直到根目录，到根后上级动作不可用。
-    await dialog.getByTestId('ide-directory-up').click()
-    await expect(dialog.getByTestId('ide-directory-location')).toHaveText('/workspace')
-    await dialog.getByTestId('ide-directory-up').click()
-    await expect(dialog.getByTestId('ide-directory-location')).toHaveText('/')
-    await expect(dialog.getByTestId('ide-directory-up')).toBeDisabled()
-    expect(state.directoryListCalls.slice(-2)).toEqual([
-      { environmentId: ENV_A, path: '/workspace' },
-      { environmentId: ENV_A, path: '/' },
-    ])
-
-    // 从根逐层展开回到 projects，选中并确认切换。
-    await dialog.getByRole('button', { name: '展开 workspace' }).click()
-    await expect(dialog.getByText('a', { exact: true })).toBeVisible()
-    await dialog.getByRole('button', { name: '展开 a' }).click()
-    await expect(dialog.getByText('projects')).toBeVisible()
-    await dialog.getByRole('button', { name: '展开 projects' }).click()
-    await expect(dialog.getByText('kk-studio')).toBeVisible()
-    await dialog.getByTestId('ide-directory-entry').filter({ hasText: /^projects$/ }).click()
-    await expect(dialog.getByTestId('ide-directory-confirm')).toBeEnabled()
-    await dialog.getByTestId('ide-directory-confirm').click()
-    await expect(dialog).toBeHidden()
-    expect(state.directoryCalls.at(-1)).toMatchObject({
-      environmentId: ENV_A,
-      body: { directory: `${DIRECTORY_A}/projects` },
-    })
-    await expect(page.getByTestId('ide-directory-badge')).toContainText('projects')
-
-    // 只有确认成功后才写入最近目录，重新打开时展示它。
-    await page.getByTestId('ide-open-directory-btn').click()
-    const reopened = page.getByRole('dialog', { name: '打开宿主目录' })
-    await expect(reopened.getByTestId('ide-recent-directory').first()).toHaveText(
-      `${DIRECTORY_A}/projects`,
-    )
-    await expect(reopened.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
-    await reopened.getByTestId('ide-recent-directory').first().click()
-    await expect(reopened.getByTestId('ide-directory-location')).toHaveText(
-      `${DIRECTORY_A}/projects`,
-    )
-    await page.screenshot({ path: testInfo.outputPath('ide-directory-desktop.png') })
-    await reopened.getByRole('button', { name: '取消' }).click()
-    await expect(reopened).toBeHidden()
+    expect(state.openCalls).toHaveLength(3)
+    expect(await sameFrame(page)).toBe(true)
+    expect(state.iframeRequests[viewId]).toBe(2)
+    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(currentEpoch)
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
   })
 
-  test('a duplicated tab cannot steal the original view and requires an explicit new view', async ({ page, context }) => {
+  test('a STALE_BINDING response is reconciled by one read and a fresh CAS, not a retry timer', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
-    await openEnvironment(page, 'A')
+    await openA(page)
+    const viewId = String(state.openCalls[0]!.body.viewId)
+    const initialEpoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
+    await saveFrame(page)
+    const readsBefore = state.readCalls.length
+
+    state.failNextOpen = 'STALE_BINDING'
+    await page.getByTestId('disconnect-events').click()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'false')
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+    await expect.poll(() => state.openCalls.length).toBe(3)
+
+    expect(state.openCalls[1]!.body).toMatchObject({
+      mode: 'resume',
+      viewId,
+      expectedBindingEpoch: initialEpoch,
+    })
+    expect(state.openCalls[2]!.body.mode).toBe('resume')
+    expect(state.openCalls[2]!.body.viewId).toBe(viewId)
+    expect(state.openCalls[2]!.body.expectedBindingEpoch).not.toBe(initialEpoch)
+    expect(BigInt(state.openCalls[2]!.body.expectedBindingEpoch as string))
+      .toBeLessThan(BigInt(state.views[viewId]!.bindingEpoch))
+    expect(state.readCalls.length).toBeGreaterThan(readsBefore + 1)
+    expect(await sameFrame(page)).toBe(true)
+    await expect.poll(() => state.iframeRequests[viewId]).toBe(2)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(1)
-    const originalViewId = String(state.openCalls[0]!.body.viewId)
+  })
+
+  test('a duplicated tab gets a distinct browser session and cannot steal the original view', async ({ page, context }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+    const originalView = String(state.openCalls[0]!.body.viewId)
     const copiedSession = await page.evaluate((key) => sessionStorage.getItem(key), SESSION_KEY)
     expect(copiedSession).not.toBeNull()
 
     const duplicate = await context.newPage()
     await installTransport(duplicate, state)
     await duplicate.addInitScript(({ key, value }) => {
-      // 同源 IDE iframe 与顶层共享 sessionStorage；只在顶层 tab 注入复制来的会话。
       if (window.top === window) {
         sessionStorage.setItem(key, value)
       }
     }, { key: SESSION_KEY, value: copiedSession! })
-    state.failNextOpen = 'view-in-use'
     await duplicate.goto(HARNESS_URL)
     await expect(duplicate.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
-
-    // 与刷新相同的 VIEW_IN_USE 只进入等待态，不自动创建替代视图。
-    await expect(duplicate.getByTestId('ide-view-in-use')).toBeVisible()
     await expect(duplicate.getByTestId('ide-iframe')).toHaveCount(0)
-    await expect(duplicate.getByTestId('ide-open-new-view-btn')).toBeVisible()
-    await duplicate.waitForTimeout(300)
-    expect(state.openCalls).toHaveLength(2)
-    expect((await session(duplicate)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalViewId)
+    await duplicate.waitForTimeout(250)
 
-    await duplicate.getByTestId('ide-open-new-view-btn').click()
+    const cloneSession = await storedSession(duplicate)
+    expect(cloneSession.browserSessionId).not.toBe((await storedSession(page)).browserSessionId)
+    expect(state.openCalls).toHaveLength(1)
+
+    await duplicate.getByTestId('pane-1-open-a').click()
     await expect(duplicate.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(3)
-
-    const resume = state.openCalls[1]!
-    const replacement = state.openCalls[2]!
-    expect(resume.body.mode).toBe('resume')
-    expect(resume.body.viewId).toBe(originalViewId)
-    expect(replacement.body.mode).toBe('create')
-    expect(replacement.body.viewId).not.toBe(originalViewId)
-    expect(replacement.body.directory).toBe(DIRECTORY_A)
-    expect(state.closeCalls).toHaveLength(0)
-
-    await expect.poll(async () => {
-      const stored = await duplicate.evaluate(
-        (key) => JSON.parse(sessionStorage.getItem(key) ?? '{}'),
-        SESSION_KEY,
-      ) as { recoveryByEnvironment?: Record<string, { viewId: string }> }
-      return stored.recoveryByEnvironment?.[ENV_A]?.viewId
-    }).toBe(replacement.body.viewId)
-    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalViewId)
-  })
-
-  test('a refresh while the old connection still holds the view waits for explicit resume', async ({ page }) => {
-    const state = createState()
-    await openHarness(page, state)
-    await openEnvironment(page, 'A')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(1)
-    const viewId = String(state.openCalls[0]!.body.viewId)
-    const localBefore = await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)
-
-    state.failNextOpen = 'view-in-use'
-    await page.reload()
-    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
-
-    await expect(page.getByTestId('ide-view-in-use')).toBeVisible()
-    await expect(page.getByTestId('ide-retry-resume-btn')).toBeVisible()
-    await expect(page.getByTestId('ide-open-new-view-btn')).toBeVisible()
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(0)
-    await page.waitForTimeout(300)
-    expect(state.openCalls).toHaveLength(2)
-    expect(state.openCalls[1]!.body).toMatchObject({ mode: 'resume', viewId })
-    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
-    expect(state.closeCalls).toHaveLength(0)
-
-    const resumeClaimId = state.openCalls[1]!.body.claimId
-    await page.getByTestId('ide-retry-resume-btn').click()
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(3)
-
-    const retry = state.openCalls[2]!
-    expect(retry.body.mode).toBe('resume')
-    expect(retry.body.viewId).toBe(viewId)
-    expect(retry.body.claimId).not.toBe(resumeClaimId)
-    expect(state.closeCalls).toHaveLength(0)
-    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
-    expect(await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)).toBe(localBefore)
-  })
-
-  test('an unknown claim result keeps the original request and reconciles it without another operation', async ({ page }) => {
-    const state = createState()
-    await openHarness(page, state)
-    state.failNextOpen = 'network'
-
-    await openEnvironment(page, 'A')
-    await expect(page.getByTestId('ide-claim-unknown')).toBeVisible()
-    expect(state.openCalls).toHaveLength(1)
-    const original = state.openCalls[0]!
-    await page.waitForTimeout(300)
-    expect(state.openCalls).toHaveLength(1)
-
-    await page.getByTestId('ide-retry-claim-btn').click()
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
     await expect.poll(() => state.openCalls.length).toBe(2)
-    expect(state.openCalls[1]!.body).toEqual(original.body)
-    expect(state.terminalCalls).toHaveLength(0)
-    expect(state.directoryCalls).toHaveLength(0)
+    const replacement = state.openCalls[1]!
+    expect(replacement.body.mode).toBe('create')
+    expect(replacement.body.viewId).not.toBe(originalView)
+    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalView)
+    expect((await storedSession(duplicate)).recoveryByEnvironment[ENV_A]?.viewId)
+      .toBe(replacement.body.viewId)
   })
 
-  test('unknown close state keeps the iframe until the user explicitly forces close', async ({ page }) => {
+  test('BFCache restore reacquires the session lock and reconciles without replacing the iframe', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
-    await openEnvironment(page, 'A')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(1)
+    await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
+    await saveFrame(page)
+    const reads = state.readCalls.length
 
-    state.dirtyCloseOnce = true
-    await page.getByTestId('ide-close-btn').click()
-    await expect(page.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })).toBeVisible()
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+    })
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+    })
+    await expect.poll(() => state.readCalls.length).toBeGreaterThan(reads)
+    await expect(page.getByTestId('ide-reconciling')).toHaveCount(0)
+
+    expect(state.openCalls).toHaveLength(1)
+    expect(await sameFrame(page)).toBe(true)
+    expect(state.iframeRequests[viewId]).toBe(1)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.closeCalls.length).toBe(1)
-    expect(state.closeCalls[0]).toMatchObject({
-      environmentId: ENV_A,
-      viewId,
-      body: { discard: false },
-    })
-
-    await page.getByRole('button', { name: '强制关闭' }).click()
-    await expect(page.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(0)
-    await expect.poll(() => state.closeCalls.length).toBe(2)
-    expect(state.closeCalls[1]).toMatchObject({
-      environmentId: ENV_A,
-      viewId,
-      body: { discard: true },
-    })
-    expect(state.closeCalls[1]!.body.bindingEpoch).toBe(state.closeCalls[0]!.body.bindingEpoch)
-    expect(state.closeCalls[1]!.body.documentId).toBe(state.closeCalls[0]!.body.documentId)
   })
 
-  test('event reconnection resumes the existing view without closing or replacing it', async ({ page }) => {
+  test('leaving Chat removes layout and returns with the same iframe and unsaved text', async ({ page }) => {
     const state = createState()
+    await page.setViewportSize({ width: 1440, height: 900 })
     await openHarness(page, state)
-    await openEnvironment(page, 'A')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
-    await expect.poll(() => state.openCalls.length).toBe(1)
+    await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
-    const firstConnection = state.eventConnectionIds[0]
+    await saveFrame(page)
+    await page.evaluate(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('[data-testid="ide-iframe"]')
+      const draft = frame?.contentDocument?.querySelector<HTMLTextAreaElement>(
+        '[data-testid="ide-fixture-draft"]',
+      )
+      if (draft != null) draft.value = 'unsaved IDE text'
+    })
 
-    await page.getByTestId('disconnect-events').click()
-    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'false')
-    await expect.poll(() => state.openCalls.length, { timeout: 5000 }).toBe(2)
-    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
-    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
+    await page.getByTestId('other-link').click()
+    const other = page.getByTestId('other-page')
+    await expect(other).toBeVisible()
+    const host = page.getByTestId('chat-ide-workspace')
+    await expect(host).toBeHidden()
+    await expect(host).toHaveAttribute('hidden', '')
+    expect(await host.evaluate((element) => (element as HTMLElement).inert)).toBe(true)
+    expect(await host.evaluate((element) => element.contains(document.activeElement))).toBe(false)
+    await expect(page.getByTestId('ide-overlay-panel')).toBeHidden()
+    await expect(page.getByRole('button', { name: '打开命令表' })).toHaveCount(0)
+    const otherBox = await other.boundingBox()
+    expect(otherBox).not.toBeNull()
+    expect(Math.abs((otherBox!.x + otherBox!.width) - 1440)).toBeLessThanOrEqual(2)
+    expect(state.openCalls).toHaveLength(1)
+    expect(state.iframeRequests[viewId]).toBe(1)
 
-    const resume = state.openCalls[1]!
-    expect(resume.body.mode).toBe('resume')
-    expect(resume.body.viewId).toBe(viewId)
-    expect(resume.body.connectionId).not.toBe(firstConnection)
-    expect(state.closeCalls).toHaveLength(0)
-    await expect.poll(() => state.iframeRequests[viewId] ?? 0).toBe(2)
+    await page.getByTestId('back-link').click()
+    await expect(page.getByTestId('chat-page')).toBeVisible()
+    await expect(page.getByTestId('ide-overlay-panel')).toBeVisible()
+    expect(await sameFrame(page)).toBe(true)
+    expect(state.openCalls).toHaveLength(1)
+    expect(await page.getByTestId('ide-iframe').evaluate((element: HTMLIFrameElement) => (
+      element.contentDocument?.querySelector<HTMLTextAreaElement>(
+        '[data-testid="ide-fixture-draft"]',
+      )?.value
+    ))).toBe('unsaved IDE text')
   })
 })

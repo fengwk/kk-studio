@@ -319,6 +319,7 @@ class ToolProcessorExecutionScopeTest {
         fixture.clock,
         fixture.scheduler,
         Runnable::run,
+        ToolProcessorTestSupport.testLifecycle(store, fixture.clock),
         TestExecutionExitConfirmer.create(store, fixture.clock),
         ToolProcessorTestSupport.STABLE_MATERIALIZER);
   }

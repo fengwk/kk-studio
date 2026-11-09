@@ -18,8 +18,9 @@ describe('environmentIdeService', () => {
   /** 普通关闭等待 IDE 内用户确认，不施加客户端超时；只有 discard 关闭才走有界超时。 */
   it('waits without a client timeout unless the close discards', async () => {
     await closeIdeView('env-1', 'view-1', {
-      documentId: 'doc-1',
+      browserSessionId: 'browser-1',
       bindingEpoch: '7',
+      expectedDaemonInstanceId: 'daemon-1',
       discard: false,
     })
     expect(requestMock).toHaveBeenLastCalledWith(
@@ -29,8 +30,9 @@ describe('environmentIdeService', () => {
     )
 
     await closeIdeView('env-1', 'view-1', {
-      documentId: 'doc-1',
+      browserSessionId: 'browser-1',
       bindingEpoch: '7',
+      expectedDaemonInstanceId: 'daemon-1',
       discard: true,
     })
     expect(requestMock).toHaveBeenLastCalledWith(

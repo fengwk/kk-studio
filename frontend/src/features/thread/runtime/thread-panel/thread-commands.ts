@@ -148,6 +148,8 @@ interface ThreadCommandOptions {
   canBranchFromRoot?: boolean
   allowSwitchAgent?: boolean
   allowBranching?: boolean
+  /** IDE 入口只在 Chat 持久宿主内提供；Provider 外不展示空命令。 */
+  ideAvailable?: boolean
 }
 
 export function threadCommandsForTarget(
@@ -157,7 +159,9 @@ export function threadCommandsForTarget(
   const compaction = options.compaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
   // 命令可用性只由目标 kind 与显式能力决定；owner 不参与既有 Thread 的能力裁剪。
-  const commandList = THREAD_COMMANDS
+  const commandList = options.ideAvailable === false
+    ? THREAD_COMMANDS.filter((item) => item.id !== 'files' && item.id !== 'shell')
+    : THREAD_COMMANDS
 
   return commandList.map((item) => {
     const targetEnabled = enabled.has(item.id)

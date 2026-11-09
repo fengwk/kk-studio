@@ -46,11 +46,11 @@ import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSu
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolExecution;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -222,7 +222,7 @@ class ExecutionExitSettlementTest {
       AtomicInteger confirmAttempts = new AtomicInteger();
       HarnessStore processorStore =
           ExecutionExitFailureStore.wrapping(fixture.store, confirmAttempts, failConfirm);
-      try (ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
+      try (ExitLogCapture exitLogs = ExitLogCapture.attach(ExecutionLifecycle.class);
           ToolProcessor processor =
               new ToolProcessor(
                   processorStore,
@@ -237,6 +237,7 @@ class ExecutionExitSettlementTest {
                   fixture.clock,
                   fixture.scheduler,
                   Runnable::run,
+                  ToolProcessorTestSupport.testLifecycle(processorStore, fixture.clock),
                   TestExecutionExitConfirmer.create(processorStore, fixture.clock),
                   ToolProcessorTestSupport.STABLE_MATERIALIZER);
           AutoCloseable execution =
@@ -320,8 +321,8 @@ class ExecutionExitSettlementTest {
               () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
               () -> assertEquals(0, notificationCount(fixture.store, parentId)));
           exitLogs.assertSingleSafeFailure(
-              "cannot confirm tool execution exit",
-              "TOOL_EXIT_CONFIRM",
+              "local execution exit is not proven",
+              "EXECUTION_EXIT",
               ExecutionExitFailureStore.InjectedPersistenceFailure.class,
               ExecutionExitFailureStore.SYNTHETIC_SECRET);
         } else {

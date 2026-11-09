@@ -29,7 +29,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -338,7 +338,7 @@ class ModelExecutionDecodeDurationTest {
               Runnable::run,
               ignored -> {},
               nano,
-              TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+              TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
       assertTrue(execution.startHeartbeat(), "heartbeat must start");
       assertTrue(execution.markRunning(), "READY must persist RUNNING");
     }

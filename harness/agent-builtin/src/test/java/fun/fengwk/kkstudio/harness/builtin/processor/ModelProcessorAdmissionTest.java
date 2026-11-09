@@ -58,7 +58,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -292,7 +293,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             fixture.scheduler,
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(processorStore, fixture.clock));
+            TestExecutionLifecycle.create(processorStore, fixture.clock));
     fixture.gateway.owner = processor;
     HarnessRuntime runtime =
         new HarnessRuntime(
@@ -335,7 +336,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           }
         });
     UUID executionId = null;
-    ExitLogCapture exitLogs = ExitLogCapture.attach(ModelExecution.class);
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ExecutionLifecycle.class);
     try {
       assertEquals(ProcessResult.STARTED, processor.process(claim(fixture.store, invocationId)));
       assertTrue(closeEntered.await(5, TimeUnit.SECONDS), "terminal committed and close is held");
@@ -389,8 +390,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
             () -> assertEquals(0, notificationCount(fixture.store, parentId)));
         exitLogs.assertSingleSafeFailure(
-            "cannot confirm model execution exit",
-            "MODEL_EXIT_CONFIRM",
+            "local execution exit is not proven",
+            "EXECUTION_EXIT",
             ExecutionExitFailureStore.InjectedPersistenceFailure.class,
             ExecutionExitFailureStore.SYNTHETIC_SECRET);
       } else {
@@ -775,7 +776,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             Runnable::run,
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
+            TestExecutionLifecycle.create(fixture.store, fixture.clock))) {
       assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(recovered));
       assertEquals(beforeModel, model(fixture.store, fixture.invocationId));
       assertEquals(beforeThread, thread(fixture.store, fixture.baseline.threadId()));

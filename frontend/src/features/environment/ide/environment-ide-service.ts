@@ -1,14 +1,20 @@
 import { request } from '@/shared/api/client'
 import type {
+  ApiRoutes,
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
   EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
+  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 
-/** 打开或恢复 view：claimId 与 mode 由调用方持有，失败后只允许按原 claimId 对账。 */
+type ReadViewQuery = ApiRoutes[
+  'GET /api/ide/environments/{environmentId}/views/{viewId}'
+] extends { query: infer Query } ? Query : never
+
+/** 打开或恢复 view：claimId 与 mode 由调用方持有，失败后只允许纯读对账。 */
 export function openIdeView(
   environmentId: string,
   body: EnvironmentIdeOpenViewDTO,
@@ -16,6 +22,21 @@ export function openIdeView(
   return request('POST /api/ide/environments/{environmentId}/views', {
     path: { environmentId },
     body,
+  })
+}
+
+/**
+ * 纯读单个 view 的权威快照；不创建、不续租、不发票据。
+ * 显式 query 参数全部来自当前已 ACK 的浏览器使用意图。
+ */
+export function readIdeView(
+  environmentId: string,
+  viewId: string,
+  query: ReadViewQuery,
+): Promise<EnvironmentIdeViewSnapshotDTO> {
+  return request('GET /api/ide/environments/{environmentId}/views/{viewId}', {
+    path: { environmentId, viewId },
+    query,
   })
 }
 

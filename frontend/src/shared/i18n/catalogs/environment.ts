@@ -46,9 +46,33 @@ export const environmentCatalog = {
     'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
     'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',
   },
-  'ai.ide.claimUnknown': {
-    'en-US': 'The IDE view result is unknown. Reconcile the original claim before continuing.',
-    'zh-CN': 'IDE 视图结果未知，请先对账原 claim 再继续。',
+  'ai.ide.sessionUnsupported': {
+    'en-US': 'This browser does not support Web Locks, so an isolated IDE session cannot be established.',
+    'zh-CN': '当前浏览器不支持 Web Locks，无法建立隔离的 IDE 会话。',
+  },
+  'ai.ide.sessionUnavailable': {
+    'en-US': 'An independent IDE session is unavailable in this tab. Reload the page to try again.',
+    'zh-CN': '当前标签页无法取得独立 IDE 会话，请刷新页面后重试。',
+  },
+  'ai.ide.sessionConflict': {
+    'en-US': 'This IDE session is currently owned by another live page. The old binding was left untouched.',
+    'zh-CN': '该 IDE 会话当前由另一个活动页面持有，旧绑定未被改动。',
+  },
+  'ai.ide.waitingReady': {
+    'en-US': 'Waiting for the environment and event connection to become ready.',
+    'zh-CN': '正在等待环境与事件连接就绪。',
+  },
+  'ai.ide.reconciling': {
+    'en-US': 'Reconciling the authoritative IDE view state.',
+    'zh-CN': '正在对账 IDE 权威视图状态。',
+  },
+  'ai.ide.viewOwnedByOther': {
+    'en-US': 'This IDE view belongs to another browser session. Open a new view for this tab.',
+    'zh-CN': '该 IDE 视图属于其他浏览器会话，请为当前标签页打开新视图。',
+  },
+  'ai.ide.cleanupPending': {
+    'en-US': 'The IDE view is still being cleaned up. Wait for cleanup or open a new view.',
+    'zh-CN': 'IDE 视图仍在清理中，请等待清理完成或打开新视图。',
   },
   'ai.ide.retryClaim': {
     'en-US': 'Reconcile',
@@ -57,14 +81,6 @@ export const environmentCatalog = {
   'ai.ide.viewGone': {
     'en-US': 'The IDE view is gone and was not recreated automatically.',
     'zh-CN': 'IDE 视图已不存在，未自动创建替代视图。',
-  },
-  'ai.ide.viewInUse': {
-    'en-US': 'This IDE view is still held by another tab or an unreleased connection. The old tab may still be active. Wait for it to release, then retry resume, or open a new view.',
-    'zh-CN': '该 IDE 视图仍被其他标签页或尚未释放的连接占用，旧标签页可能仍在使用。请等待释放后重试恢复，或打开新视图。',
-  },
-  'ai.ide.retryResume': {
-    'en-US': 'Retry Resume',
-    'zh-CN': '重试恢复',
   },
   'ai.ide.openNewView': {
     'en-US': 'Open New View',
