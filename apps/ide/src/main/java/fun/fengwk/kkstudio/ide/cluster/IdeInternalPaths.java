@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 
 /**
  * 内部 IDE REST 的路径契约，供跨节点客户端与内部 controller 共用，避免两侧路径漂移。
@@ -23,6 +25,27 @@ public final class IdeInternalPaths {
 
   public static String viewsPath(EnvironmentId environmentId) {
     return environmentPrefix(environmentId) + "/views";
+  }
+
+  public static String viewPath(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
+    StringBuilder path =
+        new StringBuilder(viewsPath(environmentId))
+            .append('/')
+            .append(viewId)
+            .append("?browserSessionId=")
+            .append(UrlEncoding.encode(request.getBrowserSessionId()))
+            .append("&eventNodeId=")
+            .append(UrlEncoding.encode(request.getEventNodeId()))
+            .append("&connectionId=")
+            .append(UrlEncoding.encode(request.getConnectionId()))
+            .append("&claimId=")
+            .append(UrlEncoding.encode(request.getClaimId()));
+    if (request.getExpectedDaemonInstanceId() != null) {
+      path.append("&expectedDaemonInstanceId=")
+          .append(UrlEncoding.encode(request.getExpectedDaemonInstanceId()));
+    }
+    return path.toString();
   }
 
   public static String directoryPath(EnvironmentId environmentId, String viewId) {

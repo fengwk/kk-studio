@@ -45,7 +45,7 @@ import java.util.UUID;
 public class IdeBrowserUseInternalController {
 
   private static final Set<String> ACTIVE_PROOF_PARAMETERS =
-      Set.of("eventNodeId", "connectionId", "documentId");
+      Set.of("eventNodeId", "connectionId", "browserSessionId");
 
   private final ClusterInternalAuthentication authentication;
   private final IdeBrowserUseRegistry registry;
@@ -74,7 +74,7 @@ public class IdeBrowserUseInternalController {
           registry
               .findExactIntent(
                   query.identity(),
-                  query.document(),
+                  query.browserSession(),
                   query.environment(),
                   query.view(),
                   query.claim())
@@ -89,7 +89,7 @@ public class IdeBrowserUseInternalController {
   public ResponseEntity<IdeBrowserUseSnapshot> activeBoundProofs(HttpServletRequest request) {
     authenticate(request);
     ConnectionIdentity identity;
-    UUID documentId;
+    UUID browserSessionId;
     try {
       Map<String, String[]> parameters = request.getParameterMap();
       if (!parameters.keySet().equals(ACTIVE_PROOF_PARAMETERS)) {
@@ -99,12 +99,13 @@ public class IdeBrowserUseInternalController {
           ConnectionIdentity.parse(
               requireSingleParameter(parameters, "eventNodeId"),
               requireSingleParameter(parameters, "connectionId"));
-      documentId =
-          Uuids.parseCanonical(requireSingleParameter(parameters, "documentId"), "documentId");
+      browserSessionId =
+          Uuids.parseCanonical(
+              requireSingleParameter(parameters, "browserSessionId"), "browserSessionId");
     } catch (RuntimeException error) {
       throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
-    Optional<IdeBrowserUse> proofs = registry.activeBoundProofs(identity, documentId);
+    Optional<IdeBrowserUse> proofs = registry.activeBoundProofs(identity, browserSessionId);
     return ResponseEntity.ok(
         IdeBrowserUseSnapshot.from(
             identity, proofs.orElseThrow(() -> DomainException.notFound("browserUse"))));

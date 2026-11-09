@@ -2,18 +2,18 @@ package fun.fengwk.kkstudio.ide;
 
 import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextSnapshotFactory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.ide.gateway.IdeBrowserSessionRegistry;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** IDE 视图控制的 Platform 装配：控制服务、绑定缓存、租约协调与一次性 bootstrap 票据存储。 */
+/** IDE 视图控制的 Platform 装配：控制服务、唯一权威快照、租约协调与一次性 bootstrap 票据存储。 */
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentIdeConfiguration {
 
@@ -30,8 +30,14 @@ public class EnvironmentIdeConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public IdeViewBindingRegistry ideViewBindingRegistry(IdeCommandTransport transport) {
-    return new IdeViewBindingRegistry(transport);
+  public IdeViewSnapshotStore ideViewSnapshotStore(IdeCommandTransport transport) {
+    return new IdeViewSnapshotStore(transport);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public IdeBrowserSessionRegistry ideBrowserSessionRegistry() {
+    return new IdeBrowserSessionRegistry();
   }
 
   @Bean(name = "localEnvironmentIdeService")
@@ -40,15 +46,13 @@ public class EnvironmentIdeConfiguration {
       IdeCommandTransport ideCommandTransport,
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserUseGateway browserUse,
-      IdeViewBindingRegistry bindings,
-      ObjectProvider<IdeViewAuthorizationListener> viewAuthorization) {
+      IdeViewSnapshotStore snapshots) {
     return new EnvironmentIdeServiceImpl(
         ideCommandTransport,
         bootstrapTickets,
         browserUse,
-        bindings,
-        EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT,
-        viewAuthorization.getIfAvailable());
+        snapshots,
+        EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT);
   }
 
   @Bean(destroyMethod = "shutdownNow")
