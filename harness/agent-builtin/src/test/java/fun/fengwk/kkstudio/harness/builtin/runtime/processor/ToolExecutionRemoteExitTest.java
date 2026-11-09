@@ -276,6 +276,11 @@ class ToolExecutionRemoteExitTest {
     }
 
     @Override
+    public void holdUntilProcessExit() {
+      delegate.holdUntilProcessExit();
+    }
+
+    @Override
     public void close() {
       delegate.close();
     }

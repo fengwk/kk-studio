@@ -1030,7 +1030,8 @@ select pg_temp.rejects('thread constraints are a json object',
 
 -- ---------------------------------------------------------------------------
 -- Execution exit evidence: enum/JSON shape and timestamps are database facts;
--- kind/state pairing and abandonment semantics are application-validated.
+-- kind/state pairing is application-validated except that OWNER_EXITED is
+-- restricted to local executions.
 -- ---------------------------------------------------------------------------
 insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
     owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
@@ -1039,6 +1040,19 @@ insert into harness_execution_exit (execution_id, thread_id, invocation_id, atte
 select pg_temp.rejects('BOGUS is not an execution exit kind',
     $$update harness_execution_exit set kind='BOGUS' where execution_id=pg_temp.uid(1700)$$,
     '23514', 'ck_harness_execution_exit_kind');
+select pg_temp.rejects('BOGUS is not an execution exit state',
+    $$update harness_execution_exit set state='BOGUS' where execution_id=pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_state');
+insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
+    owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
+    values (pg_temp.uid(1706), pg_temp.uid(310), pg_temp.uid(1701), 2, '00000000-0000-0000-0000-000000000001', 'DRIVER',
+        null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
+update harness_execution_exit
+    set state = 'OWNER_EXITED', confirmed_at = registered_at + interval '1 millisecond'
+    where execution_id = pg_temp.uid(1706);
+select pg_temp.assert_true('a local owner exit is a durable exit evidence',
+    (select state = 'OWNER_EXITED' and confirmed_at = registered_at + interval '1 millisecond'
+        from harness_execution_exit where execution_id = pg_temp.uid(1706)));
 select pg_temp.assert_true('execution exit stores an optional millisecond abandonment time',
     (select is_nullable = 'YES' and data_type = 'timestamp with time zone'
         and datetime_precision = 3
@@ -1073,6 +1087,11 @@ insert into harness_execution_exit (execution_id, thread_id, invocation_id, atte
 select pg_temp.assert_true('remote execution exit fact records environment_id and parent',
     (select kind = 'REMOTE' and parent_execution_id = pg_temp.uid(1700) and environment_id = pg_temp.uid(901)
         from harness_execution_exit where execution_id = pg_temp.uid(1704)));
+select pg_temp.rejects('a remote execution cannot claim local owner exit',
+    $$update harness_execution_exit
+        set state='OWNER_EXITED', confirmed_at = registered_at + interval '1 millisecond'
+        where execution_id=pg_temp.uid(1704)$$,
+    '23514', 'ck_harness_execution_exit_owner_exited');
 select pg_temp.assert_true('unconfirmed remote execution partial index exists',
     exists(select 1 from pg_indexes where schemaname = 'public'
         and tablename = 'harness_execution_exit'

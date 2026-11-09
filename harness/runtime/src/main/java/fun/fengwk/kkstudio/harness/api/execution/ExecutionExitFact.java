@@ -56,6 +56,9 @@ public record ExecutionExitFact(
     if (state == ExecutionExitState.STUDIO_EXITED && kind == ExecutionExitKind.REMOTE) {
       throw new IllegalArgumentException("a remote execution cannot claim studio exit");
     }
+    if (state == ExecutionExitState.OWNER_EXITED && kind == ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("a remote execution cannot claim local owner exit");
+    }
     registeredAt = HarnessStoreTime.requireMillisecondPrecision(registeredAt);
     confirmedAt = HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
     abandonedAt = HarnessStoreTime.requireMillisecondPrecision(abandonedAt);

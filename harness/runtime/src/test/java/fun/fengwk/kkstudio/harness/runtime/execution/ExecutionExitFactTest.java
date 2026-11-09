@@ -253,6 +253,29 @@ class ExecutionExitFactTest {
   }
 
   @Test
+  void ownerExitIsRealEvidenceForLocalGenerationsOnly() {
+    ExecutionExitFact ownerExited = tool().confirm(ExecutionExitState.OWNER_EXITED, CONFIRMED_AT);
+    assertEquals(ExecutionExitState.OWNER_EXITED, ownerExited.state());
+    assertTrue(ownerExited.state().confirmed());
+    assertEquals(CONFIRMED_AT, ownerExited.confirmedAt());
+    assertSame(
+        ownerExited,
+        ownerExited.confirm(ExecutionExitState.OWNER_EXITED, CONFIRMED_AT.plusSeconds(1)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ownerExited.confirm(ExecutionExitState.STUDIO_EXITED, CONFIRMED_AT.plusSeconds(1)));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> remote().confirm(ExecutionExitState.OWNER_EXITED, CONFIRMED_AT));
+
+    ExecutionExitFact abandoned = tool().abandon(REGISTERED_AT.plusMillis(5));
+    ExecutionExitFact upgraded = abandoned.confirm(ExecutionExitState.OWNER_EXITED, CONFIRMED_AT);
+    assertEquals(ExecutionExitState.OWNER_EXITED, upgraded.state());
+    assertEquals(REGISTERED_AT.plusMillis(5), upgraded.abandonedAt());
+  }
+
+  @Test
   void confirmedEvidenceIsIdempotentAndCannotBeRewritten() {
     ExecutionExitFact confirmed = tool().confirm(ExecutionExitState.STUDIO_EXITED, CONFIRMED_AT);
 

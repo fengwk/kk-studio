@@ -9,9 +9,11 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -419,6 +421,7 @@ class FileExecutionExitJournalTest {
             ExecutionExitKind.REMOTE,
             UUID.randomUUID(),
             EnvironmentId.of(UUID.randomUUID()),
+            ExecutionExitJournalStage.EXIT_PROOF,
             ExecutionExitState.REMOTE_ACKNOWLEDGED,
             T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -917,6 +920,100 @@ class FileExecutionExitJournalTest {
     }
   }
 
+  @Test
+  void preparedRecordIsDurableAndUpgradesToExitProof(@TempDir Path directory) throws IOException {
+    UUID executionId = UUID.randomUUID();
+    ExecutionExitJournalRecord prepared = prepared(executionId);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      assertEquals(prepared, journal.write(prepared));
+      assertEquals(List.of(prepared), journal.loadAll().records());
+      assertEquals(prepared, journal.write(prepared(executionId)));
+
+      String json = Files.readString(directory.resolve(executionId + ".json"));
+      assertTrue(json.contains("\"stage\":\"PREPARED\""));
+      assertTrue(json.contains("\"targetState\":null"));
+      assertTrue(json.contains("\"confirmedAt\":null"));
+
+      ExecutionExitJournalRecord proof = proof(executionId, ExecutionExitState.STUDIO_EXITED);
+      assertEquals(proof, journal.write(proof));
+      assertEquals(List.of(proof), journal.loadAll().records());
+      assertEquals(proof, journal.write(proof));
+      assertTrue(Files.readString(directory.resolve(executionId + ".json")).contains("EXIT_PROOF"));
+    }
+    try (FileExecutionExitJournal reopened = new FileExecutionExitJournal(directory)) {
+      assertEquals(
+          List.of(proof(executionId, ExecutionExitState.STUDIO_EXITED)),
+          reopened.loadAll().records());
+    }
+  }
+
+  @Test
+  void preparedCannotRegressAfterProofAndDifferentEvidenceIsAConflict(@TempDir Path directory) {
+    UUID executionId = UUID.randomUUID();
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(proof(executionId, ExecutionExitState.STUDIO_EXITED));
+
+      ExecutionExitJournalConflictException stageConflict =
+          assertThrows(
+              ExecutionExitJournalConflictException.class,
+              () -> journal.write(prepared(executionId)));
+      assertEquals(ExecutionExitJournalConflictException.Conflict.STAGE, stageConflict.conflict());
+
+      ExecutionExitJournalConflictException targetConflict =
+          assertThrows(
+              ExecutionExitJournalConflictException.class,
+              () -> journal.write(proof(executionId, ExecutionExitState.NOT_STARTED)));
+      assertEquals(
+          ExecutionExitJournalConflictException.Conflict.TARGET, targetConflict.conflict());
+    }
+  }
+
+  @Test
+  void heldJournalKeepsTheDirectoryLockUntilProcessExit(@TempDir Path directory) {
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(prepared(UUID.randomUUID()));
+      journal.holdUntilProcessExit();
+    }
+    // 仍有无法证明退出的物理执行：锁必须保留到 JVM 退出，新进程不得接管同一目录。
+    assertThrows(
+        ExecutionExitJournalException.class, () -> new FileExecutionExitJournal(directory));
+  }
+
+  private static ExecutionExitJournalRecord prepared(UUID executionId) {
+    return ExecutionExitJournalRecord.prepared(identity(executionId));
+  }
+
+  private static ExecutionExitJournalRecord proof(UUID executionId, ExecutionExitState state) {
+    return ExecutionExitJournalRecord.exitProof(fact(executionId), state, T0.plusMillis(10));
+  }
+
+  private static LocalExecutionIdentity identity(UUID executionId) {
+    return new LocalExecutionIdentity(
+        executionId,
+        UUID.fromString("22222222-2222-2222-2222-222222222222"),
+        UUID.fromString("33333333-3333-3333-3333-333333333333"),
+        1,
+        LEASE_ID,
+        ExecutionExitKind.TOOL);
+  }
+
+  private static ExecutionExitFact fact(UUID executionId) {
+    LocalExecutionIdentity identity = identity(executionId);
+    return new ExecutionExitFact(
+        identity.executionId(),
+        identity.threadId(),
+        identity.invocationId(),
+        identity.attempt(),
+        identity.ownerLeaseToken(),
+        identity.kind(),
+        null,
+        null,
+        ExecutionExitState.UNCONFIRMED,
+        T0,
+        null,
+        null);
+  }
+
   private static ExecutionExitJournalRecord record(
       UUID executionId,
       UUID threadId,
@@ -932,6 +1029,7 @@ class FileExecutionExitJournalTest {
         ExecutionExitKind.TOOL,
         null,
         null,
+        ExecutionExitJournalStage.EXIT_PROOF,
         state,
         confirmedAt);
   }

@@ -17,7 +17,8 @@
  *
  * <p>专用契约按依赖的能力分子包：{@code spi.store} 是唯一持久化边界，{@code spi.driver} 是 Agent Driver 契约，{@code spi.work}
  * 是两者共同引用的 Work 邮箱值契约（{@code Work}、{@code WorkTarget}、{@code WorkTargetType} 与已认领快照 {@code
- * ClaimedWork}，不是公开 api）；部署配置与策略的现读端口按域放在 {@code spi.compaction}，重试配置直接使用 JDK {@code
- * Supplier}/{@code Function}。Tool 权限策略与其配置端口属于平台实现，不在内核 SPI 中。
+ * ClaimedWork}，不是公开 api）；{@code spi.execution} 是本地执行的物理生命周期端口（PREPARED 登记、物理句柄、取消、退出证明、排空与上一进程恢复）；
+ * 部署配置与策略的现读端口按域放在 {@code spi.compaction}，重试配置直接使用 JDK {@code Supplier}/{@code Function}。Tool
+ * 权限策略与其配置端口属于平台实现，不在内核 SPI 中。
  */
 package fun.fengwk.kkstudio.harness.spi;
