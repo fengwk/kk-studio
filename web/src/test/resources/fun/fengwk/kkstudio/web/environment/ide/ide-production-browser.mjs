@@ -22,7 +22,7 @@
 //   {"event":"failure","stage":"<safe fixed name>","detail":"<error class or HTTP code>"}
 
 import { watch } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -170,113 +170,49 @@ async function openEditableEditor(page, fileRow) {
   return editor
 }
 
-/**
- * Waits for the real workbench user-data backup file to contain the marker in IndexedDB.
- *
- * <p>This is an actual commit observation (bounded polling of the IndexedDB cursor), not a fixed sleep.
- * The marker is written only after the dirty model is backed up by code-server's working-copy service.
- *
- * @returns {Promise<{store: string, key: string}>}
- */
-async function waitForIndexedDbMarker(page, marker, timeoutMs = EDITOR_TIMEOUT) {
-  const match = await page.evaluate(
-    async ({ marker, timeoutMs }) => {
-      const decode = (value) => {
-        try {
-          return new TextDecoder().decode(value)
-        } catch {
-          return ''
-        }
-      }
-      const contains = (value, depth = 0) => {
-        if (depth > 8 || value === null || value === undefined) return false
-        if (typeof value === 'string') return value.includes(marker)
-        if (typeof value === 'number' || typeof value === 'boolean') return false
-        if (value instanceof ArrayBuffer) {
-          return decode(new Uint8Array(value)).includes(marker)
-        }
-        if (ArrayBuffer.isView(value)) {
-          return decode(value).includes(marker)
-        }
-        if (Array.isArray(value)) {
-          return value.some((item) => contains(item, depth + 1))
-        }
-        if (typeof value === 'object') {
-          return Object.keys(value).some((key) => contains(value[key], depth + 1))
-        }
-        return false
-      }
-      const scan = async () => {
-        const databases = await indexedDB.databases()
-        for (const info of databases) {
-          if (typeof info.name !== 'string' || info.name.length === 0) continue
-          const db = await new Promise((accept, reject) => {
-            const request = indexedDB.open(info.name)
-            request.onsuccess = () => accept(request.result)
-            request.onerror = () => reject(request.error)
-            request.onblocked = () => reject(new Error('IndexedDBBlocked'))
-          })
-          try {
-            const storeNames = Array.from(db.objectStoreNames)
-            const priority = ['vscode-userdata-store', 'ItemTable']
-            storeNames.sort((left, right) => {
-              const leftIndex = priority.indexOf(left)
-              const rightIndex = priority.indexOf(right)
-              if (leftIndex === -1 && rightIndex === -1) return 0
-              if (leftIndex === -1) return 1
-              if (rightIndex === -1) return -1
-              return leftIndex - rightIndex
-            })
-            for (const storeName of storeNames) {
-              const transaction = db.transaction(storeName, 'readonly')
-              const store = transaction.objectStore(storeName)
-              const found = await new Promise((accept, reject) => {
-                const request = store.openCursor()
-                request.onerror = () => reject(request.error)
-                request.onsuccess = () => {
-                  const cursor = request.result
-                  if (cursor === null) {
-                    accept(null)
-                    return
-                  }
-                  if (contains(cursor.value)) {
-                    accept({ database: info.name, store: storeName, key: String(cursor.key) })
-                    return
-                  }
-                  cursor.continue()
-                }
-              })
-              if (found !== null) return found
-            }
-          } finally {
-            db.close()
-          }
-        }
-        return null
-      }
-
-      const deadline = performance.now() + timeoutMs
-      while (performance.now() < deadline) {
-        const found = await scan()
-        if (found !== null) return found
-        await new Promise((resolve) => requestAnimationFrame(() => resolve()))
-      }
-      return null
-    },
-    { marker, timeoutMs },
-  )
-  if (match === null) {
-    throw namedError('IndexedDbBackupTimeout')
+/** Observe the remote workbench's working-copy backup, never save the edited file. */
+async function waitForWorkingCopyBackup(workspaceDirectory, marker) {
+  const userData = join(dirname(workspaceDirectory), 'distribution', 'data', 'ide', 'code-server', 'user-data')
+  const inspect = async () => {
+    const entries = await readdir(userData, { recursive: true, withFileTypes: true })
+    for (const entry of entries) {
+      const path = join(entry.parentPath, entry.name)
+      if (!entry.isFile() || !/[\\/]backups[\\/]/i.test(path)) continue
+      const content = await readFile(path, 'utf8')
+      if (content.includes('editable.txt') && content.includes(marker)) return true
+    }
+    return false
   }
-  return match
+  await new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      watcher.close()
+      if (error) reject(error)
+      else resolve()
+    }
+    const scan = () => {
+      void inspect().then((found) => { if (found) finish() }, finish)
+    }
+    const watcher = watch(userData, { recursive: true }, scan)
+    watcher.on('error', finish)
+    const timer = setTimeout(() => finish(namedError('WorkingCopyBackupTimeout')), EDITOR_TIMEOUT)
+    scan()
+  })
 }
 
 /**
  * Waits for a reloaded workbench to restore the dirty model and keep its dirty tab.
  */
 async function waitForRestoredEditor(page, marker) {
-  const editor = page.locator('.monaco-editor .view-lines').first()
-  await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+  // Workbench editor-layout persistence is separate from working-copy backup. Reopen the
+  // same file through the UI so restoration does not depend on an unload-time layout write.
+  const fileRow = page
+    .locator('.explorer-folders-view .monaco-list-row', { hasText: 'editable.txt' }).first()
+  await fileRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+  await openEditableEditor(page, fileRow)
   await waitForEditorText(page, marker)
   await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
 }
@@ -423,15 +359,9 @@ async function run(config, lines) {
       await waitForEditorText(page, marker)
       await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
 
-      // Wait for the workbench's real user-data backup commit, not a fixed delay.
+      // The remote workbench stores working-copy backups on its managed host.
       stage('editor-backup')
-      const backup = await waitForIndexedDbMarker(page, marker)
-      if (backup.store !== 'vscode-userdata-store') {
-        process.stderr.write(
-          `backup marker matched store=${backup.store} key=${backup.key}\n`,
-        )
-        throw namedError('BackupStoreMismatch')
-      }
+      await waitForWorkingCopyBackup(config.workspaceDirectory, marker)
       if ((await readFile(editablePath, 'utf8')) !== initialText) {
         throw namedError('DirtyFileWasSaved')
       }

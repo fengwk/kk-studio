@@ -332,7 +332,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
     return owned;
   }
 
-  private static List<String> terminateOwnedDescendants(List<ProcessHandle> owned) {
+  static List<String> terminateOwnedDescendants(List<ProcessHandle> owned) {
     List<String> survivors = new ArrayList<>();
     for (ProcessHandle handle : owned) {
       try {
@@ -355,7 +355,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
     return survivors;
   }
 
-  private static ExitOutcome stopProcess(Process target) {
+  static ExitOutcome stopProcess(Process target) {
     try {
       ProcessHandle handle = target.toHandle();
       handle.destroy();
@@ -401,7 +401,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
     return "pid=" + handle.pid() + " command=" + command + suffix;
   }
 
-  private enum ExitOutcome {
+  enum ExitOutcome {
     EXITED,
     ALIVE,
     UNCONFIRMED

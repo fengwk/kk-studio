@@ -47,6 +47,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -129,8 +130,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private Path testRecordsDir;
 
-  private boolean preserveTestRecords;
-
   @AfterEach
   void tearDown() {
     RuntimeException failure = null;
@@ -147,7 +146,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       if (browserTempDir != null) {
         try {
           deleteTree(browserTempDir);
-        } catch (Exception ignored) {
+        } catch (IOException error) {
+          RuntimeException cleanupFailure =
+              new IllegalStateException("failed to remove browser temporary data", error);
+          if (failure == null) {
+            failure = cleanupFailure;
+          } else {
+            failure.addSuppressed(cleanupFailure);
+          }
         } finally {
           browserTempDir = null;
         }
@@ -157,13 +163,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         daemon = null;
       }
       if (testRecordsDir != null) {
-        if (!preserveTestRecords) {
-          deleteTree(testRecordsDir);
-        }
+        // 日志只包含隔离测试数据并保持私有，保留到临时目录或操作者指定的记录目录。
         testRecordsDir = null;
       }
-    } catch (IOException error) {
-      throw new IllegalStateException("failed to remove IDE test records", error);
     } catch (RuntimeException error) {
       if (failure == null) {
         failure = error;
@@ -749,7 +751,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 真实 Monaco 未保存文本必须跨同 owner 新绑定和真实页面 reload 从 IndexedDB 恢复，宿主文件仍是原文。 */
+  /** 真实 Monaco 未保存文本必须跨同 owner 新绑定和真实页面 reload 从工作副本备份恢复，宿主文件仍是原文。 */
   @Test
   @Order(8)
   void restoresUnsavedMonacoTextAcrossTakeoverAndRealPageReload() throws Exception {
@@ -859,10 +861,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             Files.readString(workspace.resolve("editable.txt"), StandardCharsets.UTF_8),
             "a real page reload must restore the backup without saving the host file");
 
-        closeView(environmentId, viewId, browserSessionId, secondEpoch);
         browserDriver.proceed();
         browserDriver.await("done");
         browserDriver.finish();
+        // 浏览器已关闭后窗口状态未知，才允许用 discard 清理本测试的资源。
+        closeView(environmentId, viewId, browserSessionId, secondEpoch);
       }
     }
   }
@@ -876,6 +879,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             + browserSessionId
             + "\",\"bindingEpoch\":\""
             + epoch
+            + "\",\"expectedDaemonInstanceId\":\""
+            + expectedDaemonInstance(viewId)
             + "\",\"discard\":false}";
     Request request =
         new Request.Builder()
@@ -1482,7 +1487,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         Files.createDirectories(records);
         Files.setPosixFilePermissions(records, PosixFilePermissions.fromString("rwx------"));
         testRecordsDir = records;
-        preserveTestRecords = true;
       } else {
         testRecordsDir = Files.createTempDirectory("kk-ide-records-");
         Files.setPosixFilePermissions(testRecordsDir, PosixFilePermissions.fromString("rwx------"));
@@ -1695,45 +1699,34 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
     @Override
     public void close() {
+      List<String> unresolved = new ArrayList<>();
       try {
         captureDescendants();
-      } catch (RuntimeException ignored) {
+      } catch (RuntimeException failure) {
+        unresolved.add("browser descendant snapshot failed");
       }
-      try {
-        reader.shutdownNow();
-      } catch (RuntimeException ignored) {
+      // 先终止进程解除 readLine 的管道读取，再关闭持有同一锁的 BufferedReader。
+      if (ProductionDaemonFixture.stopProcess(process)
+          != ProductionDaemonFixture.ExitOutcome.EXITED) {
+        unresolved.add("browser driver exit is unconfirmed");
       }
+      unresolved.addAll(ProductionDaemonFixture.terminateOwnedDescendants(new ArrayList<>(owned)));
+      reader.shutdownNow();
       try {
         input.close();
-      } catch (IOException ignored) {
+      } catch (IOException failure) {
+        unresolved.add("browser command pipe close failed");
       }
-      try {
-        output.close();
-      } catch (IOException ignored) {
-      }
-      process.destroy();
-      try {
-        if (!process.waitFor(5, TimeUnit.SECONDS)) {
-          process.destroyForcibly();
-        }
-      } catch (InterruptedException ignored) {
-        process.destroyForcibly();
-      }
-      for (ProcessHandle handle : owned) {
+      if (!process.isAlive()) {
         try {
-          if (handle.isAlive()) {
-            handle.destroy();
-          }
-        } catch (RuntimeException ignored) {
+          output.close();
+        } catch (IOException failure) {
+          unresolved.add("browser event pipe close failed");
         }
       }
-      for (ProcessHandle handle : owned) {
-        try {
-          if (handle.isAlive()) {
-            handle.destroyForcibly();
-          }
-        } catch (RuntimeException ignored) {
-        }
+      if (!unresolved.isEmpty()) {
+        throw new IllegalStateException(
+            "browser resources were not fully released: " + String.join("; ", unresolved));
       }
     }
   }
