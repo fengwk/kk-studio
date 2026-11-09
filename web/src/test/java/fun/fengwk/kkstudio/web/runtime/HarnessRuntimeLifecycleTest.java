@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -30,7 +32,10 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /** {@link HarnessRuntimeLifecycle} 的 dispatcher 启停、单一停机 deadline、失败回滚与 workers 开关语义。 */
@@ -282,6 +287,110 @@ class HarnessRuntimeLifecycleTest {
   }
 
   @Test
+  void blockingRemoteCleanupStaysBoundedAndStillClosesPhysicalLifecycle() throws Exception {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    LocalExecutionLifecycle executionLifecycle = mock(LocalExecutionLifecycle.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    EnvironmentDaemonServer daemonServer = mock(EnvironmentDaemonServer.class);
+    when(executionLifecycle.drain(any())).thenReturn(new LocalExecutionDrain(List.of(), false));
+
+    CountDownLatch daemonEntered = new CountDownLatch(1);
+    CountDownLatch daemonRelease = new CountDownLatch(1);
+    CountDownLatch toolEntered = new CountDownLatch(1);
+    CountDownLatch toolRelease = new CountDownLatch(1);
+    AtomicReference<Thread> cleanupThread = new AtomicReference<>();
+    doAnswer(
+            invocation -> {
+              cleanupThread.compareAndSet(null, Thread.currentThread());
+              daemonEntered.countDown();
+              awaitIgnoringInterrupt(daemonRelease);
+              return null;
+            })
+        .when(daemonServer)
+        .drain();
+    doAnswer(
+            invocation -> {
+              cleanupThread.compareAndSet(null, Thread.currentThread());
+              toolEntered.countDown();
+              awaitIgnoringInterrupt(toolRelease);
+              return null;
+            })
+        .when(toolProcessor)
+        .drain(any());
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            executionLifecycle,
+            toolProcessor,
+            provider(daemonServer),
+            Duration.ZERO,
+            Duration.ofMillis(200));
+    lifecycle.start();
+
+    Thread cleanup = null;
+    try {
+      long startedAt = System.nanoTime();
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2),
+          () -> {
+            lifecycle.stop();
+          });
+      Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+      assertTrue(
+          elapsed.compareTo(Duration.ofSeconds(2)) < 0,
+          "stop must return without waiting for blocking remote cleanup: " + elapsed);
+      assertTrue(daemonEntered.await(5, TimeUnit.SECONDS), "daemon cleanup must start");
+      assertEquals(
+          1, toolEntered.getCount(), "daemon cleanup must still be blocking tool handover");
+      verify(executionLifecycle, times(2)).drain(any());
+      verify(executionLifecycle).close();
+
+      daemonRelease.countDown();
+      assertTrue(
+          toolEntered.await(5, TimeUnit.SECONDS), "tool handover must start after daemon drain");
+    } finally {
+      daemonRelease.countDown();
+      toolRelease.countDown();
+      cleanup = cleanupThread.get();
+      if (cleanup != null) {
+        cleanup.join(5_000);
+      }
+    }
+
+    assertNotNull(cleanup, "background cleanup must execute on its own thread");
+    assertFalse(cleanup.isAlive(), "background cleanup must finish after the test releases it");
+  }
+
+  @Test
+  void remoteCleanupFailureIsReportedAfterPhysicalLifecycleClose() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    LocalExecutionLifecycle executionLifecycle = mock(LocalExecutionLifecycle.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    EnvironmentDaemonServer daemonServer = mock(EnvironmentDaemonServer.class);
+    when(executionLifecycle.drain(any())).thenReturn(new LocalExecutionDrain(List.of(), false));
+    IllegalStateException cleanupFailure = new IllegalStateException("daemon drain failed");
+    doThrow(cleanupFailure).when(daemonServer).drain();
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            executionLifecycle,
+            toolProcessor,
+            provider(daemonServer),
+            DRAIN_TIMEOUT,
+            LEASE_DURATION);
+
+    lifecycle.start();
+
+    assertSame(cleanupFailure, assertThrows(IllegalStateException.class, lifecycle::stop));
+    verify(executionLifecycle).close();
+    verify(toolProcessor, never()).drain(any());
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
   void singleDeadlineCapsRemainingBudgetToTotal() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
     LocalExecutionLifecycle executionLifecycle = mock(LocalExecutionLifecycle.class);
@@ -420,5 +529,17 @@ class HarnessRuntimeLifecycleTest {
         .when(provider)
         .ifAvailable(any());
     return provider;
+  }
+
+  /** 模拟忽略中断的阻塞 JDBC 清理；只有测试显式 release 才继续。 */
+  private static void awaitIgnoringInterrupt(CountDownLatch latch) {
+    while (true) {
+      try {
+        latch.await();
+        return;
+      } catch (InterruptedException ignored) {
+        // 故意保留阻塞，验证 stop 不依赖后台清理响应中断。
+      }
+    }
   }
 }
