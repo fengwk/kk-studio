@@ -256,12 +256,11 @@ describe('NotificationEntryBlock', () => {
 
     const block = container.querySelector('.thread-subagent-receipt')
     expect(block).not.toBeNull()
-    expect(block).toHaveClass('thread-notification')
+    expect(block).toHaveClass('thread-notification', 'thread-disclosure', 'is-info')
     expect(block).toHaveAttribute('data-entry-kind', 'notification')
     expect(block).toHaveAttribute('data-notification-kind', 'SUBAGENT_RESULT')
     expect(block).toHaveAttribute('data-subagent-state', 'completed')
     // 无标题栏图标列或左缩进：不使用 thread-entry-row / thread-entry-icon 结构。
-    expect(container.querySelector('.thread-system-message-header')).toBeNull()
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()
     expect(container.querySelector('.thread-block-user')).toBeNull()
@@ -270,23 +269,25 @@ describe('NotificationEntryBlock', () => {
     expect(block?.querySelector('.thread-subagent-receipt-state.is-completed')).not.toBeNull()
     expect(block?.querySelector('.thread-subagent-receipt-preview')?.textContent)
       .toBeTruthy()
-    expect(block?.querySelector('.thread-subagent-receipt-toggle'))
+    expect(block?.querySelector('.thread-disclosure-toggle'))
       .toHaveAttribute('aria-expanded', 'false')
 
-    const link = screen.getByRole('link', { name: '查看 subagent child-thread-1 的执行' })
+    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-    expect(link).toHaveAttribute('title', '查看 subagent child-thread-1 的执行')
+    expect(link).toHaveAttribute('title', '查看 subagent 执行')
+    expect(link).not.toHaveTextContent('child-thread-1')
 
-    // 折叠态只出现截断后的任务预览，完整任务原文与报告都还没渲染。
+    // 折叠态只出现截断后的任务预览，完整任务原文与结果都还没渲染。
     expect(container.textContent).not.toContain(SECRET_TASK_TAIL)
-    expect(container.querySelector('.thread-subagent-receipt-detail')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(screen.queryByText('Done')).toBeNull()
     expect(screen.queryByText('查看原始数据')).toBeNull()
     expect(container.querySelector('.thread-entry-payload')).toBeNull()
   })
 
-  it('expands to the full task, result Markdown and labelled sections', () => {
-    // 测试意图：展开后逐字展示完整任务原文与安全 Markdown 结果，并带明确的内容分区标签。
+  it('expands to the full result first, then the task and supplementary body', () => {
+    // 测试意图：展开后先展示结果，再展示任务原文与安全 Markdown，并带明确的内容分区标签。
     const { container } = renderNotification(
       notificationMessage(
         'SUBAGENT_RESULT',
@@ -294,14 +295,23 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /coder/ }))
-    const detail = container.querySelector('.thread-subagent-receipt-detail')
-    expect(detail).not.toBeNull()
-    expect(screen.getByRole('button', { name: /coder/ })).toHaveAttribute('aria-expanded', 'true')
-    expect(container.textContent).toContain(SECRET_TASK_TAIL)
-    expect(screen.getByText('任务')).toBeInTheDocument()
-    expect(screen.getByText('Done')).toBeInTheDocument()
-    expect(screen.getByText('item one')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    const toggle = screen.getByRole('button', { name: '收起详情' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    const preview = container.querySelector('.thread-disclosure-preview')
+    const body = container.querySelector('.thread-disclosure-body')
+    expect(preview).not.toBeNull()
+    expect(body).not.toBeNull()
+    expect(preview?.textContent).toContain('Done')
+    expect(preview?.textContent).toContain('item one')
+    expect(body?.textContent).toContain(SECRET_TASK_TAIL)
+    expect(preview?.textContent).toContain('结果')
+    expect(body?.textContent).toContain('任务')
+    // 结果优先：结果分区位于 preview，任务分区位于其后的 body。
+    expect(
+      (preview as HTMLElement).compareDocumentPosition(body as HTMLElement)
+        & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('navigates in-pane when the Thread link is clicked', () => {
@@ -315,12 +325,12 @@ describe('NotificationEntryBlock', () => {
       onOpenThread,
     )
 
-    fireEvent.click(screen.getByRole('link', { name: '查看 subagent child-thread-1 的执行' }))
+    fireEvent.click(screen.getByRole('link', { name: '查看 subagent 执行' }))
     expect(onOpenThread).toHaveBeenCalledWith('child-thread-1')
   })
 
-  it('shows error and partial result for failed receipts', () => {
-    // 测试意图：失败回执分别展示错误与部分结果，正文按 Markdown 渲染，任务原文仍只在展开后出现。
+  it('shows a fixed plain-text error block and supplementary body for failed receipts', () => {
+    // 测试意图：失败原因固定在 preview 顶部（纯文本，收起也可见），部分结果与任务原文只在展开后的 body 出现。
     const { container } = renderNotification(
       notificationMessage(
         'SUBAGENT_RESULT',
@@ -333,21 +343,31 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
+    const card = container.querySelector('.thread-subagent-receipt')
+    expect(card).toHaveClass('is-error')
     expect(container.textContent).not.toContain(SECRET_TASK_TAIL)
-    fireEvent.click(screen.getByRole('button', { name: /explorer/ }))
+    // 固定错误块在收起态即可见，且不把错误文本二次解析为 Markdown。
+    const errorBlock = container.querySelector('.thread-disclosure-error')
+    expect(errorBlock).not.toBeNull()
+    expect(errorBlock?.textContent).toContain('provider **failed**')
+    expect(errorBlock?.querySelector('strong')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-preview')).not.toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
 
-    const errorSection = container.querySelector('.thread-subagent-receipt-error')
-    expect(errorSection).not.toBeNull()
-    expect(errorSection?.textContent).toContain('错误')
-    expect(errorSection?.textContent).toContain('provider failed')
-    expect(errorSection?.querySelector('strong')?.textContent).toBe('failed')
-    expect(container.querySelector('.thread-subagent-receipt-partial')?.textContent)
-      .toContain('部分结果')
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+
+    const preview = container.querySelector('.thread-disclosure-preview')
+    const body = container.querySelector('.thread-disclosure-body')
+    expect(preview?.querySelector('.thread-disclosure-error')).not.toBeNull()
+    expect(body?.textContent).toContain('部分结果')
+    expect(body?.textContent).toContain('half a report')
+    expect(body?.textContent).toContain('任务')
     expect(screen.getByText('half a report')).toBeInTheDocument()
+    expect(container.textContent).toContain(SECRET_TASK_TAIL)
   })
 
   it('labels a cancelled receipt as cancelled instead of an error', () => {
-    // 测试意图：取消回执的错误段使用“已取消”标签，避免把用户取消渲染成失败。
+    // 测试意图：取消是用户决策而非失败：卡片保持 info 语义，原因段使用“已取消”标签。
     const { container } = renderNotification(
       notificationMessage(
         'SUBAGENT_RESULT',
@@ -355,13 +375,17 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /coder/ }))
-    expect(container.querySelector('.thread-subagent-receipt-error')?.textContent)
+    const card = container.querySelector('.thread-subagent-receipt')
+    expect(card).toHaveClass('is-info')
+    expect(container.querySelector('.thread-disclosure-error')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(container.querySelector('.thread-subagent-receipt-cancelled')?.textContent)
       .toContain('已取消')
     expect(screen.getByText('Cancelled by user')).toBeInTheDocument()
   })
 
-  it('reports invalid XML explicitly instead of swallowing the failure', () => {
+  it('reports invalid XML explicitly without pretending to be a receipt', () => {
     // 测试意图：非法信封明确提示错误，不崩溃也不再冒充子代理结果正文。
     const { container } = renderNotification(
       notificationMessage(
@@ -370,10 +394,13 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
+    const card = container.querySelector('.thread-subagent-receipt')
+    expect(card).toHaveClass('is-invalid', 'is-error')
     expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
-    expect(container.querySelector('.thread-subagent-receipt-toggle')).toBeNull()
-    expect(container.querySelector('.thread-subagent-receipt-detail')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-error')).not.toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(container.textContent).not.toContain('subagent_result')
+    expect(screen.queryByRole('link')).toBeNull()
   })
 
   it('rejects a receipt that belongs to a different source thread', () => {
@@ -390,20 +417,31 @@ describe('NotificationEntryBlock', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('renders an unknown kind as a plain system notification without subagent affordances', () => {
-    // 测试意图：未知 kind 不解析信封、不显示子代理来源与 Thread 链接。
+  it('renders an unknown kind as a collapsed plain system notification without subagent affordances', () => {
+    // 测试意图：未知 kind 不解析信封、不显示子代理来源与 Thread 链接；正文默认 0 行，展开后完整显示。
     const { container } = renderNotification(
       notificationMessage('SOMETHING_ELSE', 'opaque system fact'),
     )
 
     expect(screen.getByText('系统通知')).toBeInTheDocument()
-    expect(screen.getByText('opaque system fact')).toBeInTheDocument()
+    expect(screen.queryByText('opaque system fact')).toBeNull()
     expect(container.querySelector('.thread-subagent-receipt')).toBeNull()
     expect(screen.queryByRole('link')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('opaque system fact')).toBeInTheDocument()
   })
 
-  it('renders TASK_BUDGET as safe Markdown without executing raw HTML', () => {
-    // 测试意图：预算提醒直接按安全 Markdown 渲染，原始 HTML 不生成可执行元素。
+  it('shows the explicit empty-text notice for an unknown notification without text', () => {
+    renderNotification(notificationMessage('SOMETHING_ELSE', ''))
+
+    expect(screen.queryByText('该通知没有附带文本内容。')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('该通知没有附带文本内容。')).toBeInTheDocument()
+  })
+
+  it('renders TASK_BUDGET as safe Markdown after expansion without executing raw HTML', () => {
+    // 测试意图：预算提醒默认 0 行；展开后按安全 Markdown 渲染，原始 HTML 不生成可执行元素。
     const { container } = renderNotification(
       notificationMessage(
         'TASK_BUDGET',
@@ -411,8 +449,11 @@ describe('NotificationEntryBlock', () => {
       ),
     )
 
-    expect(screen.getByText('exhausted')).toBeInTheDocument()
+    expect(screen.queryByText('exhausted')).toBeNull()
     expect(container.querySelector('.thread-subagent-receipt')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('exhausted')).toBeInTheDocument()
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
   })

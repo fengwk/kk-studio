@@ -1,74 +1,28 @@
 /*
- * SUBAGENT_RESULT 专属轻量信息卡：使用现有 info/info-soft 语义 token 的浅青蓝染色与细边框。
- * 全部规则限定在 .thread-subagent-receipt 下，不改变 SystemMessageCard、思考、压缩摘要与其它通知。
+ * SUBAGENT_RESULT 轻量信息卡：外壳、header 布局、chevron 与 info/error 染色
+ * 统一由 thread-disclosure.css 提供；这里只定义回执身份、来源链接和内容分区。
  */
 .thread-subagent-receipt {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
-  border-radius: 8px;
-  background: var(--info-soft);
   font-size: var(--font-size-xs);
 }
 
+/* 身份行使用行内流，以便收起态由容器的 2 行 clamp 统一截断。 */
 .thread-subagent-receipt-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
   min-width: 0;
 }
 
-.thread-subagent-receipt-identity {
-  display: flex;
-  flex: 1 1 180px;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* 展开控件是最后一个独立按钮，与来源链接互不嵌套。 */
-.thread-subagent-receipt-toggle {
-  display: flex;
-  flex: 0 0 28px;
-  width: 28px;
-  height: 28px;
-  justify-content: center;
-  margin-left: auto;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.thread-subagent-receipt-toggle:focus-visible {
-  outline: 1px solid var(--info);
-  outline-offset: 2px;
-}
-
-/* 长 agent 名在自身范围内换行，不截断、不撑破摘要。 */
 .thread-subagent-receipt-agent {
-  flex: 0 0 auto;
-  max-width: 45%;
-  min-width: 0;
   color: var(--fg);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-/* 状态只用小图标，语义由 aria-label/title 保留。 */
+/* 状态只用小图标，语义由 aria-label/title 保留；已返回与已取消同为蓝色。 */
 .thread-subagent-receipt-state {
   display: inline-flex;
-  flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
   color: var(--fg-muted);
+  vertical-align: middle;
 }
 
 .thread-subagent-receipt-state svg {
@@ -76,51 +30,31 @@
   height: 12px;
 }
 
-.thread-subagent-receipt-state.is-completed {
-  color: var(--accent);
+.thread-subagent-receipt-state.is-completed,
+.thread-subagent-receipt-state.is-cancelled {
+  color: var(--info);
 }
 
 .thread-subagent-receipt-state.is-error {
   color: var(--danger);
 }
 
-.thread-subagent-receipt-state.is-cancelled {
-  color: var(--fg-muted);
-}
-
-/* 任务预览是前端截取的单行预览，窄 pane 下优先压缩它。 */
+/* 任务预览是前端截取的单行文本；允许在 header 的 2 行 clamp 内折行。 */
 .thread-subagent-receipt-preview {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
   color: var(--fg-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.thread-subagent-receipt-chevron {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--fg-muted);
-}
-
-.thread-subagent-receipt-chevron svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* 来源跳转与展开动作分离：窄 pane 时整条链接换行，文本本身也可再折行。 */
+/* 来源跳转是独立链接，可见文字只保留「查看执行」，完整 ID 只在 href 中。 */
 .thread-subagent-receipt-source {
   display: inline-flex;
-  flex: 0 0 auto;
-  max-width: calc(100% - 38px);
   align-items: center;
   gap: 4px;
   min-width: 0;
   color: var(--info);
-  overflow-wrap: anywhere;
+  font-size: var(--font-size-xs);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .thread-subagent-receipt-source:hover {
@@ -133,19 +67,14 @@
   height: 12px;
 }
 
-.thread-subagent-receipt-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--info) 22%, transparent);
-}
-
 .thread-subagent-receipt-section {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* preview/body 内的多个分区保持统一间距。 */
+.thread-subagent-receipt-section + .thread-subagent-receipt-section {
+  margin-top: 8px;
 }
 
 .thread-subagent-receipt-label {
@@ -155,12 +84,7 @@
   font-weight: 600;
 }
 
-.thread-subagent-receipt-error .thread-subagent-receipt-label {
-  color: var(--danger);
-}
-
-.thread-subagent-receipt-invalid {
-  margin: 0;
-  color: var(--danger);
-  line-height: 1.45;
+/* 取消是用户决策而不是失败：原因段保持 info 语义，不进入红色错误块。 */
+.thread-subagent-receipt-cancelled .thread-subagent-receipt-label {
+  color: var(--info);
 }

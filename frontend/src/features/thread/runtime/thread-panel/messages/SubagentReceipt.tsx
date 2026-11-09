@@ -1,7 +1,5 @@
 import {
   ArrowUpRight,
-  ChevronDown,
-  ChevronRight,
   CircleCheck,
   CircleSlash,
   CircleX,
@@ -10,11 +8,19 @@ import {
 import { useState } from 'react'
 import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
 import {
+  discloseText,
+  disclosureHint,
+  ERROR_COLLAPSED_LINES,
+  SUBAGENT_RECEIPT_DISCLOSURE,
+  type TextDisclosure,
+} from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
+import {
   parseSubagentReceipt,
   type SubagentReceiptState,
 } from '@/features/thread/runtime/thread-panel/messages/notification-receipt'
 import { subagentTaskPreview } from '@/features/thread/runtime/thread-panel/messages/subagent-receipt-preview'
 import { SystemMessageBody } from '@/features/thread/runtime/thread-panel/messages/SystemMessageBody'
+import { ThreadDisclosure } from '@/features/thread/runtime/thread-panel/messages/ThreadDisclosure'
 import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
 import type { EntryNotification } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
@@ -34,120 +40,161 @@ const STATE_ICONS: Record<SubagentReceiptState, LucideIcon> = {
 }
 
 /**
- * SUBAGENT_RESULT 专属轻量信息卡：浅青蓝 info 染色 + 细边框 + 状态图标。
+ * SUBAGENT_RESULT 专属轻量信息卡，统一使用只读消息容器。
  *
- * <p>默认折叠，摘要展示 agent、真实终态图标、任务短预览；最后的箭头负责展开，来源跳转是独立的
- * ThreadLink，与展开动作语义分开且各自键盘可达。展开后按安全 Markdown 展示完整
- * task/result/error/partial_result；partial_result 只是内容分区，不是第四种终态。
- * 非法信封明确显示解析失败，不伪装成回执正文。
+ * <p>默认 0 行：摘要展示 agent、真实终态图标与任务短预览；来源跳转是独立的
+ * ThreadLink，可见文字只有「查看执行」，不重复长 UUID。展开后先展示结果，
+ * 再展示任务原文与部分结果；失败原因固定为 preview 顶部的错误块，收起最多
+ * 3 行且受 1500 字符限制，展开完整显示。非法信封明确显示错误，不伪装成回执正文。
  */
 export function SubagentReceipt({
   notification,
   xml,
+  title,
 }: {
   notification: EntryNotification
   xml: string
+  title: string
 }) {
   const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const parsed = parseSubagentReceipt(xml, notification.sourceThreadId)
+  const expandFromHint = (element: HTMLElement) => {
+    announceTranscriptReading(element, 'disclosure-hint')
+    setExpanded(true)
+  }
+
   if (!parsed.ok) {
     return (
-      <section
-        className="thread-block thread-notification thread-subagent-receipt is-invalid"
+      <ThreadDisclosure
+        className="thread-notification thread-subagent-receipt is-invalid"
         data-entry-kind="notification"
         data-notification-kind={notification.kind}
-      >
-        <p className="thread-subagent-receipt-invalid">
-          {t('ai.runtime.notification.entry.invalidReceipt')}
-        </p>
-      </section>
+        tone="error"
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        hasDetails={false}
+        label={title}
+        header={<span className="thread-subagent-receipt-agent">{title}</span>}
+        preview={<DisclosureError text={t('ai.runtime.notification.entry.invalidReceipt')} />}
+      />
     )
   }
 
   const { receipt } = parsed
   const sourceThreadId = notification.sourceThreadId ?? receipt.threadId
   const StateIcon = STATE_ICONS[receipt.state]
-  const preview = subagentTaskPreview(receipt.task)
+  const taskPreview = subagentTaskPreview(receipt.task)
+  const errorText = receipt.state === 'error' && receipt.error?.trim()
+    ? receipt.error
+    : null
+  // 回执 Markdown 分区只支持 0 行（收起）与全部（展开）；错误块单独受行数/字符限制。
+  const showAll = expanded || SUBAGENT_RECEIPT_DISCLOSURE.preview === -1
+  const showSections = expanded || SUBAGENT_RECEIPT_DISCLOSURE.preview !== 0
+  const errorWindow = errorText == null
+    ? null
+    : discloseText(errorText, showAll ? -1 : ERROR_COLLAPSED_LINES)
+  const errorHint = errorWindow == null ? null : disclosureHint(errorWindow, 'start')
+  const cancelledText = receipt.state === 'cancelled' ? receipt.error : null
+  const hasSections = receipt.result != null
+    || receipt.task != null
+    || receipt.partial != null
+    || cancelledText != null
+  const hasDetails = hasSections || errorHint != null
+  const identity = [receipt.agent ?? t('ai.runtime.task.subagent'), t(STATE_LABEL_KEYS[receipt.state])]
+  const label = [...identity, taskPreview].filter(Boolean).join(' · ')
+  const preview = errorWindow != null
+    || (showSections && (receipt.result != null || cancelledText != null))
+    ? (
+      <>
+        {errorWindow != null && (
+          <DisclosureError
+            disclosure={errorWindow}
+            hint={errorHint}
+            onExpand={expandFromHint}
+          />
+        )}
+        {showSections && receipt.result != null && (
+          <ReceiptSection
+            label={t('ai.runtime.event.detail.result')}
+            content={receipt.result}
+          />
+        )}
+        {showSections && cancelledText != null && (
+          <ReceiptSection
+            className="thread-subagent-receipt-cancelled"
+            label={t('ai.runtime.notification.entry.cancelled')}
+            content={cancelledText}
+          />
+        )}
+      </>
+    )
+    : undefined
+  const body = showSections && (receipt.task != null || receipt.partial != null)
+    ? (
+      <>
+        {receipt.task != null && (
+          <ReceiptSection
+            label={t('ai.runtime.notification.entry.subagentTask')}
+            content={receipt.task}
+          />
+        )}
+        {receipt.partial != null && (
+          <ReceiptSection
+            label={t('ai.runtime.notification.entry.partial')}
+            content={receipt.partial}
+          />
+        )}
+      </>
+    )
+    : undefined
 
   return (
-    <section
-      className="thread-block thread-notification thread-subagent-receipt"
+    <ThreadDisclosure
+      className="thread-notification thread-subagent-receipt"
       data-entry-kind="notification"
       data-notification-kind={notification.kind}
       data-subagent-state={receipt.state}
-    >
-      <div className="thread-subagent-receipt-summary">
-        <div className="thread-subagent-receipt-identity">
+      tone={receipt.state === 'error' ? 'error' : 'info'}
+      expanded={expanded}
+      onExpandedChange={setExpanded}
+      hasDetails={hasDetails}
+      label={label}
+      header={(
+        <span className="thread-subagent-receipt-summary">
           <span className="thread-subagent-receipt-agent">
             {receipt.agent ?? t('ai.runtime.task.subagent')}
-          </span>
-          <span className={`thread-subagent-receipt-state is-${receipt.state}`}
-            role="img" aria-label={t(STATE_LABEL_KEYS[receipt.state])} title={t(STATE_LABEL_KEYS[receipt.state])}>
+          </span>{' '}
+          <span
+            className={`thread-subagent-receipt-state is-${receipt.state}`}
+            role="img"
+            aria-label={t(STATE_LABEL_KEYS[receipt.state])}
+            title={t(STATE_LABEL_KEYS[receipt.state])}
+          >
             <StateIcon aria-hidden="true" />
           </span>
-          {preview != null && (
-            <span className="thread-subagent-receipt-preview">{preview}</span>
-          )}
-        </div>
-        {sourceThreadId != null && (
-          <ThreadLink
-            className="thread-subagent-receipt-source"
-            threadId={sourceThreadId}
-            title={t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: sourceThreadId })}
-          >
-            <ArrowUpRight aria-hidden="true" />
-            {t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: sourceThreadId })}
-          </ThreadLink>
-        )}
-        <button
-          type="button"
-          className="thread-subagent-receipt-toggle"
-          aria-expanded={expanded}
-          aria-label={[receipt.agent ?? t('ai.runtime.task.subagent'), t(STATE_LABEL_KEYS[receipt.state]), preview].filter(Boolean).join(' · ')}
-          onClick={(event) => {
-            announceTranscriptReading(event.currentTarget, 'subagent-receipt-toggle')
-            setExpanded((current) => !current)
-          }}
-        >
-          <span className="thread-subagent-receipt-chevron" aria-hidden="true">
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-          </span>
-        </button>
-      </div>
-      {expanded && (
-        <div className="thread-subagent-receipt-detail">
-          {receipt.task != null && (
-            <ReceiptSection
-              label={t('ai.runtime.notification.entry.subagentTask')}
-              content={receipt.task}
-            />
-          )}
-          {receipt.result != null && (
-            <ReceiptSection
-              label={t('ai.runtime.event.detail.result')}
-              content={receipt.result}
-            />
-          )}
-          {receipt.error != null && (
-            <ReceiptSection
-              className="thread-subagent-receipt-error"
-              label={receipt.state === 'cancelled'
-                ? t('ai.runtime.notification.entry.cancelled')
-                : t('ai.runtime.notification.entry.error')}
-              content={receipt.error}
-            />
-          )}
-          {receipt.partial != null && (
-            <ReceiptSection
-              className="thread-subagent-receipt-partial"
-              label={t('ai.runtime.notification.entry.partial')}
-              content={receipt.partial}
-            />
-          )}
-        </div>
+          {taskPreview != null ? (
+            <>
+              {' '}
+              <span className="thread-subagent-receipt-preview">{taskPreview}</span>
+            </>
+          ) : null}
+        </span>
       )}
-    </section>
+      actions={sourceThreadId != null ? (
+        <ThreadLink
+          className="thread-subagent-receipt-source"
+          threadId={sourceThreadId}
+          title={t('ai.runtime.disclosure.viewSubagentExecution')}
+          aria-label={t('ai.runtime.disclosure.viewSubagentExecution')}
+        >
+          <ArrowUpRight aria-hidden="true" />
+          <span>{t('ai.runtime.notification.entry.viewSubagentExecution')}</span>
+        </ThreadLink>
+      ) : undefined}
+      preview={preview}
+      body={body}
+    />
   )
 }
 
@@ -166,5 +213,40 @@ function ReceiptSection({
       <div className="thread-subagent-receipt-label">{label}</div>
       <SystemMessageBody content={content} />
     </section>
+  )
+}
+
+/**
+ * 固定错误块：失败原因固定在 preview 顶部，收起态按 3 行与 1500 字符截取，
+ * 展开态完整显示；截断时提供与 chevron 等价的展开提示。
+ */
+function DisclosureError({
+  text,
+  disclosure,
+  hint,
+  onExpand,
+}: {
+  text?: string
+  disclosure?: TextDisclosure
+  hint?: string | null
+  onExpand?: (element: HTMLElement) => void
+}) {
+  const content = disclosure?.text ?? text ?? ''
+  return (
+    <div className="thread-disclosure-error">
+      <CircleX className="thread-disclosure-error-icon" size={12} aria-hidden="true" />
+      <div>
+        <p className="thread-disclosure-error-text">{content}</p>
+        {hint != null && onExpand != null ? (
+          <button
+            type="button"
+            className="thread-disclosure-hint"
+            onClick={(event) => onExpand(event.currentTarget)}
+          >
+            {hint}
+          </button>
+        ) : null}
+      </div>
+    </div>
   )
 }

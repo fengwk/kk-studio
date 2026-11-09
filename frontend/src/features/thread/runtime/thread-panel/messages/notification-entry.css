@@ -1,7 +1,6 @@
-/* NOTIFICATION 专属正文细节；外壳与标题由 system-message.css 的 SystemMessageCard 提供。 */
+/* NOTIFICATION 正文细节；外壳、header 与展开交互由 thread-disclosure.css 提供。 */
 .thread-notification-body {
   min-width: 0;
-  margin-top: 4px;
   font-size: var(--font-size-xs);
 }
 

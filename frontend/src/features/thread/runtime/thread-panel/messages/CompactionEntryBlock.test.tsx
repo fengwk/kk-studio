@@ -26,75 +26,74 @@ function renderCard(text: string, id?: string) {
   return render(<EntryMessageBlock message={compactionMessage(text, id)} />)
 }
 
+function previewOf(container: HTMLElement): HTMLElement {
+  const preview = container.querySelector<HTMLElement>('.thread-disclosure-preview')
+  expect(preview).not.toBeNull()
+  return preview as HTMLElement
+}
+
 describe('CompactionEntryBlock', () => {
-  it('starts collapsed with a rightmost toggle and no summary body', () => {
-    // 测试意图：完整成功压缩默认折叠，第一行最右提供展开控制。
+  it('defaults to zero lines with a rightmost disclosure toggle', () => {
+    // 测试意图：压缩摘要默认只有标题；收起态不渲染正文，也不使用卡片内滚动。
     const { container } = renderCard(FULL_COMPACTION_SUMMARY)
 
     const card = container.querySelector('[data-entry-kind="compaction"]')
-    expect(card).toHaveClass('thread-compaction')
+    expect(card).toHaveClass('thread-compaction', 'thread-disclosure', 'is-neutral')
     expect(screen.getByText('上下文已压缩')).toBeInTheDocument()
 
-    const toggle = screen.getByRole('button', { name: '展开压缩摘要' })
+    const toggle = screen.getByRole('button', { name: '展开详情' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    // 收起时没有正文滚动区，也没有 ChevronDown。
-    expect(container.querySelector('.thread-compaction-body')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.textContent).not.toContain('会话压缩摘要')
     expect(container.querySelector('.lucide-chevron-right')).toBeInTheDocument()
     expect(container.querySelector('.lucide-chevron-down')).toBeNull()
   })
 
-  it('expands to the full summary inside one bounded scroll region', () => {
-    // 测试意图：展开显示唯一有界正文区，整份摘要不做首 N 行截断。
+  it('expands to the full summary without an internal scroll region', () => {
+    // 测试意图：展开显示整份摘要（不做首 N 行截断），正文区自身不是滚动容器。
     const { container } = renderCard(LONG_COMPACTION_SUMMARY)
 
-    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
 
-    const toggle = screen.getByRole('button', { name: '收起压缩摘要' })
+    const toggle = screen.getByRole('button', { name: '收起详情' })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(container.querySelector('.lucide-chevron-down')).toBeInTheDocument()
 
-    const bodies = container.querySelectorAll('.thread-compaction-body')
+    const preview = previewOf(container)
+    const bodies = preview.querySelectorAll('.thread-system-message-body')
     expect(bodies).toHaveLength(1)
-    const body = bodies[0] as HTMLElement
-    expect(body).toHaveClass('thread-system-message-body')
-    // 唯一滚动区可滚动（jsdom 不计算 CSS 高度，浏览器回归验证真实 max-height）。
-    body.scrollTop = 120
-    expect(body.scrollTop).toBe(120)
     // 完整正文都在 DOM 中（40 段 + 保留标签），没有截断。
-    expect(body.textContent).toContain('第 40 段')
-    expect(body.textContent).toContain('<read-files>')
+    expect(preview.textContent).toContain('第 40 段')
+    expect(preview.textContent).toContain('<read-files>')
+    // 完整正文在唯一的 preview 中，容器不创建额外的 body 区域或内部滚动区。
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
   })
 
   it('keeps the expanded state when the same durable entry is re-projected', () => {
     // 测试意图：刷新投影以摘要 Entry 的稳定 id 复用组件实例，展开状态不重置。
     const { rerender } = render(<EntryMessageBlock message={compactionMessage('refresh stable')} />)
-    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
-    expect(screen.getByRole('button', { name: '收起压缩摘要' })).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByRole('button', { name: '收起详情' })).toHaveAttribute('aria-expanded', 'true')
 
     // 新对象、同一摘要身份（MessageList 以 message.id 作为 React key）。
     rerender(<EntryMessageBlock message={compactionMessage('refresh stable')} />)
 
-    expect(screen.getByRole('button', { name: '收起压缩摘要' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '收起详情' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('refresh stable')).toBeInTheDocument()
   })
 
-  it('announces reading on toggles and inner scrolling without resuming outer follow', () => {
-    // 展开和内部回看都只通知暂停；正文可用键盘滚动。
+  it('announces reading when the summary is expanded or collapsed', () => {
+    // 展开与收起都是阅读意图，统一容器只通知外层暂停跟随。
     const { container } = renderCard(LONG_COMPACTION_SUMMARY)
     const reading = vi.fn()
     container.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, reading)
 
-    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
-    const body = container.querySelector('.thread-compaction-body') as HTMLElement
-    expect(body).toHaveAttribute('tabindex', '0')
-    expect(body).toHaveAttribute('aria-label', '上下文已压缩')
-    fireEvent.scroll(body, { target: { scrollTop: 120 } })
-    fireEvent.click(screen.getByRole('button', { name: '收起压缩摘要' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    fireEvent.click(screen.getByRole('button', { name: '收起详情' }))
 
     expect(reading.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([
-      { source: 'compaction-toggle' },
-      { source: 'compaction-body' },
-      { source: 'compaction-toggle' },
+      { source: 'disclosure-toggle' },
+      { source: 'disclosure-toggle' },
     ])
   })
 
@@ -102,14 +101,15 @@ describe('CompactionEntryBlock', () => {
     // 测试意图：标题/列表/代码块按 Markdown 渲染；<read-files>/<modified-files>
     // 保留为普通文本并逐行保留换行，不做专用解析或折叠。
     const { container } = renderCard(FULL_COMPACTION_SUMMARY)
-    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
 
-    expect(container.querySelector('.md-root h1')?.textContent).toBe('会话压缩摘要')
-    expect(container.querySelector('.md-root h2')?.textContent).toBe('关键决策')
-    expect(container.querySelectorAll('.md-root li')).toHaveLength(2)
-    expect(container.querySelector('.md-code-block')?.textContent).toContain('TURN_PREFIX')
+    const preview = previewOf(container)
+    expect(preview.querySelector('.md-root h1')?.textContent).toBe('会话压缩摘要')
+    expect(preview.querySelector('.md-root h2')?.textContent).toBe('关键决策')
+    expect(preview.querySelectorAll('.md-root li')).toHaveLength(2)
+    expect(preview.querySelector('.md-code-block')?.textContent).toContain('TURN_PREFIX')
 
-    const root = container.querySelector('.thread-compaction-body .md-root') as HTMLElement
+    const root = preview.querySelector('.md-root') as HTMLElement
     const rawSpans = root.querySelectorAll('.md-raw-text')
     expect(rawSpans).toHaveLength(2)
     expect(rawSpans[0].textContent).toBe(
@@ -127,7 +127,7 @@ describe('CompactionEntryBlock', () => {
   it('renders raw HTML as inert text without executing it', () => {
     // 测试意图：摘要中的原始 HTML 不得生成可执行元素，也不产生图片请求。
     const { container } = renderCard(UNSAFE_COMPACTION_SUMMARY)
-    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
 
     expect(container.querySelector('script')).toBeNull()
     expect(container.querySelector('img')).toBeNull()
