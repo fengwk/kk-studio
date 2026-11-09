@@ -6,7 +6,10 @@ import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessThreadSnapshotDTO,
+  ThreadExecutionControl,
+} from '@/shared/api/generated/contracts'
 import '@/features/thread/runtime/unconfirmed-executions.css'
 
 type UnconfirmedExecution = HarnessThreadSnapshotDTO['unconfirmedExecutions'][number]
@@ -33,12 +36,18 @@ export function UnconfirmedExecutionsPanel({
   threadId,
   rootThreadId,
   expectedVersion,
+  executionControl,
   executions,
+  onStop,
+  stopPending = false,
 }: {
   threadId: string
   rootThreadId: string
   expectedVersion: string
+  executionControl: ThreadExecutionControl
   executions: readonly UnconfirmedExecution[]
+  onStop?: () => void
+  stopPending?: boolean
 }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -47,6 +56,8 @@ export function UnconfirmedExecutionsPanel({
   const [error, setError] = useState<string | null>(null)
   const inFlightRef = useRef(false)
   const pending = pendingExecutionId != null
+  // RUNNABLE 只展示退出待确认原因与既有 Stop 入口；放弃确认只在 STOPPED 后开放。
+  const canAbandon = executionControl === 'STOPPED'
 
   // 快照更新（真实退出 ACK 或其它标签页放弃）后，已消失的执行不能继续弹窗。
   useEffect(() => {
@@ -56,6 +67,13 @@ export function UnconfirmedExecutionsPanel({
         : null
     ))
   }, [executions])
+
+  // executionControl 变为 RUNNABLE（例如恢复执行）时关闭仅 STOPPED 才开放的放弃确认。
+  useEffect(() => {
+    if (!canAbandon) {
+      setTarget(null)
+    }
+  }, [canAbandon])
 
   async function refreshFacts(): Promise<void> {
     const invalidations = [
@@ -107,6 +125,7 @@ export function UnconfirmedExecutionsPanel({
   return (
     <section
       className="thread-unconfirmed-executions"
+      data-execution-control={executionControl}
       aria-label={t('ai.runtime.unconfirmedExecutions.title')}
     >
       <header className="thread-unconfirmed-executions-header">
@@ -114,7 +133,9 @@ export function UnconfirmedExecutionsPanel({
           {t('ai.runtime.unconfirmedExecutions.title')}
         </h3>
         <p className="thread-unconfirmed-executions-hint">
-          {t('ai.runtime.unconfirmedExecutions.hint')}
+          {executionControl === 'STOPPED'
+            ? t('ai.runtime.unconfirmedExecutions.hint')
+            : t('ai.runtime.unconfirmedExecutions.hintRunnable')}
         </p>
       </header>
       {error ? (
@@ -136,28 +157,42 @@ export function UnconfirmedExecutionsPanel({
                 executionId: execution.executionId,
               })}</code>
             </div>
-            <Button
-              variant="ghost"
-              size="compact"
-              danger
-              disabled={pending}
-              aria-label={t('ai.runtime.unconfirmedExecutions.abandonItem', {
-                kind: execution.kind,
-                attempt: execution.attempt,
-              })}
-              onClick={() => {
-                setError(null)
-                setTarget(execution)
-              }}
-            >
-              {t('ai.runtime.unconfirmedExecutions.abandon')}
-            </Button>
+            {canAbandon ? (
+              <Button
+                variant="ghost"
+                size="compact"
+                danger
+                disabled={pending}
+                aria-label={t('ai.runtime.unconfirmedExecutions.abandonItem', {
+                  kind: execution.kind,
+                  attempt: execution.attempt,
+                })}
+                onClick={() => {
+                  setError(null)
+                  setTarget(execution)
+                }}
+              >
+                {t('ai.runtime.unconfirmedExecutions.abandon')}
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>
+      {!canAbandon && onStop != null ? (
+        <div className="thread-unconfirmed-executions-actions">
+          <Button
+            variant="primary"
+            size="compact"
+            disabled={stopPending}
+            onClick={onStop}
+          >
+            {t('ai.runtime.unconfirmedExecutions.stopAndHandle')}
+          </Button>
+        </div>
+      ) : null}
       <ConfirmActionModal
         className="modal-touch-target"
-        modal={target == null
+        modal={!canAbandon || target == null
           ? null
           : {
               title: t('ai.runtime.unconfirmedExecutions.confirmTitle', {

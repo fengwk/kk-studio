@@ -7,7 +7,7 @@ import java.util.Objects;
 /**
  * 普通委派收敛静止状态的最小共享事实评估器。
  *
- * <p>对外三态运行状态（{@code ThreadRuntimeStatus}）的纯值投影由公共 ThreadSnapshot 的 {@code evaluateRuntimeStatus}
+ * <p>对外四态运行状态（{@code ThreadRuntimeStatus}）的纯值投影由公共 ThreadSnapshot 的 {@code evaluateRuntimeStatus}
  * 统一给出；本类只回答「本地是否已收敛为可向父结算的静止状态」，与快照状态共用同一批客观事实。本地活跃执行与 open compaction 均属在途工作；待启动输入需求仅在 RUNNABLE
  * 下阻挡收敛；未完成直接子 Join 与未确认执行同样阻挡结算。
  */

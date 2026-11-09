@@ -55,15 +55,15 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Stop 之后活动执行体尚未退出时，不得把子 Thread 投影成已空闲，也不得提前交付其 NOTIFY_PARENT Join。
  *
- * <p>真实 ToolProcessor 已进入工具 body；工具观察到 Stop 中断后，仍由 latch 挡住退出。执行体还在父 gate 内时必须保持 RUNNING 且 Join
- * 未交付。无论断言成败都通过 TWR 释放并等待执行体退出，后续清理独立尝试且不覆盖主体失败；释放后的 Studio 退出确认必须只交付一次。
+ * <p>真实 ToolProcessor 已进入工具 body；工具观察到 Stop 中断后，仍由 latch 挡住退出。执行体还在父 gate 内时必须保持非 IDLE（无活跃流程时
+ * EXIT_PENDING）且 Join 未交付。无论断言成败都通过 TWR 释放并等待执行体退出，后续清理独立尝试且不覆盖主体失败；释放后的 Studio 退出确认必须只交付一次。
  */
 class HarnessRuntimeStopExitContractTest {
 
   private static final EnvironmentId TEST_ENV = EnvironmentId.of(UUID.randomUUID());
 
   @Test
-  void stopKeepsRunningStatusAndWithholdsJoinUntilTheEnteredToolExits() throws Exception {
+  void stopProjectsExitPendingAndWithholdsJoinUntilTheEnteredToolExits() throws Exception {
     UUID joinId = UUID.randomUUID();
     UUID parentId;
     UUID[] executionSeen = new UUID[1];
@@ -142,7 +142,7 @@ class HarnessRuntimeStopExitContractTest {
         assertEquals(ThreadExecutionControl.STOPPED, child.thread().executionControl());
         boolean notified = parentNotified(fixture, parentId);
         assertAll(
-            () -> assertEquals(ThreadRuntimeStatus.RUNNING, child.runtimeStatus()),
+            () -> assertEquals(ThreadRuntimeStatus.EXIT_PENDING, child.runtimeStatus()),
             () ->
                 assertFalse(
                     join.matched(), "NOTIFY_PARENT join must stay unmatched until the body exits"),
@@ -347,9 +347,9 @@ class HarnessRuntimeStopExitContractTest {
                     localExecutionId, execution(fixture, acknowledgedRemote).parentExecutionId()),
             () ->
                 assertEquals(
-                    ThreadRuntimeStatus.RUNNING,
+                    ThreadRuntimeStatus.EXIT_PENDING,
                     runtime.getThreadSnapshot(leafId).runtimeStatus(),
-                    "an unconfirmed remote keeps the stopped expando RUNNING"),
+                    "an unconfirmed remote keeps the stopped expando EXIT_PENDING"),
             () ->
                 assertEquals(
                     ThreadExecutionControl.STOPPED,
@@ -371,7 +371,7 @@ class HarnessRuntimeStopExitContractTest {
                     ExecutionExitState.UNCONFIRMED, executionState(fixture, notStartedRemote)),
             () ->
                 assertEquals(
-                    ThreadRuntimeStatus.RUNNING,
+                    ThreadRuntimeStatus.EXIT_PENDING,
                     runtime.getThreadSnapshot(leafId).runtimeStatus(),
                     "one remote remains unconfirmed"),
             () -> assertFalse(runtime.findJoin(joinId).orElseThrow().matched()),
@@ -403,7 +403,7 @@ class HarnessRuntimeStopExitContractTest {
                     ExecutionExitState.UNCONFIRMED, executionState(fixture, notStartedRemote)),
             () ->
                 assertEquals(
-                    ThreadRuntimeStatus.RUNNING,
+                    ThreadRuntimeStatus.EXIT_PENDING,
                     runtime.getThreadSnapshot(leafId).runtimeStatus()));
 
         observer.get().confirmNotStarted(notStartedRemote);

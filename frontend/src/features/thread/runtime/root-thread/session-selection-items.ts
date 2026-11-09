@@ -1,4 +1,5 @@
 import { formatBackendDate } from '@/shared/lib/date-format'
+import { formatThreadStatusLabel } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type {
   HarnessSessionSummaryDTO,
   HarnessThreadSummaryDTO,
@@ -25,7 +26,7 @@ export function threadSelectionItem(thread: HarnessThreadSummaryDTO) {
     title: thread.name,
     subtitle: [
       thread.headMessagePreview,
-      `${formatBackendDate(thread.updatedAt)} · ${thread.status}`,
+      `${formatBackendDate(thread.updatedAt)} · ${formatThreadStatusLabel(thread.status)}`,
     ].filter(Boolean).join(' · '),
     badge: thread.threadId,
   }

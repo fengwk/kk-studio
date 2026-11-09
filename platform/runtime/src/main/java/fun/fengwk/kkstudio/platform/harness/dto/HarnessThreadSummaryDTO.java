@@ -30,7 +30,7 @@ public class HarnessThreadSummaryDTO {
   /** Thread 最后更新时间（UTC Instant）。 */
   private Instant updatedAt;
 
-  /** 从当前 Thread 快照派生的状态：{@code RUNNING / WAITING / IDLE}。 */
+  /** 从当前 Thread 快照派生的状态：{@code RUNNING / EXIT_PENDING / WAITING / IDLE}。 */
   private ThreadRuntimeStatus status;
 
   /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */
