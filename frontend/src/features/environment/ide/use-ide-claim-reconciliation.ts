@@ -496,8 +496,7 @@ export function useIdeClaimReconciliation({
       }
       const validated = validateOpenResponse(
         environmentId,
-        request.browserSessionId,
-        pending,
+        request,
         response,
       )
       const current = viewsRef.current[environmentId]
@@ -820,15 +819,19 @@ export function useIdeClaimReconciliation({
       if (latest == null || latest.attempt !== attempt) {
         return
       }
-      const sameConnection = isBoundToConnection(
-        latest,
-        currentIdentity.eventNodeId,
-        currentIdentity.connectionId,
-      )
+      const sameConnection = accepted.view.eventNodeId === currentIdentity.eventNodeId
+        && accepted.view.connectionId === currentIdentity.connectionId
+      if (sameConnection && latest.pending?.claimId === accepted.view.claimId) {
+        // 原 claim 已提交：只重取该绑定的入口，不分配另一代绑定。
+        await sendOpen(environmentId, attempt, latest.pending, options)
+        return
+      }
       const authorityUnchanged = latest.bindingEpoch === accepted.view.bindingEpoch
       if (
         sameConnection
         && authorityUnchanged
+        && latest.eventNodeId === currentIdentity.eventNodeId
+        && latest.connectionId === currentIdentity.connectionId
         && latest.entryUrl != null
         && latest.daemonInstanceId === accepted.daemonInstanceId
       ) {
@@ -1133,6 +1136,7 @@ export function useIdeClaimReconciliation({
       }
       const next = { ...viewsRef.current }
       delete next[environmentId]
+      snapshotCacheRef.current.delete(`${view.daemonInstanceId}:${view.viewId}`)
       commitViews(next)
       writeSession()
       registerUsageQuiet()

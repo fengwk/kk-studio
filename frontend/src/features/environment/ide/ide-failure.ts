@@ -42,14 +42,6 @@ export function isViewGone(error: unknown): boolean {
   return ideFailureReason(error) === 'VIEW_GONE' || isNotFoundError(error)
 }
 
-export function isDaemonNotReady(error: unknown): boolean {
-  return ideFailureReason(error) === 'DAEMON_NOT_READY'
-}
-
-export function isOutcomeUnknown(error: unknown): boolean {
-  return ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN' || isUnknownIdeFailure(error)
-}
-
 function hasSensitivePath(value: string): boolean {
   return /\/(?:home|var|tmp|srv|Users)\/|[A-Za-z]:\\/.test(value)
 }

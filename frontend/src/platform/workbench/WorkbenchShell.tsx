@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
-import { Link, matchPath, Navigate, Route, Routes, useLocation } from 'react-router'
+import { Link, Navigate, Route, Routes } from 'react-router'
 import type { PageContribution } from '@/platform/extensions/types'
 import { useApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
-import { ChatIdeWorkspace } from '@/features/environment/ide/ChatIdeWorkspace'
 import { AppShell } from '@/platform/shell/AppShell'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
@@ -60,28 +59,24 @@ function StudioRoutes() {
  * 由 shell 在根部提供唯一 OverlayHost；registered page 路径已由页面自身挂载，
  * 两条路径各自只挂载一次，不重复渲染。
  *
- * Chat IDE 宿主在路由组合层常驻，只由明确的 `/chats/:chatId` 路由匹配激活；
- * 非 Chat 页面直接渲染独立全宽内容，完全不被 IDE shell 包装。
+ * 应用组合层可组合页面路由与持久区域；平台不依赖具体业务页面。
  */
 interface WorkbenchShellProps {
   navItems: readonly PrimaryNavItem[]
   children?: ReactNode
+  renderContent?: (registeredContent: ReactNode) => ReactNode
 }
 
 export function WorkbenchShell({
   navItems,
   children,
+  renderContent,
 }: WorkbenchShellProps) {
-  const location = useLocation()
-  const chatDetail = matchPath({ path: '/chats/:chatId', end: true }, location.pathname) != null
   const content = children ?? <StudioRoutes />
 
   return (
     <AppShell navItems={navItems}>
-      <ChatIdeWorkspace active={chatDetail}>
-        {chatDetail ? content : null}
-      </ChatIdeWorkspace>
-      {chatDetail ? null : content}
+      {renderContent == null ? content : renderContent(content)}
       {children ? <OverlayHost /> : null}
     </AppShell>
   )

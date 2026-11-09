@@ -139,18 +139,19 @@ export interface IdeBindingResult {
 
 export function validateOpenResponse(
   environmentId: string,
-  browserSessionId: string,
-  pending: IdePendingClaim,
+  request: EnvironmentIdeOpenViewDTO,
   response: EnvironmentIdeViewDTO,
 ): IdeBindingResult {
   if (
     response == null
     || typeof response !== 'object'
-    || response.viewId !== pending.viewId
+    || response.viewId !== request.viewId
     || response.environmentId !== environmentId
-    || response.browserSessionId !== browserSessionId
-    || response.claimId !== pending.claimId
-    || response.daemonInstanceId !== pending.expectedDaemonInstanceId
+    || response.browserSessionId !== request.browserSessionId
+    || response.eventNodeId !== request.eventNodeId
+    || response.connectionId !== request.connectionId
+    || response.claimId !== request.claimId
+    || response.daemonInstanceId !== request.expectedDaemonInstanceId
     || !isCanonicalUuid(response.viewId)
     || !isCanonicalUuid(response.environmentId)
     || !isCanonicalUuid(response.browserSessionId)
@@ -160,8 +161,8 @@ export function validateOpenResponse(
     || !isCanonicalUuid(response.daemonInstanceId)
     || typeof response.bindingEpoch !== 'string'
     || !CANONICAL_POSITIVE_DECIMAL.test(response.bindingEpoch)
-    || (pending.mode === 'resume'
-      && compareDecimal(response.bindingEpoch, pending.expectedBindingEpoch) < 0)
+    || (request.mode === 'resume'
+      && compareDecimal(response.bindingEpoch, request.expectedBindingEpoch) < 0)
     || !isIdeDirectory(response.directory)
     || typeof response.workspacePath !== 'string'
     || response.workspacePath.length === 0
@@ -175,7 +176,7 @@ export function validateOpenResponse(
     bindingEpoch: response.bindingEpoch,
     directory: response.directory,
     workspacePath: response.workspacePath,
-    entryUrl: validateIdeEntryUrl(response.entryUrl, environmentId, pending.viewId),
+    entryUrl: validateIdeEntryUrl(response.entryUrl, environmentId, request.viewId),
   }
 }
 

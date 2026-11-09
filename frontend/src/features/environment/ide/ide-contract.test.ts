@@ -122,25 +122,37 @@ describe('IDE contract validation', () => {
   })
 
   it('validates the frozen claim identity, instance and epoch on OPEN receipts', () => {
+    const request = buildOpenRequest(pending(), BROWSER, {
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION,
+    })
     const response = view({
       entryUrl: `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`,
     })
-    expect(validateOpenResponse(ENV, BROWSER, pending(), response)).toMatchObject({
+    expect(validateOpenResponse(ENV, request, response)).toMatchObject({
       viewId: VIEW,
       daemonInstanceId: DAEMON,
       bindingEpoch: '10',
     })
-    expect(() => validateOpenResponse(ENV, BROWSER, pending(), view({
+    expect(() => validateOpenResponse(ENV, request, view({
       claimId: 'e2000000-0000-4000-8000-000000000002',
       entryUrl: `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`,
     }))).toThrow(IdeProtocolError)
-    expect(() => validateOpenResponse(ENV, BROWSER, pending(), view({
+    expect(() => validateOpenResponse(ENV, request, view({
       daemonInstanceId: 'd2000000-0000-4000-8000-000000000002',
       entryUrl: `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`,
     }))).toThrow(IdeProtocolError)
-    expect(() => validateOpenResponse(ENV, BROWSER, pending({
+    expect(() => validateOpenResponse(ENV, {
+      ...request,
       expectedBindingEpoch: '20',
-    }), response)).toThrow(IdeProtocolError)
+    }, response)).toThrow(IdeProtocolError)
+    // 规范 UUID 仍可能属于旧连接，不能把它发布为当前连接的授权。
+    expect(() => validateOpenResponse(ENV, request, {
+      ...response, connectionId: 'f2000000-0000-4000-8000-000000000003',
+    })).toThrow(IdeProtocolError)
+    expect(() => validateOpenResponse(ENV, request, {
+      ...response, eventNodeId: 'f1000000-0000-4000-8000-000000000003',
+    })).toThrow(IdeProtocolError)
   })
 
   it('freezes the OPEN request from pending and only includes create directory', () => {

@@ -245,11 +245,7 @@ export function IdePanelProvider({
     const current = presentationRef.current
     const view = claimReconciliation.viewsRef.current[environment.id]
     if (view == null) {
-      // 切换 Chat 时没有已打开 view 不自动创建；只更新选择偏好。
-      commitPresentation({
-        ...current,
-        selectedEnvironmentId: environment.id,
-      }, 'session')
+      // Chat 选择不是打开操作；不把未打开的环境写成已打开面板的选择。
       return
     }
     commitPresentation(ensureOpened(current, environment.id, true), 'both')
@@ -354,7 +350,7 @@ export function IdePanelProvider({
     claimReconciliation.reconcileEnvironments(available)
   }, [environmentsQuery.data, environmentsQuery.isSuccess, claimReconciliation, commitPresentation])
 
-  const selectedEnvironmentId = activeEnvironmentId ?? presentation.selectedEnvironmentId
+  const selectedEnvironmentId = activeEnvironmentId
   const selectedView = selectedEnvironmentId == null
     ? undefined
     : claimReconciliation.views[selectedEnvironmentId]

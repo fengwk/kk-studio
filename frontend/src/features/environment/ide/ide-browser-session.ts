@@ -49,29 +49,17 @@ function acquireBrowserSessionLock(
     }
   }
   let released = false
-  let acquiredSettled = false
   let resolveAcquired: (acquired: boolean) => void = () => {}
   const acquired = new Promise<boolean>((resolve) => {
-    resolveAcquired = (value) => {
-      if (!acquiredSettled) {
-        acquiredSettled = true
-        resolve(value)
-      }
-    }
+    resolveAcquired = resolve
   })
   let resolveRelease: () => void = () => {}
   const releaseSignal = new Promise<void>((resolve) => {
     resolveRelease = resolve
   })
-  let completedSettled = false
   let resolveCompleted: () => void = () => {}
   const completed = new Promise<void>((resolve) => {
-    resolveCompleted = () => {
-      if (!completedSettled) {
-        completedSettled = true
-        resolve()
-      }
-    }
+    resolveCompleted = resolve
   })
   const name = `kk-studio.ide-session:${browserSessionId}`
   void (async () => {

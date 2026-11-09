@@ -115,7 +115,7 @@ function ChatWorkspaceContent({
   const ideHint = ideEnvironment != null
     ? t('ai.ide.toggle')
     : t(chat.environmentName ? 'ai.ide.chatEnvironmentUnavailable' : 'ai.ide.selectChatEnvironment')
-  const activatedIdeEnvironmentRef = useRef<string | null>(null)
+  const activatedIdeEnvironmentRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
     const key = ideEnvironment == null
       ? null
@@ -566,6 +566,15 @@ export function ChatWorkspacePage() {
   const { chatId = '' } = useParams()
   const navigate = useNavigate()
   const { t } = useI18n()
+  const activateIde = useOptionalIdePanel()?.activateChatEnvironment
+  const activateIdeRef = useRef(activateIde)
+  useLayoutEffect(() => {
+    activateIdeRef.current = activateIde
+  })
+  useLayoutEffect(() => {
+    // 新 Chat 的环境事实尚未加载时，不能显示上一 Chat 的面板；iframe 仍保活。
+    activateIdeRef.current?.(null)
+  }, [chatId])
 
   const chatQuery = useQuery({
     queryKey: queryKeys.chats.detail(chatId),

@@ -142,6 +142,9 @@ function Harness() {
       <button data-testid="activate-a" onClick={() => activateChatEnvironment(ENV_INFO_A)}>
         Activate
       </button>
+      <button data-testid="activate-none" onClick={() => activateChatEnvironment(null)}>
+        No environment
+      </button>
       <button data-testid="toggle-a" onClick={() => togglePanel(ENV_INFO_A)}>
         Toggle
       </button>
@@ -525,7 +528,7 @@ describe('IdePanelProvider recovery state machine', () => {
       browserSessionId: BROWSER_A,
       eventNodeId: EVENT_NODE,
       connectionId: CONNECTION_1,
-      claimId: CLAIM_A,
+      claimId: 'e1000000-0000-4000-8000-000000000012',
       daemonInstanceId: DAEMON_A,
       bindingEpoch: '11',
       directory: DIRECTORY_A,
@@ -685,6 +688,72 @@ describe('IdePanelProvider recovery state machine', () => {
       expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
     })
     expect(sessionSnapshot().recoveryByEnvironment[ENV_A]).toBeUndefined()
+  })
+
+  it('hides an unrelated view in a Chat without an environment and keeps its iframe for return', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    const frame = await screen.findByTestId('ide-iframe')
+    const opens = ideService.openIdeView.mock.calls.length
+
+    await user.click(screen.getByTestId('activate-none'))
+    expect(screen.getByTestId('ide-overlay-panel')).not.toBeVisible()
+    expect(screen.getByTestId('ide-iframe')).toBe(frame)
+    await user.click(screen.getByTestId('activate-a'))
+    expect(screen.getByTestId('ide-overlay-panel')).toBeVisible()
+    expect(screen.getByTestId('ide-iframe')).toBe(frame)
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(opens)
+  })
+
+  it('does not carry an old in-flight close flag into a newer connection binding', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    const firstRequest = ideService.openIdeView.mock.calls[0]![1] as Record<string, unknown>
+    ideService.readIdeView.mockResolvedValue(snapshot({
+      ...viewDto(firstRequest, 0), entryUrl: null,
+    }, { revision: '21' }))
+    let resolveClose!: () => void
+    ideService.closeIdeView.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveClose = resolve
+    }))
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await waitFor(() => expect(ideService.closeIdeView).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByTestId('reconnect'))
+    ideService.openIdeView.mockImplementation(async (_id: string, request: Record<string, unknown>) => (
+      viewDto(request, 2)
+    ))
+    await act(async () => { connect(sockets, CONNECTION_2) })
+    await waitFor(() => expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('12'))
+    await act(async () => { resolveClose() })
+
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+    expect(screen.getByTestId('ide-close-btn')).toBeEnabled()
+  })
+
+  it('reuses a committed unknown claim to obtain its entry instead of rebinding it again', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    ideService.openIdeView.mockImplementationOnce(async (_id: string, request: Record<string, unknown>) => {
+      ideService.readIdeView.mockResolvedValue(snapshot({
+        ...viewDto(request, 1), entryUrl: null,
+      }, { revision: '21' }))
+      throw new ApiError('network interrupted', undefined, 'network_error')
+    })
+    ideService.openIdeView.mockImplementation(async (_id: string, request: Record<string, unknown>) => (
+      viewDto(request, 1)
+    ))
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
+    expect(ideService.openIdeView.mock.calls[1]![1]).toEqual(ideService.openIdeView.mock.calls[0]![1])
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('11')
   })
 
   it('retries DAEMON_NOT_READY on a real new connection instead of freezing the view', async () => {

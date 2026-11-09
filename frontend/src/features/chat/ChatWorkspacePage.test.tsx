@@ -31,6 +31,7 @@ import { setLocale } from '@/shared/i18n'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDTO,
+  ChatDTO,
   ModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessSessionEntryDTO,
@@ -251,18 +252,20 @@ function renderWorkspaceRouter(
     ],
     { initialEntries },
   )
-  return render(
+  const activateChatEnvironment = vi.fn()
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <IdePanelContext.Provider value={{
         openEnvironment,
         togglePanel,
         panelVisible: false,
-        activateChatEnvironment: vi.fn(),
+        activateChatEnvironment,
       }}>
         <RouterProvider router={router} />
       </IdePanelContext.Provider>
     </QueryClientProvider>,
   )
+  return { ...rendered, router, activateChatEnvironment }
 }
 
 function renderWorkspace(chatId = CHAT_ID) {
@@ -345,6 +348,33 @@ describe('ChatWorkspacePage', () => {
     expect(togglePanel).toHaveBeenCalledWith({
       id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
     })
+  })
+
+  it('withdraws the previous Chat environment while the next Chat is loading', async () => {
+    const environment = { id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true }
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'local-node',
+      yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+    })
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
+      ...environment, daemonConfig: testDaemonConfig(), status: 'READY', version: '1',
+      createdAt: 0, updatedAt: 0, capabilities: [], statusExpiresAt: null, lastSeenAt: null,
+    }])
+    const { router, activateChatEnvironment } = renderWorkspaceRouter([`/chats/${CHAT_ID}`])
+    await waitFor(() => expect(activateChatEnvironment).toHaveBeenLastCalledWith(environment))
+    let loaded!: (chat: ChatDTO) => void
+    vi.mocked(chatService.getChat).mockImplementationOnce(() => new Promise((resolve) => { loaded = resolve }))
+
+    await act(async () => { await router.navigate('/chats/no-environment') })
+    expect(activateChatEnvironment).toHaveBeenLastCalledWith(null)
+    await act(async () => {
+      loaded({
+        id: 'no-environment', title: 'No environment', agentName: 'assistant', environmentName: null,
+        yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
+      })
+    })
+    await screen.findByRole('heading', { name: 'No environment' })
+    expect(activateChatEnvironment).toHaveBeenLastCalledWith(null)
   })
 
   it('restores layout and pane targets from one bounded tab snapshot', async () => {

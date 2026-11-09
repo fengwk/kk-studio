@@ -70,12 +70,13 @@ interface TransportState {
   epoch: number
   openCalls: OpenCall[]
   readCalls: Array<{ environmentId: string; viewId: string; query: Record<string, string> }>
-  usageFrames: Array<{ browserSessionId: string; revision: string; views: unknown[] }>
+  usageFrames: Array<{ browserSessionId: string; connectionId: string; revision: string; views: unknown[] }>
+  closedConnections: Set<string>
   iframeRequests: Record<string, number>
   eventConnectionIds: string[]
   failNextOpen: 'STALE_BINDING' | 'DAEMON_NOT_READY' | 'VIEW_OWNED_BY_OTHER_SESSION' | null
   holdNextOpen: boolean
-  heldOpen: { route: Route; body: Record<string, unknown> } | null
+  heldOpen: { route: Route; body: Record<string, unknown>; epoch: string } | null
 }
 
 function connectionId(index: number): string {
@@ -92,8 +93,8 @@ function directory(environmentId: string): string {
   return environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B
 }
 
-function entryUrl(environmentId: string, viewId: string): string {
-  return `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-token`
+function entryUrl(environmentId: string, viewId: string, epoch: string): string {
+  return `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${epoch}`
 }
 
 function viewResponse(view: ViewRecord): Record<string, unknown> {
@@ -141,6 +142,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
   await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     const currentConnection = connectionId(state.eventConnectionIds.length + 1)
     state.eventConnectionIds.push(currentConnection)
+    socket.onClose(() => { state.closedConnections.add(currentConnection) })
     let connected = false
     socket.onMessage((raw) => {
       const message = JSON.parse(String(raw)) as Record<string, unknown>
@@ -159,8 +161,9 @@ async function installTransport(page: Page, state: TransportState): Promise<void
           cursor: '0',
         }))
       } else if (message.type === 'ide-use') {
-        state.usageFrames.push(message as unknown as {
+        state.usageFrames.push({ ...message, connectionId: currentConnection } as unknown as {
           browserSessionId: string
+          connectionId: string
           revision: string
           views: unknown[]
         })
@@ -192,6 +195,13 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         viewId,
         query: Object.fromEntries(parsed.searchParams.entries()),
       })
+      if (!hasUsageIntent(state, environmentId, viewId, Object.fromEntries(parsed.searchParams.entries()))) {
+        await route.fulfill({
+          status: 409,
+          json: problem(409, 'STALE_BINDING', 'browser usage intent is not confirmed'),
+        })
+        return
+      }
       state.revision += 1
       const view = state.views[viewId]
       await route.fulfill({
@@ -215,9 +225,17 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         pendingAtPost: pending.pending,
         sessionBrowserIdAtPost: pending.browserSessionId,
       })
+      if (!hasUsageIntent(state, environmentId, String(body.viewId), body)) {
+        await route.fulfill({
+          status: 409,
+          json: problem(409, 'STALE_BINDING', 'browser usage intent is not confirmed'),
+        })
+        return
+      }
       if (state.holdNextOpen) {
         state.holdNextOpen = false
-        state.heldOpen = { route, body }
+        state.epoch += 1
+        state.heldOpen = { route, body, epoch: String(state.epoch + 10) }
         return
       }
       const failure = state.failNextOpen
@@ -274,6 +292,11 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         })
         return
       }
+      if (existing != null && existing.claimId === body.claimId
+        && existing.connectionId === body.connectionId && existing.eventNodeId === body.eventNodeId) {
+        await route.fulfill({ json: viewResponse(existing) })
+        return
+      }
       if (
         mode === 'resume'
         && existing != null
@@ -298,7 +321,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         directory: directory(environmentId),
         workspacePath: directory(environmentId),
         state: 'OPEN',
-        entryUrl: entryUrl(environmentId, viewId),
+        entryUrl: '',
       }
       if (mode === 'create' && existing == null) {
         state.epoch += 1
@@ -308,11 +331,14 @@ async function installTransport(page: Page, state: TransportState): Promise<void
           view.workspacePath = body.directory
         }
       } else {
+        state.epoch += 1
+        view.bindingEpoch = String(state.epoch + 10)
         view.eventNodeId = String(body.eventNodeId)
         view.connectionId = String(body.connectionId)
         view.claimId = String(body.claimId)
         view.browserSessionId = String(body.browserSessionId)
       }
+      view.entryUrl = entryUrl(environmentId, viewId, view.bindingEpoch)
       state.views[viewId] = view
       await route.fulfill({ json: viewResponse(view) })
       return
@@ -370,6 +396,28 @@ async function installTransport(page: Page, state: TransportState): Promise<void
   })
 }
 
+/** 模拟真实 Backend：本连接最新已 ACK 的 usage 必须包含精确 owner/view/claim。 */
+function hasUsageIntent(
+  state: TransportState,
+  environmentId: string,
+  viewId: string,
+  request: Record<string, unknown>,
+): boolean {
+  if (request.eventNodeId !== EVENT_NODE || state.closedConnections.has(String(request.connectionId))) {
+    return false
+  }
+  for (let index = state.usageFrames.length - 1; index >= 0; index -= 1) {
+    const frame = state.usageFrames[index]!
+    if (frame.connectionId !== request.connectionId) continue
+    return frame.browserSessionId === request.browserSessionId && frame.views.some((value) => {
+      if (typeof value !== 'object' || value == null) return false
+      const view = value as Record<string, unknown>
+      return view.environmentId === environmentId && view.viewId === viewId && view.claimId === request.claimId
+    })
+  }
+  return false
+}
+
 function createState(): TransportState {
   return {
     views: {},
@@ -378,6 +426,7 @@ function createState(): TransportState {
     openCalls: [],
     readCalls: [],
     usageFrames: [],
+    closedConnections: new Set(),
     iframeRequests: {},
     eventConnectionIds: [],
     failNextOpen: null,
@@ -496,7 +545,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     })
     expect(state.openCalls[1]!.body.connectionId).not.toBe(firstConnection)
     expect(await sameFrame(page)).toBe(true)
-    expect(state.iframeRequests[viewId]).toBe(1)
+    await expect.poll(() => state.iframeRequests[viewId]).toBe(2)
     await expect(page.getByTestId('ide-retry-claim-btn')).toHaveCount(0)
   })
 
@@ -505,7 +554,6 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await openHarness(page, state)
     await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
-    const epoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
     await saveFrame(page)
 
     state.holdNextOpen = true
@@ -523,6 +571,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await expect.poll(() => state.openCalls.length).toBe(3)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
 
+    const currentEpoch = state.views[viewId]!.bindingEpoch
     await held.route.fulfill({
       json: {
         ...state.views[viewId],
@@ -530,15 +579,16 @@ test.describe('Chat-scoped persistent IDE host', () => {
         eventNodeId: held.body.eventNodeId,
         browserSessionId: held.body.browserSessionId,
         claimId: held.body.claimId,
-        entryUrl: entryUrl(ENV_A, viewId),
+        bindingEpoch: held.epoch,
+        entryUrl: entryUrl(ENV_A, viewId, held.epoch),
       },
     })
     await page.waitForTimeout(150)
 
     expect(state.openCalls).toHaveLength(3)
     expect(await sameFrame(page)).toBe(true)
-    expect(state.iframeRequests[viewId]).toBe(1)
-    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(epoch)
+    expect(state.iframeRequests[viewId]).toBe(2)
+    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(currentEpoch)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
   })
 
@@ -565,10 +615,11 @@ test.describe('Chat-scoped persistent IDE host', () => {
     expect(state.openCalls[2]!.body.mode).toBe('resume')
     expect(state.openCalls[2]!.body.viewId).toBe(viewId)
     expect(state.openCalls[2]!.body.expectedBindingEpoch).not.toBe(initialEpoch)
-    expect(state.openCalls[2]!.body.expectedBindingEpoch).toBe(state.views[viewId]!.bindingEpoch)
+    expect(BigInt(state.openCalls[2]!.body.expectedBindingEpoch as string))
+      .toBeLessThan(BigInt(state.views[viewId]!.bindingEpoch))
     expect(state.readCalls.length).toBeGreaterThan(readsBefore + 1)
     expect(await sameFrame(page)).toBe(true)
-    expect(state.iframeRequests[viewId]).toBe(1)
+    await expect.poll(() => state.iframeRequests[viewId]).toBe(2)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
   })
 
@@ -613,6 +664,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
     await saveFrame(page)
+    const reads = state.readCalls.length
 
     await page.evaluate(() => {
       window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
@@ -620,9 +672,10 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await page.evaluate(() => {
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     })
-    await expect.poll(() => state.openCalls.length).toBe(2)
+    await expect.poll(() => state.readCalls.length).toBeGreaterThan(reads)
+    await expect(page.getByTestId('ide-reconciling')).toHaveCount(0)
 
-    expect(state.openCalls[1]!.body).toMatchObject({ mode: 'resume', viewId })
+    expect(state.openCalls).toHaveLength(1)
     expect(await sameFrame(page)).toBe(true)
     expect(state.iframeRequests[viewId]).toBe(1)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
