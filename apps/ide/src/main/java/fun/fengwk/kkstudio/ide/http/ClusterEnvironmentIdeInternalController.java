@@ -198,7 +198,7 @@ public class ClusterEnvironmentIdeInternalController {
         clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
       throw DomainException.unavailable(
-          "IDE_UNAVAILABLE", "internal IDE request does not match this node's READY owner route");
+          "DAEMON_NOT_READY", "internal IDE request does not match this node's READY owner route");
     }
   }
 }

@@ -152,7 +152,13 @@ class ClusterEnvironmentIdeServiceTest {
   void missingRouteFailsClosedBeforeAnyDelivery() {
     registry.current = Optional.empty();
 
-    assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest()));
+    // 没有 owner 时确定未派发，reason 必须允许客户端等 READY 而不是把结果当作未知。
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest()));
+    assertEquals("DAEMON_NOT_READY", error.reason());
+    DomainException readError =
+        assertThrows(DomainException.class, () -> service.readView(ENV, VIEW, readViewRequest()));
+    assertEquals("DAEMON_NOT_READY", readError.reason());
     assertTrue(client.calls.isEmpty());
     assertTrue(localTransport.commands.isEmpty());
   }

@@ -157,8 +157,8 @@ export function threadIdOf(thread) {
   return threadId
 }
 
-/** Thread 自身本地活动三态；STOP 只改变 executionControl，不覆盖本状态。 */
-const THREAD_RUNTIME_STATUSES = new Set(['RUNNING', 'WAITING', 'IDLE'])
+/** Thread 自身执行活动、退出等待与空闲状态；STOP 与这些状态正交。 */
+const THREAD_RUNTIME_STATUSES = new Set(['RUNNING', 'EXIT_PENDING', 'WAITING', 'IDLE'])
 
 /**
  * 创建 Chat（name-based Agent 引用；可选默认 Environment name，Chat 不携带任何 workspace 状态）。

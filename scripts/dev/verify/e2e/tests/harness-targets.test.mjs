@@ -154,9 +154,8 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   }
 })
 
-test('threadIdOf accepts only the three-state runtime status', () => {
-  // 测试意图：Thread 的 status 只表示本地活动三态（RUNNING/WAITING/IDLE），executionControl 是正交的
-  // 持久控制（RUNNABLE/STOPPED）；threadIdOf 必须接受六种组合，并显式拒绝非法状态词汇。
+test('threadIdOf accepts the four runtime states independently of execution control', () => {
+  // 退出等待是独立状态，STOPPED 不等于物理退出；严格接纳四态与执行控制的八种合法组合。
   const threadId = '00000000-0000-4000-8000-000000000000'
   const base = {
     threadId,
@@ -169,7 +168,7 @@ test('threadIdOf accepts only the three-state runtime status', () => {
     nextCommandSequence: '1',
     version: '0',
   }
-  for (const status of ['RUNNING', 'WAITING', 'IDLE']) {
+  for (const status of ['RUNNING', 'EXIT_PENDING', 'WAITING', 'IDLE']) {
     for (const executionControl of ['RUNNABLE', 'STOPPED']) {
       assert.equal(
         threadIdOf({ ...base, status, executionControl }),

@@ -135,7 +135,7 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
             .orElseThrow(
                 () ->
                     DomainException.unavailable(
-                        "IDE_UNAVAILABLE", "environment IDE owner route is unavailable"));
+                        "DAEMON_NOT_READY", "environment IDE owner route is unavailable"));
     return owner.local() ? localCall.get() : remoteCall.apply(owner);
   }
 
