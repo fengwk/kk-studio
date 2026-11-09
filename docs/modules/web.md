@@ -53,7 +53,7 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
-| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 与本地执行准入并标记排空；2) 按 `LocalExecutionLifecycle` 的物理句柄在 `drainTimeout` 内等待 body 与资源结束；3) 使用同一总 deadline 的剩余预算中断未结束的本地 body、`EnvironmentDaemonServer.drain()` GOAWAY 并释放环境租约、交由 `ToolProcessor.drain()` 移交可 reattach 的远端工具并 release TOOL Work；4) 已产生的退出证据先持久化，无法证明退出时保留日志目录锁到 JVM 退出。默认 `60s + 30s = 90s`，下层不得各自重开预算；`workersEnabled=false` 时不启动 dispatcher |
+| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim 与本地执行准入并标记排空；2) 按 `LocalExecutionLifecycle` 的物理句柄在 `drainTimeout` 内等待 body 与资源结束；3) 使用同一总 deadline 的剩余预算中断未结束的本地 body、`EnvironmentDaemonServer.drain()` GOAWAY 并释放环境租约、交由 `ToolProcessor.drain()` 移交可 reattach 的远端工具并 release TOOL Work；4) 已产生的退出证据先持久化，无法证明退出时保留日志目录锁到 JVM 退出。默认 `60s + 30s = 90s`，下层不得各自重开预算；线程池由同一 deadline 的 shutdown/await 收尾，不另做无界 close 等待；`workersEnabled=false` 时不启动 dispatcher |
 | `issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
 | `canvasFunctionDispatcherLifecycle` | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |

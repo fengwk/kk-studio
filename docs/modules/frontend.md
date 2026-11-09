@@ -472,7 +472,9 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 
 测试入口：[`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide) 的状态机、存储与
 对账单测，以及 [`AgentPane.test.tsx`](../../frontend/src/features/thread/runtime/AgentPane.test.tsx) 对非 Chat 入口
-隐藏与 Chat 宿主的守护。真实浏览器回归还需覆盖 reload、旧 WS 重叠、复制 tab 与 BFCache。
+隐藏与 Chat 宿主的守护。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
+[开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收) 的真实 IDE 入口执行；只记录实际
+运行结果，不预设固定用例数。
 
 目录选择器是 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) 内的惰性目录树
 （[`OpenDirectoryModal`](../../frontend/src/features/environment/ide/OpenDirectoryModal.tsx)）：
