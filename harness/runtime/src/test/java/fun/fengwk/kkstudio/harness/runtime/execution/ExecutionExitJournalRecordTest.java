@@ -17,6 +17,26 @@ class ExecutionExitJournalRecordTest {
   private static final EnvironmentId ENV = EnvironmentId.of(new UUID(0L, 501L));
 
   @Test
+  void preparedRecordMustBeALocalExecution() {
+    // 远端执行不占用本地物理生命周期；静态工厂已限制，直接构造与解码路径也必须拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ExecutionExitJournalRecord(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                1,
+                UUID.randomUUID(),
+                ExecutionExitKind.REMOTE,
+                UUID.randomUUID(),
+                ENV,
+                ExecutionExitJournalStage.PREPARED,
+                null,
+                null));
+  }
+
+  @Test
   void rejectsIdentityTargetAndEvidenceCombinationsThatCannotBeReplayed() {
     UUID executionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();

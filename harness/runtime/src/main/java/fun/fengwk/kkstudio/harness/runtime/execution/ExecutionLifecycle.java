@@ -30,6 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>本实现不做任何持久化决策：PREPARED / EXIT_PROOF 由 {@link ExecutionExitJournal} 落盘，数据库登记由调用方事务完成，确认与恢复由
  * {@link ExecutionExitConfirmer} 负责。
+ *
+ * <p>物理语义：取消在 attach body 之前就会被记住；只有确认登记且未被取消时 {@link LocalExecutionHandle#attachBody} 才放行
+ * body。仍存活的已附着 body 继续留在物理集合中，只有 body 结束或被 detach 后才允许证明退出；无法证明退出时目录锁保留到 JVM 退出。
  */
 @Slf4j
 public final class ExecutionLifecycle implements LocalExecutionLifecycle {
@@ -117,10 +120,13 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
       return handle;
     }
     if (!ExecutionExitJournalRecord.prepared(identity).matchesFactIdentity(registered)) {
-      finish(handle);
-      throw new IllegalStateException(
-          "registered execution fact does not match the frozen identity: "
-              + identity.executionId());
+      // 登记了与本代次不符的事实：不能把调用方的错误登记当成安全结论，保留物理句柄与目录锁。
+      IllegalStateException mismatch =
+          new IllegalStateException(
+              "registered execution fact does not match the frozen identity: "
+                  + identity.executionId());
+      retainJournalLock(identity.executionId(), mismatch);
+      throw mismatch;
     }
     handle.registered(registered);
     return handle;
@@ -222,11 +228,24 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
     }
   }
 
-  /** 无法证明退出：保留日志与未确认事实，并要求目录锁保留到 JVM 退出。 */
+  /**
+   * 无法证明退出：保留日志与未确认事实，并要求目录锁保留到 JVM 退出。
+   *
+   * <p>目录锁已随 journal 关闭而释放时如实记录错误，不假装锁仍被持有。
+   */
   private void retainJournalLock(UUID executionId, Throwable failure) {
     synchronized (monitor) {
       retainsJournalLock = true;
+    }
+    try {
       journal.holdUntilProcessExit();
+    } catch (RuntimeException journalFailure) {
+      log.error(
+          "cannot retain the execution journal directory lock; it was already released;"
+              + " phase={}; executionId={}; exception={}",
+          PHASE_EXIT,
+          executionId,
+          journalFailure.getClass().getSimpleName());
     }
     log.warn(
         "local execution exit is not proven; phase={}; executionId={}; exception={}",
@@ -235,15 +254,17 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
         failure == null ? "-" : failure.getClass().getSimpleName());
   }
 
-  /** 一次本地执行的物理句柄；结束方法幂等，只有第一次结束调用生效。 */
+  /** 一次本地执行的物理句柄；结束方法幂等，只有第一次成功结束调用生效。 */
   private final class Handle implements LocalExecutionHandle {
 
     private final LocalExecutionIdentity identity;
     private final AtomicBoolean settled = new AtomicBoolean();
+    private final Object bodyMonitor = new Object();
     private volatile ExecutionExitFact fact;
     private volatile boolean registered;
     private volatile RegistrationLookup registrationLookup = RegistrationLookup.undetermined();
     private volatile Thread body;
+    private boolean cancelRequested;
 
     private Handle(LocalExecutionIdentity identity) {
       this.identity = identity;
@@ -260,18 +281,32 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
     }
 
     @Override
-    public void attachBody(Thread body) {
-      this.body = Objects.requireNonNull(body, "body");
+    public boolean attachBody(Thread body) {
+      Objects.requireNonNull(body, "body");
+      synchronized (bodyMonitor) {
+        // 取消在 attach 之前也必须生效：否则先 requestCancel 再 attach 会丢掉取消并放行 body。
+        if (cancelRequested || settled.get() || !registered) {
+          return false;
+        }
+        this.body = body;
+        return true;
+      }
     }
 
     @Override
     public void detachBody() {
-      this.body = null;
+      synchronized (bodyMonitor) {
+        body = null;
+      }
     }
 
     @Override
     public void requestCancel() {
-      Thread target = body;
+      Thread target;
+      synchronized (bodyMonitor) {
+        cancelRequested = true;
+        target = body;
+      }
       if (target != null) {
         target.interrupt();
       }
@@ -290,10 +325,18 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
                 + identity.executionId()
                 + " was not registered and cannot claim studio exit");
       }
-      if (!settled.compareAndSet(false, true)) {
-        return;
+      synchronized (bodyMonitor) {
+        if (body != null && body.isAlive()) {
+          throw new IllegalStateException(
+              "execution "
+                  + identity.executionId()
+                  + " still has a live attached body; detach it before proving exit");
+        }
+        body = null;
+        if (!settled.compareAndSet(false, true)) {
+          return;
+        }
       }
-      body = null;
       try {
         if (registered || fact != null) {
           confirmer.confirm(fact, state);
@@ -312,10 +355,25 @@ public final class ExecutionLifecycle implements LocalExecutionLifecycle {
 
     @Override
     public void exitNotProven() {
-      if (!settled.compareAndSet(false, true)) {
+      boolean liveBody;
+      boolean settledHere;
+      synchronized (bodyMonitor) {
+        liveBody = body != null && body.isAlive();
+        if (liveBody) {
+          settledHere = false;
+        } else {
+          body = null;
+          settledHere = settled.compareAndSet(false, true);
+        }
+      }
+      if (liveBody) {
+        // 物理 body 仍存活：保留引用和物理句柄，只保留目录锁，等待 body 自己结束或排空。
+        retainJournalLock(identity.executionId(), null);
         return;
       }
-      body = null;
+      if (!settledHere) {
+        return;
+      }
       retainJournalLock(identity.executionId(), null);
       finish(this);
     }
