@@ -5,12 +5,17 @@
 //
 // Protocol (stdin): the first line is the JSON configuration:
 //   {playwrightModule, baseUrl, environmentId, browserSessionId, workspaceDirectory,
-//    browserTempDirectory, entryUrl, viewId, bindingEpoch}
-// later lines are {"continue":true} for synchronization.
+//    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?}
+// later lines are {"continue":true} for synchronization; the refresh-preserves-dirty scenario
+// additionally accepts {"navigate":{"entryUrl":"..."}} after the IndexedDB backup is committed.
 //
 // Protocol (stdout): newline delimited JSON only:
 //   {"event":"stage","stage":"<safe fixed name>"}
 //   {"event":"workbench-ready"}
+//   {"event":"editor-ready"}
+//   {"event":"dirty-backed-up","cookie":"<session-cookie>"}
+//   {"event":"entry-restored"}
+//   {"event":"reload-restored"}
 //   {"event":"terminal-success"}
 //   {"event":"file-saved"}
 //   {"event":"done"}
@@ -140,6 +145,143 @@ function awaitFile(filePath, predicate, timeoutMs = FILE_TIMEOUT) {
 }
 
 /**
+ * Waits until the visible Monaco model contains the expected text.
+ */
+async function waitForEditorText(page, text, timeoutMs = EDITOR_TIMEOUT) {
+  await page.waitForFunction(
+    (expected) =>
+      document
+        .querySelector('.monaco-editor .view-lines')
+        ?.textContent?.replaceAll('\u00a0', ' ')
+        .includes(expected),
+    text,
+    { timeout: timeoutMs },
+  )
+}
+
+/**
+ * Opens editable.txt through the explorer and waits until Monaco shows its original text.
+ */
+async function openEditableEditor(page, fileRow) {
+  await fileRow.dblclick()
+  const editor = page.locator('.monaco-editor .view-lines').first()
+  await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+  await waitForEditorText(page, 'initial text in workspace')
+  return editor
+}
+
+/**
+ * Waits for the real workbench user-data backup file to contain the marker in IndexedDB.
+ *
+ * <p>This is an actual commit observation (bounded polling of the IndexedDB cursor), not a fixed sleep.
+ * The marker is written only after the dirty model is backed up by code-server's working-copy service.
+ *
+ * @returns {Promise<{store: string, key: string}>}
+ */
+async function waitForIndexedDbMarker(page, marker, timeoutMs = EDITOR_TIMEOUT) {
+  const match = await page.evaluate(
+    async ({ marker, timeoutMs }) => {
+      const decode = (value) => {
+        try {
+          return new TextDecoder().decode(value)
+        } catch {
+          return ''
+        }
+      }
+      const contains = (value, depth = 0) => {
+        if (depth > 8 || value === null || value === undefined) return false
+        if (typeof value === 'string') return value.includes(marker)
+        if (typeof value === 'number' || typeof value === 'boolean') return false
+        if (value instanceof ArrayBuffer) {
+          return decode(new Uint8Array(value)).includes(marker)
+        }
+        if (ArrayBuffer.isView(value)) {
+          return decode(value).includes(marker)
+        }
+        if (Array.isArray(value)) {
+          return value.some((item) => contains(item, depth + 1))
+        }
+        if (typeof value === 'object') {
+          return Object.keys(value).some((key) => contains(value[key], depth + 1))
+        }
+        return false
+      }
+      const scan = async () => {
+        const databases = await indexedDB.databases()
+        for (const info of databases) {
+          if (typeof info.name !== 'string' || info.name.length === 0) continue
+          const db = await new Promise((accept, reject) => {
+            const request = indexedDB.open(info.name)
+            request.onsuccess = () => accept(request.result)
+            request.onerror = () => reject(request.error)
+            request.onblocked = () => reject(new Error('IndexedDBBlocked'))
+          })
+          try {
+            const storeNames = Array.from(db.objectStoreNames)
+            const priority = ['vscode-userdata-store', 'ItemTable']
+            storeNames.sort((left, right) => {
+              const leftIndex = priority.indexOf(left)
+              const rightIndex = priority.indexOf(right)
+              if (leftIndex === -1 && rightIndex === -1) return 0
+              if (leftIndex === -1) return 1
+              if (rightIndex === -1) return -1
+              return leftIndex - rightIndex
+            })
+            for (const storeName of storeNames) {
+              const transaction = db.transaction(storeName, 'readonly')
+              const store = transaction.objectStore(storeName)
+              const found = await new Promise((accept, reject) => {
+                const request = store.openCursor()
+                request.onerror = () => reject(request.error)
+                request.onsuccess = () => {
+                  const cursor = request.result
+                  if (cursor === null) {
+                    accept(null)
+                    return
+                  }
+                  if (contains(cursor.value)) {
+                    accept({ database: info.name, store: storeName, key: String(cursor.key) })
+                    return
+                  }
+                  cursor.continue()
+                }
+              })
+              if (found !== null) return found
+            }
+          } finally {
+            db.close()
+          }
+        }
+        return null
+      }
+
+      const deadline = performance.now() + timeoutMs
+      while (performance.now() < deadline) {
+        const found = await scan()
+        if (found !== null) return found
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()))
+      }
+      return null
+    },
+    { marker, timeoutMs },
+  )
+  if (match === null) {
+    throw namedError('IndexedDbBackupTimeout')
+  }
+  return match
+}
+
+/**
+ * Waits for a reloaded workbench to restore the dirty model and keep its dirty tab.
+ */
+async function waitForRestoredEditor(page, marker) {
+  const editor = page.locator('.monaco-editor .view-lines').first()
+  await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+  await waitForEditorText(page, marker)
+  await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+}
+
+/**
  * Ensures terminal is opened through workbench UI interactions.
  */
 async function openTerminalThroughUi(page) {
@@ -227,25 +369,14 @@ async function run(config, lines) {
 
     if (config.scenario === 'dirty-close') {
       stage('dirty-editor')
-      await fileRow.dblclick()
-      const editor = page.locator('.monaco-editor .view-lines').first()
-      await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
-      await page.waitForFunction(
-        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('initial text in workspace'),
-        undefined,
-        { timeout: EDITOR_TIMEOUT },
-      )
+      const editor = await openEditableEditor(page, fileRow)
       emit({ event: 'editor-ready' })
       const ready = await lines.next()
       if (ready.done || JSON.parse(ready.value).continue !== true) throw namedError('ProtocolError')
       await editor.click()
       await page.keyboard.press('End')
       await page.keyboard.type(' dirty acceptance')
-      await page.waitForFunction(
-        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('dirty acceptance'),
-        undefined,
-        { timeout: EDITOR_TIMEOUT },
-      )
+      await waitForEditorText(page, 'dirty acceptance')
       try {
         await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
       } catch (error) {
@@ -268,6 +399,93 @@ async function run(config, lines) {
       }
       const next = await lines.next()
       if (next.done || JSON.parse(next.value).continue !== true) throw namedError('ProtocolError')
+      await browser.close()
+      browser = null
+      emit({ event: 'done' })
+      return
+    }
+
+    if (config.scenario === 'refresh-preserves-dirty') {
+      const editablePath = join(config.workspaceDirectory, 'editable.txt')
+      const initialText = 'initial text in workspace\n'
+      const marker = 'refresh-preserves-dirty'
+
+      stage('editor-open-file')
+      const editor = await openEditableEditor(page, fileRow)
+      emit({ event: 'editor-ready' })
+      const ready = await lines.next()
+      if (ready.done || JSON.parse(ready.value).continue !== true) throw namedError('ProtocolError')
+
+      stage('editor-type')
+      await editor.click()
+      await page.keyboard.press('End')
+      await page.keyboard.type(` ${marker}`, { delay: 20 })
+      await waitForEditorText(page, marker)
+      await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+
+      // Wait for the workbench's real user-data backup commit, not a fixed delay.
+      stage('editor-backup')
+      const backup = await waitForIndexedDbMarker(page, marker)
+      if (backup.store !== 'vscode-userdata-store') {
+        process.stderr.write(
+          `backup marker matched store=${backup.store} key=${backup.key}\n`,
+        )
+        throw namedError('BackupStoreMismatch')
+      }
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      const cookies = await context.cookies()
+      const cookie = cookies.find((item) => item.name === 'kk_ide_session')
+      if (!cookie) throw namedError('MissingSessionCookie')
+      emit({ event: 'dirty-backed-up', cookie: cookie.value })
+
+      stage('await-refresh')
+      const refresh = await lines.next()
+      if (refresh.done || refresh.value.trim().length === 0) throw namedError('ProtocolError')
+      const refreshMessage = JSON.parse(refresh.value)
+      const refreshEntryUrl = refreshMessage?.navigate?.entryUrl
+      if (typeof refreshEntryUrl !== 'string' || refreshEntryUrl.length === 0) {
+        throw namedError('ProtocolError')
+      }
+
+      // Programmatic navigation can be guarded by the browser's beforeunload confirmation; the
+      // workbench's in-page dirty dialog is handled by the daemon path and is not involved here.
+      page.on('dialog', (dialog) => {
+        void dialog.accept()
+      })
+
+      stage('workbench-navigate')
+      await page.goto(new URL(refreshEntryUrl, config.baseUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: WORKBENCH_TIMEOUT,
+      })
+      await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+      await waitForRestoredEditor(page, marker)
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      emit({ event: 'entry-restored' })
+
+      const afterEntry = await lines.next()
+      if (afterEntry.done || JSON.parse(afterEntry.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+
+      stage('workbench-reload')
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: WORKBENCH_TIMEOUT })
+      await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+      await waitForRestoredEditor(page, marker)
+      if ((await readFile(editablePath, 'utf8')) !== initialText) {
+        throw namedError('DirtyFileWasSaved')
+      }
+      emit({ event: 'reload-restored' })
+
+      const afterReload = await lines.next()
+      if (afterReload.done || JSON.parse(afterReload.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+      stage('closing-browser')
       await browser.close()
       browser = null
       emit({ event: 'done' })
@@ -311,20 +529,7 @@ async function run(config, lines) {
 
     // 3. File editing interaction: open file, type in Monaco editor, save with Ctrl+S, assert fs
     stage('editor-open-file')
-    await fileRow.dblclick()
-
-    stage('editor-monaco-lines')
-    const editor = page.locator('.monaco-editor .view-lines').first()
-    await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
-    await page.waitForFunction(
-      () =>
-        document
-          .querySelector('.monaco-editor .view-lines')
-          ?.textContent?.replaceAll('\u00a0', ' ')
-          .includes('initial text in workspace'),
-      undefined,
-      { timeout: EDITOR_TIMEOUT },
-    )
+    const editor = await openEditableEditor(page, fileRow)
 
     stage('editor-type')
     await editor.click()
@@ -332,15 +537,7 @@ async function run(config, lines) {
     await page.keyboard.press('Enter')
     const appendText = 'appended by playwright in monaco editor'
     await page.keyboard.type(appendText, { delay: 20 })
-    await page.waitForFunction(
-      (text) =>
-        document
-          .querySelector('.monaco-editor .view-lines')
-          ?.textContent?.replaceAll('\u00a0', ' ')
-          .includes(text),
-      appendText,
-      { timeout: EDITOR_TIMEOUT },
-    )
+    await waitForEditorText(page, appendText)
 
     stage('editor-save')
     await editor.click()

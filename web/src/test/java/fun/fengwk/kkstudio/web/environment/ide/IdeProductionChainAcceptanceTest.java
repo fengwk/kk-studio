@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -90,6 +91,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   static final String CODE_SERVER_RELEASE_PROPERTY = "kk-studio.it.ide.code-server-release";
   static final String NODE_BINARY_PROPERTY = "kk-studio.it.ide.node";
   static final String PLAYWRIGHT_MODULE_PROPERTY = "kk-studio.it.ide.playwright-module";
+  static final String RECORDS_DIR_PROPERTY = "kk-studio.it.ide.records-dir";
 
   private static final String CLUSTER_SECRET = "ide-production-chain-acceptance-secret";
   private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
@@ -127,6 +129,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private Path testRecordsDir;
 
+  private boolean preserveTestRecords;
+
   @AfterEach
   void tearDown() {
     RuntimeException failure = null;
@@ -153,7 +157,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         daemon = null;
       }
       if (testRecordsDir != null) {
-        deleteTree(testRecordsDir);
+        if (!preserveTestRecords) {
+          deleteTree(testRecordsDir);
+        }
         testRecordsDir = null;
       }
     } catch (IOException error) {
@@ -629,6 +635,238 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
+  /** 同一 owner 的新事件通道必须立即接管旧 epoch：旧 WS/usage 仍活着，旧 cookie/票据不能再授权。 */
+  @Test
+  @Order(7)
+  void newEventChannelTakesOverTheOldEpochWhileTheOldWebSocketStaysLive() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel oldEvents = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity oldIdentity = oldEvents.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID oldClaim = UUID.randomUUID();
+      oldEvents.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, oldClaim, null)));
+
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, oldIdentity, oldClaim);
+      long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String daemonInstance = opened.path("daemonInstanceId").asText();
+      String workspacePath = opened.path("workspacePath").asText();
+      String directory = opened.path("directory").asText();
+      String oldCookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, oldCookie, "/").toLowerCase().contains("<html"),
+          "the old epoch must serve the workbench before takeover");
+
+      // Same claim replay must not allocate an epoch; keep a still-unused old-epoch ticket for the
+      // post-takeover rejection assertion.
+      String unusedOldEntry =
+          reissueOpenEntry(
+              environmentId,
+              viewId,
+              browserSessionId,
+              oldIdentity,
+              oldClaim,
+              firstEpoch,
+              daemonInstance);
+      // The old physical connection is still the live usage proof for this owner while takeover
+      // starts; this is not a "close the old connection first" shortcut.
+      oldEvents.registerUsage(
+          browserSessionId,
+          2L,
+          List.of(new IntentView(environmentId, viewId, oldClaim, firstEpoch)));
+
+      try (EventChannel newEvents = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+        EventIdentity newIdentity = newEvents.awaitConnected();
+        UUID newClaim = UUID.randomUUID();
+        newEvents.registerUsage(
+            browserSessionId,
+            1L,
+            List.of(new IntentView(environmentId, viewId, newClaim, firstEpoch)));
+
+        long discoveryStart = System.nanoTime();
+        JsonNode discovered =
+            readView(
+                environmentId, viewId, browserSessionId, newIdentity, newClaim, daemonInstance);
+        long discoveryMillis = Duration.ofNanos(System.nanoTime() - discoveryStart).toMillis();
+        assertTrue(
+            discoveryMillis < 20_000,
+            "GET_VIEW must not wait for the old channel to close (" + discoveryMillis + "ms)");
+        assertCurrentSnapshot(
+            discovered, viewId, browserSessionId, firstEpoch, workspacePath, directory);
+
+        JsonNode resumed =
+            openView(environmentId, viewId, browserSessionId, newIdentity, newClaim, "resume");
+        long secondEpoch = Long.parseLong(resumed.path("bindingEpoch").asText());
+        assertTrue(
+            secondEpoch > firstEpoch,
+            "resume must allocate a newer binding epoch ("
+                + firstEpoch
+                + " -> "
+                + secondEpoch
+                + ")");
+        assertEquals(daemonInstance, resumed.path("daemonInstanceId").asText());
+        assertEquals(viewId.toString(), resumed.path("viewId").asText());
+        assertEquals(browserSessionId.toString(), resumed.path("browserSessionId").asText());
+        assertEquals(newIdentity.eventNodeId(), resumed.path("eventNodeId").asText());
+        assertEquals(newIdentity.connectionId(), resumed.path("connectionId").asText());
+        assertEquals(newClaim.toString(), resumed.path("claimId").asText());
+        assertEquals(workspacePath, resumed.path("workspacePath").asText());
+        assertEquals(directory, resumed.path("directory").asText());
+        assertEquals("OPEN", resumed.path("state").asText());
+
+        // The old connection is still alive and its usage still satisfies the read-intent check:
+        // GET through the old channel must observe the new binding, not VIEW_GONE.
+        oldEvents.registerUsage(
+            browserSessionId,
+            3L,
+            List.of(new IntentView(environmentId, viewId, oldClaim, firstEpoch)));
+        JsonNode oldRead =
+            readView(
+                environmentId, viewId, browserSessionId, oldIdentity, oldClaim, daemonInstance);
+        assertCurrentSnapshot(
+            oldRead, viewId, browserSessionId, secondEpoch, workspacePath, directory);
+        assertEquals(newIdentity.eventNodeId(), oldRead.path("view").path("eventNodeId").asText());
+        assertEquals(
+            newIdentity.connectionId(), oldRead.path("view").path("connectionId").asText());
+        assertEquals(newClaim.toString(), oldRead.path("view").path("claimId").asText());
+
+        assertViewRejected(
+            environmentId, viewId, oldCookie, "the old epoch cookie must stop authorizing");
+        assertEntryRejected(unusedOldEntry);
+        Response staleClose = deleteView(environmentId, viewId, browserSessionId, firstEpoch);
+        try (staleClose) {
+          assertEquals(
+              409, staleClose.code(), "the old epoch must not be able to close the new binding");
+        }
+
+        String newCookie = bootstrap(environmentId, viewId, resumed.path("entryUrl").asText());
+        assertTrue(
+            fetchView(environmentId, viewId, newCookie, "/").toLowerCase().contains("<html"),
+            "the new epoch cookie must serve the workbench");
+        closeView(environmentId, viewId, browserSessionId, secondEpoch);
+      }
+    }
+  }
+
+  /** 真实 Monaco 未保存文本必须跨同 owner 新绑定和真实页面 reload 从 IndexedDB 恢复，宿主文件仍是原文。 */
+  @Test
+  @Order(8)
+  void restoresUnsavedMonacoTextAcrossTakeoverAndRealPageReload() throws Exception {
+    Path playwright = explicitPlaywrightModule();
+    Path node = nodeBinary();
+
+    browserTempDir = Files.createTempDirectory("kk-ide-br-");
+    Files.setPosixFilePermissions(browserTempDir, PosixFilePermissions.fromString("rwx------"));
+
+    String environmentId = startEnvironmentAndDaemon();
+    Path workspace = daemon.workspaceDirectory();
+    String initialText = "initial text in workspace\n";
+    Files.writeString(workspace.resolve("editable.txt"), initialText, StandardCharsets.UTF_8);
+    Files.createDirectory(workspace.resolve(".vscode"));
+    Files.writeString(
+        workspace.resolve(".vscode/settings.json"),
+        "{\"files.autoSave\":\"off\"}\n",
+        StandardCharsets.UTF_8);
+
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel oldEvents = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity oldIdentity = oldEvents.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID firstClaim = UUID.randomUUID();
+      oldEvents.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, oldIdentity, firstClaim);
+      long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String daemonInstance = opened.path("daemonInstanceId").asText();
+      String workspacePath = opened.path("workspacePath").asText();
+      String directory = opened.path("directory").asText();
+
+      browserDriver = BrowserDriver.start(node, recordsDir());
+      browserDriver.send(
+          Map.ofEntries(
+              Map.entry("playwrightModule", playwright.toString()),
+              Map.entry("baseUrl", baseUrl()),
+              Map.entry("environmentId", environmentId),
+              Map.entry("browserSessionId", browserSessionId.toString()),
+              Map.entry("workspaceDirectory", workspace.toString()),
+              Map.entry("browserTempDirectory", browserTempDir.toString()),
+              Map.entry("entryUrl", opened.path("entryUrl").asText()),
+              Map.entry("viewId", viewId.toString()),
+              Map.entry("bindingEpoch", Long.toString(firstEpoch)),
+              Map.entry("scenario", "refresh-preserves-dirty")));
+
+      browserDriver.await("workbench-ready");
+      browserDriver.await("editor-ready");
+      browserDriver.proceed();
+      JsonNode dirty = browserDriver.await("dirty-backed-up");
+      String oldCookie = dirty.path("cookie").asText();
+      assertFalse(oldCookie.isBlank(), "the dirty browser session must expose its real cookie");
+      assertEquals(
+          initialText,
+          Files.readString(workspace.resolve("editable.txt"), StandardCharsets.UTF_8),
+          "the browser must not save the dirty editor before refresh");
+
+      oldEvents.registerUsage(
+          browserSessionId,
+          2L,
+          List.of(new IntentView(environmentId, viewId, firstClaim, firstEpoch)));
+      try (EventChannel newEvents = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+        EventIdentity newIdentity = newEvents.awaitConnected();
+        UUID newClaim = UUID.randomUUID();
+        newEvents.registerUsage(
+            browserSessionId,
+            1L,
+            List.of(new IntentView(environmentId, viewId, newClaim, firstEpoch)));
+
+        JsonNode discovered =
+            readView(
+                environmentId, viewId, browserSessionId, newIdentity, newClaim, daemonInstance);
+        assertCurrentSnapshot(
+            discovered, viewId, browserSessionId, firstEpoch, workspacePath, directory);
+
+        JsonNode resumed =
+            openView(environmentId, viewId, browserSessionId, newIdentity, newClaim, "resume");
+        long secondEpoch = Long.parseLong(resumed.path("bindingEpoch").asText());
+        assertTrue(
+            secondEpoch > firstEpoch,
+            "resume must allocate a newer binding epoch ("
+                + firstEpoch
+                + " -> "
+                + secondEpoch
+                + ")");
+        assertEquals(daemonInstance, resumed.path("daemonInstanceId").asText());
+        assertEquals(viewId.toString(), resumed.path("viewId").asText());
+        assertEquals(browserSessionId.toString(), resumed.path("browserSessionId").asText());
+        assertEquals(workspacePath, resumed.path("workspacePath").asText());
+        assertEquals(directory, resumed.path("directory").asText());
+
+        assertViewRejected(
+            environmentId, viewId, oldCookie, "the old epoch cookie must stop authorizing");
+        assertEntryRejected(opened.path("entryUrl").asText());
+
+        browserDriver.send(
+            Map.of("navigate", Map.of("entryUrl", resumed.path("entryUrl").asText())));
+        browserDriver.await("entry-restored");
+        assertEquals(
+            initialText,
+            Files.readString(workspace.resolve("editable.txt"), StandardCharsets.UTF_8),
+            "loading the new entry must restore the backup without saving the host file");
+        browserDriver.proceed();
+        browserDriver.await("reload-restored");
+        assertEquals(
+            initialText,
+            Files.readString(workspace.resolve("editable.txt"), StandardCharsets.UTF_8),
+            "a real page reload must restore the backup without saving the host file");
+
+        closeView(environmentId, viewId, browserSessionId, secondEpoch);
+        browserDriver.proceed();
+        browserDriver.await("done");
+        browserDriver.finish();
+      }
+    }
+  }
+
   private record CloseResult(int status, String body) {}
 
   private CloseResult normalCloseStatus(
@@ -659,17 +897,34 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private String startEnvironmentAndDaemon() throws Exception {
     Path release = explicitCodeServerRelease();
     JsonNode created =
-        postJson("/api/platform/environments", "{\"name\":\"ide-acceptance-" + suffix() + "\"}");
+        postJson(
+            "/api/platform/environments",
+            "{\"name\":\"ide-acceptance-"
+                + suffix()
+                + "\",\"daemonConfig\":{\"studioUrl\":\""
+                + baseUrl()
+                + "\"}}");
     JsonNode card = created;
     String environmentId = card.path("id").asText();
     String registrationToken = card.path("registrationToken").asText();
+    JsonNode daemonConfig = card.path("daemonConfig");
+    long configVersion = Long.parseLong(card.path("version").asText());
     assertFalse(environmentId.isBlank(), "environment creation must return an id");
     assertFalse(
         registrationToken.isBlank(), "environment creation must return a registration token");
+    assertTrue(
+        daemonConfig.isObject(), "environment creation must return the complete daemonConfig");
 
     daemon =
         ProductionDaemonFixture.start(
-            repoRoot(), release, baseUrl(), registrationToken, recordsDir(), nodeBinary());
+            repoRoot(),
+            release,
+            environmentId,
+            configVersion,
+            daemonConfig.toString(),
+            registrationToken,
+            recordsDir(),
+            nodeBinary());
     awaitReady(environmentId);
     return environmentId;
   }
@@ -724,12 +979,27 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       UUID claimId,
       String mode)
       throws IOException {
+    return openViewBody(environmentId, viewId, browserSessionId, identity, claimId, mode, null);
+  }
+
+  private String openViewBody(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      String mode,
+      Long expectedEpochOverride)
+      throws IOException {
     String daemonInstance = daemonInstances.get(viewId);
     if (daemonInstance == null) {
       daemonInstance =
           discoverDaemonInstance(environmentId, viewId, browserSessionId, identity, claimId);
     }
-    long expectedBindingEpoch = bindingEpochs.getOrDefault(viewId, 0L);
+    long expectedBindingEpoch =
+        expectedEpochOverride != null
+            ? expectedEpochOverride
+            : bindingEpochs.getOrDefault(viewId, 0L);
     return "{\"viewId\":\""
         + viewId
         + "\",\"browserSessionId\":\""
@@ -759,29 +1029,57 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       EventIdentity identity,
       UUID claimId)
       throws IOException {
-    String url =
-        baseUrl()
-            + "/api/ide/environments/"
-            + environmentId
-            + "/views/"
-            + viewId
-            + "?browserSessionId="
-            + browserSessionId
-            + "&eventNodeId="
-            + identity.eventNodeId()
-            + "&connectionId="
-            + identity.connectionId()
-            + "&claimId="
-            + claimId;
-    Response response = browser.newCall(new Request.Builder().url(url).get().build()).execute();
+    JsonNode snapshot = readView(environmentId, viewId, browserSessionId, identity, claimId, null);
+    String daemonInstance = snapshot.path("daemonInstanceId").asText();
+    assertFalse(daemonInstance.isBlank(), "IDE view discovery must return a daemon instance");
+    return daemonInstance;
+  }
+
+  /** 纯读 GET：所有 owner 定位字段都是显式 query 参数，不发送任何命令副作用。 */
+  private JsonNode readView(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      String expectedDaemonInstanceId)
+      throws IOException {
+    HttpUrl.Builder url =
+        HttpUrl.get(baseUrl() + "/api/ide/environments/" + environmentId + "/views/" + viewId)
+            .newBuilder()
+            .addQueryParameter("browserSessionId", browserSessionId.toString())
+            .addQueryParameter("eventNodeId", identity.eventNodeId())
+            .addQueryParameter("connectionId", identity.connectionId())
+            .addQueryParameter("claimId", claimId.toString());
+    if (expectedDaemonInstanceId != null) {
+      url.addQueryParameter("expectedDaemonInstanceId", expectedDaemonInstanceId);
+    }
+    Response response =
+        browser.newCall(new Request.Builder().url(url.build()).get().build()).execute();
     try (response) {
       String text = response.body().string();
       assertEquals(200, response.code(), "IDE view discovery must succeed: " + text);
-      String daemonInstance =
-          JsonMapper.builder().build().readTree(text).path("daemonInstanceId").asText();
-      assertFalse(daemonInstance.isBlank(), "IDE view discovery must return a daemon instance");
-      return daemonInstance;
+      return JsonMapper.builder().build().readTree(text);
     }
+  }
+
+  private static void assertCurrentSnapshot(
+      JsonNode snapshot,
+      UUID viewId,
+      UUID browserSessionId,
+      long bindingEpoch,
+      String workspacePath,
+      String directory) {
+    JsonNode view = snapshot.path("view");
+    assertEquals(viewId.toString(), view.path("viewId").asText(), "snapshot viewId");
+    assertEquals(
+        browserSessionId.toString(),
+        view.path("browserSessionId").asText(),
+        "snapshot browserSessionId");
+    assertEquals(Long.toString(bindingEpoch), view.path("bindingEpoch").asText(), "snapshot epoch");
+    assertEquals(workspacePath, view.path("workspacePath").asText(), "snapshot workspacePath");
+    assertEquals(directory, view.path("directory").asText(), "snapshot directory");
+    assertEquals("OPEN", view.path("state").asText(), "snapshot state");
   }
 
   private JsonNode openView(
@@ -811,6 +1109,45 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       daemonInstances.put(viewId, result.path("daemonInstanceId").asText());
       bindingEpochs.put(viewId, Long.parseLong(result.path("bindingEpoch").asText()));
       return result;
+    }
+  }
+
+  /**
+   * 用同一 claim/原请求重放一次 CREATE：Daemon 不得分配新 epoch，但会签发新的旧 epoch 入口票据。
+   *
+   * <p>保留该票据而不消费，用于验证接管后未消费的旧 token 也不能再授权。
+   */
+  private String reissueOpenEntry(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      long expectedEpoch,
+      String expectedDaemonInstance)
+      throws IOException {
+    String body =
+        openViewBody(environmentId, viewId, browserSessionId, identity, claimId, "create", 0L);
+    Response response =
+        browser
+            .newCall(
+                new Request.Builder()
+                    .url(baseUrl() + "/api/ide/environments/" + environmentId + "/views")
+                    .post(RequestBody.create(body, JSON))
+                    .build())
+            .execute();
+    try (response) {
+      String text = response.body().string();
+      assertEquals(200, response.code(), "an OPEN_VIEW replay must succeed: " + text);
+      JsonNode replay = JsonMapper.builder().build().readTree(text);
+      assertEquals(
+          Long.toString(expectedEpoch),
+          replay.path("bindingEpoch").asText(),
+          "same-claim replay must not allocate a new binding epoch");
+      assertEquals(expectedDaemonInstance, replay.path("daemonInstanceId").asText());
+      String entryUrl = replay.path("entryUrl").asText();
+      assertFalse(entryUrl.isBlank(), "an OPEN_VIEW replay must issue a fresh entry ticket");
+      return entryUrl;
     }
   }
 
@@ -929,6 +1266,20 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             .execute();
     try (response) {
       assertTrue(response.code() >= 400, message + " (status " + response.code() + ")");
+    }
+  }
+
+  /** 旧 epoch 的入口票据不能在接管后换取新 cookie。 */
+  private void assertEntryRejected(String entryUrl) throws IOException {
+    Response response =
+        browser.newCall(new Request.Builder().url(baseUrl() + entryUrl).get().build()).execute();
+    try (response) {
+      assertTrue(
+          response.code() >= 400,
+          "the old bootstrap ticket must be rejected (status " + response.code() + ")");
+      assertNull(
+          response.header("Set-Cookie"),
+          "the old bootstrap ticket must not issue another session cookie");
     }
   }
 
@@ -1066,7 +1417,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             .execute();
     try (response) {
       String text = response.body().string();
-      assertEquals(201, response.code(), "creating the environment must succeed");
+      assertEquals(201, response.code(), "creating the environment must succeed: " + text);
       return JsonMapper.builder().build().readTree(text);
     }
   }
@@ -1125,8 +1476,17 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private Path recordsDir() throws IOException {
     if (testRecordsDir == null) {
-      testRecordsDir = Files.createTempDirectory("kk-ide-records-");
-      Files.setPosixFilePermissions(testRecordsDir, PosixFilePermissions.fromString("rwx------"));
+      String configured = System.getProperty(RECORDS_DIR_PROPERTY);
+      if (configured != null && !configured.isBlank()) {
+        Path records = Path.of(configured).toAbsolutePath().normalize();
+        Files.createDirectories(records);
+        Files.setPosixFilePermissions(records, PosixFilePermissions.fromString("rwx------"));
+        testRecordsDir = records;
+        preserveTestRecords = true;
+      } else {
+        testRecordsDir = Files.createTempDirectory("kk-ide-records-");
+        Files.setPosixFilePermissions(testRecordsDir, PosixFilePermissions.fromString("rwx------"));
+      }
     }
     return testRecordsDir;
   }

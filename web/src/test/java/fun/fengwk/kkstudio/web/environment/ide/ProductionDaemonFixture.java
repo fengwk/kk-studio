@@ -77,7 +77,9 @@ final class ProductionDaemonFixture implements AutoCloseable {
    *
    * @param repoRoot 仓库根（提供 {@code daemon/dist} 与 {@code daemon/ide-extension}）
    * @param codeServerRelease 只读的已构建 code-server 发行目录
-   * @param studioUrl Daemon 连接的 Studio 同源地址
+   * @param environmentId 创建环境后由服务端返回的 canonical UUID
+   * @param configVersion 创建环境后由服务端返回的配置 CAS 版本
+   * @param daemonConfigJson 创建环境后由服务端返回的完整 daemonConfig JSON
    * @param registrationToken 注册凭据明文；只写进 0600 的 {@code daemon.token}
    * @param recordsDir 私有日志目录（0700）
    * @param nodeBinary Node 24 可执行文件
@@ -85,7 +87,9 @@ final class ProductionDaemonFixture implements AutoCloseable {
   static ProductionDaemonFixture start(
       Path repoRoot,
       Path codeServerRelease,
-      String studioUrl,
+      String environmentId,
+      long configVersion,
+      String daemonConfigJson,
       String registrationToken,
       Path recordsDir,
       Path nodeBinary)
@@ -120,8 +124,16 @@ final class ProductionDaemonFixture implements AutoCloseable {
       Path dataDir = distributionDir.resolve("data");
       Files.createDirectories(dataDir);
       restrictDirectory(dataDir);
-      Path configFile = dataDir.resolve("config.json");
-      writePrivate(configFile, "{\"studioUrl\":\"" + studioUrl + "\"}\n");
+      Path configFile = dataDir.resolve("daemon.json");
+      writePrivate(
+          configFile,
+          "{\"environmentId\":\""
+              + environmentId
+              + "\",\"version\":\""
+              + configVersion
+              + "\",\"daemonConfig\":"
+              + daemonConfigJson
+              + "}\n");
       Path tokenFile = dataDir.resolve("daemon.token");
       writePrivate(tokenFile, registrationToken + "\n");
 
