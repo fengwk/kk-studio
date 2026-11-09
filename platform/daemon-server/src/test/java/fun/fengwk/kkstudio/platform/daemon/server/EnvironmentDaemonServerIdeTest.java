@@ -42,10 +42,12 @@ class EnvironmentDaemonServerIdeTest {
         .setAction(IdeAction.OPEN_VIEW)
         .setMode(IdeOpenMode.CREATE)
         .setViewId(VIEW_ID)
-        .setDocumentId("66666666-7777-8888-9999-aaaaaaaaaaaa")
+        .setBrowserSessionId("66666666-7777-8888-9999-aaaaaaaaaaaa")
         .setEventNodeId("bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
         .setConnectionId("12345678-1234-1234-1234-123456789abc")
         .setClaimId("87654321-4321-4321-4321-cba987654321")
+        .setExpectedBindingEpoch(0L)
+        .setExpectedDaemonInstanceId("a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5")
         .build();
   }
 
@@ -53,7 +55,7 @@ class EnvironmentDaemonServerIdeTest {
     return IdeResult.newBuilder()
         .setOk(true)
         .setViewId(VIEW_ID)
-        .setDocumentId("66666666-7777-8888-9999-aaaaaaaaaaaa")
+        .setBrowserSessionId("66666666-7777-8888-9999-aaaaaaaaaaaa")
         .setEventNodeId("bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
         .setConnectionId("12345678-1234-1234-1234-123456789abc")
         .setClaimId("87654321-4321-4321-4321-cba987654321")
@@ -339,7 +341,7 @@ class EnvironmentDaemonServerIdeTest {
             .addBindings(
                 IdeLeaseBinding.newBuilder()
                     .setViewId(VIEW_ID)
-                    .setDocumentId("66666666-7777-8888-9999-aaaaaaaaaaaa")
+                    .setBrowserSessionId("66666666-7777-8888-9999-aaaaaaaaaaaa")
                     .setBindingEpoch(1L)
                     .build())
             .build();

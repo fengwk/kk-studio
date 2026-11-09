@@ -5,7 +5,7 @@
  * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<UUID>"}}
  * - {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * - {"type":"unsubscribe","resource":{...}}
- * - {"type":"ide-use","documentId":"<UUID>","revision":"<positive decimal>",
+ * - {"type":"ide-use","browserSessionId":"<UUID>","revision":"<positive decimal>",
  *    "views":[{"environmentId":"<UUID>","viewId":"<UUID>","claimId":"<UUID>","bindingEpoch":"<positive decimal>"}]}
  *
  * server -> client（JSON 文本）：
@@ -82,9 +82,9 @@ export interface ApplicationEventIdeUseView {
   bindingEpoch?: string
 }
 
-/** 一个浏览器 document 的完整 IDE 持有列表；revision 在同一连接内单调递增。 */
+/** 一个浏览器会话的完整 IDE 持有列表；revision 在同一连接内单调递增。 */
 export interface ApplicationEventIdeUse {
-  documentId: string
+  browserSessionId: string
   revision: ApplicationEventRevision
   views: ApplicationEventIdeUseView[]
 }
@@ -94,7 +94,7 @@ export type ApplicationEventClientMessage =
   | { type: 'unsubscribe'; resource: ApplicationEventResource }
   | {
       type: 'ide-use'
-      documentId: string
+      browserSessionId: string
       revision: ApplicationEventRevision
       views: ApplicationEventIdeUseView[]
     }

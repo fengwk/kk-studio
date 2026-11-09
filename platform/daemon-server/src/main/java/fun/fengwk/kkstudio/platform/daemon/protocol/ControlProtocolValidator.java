@@ -903,16 +903,33 @@ public final class ControlProtocolValidator {
     switch (command.getAction()) {
       case OPEN_VIEW -> {
         requireUuid(command.hasViewId(), command.getViewId(), "ideCommand.viewId");
-        requireUuid(command.hasDocumentId(), command.getDocumentId(), "ideCommand.documentId");
+        requireUuid(
+            command.hasBrowserSessionId(),
+            command.getBrowserSessionId(),
+            "ideCommand.browserSessionId");
         requireUuid(command.hasEventNodeId(), command.getEventNodeId(), "ideCommand.eventNodeId");
         requireUuid(
             command.hasConnectionId(), command.getConnectionId(), "ideCommand.connectionId");
         requireUuid(command.hasClaimId(), command.getClaimId(), "ideCommand.claimId");
+        requireExpectedDaemonInstance(command);
+        requireInt64(
+            command.hasExpectedBindingEpoch(),
+            command.getExpectedBindingEpoch(),
+            "ideCommand.expectedBindingEpoch",
+            0,
+            Long.MAX_VALUE);
         if (command.hasBindingEpoch() || command.hasDiscard()) {
           throw new ControlProtocolException("OPEN_VIEW must not declare bindingEpoch or discard");
         }
         if (command.getMode() != IdeOpenMode.CREATE && command.getMode() != IdeOpenMode.RESUME) {
           throw new ControlProtocolException("ideCommand.mode is required for OPEN_VIEW");
+        }
+        if (command.getMode() == IdeOpenMode.CREATE && command.getExpectedBindingEpoch() != 0) {
+          throw new ControlProtocolException("OPEN_VIEW create requires expectedBindingEpoch 0");
+        }
+        if (command.getMode() == IdeOpenMode.RESUME && command.getExpectedBindingEpoch() <= 0) {
+          throw new ControlProtocolException(
+              "OPEN_VIEW resume requires a positive expectedBindingEpoch");
         }
         if (command.hasDirectory()) {
           requireIdePath(command.getDirectory(), "ideCommand.directory");
@@ -920,6 +937,7 @@ public final class ControlProtocolValidator {
       }
       case CHANGE_DIRECTORY -> {
         requireBoundView(command, false);
+        requireExpectedDaemonInstance(command);
         if (!command.hasDirectory()) {
           throw new ControlProtocolException("ideCommand.directory is required");
         }
@@ -928,6 +946,7 @@ public final class ControlProtocolValidator {
       }
       case FOCUS_TERMINAL, COLLAPSE_MOBILE -> {
         requireBoundView(command, false);
+        requireExpectedDaemonInstance(command);
         if (command.hasDirectory()) {
           throw new ControlProtocolException("ideCommand.directory is not valid for this action");
         }
@@ -935,6 +954,7 @@ public final class ControlProtocolValidator {
       }
       case CLOSE_VIEW -> {
         requireBoundView(command, true);
+        requireExpectedDaemonInstance(command);
         if (command.hasDirectory()) {
           throw new ControlProtocolException("CLOSE_VIEW must not declare directory");
         }
@@ -942,11 +962,13 @@ public final class ControlProtocolValidator {
       }
       case LIST_VIEWS, LIST_DIRECTORIES -> {
         if (command.hasViewId()
-            || command.hasDocumentId()
+            || command.hasBrowserSessionId()
             || command.hasEventNodeId()
             || command.hasConnectionId()
             || command.hasClaimId()
             || command.hasBindingEpoch()
+            || command.hasExpectedBindingEpoch()
+            || command.hasExpectedDaemonInstanceId()
             || command.getMode() != IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED
             || (command.getAction() == IdeAction.LIST_VIEWS && command.hasDirectory())
             || command.hasDiscard()) {
@@ -960,9 +982,19 @@ public final class ControlProtocolValidator {
     }
   }
 
+  private static void requireExpectedDaemonInstance(IdeCommand command) {
+    requireUuid(
+        command.hasExpectedDaemonInstanceId(),
+        command.getExpectedDaemonInstanceId(),
+        "ideCommand.expectedDaemonInstanceId");
+  }
+
   private static void requireBoundView(IdeCommand command, boolean discardRequired) {
     requireUuid(command.hasViewId(), command.getViewId(), "ideCommand.viewId");
-    requireUuid(command.hasDocumentId(), command.getDocumentId(), "ideCommand.documentId");
+    requireUuid(
+        command.hasBrowserSessionId(),
+        command.getBrowserSessionId(),
+        "ideCommand.browserSessionId");
     requirePositive(
         command.hasBindingEpoch(), command.getBindingEpoch(), "ideCommand.bindingEpoch");
     if (discardRequired && !command.hasDiscard()) {
@@ -977,6 +1009,7 @@ public final class ControlProtocolValidator {
     if (command.hasEventNodeId()
         || command.hasConnectionId()
         || command.hasClaimId()
+        || command.hasExpectedBindingEpoch()
         || command.getMode() != IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED) {
       throw new ControlProtocolException(
           "ideCommand declares fields that do not belong to its action");
@@ -988,15 +1021,30 @@ public final class ControlProtocolValidator {
       throw new ControlProtocolException("ideResult.ok is required");
     }
     if (!result.getOk()) {
-      if (result.hasViewId()
-          || result.hasDocumentId()
+      if (result.hasRevision()) {
+        if (result.hasViewId()
+            || result.hasBrowserSessionId()
+            || result.hasEventNodeId()
+            || result.hasConnectionId()
+            || result.hasClaimId()
+            || result.hasBindingEpoch()
+            || result.hasDirectory()
+            || result.hasWorkspacePath()
+            || result.hasDirectoryListing()) {
+          throw new ControlProtocolException(
+              "failed IDE result with a snapshot must only declare code, message, revision and views");
+        }
+        validateIdeSnapshot(result);
+      } else if (result.getViewsCount() > 0) {
+        throw new ControlProtocolException("ideResult.revision is required with views");
+      } else if (result.hasViewId()
+          || result.hasBrowserSessionId()
           || result.hasEventNodeId()
           || result.hasConnectionId()
           || result.hasClaimId()
           || result.hasBindingEpoch()
           || result.hasDirectory()
           || result.hasWorkspacePath()
-          || result.getViewsCount() > 0
           || result.hasDirectoryListing()) {
         throw new ControlProtocolException("failed IDE result must only declare code and message");
       }
@@ -1013,16 +1061,18 @@ public final class ControlProtocolValidator {
       throw new ControlProtocolException("successful IDE result must not declare code or message");
     }
     if (result.hasDirectoryListing()) {
-      if (result.hasViewId()
-          || result.hasDocumentId()
+      if (result.hasRevision()
+          || result.getViewsCount() > 0
+          || result.hasViewId()
+          || result.hasBrowserSessionId()
           || result.hasEventNodeId()
           || result.hasConnectionId()
           || result.hasClaimId()
           || result.hasBindingEpoch()
           || result.hasDirectory()
-          || result.hasWorkspacePath()
-          || result.getViewsCount() > 0) {
-        throw new ControlProtocolException("directory listing result must not contain view fields");
+          || result.hasWorkspacePath()) {
+        throw new ControlProtocolException(
+            "directory listing result must not contain view or snapshot fields");
       }
       IdeDirectoryListing listing = result.getDirectoryListing();
       requireIdePath(
@@ -1045,33 +1095,13 @@ public final class ControlProtocolValidator {
       }
       return;
     }
-    if (result.getViewsCount() > 0) {
-      if (result.hasViewId()
-          || result.hasDocumentId()
-          || result.hasDirectory()
-          || result.hasWorkspacePath()
-          || result.hasEventNodeId()
-          || result.hasConnectionId()
-          || result.hasClaimId()
-          || result.hasBindingEpoch()) {
-        throw new ControlProtocolException("IDE list result must only declare views");
-      }
-      if (result.getViewsCount() > MAX_LISTED_IDE_VIEWS) {
-        throw new ControlProtocolException(
-            "ideResult.views must not exceed " + MAX_LISTED_IDE_VIEWS + " entries");
-      }
-      Set<String> viewIds = new HashSet<>();
-      for (int index = 0; index < result.getViewsCount(); index++) {
-        IdeViewSummary view = result.getViews(index);
-        validateView(view, "ideResult.views[" + index + "]");
-        if (!viewIds.add(view.getViewId())) {
-          throw new ControlProtocolException("ideResult.views must not repeat viewId");
-        }
-      }
-      return;
+    if (result.hasRevision()) {
+      validateIdeSnapshot(result);
+    } else if (result.getViewsCount() > 0) {
+      throw new ControlProtocolException("ideResult.revision is required with views");
     }
     boolean binding =
-        result.hasDocumentId()
+        result.hasBrowserSessionId()
             || result.hasEventNodeId()
             || result.hasConnectionId()
             || result.hasClaimId()
@@ -1079,7 +1109,8 @@ public final class ControlProtocolValidator {
             || result.hasWorkspacePath();
     if (binding) {
       requireUuid(result.hasViewId(), result.getViewId(), "ideResult.viewId");
-      requireUuid(result.hasDocumentId(), result.getDocumentId(), "ideResult.documentId");
+      requireUuid(
+          result.hasBrowserSessionId(), result.getBrowserSessionId(), "ideResult.browserSessionId");
       requireUuid(result.hasEventNodeId(), result.getEventNodeId(), "ideResult.eventNodeId");
       requireUuid(result.hasConnectionId(), result.getConnectionId(), "ideResult.connectionId");
       requireUuid(result.hasClaimId(), result.getClaimId(), "ideResult.claimId");
@@ -1100,12 +1131,38 @@ public final class ControlProtocolValidator {
     }
     if (result.hasViewId()) {
       requireUuid(true, result.getViewId(), "ideResult.viewId");
+      return;
+    }
+    if (!result.hasRevision()) {
+      throw new ControlProtocolException("successful IDE result must declare an outcome");
+    }
+  }
+
+  private static void validateIdeSnapshot(IdeResult result) {
+    requireInt64(
+        result.hasRevision(), result.getRevision(), "ideResult.revision", 0, Long.MAX_VALUE);
+    if (result.getViewsCount() > MAX_LISTED_IDE_VIEWS) {
+      throw new ControlProtocolException(
+          "ideResult.views must not exceed " + MAX_LISTED_IDE_VIEWS + " entries");
+    }
+    Set<String> viewIds = new HashSet<>();
+    String previousViewId = null;
+    for (int index = 0; index < result.getViewsCount(); index++) {
+      IdeViewSummary view = result.getViews(index);
+      validateView(view, "ideResult.views[" + index + "]");
+      if (!viewIds.add(view.getViewId())) {
+        throw new ControlProtocolException("ideResult.views must not repeat viewId");
+      }
+      if (previousViewId != null && previousViewId.compareTo(view.getViewId()) > 0) {
+        throw new ControlProtocolException("ideResult.views must be sorted by viewId");
+      }
+      previousViewId = view.getViewId();
     }
   }
 
   private static void validateView(IdeViewSummary view, String path) {
     requireUuid(view.hasViewId(), view.getViewId(), path + ".viewId");
-    requireUuid(view.hasDocumentId(), view.getDocumentId(), path + ".documentId");
+    requireUuid(view.hasBrowserSessionId(), view.getBrowserSessionId(), path + ".browserSessionId");
     requireUuid(view.hasEventNodeId(), view.getEventNodeId(), path + ".eventNodeId");
     requireUuid(view.hasConnectionId(), view.getConnectionId(), path + ".connectionId");
     requireUuid(view.hasClaimId(), view.getClaimId(), path + ".claimId");
@@ -1135,7 +1192,8 @@ public final class ControlProtocolValidator {
       if (!viewIds.add(binding.getViewId())) {
         throw new ControlProtocolException("ideLease.bindings must not repeat viewId");
       }
-      requireUuid(binding.hasDocumentId(), binding.getDocumentId(), path + ".documentId");
+      requireUuid(
+          binding.hasBrowserSessionId(), binding.getBrowserSessionId(), path + ".browserSessionId");
       requirePositive(binding.hasBindingEpoch(), binding.getBindingEpoch(), path + ".bindingEpoch");
     }
   }

@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.ide.dto;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-/** 关闭 IDE 视图：必须携带当前文档/代际，{@code discard} 必须由显式放弃操作给出。 */
+/** 关闭 IDE 视图：{@code discard} 必须由显式放弃操作给出。 */
 @Data
-public class EnvironmentIdeCloseViewDTO {
+@EqualsAndHashCode(callSuper = true)
+public class EnvironmentIdeCloseViewDTO extends EnvironmentIdeViewBindingDTO {
 
-  private String documentId;
-  private Long bindingEpoch;
   private boolean discard;
 }

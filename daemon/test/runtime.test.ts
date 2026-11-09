@@ -258,6 +258,7 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
         code: env.payload.value.code,
         message: env.payload.value.message,
         views: env.payload.value.views ?? [],
+        revision: env.payload.value.revision,
       }
     }
     return {
@@ -382,7 +383,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         value: create(IdeCommandSchema, {
           action: ACTION_ENUM_MAP[rawPayload.action] ?? ProtoIdeAction.LIST_VIEWS,
           viewId: rawPayload.viewId,
-          documentId: rawPayload.documentId,
+          browserSessionId: rawPayload.browserSessionId,
           eventNodeId: rawPayload.eventNodeId,
           connectionId: rawPayload.connectionId,
           claimId: rawPayload.claimId,
@@ -390,6 +391,10 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
           mode: rawPayload.mode === 'open' ? ProtoIdeOpenMode.RESUME : (rawPayload.mode === 'create' ? ProtoIdeOpenMode.CREATE : undefined),
           directory: rawPayload.directory,
           discard: rawPayload.discard,
+          expectedBindingEpoch: rawPayload.expectedBindingEpoch !== undefined
+            ? BigInt(rawPayload.expectedBindingEpoch)
+            : undefined,
+          expectedDaemonInstanceId: rawPayload.expectedDaemonInstanceId,
         }),
       },
     })
@@ -405,7 +410,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
           bindings: (rawPayload.bindings ?? []).map((b: any) =>
             create(IdeLeaseBindingSchema, {
               viewId: b.viewId,
-              documentId: b.documentId,
+              browserSessionId: b.browserSessionId,
               bindingEpoch: BigInt(b.bindingEpoch ?? 1),
             }),
           ),
@@ -484,11 +489,14 @@ function textResult(callId: string, text = 'ok'): CapabilityResult {
 const openViewPayload = {
   action: 'OPEN_VIEW',
   viewId: ENV,
-  documentId: '22222222-3333-4444-8555-666666666666',
+  browserSessionId: '22222222-3333-4444-8555-666666666666',
   eventNodeId: '33333333-4444-4555-8666-777777777777',
   connectionId: '44444444-5555-4666-8777-888888888888',
   claimId: '55555555-6666-4777-8888-999999999999',
   mode: 'create',
+  expectedBindingEpoch: '0',
+  expectedDaemonInstanceId: 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5',
+  directory: '/workspace/dir',
 }
 
 const lease = {
@@ -496,7 +504,7 @@ const lease = {
   bindings: [
     {
       viewId: ENV,
-      documentId: '22222222-3333-4444-8555-666666666666',
+      browserSessionId: '22222222-3333-4444-8555-666666666666',
       bindingEpoch: '1',
     },
   ],
@@ -1957,7 +1965,7 @@ describe('runtime update handling', () => {
           bindings: [
             {
               viewId: ENV,
-              documentId: '99999999-2222-4333-8444-555555555555',
+              browserSessionId: '99999999-2222-4333-8444-555555555555',
               bindingEpoch: '1',
             },
           ],
@@ -2309,7 +2317,7 @@ describe('runtime extension handlers', () => {
     bindings: [
       {
         viewId: ENV,
-        documentId: '99999999-2222-4333-8444-555555555555',
+        browserSessionId: '99999999-2222-4333-8444-555555555555',
         bindingEpoch: '1',
       },
     ],
@@ -2438,7 +2446,9 @@ describe('runtime IDE commands', () => {
       ide: ideService({
         async handle(command) {
           commands.push(command)
-          return command.action === 'LIST_DIRECTORIES' ? { ok: true, directoryListing: listing } : { ok: true }
+          return command.action === 'LIST_DIRECTORIES'
+            ? { ok: true, directoryListing: listing }
+            : { ok: true, viewId: ENV }
         },
       }),
     })
@@ -2454,12 +2464,25 @@ describe('runtime IDE commands', () => {
       expect(result.payload.value.ok).toBe(true)
       expect(result.payload.value.directoryListing).toMatchObject(listing)
       setup.transport.receive(serverMessage('IDE_COMMAND', {
-        invocationId: 'ide-collapse', payload: { action: 'COLLAPSE_MOBILE', viewId: ENV },
+        invocationId: 'ide-collapse',
+        payload: {
+          action: 'COLLAPSE_MOBILE',
+          viewId: ENV,
+          browserSessionId: '22222222-3333-4444-8555-666666666666',
+          bindingEpoch: '1',
+          expectedDaemonInstanceId: 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5',
+        },
       }))
       await waitFor(() => setup.transport.sent.some((env) => env.invocationId === 'ide-collapse'))
       expect(commands).toHaveLength(2)
       expect(commands[0]).toMatchObject({ action: 'LIST_DIRECTORIES', directory: '/workspace' })
-      expect(commands[1]).toMatchObject({ action: 'COLLAPSE_MOBILE', viewId: ENV })
+      expect(commands[1]).toMatchObject({
+        action: 'COLLAPSE_MOBILE',
+        viewId: ENV,
+        browserSessionId: '22222222-3333-4444-8555-666666666666',
+        bindingEpoch: '1',
+        expectedDaemonInstanceId: 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5',
+      })
       expect(sent(setup.transport).find((env) => env.invocationId === 'ide-collapse')?.payload.ok).toBe(true)
     } finally {
       setup.runtime.close()
@@ -2558,7 +2581,7 @@ describe('runtime IDE commands', () => {
       ide: ideService({
         async handle() {
           handled++
-          return { ok: true, views: [] }
+          return { ok: true, revision: '1', views: [] }
         },
       }),
     })
@@ -2569,12 +2592,12 @@ describe('runtime IDE commands', () => {
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT'))
     const result = sent(setup.transport).find((envelope) => envelope.messageType === 'IDE_RESULT')
     expect(result?.invocationId).toBe('ide-1')
-    expect(result?.payload).toEqual({ ok: true, views: [] })
+    expect(result?.payload).toEqual({ ok: true, views: [], revision: 1n })
     expect(handled).toBe(1)
     setup.runtime.close()
   })
 
-  it('maps all protocol fields including discard, bindingEpoch, directory to IdeCommand', async () => {
+  it('maps IDE command browser session, binding epoch and expected daemon instance', async () => {
     let captured: any = null
     const setup = buildRuntime({
       ide: ideService({
@@ -2592,10 +2615,10 @@ describe('runtime IDE commands', () => {
         payload: {
           action: 'CLOSE_VIEW',
           viewId: '11111111-1111-1111-1111-111111111111',
-          documentId: '22222222-2222-2222-2222-222222222222',
+          browserSessionId: '22222222-2222-2222-2222-222222222222',
           bindingEpoch: 42,
           discard: true,
-          directory: '/workspace/dir',
+          expectedDaemonInstanceId: 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5',
         },
       }),
     )
@@ -2603,10 +2626,10 @@ describe('runtime IDE commands', () => {
     expect(captured).toMatchObject({
       action: 'CLOSE_VIEW',
       viewId: '11111111-1111-1111-1111-111111111111',
-      documentId: '22222222-2222-2222-2222-222222222222',
+      browserSessionId: '22222222-2222-2222-2222-222222222222',
       bindingEpoch: '42',
       discard: true,
-      directory: '/workspace/dir',
+      expectedDaemonInstanceId: 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5',
     })
     setup.runtime.close()
   })
@@ -2650,7 +2673,7 @@ describe('runtime IDE commands', () => {
         payload: {
           action: 'CLOSE_VIEW',
           viewId: ENV,
-          documentId: '22222222-3333-4444-8555-666666666666',
+          browserSessionId: '22222222-3333-4444-8555-666666666666',
           bindingEpoch: '1',
           discard: true,
         },

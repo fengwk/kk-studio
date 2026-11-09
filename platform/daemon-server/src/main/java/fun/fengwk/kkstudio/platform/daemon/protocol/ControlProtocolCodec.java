@@ -17,7 +17,7 @@ import java.util.Objects;
 public final class ControlProtocolCodec {
 
   /** 控制协议版本；用于握手与 426 升级载荷。 */
-  public static final int PROTOCOL_VERSION = 2;
+  public static final int PROTOCOL_VERSION = 3;
 
   private ControlProtocolCodec() {}
 

@@ -153,7 +153,7 @@ export type IdeViewState = 'OPEN' | 'CLOSING'
 /** 视图的 owner 身份与本机资源快照；这类身份只随命令/列表回执返回，不进入浏览器持久存储。 */
 export interface IdeViewSummary {
   viewId: string
-  documentId: string
+  browserSessionId: string
   eventNodeId: string
   connectionId: string
   claimId: string
@@ -166,7 +166,7 @@ export interface IdeViewSummary {
 export interface IdeCommand {
   action: IdeAction
   viewId?: string
-  documentId?: string
+  browserSessionId?: string
   eventNodeId?: string
   connectionId?: string
   claimId?: string
@@ -174,12 +174,14 @@ export interface IdeCommand {
   mode?: IdeOpenMode
   directory?: string
   discard?: boolean
+  expectedBindingEpoch?: string
+  expectedDaemonInstanceId?: string
 }
 
 export interface IdeReply {
   ok: boolean
   viewId?: string
-  documentId?: string
+  browserSessionId?: string
   eventNodeId?: string
   connectionId?: string
   claimId?: string
@@ -187,6 +189,7 @@ export interface IdeReply {
   directory?: string
   workspacePath?: string
   views?: IdeViewSummary[]
+  revision?: string
   directoryListing?: {
     path: string
     parentPath?: string

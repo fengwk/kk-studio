@@ -154,7 +154,8 @@ export function executionExitedEnvelope() {
 }
 
 const VIEW = '11111111-1111-4111-8111-111111111111'
-const DOCUMENT = '22222222-2222-4222-8222-222222222222'
+const BROWSER_SESSION = '22222222-2222-4222-8222-222222222222'
+const DAEMON_INSTANCE = 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5'
 const NODE = '33333333-3333-4333-8333-333333333333'
 const CONNECTION = '44444444-4444-4444-8444-444444444444'
 const CLAIM = '55555555-5555-4555-8555-555555555555'
@@ -397,10 +398,12 @@ export function ideCommandEnvelope() {
     value: create(IdeCommandSchema, {
       action: IdeAction.OPEN_VIEW,
       viewId: VIEW,
-      documentId: DOCUMENT,
+      browserSessionId: BROWSER_SESSION,
       eventNodeId: NODE,
       connectionId: CONNECTION,
       claimId: CLAIM,
+      expectedBindingEpoch: 0n,
+      expectedDaemonInstanceId: DAEMON_INSTANCE,
       mode: IdeOpenMode.CREATE,
       directory: '/work',
     }),
@@ -412,10 +415,19 @@ export function ideResultEnvelope() {
     case: 'ideResult',
     value: create(IdeResultSchema, {
       ok: true,
+      viewId: VIEW,
+      browserSessionId: BROWSER_SESSION,
+      eventNodeId: NODE,
+      connectionId: CONNECTION,
+      claimId: CLAIM,
+      bindingEpoch: 3n,
+      directory: '/work',
+      workspacePath: '/work',
+      revision: 3n,
       views: [
         create(IdeViewSummarySchema, {
           viewId: VIEW,
-          documentId: DOCUMENT,
+          browserSessionId: BROWSER_SESSION,
           eventNodeId: NODE,
           connectionId: CONNECTION,
           claimId: CLAIM,
@@ -437,7 +449,7 @@ export function ideLeaseEnvelope() {
       case: 'ideLease',
       value: create(IdeLeaseSchema, {
         round: 2n,
-        bindings: [create(IdeLeaseBindingSchema, { viewId: VIEW, documentId: DOCUMENT, bindingEpoch: 4n })],
+        bindings: [create(IdeLeaseBindingSchema, { viewId: VIEW, browserSessionId: BROWSER_SESSION, bindingEpoch: 4n })],
       }),
     },
   })

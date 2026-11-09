@@ -20,6 +20,118 @@ import java.util.List;
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
 
+  /** v3 冻结 OPEN 的 expected 条件与 IDE 快照修订/排序，失败回执只能在状态已改变时携带快照。 */
+  @Test
+  void validatesIdeV3BindingAndSnapshotContract() {
+    assertEquals(3, ControlProtocolCodec.PROTOCOL_VERSION);
+    Envelope command =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-command.bin"));
+    IdeCommand open = command.getIdeCommand();
+    assertEquals("22222222-2222-4222-8222-222222222222", open.getBrowserSessionId());
+    assertEquals(ControlProtocolFixtures.DAEMON_INSTANCE_ID, open.getExpectedDaemonInstanceId());
+    assertEquals(0L, open.getExpectedBindingEpoch());
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(open.toBuilder().clearExpectedBindingEpoch())
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(open.toBuilder().setExpectedBindingEpoch(1))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        open.toBuilder().setMode(IdeOpenMode.RESUME).setExpectedBindingEpoch(0))
+                    .build()));
+
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(
+                IdeCommand.newBuilder()
+                    .setAction(IdeAction.CHANGE_DIRECTORY)
+                    .setViewId(open.getViewId())
+                    .setBrowserSessionId(open.getBrowserSessionId())
+                    .setBindingEpoch(1)
+                    .setExpectedDaemonInstanceId(open.getExpectedDaemonInstanceId())
+                    .setDirectory("/work"))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        IdeCommand.newBuilder()
+                            .setAction(IdeAction.CHANGE_DIRECTORY)
+                            .setViewId(open.getViewId())
+                            .setBrowserSessionId(open.getBrowserSessionId())
+                            .setBindingEpoch(1)
+                            .setDirectory("/work"))
+                    .build()));
+
+    Envelope result =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-result.bin"));
+    IdeViewSummary view = result.getIdeResult().getViews(0);
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true).setRevision(0)).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(IdeResult.newBuilder().setOk(true).addViews(view))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        IdeResult.newBuilder()
+                            .setOk(true)
+                            .setRevision(1)
+                            .addViews(
+                                view.toBuilder()
+                                    .setViewId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                            .addViews(view))
+                    .build()));
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder()
+            .setIdeResult(
+                IdeResult.newBuilder()
+                    .setOk(false)
+                    .setCode("VIEW_GONE")
+                    .setMessage("gone")
+                    .setRevision(2)
+                    .addViews(view))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        IdeResult.newBuilder()
+                            .setOk(false)
+                            .setCode("VIEW_GONE")
+                            .setMessage("gone")
+                            .setRevision(2)
+                            .setBrowserSessionId(open.getBrowserSessionId()))
+                    .build()));
+  }
+
   /** 目录结果与视图回执互斥，新命令遵守绑定和路径边界。 */
   @Test
   void validatesDirectoryListingAndMobileCommands() {
@@ -40,8 +152,9 @@ class ControlProtocolCodecTest {
         IdeCommand.newBuilder()
             .setAction(IdeAction.COLLAPSE_MOBILE)
             .setViewId(command.getIdeCommand().getViewId())
-            .setDocumentId(command.getIdeCommand().getDocumentId())
+            .setBrowserSessionId(command.getIdeCommand().getBrowserSessionId())
             .setBindingEpoch(1)
+            .setExpectedDaemonInstanceId(ControlProtocolFixtures.DAEMON_INSTANCE_ID)
             .build();
     ControlProtocolCodec.encodeBinary(command.toBuilder().setIdeCommand(mobile).build());
     assertThrows(
@@ -230,8 +343,9 @@ class ControlProtocolCodecTest {
                 IdeCommand.newBuilder()
                     .setAction(IdeAction.CHANGE_DIRECTORY)
                     .setViewId(command.getIdeCommand().getViewId())
-                    .setDocumentId(command.getIdeCommand().getDocumentId())
+                    .setBrowserSessionId(command.getIdeCommand().getBrowserSessionId())
                     .setBindingEpoch(1)
+                    .setExpectedDaemonInstanceId(ControlProtocolFixtures.DAEMON_INSTANCE_ID)
                     .setDirectory("/work"))
             .build());
     ControlProtocolCodec.encodeBinary(
@@ -240,8 +354,9 @@ class ControlProtocolCodecTest {
                 IdeCommand.newBuilder()
                     .setAction(IdeAction.CLOSE_VIEW)
                     .setViewId(command.getIdeCommand().getViewId())
-                    .setDocumentId(command.getIdeCommand().getDocumentId())
+                    .setBrowserSessionId(command.getIdeCommand().getBrowserSessionId())
                     .setBindingEpoch(1)
+                    .setExpectedDaemonInstanceId(ControlProtocolFixtures.DAEMON_INSTANCE_ID)
                     .setDiscard(true))
             .build());
 
@@ -260,8 +375,11 @@ class ControlProtocolCodecTest {
                     .setIdeResult(
                         IdeResult.newBuilder().setOk(false).setCode("busy").setMessage("later"))
                     .build()));
-    ControlProtocolCodec.encodeBinary(
-        result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build()));
 
     Envelope update =
         Envelope.newBuilder()
@@ -324,8 +442,9 @@ class ControlProtocolCodecTest {
                 IdeCommand.newBuilder()
                     .setAction(IdeAction.FOCUS_TERMINAL)
                     .setViewId(open.getViewId())
-                    .setDocumentId(open.getDocumentId())
-                    .setBindingEpoch(1))
+                    .setBrowserSessionId(open.getBrowserSessionId())
+                    .setBindingEpoch(1)
+                    .setExpectedDaemonInstanceId(ControlProtocolFixtures.DAEMON_INSTANCE_ID))
             .build());
     // 未声明的枚举值必须被拒绝，即使其它字段形状与 bound 动作一致。
     assertThrows(
@@ -337,7 +456,7 @@ class ControlProtocolCodecTest {
                         IdeCommand.newBuilder()
                             .setActionValue(999)
                             .setViewId(open.getViewId())
-                            .setDocumentId(open.getDocumentId())
+                            .setBrowserSessionId(open.getBrowserSessionId())
                             .setBindingEpoch(1))
                     .build()),
         "undeclared action value 999 must be rejected");
@@ -354,7 +473,7 @@ class ControlProtocolCodecTest {
                         IdeCommand.newBuilder()
                             .setAction(IdeAction.CHANGE_DIRECTORY)
                             .setViewId(open.getViewId())
-                            .setDocumentId(open.getDocumentId())
+                            .setBrowserSessionId(open.getBrowserSessionId())
                             .setBindingEpoch(1)
                             .setDiscard(true)
                             .setDirectory("/work"))
@@ -368,7 +487,7 @@ class ControlProtocolCodecTest {
                         IdeCommand.newBuilder()
                             .setAction(IdeAction.CLOSE_VIEW)
                             .setViewId(open.getViewId())
-                            .setDocumentId(open.getDocumentId())
+                            .setBrowserSessionId(open.getBrowserSessionId())
                             .setBindingEpoch(1))
                     .build()));
 
@@ -379,7 +498,7 @@ class ControlProtocolCodecTest {
                 IdeResult.newBuilder()
                     .setOk(true)
                     .setViewId(view.getViewId())
-                    .setDocumentId(view.getDocumentId())
+                    .setBrowserSessionId(view.getBrowserSessionId())
                     .setEventNodeId(view.getEventNodeId())
                     .setConnectionId(view.getConnectionId())
                     .setClaimId(view.getClaimId())

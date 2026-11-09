@@ -68,12 +68,14 @@ import {
   UpgradeRequiredSchema,
   type CapabilityResult,
   type Envelope,
+  type IdeResult,
   type Invoke,
   type ResourceContent,
 } from '../../src/generated/control_pb.js'
 import {
   decodeFrame,
   encodeFrame,
+  PROTOCOL_VERSION,
   validate,
   validateUpgrade,
 } from '../../src/protocol/control/codec.js'
@@ -113,6 +115,8 @@ function encodeBinary(envelope: Envelope): Uint8Array {
 function decodeBinary(bytes: Uint8Array): Envelope {
   return decodeFrame(frame(bytes))
 }
+
+const DAEMON_INSTANCE = 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5'
 
 function readGolden(name: string): Uint8Array {
   return new Uint8Array(readFileSync(join(GOLDEN, name)))
@@ -156,6 +160,10 @@ function validInvoke() {
 }
 
 describe('control binary codec', () => {
+  it('pins the public control protocol version to v3', () => {
+    expect(PROTOCOL_VERSION).toBe(3)
+  })
+
   it('roundtrips directory listing and mobile actions with their payloads', () => {
     // Verify the action fields survive validation and binary serialization.
     for (const action of [IdeAction.LIST_DIRECTORIES, IdeAction.COLLAPSE_MOBILE]) {
@@ -164,7 +172,8 @@ describe('control binary codec', () => {
         payload: { case: 'ideCommand', value: create(IdeCommandSchema, action === IdeAction.LIST_DIRECTORIES
           ? { action, directory: '/workspace' }
           : { action, viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-            documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', bindingEpoch: 1n }) },
+            browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', bindingEpoch: 1n,
+            expectedDaemonInstanceId: DAEMON_INSTANCE }) },
       })
       expect(decodeBinary(encodeBinary(command))).toEqual(command)
     }
@@ -967,12 +976,14 @@ describe('control binary codec', () => {
             value: create(IdeCommandSchema, {
               action: IdeAction.OPEN_VIEW,
               viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               mode: IdeOpenMode.CREATE,
               bindingEpoch: 1n,
+              expectedBindingEpoch: 0n,
+              expectedDaemonInstanceId: DAEMON_INSTANCE,
             }),
           },
         }),
@@ -990,8 +1001,9 @@ describe('control binary codec', () => {
             value: create(IdeCommandSchema, {
               action: IdeAction.CHANGE_DIRECTORY,
               viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               bindingEpoch: 1n,
+              expectedDaemonInstanceId: DAEMON_INSTANCE,
             }),
           },
         }),
@@ -1009,8 +1021,9 @@ describe('control binary codec', () => {
             value: create(IdeCommandSchema, {
               action: IdeAction.CLOSE_VIEW,
               viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               bindingEpoch: 1n,
+              expectedDaemonInstanceId: DAEMON_INSTANCE,
             }),
           },
         }),
@@ -1078,12 +1091,12 @@ describe('control binary codec', () => {
               bindings: [
                 create(IdeLeaseBindingSchema, {
                   viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
                   bindingEpoch: 1n,
                 }),
                 create(IdeLeaseBindingSchema, {
                   viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae8',
+                  browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae8',
                   bindingEpoch: 1n,
                 }),
               ],
@@ -1288,11 +1301,13 @@ describe('control binary codec', () => {
             value: create(IdeCommandSchema, {
               action: IdeAction.OPEN_VIEW,
               viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               mode: IdeOpenMode.CREATE,
+              expectedBindingEpoch: 0n,
+              expectedDaemonInstanceId: DAEMON_INSTANCE,
               directory: '/bad\x00path',
             }),
           },
@@ -1312,8 +1327,9 @@ describe('control binary codec', () => {
         value: create(IdeCommandSchema, {
           action: IdeAction.FOCUS_TERMINAL,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
+          expectedDaemonInstanceId: DAEMON_INSTANCE,
         }),
       },
     })
@@ -1330,7 +1346,7 @@ describe('control binary codec', () => {
         value: create(IdeCommandSchema, {
           action: 5 as IdeAction,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
         }),
       },
@@ -1361,8 +1377,9 @@ describe('control binary codec', () => {
         value: create(IdeCommandSchema, {
           action: IdeAction.CLOSE_VIEW,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
+          expectedDaemonInstanceId: DAEMON_INSTANCE,
           discard: true,
         }),
       },
@@ -1378,10 +1395,11 @@ describe('control binary codec', () => {
         case: 'ideResult',
         value: create(IdeResultSchema, {
           ok: true,
+          revision: 1n,
           views: [
             create(IdeViewSummarySchema, {
               viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
               claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
@@ -1437,13 +1455,14 @@ describe('control binary codec', () => {
         value: create(IdeResultSchema, {
           ok: true,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
           directory: '/workspace/dir',
           workspacePath: '/workspace/dir/project.code-workspace',
+          revision: 1n,
         }),
       },
     })
@@ -1460,10 +1479,11 @@ describe('control binary codec', () => {
             case: 'ideResult',
             value: create(IdeResultSchema, {
               ok: true,
+              revision: 1n,
               views: [
                 create(IdeViewSummarySchema, {
                   viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
                   eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
                   connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
                   claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
@@ -1483,7 +1503,7 @@ describe('control binary codec', () => {
     const tooManyBindings = Array.from({ length: 65 }, (_, i) =>
       create(IdeLeaseBindingSchema, {
         viewId: `7c9e6679-7425-40de-944b-${String(i).padStart(12, '0')}`,
-        documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
         bindingEpoch: 1n,
       }),
     )
@@ -1594,11 +1614,11 @@ describe('control framing', () => {
     expect(frame(new Uint8Array([1, 2, 3]))).toEqual(new Uint8Array([0, 0, 0, 3, 1, 2, 3]))
   })
 
-  it('validates ide list result constraints (extra fields, view limit, duplicate viewId)', () => {
+  it('validates IDE snapshot constraints (revision, view limit, duplicate and order)', () => {
     const makeValidView = (viewId = '7c9e6679-7425-40de-944b-e07fc1f90ae7') =>
       create(IdeViewSummarySchema, {
         viewId,
-        documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
         eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
         connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
         claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
@@ -1607,56 +1627,66 @@ describe('control framing', () => {
         workspacePath: '/workspace/dir/project.code-workspace',
         state: IdeViewState.OPEN,
       })
+    const resultEnvelope = (result: IdeResult) =>
+      create(EnvelopeSchema, {
+        messageType: MessageType.IDE_RESULT,
+        environmentId: ENVIRONMENT_ID,
+        invocationId: INVOCATION_ID,
+        payload: { case: 'ideResult', value: result },
+      })
 
-    // 1. IDE list result 声明了非 views 字段 (例如 documentId)
-    const extraField = create(EnvelopeSchema, {
-      messageType: MessageType.IDE_RESULT,
-      environmentId: ENVIRONMENT_ID,
-      invocationId: INVOCATION_ID,
-      payload: {
-        case: 'ideResult',
-        value: create(IdeResultSchema, {
-          ok: true,
-          action: IdeAction.LIST_VIEWS,
-          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-          views: [makeValidView()],
-        }),
-      },
-    })
-    expect(() => validate(extraField)).toThrow(/must only declare views/)
+    // 1. 快照声明了不完整的绑定字段
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: true,
+        revision: 1n,
+        browserSessionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        views: [makeValidView()],
+      }))),
+    ).toThrow(/ideResult\.viewId/)
 
     // 2. views 超过上限 64
-    const tooManyViews = Array.from({ length: 65 }, () => makeValidView())
-    const excessViews = create(EnvelopeSchema, {
-      messageType: MessageType.IDE_RESULT,
-      environmentId: ENVIRONMENT_ID,
-      invocationId: INVOCATION_ID,
-      payload: {
-        case: 'ideResult',
-        value: create(IdeResultSchema, {
-          ok: true,
-          action: IdeAction.LIST_VIEWS,
-          views: tooManyViews,
-        }),
-      },
-    })
-    expect(() => validate(excessViews)).toThrow(/must not exceed 64/)
+    const tooManyViews = Array.from({ length: 65 }, (_, index) =>
+      makeValidView(`7c9e6679-7425-40de-944b-${String(index).padStart(12, '0')}`))
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: true,
+        revision: 1n,
+        views: tooManyViews,
+      }))),
+    ).toThrow(/must not exceed 64/)
 
     // 3. 重复 viewId
-    const duplicateViews = create(EnvelopeSchema, {
-      messageType: MessageType.IDE_RESULT,
-      environmentId: ENVIRONMENT_ID,
-      invocationId: INVOCATION_ID,
-      payload: {
-        case: 'ideResult',
-        value: create(IdeResultSchema, {
-          ok: true,
-          action: IdeAction.LIST_VIEWS,
-          views: [makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7'), makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7')],
-        }),
-      },
-    })
-    expect(() => validate(duplicateViews)).toThrow(/must not repeat viewId/)
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: true,
+        revision: 1n,
+        views: [
+          makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7'),
+          makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7'),
+        ],
+      }))),
+    ).toThrow(/must not repeat viewId/)
+
+    // 4. viewId 必须按快照规范升序
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: true,
+        revision: 1n,
+        views: [
+          makeValidView('8c9e6679-7425-40de-944b-e07fc1f90ae7'),
+          makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7'),
+        ],
+      }))),
+    ).toThrow(/must be sorted by viewId/)
+
+    // 5. views 必须与 revision 同一快照提交
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: true,
+        views: [makeValidView()],
+      }))),
+    ).toThrow(/revision is required with views/)
   })
 
   it('validates and roundtrips SKILL_SYNC and SKILL_STATE', () => {

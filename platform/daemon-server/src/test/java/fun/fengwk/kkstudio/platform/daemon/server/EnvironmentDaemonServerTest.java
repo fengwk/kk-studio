@@ -2710,10 +2710,12 @@ class EnvironmentDaemonServerTest {
           .setAction(IdeAction.OPEN_VIEW)
           .setMode(IdeOpenMode.CREATE)
           .setViewId("11111111-1111-1111-1111-111111111111")
-          .setDocumentId("22222222-2222-2222-2222-222222222222")
+          .setBrowserSessionId("22222222-2222-2222-2222-222222222222")
           .setEventNodeId("33333333-3333-3333-3333-333333333333")
           .setConnectionId("44444444-4444-4444-4444-444444444444")
           .setClaimId("55555555-5555-5555-5555-555555555555")
+          .setExpectedBindingEpoch(0L)
+          .setExpectedDaemonInstanceId("a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5")
           .build();
 
   /** 测试意图：宿主 READY 与更新回执通知失败只记录固定阶段与异常类名，不改变会话状态，也不阻断后续帧处理。 */
@@ -3342,14 +3344,14 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-runtime-controls");
     UUID viewId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-    UUID documentId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    UUID browserSessionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
     IdeLease ideLease =
         IdeLease.newBuilder()
             .setRound(2L)
             .addBindings(
                 IdeLeaseBinding.newBuilder()
                     .setViewId(viewId.toString())
-                    .setDocumentId(documentId.toString())
+                    .setBrowserSessionId(browserSessionId.toString())
                     .setBindingEpoch(3L)
                     .build())
             .build();

@@ -100,7 +100,7 @@ export function toProtoIdeResult(reply: IdeReply): IdeResult {
   const views = reply.views?.map((view) =>
     create(IdeViewSummarySchema, {
       viewId: view.viewId,
-      documentId: view.documentId,
+      browserSessionId: view.browserSessionId,
       eventNodeId: view.eventNodeId,
       connectionId: view.connectionId,
       claimId: view.claimId,
@@ -114,7 +114,7 @@ export function toProtoIdeResult(reply: IdeReply): IdeResult {
   return create(IdeResultSchema, {
     ok: reply.ok,
     viewId: reply.viewId,
-    documentId: reply.documentId,
+    browserSessionId: reply.browserSessionId,
     eventNodeId: reply.eventNodeId,
     connectionId: reply.connectionId,
     claimId: reply.claimId,
@@ -122,6 +122,7 @@ export function toProtoIdeResult(reply: IdeReply): IdeResult {
     directory: reply.directory,
     workspacePath: reply.workspacePath,
     views: views ?? [],
+    revision: reply.revision !== undefined ? BigInt(reply.revision) : undefined,
     directoryListing: reply.directoryListing === undefined ? undefined : create(IdeDirectoryListingSchema, {
       path: reply.directoryListing.path,
       parentPath: reply.directoryListing.parentPath,
@@ -173,7 +174,7 @@ function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
   return {
     action: toIdeAction(protoCmd.action),
     viewId: protoCmd.viewId ?? undefined,
-    documentId: protoCmd.documentId ?? undefined,
+    browserSessionId: protoCmd.browserSessionId ?? undefined,
     eventNodeId: protoCmd.eventNodeId ?? undefined,
     connectionId: protoCmd.connectionId ?? undefined,
     claimId: protoCmd.claimId ?? undefined,
@@ -181,6 +182,10 @@ function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
     mode: toIdeMode(protoCmd.mode),
     directory: protoCmd.directory ?? undefined,
     discard: protoCmd.discard ?? undefined,
+    expectedBindingEpoch: protoCmd.expectedBindingEpoch !== undefined
+      ? protoCmd.expectedBindingEpoch.toString()
+      : undefined,
+    expectedDaemonInstanceId: protoCmd.expectedDaemonInstanceId ?? undefined,
   }
 }
 
@@ -190,7 +195,7 @@ export function toIdeLeaseProof(lease: IdeLease): IdeLease {
     round: String(lease.round ?? 0n),
     bindings: (lease.bindings ?? []).map((binding) => ({
       viewId: binding.viewId,
-      documentId: binding.documentId,
+      browserSessionId: binding.browserSessionId,
       bindingEpoch: String(binding.bindingEpoch ?? 0n),
     })),
   } as unknown as IdeLease

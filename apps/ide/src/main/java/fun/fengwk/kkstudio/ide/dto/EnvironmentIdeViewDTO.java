@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.ide.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
@@ -14,7 +15,7 @@ public class EnvironmentIdeViewDTO {
 
   private String viewId;
   private String environmentId;
-  private String documentId;
+  private String browserSessionId;
   private String eventNodeId;
   private String connectionId;
   private String claimId;
@@ -25,5 +26,6 @@ public class EnvironmentIdeViewDTO {
   private EnvironmentIdeViewState state;
 
   /** Studio 根相对的短时一次性 bootstrap 入口；只有 claim 成功时返回。 */
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private @Nullable String entryUrl;
 }

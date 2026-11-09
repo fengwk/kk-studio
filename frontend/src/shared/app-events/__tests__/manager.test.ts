@@ -11,8 +11,8 @@ const EVENT_NODE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const EVENT_NODE_B = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab'
 const CONNECTION_A = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const CONNECTION_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc'
-const DOCUMENT_A = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
-const DOCUMENT_B = 'dddddddd-dddd-4ddd-8ddd-ddddddddddde'
+const BROWSER_SESSION_A = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const BROWSER_SESSION_B = 'dddddddd-dddd-4ddd-8ddd-ddddddddddde'
 const ENVIRONMENT_A = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 const VIEW_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
 const CLAIM_A = '99999999-9999-4999-8999-999999999999'
@@ -22,9 +22,9 @@ function connectLatest(socket: ReturnType<FakeWebSocketHarness['openLatest']>, n
   socket.emitServer({ type: 'connected', eventNodeId: node, connectionId: connection })
 }
 
-function usage(revision = '1', documentId = DOCUMENT_A, claimId = CLAIM_A) {
+function usage(revision = '1', browserSessionId = BROWSER_SESSION_A, claimId = CLAIM_A) {
   return {
-    documentId,
+    browserSessionId,
     revision,
     views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId }],
   }
@@ -190,28 +190,28 @@ describe('ApplicationEventManager', () => {
       {
         
         type: 'ide-use',
-        documentId: DOCUMENT_A,
+        browserSessionId: BROWSER_SESSION_A,
         revision: '1',
         views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId: CLAIM_A }],
       },
       {
         
         type: 'ide-use',
-        documentId: DOCUMENT_A,
+        browserSessionId: BROWSER_SESSION_A,
         revision: '1',
         views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId: CLAIM_A }],
       },
     ])
-    await expect(manager.registerUsage(usage('1', DOCUMENT_A, CLAIM_B))).rejects.toThrow(
+    await expect(manager.registerUsage(usage('1', BROWSER_SESSION_A, CLAIM_B))).rejects.toThrow(
       'already pending with different content',
     )
 
     socket.emitServer({ type: 'ide-use-accepted', revision: '1' })
     await expect(first).resolves.toEqual({ revision: '1' })
 
-    // 服务端已接受后，同一物理连接仍只能绑定一个 document。
-    await expect(manager.registerUsage(usage('2', DOCUMENT_B))).rejects.toThrow(
-      'documentId is fixed for this connection',
+    // 服务端已接受后，同一物理连接仍只能绑定一个浏览器会话。
+    await expect(manager.registerUsage(usage('2', BROWSER_SESSION_B))).rejects.toThrow(
+      'browserSessionId is fixed for this connection',
     )
   })
 
