@@ -27,6 +27,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 import { translate } from '@/shared/i18n'
 import { mergeThreadSnapshotCache } from '@/features/thread/runtime/thread-snapshot-cache'
+import { isThreadActiveStatus } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -68,9 +69,9 @@ interface SettingsOverlayEntry {
 /** 仅 STALE_COMMAND_CURSOR 允许借既有冲突回读机制重建一次 cursor/diff，不另造任意重试。 */
 const MAX_STALE_SETTINGS_CURSOR_RETRIES = 2
 
-/** 活动与执行控制正交；等待异步结果也仍占用当前执行。 */
+/** 活动与执行控制正交；等待异步结果、退出待确认等其它非 IDLE 状态也仍占用当前执行。 */
 function isBusyThread(thread: HarnessThreadDTO): boolean {
-  return thread.status === 'RUNNING' || thread.status === 'WAITING'
+  return isThreadActiveStatus(thread.status)
 }
 
 /**

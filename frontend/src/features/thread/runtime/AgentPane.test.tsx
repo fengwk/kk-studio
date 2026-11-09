@@ -1679,7 +1679,7 @@ describe('AgentPane orchestration', () => {
     })).toMatchObject({
       id: THREAD_ID,
       title: 'Named Thread',
-      subtitle: expect.stringContaining('IDLE'),
+      subtitle: expect.stringContaining('空闲'),
     })
     // 名称为主展示，绝不回退为 id 或 preview。
     expect(sessionSelectionItem({
@@ -2374,8 +2374,8 @@ describe('AgentPane orchestration', () => {
     expect(await screen.findByRole('option', { name: /^stop/ })).toHaveAttribute('aria-disabled', 'false')
   })
 
-  it('shows unconfirmed executions only for a stopped thread and abandons exactly the selected execution', async () => {
-    // 测试意图：STOPPED + 非空事实才展示逐项入口；取消不发请求，确认只发送所选 executionId
+  it('shows exit-pending details only when the thread is actually EXIT_PENDING and abandons exactly the selected execution when stopped', async () => {
+    // 测试意图：EXIT_PENDING+STOPPED 才展示逐项放弃入口；取消不发请求，确认只发送所选 executionId
     // 与当前 expectedVersion。成功以返回快照更新投影并刷新执行树，另一项仍保留。
     const user = userEvent.setup()
     const firstExecution: HarnessExecutionExitDTO = {
@@ -2393,11 +2393,11 @@ describe('AgentPane orchestration', () => {
       registeredAt: 1767225601000,
     }
     const initial = snapshot(
-      threadFixture(THREAD_ID, { status: 'IDLE', executionControl: 'STOPPED', version: '7' }),
+      threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '7' }),
       { unconfirmedExecutions: [firstExecution, secondExecution] },
     )
     const updated = snapshot(
-      threadFixture(THREAD_ID, { status: 'IDLE', executionControl: 'STOPPED', version: '8' }),
+      threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '8' }),
       { unconfirmedExecutions: [secondExecution] },
     )
     vi.mocked(harnessService.getThreadSnapshot)
@@ -2454,9 +2454,10 @@ describe('AgentPane orchestration', () => {
     ).toBeGreaterThan(treeCallsBefore))
   })
 
-  it('hides unconfirmed executions on a runnable thread or when a stopped thread has no facts', async () => {
-    // 测试意图：未确认退出列表只在 executionControl=STOPPED 且事实非空时出现，
-    // 不把 RUNNABLE 的未知/活跃执行混入。
+  it('hides normal active unconfirmed facts, then shows EXIT_PENDING details with stop-and-handle but no abandon', async () => {
+    // 测试意图：活跃执行中的 UNCONFIRMED 不是异常；只有服务端明确 EXIT_PENDING+RUNNABLE 才展示原因和
+    // “停止并处理”，且不开放放弃确认。无事实或已停止无残留时不出现空壳。
+    const user = userEvent.setup()
     const execution: HarnessExecutionExitDTO = {
       executionId: 'execution-runnable',
       invocationId: 'invocation-runnable',
@@ -2469,23 +2470,59 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { executionControl: 'RUNNABLE' }), {
+      snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'RUNNABLE' }), {
         unconfirmedExecutions: [execution],
       }),
     )
-    const runnable = renderPane({ kind: 'CHAT', id: CHAT_ID })
+    const active = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
-    runnable.unmount()
+    active.unmount()
 
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { executionControl: 'STOPPED' }), {
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'RUNNABLE' }), {
+        unconfirmedExecutions: [execution],
+      }),
+    )
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      status: 'STOPPED',
+      thread: threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }),
+      stoppedThreads: [],
+    })
+    const pending = renderPane({ kind: 'CHAT', id: CHAT_ID })
+    expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
+    expect(screen.getByText('执行仍在进行，因此尚未确认退出。停止会话后才能选择是否放弃等待。'))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^放弃等待/ })).not.toBeInTheDocument()
+
+    // Stop 成功回读后只剩“放弃等待”动作；断言真实 API 一次与最终 STOPPED 语义，不依赖 query 次数。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }), {
+        unconfirmedExecutions: [execution],
+      }),
+    )
+    await user.click(screen.getByRole('button', { name: '停止并处理' }))
+    await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
+    expect(harnessService.stopThread).toHaveBeenCalledWith(
+      THREAD_ID,
+      expect.objectContaining({ expectedVersion: '0' }),
+    )
+    expect(await screen.findByRole('button', {
+      name: '放弃等待 TOOL 第 1 次尝试',
+    })).toBeInTheDocument()
+    expect(screen.getByText('这些执行尚未确认退出。放弃等待只停止等待确认，不会终止本地或远端执行。'))
+      .toBeInTheDocument()
+    pending.unmount()
+
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }), {
         unconfirmedExecutions: [],
       }),
     )
     renderPane({ kind: 'CHAT', id: CHAT_ID })
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(2))
-    expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
+    await waitFor(() => expect(
+      screen.queryByRole('heading', { name: '未确认退出执行' }),
+    ).not.toBeInTheDocument())
   })
 
   it('keeps the unconfirmed execution list and a friendly error when abandoning fails', async () => {
@@ -2499,7 +2536,7 @@ describe('AgentPane orchestration', () => {
       registeredAt: 1767225600000,
     }
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { executionControl: 'STOPPED' }), {
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }), {
         unconfirmedExecutions: [execution],
       }),
     )
@@ -2534,11 +2571,11 @@ describe('AgentPane orchestration', () => {
     }
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshot(
-        threadFixture(THREAD_ID, { executionControl: 'STOPPED', version: '7' }),
+        threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '7' }),
         { unconfirmedExecutions: [execution] },
       ))
       .mockResolvedValue(snapshot(
-        threadFixture(THREAD_ID, { executionControl: 'STOPPED', version: '8' }),
+        threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '8' }),
         { unconfirmedExecutions: [execution] },
       ))
     vi.mocked(harnessService.abandonExecution).mockRejectedValueOnce(
@@ -2626,11 +2663,12 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(composer).toHaveTextContent('cancelled draft'))
   })
 
-  it('renders three-state thread status and gives priority to active execution facts', async () => {
-    // 测试意图：验证 Thread status 三态及执行事实优先级：
+  it('renders four-state thread status and gives priority to active execution facts', async () => {
+    // 测试意图：验证 Thread status 四态及执行事实优先级：
     // 1. WAITING 状态展示“等待异步结果”，无生成动画；
     // 2. RUNNING 状态且无 active model/tool 时展示“运行中”，绝不直接显示生成，无生成动画；
-    // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool，优先展示真实“执行中”，且带生成动画。
+    // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool，优先展示真实“执行中”，且带生成动画；
+    // 4. EXIT_PENDING 在 RUNNABLE/STOPPED 下均静态展示原因，不等同 RUNNING/IDLE。
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
@@ -2687,9 +2725,9 @@ describe('AgentPane orchestration', () => {
     })
     stoppedPane.unmount()
 
-    // 场景 4：STOPPED + RUNNING 且没有真实 RUNNING model/tool，静态提示退出尚未确认
+    // 场景 4：STOPPED + EXIT_PENDING 且没有真实 RUNNING model/tool，静态提示退出尚未确认
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' })),
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' })),
     )
     const unconfirmedPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
@@ -2702,10 +2740,10 @@ describe('AgentPane orchestration', () => {
     })
     unconfirmedPane.unmount()
 
-    // 场景 4b：STOPPED+RUNNING 下残留 READY 不展示排队，仍是静态退出未确认
+    // 场景 4b：STOPPED+EXIT_PENDING 下残留 READY 不展示排队，仍是静态退出未确认
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
-        threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
+        threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }),
         { toolInvocations: [pendingInvocation()] },
       ),
     )
@@ -2720,7 +2758,21 @@ describe('AgentPane orchestration', () => {
     })
     residualPane.unmount()
 
-    // 场景 5：真实 RUNNING model 同样优先于停止未确认，保持生成动画
+    // 场景 4c：RUNNABLE + EXIT_PENDING 展示等待退出确认，而不是普通运行中
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'RUNNABLE' })),
+    )
+    const runnableExitPending = renderPane({ kind: 'CHAT', id: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('等待执行退出确认')
+      expect(working).not.toHaveTextContent('运行中')
+      expect(working).toHaveAttribute('data-animated', 'false')
+      expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
+    })
+    runnableExitPending.unmount()
+
+    // 场景 5：真实 RUNNING model 同样优先于退出待确认，保持生成动画
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
         threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
