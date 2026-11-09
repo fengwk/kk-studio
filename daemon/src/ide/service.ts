@@ -25,7 +25,6 @@ import { createViewLease } from './serviceLease.js'
 import { createViewRegistry } from './serviceRegistry.js'
 import type {
   ActiveStream,
-  BindingReservation,
   ClaimRecord,
   IdeSnapshot,
   ViewRecord,
@@ -35,6 +34,7 @@ import {
   canonicalDirectory,
   readRecoveryBackup,
   validateBindingEpoch,
+  validateUuid,
   validateViewId,
   workspaceFileContent,
 } from './workspace.js'
@@ -42,12 +42,13 @@ import {
 /**
  * Managed code-server IDE lifecycle for one Environment.
  *
- * <p>Every visible state commit advances one IDE revision. bindingEpoch is a reservation from
- * that same sequence and becomes visible only with the binding commit; snapshots wait for such
- * reservations, so no revision is ever observed with pre-commit content. A view's workspace is
- * owned by browserSessionId, and only that session can CAS a new binding epoch. Usage proof
- * never creates or extends a view beyond its own binding epoch: Runtime supplies the local
- * monotonic time at which the lease round was sent; old binding epochs cannot be renewed.
+ * <p>One IDE revision sequence allocates both binding epochs and visible commits. An epoch may
+ * advance the sequence before the native registration completes (leaving a gap); the committed
+ * view mutation advances it again, so bindingEpoch &lt;= snapshot.revision and no revision ever
+ * changes content. A view's workspace is owned by browserSessionId, and only that session can CAS
+ * a new binding epoch. Usage proof never creates or extends a view beyond its own binding epoch:
+ * Runtime supplies the local monotonic time at which the lease round was sent; old binding epochs
+ * cannot be renewed.
  */
 
 const IDE_MAX_VIEWS = 64
@@ -240,7 +241,8 @@ export async function createIdeService(
   const scheduler = options.scheduler ?? systemScheduler
   const maxViews = options.maxViews ?? IDE_MAX_VIEWS
   const recoveryQuotaBytes = options.recoveryQuotaBytes ?? DEFAULT_RECOVERY_QUOTA_BYTES
-  const daemonInstanceId = options.daemonInstanceId
+  // The actual process UUID comes from main; never synthesize a per-subsystem identity here.
+  const daemonInstanceId = validateUuid(options.daemonInstanceId, 'daemonInstanceId')
   const bridge = options.bridge ?? (await createIdeBridge())
   const manager =
     options.manager ??
@@ -271,6 +273,10 @@ export async function createIdeService(
     }
   }
 
+  /**
+   * Allocates the next value from the single revision sequence. Binding registration uses it
+   * before the native call and may leave a gap; every visible state mutation calls it again.
+   */
   const commitRevision = (): string => {
     if (revision >= LONG_MAX) {
       throw new IdeError('IDE revision space is exhausted', 'BUSY')
@@ -279,39 +285,8 @@ export async function createIdeService(
     return revision.toString()
   }
 
-  /**
-   * Binding epochs are reserved from the same revision sequence as every visible commit.
-   * The reservation barrier keeps the reserved revision out of snapshots until its view
-   * mutation lands, so a revision never describes pre-commit content.
-   */
-  const pendingBindingCommits = new Set<Promise<void>>()
-  const reserveBinding = (): BindingReservation => {
-    const epoch = commitRevision()
-    let release: () => void = () => {}
-    const pending = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    pendingBindingCommits.add(pending)
-    let settled = false
-    return {
-      epoch,
-      complete: () => {
-        if (settled) {
-          return
-        }
-        settled = true
-        pendingBindingCommits.delete(pending)
-        release()
-      },
-    }
-  }
-  const awaitPendingBindingCommits = async (): Promise<void> => {
-    while (pendingBindingCommits.size > 0) {
-      await Promise.all([...pendingBindingCommits])
-    }
-  }
-  const snapshot = async (): Promise<IdeSnapshot> => {
-    await awaitPendingBindingCommits()
+  /** Freezes the currently committed views; it never waits for an in-flight native call. */
+  const snapshot = (): IdeSnapshot => {
     const viewSummaries = [...views.values()]
       .map(summary)
       .sort((left, right) => (left.viewId < right.viewId ? -1 : left.viewId > right.viewId ? 1 : 0))
@@ -496,7 +471,7 @@ export async function createIdeService(
     paths, views, reservations, claims, scheduler, bridge, manager, maxViews, daemonInstanceId,
     closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,
     getCrashEpoch: () => crashEpoch, emit, withViewLock, withClaimLock, scheduleExpiry, scheduleIdleStop,
-    cancelIdle, reserveBinding, snapshot, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash,
+    cancelIdle, commitRevision, snapshot, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash,
     abortViewStreams, required, boundedText,
   })
 
@@ -533,7 +508,7 @@ export async function createIdeService(
       await writePrivateFile(view.workspacePath, workspaceFileContent(directory))
       commitRevision()
       view.directory = directory
-      return { ok: true, viewId: view.viewId, directory: view.directory, ...(await snapshot()) }
+      return { ok: true, viewId: view.viewId, directory: view.directory, ...snapshot() }
     })
   }
 
@@ -592,7 +567,7 @@ export async function createIdeService(
     })
   }
 
-  const listViews = async (): Promise<IdeReply> => ({ ok: true, ...(await snapshot()) })
+  const listViews = (): IdeReply => ({ ok: true, ...snapshot() })
 
   const handle = createCommandHandler({
     isClosed: () => closed, awaitCrashRecovery, openView, changeDirectory, focusTerminal, closeView,

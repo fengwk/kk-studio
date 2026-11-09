@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { create } from '@bufbuild/protobuf'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -6,6 +7,7 @@ import { join, sep } from 'node:path'
 import type {
   DaemonConfig,
   IdeCommand,
+  IdeReply,
   IdeStreamRequest,
   ProcessSupervisor,
 } from '../../src/contracts.js'
@@ -26,6 +28,8 @@ import {
 } from '../../src/ide/service.js'
 import { DAEMON_INSTANCE_ID, listViews, openCommand, signal } from './lifecycle-fixtures.js'
 import { toProtoIdeResult } from '../../src/runtime-ide.js'
+import { EnvelopeSchema, MessageType } from '../../src/generated/control_pb.js'
+import { validate } from '../../src/protocol/control/codec.js'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -100,6 +104,7 @@ class TestScheduler implements IdeScheduler {
 class FakeManager implements CodeServerManager {
   readonly registers: Array<{ viewId: string; bindingEpoch: string; workspacePath: string }> = []
   readonly closes: Array<{ viewId: string; bindingEpoch: string; mode: ManagedViewCloseMode }> = []
+  readonly nativeViews = new Map<string, { bindingEpoch: string; workspacePath: string; state: 'OPEN' | 'CLOSING' }>()
   closeFail = false
   stopCalls = 0
   stopError: Error | undefined
@@ -148,6 +153,8 @@ class FakeManager implements CodeServerManager {
       throw this.stopError
     }
     this.current = undefined
+    // A stopped process owns no native management views.
+    this.nativeViews.clear()
   }
 
   async close(): Promise<void> {
@@ -159,6 +166,7 @@ class FakeManager implements CodeServerManager {
       await this.registerGate
     }
     this.registers.push({ viewId, bindingEpoch, workspacePath })
+    this.nativeViews.set(viewId, { bindingEpoch, workspacePath, state: 'OPEN' })
     return { viewId, bindingEpoch, workspacePath, state: 'OPEN' }
   }
 
@@ -174,6 +182,7 @@ class FakeManager implements CodeServerManager {
   ): Promise<ManagedViewCloseResult> {
     this.closes.push({ viewId, bindingEpoch, mode })
     if (this.closeFail) {
+      this.nativeViews.set(viewId, { bindingEpoch, workspacePath: '/managed', state: 'CLOSING' })
       return {
         viewId,
         bindingEpoch,
@@ -184,6 +193,7 @@ class FakeManager implements CodeServerManager {
         failures: ['synthetic cleanup failure'],
       }
     }
+    this.nativeViews.delete(viewId)
     return {
       viewId,
       bindingEpoch,
@@ -195,7 +205,7 @@ class FakeManager implements CodeServerManager {
   }
 
   async listViews(_signal: AbortSignal): Promise<ManagedViewInspection[]> {
-    return []
+    return [...this.nativeViews.entries()].map(([viewId, view]) => ({ viewId, ...view }))
   }
 
   onUnexpectedExit(listener: (generation: number) => void): void {
@@ -435,7 +445,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
         await manager.ensureStarted(signal())
         return result
       }
-      // The old epoch remains the only locally published binding after a failed resume.
+      // An unproven native epoch change is retained as CLOSING, never published as the old OPEN.
       const resumed = await service.handle(
         open(viewId, browserSessionId, randomUUID(), undefined, 'resume', opened.bindingEpoch as string),
         signal(),
@@ -443,10 +453,148 @@ describe('managed IDE claim and tenant lifecycle', () => {
       expect(resumed).toMatchObject({
         ok: false, code: scenario === 'registration-rejected' ? 'CLEANUP_FAILED' : 'BUSY',
       })
-      expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', bindingEpoch: opened.bindingEpoch })
+      if (scenario === 'registration-rejected') {
+        expect(service.getViewState(viewId)).toMatchObject({
+          state: 'OPEN',
+          bindingEpoch: opened.bindingEpoch,
+        })
+      } else {
+        expect(service.getViewState(viewId)).toMatchObject({
+          state: 'CLOSING',
+          bindingEpoch: opened.bindingEpoch,
+        })
+        expect(manager.closes).toHaveLength(0)
+      }
       expect(bridge.assignments.get(viewId)?.bindingEpoch).toBe(opened.bindingEpoch)
     },
   )
+
+  it('adopts the new binding when the native resume response is lost', async () => {
+    const { service, manager, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const browserSessionId = randomUUID()
+    const opened = await service.handle(open(viewId, browserSessionId, randomUUID(), project), signal())
+    const register = manager.registerView.bind(manager)
+    manager.registerView = async (id, epoch, workspacePath) => {
+      await register(id, epoch, workspacePath)
+      throw new Error('management response was lost')
+    }
+    const claimId = randomUUID()
+    const resumed = await service.handle(
+      open(viewId, browserSessionId, claimId, undefined, 'resume', opened.bindingEpoch as string),
+      signal(),
+    )
+    expect(resumed).toMatchObject({ ok: true, claimId, viewId })
+    expect(BigInt(resumed.bindingEpoch as string)).toBeGreaterThan(BigInt(opened.bindingEpoch as string))
+    expect(BigInt(resumed.bindingEpoch as string)).toBeLessThan(BigInt(resumed.revision as string))
+    expect(service.getViewState(viewId)).toMatchObject({
+      state: 'OPEN',
+      bindingEpoch: resumed.bindingEpoch,
+    })
+    expect(bridge.assignments.get(viewId)?.bindingEpoch).toBe(resumed.bindingEpoch)
+    expect(manager.closes).toHaveLength(0)
+  })
+
+  it('keeps the old binding OPEN when native inspection proves the resume did not land', async () => {
+    const { service, manager, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const browserSessionId = randomUUID()
+    const opened = await service.handle(open(viewId, browserSessionId, randomUUID(), project), signal())
+    manager.registerView = async () => { throw new Error('management connection refused') }
+    const resumed = await service.handle(
+      open(viewId, browserSessionId, randomUUID(), undefined, 'resume', opened.bindingEpoch as string),
+      signal(),
+    )
+    expect(resumed).toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+    expect(service.getViewState(viewId)).toMatchObject({
+      state: 'OPEN',
+      bindingEpoch: opened.bindingEpoch,
+    })
+    expect(bridge.assignments.get(viewId)?.bindingEpoch).toBe(opened.bindingEpoch)
+    expect(manager.closes).toHaveLength(0)
+  })
+
+  it.each(['unrelated-epoch', 'inspection-failed'] as const)(
+    'retains an unverified resume as CLOSING when native state is %s',
+    async (scenario) => {
+      const { service, manager, project } = await setup()
+      const viewId = randomUUID()
+      const browserSessionId = randomUUID()
+      const opened = await service.handle(open(viewId, browserSessionId, randomUUID(), project), signal())
+      manager.registerView = async () => {
+        if (scenario === 'unrelated-epoch') {
+          manager.nativeViews.set(viewId, {
+            bindingEpoch: '999',
+            workspacePath: opened.workspacePath as string,
+            state: 'OPEN',
+          })
+        }
+        throw new Error('native resume outcome is unknown')
+      }
+      if (scenario === 'inspection-failed') {
+        manager.listViews = async () => { throw new Error('management inspection failed') }
+      }
+      const resumed = await service.handle(
+        open(viewId, browserSessionId, randomUUID(), undefined, 'resume', opened.bindingEpoch as string),
+        signal(),
+      )
+      expect(resumed).toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+      expect(resumed.revision).toBeDefined()
+      expect(resumed.views?.[0]).toMatchObject({ viewId, state: 'CLOSING', bindingEpoch: opened.bindingEpoch })
+      expect(BigInt(resumed.revision as string)).toBeGreaterThan(BigInt(opened.revision as string))
+      expect(service.getViewState(viewId)).toMatchObject({ state: 'CLOSING' })
+      expect(service.hasActiveViews()).toBe(true)
+      // A claim that previously succeeded cannot replay success after the binding became CLOSING.
+      expect(await service.handle(
+        open(viewId, browserSessionId, opened.claimId as string, project),
+        signal(),
+      )).toMatchObject({ ok: false, code: 'STALE_BINDING' })
+      // The retained workspace is released only through an explicit close, not silently discarded.
+      expect((await service.handle(boundCommand('CLOSE_VIEW', {
+        viewId,
+        browserSessionId,
+        bindingEpoch: opened.bindingEpoch as string,
+      }, { discard: true }), signal())).ok).toBe(true)
+      expect(manager.closes[0]).toMatchObject({ viewId, mode: 'discard' })
+    },
+  )
+
+  it('does not let one in-flight resume block another view snapshot', async () => {
+    const { service, manager, project } = await setup()
+    const firstId = '11111111-1111-4111-8222-111111111111'
+    const secondId = '22222222-2222-4222-8222-222222222222'
+    const firstOwner = randomUUID()
+    const secondOwner = randomUUID()
+    const first = await service.handle(open(firstId, firstOwner, randomUUID(), project), signal())
+    const second = await service.handle(open(secondId, secondOwner, randomUUID(), project), signal())
+    expect(first.ok && second.ok).toBe(true)
+    const before = await listViews(service)
+
+    let releaseRegistration: () => void = () => {}
+    manager.registerGate = new Promise<void>((resolve) => {
+      releaseRegistration = resolve
+    })
+    const pendingResume = service.handle(
+      open(secondId, secondOwner, randomUUID(), undefined, 'resume', second.bindingEpoch as string),
+      signal(),
+    )
+    await flush()
+    const listedWhilePending = await Promise.race([
+      listViews(service),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('snapshot was blocked')), 1_000)),
+    ])
+    // The reserved epoch may advance revision while the visible view still carries old content.
+    expect(BigInt(listedWhilePending.revision as string)).toBeGreaterThan(BigInt(before.revision as string))
+    expect(listedWhilePending.views?.find((view) => view.viewId === secondId)).toMatchObject({
+      state: 'OPEN',
+      bindingEpoch: second.bindingEpoch,
+    })
+    releaseRegistration()
+    const resumed = await pendingResume
+    expect(resumed.ok).toBe(true)
+    expect(BigInt(resumed.revision as string)).toBeGreaterThan(BigInt(listedWhilePending.revision as string))
+    expect(service.getViewState(secondId)?.bindingEpoch).toBe(resumed.bindingEpoch)
+  })
 
   it.each(['drift', 'not-open', 'cleanup-throws'] as const)(
     'converges failed registration (%s) or retains its quota when cleanup throws',
@@ -768,6 +916,46 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(listedResult.views?.length).toBe(1)
   })
 
+  it('validates live IDE replies against the frozen protocol invariants', async () => {
+    const { service, manager, project } = await setup()
+    const validateReply = (reply: IdeReply): void => {
+      validate(create(EnvelopeSchema, {
+        messageType: MessageType.IDE_RESULT,
+        environmentId: randomUUID(),
+        invocationId: randomUUID(),
+        payload: { case: 'ideResult', value: toProtoIdeResult(reply) },
+      }))
+    }
+    const viewId = randomUUID()
+    const browserSessionId = randomUUID()
+    const opened = await service.handle(open(viewId, browserSessionId, randomUUID(), project), signal())
+    validateReply(opened)
+    validateReply(await listViews(service))
+    validateReply(await service.handle(boundCommand('CHANGE_DIRECTORY', {
+      viewId,
+      browserSessionId,
+      bindingEpoch: opened.bindingEpoch as string,
+    }, { directory: project }), signal()))
+
+    manager.closeFail = true
+    const failed = await service.handle(boundCommand('CLOSE_VIEW', {
+      viewId,
+      browserSessionId,
+      bindingEpoch: opened.bindingEpoch as string,
+    }, { discard: false }), signal())
+    expect(failed.ok).toBe(false)
+    validateReply(failed)
+
+    manager.closeFail = false
+    const closed = await service.handle(boundCommand('CLOSE_VIEW', {
+      viewId,
+      browserSessionId,
+      bindingEpoch: opened.bindingEpoch as string,
+    }, { discard: true }), signal())
+    expect(closed.ok).toBe(true)
+    validateReply(closed)
+  })
+
   it('round-trips the actual CHANGE_DIRECTORY service reply with its confirmed canonical directory', async () => {
     const { service, bridge, project } = await setup()
     const viewId = randomUUID()
@@ -844,7 +1032,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     const [first, second] = await Promise.all([service.handle(command, signal()), service.handle(command, signal())])
     expect(first.ok).toBe(true)
     expect(second).toEqual(first)
-    expect(first.bindingEpoch).toBe(first.revision)
+    expect(BigInt(first.bindingEpoch as string)).toBeLessThan(BigInt(first.revision as string))
     expect(first.views).toHaveLength(1)
     expect(first.views?.[0]).toMatchObject({
       viewId,
@@ -964,11 +1152,12 @@ describe('managed IDE claim and tenant lifecycle', () => {
     const firstOwner = randomUUID()
     const secondOwner = randomUUID()
     const first = await service.handle(open(firstId, firstOwner, randomUUID(), project), signal())
-    expect(first).toMatchObject({ ok: true, revision: first.bindingEpoch })
+    expect(first).toMatchObject({ ok: true })
+    expect(BigInt(first.bindingEpoch as string)).toBeLessThan(BigInt(first.revision as string))
     const second = await service.handle(open(secondId, secondOwner, randomUUID(), project), signal())
     expect(second.ok).toBe(true)
     expect(BigInt(second.revision as string)).toBeGreaterThan(BigInt(first.revision as string))
-    expect(second.bindingEpoch).toBe(second.revision)
+    expect(BigInt(second.bindingEpoch as string)).toBeLessThanOrEqual(BigInt(second.revision as string))
     expect(second.views?.map((view) => view.viewId)).toEqual([firstId, secondId])
     expect(second.views?.every((view) => !('lastProofAt' in view))).toBe(true)
 
@@ -1452,8 +1641,8 @@ describe('managed IDE claim and tenant lifecycle', () => {
 
     const closed = await service.handle(boundCommand('CLOSE_VIEW', targetState, { discard: false }), signal())
 
-    expect(closed).toMatchObject({ ok: true, views: [] })
-    expect(closed.views).toEqual([])
+    expect(closed).toMatchObject({ ok: true })
+    expect(closed.views?.map((view) => view.viewId)).toEqual([otherId])
     expect(targetStream.signal.aborted).toBe(true)
     expect(otherStream.signal.aborted).toBe(false)
     expect(service.activeStreamCount()).toBe(1)

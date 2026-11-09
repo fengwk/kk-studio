@@ -52,9 +52,3 @@ export interface IdeSnapshot {
   revision: string
   views: IdeViewSummary[]
 }
-
-export interface BindingReservation {
-  epoch: string
-  /** Publishes the reserved revision after the state mutation is complete. */
-  complete(): void
-}

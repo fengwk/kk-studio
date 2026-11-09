@@ -22,7 +22,7 @@ interface ClosePathDependencies {
   clearTimer: (view: ViewRecord) => void
   scheduleExpiry: (view: ViewRecord, notBefore?: number) => void
   commitRevision: () => string
-  snapshot: () => Promise<IdeSnapshot>
+  snapshot: () => IdeSnapshot
   scheduleIdleStop: () => void
   waitForViewStreams: (view: ViewRecord) => Promise<void>
   waitWithSignal: <T>(promise: Promise<T>, signal: AbortSignal) => Promise<T>
@@ -87,7 +87,7 @@ export function createClosePath({
         commitRevision()
         views.delete(viewId)
         scheduleIdleStop()
-        return { ok: true, ...(await snapshot()) }
+        return { ok: true, ...snapshot() }
       } catch (error) {
         if (views.get(viewId) === view && view.bindingEpoch === epoch) {
           view.cleanupFailed = true
@@ -106,7 +106,7 @@ export function createClosePath({
           error instanceof IdeError
             ? error
             : new IdeError('view cleanup failed', 'CLEANUP_FAILED'),
-          await snapshot(),
+          snapshot(),
         )
       }
     })()

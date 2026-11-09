@@ -3,15 +3,10 @@ import { join } from 'node:path'
 import type { IdeCommand, IdeReply } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import type { IdeBridge } from './bridge.js'
-import type { CodeServerManager, IdePaths } from './codeServer.js'
+import type { CodeServerManager, IdePaths, ManagedViewInspection } from './codeServer.js'
 import { IdeError } from './errors.js'
 import type { IdeScheduler, IdeServiceEvent } from './service.js'
-import type {
-  BindingReservation,
-  ClaimRecord,
-  IdeSnapshot,
-  ViewRecord,
-} from './serviceTypes.js'
+import type { ClaimRecord, IdeSnapshot, ViewRecord } from './serviceTypes.js'
 import {
   canonicalDirectory,
   hostHome,
@@ -43,8 +38,8 @@ interface RegistryDependencies {
   scheduleExpiry: (view: ViewRecord, notBefore?: number) => void
   scheduleIdleStop: () => void
   cancelIdle: () => void
-  reserveBinding: () => BindingReservation
-  snapshot: () => Promise<IdeSnapshot>
+  commitRevision: () => string
+  snapshot: () => IdeSnapshot
   awaitCrashRecovery: (signal: AbortSignal) => Promise<void>
   awaitManagerStopped: (signal: AbortSignal) => Promise<void>
   convergeAfterCrash: () => Promise<void>
@@ -83,7 +78,7 @@ function openReply(view: ViewRecord, snapshot: IdeSnapshot): IdeReply {
 export function createViewRegistry({
   paths, views, reservations, claims, scheduler, bridge, manager, maxViews, daemonInstanceId,
   closeBudgetMillis, getCrashEpoch, emit, withViewLock, withClaimLock, scheduleExpiry, scheduleIdleStop,
-  cancelIdle, reserveBinding, snapshot, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash,
+  cancelIdle, commitRevision, snapshot, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash,
   abortViewStreams, required, boundedText,
 }: RegistryDependencies) {
   const parseOpenCommand = (command: IdeCommand): ParsedOpenCommand => {
@@ -140,7 +135,7 @@ export function createViewRegistry({
   }
 
   /** A committed claim returns current state only; it can never publish an older snapshot. */
-  const replayClaim = async (claimId: string, shape: string): Promise<IdeReply | null> => {
+  const replayClaim = (claimId: string, shape: string): IdeReply | null => {
     const cached = claims.get(claimId)
     if (cached === undefined) {
       return null
@@ -151,10 +146,11 @@ export function createViewRegistry({
     const current = views.get(cached.viewId)
     if (
       current !== undefined &&
+      current.state === 'OPEN' &&
       current.bindingEpoch === cached.bindingEpoch &&
       current.claimId === claimId
     ) {
-      return openReply(current, await snapshot())
+      return openReply(current, snapshot())
     }
     throw new IdeError('claim was superseded by a newer binding', 'STALE_BINDING')
   }
@@ -200,8 +196,7 @@ export function createViewRegistry({
     cancelIdle()
     const crashAtStart = getCrashEpoch()
     let workspacePath: string | undefined
-    let reservation: BindingReservation | undefined
-    let committed = false
+    let epoch: string | undefined
     let sessionGeneration: number | undefined
     try {
       const directory = await canonicalDirectory(command.directory ?? hostHome())
@@ -212,23 +207,20 @@ export function createViewRegistry({
       // code-server canonicalises the workspace path at registration; bind the bridge to the
       // same canonical file so a symlinked data directory cannot produce two identities.
       workspacePath = await realpath(workspaceFile)
-      reservation = reserveBinding()
-      bridge.assign(command.viewId, workspacePath, reservation.epoch, directory)
+      // The epoch may advance the revision sequence before the native registration lands.
+      // The visible view insertion below commits a fresh revision, so bindingEpoch <= revision.
+      epoch = commitRevision()
+      bridge.assign(command.viewId, workspacePath, epoch, directory)
       const session = await manager.ensureStarted(signal)
       sessionGeneration = session.generation
       if (getCrashEpoch() !== crashAtStart) {
         throw new IdeError('code-server process changed during view creation', 'BUSY')
       }
-      const registered = await manager.registerView(
-        command.viewId,
-        reservation.epoch,
-        workspacePath,
-        signal,
-      )
+      const registered = await manager.registerView(command.viewId, epoch, workspacePath, signal)
       if (registered.state !== 'OPEN') {
         throw new IdeError('managed view did not become open', 'CLEANUP_FAILED')
       }
-      if (registered.bindingEpoch !== reservation.epoch || registered.workspacePath !== workspacePath) {
+      if (registered.bindingEpoch !== epoch || registered.workspacePath !== workspacePath) {
         throw new IdeError('managed view registration drifted', 'CLEANUP_FAILED')
       }
       if (getCrashEpoch() !== crashAtStart || manager.session()?.generation !== session.generation) {
@@ -240,7 +232,7 @@ export function createViewRegistry({
         eventNodeId: command.eventNodeId,
         connectionId: command.connectionId,
         claimId: command.claimId,
-        bindingEpoch: reservation.epoch,
+        bindingEpoch: epoch,
         directory,
         workspacePath,
         workspaceOwned: true,
@@ -252,19 +244,18 @@ export function createViewRegistry({
         streams: new Set(),
         sessionGeneration: session.generation,
       }
+      commitRevision()
       views.set(command.viewId, view)
-      reservation.complete()
-      committed = true
       scheduleExpiry(view)
       rememberClaim(command.claimId, {
         shape: openCommandShape(command),
         viewId: command.viewId,
-        bindingEpoch: reservation.epoch,
+        bindingEpoch: epoch,
       })
-      return openReply(view, await snapshot())
+      return openReply(view, snapshot())
     } catch (error) {
-      if (workspacePath !== undefined && reservation !== undefined) {
-        bridge.revoke(command.viewId, reservation.epoch)
+      if (workspacePath !== undefined && epoch !== undefined) {
+        bridge.revoke(command.viewId, epoch)
         // Registration may have become visible in code-server even though the command failed.
         // Converge it; if cleanup cannot be proven, retain a counted CLOSING record. A process
         // crash already invalidated its whole scope, so there is nothing left to converge.
@@ -272,12 +263,15 @@ export function createViewRegistry({
         if (getCrashEpoch() === crashAtStart && sessionGeneration !== undefined) {
           if (manager.session()?.generation === sessionGeneration) {
             try {
-              await manager.closeView(
+              const closed = await manager.closeView(
                 command.viewId,
-                reservation.epoch,
+                epoch,
                 'discard',
                 AbortSignal.timeout(closeBudgetMillis),
               )
+              if (closed.state !== 'CLOSED' || closed.cleanup.complete !== true) {
+                cleanupFailed = true
+              }
             } catch {
               cleanupFailed = true
             }
@@ -286,13 +280,14 @@ export function createViewRegistry({
           }
         }
         if (cleanupFailed) {
+          commitRevision()
           views.set(command.viewId, {
             viewId: command.viewId,
             browserSessionId: command.browserSessionId,
             eventNodeId: command.eventNodeId,
             connectionId: command.connectionId,
             claimId: command.claimId,
-            bindingEpoch: reservation.epoch,
+            bindingEpoch: epoch,
             directory: command.directory ?? 'unavailable',
             workspacePath,
             workspaceOwned: true,
@@ -304,8 +299,6 @@ export function createViewRegistry({
             streams: new Set(),
             sessionGeneration: sessionGeneration ?? 0,
           })
-          reservation.complete()
-          committed = true
           emit({
             kind: 'cleanup-failed',
             viewId: command.viewId,
@@ -319,12 +312,107 @@ export function createViewRegistry({
       }
       throw error
     } finally {
-      if (reservation !== undefined && !committed) {
-        reservation.complete()
-      }
       reservations.delete(command.viewId)
       scheduleIdleStop()
     }
+  }
+
+  const markBindingUnverified = (view: ViewRecord): void => {
+    if (views.get(view.viewId) !== view) {
+      return
+    }
+    view.bindingPending = false
+    if (view.state === 'CLOSING' && view.cleanupFailed) {
+      return
+    }
+    commitRevision()
+    view.state = 'CLOSING'
+    view.cleanupFailed = true
+    view.forceAllowed = true
+    view.nativeClosePending = false
+    // CLOSING makes the lease scheduler clear the expiry timer without deleting or touching files.
+    scheduleExpiry(view)
+    emit({
+      kind: 'cleanup-failed',
+      viewId: view.viewId,
+      message: 'resume binding outcome could not be verified',
+    })
+  }
+
+  const adoptRegisteredBinding = (
+    view: ViewRecord,
+    command: ParsedOpenCommand,
+    epoch: string,
+    sessionGeneration: number,
+  ): IdeReply => {
+    commitRevision()
+    view.bindingEpoch = epoch
+    view.eventNodeId = command.eventNodeId
+    view.connectionId = command.connectionId
+    view.claimId = command.claimId
+    view.state = 'OPEN'
+    view.cleanupFailed = false
+    view.forceAllowed = false
+    view.lastProofAt = null
+    view.createdAt = scheduler.now()
+    view.sessionGeneration = sessionGeneration
+    view.bindingPending = false
+    bridge.assign(view.viewId, view.workspacePath, epoch, view.directory)
+    scheduleExpiry(view)
+    rememberClaim(command.claimId, {
+      shape: openCommandShape(command),
+      viewId: view.viewId,
+      bindingEpoch: epoch,
+    })
+    return openReply(view, snapshot())
+  }
+
+  /**
+   * Reconciles a failed/uncertain native resume without guessing.
+   *
+   * <p>The native registry is the only proof of which epoch is live. If it still reports the old
+   * OPEN binding, that binding stays authoritative. If it reports the new OPEN binding, the
+   * response was merely lost and the binding can be adopted. Anything else keeps the workspace
+   * counted as CLOSING/cleanupFailed so a later explicit close can snapshot dirty text.
+   */
+  const reconcileResumeFailure = async (
+    view: ViewRecord,
+    command: ParsedOpenCommand,
+    epoch: string,
+    crashAtStart: number,
+    sessionGeneration: number,
+  ): Promise<IdeReply | null> => {
+    const sameGeneration = (): boolean =>
+      getCrashEpoch() === crashAtStart &&
+      manager.session()?.generation === sessionGeneration &&
+      views.get(view.viewId) === view
+    if (!sameGeneration()) {
+      markBindingUnverified(view)
+      return null
+    }
+    let nativeViews: ManagedViewInspection[]
+    try {
+      nativeViews = await manager.listViews(AbortSignal.timeout(closeBudgetMillis))
+    } catch {
+      markBindingUnverified(view)
+      return null
+    }
+    if (!sameGeneration()) {
+      markBindingUnverified(view)
+      return null
+    }
+    const native = nativeViews.find((candidate) => candidate.viewId === view.viewId)
+    if (native !== undefined && native.state === 'OPEN' && native.workspacePath === view.workspacePath) {
+      if (native.bindingEpoch === epoch) {
+        return adoptRegisteredBinding(view, command, epoch, sessionGeneration)
+      }
+      if (native.bindingEpoch === view.bindingEpoch) {
+        view.bindingPending = false
+        return null
+      }
+    }
+    markBindingUnverified(view)
+    return null
   }
 
   const resumeView = async (
@@ -359,17 +447,11 @@ export function createViewRegistry({
       throw new IdeError('code-server is not running', 'UNAVAILABLE')
     }
     view.bindingPending = true
-    const reservation = reserveBinding()
-    let committed = false
+    const epoch = commitRevision()
     try {
       abortViewStreams(view)
-      const registered = await manager.registerView(
-        view.viewId,
-        reservation.epoch,
-        view.workspacePath,
-        signal,
-      )
-      if (registered.state !== 'OPEN' || registered.bindingEpoch !== reservation.epoch) {
+      const registered = await manager.registerView(view.viewId, epoch, view.workspacePath, signal)
+      if (registered.state !== 'OPEN' || registered.bindingEpoch !== epoch) {
         throw new IdeError('managed view did not accept the new binding epoch', 'CLEANUP_FAILED')
       }
       if (
@@ -380,32 +462,15 @@ export function createViewRegistry({
       ) {
         throw new IdeError('code-server process changed during view resume', 'BUSY')
       }
-      view.bindingEpoch = reservation.epoch
-      view.eventNodeId = command.eventNodeId
-      view.connectionId = command.connectionId
-      view.claimId = command.claimId
-      view.state = 'OPEN'
-      view.cleanupFailed = false
-      view.forceAllowed = false
-      view.lastProofAt = null
-      view.createdAt = scheduler.now()
-      view.sessionGeneration = sessionGeneration
-      view.bindingPending = false
-      bridge.assign(view.viewId, view.workspacePath, reservation.epoch, view.directory)
-      scheduleExpiry(view)
-      rememberClaim(command.claimId, {
-        shape: openCommandShape(command),
-        viewId: view.viewId,
-        bindingEpoch: reservation.epoch,
-      })
-      reservation.complete()
-      committed = true
-      return openReply(view, await snapshot())
+      return adoptRegisteredBinding(view, command, epoch, sessionGeneration)
+    } catch (error) {
+      const adopted = await reconcileResumeFailure(view, command, epoch, crashAtStart, sessionGeneration)
+      if (adopted !== null) {
+        return adopted
+      }
+      throw error
     } finally {
       view.bindingPending = false
-      if (!committed) {
-        reservation.complete()
-      }
     }
   }
 
@@ -413,13 +478,13 @@ export function createViewRegistry({
     requireDaemonInstance(command, daemonInstanceId)
     const parsed = parseOpenCommand(command)
     const shape = openCommandShape(parsed)
-    const replayed = await replayClaim(parsed.claimId, shape)
+    const replayed = replayClaim(parsed.claimId, shape)
     if (replayed !== null) {
       return replayed
     }
     return withClaimLock(parsed.claimId, () =>
       withViewLock(parsed.viewId, async () => {
-        const replay = await replayClaim(parsed.claimId, shape)
+        const replay = replayClaim(parsed.claimId, shape)
         if (replay !== null) {
           return replay
         }

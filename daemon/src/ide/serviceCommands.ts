@@ -14,8 +14,8 @@ export function createCommandHandler(options: {
   focusTerminal: CommandHandler
   closeView: CommandHandler
   collapseMobile: CommandHandler
-  listViews: () => Promise<IdeReply>
-  snapshot: () => Promise<IdeSnapshot>
+  listViews: () => Promise<IdeReply> | IdeReply
+  snapshot: () => IdeSnapshot
   boundedText: (value: string | undefined, field: string) => string | undefined
 }): CommandHandler {
   return async (command, signal) => {
@@ -50,7 +50,7 @@ export function createCommandHandler(options: {
       // receipt still carries the complete post-failure snapshot for reconciliation.
       return failureReply(
         error,
-        command.action === 'LIST_DIRECTORIES' ? undefined : await options.snapshot(),
+        command.action === 'LIST_DIRECTORIES' ? undefined : options.snapshot(),
       )
     }
   }
