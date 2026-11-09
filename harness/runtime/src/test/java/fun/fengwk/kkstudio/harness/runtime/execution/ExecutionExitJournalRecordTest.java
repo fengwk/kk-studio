@@ -121,6 +121,7 @@ class ExecutionExitJournalRecordTest {
         kind,
         parentExecutionId,
         kind == ExecutionExitKind.REMOTE ? ENV : null,
+        ExecutionExitJournalStage.EXIT_PROOF,
         targetState,
         confirmedAt);
   }

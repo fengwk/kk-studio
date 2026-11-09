@@ -205,6 +205,7 @@ class ExecutionExitVirtualThreadPinningTest {
                 ExecutionExitKind.TOOL,
                 null,
                 null,
+                ExecutionExitJournalStage.EXIT_PROOF,
                 ExecutionExitState.STUDIO_EXITED,
                 Instant.EPOCH);
         CountDownLatch contenderStarted = new CountDownLatch(1);
@@ -277,6 +278,7 @@ class ExecutionExitVirtualThreadPinningTest {
                 ExecutionExitKind.TOOL,
                 null,
                 null,
+                ExecutionExitJournalStage.EXIT_PROOF,
                 ExecutionExitState.STUDIO_EXITED,
                 Instant.EPOCH));
       }

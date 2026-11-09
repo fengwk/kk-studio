@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -41,9 +42,10 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * 单机文件实现：每个执行身份一个 {@code <executionId>.json}，目录与文件分别限定为 0700/0600。
  *
- * <p>进程启动时以独占文件锁占用目录，防止两个 Studio 进程共用同一目录。写入先在同目录创建临时文件、设置权限并 force，再原子 rename； 读取遇到无法解码、
- * 身份不符或类型异常的文件时只记录该文件失败，不删除或覆盖原文件，健康记录仍返回。
+ * <p>进程启动时以独占文件锁占用目录，防止两个 Studio 进程共用同一目录。写入先在同目录创建临时文件、设置权限并 force，再原子 rename； PREPARED 到
+ * EXIT_PROOF 的推进使用原子替换。读取遇到无法解码、身份不符或类型异常的文件时只记录该文件失败，不删除或覆盖原文件，健康记录仍返回。
  */
+@Slf4j
 public final class FileExecutionExitJournal implements ExecutionExitJournal {
 
   private static final String LOCK_FILE = ".lock";
@@ -64,6 +66,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
           "kind",
           "parentExecutionId",
           "environmentId",
+          "stage",
           "targetState",
           "confirmedAt");
 
@@ -72,6 +75,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private final FileLock lock;
   private final ReentrantLock writeLock = new ReentrantLock();
   private boolean closed;
+  private boolean heldUntilProcessExit;
 
   public FileExecutionExitJournal(Path directory) {
     this.directory = Objects.requireNonNull(directory, "directory").toAbsolutePath();
@@ -124,13 +128,26 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
               ExecutionExitJournalConflictException.Conflict.IDENTITY,
               "execution exit journal identity conflict for " + record.executionId());
         }
-        if (existing.targetState() != record.targetState()) {
-          throw new ExecutionExitJournalConflictException(
-              ExecutionExitJournalConflictException.Conflict.TARGET,
-              "execution exit journal target conflict for " + record.executionId());
+        if (existing.stage() == ExecutionExitJournalStage.EXIT_PROOF) {
+          if (record.stage() == ExecutionExitJournalStage.PREPARED) {
+            throw new ExecutionExitJournalConflictException(
+                ExecutionExitJournalConflictException.Conflict.STAGE,
+                "execution exit journal stage cannot regress for " + record.executionId());
+          }
+          if (existing.targetState() != record.targetState()) {
+            throw new ExecutionExitJournalConflictException(
+                ExecutionExitJournalConflictException.Conflict.TARGET,
+                "execution exit journal target conflict for " + record.executionId());
+          }
+          forceDirectoryForWrite();
+          return existing;
         }
-        forceDirectoryForWrite();
-        return existing;
+        if (record.stage() == ExecutionExitJournalStage.PREPARED) {
+          forceDirectoryForWrite();
+          return existing;
+        }
+        replaceDurably(target, record);
+        return record;
       }
       Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
       boolean moved = false;
@@ -165,6 +182,36 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       }
     } finally {
       writeLock.unlock();
+    }
+  }
+
+  /** 把同一身份的 PREPARED 原子推进到 EXIT_PROOF：写临时文件后原子替换，保留单一 canonical 文件。 */
+  private void replaceDurably(Path target, ExecutionExitJournalRecord record) {
+    Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
+    boolean moved = false;
+    Throwable failure = null;
+    try {
+      writeDurably(temporary, encode(record));
+      try {
+        Files.move(
+            temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } catch (IOException error) {
+        throw new ExecutionExitJournalException(
+            "cannot persist execution exit journal entry for " + record.executionId(), error);
+      }
+      moved = true;
+      forceDirectoryForWrite();
+    } catch (IOException | RuntimeException error) {
+      failure = error;
+      if (error instanceof ExecutionExitJournalException journalError) {
+        throw journalError;
+      }
+      throw new ExecutionExitJournalException(
+          "cannot persist execution exit journal entry for " + record.executionId(), error);
+    } finally {
+      if (!moved) {
+        deleteTemporary(temporary, failure);
+      }
     }
   }
 
@@ -231,10 +278,35 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   }
 
   @Override
+  public void holdUntilProcessExit() {
+    writeLock.lock();
+    try {
+      if (closed) {
+        log.error(
+            "execution exit journal is already closed and cannot retain its directory lock;"
+                + " directory={}",
+            directory);
+        return;
+      }
+      heldUntilProcessExit = true;
+    } finally {
+      writeLock.unlock();
+    }
+  }
+
+  @Override
   public void close() {
     writeLock.lock();
     try {
       if (closed) {
+        return;
+      }
+      if (heldUntilProcessExit) {
+        // 仍有物理执行或未证明退出：保留内核锁直到 JVM 退出，由操作系统回收。
+        closed = true;
+        log.warn(
+            "execution exit journal retains its directory lock until process exit; directory={}",
+            directory);
         return;
       }
       Throwable failure = null;
@@ -348,8 +420,17 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     } else {
       node.put("environmentId", record.environmentId().toString());
     }
-    node.put("targetState", record.targetState().name());
-    node.put("confirmedAt", record.confirmedAt().toString());
+    node.put("stage", record.stage().name());
+    if (record.targetState() == null) {
+      node.putNull("targetState");
+    } else {
+      node.put("targetState", record.targetState().name());
+    }
+    if (record.confirmedAt() == null) {
+      node.putNull("confirmedAt");
+    } else {
+      node.put("confirmedAt", record.confirmedAt().toString());
+    }
     try {
       return MAPPER.writeValueAsString(node);
     } catch (JacksonException error) {
@@ -371,6 +452,16 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         envNode == null || envNode.isNull()
             ? null
             : EnvironmentId.parse(text(envNode, "environmentId"));
+    JsonNode targetNode = node.get("targetState");
+    ExecutionExitState targetState =
+        targetNode == null || targetNode.isNull()
+            ? null
+            : ExecutionExitState.valueOf(text(targetNode, "targetState"));
+    JsonNode confirmedNode = node.get("confirmedAt");
+    Instant confirmedAt =
+        confirmedNode == null || confirmedNode.isNull()
+            ? null
+            : Instant.parse(text(confirmedNode, "confirmedAt"));
     return new ExecutionExitJournalRecord(
         uuid(node.get("executionId"), "executionId"),
         uuid(node.get("threadId"), "threadId"),
@@ -380,8 +471,9 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         ExecutionExitKind.valueOf(text(node.get("kind"), "kind")),
         parent,
         environmentId,
-        ExecutionExitState.valueOf(text(node.get("targetState"), "targetState")),
-        Instant.parse(text(node.get("confirmedAt"), "confirmedAt")));
+        ExecutionExitJournalStage.valueOf(text(node.get("stage"), "stage")),
+        targetState,
+        confirmedAt);
   }
 
   private static UUID uuid(JsonNode node, String name) {

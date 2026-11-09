@@ -743,7 +743,11 @@ create table harness_execution_exit (
         kind in ('DRIVER', 'TOOL', 'REMOTE')
     ),
     constraint ck_harness_execution_exit_state check (
-        state in ('UNCONFIRMED', 'STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED', 'ABANDONED')
+        state in ('UNCONFIRMED', 'STUDIO_EXITED', 'OWNER_EXITED', 'REMOTE_ACKNOWLEDGED',
+            'NOT_STARTED', 'ABANDONED')
+    ),
+    constraint ck_harness_execution_exit_owner_exited check (
+        state <> 'OWNER_EXITED' or kind in ('DRIVER', 'TOOL')
     ),
     constraint ck_harness_execution_exit_time check (
         (confirmed_at is null or confirmed_at >= registered_at)
@@ -760,7 +764,7 @@ comment on column harness_execution_exit.owner_lease_token is '登记时持有�
 comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
 comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
-comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
+comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、本地所有者退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
 comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
 comment on column harness_execution_exit.abandoned_at is '用户显式放弃确认的时间（毫秒精度）；只有 ABANDONED 必填，后续真实确认保留';

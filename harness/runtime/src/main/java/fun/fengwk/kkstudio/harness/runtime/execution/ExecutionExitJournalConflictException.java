@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 
 import java.util.Objects;
 
-/** journal 中已经存在同一 execution 的其它身份或目标证据；不得覆盖，只保留证明并低频核对是否已修复或合法深删。 */
+/** journal 中已经存在同一 execution 的其它身份、阶段或目标证据；不得覆盖，只保留证明并低频核对是否已修复或合法深删。 */
 public final class ExecutionExitJournalConflictException extends ExecutionExitJournalException {
 
   public enum Conflict {
     IDENTITY,
+    STAGE,
     TARGET
   }
 

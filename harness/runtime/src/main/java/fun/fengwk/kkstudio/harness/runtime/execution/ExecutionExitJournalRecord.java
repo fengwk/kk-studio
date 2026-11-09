@@ -5,15 +5,16 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
 
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 退出确认的 write-ahead 记录：只保存精确执行身份、目标真实证据与确认时刻。
+ * 执行日志记录：冻结完整执行身份，并只携带当前阶段的证据。
  *
- * <p>不包含模型输出、用户输入或任何业务内容。记录在提交数据库确认事务之前落盘，确认与结算提交后才删除。
+ * <p>PREPARED 只保存身份；EXIT_PROOF 额外保存目标真实证据与确认时刻。记录不包含模型输出、用户输入或任何业务内容。
  */
 public record ExecutionExitJournalRecord(
     UUID executionId,
@@ -24,6 +25,7 @@ public record ExecutionExitJournalRecord(
     ExecutionExitKind kind,
     UUID parentExecutionId,
     EnvironmentId environmentId,
+    ExecutionExitJournalStage stage,
     ExecutionExitState targetState,
     Instant confirmedAt) {
 
@@ -50,22 +52,73 @@ public record ExecutionExitJournalRecord(
         throw new IllegalArgumentException("only a remote execution has an environment id");
       }
     }
-    targetState = Objects.requireNonNull(targetState, "targetState");
-    if (!targetState.confirmed()) {
-      throw new IllegalArgumentException("journal target must be real exit evidence");
+    stage = Objects.requireNonNull(stage, "stage");
+    if (stage == ExecutionExitJournalStage.PREPARED) {
+      if (targetState != null) {
+        throw new IllegalArgumentException("a prepared execution has no exit evidence");
+      }
+      if (confirmedAt != null) {
+        throw new IllegalArgumentException("a prepared execution has no confirmation time");
+      }
+    } else {
+      targetState = Objects.requireNonNull(targetState, "targetState");
+      if (!targetState.confirmed()) {
+        throw new IllegalArgumentException("journal target must be real exit evidence");
+      }
+      if (targetState == ExecutionExitState.REMOTE_ACKNOWLEDGED
+          && kind != ExecutionExitKind.REMOTE) {
+        throw new IllegalArgumentException("only a remote execution can be remote-acknowledged");
+      }
+      if ((targetState == ExecutionExitState.STUDIO_EXITED
+              || targetState == ExecutionExitState.OWNER_EXITED)
+          && kind == ExecutionExitKind.REMOTE) {
+        throw new IllegalArgumentException("a remote execution cannot claim a local exit");
+      }
+      confirmedAt = Objects.requireNonNull(confirmedAt, "confirmedAt");
+      HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
     }
-    if (targetState == ExecutionExitState.REMOTE_ACKNOWLEDGED && kind != ExecutionExitKind.REMOTE) {
-      throw new IllegalArgumentException("only a remote execution can be remote-acknowledged");
-    }
-    if (targetState == ExecutionExitState.STUDIO_EXITED && kind == ExecutionExitKind.REMOTE) {
-      throw new IllegalArgumentException("a remote execution cannot claim studio exit");
-    }
-    confirmedAt = Objects.requireNonNull(confirmedAt, "confirmedAt");
-    HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
+  }
+
+  /** 允许本地 body 之前的持久声明：只冻结执行身份。 */
+  public static ExecutionExitJournalRecord prepared(LocalExecutionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    return new ExecutionExitJournalRecord(
+        identity.executionId(),
+        identity.threadId(),
+        identity.invocationId(),
+        identity.attempt(),
+        identity.ownerLeaseToken(),
+        identity.kind(),
+        null,
+        null,
+        ExecutionExitJournalStage.PREPARED,
+        null,
+        null);
+  }
+
+  /** 用精确事实与真实证据构造 EXIT_PROOF；未登记或身份不符的事实不能生成证明。 */
+  public static ExecutionExitJournalRecord exitProof(
+      ExecutionExitFact fact, ExecutionExitState state, Instant confirmedAt) {
+    Objects.requireNonNull(fact, "fact");
+    return new ExecutionExitJournalRecord(
+        fact.executionId(),
+        fact.threadId(),
+        fact.invocationId(),
+        fact.attempt(),
+        fact.ownerLeaseToken(),
+        fact.kind(),
+        fact.parentExecutionId(),
+        fact.environmentId(),
+        ExecutionExitJournalStage.EXIT_PROOF,
+        state,
+        confirmedAt);
   }
 
   /** 用记录中的身份构造待确认事实；登记时间不参与身份，仅需满足事实的毫秒边界。 */
   public ExecutionExitFact expected(Instant registeredAt) {
+    if (stage != ExecutionExitJournalStage.EXIT_PROOF) {
+      throw new IllegalStateException("a prepared execution has no exit evidence");
+    }
     return new ExecutionExitFact(
         executionId,
         threadId,
@@ -81,7 +134,7 @@ public record ExecutionExitJournalRecord(
         null);
   }
 
-  /** 执行身份相同；目标证据或确认时刻不同仍属于同一身份。 */
+  /** 执行身份相同；阶段、目标证据或确认时刻不同仍属于同一身份。 */
   public boolean sameIdentity(ExecutionExitJournalRecord other) {
     return other != null
         && executionId.equals(other.executionId)
@@ -92,5 +145,18 @@ public record ExecutionExitJournalRecord(
         && kind == other.kind
         && Objects.equals(parentExecutionId, other.parentExecutionId)
         && Objects.equals(environmentId, other.environmentId);
+  }
+
+  /** 与数据库事实的身份字段一致；登记时间、证据与状态不参与比较。 */
+  public boolean matchesFactIdentity(ExecutionExitFact fact) {
+    return fact != null
+        && executionId.equals(fact.executionId())
+        && threadId.equals(fact.threadId())
+        && invocationId.equals(fact.invocationId())
+        && attempt == fact.attempt()
+        && ownerLeaseToken.equals(fact.ownerLeaseToken())
+        && kind == fact.kind()
+        && Objects.equals(parentExecutionId, fact.parentExecutionId())
+        && Objects.equals(environmentId, fact.environmentId());
   }
 }

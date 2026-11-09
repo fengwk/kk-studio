@@ -231,6 +231,9 @@ class ExecutionExitConfirmationRetryTest {
     }
 
     @Override
+    public void holdUntilProcessExit() {}
+
+    @Override
     public void close() {}
   }
 }

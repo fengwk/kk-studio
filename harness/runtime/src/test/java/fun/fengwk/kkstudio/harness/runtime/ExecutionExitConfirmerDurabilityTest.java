@@ -138,6 +138,9 @@ class ExecutionExitConfirmerDurabilityTest {
           }
 
           @Override
+          public void holdUntilProcessExit() {}
+
+          @Override
           public void close() {}
         };
     ExecutionExitConfirmer confirmer =
@@ -367,17 +370,7 @@ class ExecutionExitConfirmerDurabilityTest {
   }
 
   private static ExecutionExitJournalRecord recordFor(ExecutionExitFact fact) {
-    return new ExecutionExitJournalRecord(
-        fact.executionId(),
-        fact.threadId(),
-        fact.invocationId(),
-        fact.attempt(),
-        fact.ownerLeaseToken(),
-        fact.kind(),
-        fact.parentExecutionId(),
-        fact.environmentId(),
-        ExecutionExitState.STUDIO_EXITED,
-        T0);
+    return ExecutionExitJournalRecord.exitProof(fact, ExecutionExitState.STUDIO_EXITED, T0);
   }
 
   private static final class FailingDeleteJournal implements ExecutionExitJournal {
@@ -405,6 +398,11 @@ class ExecutionExitConfirmerDurabilityTest {
     @Override
     public ExecutionExitJournalSnapshot loadAll() {
       return delegate.loadAll();
+    }
+
+    @Override
+    public void holdUntilProcessExit() {
+      delegate.holdUntilProcessExit();
     }
 
     @Override
