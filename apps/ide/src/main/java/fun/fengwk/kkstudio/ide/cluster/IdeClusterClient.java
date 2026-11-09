@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.ide.cluster;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -11,8 +10,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
@@ -127,6 +128,21 @@ public class IdeClusterClient {
         EnvironmentIdeViewsDTO.class);
   }
 
+  public EnvironmentIdeViewSnapshotDTO readView(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      EnvironmentIdeReadViewDTO request) {
+    return exchange(
+        "GET",
+        IdeInternalPaths.viewPath(environmentId, viewId, request),
+        owner,
+        null,
+        EnvironmentIdeViewSnapshotDTO.class,
+        true,
+        false);
+  }
+
   public void focusTerminal(
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
@@ -169,7 +185,7 @@ public class IdeClusterClient {
 
   private <T> T exchange(
       String method, String path, ClusterOwnerRoute owner, Object body, Class<T> type) {
-    return exchange(method, path, owner, body, type, true);
+    return exchange(method, path, owner, body, type, true, true);
   }
 
   private <T> T exchange(
@@ -179,6 +195,17 @@ public class IdeClusterClient {
       Object body,
       Class<T> type,
       boolean boundedTime) {
+    return exchange(method, path, owner, body, type, boundedTime, true);
+  }
+
+  private <T> T exchange(
+      String method,
+      String path,
+      ClusterOwnerRoute owner,
+      Object body,
+      Class<T> type,
+      boolean boundedTime,
+      boolean commandMayHaveExecuted) {
     URI uri = owner.internalUrl().resolve(path);
     Map<String, String> authHeaders = authentication.sign(method, path, owner.nodeInstanceId());
     HttpRequest.Builder builder = HttpRequest.newBuilder(uri).header("Accept", "application/json");
@@ -224,16 +251,14 @@ public class IdeClusterClient {
     } catch (TimeoutException error) {
       subscriber.cancel();
       responseFuture.cancel(true);
-      throw DomainException.unavailable(
-          "IDE_UNAVAILABLE", "cluster IDE owner response timed out", error);
+      throw transportFailure("cluster IDE owner response timed out", error, commandMayHaveExecuted);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       subscriber.cancel();
       responseFuture.cancel(true);
-      throw DomainException.unavailable(
-          "IDE_UNAVAILABLE", "cluster IDE request was interrupted", error);
+      throw transportFailure("cluster IDE request was interrupted", error, commandMayHaveExecuted);
     } catch (ExecutionException error) {
-      throw mapFailure(error.getCause());
+      throw mapFailure(error.getCause(), commandMayHaveExecuted);
     }
     int status = response.statusCode();
     byte[] payload = response.body();
@@ -247,27 +272,64 @@ public class IdeClusterClient {
     Problem problem = ClusterInternalErrors.parse(objectMapper, payload);
     String detail =
         problem.detail() == null ? "cluster IDE owner rejected the request" : problem.detail();
-    if (status == 400 && "validation".equals(problem.code())) {
-      if ("IDE_CLOSE_CANCELLED".equals(problem.reason())) {
-        throw DomainException.validationReason("IDE_CLOSE_CANCELLED", detail);
-      }
-      throw DomainException.validation("environment", detail);
-    }
-    throw DomainException.unavailable("IDE_UNAVAILABLE", detail);
+    throw problemFailure(problem, detail);
   }
 
-  private static DomainException mapFailure(Throwable cause) {
-    if (cause instanceof DomainException error
-        && error.code() == DomainErrorCode.UNAVAILABLE
-        && "IDE_UNAVAILABLE".equals(error.reason())) {
+  private static DomainException mapFailure(Throwable cause, boolean commandMayHaveExecuted) {
+    if (cause instanceof DomainException error) {
       return error;
     }
     if (cause instanceof TimeoutException) {
-      return DomainException.unavailable(
-          "IDE_UNAVAILABLE", "cluster IDE owner response timed out", cause);
+      return transportFailure(
+          "cluster IDE owner response timed out", cause, commandMayHaveExecuted);
     }
-    return DomainException.unavailable(
-        "IDE_UNAVAILABLE", "cluster IDE owner is unreachable", cause);
+    return transportFailure("cluster IDE owner is unreachable", cause, commandMayHaveExecuted);
+  }
+
+  private static DomainException transportFailure(
+      String message, Throwable cause, boolean commandMayHaveExecuted) {
+    String reason = commandMayHaveExecuted ? "IDE_OUTCOME_UNKNOWN" : "IDE_UNAVAILABLE";
+    return DomainException.unavailable(reason, message, cause);
+  }
+
+  private static DomainException problemFailure(Problem problem, String detail) {
+    String code = problem.code();
+    String reason = problem.reason();
+    if ("validation".equals(code)) {
+      return hasReason(reason)
+          ? DomainException.validationReason(reason, detail)
+          : DomainException.validation("environment", detail);
+    }
+    if ("conflict".equals(code)) {
+      return DomainException.conflict(hasReason(reason) ? reason : "IDE_CONFLICT", detail);
+    }
+    if ("unavailable".equals(code)) {
+      return DomainException.unavailable(hasReason(reason) ? reason : "IDE_UNAVAILABLE", detail);
+    }
+    if ("not_found".equals(code)) {
+      return DomainException.notFound("environment", detail);
+    }
+    if ("upstream_failed".equals(code)) {
+      return DomainException.upstream("environment", detail);
+    }
+    if ("unauthorized".equals(code)) {
+      return DomainException.unavailable("IDE_UNAUTHORIZED", detail);
+    }
+    return DomainException.unavailable("IDE_UNAVAILABLE", detail);
+  }
+
+  /** 只校验 reason 的结构，不猜测其语义；完整原因仍由 owner 提供。 */
+  private static boolean hasReason(String reason) {
+    if (reason == null || reason.isBlank()) {
+      return false;
+    }
+    for (int index = 0; index < reason.length(); index++) {
+      char c = reason.charAt(index);
+      if (!(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '_') {
+        return false;
+      }
+    }
+    return reason.charAt(0) >= 'A' && reason.charAt(0) <= 'Z';
   }
 
   private byte[] writeRequestJson(Object body) {

@@ -54,7 +54,7 @@ class IdeCommandTransportTest {
             .addBindings(
                 IdeLeaseBinding.newBuilder()
                     .setViewId(view.toString())
-                    .setDocumentId(document.toString())
+                    .setBrowserSessionId(document.toString())
                     .setBindingEpoch(7L))
             .build();
     verify(server).sendIdeLease(environment, identity, expected);

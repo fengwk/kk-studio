@@ -350,7 +350,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
               fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
             }
           }
-          case DOCUMENT_MISMATCH -> rejectIdeUse("documentId is fixed for this connection");
+          case BROWSER_SESSION_MISMATCH -> rejectIdeUse(
+              "browserSessionId is fixed for this connection");
           case REVISION_CONFLICT -> rejectIdeUse(
               "ide-use revision must increase and keep identical content for the same revision");
           case DISCONNECTED -> {

@@ -19,7 +19,7 @@ export function createViewLease(
 
   function scheduleExpiry(view: ViewRecord, notBefore = 0): void {
     clearTimer(view)
-    if (view.state !== 'OPEN' || view.nativeClosePending || isClosed()) {
+    if (view.state !== 'OPEN' || view.nativeClosePending || view.bindingPending || isClosed()) {
       return
     }
     const base = view.lastProofAt ?? view.createdAt
@@ -40,7 +40,8 @@ export function createViewLease(
       if (
         view === undefined ||
         view.state !== 'OPEN' ||
-        view.documentId !== binding.documentId ||
+        view.bindingPending ||
+        view.browserSessionId !== binding.browserSessionId ||
         view.bindingEpoch !== binding.bindingEpoch!.toString()
       ) {
         continue

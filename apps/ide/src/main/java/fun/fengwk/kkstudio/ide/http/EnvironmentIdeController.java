@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.ide.http;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -18,8 +19,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 
 import java.util.UUID;
 
@@ -40,6 +43,15 @@ public class EnvironmentIdeController {
   public EnvironmentIdeViewDTO openView(
       @PathVariable UUID environmentId, @RequestBody EnvironmentIdeOpenViewDTO request) {
     return environmentIdeService.openView(EnvironmentId.of(environmentId), request);
+  }
+
+  @GetMapping("/views/{viewId}")
+  public EnvironmentIdeViewSnapshotDTO readView(
+      @PathVariable UUID environmentId,
+      @PathVariable UUID viewId,
+      @ModelAttribute EnvironmentIdeReadViewDTO request) {
+    return environmentIdeService.readView(
+        EnvironmentId.of(environmentId), viewId.toString(), request);
   }
 
   @PutMapping("/views/{viewId}/directory")

@@ -35,7 +35,8 @@ class IdeBrowserUseInternalControllerTest {
   private static final UUID NODE = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   private static final UUID OTHER_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID CONNECTION = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
-  private static final UUID DOCUMENT = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final UUID BROWSER_SESSION =
+      UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final UUID VIEW = UUID.fromString("33333333-3333-3333-3333-333333333333");
@@ -109,14 +110,14 @@ class IdeBrowserUseInternalControllerTest {
   void activeBoundProofsGetReturnsOnlyBoundViews() throws Exception {
     registerUsage(
         1, intent(), new IdeBrowserUseView(ENVIRONMENT, BOUND_VIEW, UUID.randomUUID(), 9L));
-    String path = IdeBrowserUsePaths.activeProofsPath(identity(), DOCUMENT);
+    String path = IdeBrowserUsePaths.activeProofsPath(identity(), BROWSER_SESSION);
 
     mockMvc
         .perform(get(path).headers(headers(authentication.sign("GET", path, NODE))))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.eventNodeId").value(NODE.toString()))
         .andExpect(jsonPath("$.connectionId").value(CONNECTION.toString()))
-        .andExpect(jsonPath("$.documentId").value(DOCUMENT.toString()))
+        .andExpect(jsonPath("$.browserSessionId").value(BROWSER_SESSION.toString()))
         .andExpect(jsonPath("$.revision").value("1"))
         .andExpect(jsonPath("$.views.length()").value(1))
         .andExpect(jsonPath("$.views[0].viewId").value(BOUND_VIEW.toString()))
@@ -126,7 +127,7 @@ class IdeBrowserUseInternalControllerTest {
   @Test
   void unboundIntentHasNoActiveProofsAndUnboundGetIs404() throws Exception {
     registerUsage(1, intent());
-    String path = IdeBrowserUsePaths.activeProofsPath(identity(), DOCUMENT);
+    String path = IdeBrowserUsePaths.activeProofsPath(identity(), BROWSER_SESSION);
 
     mockMvc
         .perform(get(path).headers(headers(authentication.sign("GET", path, NODE))))
@@ -136,7 +137,7 @@ class IdeBrowserUseInternalControllerTest {
   @Test
   void duplicateOrUnknownQueryParametersAreRejected() throws Exception {
     registerUsage(1, new IdeBrowserUseView(ENVIRONMENT, BOUND_VIEW, UUID.randomUUID(), 9L));
-    String base = IdeBrowserUsePaths.activeProofsPath(identity(), DOCUMENT);
+    String base = IdeBrowserUsePaths.activeProofsPath(identity(), BROWSER_SESSION);
     String duplicate = base.replace("&connectionId=", "&eventNodeId=" + NODE + "&connectionId=");
     for (String path : List.of(duplicate, base + "&extra=true")) {
       mockMvc
@@ -220,16 +221,17 @@ class IdeBrowserUseInternalControllerTest {
 
   private long registerUsage(long revision, IdeBrowserUseView... views) {
     long generation = registry.register(identity());
-    registry.accept(identity(), generation, new IdeBrowserUse(DOCUMENT, revision, List.of(views)));
+    registry.accept(
+        identity(), generation, new IdeBrowserUse(BROWSER_SESSION, revision, List.of(views)));
     return generation;
   }
 
   private String intentBody() {
     return """
-        {"eventNodeId":"%s","connectionId":"%s","documentId":"%s","environmentId":"%s",
+        {"eventNodeId":"%s","connectionId":"%s","browserSessionId":"%s","environmentId":"%s",
          "viewId":"%s","claimId":"%s"}
         """
-        .formatted(NODE, CONNECTION, DOCUMENT, ENVIRONMENT, VIEW, CLAIM);
+        .formatted(NODE, CONNECTION, BROWSER_SESSION, ENVIRONMENT, VIEW, CLAIM);
   }
 
   private static IdeBrowserUseView intent() {

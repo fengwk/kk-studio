@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -24,8 +25,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
@@ -93,6 +96,16 @@ public class ClusterEnvironmentIdeInternalController {
       @PathVariable UUID environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     return localEnvironmentIdeService.listViews(environment);
+  }
+
+  @GetMapping("/views/{viewId:" + VIEW_ID + "}")
+  public EnvironmentIdeViewSnapshotDTO readView(
+      @PathVariable UUID environmentId,
+      @PathVariable String viewId,
+      @ModelAttribute EnvironmentIdeReadViewDTO readView,
+      HttpServletRequest request) {
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    return localEnvironmentIdeService.readView(environment, viewId, readView);
   }
 
   @GetMapping("/directories")

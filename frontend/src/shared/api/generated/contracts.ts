@@ -819,15 +819,17 @@ export const ENVIRONMENT_EVENT_TYPE_VALUES: readonly EnvironmentEventType[] = [
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO */
 export interface EnvironmentIdeChangeDirectoryDTO {
-  documentId: string
+  browserSessionId: string
   bindingEpoch: string
+  expectedDaemonInstanceId: string
   directory: string
 }
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO */
 export interface EnvironmentIdeCloseViewDTO {
-  documentId: string
+  browserSessionId: string
   bindingEpoch: string
+  expectedDaemonInstanceId: string
   discard: boolean
 }
 
@@ -858,25 +860,28 @@ export const ENVIRONMENT_IDE_OPEN_MODE_VALUES: readonly EnvironmentIdeOpenMode[]
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
-  documentId: string
+  browserSessionId: string
   eventNodeId: string
   connectionId: string
   claimId: string
   mode: EnvironmentIdeOpenMode
+  expectedBindingEpoch: string
+  expectedDaemonInstanceId: string
   directory?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO */
 export interface EnvironmentIdeViewBindingDTO {
-  documentId: string
+  browserSessionId: string
   bindingEpoch: string
+  expectedDaemonInstanceId: string
 }
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO */
 export interface EnvironmentIdeViewDTO {
   viewId: string
   environmentId: string
-  documentId: string
+  browserSessionId: string
   eventNodeId: string
   connectionId: string
   claimId: string
@@ -886,6 +891,13 @@ export interface EnvironmentIdeViewDTO {
   workspacePath: string
   state: EnvironmentIdeViewState
   entryUrl?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO */
+export interface EnvironmentIdeViewSnapshotDTO {
+  daemonInstanceId: string
+  revision: string
+  view: EnvironmentIdeViewDTO | null
 }
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState */
@@ -900,6 +912,8 @@ export const ENVIRONMENT_IDE_VIEW_STATE_VALUES: readonly EnvironmentIdeViewState
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO */
 export interface EnvironmentIdeViewsDTO {
+  daemonInstanceId: string
+  revision: string
   views: EnvironmentIdeViewDTO[]
 }
 
@@ -1643,7 +1657,7 @@ export interface IdeBrowserUseIntentReply {
 export interface IdeBrowserUseSnapshot {
   eventNodeId: string
   connectionId: string
-  documentId: string
+  browserSessionId: string
   revision: string
   views: IdeBrowserUseSnapshotView[]
 }
@@ -2969,11 +2983,13 @@ export const THREAD_EXECUTION_CONTROL_VALUES: readonly ThreadExecutionControl[] 
 /** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus */
 export type ThreadRuntimeStatus =
   | 'RUNNING'
+  | 'EXIT_PENDING'
   | 'WAITING'
   | 'IDLE'
 
 export const THREAD_RUNTIME_STATUS_VALUES: readonly ThreadRuntimeStatus[] = [
   'RUNNING',
+  'EXIT_PENDING',
   'WAITING',
   'IDLE',
 ]
@@ -3218,6 +3234,10 @@ export interface ApiRoutes {
     path: { environmentId: string }
     query: { path?: string }
     response: EnvironmentIdeDirectoryListingDTO
+  }
+  'GET /api/ide/environments/{environmentId}/views/{viewId}': {
+    path: { environmentId: string; viewId: string }
+    response: EnvironmentIdeViewSnapshotDTO
   }
   'GET /api/platform/agents': {
     response: AgentDTO[]

@@ -11,10 +11,10 @@ import java.util.Optional;
  * IDE 同源网关的一次性 bootstrap 票据：claim 成功后的 entryUrl 携带该票据，网关消费后设置绑定 view+epoch 的 HttpOnly cookie。
  *
  * <p>票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管 workspace，一次性且短时；消费时仍须复核当前 {@link
- * IdeGenerationState} 与视图绑定。关闭/恢复换代时 {@link #revokeView} 撤销该实例该视图尚未消费的票据；实例接管不批量撤销，旧代际票据在消费时因代际 已
- * REPLACED 被拒绝。
+ * IdeGenerationState} 与唯一权威视图快照。撤销按完整 {@code (Daemon 身份, viewId, bindingEpoch)} 精确进行，旧 epoch
+ * 的回滚或清理不能删除新绑定票据。
  */
-public final class IdeBootstrapTicketService {
+public class IdeBootstrapTicketService {
 
   private final OneTimeTicketStore<Ticket> store = new OneTimeTicketStore<>();
 
@@ -30,11 +30,33 @@ public final class IdeBootstrapTicketService {
     return store.consume(ticket);
   }
 
-  /** 撤销某 Daemon 进程某视图全部尚未消费的入口票据（关闭、恢复换代时调用）；另一个进程复用同 viewId 的票据不受影响。 */
-  public void revokeView(DaemonConnectionIdentity identity, String viewId) {
+  /** 只撤销该 Daemon 进程该视图该 epoch 尚未消费的入口票据。 */
+  public void revoke(DaemonConnectionIdentity identity, String viewId, long bindingEpoch) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
-    store.revoke(ticket -> ticket.identity().equals(identity) && ticket.viewId().equals(viewId));
+    if (bindingEpoch <= 0) {
+      throw new IllegalArgumentException("bindingEpoch must be positive");
+    }
+    store.revoke(
+        ticket ->
+            ticket.identity().equals(identity)
+                && ticket.viewId().equals(viewId)
+                && ticket.bindingEpoch() == bindingEpoch);
+  }
+
+  /** 只单向撤销同 view 严格早于 {@code currentBindingEpoch} 的遗留票据；当前与更新 epoch 永不受影响。 */
+  public void revokeOlderThan(
+      DaemonConnectionIdentity identity, String viewId, long currentBindingEpoch) {
+    Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(viewId, "viewId");
+    if (currentBindingEpoch <= 0) {
+      throw new IllegalArgumentException("currentBindingEpoch must be positive");
+    }
+    store.revoke(
+        ticket ->
+            ticket.identity().equals(identity)
+                && ticket.viewId().equals(viewId)
+                && ticket.bindingEpoch() < currentBindingEpoch);
   }
 
   int pendingCount() {

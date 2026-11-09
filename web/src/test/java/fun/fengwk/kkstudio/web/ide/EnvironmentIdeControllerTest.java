@@ -38,14 +38,16 @@ import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
-import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
+import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.http.EnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -112,14 +114,50 @@ class EnvironmentIdeControllerTest {
         .perform(
             post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/apply-mobile-layout")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
+                .content(
+                    "{\"browserSessionId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isNoContent());
     ArgumentCaptor<EnvironmentIdeViewBindingDTO> body =
         ArgumentCaptor.forClass(EnvironmentIdeViewBindingDTO.class);
     verify(environmentIdeService)
         .collapseMobile(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), body.capture());
-    assertEquals(DOCUMENT_ID, body.getValue().getDocumentId());
+    assertEquals(DOCUMENT_ID, body.getValue().getBrowserSessionId());
     assertEquals(7L, body.getValue().getBindingEpoch());
+  }
+
+  /** 纯读 GET 使用显式 query DTO，直接返回权威快照且绝不携带 entryUrl。 */
+  @Test
+  void readViewForwardsExplicitQueryAndReturnsSnapshotWithoutEntryUrl() throws Exception {
+    EnvironmentIdeViewDTO view = view("/workspace");
+    EnvironmentIdeViewSnapshotDTO snapshot = new EnvironmentIdeViewSnapshotDTO();
+    snapshot.setDaemonInstanceId("daemon-instance");
+    snapshot.setRevision(9L);
+    snapshot.setView(view);
+    when(environmentIdeService.readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
+        .thenReturn(snapshot);
+
+    mockMvc
+        .perform(
+            get("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID)
+                .param("browserSessionId", DOCUMENT_ID)
+                .param("eventNodeId", "11111111-1111-4111-8111-111111111111")
+                .param("connectionId", "22222222-2222-4222-8222-222222222222")
+                .param("claimId", "33333333-3333-4333-8333-333333333333")
+                .param("expectedDaemonInstanceId", "daemon-instance"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.daemonInstanceId").value("daemon-instance"))
+        .andExpect(jsonPath("$.revision").value(9))
+        .andExpect(jsonPath("$.view.viewId").value(VIEW_ID))
+        .andExpect(jsonPath("$.view.entryUrl").doesNotExist());
+
+    ArgumentCaptor<EnvironmentIdeReadViewDTO> request =
+        ArgumentCaptor.forClass(EnvironmentIdeReadViewDTO.class);
+    verify(environmentIdeService)
+        .readView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
+    assertEquals(DOCUMENT_ID, request.getValue().getBrowserSessionId());
+    assertEquals("daemon-instance", request.getValue().getExpectedDaemonInstanceId());
   }
 
   /** 意图：OPEN_VIEW 返回 200 与受控 entryUrl，并把路径中的 environmentId 与请求体原样转发给服务。 */
@@ -165,9 +203,9 @@ class EnvironmentIdeControllerTest {
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\""
+                    "{\"browserSessionId\":\""
                         + DOCUMENT_ID
-                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
@@ -187,9 +225,9 @@ class EnvironmentIdeControllerTest {
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\""
+                    "{\"browserSessionId\":\""
                         + DOCUMENT_ID
-                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.viewId").value(VIEW_ID))
         .andExpect(jsonPath("$.directory").value("/workspace/subdir"))
@@ -199,7 +237,7 @@ class EnvironmentIdeControllerTest {
         ArgumentCaptor.forClass(EnvironmentIdeChangeDirectoryDTO.class);
     verify(environmentIdeService)
         .changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
-    assertEquals(DOCUMENT_ID, request.getValue().getDocumentId());
+    assertEquals(DOCUMENT_ID, request.getValue().getBrowserSessionId());
     assertEquals(7L, request.getValue().getBindingEpoch());
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
   }
@@ -222,9 +260,9 @@ class EnvironmentIdeControllerTest {
                 .locale(Locale.forLanguageTag(languageTag))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\""
+                    "{\"browserSessionId\":\""
                         + DOCUMENT_ID
-                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.status").value(409))
         .andExpect(jsonPath("$.code").value("unavailable"))
@@ -275,7 +313,10 @@ class EnvironmentIdeControllerTest {
             post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/focus-terminal")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
+                .content(
+                    "{\"browserSessionId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(
@@ -283,9 +324,9 @@ class EnvironmentIdeControllerTest {
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\""
+                    "{\"browserSessionId\":\""
                         + DOCUMENT_ID
-                        + "\",\"bindingEpoch\":\"7\",\"discard\":false}"))
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\",\"discard\":false}"))
         .andExpect(status().isNoContent());
 
     ArgumentCaptor<EnvironmentIdeViewBindingDTO> focus =
@@ -296,9 +337,9 @@ class EnvironmentIdeControllerTest {
         .focusTerminal(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), focus.capture());
     verify(environmentIdeService)
         .closeView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), close.capture());
-    assertEquals(DOCUMENT_ID, focus.getValue().getDocumentId());
+    assertEquals(DOCUMENT_ID, focus.getValue().getBrowserSessionId());
     assertEquals(7L, focus.getValue().getBindingEpoch());
-    assertEquals(DOCUMENT_ID, close.getValue().getDocumentId());
+    assertEquals(DOCUMENT_ID, close.getValue().getBrowserSessionId());
     assertEquals(7L, close.getValue().getBindingEpoch());
     assertFalse(close.getValue().isDiscard());
   }
@@ -311,7 +352,10 @@ class EnvironmentIdeControllerTest {
             post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/close")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
+                .content(
+                    "{\"browserSessionId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("discard is required"));
@@ -328,9 +372,9 @@ class EnvironmentIdeControllerTest {
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\""
+                    "{\"browserSessionId\":\""
                         + DOCUMENT_ID
-                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace\",\"unknown\":true}"))
+                        + "\",\"expectedDaemonInstanceId\":\"daemon-instance\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace\",\"unknown\":true}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("unknown is not allowed"));
@@ -352,9 +396,8 @@ class EnvironmentIdeControllerTest {
             transport,
             new IdeBootstrapTicketService(),
             mock(IdeBrowserUseGateway.class),
-            new IdeViewBindingRegistry(environmentId -> Optional.empty()),
-            Duration.ofSeconds(5),
-            null);
+            new IdeViewSnapshotStore(environmentId -> Optional.empty()),
+            Duration.ofSeconds(5));
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new EnvironmentIdeController(service))
             .setControllerAdvice(new ProblemAdvice(new MessageService()))
@@ -362,11 +405,13 @@ class EnvironmentIdeControllerTest {
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
     openRequest.setViewId(VIEW_ID);
-    openRequest.setDocumentId(DOCUMENT_ID);
+    openRequest.setBrowserSessionId(DOCUMENT_ID);
     openRequest.setEventNodeId(UUID.randomUUID().toString());
     openRequest.setConnectionId(UUID.randomUUID().toString());
     openRequest.setClaimId(UUID.randomUUID().toString());
     openRequest.setMode(EnvironmentIdeOpenMode.CREATE);
+    openRequest.setExpectedBindingEpoch(0L);
+    openRequest.setExpectedDaemonInstanceId("daemon-instance");
     openRequest.setDirectory(directory);
     realChain
         .perform(
@@ -379,8 +424,9 @@ class EnvironmentIdeControllerTest {
         .andExpect(jsonPath("$.detail", containsString("directory")));
 
     EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
-    changeRequest.setDocumentId(DOCUMENT_ID);
+    changeRequest.setBrowserSessionId(DOCUMENT_ID);
     changeRequest.setBindingEpoch(7L);
+    changeRequest.setExpectedDaemonInstanceId("daemon-instance");
     changeRequest.setDirectory(directory);
     realChain
         .perform(
@@ -410,11 +456,13 @@ class EnvironmentIdeControllerTest {
   private static String openViewBody(String directory) throws Exception {
     EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
     request.setViewId(VIEW_ID);
-    request.setDocumentId(DOCUMENT_ID);
+    request.setBrowserSessionId(DOCUMENT_ID);
     request.setEventNodeId(UUID.randomUUID().toString());
     request.setConnectionId(UUID.randomUUID().toString());
     request.setClaimId(UUID.randomUUID().toString());
     request.setMode(EnvironmentIdeOpenMode.CREATE);
+    request.setExpectedBindingEpoch(0L);
+    request.setExpectedDaemonInstanceId("daemon-instance");
     request.setDirectory(directory);
     return OBJECT_MAPPER.writeValueAsString(request);
   }

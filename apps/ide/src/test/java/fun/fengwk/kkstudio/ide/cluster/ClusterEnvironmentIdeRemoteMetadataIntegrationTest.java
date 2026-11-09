@@ -20,13 +20,13 @@ import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
-import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
-import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
+import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
@@ -39,6 +39,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryListing;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
@@ -110,9 +112,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             transportB,
             new IdeBootstrapTicketService(),
             new AllowGateway(),
-            new IdeViewBindingRegistry(transportB),
-            Duration.ofSeconds(1),
-            new NoopAuthorization());
+            new IdeViewSnapshotStore(transportB),
+            Duration.ofSeconds(1));
 
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/internal/ide/environments/", this::handle);
@@ -158,7 +159,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertEquals(2, transportB.commands.size());
     IdeCommand focus = transportB.commands.getLast();
     assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
-    assertEquals(DOCUMENT.toString(), focus.getDocumentId());
+    assertEquals(DOCUMENT, focus.getBrowserSessionId());
     assertEquals(7L, focus.getBindingEpoch());
     assertTrue(localTransportA.commands.isEmpty());
   }
@@ -426,9 +427,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         localTransportA,
         new IdeBootstrapTicketService(),
         new AllowGateway(),
-        new IdeViewBindingRegistry(localTransportA),
-        Duration.ofSeconds(1),
-        new NoopAuthorization());
+        new IdeViewSnapshotStore(localTransportA),
+        Duration.ofSeconds(1));
   }
 
   private void handle(HttpExchange exchange) throws IOException {
@@ -476,6 +476,20 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         respond(exchange, 200, objectMapper.writeValueAsString(views));
         return;
       }
+      if ("GET".equals(method) && segments.length == 7 && "views".equals(segments[5])) {
+        Map<String, String> parameters = queryParameters(exchange.getRequestURI().getRawQuery());
+        EnvironmentIdeReadViewDTO read = new EnvironmentIdeReadViewDTO();
+        read.setBrowserSessionId(parameters.get("browserSessionId"));
+        read.setEventNodeId(parameters.get("eventNodeId"));
+        read.setConnectionId(parameters.get("connectionId"));
+        read.setClaimId(parameters.get("claimId"));
+        read.setExpectedDaemonInstanceId(parameters.get("expectedDaemonInstanceId"));
+        respond(
+            exchange,
+            200,
+            objectMapper.writeValueAsString(nodeBLocal.readView(environmentId, segments[6], read)));
+        return;
+      }
       if ("PUT".equals(method) && segments.length == 8 && "directory".equals(segments[7])) {
         EnvironmentIdeChangeDirectoryDTO request =
             objectMapper.readValue(
@@ -521,6 +535,22 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     return EnvironmentId.parse(segments[4]);
   }
 
+  private static Map<String, String> queryParameters(String rawQuery) {
+    Map<String, String> parameters = new HashMap<>();
+    if (rawQuery == null || rawQuery.isEmpty()) {
+      return parameters;
+    }
+    for (String pair : rawQuery.split("&")) {
+      int equals = pair.indexOf('=');
+      String key = equals < 0 ? pair : pair.substring(0, equals);
+      String value = equals < 0 ? "" : pair.substring(equals + 1);
+      parameters.put(
+          URLDecoder.decode(key, StandardCharsets.UTF_8),
+          URLDecoder.decode(value, StandardCharsets.UTF_8));
+    }
+    return parameters;
+  }
+
   private static void respond(HttpExchange exchange, int status, String body) throws IOException {
     byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -535,19 +565,22 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   private static EnvironmentIdeOpenViewDTO openViewRequest(String directory) {
     EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
     request.setViewId(VIEW);
-    request.setDocumentId(DOCUMENT);
+    request.setBrowserSessionId(DOCUMENT);
     request.setEventNodeId(EVENT_NODE);
     request.setConnectionId(CONNECTION);
     request.setClaimId(CLAIM);
     request.setMode(EnvironmentIdeOpenMode.CREATE);
+    request.setExpectedBindingEpoch(0L);
+    request.setExpectedDaemonInstanceId("daemon-instance");
     request.setDirectory(directory);
     return request;
   }
 
   private static EnvironmentIdeViewBindingDTO binding(long epoch) {
     EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
-    binding.setDocumentId(DOCUMENT);
+    binding.setBrowserSessionId(DOCUMENT);
     binding.setBindingEpoch(epoch);
+    binding.setExpectedDaemonInstanceId("daemon-instance");
     return binding;
   }
 
@@ -578,6 +611,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     }
 
     private final List<IdeCommand> commands = new ArrayList<>();
+    private final Map<String, IdeViewSummary> views = new HashMap<>();
+    private long revision;
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
@@ -588,40 +623,62 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
     }
 
-    private static IdeResult replyFor(IdeCommand command) {
+    private IdeResult replyFor(IdeCommand command) {
       if (command.getAction() == IdeAction.LIST_DIRECTORIES) {
         return IdeResult.newBuilder()
             .setOk(true)
             .setDirectoryListing(IdeDirectoryListing.newBuilder().setPath("/").setTruncated(false))
             .build();
       }
-      if (command.getAction() == IdeAction.LIST_VIEWS) {
-        return IdeResult.newBuilder().setOk(true).build();
+      if (command.getAction() == IdeAction.OPEN_VIEW) {
+        views.put(
+            command.getViewId(),
+            summary(
+                command.getViewId(),
+                command.getBrowserSessionId(),
+                command.getEventNodeId(),
+                command.getConnectionId(),
+                command.getClaimId(),
+                "/home/dev/project"));
+        revision++;
+      } else if (command.getAction() == IdeAction.CHANGE_DIRECTORY) {
+        IdeViewSummary current = views.get(command.getViewId());
+        if (current != null) {
+          views.put(
+              command.getViewId(),
+              current.toBuilder().setDirectory(command.getDirectory()).build());
+          revision++;
+        }
+      } else if (command.getAction() == IdeAction.CLOSE_VIEW) {
+        if (views.remove(command.getViewId()) != null) {
+          revision++;
+        }
       }
-      String directory =
-          command.getAction() == IdeAction.CHANGE_DIRECTORY
-              ? command.getDirectory()
-              : "/home/dev/project";
-      IdeResult.Builder builder =
-          IdeResult.newBuilder()
-              .setOk(true)
-              .setViewId(command.getViewId())
-              .setBindingEpoch(7L)
-              .setDirectory(directory)
-              .setWorkspacePath("/daemon/workspaces/" + command.getViewId());
-      if (command.hasDocumentId()) {
-        builder.setDocumentId(command.getDocumentId());
-      }
-      if (command.hasEventNodeId()) {
-        builder.setEventNodeId(command.getEventNodeId());
-      }
-      if (command.hasConnectionId()) {
-        builder.setConnectionId(command.getConnectionId());
-      }
-      if (command.hasClaimId()) {
-        builder.setClaimId(command.getClaimId());
-      }
-      return builder.build();
+      return IdeResult.newBuilder()
+          .setOk(true)
+          .setRevision(revision)
+          .addAllViews(views.values())
+          .build();
+    }
+
+    private static IdeViewSummary summary(
+        String viewId,
+        String browserSessionId,
+        String eventNodeId,
+        String connectionId,
+        String claimId,
+        String directory) {
+      return IdeViewSummary.newBuilder()
+          .setViewId(viewId)
+          .setBrowserSessionId(browserSessionId)
+          .setEventNodeId(eventNodeId)
+          .setConnectionId(connectionId)
+          .setClaimId(claimId)
+          .setBindingEpoch(7L)
+          .setDirectory(directory)
+          .setWorkspacePath("/daemon/workspaces/" + viewId)
+          .setState(IdeViewState.OPEN)
+          .build();
     }
 
     @Override
@@ -651,7 +708,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     public boolean findExactIntent(
         UUID eventNodeId,
         UUID connectionId,
-        UUID documentId,
+        UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
         UUID claimId) {
@@ -660,24 +717,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID documentId) {
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
       return Optional.empty();
     }
-  }
-
-  private static final class NoopAuthorization implements IdeViewAuthorizationListener {
-
-    @Override
-    public void ensureViewCapacity(DaemonConnectionIdentity identity) {}
-
-    @Override
-    public void viewOpened(
-        DaemonConnectionIdentity identity,
-        String viewId,
-        long bindingEpoch,
-        String workspacePath) {}
-
-    @Override
-    public void viewClosed(DaemonConnectionIdentity identity, String viewId, long bindingEpoch) {}
   }
 }
