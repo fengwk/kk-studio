@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalStage;
@@ -251,6 +253,111 @@ class ExecutionExitConfirmerRecoveryTest {
     }
     assertEquals(ExecutionExitState.STUDIO_EXITED, stored(store, proofed.executionId()).state());
     assertEquals(ExecutionExitState.OWNER_EXITED, stored(store, prepared.executionId()).state());
+  }
+
+  @Test
+  void unreadableDirectoryRefusesStartupAndCannotBeRecoveredTwice() {
+    // 无法冻结旧记录时必须拒绝启动，不能先放行新执行后再猜测旧 owner。
+    FaultJournal journal = new FaultJournal();
+    journal.failLoad = true;
+    ExecutionExitConfirmer confirmer = confirmer(fixedStore(), journal, fixedClock());
+    assertThrows(ExecutionExitJournalException.class, confirmer::recoverPreviousRun);
+    journal.failLoad = false;
+    assertThrows(IllegalStateException.class, confirmer::recoverPreviousRun);
+  }
+
+  @Test
+  void preparedCleanupFailureIsRetainedAndReplayedWithoutInventingAnExit() {
+    InMemoryHarnessStore store = fixedStore();
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    FaultJournal journal = new FaultJournal();
+    MutableClock clock = new MutableClock();
+    ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(31));
+    store.transaction(
+        tx -> {
+          tx.threads().lock(fact.threadId());
+          return tx.exits().confirm(fact, ExecutionExitState.NOT_STARTED, T0.plusMillis(1));
+        });
+    journal.write(prepared(fact));
+    journal.failDelete = true;
+    ExecutionExitConfirmer confirmer = confirmer(store, journal, clock);
+
+    assertEquals(List.of(fact.executionId()), confirmer.recoverPreviousRun().retained());
+    assertEquals(
+        ExecutionExitJournalStage.PREPARED, journal.loadAll().records().getFirst().stage());
+    journal.failDelete = false;
+    clock.advance(Duration.ofSeconds(2));
+    confirmer.replayPending();
+
+    // 文件删除失败只重放清理；数据库中先前的真实结论与时间不得改变。
+    assertTrue(journal.loadAll().records().isEmpty());
+    assertEquals(ExecutionExitState.NOT_STARTED, stored(store, fact.executionId()).state());
+    assertEquals(T0.plusMillis(1), stored(store, fact.executionId()).confirmedAt());
+  }
+
+  @Test
+  void ownerExitProofWriteFailureRetainsPreparedUntilDurableReplay() {
+    InMemoryHarnessStore store = fixedStore();
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    FaultJournal journal = new FaultJournal();
+    MutableClock clock = new MutableClock();
+    ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(32));
+    journal.write(prepared(fact));
+    journal.failWrite = true;
+    ExecutionExitConfirmer confirmer = confirmer(store, journal, clock);
+
+    assertEquals(List.of(fact.executionId()), confirmer.recoverPreviousRun().retained());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(store, fact.executionId()).state());
+    assertEquals(
+        ExecutionExitJournalStage.PREPARED, journal.loadAll().records().getFirst().stage());
+    journal.failWrite = false;
+    clock.advance(Duration.ofSeconds(2));
+    confirmer.replayPending();
+
+    assertEquals(ExecutionExitState.OWNER_EXITED, stored(store, fact.executionId()).state());
+    assertTrue(journal.loadAll().records().isEmpty());
+  }
+
+  /** 只注入持久日志边界故障，不改变记录的阶段和身份语义。 */
+  private static final class FaultJournal implements ExecutionExitJournal {
+    private final MemoryExecutionExitJournal delegate = new MemoryExecutionExitJournal();
+    private boolean failLoad;
+    private boolean failWrite;
+    private boolean failDelete;
+
+    @Override
+    public ExecutionExitJournalRecord write(ExecutionExitJournalRecord record) {
+      if (failWrite) {
+        throw new ExecutionExitJournalException("proof storage unavailable");
+      }
+      return delegate.write(record);
+    }
+
+    @Override
+    public void delete(UUID executionId) {
+      if (failDelete) {
+        throw new ExecutionExitJournalException("cleanup unavailable");
+      }
+      delegate.delete(executionId);
+    }
+
+    @Override
+    public ExecutionExitJournalSnapshot loadAll() {
+      if (failLoad) {
+        throw new ExecutionExitJournalException("directory unavailable");
+      }
+      return delegate.loadAll();
+    }
+
+    @Override
+    public void holdUntilProcessExit() {
+      delegate.holdUntilProcessExit();
+    }
+
+    @Override
+    public void close() {
+      delegate.close();
+    }
   }
 
   private static InMemoryHarnessStore fixedStore() {
