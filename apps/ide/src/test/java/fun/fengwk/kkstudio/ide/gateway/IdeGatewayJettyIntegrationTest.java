@@ -32,9 +32,11 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
@@ -107,18 +109,33 @@ class IdeGatewayJettyIntegrationTest {
     wsClient.start();
 
     // 1. Session & View Authorization
-    IdeBrowserSessionRegistry registry =
-        new IdeBrowserSessionRegistry(environmentId -> Optional.of(IDENTITY));
-    registry.viewOpened(IDENTITY, VIEW.toString(), 1L, "/managed/workspace");
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeViewSnapshotStore snapshots =
+        new IdeViewSnapshotStore(environmentId -> Optional.of(IDENTITY));
+    snapshots.accept(
+        IDENTITY,
+        1L,
+        List.of(
+            new IdeViewSnapshotStore.View(
+                VIEW,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                1L,
+                "/managed/dir",
+                "/managed/workspace",
+                IdeViewState.OPEN)));
     sessionCookie = registry.open(IDENTITY, VIEW.toString(), 1L, "/managed/workspace");
 
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
-    SessionIdeDataViewAuthorizer authorizer = new SessionIdeDataViewAuthorizer(registry, transport);
+    SessionIdeDataViewAuthorizer authorizer =
+        new SessionIdeDataViewAuthorizer(registry, snapshots, transport);
 
     ticketService = mock(IdeBootstrapTicketService.class);
     IdeBrowserSessionHandler sessionHandler =
-        new IdeBrowserSessionHandler(ticketService, registry, transport);
+        new IdeBrowserSessionHandler(ticketService, registry, snapshots, transport);
     IdeClusterClient clusterClient = mock(IdeClusterClient.class);
     when(clusterClient.signHeaders(any(), any(), any()))
         .thenReturn(Map.of("X-KK-Cluster-Signature", "sig123"));

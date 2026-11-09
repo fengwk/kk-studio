@@ -9,8 +9,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
@@ -109,6 +111,17 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         environmentId,
         () -> local.listViews(environmentId),
         owner -> client.listViews(environmentId, owner));
+  }
+
+  @Override
+  public EnvironmentIdeViewSnapshotDTO readView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
+    Objects.requireNonNull(request, "request");
+    String parsedViewId = parseViewId(viewId);
+    return route(
+        environmentId,
+        () -> local.readView(environmentId, parsedViewId, request),
+        owner -> client.readView(environmentId, owner, parsedViewId, request));
   }
 
   private <T> T route(

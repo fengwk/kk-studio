@@ -21,14 +21,14 @@ public final class IdeBrowserUsePaths {
   }
 
   /** 已绑定使用证明 GET 的 canonical path（含固定顺序的 query）。 */
-  public static String activeProofsPath(ConnectionIdentity identity, UUID documentId) {
+  public static String activeProofsPath(ConnectionIdentity identity, UUID browserSessionId) {
     return INTERNAL_PATH
         + "?eventNodeId="
         + encode(identity.eventNodeId())
         + "&connectionId="
         + encode(identity.connectionId())
-        + "&documentId="
-        + encode(documentId);
+        + "&browserSessionId="
+        + encode(browserSessionId);
   }
 
   private static String encode(UUID value) {

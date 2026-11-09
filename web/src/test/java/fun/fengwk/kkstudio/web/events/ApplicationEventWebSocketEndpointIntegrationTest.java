@@ -62,23 +62,24 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);
     ConnectionIdentity identity = assertConnected(collector);
-    UUID documentId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+    UUID browserSessionId = UUID.fromString("44444444-4444-4444-4444-444444444444");
     UUID environmentId = UUID.fromString("33333333-3333-3333-3333-333333333333");
     UUID viewId = UUID.fromString("55555555-5555-5555-5555-555555555555");
     UUID claimId = UUID.fromString("66666666-6666-6666-6666-666666666666");
 
     socket
-        .sendText(ideUseFrame(documentId, environmentId, viewId, claimId), true)
+        .sendText(ideUseFrame(browserSessionId, environmentId, viewId, claimId), true)
         .get(10, TimeUnit.SECONDS);
     assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
     assertTrue(
         browserUseRegistry
-            .findExactIntent(identity, documentId, EnvironmentId.of(environmentId), viewId, claimId)
+            .findExactIntent(
+                identity, browserSessionId, EnvironmentId.of(environmentId), viewId, claimId)
             .isPresent());
     assertEquals(
         9L,
         browserUseRegistry
-            .activeBoundProofs(identity, documentId)
+            .activeBoundProofs(identity, browserSessionId)
             .orElseThrow()
             .views()
             .getFirst()
@@ -86,7 +87,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
     // 同 revision 不同内容被拒绝，但连接保持可用。
     socket
-        .sendText(ideUseFrame(documentId, environmentId, viewId, UUID.randomUUID()), true)
+        .sendText(ideUseFrame(browserSessionId, environmentId, viewId, UUID.randomUUID()), true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(
         "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
@@ -104,7 +105,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     WebSocket socket = connect(collector);
     assertConnected(collector);
 
-    String documentId = UUID.randomUUID().toString();
+    String browserSessionId = UUID.randomUUID().toString();
     String environmentId = UUID.randomUUID().toString();
     String claimId = UUID.randomUUID().toString();
     StringBuilder views = new StringBuilder();
@@ -124,8 +125,8 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
           .append("\"}");
     }
     String frame =
-        "{\"type\":\"ide-use\",\"documentId\":\""
-            + documentId
+        "{\"type\":\"ide-use\",\"browserSessionId\":\""
+            + browserSessionId
             + "\",\"revision\":\"1\",\"views\":["
             + views
             + "]}";
@@ -299,12 +300,12 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   }
 
   private static String ideUseFrame(
-      UUID documentId, UUID environmentId, UUID viewId, UUID claimId) {
+      UUID browserSessionId, UUID environmentId, UUID viewId, UUID claimId) {
     return """
-        {"type":"ide-use","documentId":"%s","revision":"1","views":[
+        {"type":"ide-use","browserSessionId":"%s","revision":"1","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"9"}]}
         """
-        .formatted(documentId, environmentId, viewId, claimId);
+        .formatted(browserSessionId, environmentId, viewId, claimId);
   }
 
   private URI uri(String path) {
