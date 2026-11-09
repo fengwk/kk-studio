@@ -1,0 +1,28 @@
+/* 固定尺寸复制按钮：反馈只换图标，不新增可见文字或占位，按钮与所在工具栏布局不变。 */
+
+.copy-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 图标槽固定为 14px：复制中、成功 ✓、失败 ! 互换时不改变按钮尺寸。 */
+.copy-text-button .copy-text-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.copy-text-button .copy-text-button-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 失败只把图标变红，尺寸与位置不变；悬停态同样保持 danger token。 */
+.copy-text-button.is-copy-failed,
+.copy-text-button.is-copy-failed:hover:not(:disabled) {
+  color: var(--danger);
+}

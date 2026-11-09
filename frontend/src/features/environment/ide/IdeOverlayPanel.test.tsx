@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeOverlayPanel, type IdeOverlayPanelProps } from '@/features/environment/ide/IdeOverlayPanel'
@@ -158,17 +158,53 @@ describe('IdeOverlayPanel', () => {
     })
   })
 
-  it('copies the full directory path and reports clipboard errors', async () => {
-    const user = userEvent.setup()
-    const write = vi.spyOn(navigator.clipboard, 'writeText')
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('denied'))
-    render(<IdeOverlayPanel {...baseProps()} />)
-    await user.click(screen.getByTestId('ide-copy-directory-btn'))
-    expect(write).toHaveBeenCalledWith(DIRECTORY_A)
-    expect(await screen.findByText('目录路径已复制')).toBeVisible()
-    await user.click(screen.getByTestId('ide-copy-directory-btn'))
-    expect(await screen.findByText('无法复制目录路径')).toBeVisible()
+  it('copies the directory path with in-place feedback instead of a new banner row', async () => {
+    vi.useFakeTimers()
+    try {
+      const write = vi.spyOn(navigator.clipboard, 'writeText')
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('denied'))
+      render(<IdeOverlayPanel {...baseProps()} />)
+      const panel = screen.getByTestId('ide-overlay-panel')
+      const panelChildren = panel.children.length
+      const button = screen.getByTestId('ide-copy-directory-btn')
+
+      fireEvent.click(button)
+      await act(async () => {})
+
+      // 反馈落在按钮原地：图标变 ✓、悬停说明与读屏状态同步，面板不插入横幅行。
+      expect(write).toHaveBeenCalledWith(DIRECTORY_A)
+      expect(button.querySelector('.lucide-check')).not.toBeNull()
+      expect(button).toHaveAttribute('title', '目录路径已复制')
+      expect(screen.getByRole('status')).toHaveTextContent('目录路径已复制')
+      expect(screen.getByRole('status')).toHaveClass('sr-only')
+      expect(panel.children.length).toBe(panelChildren)
+      expect(
+        screen.queryByText('目录路径已复制', { selector: '.ide-panel-warning-banner' }),
+      ).toBeNull()
+
+      act(() => {
+        vi.advanceTimersByTime(1500)
+      })
+      expect(button).toHaveAttribute('title', '复制目录路径')
+      expect(button.querySelector('.lucide-copy')).not.toBeNull()
+
+      // 剪贴板与兜底都失败时同样是原地红色 !，仍然不新增行。
+      fireEvent.click(button)
+      await act(async () => {})
+      expect(button.querySelector('.lucide-circle-alert')).not.toBeNull()
+      expect(button).toHaveClass('is-copy-failed')
+      expect(button).toHaveAttribute('title', '无法复制目录路径')
+      expect(panel.children.length).toBe(panelChildren)
+
+      act(() => {
+        vi.advanceTimersByTime(3000)
+      })
+      expect(button).toHaveAttribute('title', '复制目录路径')
+      expect(button).not.toHaveClass('is-copy-failed')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {

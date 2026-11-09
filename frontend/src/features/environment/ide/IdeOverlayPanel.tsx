@@ -6,14 +6,14 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
-import { ArrowLeft, Copy, FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
+import { ArrowLeft, FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
 import { OpenDirectoryModal } from '@/features/environment/ide/OpenDirectoryModal'
 import { Button } from '@/shared/ui/controls/Button'
+import { CopyTextButton } from '@/shared/ui/controls/CopyTextButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
-import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
@@ -99,7 +99,6 @@ export function IdeOverlayPanel({
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [recentDirectories, setRecentDirectories] = useState<string[]>([])
-  const [copyStatus, setCopyStatus] = useState<'copied' | 'failed' | null>(null)
   const [dirtyCloseEnvironmentId, setDirtyCloseEnvironmentId] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
   const lastSelectedRef = useRef(selectedEnvironmentId)
@@ -118,7 +117,6 @@ export function IdeOverlayPanel({
     setDirectoryOpen(false)
     setDirectoryError(null)
     setRecentDirectories([])
-    setCopyStatus(null)
     setDirectoryPending(false)
     setDirtyCloseEnvironmentId(null)
   }, [selectedEnvironmentId])
@@ -228,7 +226,6 @@ export function IdeOverlayPanel({
       }
       setRecentDirectories(recordRecentDirectory(environmentId, directory))
       setDirectoryOpen(false)
-      setCopyStatus(null)
     } finally {
       setDirectoryPending(false)
     }
@@ -330,21 +327,14 @@ export function IdeOverlayPanel({
         </div>
         <div className="ide-toolbar-actions">
           {directory ? (
-            <Button
-              variant="ghost"
-              size="compact"
+            <CopyTextButton
               className="ide-toolbar-icon"
-              aria-label={t('ai.ide.copyDirectory')}
-              title={t('ai.ide.copyDirectory')}
+              source={directory}
+              label={t('ai.ide.copyDirectory')}
+              copiedLabel={t('ai.ide.directoryCopied')}
+              failedLabel={t('ai.ide.directoryCopyFailed')}
               data-testid="ide-copy-directory-btn"
-              onClick={() => {
-                void copyTextToClipboard(directory).then((copied) => {
-                  setCopyStatus(copied ? 'copied' : 'failed')
-                })
-              }}
-            >
-              <Copy size={14} aria-hidden="true" />
-            </Button>
+            />
           ) : null}
           {selectedView != null ? (
             <Button
@@ -397,11 +387,6 @@ export function IdeOverlayPanel({
         </div>
       </header>
 
-      {copyStatus ? (
-        <div className="ide-panel-warning-banner" role="status">
-          {t(copyStatus === 'copied' ? 'ai.ide.directoryCopied' : 'ai.ide.directoryCopyFailed')}
-        </div>
-      ) : null}
       {storageUnavailable ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-storage-unavailable">
           {t('ai.ide.storageUnavailable')}
