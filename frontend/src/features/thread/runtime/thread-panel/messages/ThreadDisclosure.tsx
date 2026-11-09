@@ -36,23 +36,42 @@ export function ThreadDisclosure({
   const [overflowsViewport, setOverflowsViewport] = useState(false)
 
   // header 收起时只有两行；CSS 截断无法用内容判断，必须测量是否真的溢出。
+  // 内容变化可能只增加被 clamp 掉的第三行，元素外框尺寸不变、ResizeObserver 不触发：
+  // 因此 header 变化后同步重测，并用 MutationObserver 覆盖同一节点内部的文本更新。
   useLayoutEffect(() => {
     const element = headerRef.current
     if (element == null || expanded) {
       setHeaderClipped(false)
       return
     }
+    setHeaderClipped(element.scrollHeight > element.clientHeight + 1)
+  }, [expanded, header])
+
+  useLayoutEffect(() => {
+    if (expanded) {
+      return
+    }
+    const element = headerRef.current
+    if (element == null) {
+      return
+    }
     const measure = () => {
       setHeaderClipped(element.scrollHeight > element.clientHeight + 1)
     }
-    measure()
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', measure)
       return () => window.removeEventListener('resize', measure)
     }
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
+    const resizeObserver = new ResizeObserver(measure)
+    resizeObserver.observe(element)
+    const mutationObserver = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(measure)
+    mutationObserver?.observe(element, { childList: true, characterData: true, subtree: true })
+    return () => {
+      resizeObserver.disconnect()
+      mutationObserver?.disconnect()
+    }
   }, [expanded])
 
   // 展开后卡片高于 transcript 可视区时才提供底部收起入口。

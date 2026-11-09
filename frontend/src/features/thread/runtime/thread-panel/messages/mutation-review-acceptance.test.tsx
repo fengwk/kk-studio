@@ -1,7 +1,7 @@
 /* eslint-disable no-restricted-imports */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard } from '@/features/thread/runtime/interactions/ApprovalCard'
@@ -22,6 +22,14 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+/** 终态工具默认收起；展开后才显示 body 中的短成功说明。 */
+function expandSettledTool() {
+  const expand = screen.queryByRole('button', { name: '展开详情' })
+  if (expand != null) {
+    fireEvent.click(expand)
+  }
+}
 
 describe('Slice F 审查与审批组件验收测试', () => {
   it('write 工具 40+ 行全文完整呈现，保留缩进、空白行与尾随换行', () => {
@@ -60,8 +68,8 @@ describe('Slice F 审查与审批组件验收测试', () => {
 
     const { container } = render(<ToolMessageBlock message={callMsg} />)
 
-    expect(screen.getByText('/workspace/Sample.java')).toBeInTheDocument()
-    expect(screen.getByText('· /workspace/root')).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('/workspace/Sample.java in /workspace/root')
 
     const viewport = container.querySelector('.thread-tool-preview-body.is-write')
     expect(viewport).toBeInTheDocument()
@@ -185,7 +193,9 @@ describe('Slice F 审查与审批组件验收测试', () => {
 
     const { container } = render(<ToolMessageBlock message={reviewedCallMsg} />)
 
-    expect(screen.getByText('/canonical/src/App.tsx')).toBeInTheDocument()
+    // Header 参数来自真实调用路径；审查 diff 仍使用 editReview 的权威内容。
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('/src/App.tsx')
 
     const preview = container.querySelector('.thread-tool-preview-body.is-edit')
     expect(preview).toBeInTheDocument()
@@ -290,6 +300,8 @@ describe('Slice F 审查与审批组件验收测试', () => {
 
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
     expect(within(container).getByText('-11|const a = 1')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     expect(screen.queryByText(rawDuplicateBody)).not.toBeInTheDocument()
 
@@ -584,6 +596,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(preview2).toBeInTheDocument()
     expect(preview2?.textContent).toBe(sampleDiff)
     // 成功终态展示短提示，不重复输出原正文
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     expect(screen.queryByText('Edited successfully.')).not.toBeInTheDocument()
     unmount2()
@@ -598,6 +612,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(preview3?.textContent).toBe(sampleDiff)
     expect(within(preview3 as HTMLElement).getByText('-2|const value = 1;')).toHaveClass('is-removed')
     expect(within(preview3 as HTMLElement).getByText('+2|const value = 2;')).toHaveClass('is-added')
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     unmount3()
 
@@ -608,6 +624,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const preview4 = container4.querySelector('.thread-tool-preview-body.is-edit')
     expect(preview4).toBeInTheDocument()
     expect(preview4?.textContent).toBe(sampleDiff)
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     // 验证默认展开视口且保留有界结构
     expect(preview4).toHaveClass('thread-tool-output')
@@ -755,6 +773,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const liveTimeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [yoloInvocation])
     const { container: liveContainer, unmount: uLive } = renderTimelineTool(liveTimeline.messages)
     expect(liveContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent).toBe(yoloReview.diff)
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     uLive()
 
@@ -762,6 +782,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const durableTimeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
     const { container: durableContainer, unmount: uDurable } = renderTimelineTool(durableTimeline.messages)
     expect(durableContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent).toBe(yoloReview.diff)
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
     uDurable()
   })
@@ -857,6 +879,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 不进入准备中转圈状态
     expect(container.querySelector('.thread-tool-preview-preparing')).toBeNull()
     // 依然具备成功状态
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
+    expandSettledTool()
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
   })
 

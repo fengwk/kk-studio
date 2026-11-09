@@ -54,6 +54,19 @@ async function verifyBoundedScrollAndNoBlowout(locator: Locator): Promise<void> 
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
 }
 
+async function verifyNoInnerScroll(locator: Locator): Promise<void> {
+  const metrics = await locator.evaluate((el) => ({
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }))
+
+  // 对话记录里的正文是普通内容：不裁剪、不创建内部滚动。
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 1)
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
+}
+
 test.beforeAll(() => {
   fs.mkdirSync(REPORTS_DIR, { recursive: true })
 })
@@ -75,13 +88,11 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     const toolPane = page.locator('[data-testid="tool-message-pane"]')
     await expect(toolPane).toBeVisible()
 
-    // 目标路径与工作目录完整展示
-    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveText(
-      '/workspace/src/LongService.java',
+    // Header 完整展示目标路径与工作目录；对话记录不重复路径行。
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toHaveText(
+      '/workspace/src/LongService.java in /workspace/root',
     )
-    await expect(toolPane.locator('.thread-tool-preview-target-workdir')).toHaveText(
-      '· /workspace/root',
-    )
+    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
 
     // 正文默认展开，且 48 行全文无截断
     const writeViewport = toolPane.locator('.thread-tool-preview-body.is-write')
@@ -99,15 +110,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(note).not.toContainText('： —')
     await expect(note).toContainText('权限规则要求审批')
 
-    // 有界滚动且无横向撑宽
-    await verifyBoundedScrollAndNoBlowout(writeViewport)
-
-    // 滚动能力验证
-    await writeViewport.evaluate((el) => {
-      el.scrollTop = 120
-    })
-    const scrolledTop = await writeViewport.evaluate((el) => el.scrollTop)
-    expect(scrolledTop).toBeGreaterThan(0)
+    // 对话记录没有内部滚动，也不横向撑宽
+    await verifyNoInnerScroll(writeViewport)
 
     // 同屏审批卡片验证
     const approvalPane = page.locator('[data-testid="approval-card-pane"]')
@@ -126,7 +130,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     // 2. 窄屏移动视口 390px
     await page.setViewportSize({ width: 390, height: 800 })
-    await verifyBoundedScrollAndNoBlowout(writeViewport)
+    await verifyNoInnerScroll(writeViewport)
     await verifyBoundedScrollAndNoBlowout(approvalWriteViewport)
     expect(await writeViewport.textContent()).toBe(LONG_WRITE_CONTENT)
     expect(await approvalWriteViewport.textContent()).toBe(LONG_WRITE_CONTENT)
@@ -173,9 +177,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await harness(page, 'renderEditReviewed')
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-reviewed')
 
-    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveText(
-      '/canonical/src/App.tsx',
-    )
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toContainText('/src/App.tsx')
+    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
     const editViewport = toolPane.locator('.thread-tool-preview-body.is-edit')
     await expect(editViewport).toBeVisible()
     expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)
@@ -211,7 +214,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     // 移动视口 390px 检查
     await page.setViewportSize({ width: 390, height: 800 })
     await harness(page, 'renderEditReviewed')
-    await verifyBoundedScrollAndNoBlowout(toolPane.locator('.thread-tool-preview-body.is-edit'))
+    await verifyNoInnerScroll(toolPane.locator('.thread-tool-preview-body.is-edit'))
     await verifyBoundedScrollAndNoBlowout(approvalEditViewport)
     expect(await approvalEditViewport.textContent()).toBe(MULTI_HUNK_DIFF)
     await page.screenshot({ path: path.join(REPORTS_DIR, 'mobile-edit-reviewed.png') })
@@ -313,8 +316,14 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('write-success')
 
     const toolPane = page.locator('[data-testid="tool-message-pane"]')
-    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('写入成功')
+    // 审查完成后默认收起：短成功说明在 body 中，展开后才显示。
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveCount(0)
     await expect(toolPane.locator('.thread-tool-preview-body.is-write')).toBeVisible()
+    await expect(toolPane.locator('.thread-tool-preview-body.is-write')).not.toContainText('line-48')
+    await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 38 more lines')
+    await toolPane.locator('.thread-disclosure-toggle').click()
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('写入成功')
+    await expect(toolPane.locator('.thread-tool-preview-body.is-write')).toContainText('line-48')
 
     // 确认结果正文中未重复输出 rawDuplicateBody
     await expect(toolPane).not.toContainText('File /workspace/src/LongService.java written successfully:')
@@ -325,8 +334,11 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await harness(page, 'renderEditSuccess')
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-success')
 
-    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveCount(0)
     await expect(toolPane.locator('.thread-tool-preview-body.is-edit')).toBeVisible()
+    await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 17 more lines')
+    await toolPane.locator('.thread-disclosure-toggle').click()
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
     await expect(toolPane).not.toContainText('File edit executed successfully:')
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-success.png') })
@@ -357,9 +369,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     )
 
     const toolPane = page.locator('[data-testid="tool-message-pane"]')
-    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveText(
-      '/canonical/src/App.tsx',
-    )
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toContainText('/src/App.tsx')
+    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
     const editViewport = toolPane.locator('.thread-tool-preview-body.is-edit')
     await expect(editViewport).toBeVisible()
     expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)

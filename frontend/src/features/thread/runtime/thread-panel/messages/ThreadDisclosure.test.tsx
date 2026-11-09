@@ -9,9 +9,7 @@ import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/trans
 function ControlledDisclosure({
   initialExpanded = false,
   ...props
-}: Omit<ThreadDisclosureProps, 'expanded' | 'onExpandedChange'> & {
-  initialExpanded?: boolean
-}) {
+}: ControlledProps) {
   const [expanded, setExpanded] = useState(initialExpanded)
   return (
     <ThreadDisclosure
@@ -22,7 +20,11 @@ function ControlledDisclosure({
   )
 }
 
-function baseProps(overrides: Partial<ThreadDisclosureProps> = {}): Omit<ThreadDisclosureProps, 'expanded' | 'onExpandedChange'> {
+type ControlledProps = Omit<ThreadDisclosureProps, 'expanded' | 'onExpandedChange'> & {
+  initialExpanded?: boolean
+}
+
+function baseProps(overrides: Partial<ControlledProps> = {}): ControlledProps {
   return {
     header: <span>bash npm test</span>,
     tone: 'success',
@@ -98,6 +100,51 @@ describe('ThreadDisclosure', () => {
       body: undefined,
     })} />)
     expect(screen.getByRole('button', { name: '展开详情' })).toBeInTheDocument()
+  })
+
+  it('remeasures the clamped header when its content grows without changing the box size', () => {
+    let headerHeight = 40
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => headerHeight)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(40)
+    const { rerender } = render(
+      <ControlledDisclosure
+        {...baseProps({
+          header: <span>two lines that still fit</span>,
+          hasDetails: false,
+          preview: undefined,
+          body: undefined,
+        })}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '展开详情' })).not.toBeInTheDocument()
+
+    // 第三行被 CSS clamp 掉时元素外框仍是两行高，只有 scrollHeight 增长。
+    headerHeight = 60
+    rerender(
+      <ControlledDisclosure
+        {...baseProps({
+          header: <span>three lines now overflow the clamp</span>,
+          hasDetails: false,
+          preview: undefined,
+          body: undefined,
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '展开详情' })).toBeInTheDocument()
+
+    // 内容缩短后 chevron 必须同步消失，不能留下不可用的展开入口。
+    headerHeight = 40
+    rerender(
+      <ControlledDisclosure
+        {...baseProps({
+          header: <span>short again</span>,
+          hasDetails: false,
+          preview: undefined,
+          body: undefined,
+        })}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '展开详情' })).not.toBeInTheDocument()
   })
 
   it('does not render the bottom collapse action before the card exceeds the viewport', () => {

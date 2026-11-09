@@ -51,7 +51,7 @@ function resource(attachment: Partial<ToolAttachment> & { name: string }): ToolC
 }
 
 function card() {
-  return document.querySelector<HTMLElement>('.thread-tool-surface')!
+  return document.querySelector<HTMLElement>('.thread-block-tool')!
 }
 
 function outputTexts(): string[] {
@@ -59,8 +59,8 @@ function outputTexts(): string[] {
     .map((element) => element.textContent ?? '')
 }
 
-const expandButton = () => screen.queryByRole('button', { name: '展开工具预览' })
-const collapseButton = () => screen.queryByRole('button', { name: '收起工具预览' })
+const expandButton = () => screen.queryByRole('button', { name: '展开详情' })
+const collapseButton = () => screen.queryByRole('button', { name: '收起详情' })
 
 describe('ToolMessageBlock shell', () => {
   it('localizes the real environment wait label in English', () => {
@@ -86,9 +86,9 @@ describe('ToolMessageBlock shell', () => {
       <ToolMessageBlock message={message({ phase: 'call', invocationStatus: status })} />,
     )
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', state)
-    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', label)
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', `read: ${label}`)
     expect(screen.queryByText(`· ${label}`)).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-tail > svg')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-toggle')).toBeNull()
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
   })
 
@@ -103,7 +103,7 @@ describe('ToolMessageBlock shell', () => {
     rerender(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'task', invocationStatus: 'SUCCEEDED',
     })} />)
-    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', '委派已受理')
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 委派已受理')
     expect(screen.queryByText('· 委派已受理')).not.toBeInTheDocument()
     expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
   })
@@ -115,7 +115,7 @@ describe('ToolMessageBlock shell', () => {
     />)
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', 'failed')
     expect(screen.getByText('permission failure')).toBeInTheDocument()
-    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', '失败')
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'read: 失败')
   })
 
   it('announces reading intent when the user toggles a card (streaming growth must not steal it)', async () => {
@@ -130,12 +130,12 @@ describe('ToolMessageBlock shell', () => {
             toolName: 'bash',
             rendererKey: 'bash',
             arguments: '{"command":"npm test"}',
-            contents: [text('running')],
+            contents: [text(Array.from({ length: 20 }, (_, index) => `line-${index + 1}`).join('\n'))],
           })}
         />,
       )
 
-      await userEvent.click(collapseButton()!)
+      await userEvent.click(expandButton()!)
 
       // 展开/收起是用户对只读卡片的交互意图：外层据此暂停贴底。
       expect(onReadingIntent).toHaveBeenCalledTimes(1)
@@ -182,7 +182,7 @@ describe('ToolMessageBlock shell', () => {
 
     expect(screen.queryByRole('button', { name: '复制工具预览' })).not.toBeInTheDocument()
     expect(container.querySelector('.thread-turn-tool > .thread-block-tool')).toBeInTheDocument()
-    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelectorAll('.thread-block-tool')).toHaveLength(1)
     expect(screen.queryByText('（无参数）')).not.toBeInTheDocument()
     expect(screen.queryByText('等待工具结果…')).not.toBeInTheDocument()
     expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
@@ -194,7 +194,7 @@ describe('ToolMessageBlock shell', () => {
     expect(screen.getByText('Tool')).toBeInTheDocument()
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
     expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
-    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', '生成调用中')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('title', 'Tool: 生成调用中')
     expect(document.querySelector('.animate-spin')).toBeNull()
     expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
   })
@@ -236,15 +236,15 @@ describe('ToolMessageBlock shell', () => {
       <ToolMessageBlock
         message={message({
           phase: 'call',
-          toolName: 'mcp__server__tool',
-          rendererKey: 'mcp__server__tool',
+          toolName: 'custom',
+          rendererKey: 'custom',
           arguments: '{"query":"needle","flag":false}',
           contents: [],
         })}
         result={message({
           phase: 'result',
-          toolName: 'mcp__server__tool',
-          rendererKey: 'mcp__server__tool',
+          toolName: 'custom',
+          rendererKey: 'custom',
           arguments: '{"query":"needle","flag":false}',
           contents: [text('search result body')],
         })}
@@ -264,7 +264,7 @@ describe('ToolMessageBlock shell', () => {
     expect(container.textContent).not.toContain('结果')
     // 参数已在 Header 展示过，展开区不重复。
     expect(container.querySelectorAll('.thread-tool-summary-detail')).toHaveLength(1)
-    expect(container.querySelector('.thread-tool-body')?.textContent).not.toContain('"query"')
+    expect(container.querySelector('.thread-disclosure-body')?.textContent).not.toContain('"query"')
   })
 
   it('does not offer a toggle when the card has no body to collapse', () => {
@@ -275,9 +275,9 @@ describe('ToolMessageBlock shell', () => {
     )
 
     expect(expandButton()).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
     // 没有正文时不渲染空正文容器。
-    expect(container.querySelector('.thread-tool-body')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
   })
 
   it('derives pending/success/error states from the paired result', () => {
@@ -317,38 +317,71 @@ describe('ToolMessageBlock shell', () => {
 })
 
 describe('ToolMessageBlock failures', () => {
-  it('keeps the failure summary visible while collapsed and never repeats the full result', async () => {
+  it('keeps the failure block visible while collapsed, truncates it to three lines, and never repeats it in the body', async () => {
+    const user = userEvent.setup()
+    const errorText = 'connection refused\nsecond line\nthird line\nfourth line'
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'custom',
+          rendererKey: 'custom',
+          arguments: '{"query":"x"}',
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'custom',
+          rendererKey: 'custom',
+          status: 'error',
+          errorMessage: errorText,
+          contents: [text(errorText)],
+        })}
+      />,
+    )
+
+    // 失败原文只由错误块承载；正文不再重复同一段文本。
+    expect(container.querySelector('.thread-tool-error')).not.toHaveTextContent('fourth line')
+    expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/connection refused/)).toHaveLength(1)
+
+    // 收起时最多三行，提示行可点击展开。
+    const expandError = screen.getByRole('button', { name: '… 1 more line' })
+    expect(container.querySelector('.thread-tool-error')).not.toHaveTextContent('fourth line')
+    await user.click(expandError)
+    expect(container.querySelector('.thread-tool-error')).toHaveTextContent('fourth line')
+    expect(container.querySelector('.thread-tool-error')?.textContent).not.toContain('… 1 more line')
+  })
+
+  it('keeps a mutation failure explanation in the body instead of dropping it', async () => {
     const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
           phase: 'call',
-          toolName: 'mcp__server__tool',
-          rendererKey: 'mcp__server__tool',
-          arguments: '{"query":"x"}',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: '{"path":"/src/App.tsx"}',
+          status: 'done',
         })}
         result={message({
           phase: 'result',
-          toolName: 'mcp__server__tool',
-          rendererKey: 'mcp__server__tool',
+          toolName: 'edit',
+          rendererKey: 'edit',
           status: 'error',
-          errorMessage: 'connection refused',
-          contents: [text('connection refused')],
+          errorMessage: 'permission denied',
+          contents: [text('permission denied'), text('extra failure detail')],
         })}
       />,
     )
 
-    // 失败结果默认展开事实，摘要不与正文重复。
-    expect(screen.getAllByText('connection refused')).toHaveLength(1)
-    expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-error')).toHaveTextContent('permission denied')
+    expect(screen.queryByText('extra failure detail')).not.toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
 
-    // 用户收起后正文消失，但失败摘要仍必须可见（不能被折叠完全隐藏）。
-    await user.click(collapseButton()!)
-    expect(container.querySelector('.thread-tool-body')).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-error'))
-      .toHaveTextContent('connection refused')
-    expect(screen.getByText('connection refused')).toBeInTheDocument()
-
+    await user.click(expandButton()!)
+    expect(screen.getByText('extra failure detail')).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-error')).toHaveTextContent('permission denied')
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
   })
 
   it('renders the failure summary next to unrelated result text', () => {
@@ -380,12 +413,11 @@ describe('ToolMessageBlock failures', () => {
     // 无原文错误不补通用「工具执行失败」文案，也不展开空框，只保留错误态。
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
     expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
     expect(screen.queryByText('工具执行失败。')).not.toBeInTheDocument()
   })
 
-  it('auto-expands a read error and never repeats its raw text', async () => {
-    const user = userEvent.setup()
+  it('keeps a read error visible while collapsed and never repeats its raw text', () => {
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -400,17 +432,13 @@ describe('ToolMessageBlock failures', () => {
       />,
     )
 
-    // read 默认收起，但失败事实优先：错误正文默认展开，原文只出现一次（正文即摘要）。
+    // read 默认收起，但失败事实优先：错误块始终可见，原文只出现一次。
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
-    expect(container.querySelector('.thread-tool-body')).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-error')).toHaveTextContent('file appears to be binary')
     expect(screen.getAllByText('file appears to be binary')).toHaveLength(1)
-    expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
-
-    // 收起后正文消失，但失败原文仍由摘要承载，不能被折叠完全隐藏。
-    await user.click(collapseButton()!)
-    expect(container.querySelector('.thread-tool-body')).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-error'))
-      .toHaveTextContent('file appears to be binary')
+    expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
+    // 错误块已完整承载同一文本，没有额外的隐藏正文可展开。
+    expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
   })
 
   it('keeps a streaming partial error visible before the durable result arrives', () => {
@@ -453,7 +481,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    expect(container.querySelector('.thread-tool-body')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
     await user.click(expandButton()!)
 
     // 有序保留：text → resource → json → text，不被压平成「全部文本 + 全部附件」。
@@ -468,8 +496,9 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(document.querySelectorAll('.thread-tool-output.is-json')).toHaveLength(1)
   })
 
-  it('previews a read image by default from the authoritative MIME', () => {
-    render(
+  it('previews a read image after expanding from the authoritative MIME', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
       <ToolMessageBlock
         message={message({ phase: 'call', arguments: '{"path":"/tmp/shot.png"}' })}
         result={message({
@@ -487,15 +516,19 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    // 默认即展开预览：不需要用户先点击展开。
+    // 只读记录默认收起；用户展开后才解析并预览图片。
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
     expect(screen.getByRole('img', { name: 'shot.png' })).toHaveAttribute(
       'src',
       'data:image/png;base64,aGVsbG8=',
     )
     expect(collapseButton()).toHaveAttribute('aria-expanded', 'true')
+    expect(container.querySelector('.thread-tool-output.is-bounded')).toBeNull()
   })
 
-  it('resolves a blob read image through the storage media type before expanding', async () => {
+  it('resolves a blob read image through the storage media type after expanding', async () => {
+    const user = userEvent.setup()
     const resolveBlobUrls = vi.fn(async () => ({
       original: 'https://s3.test/shot.png',
       preview: 'https://s3.test/shot.png.preview',
@@ -515,6 +548,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </ResourceBlobUrlContext.Provider>,
     )
 
+    await user.click(expandButton()!)
     expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveAttribute(
       'src',
       'https://s3.test/shot.png.preview',
@@ -535,12 +569,12 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
 
     // 权威 MIME 未知：不提前展开，也不按扩展名猜成图片。
-    expect(document.querySelector('.thread-tool-body')).not.toBeInTheDocument()
+    expect(document.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
     expect(expandButton()).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
-  it('shows the write body by default in a bounded viewport and allows collapsing', async () => {
+  it('keeps the mutation review fully visible during review and does not create an inner scroll', async () => {
     const user = userEvent.setup()
     const content = Array.from({ length: 40 }, (_, index) => `line-${index + 1}`).join('\n')
     const { container } = render(
@@ -559,12 +593,13 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(preview).toHaveTextContent('line-1')
     expect(preview).toHaveTextContent('line-40')
     expect(preview).toHaveClass('thread-tool-output')
+    expect(preview).not.toHaveClass('is-bounded')
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('line-1')
 
-    // prompt/正文默认可见不等于不可收起。
+    // 审查期间收起配额为全部显示：用户收起也不会把审查材料藏起来。
     await user.click(collapseButton()!)
-    expect(container.querySelector('.thread-tool-preview-body')).not.toBeInTheDocument()
-    expect(screen.getAllByText(/App\.java/).length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
+    expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
   })
 
   it('shows the pre-execution edit diff when editReview is present', () => {
@@ -668,7 +703,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(within(preview as HTMLElement).getByText('-six')).toBeInTheDocument()
   })
 
-  it('shows bash output by default in the bounded viewport and follows the streaming tail', () => {
+  it('collapses bash to the last ten logical lines and expands without an inner scroll', async () => {
+    const user = userEvent.setup()
     const output = Array.from({ length: 30 }, (_, index) => `build step ${index + 1}`).join('\n')
     const { container } = render(
       <ToolMessageBlock
@@ -685,69 +721,119 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
     const viewport = container.querySelector('.thread-tool-output')
-    // 持续日志默认跟随底部：完整内容都在 DOM 中，不按行截断。
-    expect(viewport).toHaveTextContent('build step 1')
+    // 收起时只渲染最后 10 个逻辑行；前面的行由提示行承载。
+    expect(viewport).toHaveTextContent('build step 21')
     expect(viewport).toHaveTextContent('build step 30')
-    expect(collapseButton()).toHaveAttribute('aria-expanded', 'true')
+    expect(viewport).not.toHaveTextContent('build step 1')
+    expect(viewport).not.toHaveClass('is-bounded')
+    expect(screen.getByRole('button', { name: '… 21 earlier lines' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '… 21 earlier lines' }))
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 1')
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 30')
+    expect(screen.queryByRole('button', { name: /earlier lines/ })).not.toBeInTheDocument()
   })
 
-  it('follows only the streaming bash tail; settled output is read from the top', () => {
-    // 挂载时的贴底写入必须可观测：用原型级尺寸桩，写入才会落在 mock 的 scrollHeight 上。
-    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
-    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    try {
-      scrollHeightSpy.mockReturnValue(400)
-      clientHeightSpy.mockReturnValue(100)
-      const log = (count: number) =>
-        Array.from({ length: count }, (_, index) => `step-${index + 1}`).join('\n')
-      const settledCall = message({
-        phase: 'call',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        status: 'done',
-        subjectEntryId: 'entry-70',
-        arguments: '{"command":"npm test"}',
-      })
-      const settledResult = message({
-        id: 'tool-result-1',
-        phase: 'result',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        status: 'done',
-        subjectEntryId: 'entry-71',
-        contents: [text(log(20))],
-      })
+  it('recomputes the collapsed bash tail as streaming output grows', () => {
+    const log = (count: number) =>
+      Array.from({ length: count }, (_, index) => `step-${index + 1}`).join('\n')
+    const messageFor = (count: number) => message({
+      phase: 'call',
+      toolName: 'bash',
+      rendererKey: 'bash',
+      status: 'streaming',
+      subjectEntryId: null,
+      arguments: '{"command":"npm test"}',
+      partialContents: [text(log(count))],
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={messageFor(20)} />)
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toBe(Array.from({ length: 10 }, (_, index) => `step-${index + 11}`).join('\n'))
+    expect(screen.getByRole('button', { name: '… 10 earlier lines' })).toBeInTheDocument()
 
-      // 终态 bash 结果（durable 结果，非流式）：静态正文从顶部读，不自动贴到底部。
-      const settled = render(<ToolMessageBlock message={settledCall} result={settledResult} />)
-      const settledViewport = settled.container.querySelector<HTMLElement>('.thread-tool-output')
-      expect(settledViewport?.scrollTop).toBe(0)
-      settled.unmount()
-
-      // 流式 bash 调用（瞬态 partial 日志）：唯一跟随尾部的正文。
-      const streamingCall = message({
-        phase: 'call',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        status: 'streaming',
-        subjectEntryId: null,
-        arguments: '{"command":"npm test"}',
-        partialContents: [text(log(20))],
-      })
-      const streaming = render(<ToolMessageBlock message={streamingCall} />)
-      const viewport = streaming.container.querySelector<HTMLElement>('.thread-tool-output')
-      expect(viewport?.scrollTop).toBe(400)
-
-      // durable 结果到达：同一节点保留阅读位置，不再自动贴底。
-      streaming.rerender(<ToolMessageBlock message={settledCall} result={settledResult} />)
-      expect(viewport?.scrollTop).toBe(400)
-    } finally {
-      scrollHeightSpy.mockRestore()
-      clientHeightSpy.mockRestore()
-    }
+    rerender(<ToolMessageBlock message={messageFor(30)} />)
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toBe(Array.from({ length: 10 }, (_, index) => `step-${index + 21}`).join('\n'))
+    expect(screen.getByRole('button', { name: '… 20 earlier lines' })).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-output')).not.toHaveClass('is-bounded')
   })
 
-  it('renders the task prompt and a clickable thread id without acceptance copy', () => {
+  it('collapses MCP results to five lines and applies the 1500-character cap', async () => {
+    const user = userEvent.setup()
+    const lines = Array.from({ length: 8 }, (_, index) => `issue-${index + 1}`).join('\n')
+    const { container, unmount } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'result',
+          toolName: 'mcp_github_list_issues',
+          rendererKey: 'mcp_github_list_issues',
+          arguments: '{"state":"open"}',
+          contents: [text(lines)],
+        })}
+      />,
+    )
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toBe(Array.from({ length: 5 }, (_, index) => `issue-${index + 1}`).join('\n'))
+    expect(screen.getByRole('button', { name: '… 3 more lines' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '… 3 more lines' }))
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('issue-8')
+
+    unmount()
+
+    // 单行超长内容由 1500 code point 上限截断。
+    const longLine = `start-${'x'.repeat(1_800)}`
+    const long = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'result',
+          toolName: 'mcp_github_get_issue',
+          rendererKey: 'mcp_github_get_issue',
+          arguments: '{"number":118}',
+          contents: [text(longLine)],
+        })}
+      />,
+    )
+    const truncated = long.container.querySelector('.thread-tool-output')?.textContent ?? ''
+    expect(Array.from(truncated)).toHaveLength(1_500)
+    expect(truncated.startsWith('start-xxx')).toBe(true)
+    expect(screen.getByRole('button', { name: '… truncated' })).toBeInTheDocument()
+  })
+
+  it('auto-collapses a write review after it settles unless the user already chose', async () => {
+    const user = userEvent.setup()
+    const content = Array.from({ length: 40 }, (_, index) => `line-${index + 1}`).join('\n')
+    const call = message({
+      phase: 'call',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: JSON.stringify({ path: 'App.java', content }),
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={call} />)
+
+    // 审查期间默认全显。
+    expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
+    expect(container.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-bounded')
+
+    // 未手动选择时随阶段切换：终态默认收起为前 10 行，成功说明在 body 中默认不展示。
+    rerender(<ToolMessageBlock message={call} result={message({
+      phase: 'result',
+      toolName: 'write',
+      rendererKey: 'write',
+      contents: [text('File written successfully.')],
+    })} />)
+    expect(container.querySelector('.thread-tool-preview-body')?.textContent)
+      .toBe(Array.from({ length: 10 }, (_, index) => `line-${index + 1}`).join('\n'))
+    expect(screen.getByRole('button', { name: '… 30 more lines' })).toBeInTheDocument()
+    expect(screen.queryByText('写入成功')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '… 30 more lines' }))
+    expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
+    expect(screen.getByText('写入成功')).toBeInTheDocument()
+  })
+
+  it('hides the task prompt while collapsed and renders it without acceptance copy', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -766,12 +852,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('explorer')
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('prompt')
+    expect(screen.queryByText(/renderer:call/)).not.toBeInTheDocument()
+    await user.click(expandButton()!)
     expect(screen.getByText(/renderer:call/)).toBeInTheDocument()
     expect(container.textContent).not.toContain('已受理')
     expect(container.textContent).not.toContain('后台执行')
   })
 
-  it('renders only the canonical receipt link for resume and falls back cleanly on missing/bad details', () => {
+  it('puts the canonical receipt link in the header without a UUID and falls back cleanly', async () => {
+    const user = userEvent.setup()
     const resumeArguments = JSON.stringify({
       subagent_type: 'coder',
       prompt: 'continue working on subtask',
@@ -806,21 +895,24 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
 
-    // 即使调用与收据的 UUID 不同，也仅能导航至收据指定的线程。
-    const link = screen.getByRole('link')
-    expect(link).toHaveAccessibleName('查看 subagent 00000000-0000-0000-0000-000000000002 的执行')
+    // 导航只使用收据指定的 threadId，Header 收起时不展示完整 UUID。
+    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
-    const prompt = screen.getByText('continue working on subtask')
-    expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)
-    expect(container.querySelector('.thread-tool-body')?.lastElementChild).toContainElement(link)
-    expect(container.querySelector('.thread-tool-summary-detail'))
-      .toHaveTextContent('coder [thread_id=00000000-0000-0000-0000-000000000001]')
+    expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
+    expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('coder')
+    expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('thread_id')
+    expect(screen.queryByText('continue working on subtask')).not.toBeInTheDocument()
     // 自然语言正文在受理成功时被链接收敛，不重复展示
     expect(screen.queryByText('Subagent accepted execution.')).not.toBeInTheDocument()
+
+    // 展开后完整参数仍保留原始 thread_id。
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('coder [thread_id=00000000-0000-0000-0000-000000000001]')
+    expect(screen.getByText('continue working on subtask')).toBeInTheDocument()
     unmount()
 
-    // 缺少 details 时不伪造链接，保留原始自然语言正文。
+    // 缺少 details 时不伪造链接，展开后保留原始自然语言正文。
     const resultWithoutDetails = message({
       phase: 'result',
       toolName: 'task',
@@ -838,6 +930,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByText('Raw output without details receipt.')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
     unmount2()
 
@@ -853,6 +947,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByText('Invalid receipt output')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
     expect(screen.getByText('Invalid receipt output')).toBeInTheDocument()
     unmount3()
 
@@ -870,7 +966,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       },
       contents: [text('Failure explanation detail')],
     })
-    render(
+    const failed = render(
       <MemoryRouter>
         <ToolMessageBlock
           message={callMessage}
@@ -880,10 +976,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(failed.container.querySelector('.thread-tool-error')).toHaveTextContent(
+      'Subagent dispatch rejected: budget exceeded',
+    )
+    await user.click(expandButton()!)
     expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
   })
 
-  it('keeps pending resume navigation absent until the accepted result arrives', () => {
+  it('keeps pending resume navigation absent and shows it in the header after acceptance', async () => {
+    const user = userEvent.setup()
     const call = message({
       phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'RUNNING',
       arguments: JSON.stringify({
@@ -894,8 +995,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
     const { rerender } = render(
       <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
     )
-    expect(screen.getByText('resume pending')).toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByText('resume pending')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
+    expect(screen.getByText('resume pending')).toBeInTheDocument()
     rerender(
       <MemoryRouter>
         <ToolMessageBlock message={call} renderer={TaskToolRenderer} result={message({
@@ -905,11 +1008,13 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 00000000-0000-0000-0000-000000000002 的执行' }))
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    expect(screen.queryByText('00000000-0000-0000-0000-000000000002')).not.toBeInTheDocument()
   })
 
-  it('puts the first task receipt link after its prompt', () => {
+  it('keeps the task receipt action in the header and the prompt in the preview', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <MemoryRouter>
         <ToolMessageBlock message={message({
@@ -922,13 +1027,14 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    const prompt = screen.getByText('first task prompt')
-    const link = screen.getByRole('link')
-    expect(link).toHaveAccessibleName('查看 subagent 00000000-0000-0000-0000-000000000002 的执行')
+    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
-    expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)
-    expect(container.querySelector('.thread-tool-body')?.lastElementChild).toContainElement(link)
+    expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(screen.queryByText('first task prompt')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
+    expect(screen.getByText('first task prompt')).toBeInTheDocument()
+    expect(container.querySelector('.thread-disclosure-preview')).not.toContainElement(link)
   })
 
   it('shows streaming task arguments once and retains collapse across completed arguments', async () => {
@@ -940,12 +1046,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
     })
     const { container, rerender } = render(<ToolMessageBlock message={call} renderer={TaskToolRenderer} />)
     const header = container.querySelector('.thread-tool-summary')!
-    const body = container.querySelector('.thread-tool-body')!
-    // 未闭合参数原样仅出现在正文；已解析的短参数仍留在标题。
+    // 未闭合参数默认收起；已解析的短参数仍留在标题。
     expect(header).toHaveTextContent('task [max_turns=15]')
     expect(header.textContent).not.toContain('Objective')
-    expect(body.querySelectorAll('.thread-tool-output')).toHaveLength(1)
-    expect(body.querySelector('.thread-tool-output')?.textContent).toBe(partial)
+    expect(container.querySelector('.thread-tool-output')).toBeNull()
+
+    await user.click(expandButton()!)
+    const preview = container.querySelector('.thread-disclosure-preview')!
+    expect(preview.querySelectorAll('.thread-tool-output')).toHaveLength(1)
+    expect(preview.querySelector('.thread-tool-output')?.textContent).toBe(partial)
     expect(container.textContent?.split(partial)).toHaveLength(2)
 
     // 流式时主动收起，完整参数到达后仍保留用户选择。
@@ -958,13 +1067,14 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(header).toHaveTextContent('task Searcher [max_turns=15]')
     expect(header.textContent).not.toContain('Objective')
     expect(expandButton()).toHaveAttribute('aria-expanded', 'false')
-    expect(container.querySelector('.thread-tool-body')).toBeNull()
+    expect(container.querySelector('.thread-tool-output')).toBeNull()
     await user.click(expandButton()!)
     expect(screen.getAllByText('Objective completed prompt')).toHaveLength(1)
     expect(container.querySelector('.thread-tool-output')?.textContent).toBe('Objective\ncompleted prompt')
   })
 
-  it('renders ask_user as a read-only record without a submission path', () => {
+  it('renders ask_user as a read-only record after expanding, with no submission path', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -989,8 +1099,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    // Header 不重复问题文本；正文是冻结问题 + 已物化答案。
+    // Header 不重复问题文本；默认收起，展开后是冻结问题 + 已物化答案。
     expect(container.querySelector('.thread-tool-summary-detail')).not.toBeInTheDocument()
+    expect(screen.queryByText('Which environment?')).not.toBeInTheDocument()
+    await user.click(expandButton()!)
     expect(screen.getByText('Which environment?')).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
@@ -1000,7 +1112,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(collapseButton()).toBeInTheDocument()
   })
 
-  it('reads canonical answers from json results and marks declined questionnaires', () => {
+  it('reads canonical answers from json results and marks declined questionnaires', async () => {
+    const user = userEvent.setup()
     const questions = JSON.stringify({
       questions: [
         { question: 'Pick two', options: ['a', 'b', 'c'], multiple: true },
@@ -1025,6 +1138,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     // json 结果里的规范答案按序物化，且没有任何提交入口。
     const answerTags = Array.from(container.querySelectorAll('.interaction-answer-tag'))
       .map((element) => element.textContent)
@@ -1033,7 +1147,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.queryByRole('button', { name: /提交|继续|confirm|submit/i })).not.toBeInTheDocument()
   })
 
-  it('marks a declined questionnaire without fabricating answers', () => {
+  it('marks a declined questionnaire without fabricating answers', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -1054,6 +1169,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     expect(container.querySelector('.interaction-questionnaire-badge.declined')).not.toBeNull()
     expect(container.querySelectorAll('.interaction-answer-tag')).toHaveLength(0)
   })
@@ -1082,6 +1198,44 @@ describe('ToolMessageBlock per-tool bodies', () => {
 })
 
 describe('ToolMessageBlock resources and approvals', () => {
+  it('preserves interleaved text and resource order without dropping expanded content', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          toolName: 'bash',
+          rendererKey: 'bash',
+          contents: [
+            text('before resource'),
+            resource({
+              type: 'file',
+              name: 'a.txt',
+              mime: 'text/plain',
+              data: 'https://example.test/a.txt',
+            }),
+            text('after resource'),
+          ],
+        })}
+      />,
+    )
+
+    // 收起态只展示文本尾部窗口；附件在 body 配额 0 下隐藏。
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toContain('before resource')
+    expect(screen.queryByText('https://example.test/a.txt')).not.toBeInTheDocument()
+    expect(expandButton()).toBeInTheDocument()
+
+    await user.click(expandButton()!)
+    const sequence = Array.from(
+      container.querySelectorAll('.thread-disclosure-preview > .thread-tool-contents > *'),
+    ).map((element) => element.textContent ?? '')
+    expect(sequence).toHaveLength(3)
+    expect(sequence[0]).toContain('before resource')
+    expect(sequence[1]).toContain('a.txt')
+    expect(sequence[1]).toContain('https://example.test/a.txt')
+    expect(sequence[2]).toContain('after resource')
+  })
+
   it('renders inline data media but never auto-requests remote resources', async () => {
     const user = userEvent.setup()
     render(
@@ -1107,6 +1261,7 @@ describe('ToolMessageBlock resources and approvals', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute(
       'src',
       'data:image/png;base64,aGVsbG8=',
@@ -1124,7 +1279,8 @@ describe('ToolMessageBlock resources and approvals', () => {
     expect(within(dialog).getByRole('img', { name: 'preview.png' })).toBeInTheDocument()
   })
 
-  it('renders a resource preview excerpt as text instead of an image source', () => {
+  it('renders a resource preview excerpt as text instead of an image source', async () => {
+    const user = userEvent.setup()
     render(
       <ToolMessageBlock
         message={message({
@@ -1141,12 +1297,14 @@ describe('ToolMessageBlock resources and approvals', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     expect(screen.getByText('https://example.test/manifest.json')).toBeInTheDocument()
     expect(screen.getByText('{"version":1,"tools":["web-search"]}')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
-  it('renders audio and video resources without autoplay', () => {
+  it('renders audio and video resources without autoplay', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -1170,6 +1328,7 @@ describe('ToolMessageBlock resources and approvals', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     expect(container.querySelector('audio')).toHaveAttribute(
       'src',
       'data:audio/mpeg;base64,QUFBQQ==',
@@ -1288,22 +1447,23 @@ describe('ToolMessageBlock identity', () => {
     )
     expect(screen.getByText('match: needle')).toBeInTheDocument()
     expect(collapseButton()).toHaveAttribute('aria-expanded', 'true')
-    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelectorAll('.thread-block-tool')).toHaveLength(1)
   })
 
   it('keeps a collapsed choice across the streaming to terminal transition', async () => {
     const user = userEvent.setup()
     const call = message({
       phase: 'call',
-      toolName: 'bash',
-      rendererKey: 'bash',
+      toolName: 'grep',
+      rendererKey: 'grep',
       status: 'streaming',
       subjectEntryId: 'assistant-1',
-      arguments: '{"command":"ls"}',
+      arguments: '{"pattern":"x"}',
       partialContents: [text('partial output')],
     })
     const { rerender } = render(<ToolMessageBlock message={call} />)
 
+    await user.click(expandButton()!)
     expect(screen.getByText('partial output')).toBeInTheDocument()
     await user.click(collapseButton()!)
 
@@ -1312,8 +1472,8 @@ describe('ToolMessageBlock identity', () => {
         message={call}
         result={message({
           phase: 'result',
-          toolName: 'bash',
-          rendererKey: 'bash',
+          toolName: 'grep',
+          rendererKey: 'grep',
           status: 'done',
           contents: [text('final output')],
         })}
@@ -1323,7 +1483,8 @@ describe('ToolMessageBlock identity', () => {
     expect(expandButton()).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('prefers the durable result contents over a stale streaming partial', () => {
+  it('prefers the durable result contents over a stale streaming partial', async () => {
+    const user = userEvent.setup()
     render(
       <ToolMessageBlock
         message={message({
@@ -1344,8 +1505,9 @@ describe('ToolMessageBlock identity', () => {
       />,
     )
 
+    await user.click(expandButton()!)
     // result 消息存在时它是唯一展示源，旧 partial 不得再贡献内容。
-    expect(document.querySelector('.thread-tool-contents')).toHaveTextContent('durable text')
-    expect(document.querySelector('.thread-tool-contents')).not.toHaveTextContent('stale partial')
+    expect(document.querySelector('.thread-tool-output')).toHaveTextContent('durable text')
+    expect(document.querySelector('.thread-tool-output')).not.toHaveTextContent('stale partial')
   })
 })

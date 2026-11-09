@@ -82,6 +82,32 @@ describe('discloseText', () => {
     expect(disclosureHint(result, 'start')).toBe('… 1 more line, truncated')
   })
 
+  it('keeps the end of a bash tail window when early lines are huge and the exit error is last', () => {
+    // 尾部窗口内有多行早期大行，末尾才是退出码：字符上限必须保留末尾。
+    const huge1 = `huge-a-${'x'.repeat(2_000)}`
+    const huge2 = `huge-b-${'y'.repeat(2_000)}`
+    const text = [huge1, huge2, 'middle-1', '[Command exited with code 2.]'].join('\n')
+    const result = discloseText(text, 10, 'end', 1_500)
+
+    expect(result.text.endsWith('middle-1\n[Command exited with code 2.]')).toBe(true)
+    expect(result.text).not.toContain('huge-a-')
+    // huge2 只剩尾部（部分可见），middle 与 exit 完整可见；huge1 整行隐藏。
+    expect(result.hiddenLines).toBe(1)
+    expect(result.truncated).toBe(true)
+    expect(disclosureHint(result, 'end')).toBe('… 1 earlier line, truncated')
+    expect(Array.from(result.text)).toHaveLength(1_500)
+  })
+
+  it('never splits an emoji when keeping the tail suffix', () => {
+    const emoji = '😀'
+    const result = discloseText(`${emoji.repeat(2_000)}\nexit 2`, 2, 'end', 1_500)
+    expect(result.text.endsWith('\nexit 2')).toBe(true)
+    expect(Array.from(result.text)).toHaveLength(1_500)
+    expect(result.text.startsWith('😀')).toBe(true)
+    expect(result.hiddenLines).toBe(0)
+    expect(result.truncated).toBe(true)
+  })
+
   it('uses singular line wording and distinguishes earlier truncation', () => {
     expect(disclosureHint(discloseText('a\nb', 1), 'start')).toBe('… 1 more line')
     expect(disclosureHint(discloseText('a\nb', 1, 'end'), 'end')).toBe('… 1 earlier line')

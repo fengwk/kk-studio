@@ -2,12 +2,10 @@ import { expect, test } from './fixture'
 import type { Locator, Page } from './fixture'
 
 /**
- * Slice C 真实浏览器回归：外层阅读锚点与工具卡片交互。
+ * 工具卡片真实浏览器回归：统一 ThreadDisclosure、配额截取、外层阅读锚点与长卡片收起。
  *
- * 覆盖设计文档中只能在真实浏览器验证的契约——流式增长跟随、空闲高度变化（手动展开、
- * 图片加载）不抢外层锚点、内部日志回看不移动卡片、流式转终态保持身份与滚动位置、
- * read 图片按权威 MIME 默认预览；恢复跟随必须来自真实用户滚动意图（滚轮等），
- * 布局收缩把 scrollTop 钳制到底部不构成用户回底。
+ * 覆盖只能在真实浏览器验证的契约——收起/展开的几何、无内部滚动、流式尾部窗口、
+ * 手动展开不抢外层锚点、媒体加载不移动卡片、流式转终态保持身份、长卡片底部收起。
  */
 
 type HarnessApi = {
@@ -24,6 +22,7 @@ type HarnessApi = {
   shrinkTail(lines?: number): void
   addImageMid(lines: number): void
   unknownLong(chars?: number): void
+  longExpanded(lines?: number): void
   restorePosition(offset: number): void
 }
 
@@ -41,7 +40,7 @@ const dialogue = (page: Page): Locator => page.locator('.thread-dialogue')
 const bashCard = (page: Page): Locator => page.locator('.thread-turn-tool').first()
 const bashViewport = (page: Page): Locator =>
   page.locator('.thread-turn-tool').first().locator('.thread-tool-output').first()
-const toggle = (page: Page): Locator => page.locator('.thread-tool-toggle').first()
+const toggle = (page: Page): Locator => page.locator('.thread-disclosure-toggle').first()
 
 async function topEdge(target: Locator): Promise<number> {
   const box = await target.boundingBox()
@@ -74,48 +73,64 @@ async function scrollMetrics(target: Locator): Promise<{
   }))
 }
 
+/**
+ * 真实鼠标点击会先 scrollIntoView，破坏本用例要测量的阅读锚点。
+ * 这里直接触发 DOM click，行为与键盘/鼠标激活一致，但不移动外层。
+ */
+async function clickWithoutScrolling(target: Locator): Promise<void> {
+  await target.evaluate((element) => (element as HTMLElement).click())
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/browser-tests/tool-card-harness.html')
   await expect(page.locator('.harness-hint')).toHaveText('tool card browser harness')
 })
 
 for (const width of [1440, 360, 320]) {
-  test(`task readable links and balanced header geometry at ${width}px`, async ({ page }, testInfo) => {
+  test(`task header action and balanced header geometry at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 820 })
     await harness(page, 'task')
     const card = page.locator('.thread-turn-tool')
     await expect(card.locator('.thread-tool-summary')).toHaveText(
-      'task Explorer [max_turns=4 thread_id=00000000-0000-4000-8000-000000000004]',
+      'task Explorer [max_turns=4]',
     )
-    await expect(card.locator('.thread-tool-state-label, .thread-tool-tail > svg, .task-tool-fields')).toHaveCount(0)
-    await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
+    await expect(card.locator('.thread-tool-state-label, .task-tool-fields')).toHaveCount(0)
+    // 收起时不显示 prompt，也不展示完整 thread_id。
+    await expect(card).not.toContainText('Keep this user text: Thread ID user-owned-marker')
+    await expect(card.locator('.thread-tool-summary')).not.toContainText('00000000-')
     const links = card.getByRole('link')
     await expect(links).toHaveCount(1)
-    await expect(links).toHaveAccessibleName('View subagent 00000000-0000-4000-8000-000000000005 execution')
+    await expect(links).toHaveAccessibleName('查看 subagent 执行')
     await expect(links).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
+    await links.click()
+    await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')
+
+    // 展开后完整参数与 prompt 可见，链接仍在 Header 操作区。
+    await card.locator('.thread-disclosure-toggle').click()
+    await expect(card.locator('.thread-disclosure-toggle')).toHaveAttribute('aria-expanded', 'true')
+    await expect(card.locator('.thread-tool-summary')).toContainText('thread_id=00000000-0000-4000-8000-000000000004')
+    await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
     const typography = await links.evaluate((element) => {
       const style = getComputedStyle(element)
       const body = getComputedStyle(document.querySelector('.task-tool-renderer .thread-tool-pre')!)
       return {
-        link: [style.fontFamily, style.fontSize, style.fontWeight, style.color],
-        body: [body.fontFamily, body.fontSize, body.fontWeight, body.color],
+        link: [style.fontFamily, style.fontSize, style.fontWeight],
+        body: [body.fontFamily, body.fontSize, body.fontWeight],
       }
     })
     expect(typography.link).toEqual(typography.body)
     expect(typography.link[0].toLowerCase()).not.toContain('monospace')
-    await links.click()
-    await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')
-    await expect(card.locator('.thread-tool-toggle')).toHaveAttribute('aria-expanded', 'true')
     await page.screenshot({ path: testInfo.outputPath(`task-card-expanded-${width}.png`) })
-    await card.locator('.thread-tool-toggle').click()
+
+    await card.locator('.thread-disclosure-toggle').click()
     const geometry = await card.evaluate((element) => {
-      const surface = element.querySelector('.thread-tool-surface')!.getBoundingClientRect()
-      const header = element.querySelector('.thread-tool-header')!.getBoundingClientRect()
+      const surface = element.getBoundingClientRect()
+      const header = element.querySelector('.thread-disclosure-header')!.getBoundingClientRect()
       const summary = element.querySelector('.thread-tool-name')!.getBoundingClientRect()
-      const toggle = element.querySelector('.thread-tool-toggle')!.getBoundingClientRect()
+      const button = element.querySelector('.thread-disclosure-toggle')!.getBoundingClientRect()
       return {
         top: header.top - surface.top, bottom: surface.bottom - header.bottom,
-        center: Math.abs(summary.y + summary.height / 2 - toggle.y - toggle.height / 2),
+        center: Math.abs(summary.y + summary.height / 2 - button.y - button.height / 2),
         overflow: element.scrollWidth - element.clientWidth,
       }
     })
@@ -127,25 +142,24 @@ for (const width of [1440, 360, 320]) {
   })
 }
 
-test('follows streaming growth, pauses on user scroll-up, and resumes at the bottom', async ({ page }) => {
+test('follows streaming growth, keeps the tail window, pauses on user scroll-up, and resumes at the bottom', async ({ page }) => {
   await harness(page, 'streaming', 20)
   const body = dialogue(page)
-  const inner = bashViewport(page)
   const outerDistance = () =>
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
-  const innerDistance = () =>
-    scrollMetrics(inner).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
 
-  // 挂载即贴底；持续日志同时跟随内部尾部。
+  // 挂载即贴底；bash 收起时只显示最后 10 个逻辑行。
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
-  await expect.poll(innerDistance).toBeLessThanOrEqual(1)
+  await expect(bashViewport(page)).toContainText('build step 20')
+  await expect(bashViewport(page)).not.toContainText('build step 1')
+  await expect(page.locator('.thread-disclosure-hint').first()).toHaveText('… 10 earlier lines')
 
-  // 流式增长：外层继续贴底，内部尾部继续跟随。
+  // 流式增长：外层继续贴底，尾部窗口继续跟随。
   await harness(page, 'grow', 60)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
-  await expect.poll(innerDistance).toBeLessThanOrEqual(1)
   await expect(bashViewport(page)).toContainText('build step 60')
-  await expect(bashViewport(page)).toContainText('build step 1')
+  await expect(bashViewport(page)).not.toContainText('build step 1')
+  await expect(page.locator('.thread-disclosure-hint').first()).toHaveText('… 50 earlier lines')
 
   // 用户用真实滚轮向历史方向滚动：立即暂停跟随，后续增长不得把手势拉回底部。
   await scrollTranscript(page, -240)
@@ -168,13 +182,7 @@ test('keeps the outer reading anchor when a tool card is expanded manually while
   const body = dialogue(page)
   const card = bashCard(page)
 
-  // 先收起卡片作为准备（收起会让下方内容上移，外层位置变化属于正常布局）。
   await toggle(page).scrollIntoViewIfNeeded()
-  await toggle(page).click()
-  await page.waitForTimeout(150)
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
-
-  // 让卡片位于可视区中部再测量：点击本身不再引发滚动。
   await body.evaluate((element) => {
     const target = document.querySelector('.thread-turn-tool')
     element.scrollTop = Math.max(0, (target?.getBoundingClientRect().top ?? 0)
@@ -188,6 +196,7 @@ test('keeps the outer reading anchor when a tool card is expanded manually while
   await page.waitForTimeout(200)
   await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
   await expect(bashViewport(page)).toBeVisible()
+  await expect(bashViewport(page)).not.toHaveClass(/is-bounded/)
 
   const cardBoxAfter = await card.boundingBox()
   expect(cardBoxAfter?.y).toBeCloseTo(cardBoxBefore?.y ?? 0, 0)
@@ -210,7 +219,8 @@ test('keeps the restored reading position while a tool card image loads', async 
   const heightBefore = await readCard.boundingBox()
   const scrollHeightBefore = await body.evaluate((element) => element.scrollHeight)
 
-  // 图片按权威 MIME 默认预览；加载完成后卡片确实长高，阅读位置与卡片顶边都不动。
+  // 只读记录默认收起；展开后按权威 MIME 预览，加载完成时阅读位置与卡片顶边都不动。
+  await clickWithoutScrolling(readCard.locator('.thread-disclosure-toggle'))
   const image = readCard.locator('img').first()
   await expect(image).toBeVisible()
   await image.evaluate((element: HTMLImageElement) => element.decode().catch(() => undefined))
@@ -224,17 +234,17 @@ test('keeps the restored reading position while a tool card image loads', async 
   expect(await topEdge(readCard)).toBeCloseTo(cardTopBefore, 0)
 })
 
-test('keeps identity, expanded state and inner scroll position across streaming to terminal', async ({ page }) => {
+test('keeps identity and expanded state across streaming to terminal', async ({ page }) => {
   await harness(page, 'streaming', 60)
   const card = bashCard(page)
   const viewport = bashViewport(page)
   await card.scrollIntoViewIfNeeded()
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
 
-  // 用户在流式期间回看内部日志。
-  await viewport.evaluate((element) => {
-    element.scrollTop = 40
-  })
-  const innerBefore = await scrollTop(viewport)
+  // 用户展开卡片后标记 DOM 身份。
+  await toggle(page).click()
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(viewport).toContainText('build step 1')
   const nodeIdentity = await card.evaluate((element) => {
     ;(element as HTMLElement).dataset.harnessProbe = 'streaming-node'
     return (element as HTMLElement).dataset.harnessProbe
@@ -245,87 +255,53 @@ test('keeps identity, expanded state and inner scroll position across streaming 
   await harness(page, 'settle', 60)
   await page.waitForTimeout(150)
 
-  // 同一 DOM 节点（身份未重置），展开状态保留，内部滚动位置不回零。
+  // 同一 DOM 节点（身份未重置），展开状态保留，完整日志仍在。
   await expect(page.locator('.thread-turn-tool')).toHaveCount(1)
   expect(await card.getAttribute('data-harness-probe')).toBe('streaming-node')
   await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
-  expect(await scrollTop(viewport)).toBe(innerBefore)
   await expect(viewport).toContainText('build step 1')
   await expect(viewport).toContainText('build step 60')
+  await expect(viewport).not.toHaveClass(/is-bounded/)
 })
 
-test('scrolls the inner log and chains naturally to the transcript at its boundary', async ({ page }) => {
+test('expands the full log from the hint and never creates an inner scroll region', async ({ page }) => {
   await harness(page, 'idleMid', 80)
-  const body = dialogue(page)
   const viewport = bashViewport(page)
 
-  // 终态 bash 结果是静态正文：挂载即从顶部读，不自动贴到底部。
-  expect(await scrollTop(viewport)).toBe(0)
-
-  // 输出视口使用等宽字体（--mono）。
-  const fontFamily = await viewport.evaluate((element) => getComputedStyle(element).fontFamily)
-  expect(fontFamily.toLowerCase()).toContain('monospace')
-
-  // 先把内部视口滚到中间，再让它在视口内就位；之后所有测量都不再触发自动定位。
-  await viewport.scrollIntoViewIfNeeded()
-  await viewport.evaluate((element) => {
-    element.scrollTop = Math.floor(element.scrollHeight / 2)
-  })
-  const innerBefore = await scrollTop(viewport)
-  expect(innerBefore).toBeGreaterThan(0)
-
-  const box = await viewport.boundingBox()
-  expect(box).not.toBeNull()
-  const centerX = (box?.x ?? 0) + (box?.width ?? 0) / 2
-  const centerY = (box?.y ?? 0) + (box?.height ?? 0) / 2
-
-  // 1) 内部仍有可滚空间：滚轮只滚内层，外层 transcript 不动。
-  const outerAnchor = await scrollTop(body)
-  await page.mouse.move(centerX, centerY)
-  await page.mouse.wheel(0, -120)
-  await page.waitForTimeout(150)
-  expect(await scrollTop(viewport)).toBeLessThan(innerBefore)
-  expect(await scrollTop(body)).toBe(outerAnchor)
-
-  // 2) 外层先移动到有上滚空间的位置，再把内层置顶。
-  await body.evaluate((element) => {
-    element.scrollTop = 140
-  })
-  const outerBefore = await scrollTop(body)
-  expect(outerBefore).toBeGreaterThan(0)
-  await viewport.evaluate((element) => {
-    element.scrollTop = 0
-  })
-  // 外层移动后重新定位指针，确保滚轮仍落在内层视口上。
-  const movedBox = await viewport.boundingBox()
-  expect(movedBox?.y ?? -1).toBeGreaterThanOrEqual(0)
-  await page.mouse.move(
-    (movedBox?.x ?? 0) + (movedBox?.width ?? 0) / 2,
-    (movedBox?.y ?? 0) + (movedBox?.height ?? 0) / 2,
+  // 终态 bash 收起为最后 10 行。
+  expect(await viewport.textContent()).toBe(
+    Array.from({ length: 10 }, (_, index) => `build step ${index + 71}`).join('\n'),
   )
-  await page.mouse.wheel(0, -400)
-  await page.waitForTimeout(200)
+  await expect(page.locator('.thread-disclosure-hint').first()).toHaveText('… 70 earlier lines')
 
-  // 内层已在边界无法再消费：overscroll-behavior auto 让滚轮自然链到外层。
-  expect(await scrollTop(viewport)).toBe(0)
-  expect(await scrollTop(body)).toBeLessThan(outerBefore)
+  await page.locator('.thread-disclosure-hint').first().click()
+  await expect(page.locator('.thread-disclosure-hint')).toHaveCount(0)
+  expect(await viewport.textContent()).toBe(
+    Array.from({ length: 80 }, (_, index) => `build step ${index + 1}`).join('\n'),
+  )
+  // 展开视图没有内部滚动：pre 自身不可滚动。
+  expect(await viewport.evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true)
+  await expect(viewport).not.toHaveClass(/is-bounded/)
 })
 
-test('keeps read text collapsed, previews read images, and keeps unknown attachments collapsed', async ({ page }) => {
+test('keeps read text collapsed, previews read images after expanding, and keeps unknown attachments collapsed', async ({ page }) => {
   await harness(page, 'idle', 20)
-  // bash 正文默认可见；read 文本默认收起（此处用 idle 场景的 bash 卡片代表默认可见）。
   await expect(bashViewport(page)).toBeVisible()
+  await expect(page.locator('.thread-disclosure-toggle')).toHaveCount(1)
 
   await harness(page, 'readUnknown')
   await page.waitForTimeout(900)
   const unknownCard = page.locator('.thread-turn-tool').first()
   await expect(page.locator('.thread-turn-tool')).toHaveCount(1)
-  // 未知 MIME 的 read 附件保持收起：没有内联图片，也没有正文。
-  await expect(unknownCard.locator('.thread-tool-body')).toHaveCount(0)
+  // 未知 MIME 的 read 附件保持收起：没有内联图片，也没有展开后的正文。
+  await expect(unknownCard.locator('.thread-disclosure-body')).toHaveCount(0)
   await expect(unknownCard.locator('img')).toHaveCount(0)
 
   await harness(page, 'readImage')
-  await expect(page.locator('.thread-turn-tool').first().locator('img').first()).toBeVisible()
+  const imageCard = page.locator('.thread-turn-tool').first()
+  await expect(imageCard.locator('img')).toHaveCount(0)
+  await imageCard.locator('.thread-disclosure-toggle').click()
+  await expect(imageCard.locator('img').first()).toBeVisible()
 })
 
 test('exposes the collapse toggle to keyboard users with an explicit state', async ({ page }) => {
@@ -333,36 +309,34 @@ test('exposes the collapse toggle to keyboard users with an explicit state', asy
   const card = bashCard(page)
   await card.scrollIntoViewIfNeeded()
 
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
   await toggle(page).focus()
   await page.keyboard.press('Enter')
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect(bashViewport(page)).toHaveCount(0)
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(bashViewport(page)).toContainText('build step 1')
 
   await page.keyboard.press('Space')
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
   await expect(bashViewport(page)).toBeVisible()
+  await expect(bashViewport(page)).not.toContainText('build step 1')
+  await expect(bashViewport(page)).toContainText('build step 40')
 })
 
-test('keeps the card anchor while streaming growth runs with expansion, media load and inner read-back', async ({ page }) => {
-  // 需求：流式期间用户展开卡片/媒体加载/回看内部日志时，外部并发增长绝不能把
-  // 正在看的卡片拉走——保护的是卡片顶边与外层 scrollTop，而不仅仅是内层不再滚动。
+test('keeps the card anchor while streaming growth runs with expansion and media load', async ({ page }) => {
   await harness(page, 'streamingTail', 40)
   const body = dialogue(page)
   const bash = bashCard(page)
-  const viewport = bashViewport(page)
   const readCard = page.locator('.thread-turn-tool').nth(1)
-  const readToggle = readCard.locator('.thread-tool-toggle')
+  const readToggle = readCard.locator('.thread-disclosure-toggle')
   const outerDistance = () =>
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
 
   // 挂载即贴底：外部仍在跟随（此时任何外部增长都会把卡片往上推）。
   await expect.poll(outerDistance, { timeout: 2500 }).toBeLessThanOrEqual(1)
 
-  // 1) 用户回看内部日志：内层上滚冒泡阅读意图 → 外层暂停，随后并发增长不得移动卡片。
-  await viewport.evaluate((element) => {
-    element.scrollTop = 30
-  })
+  // 1) 用户回看 transcript：外层暂停，随后并发增长不得移动卡片。
+  await scrollTranscript(page, -240)
+  await expect.poll(outerDistance).toBeGreaterThan(1)
   const pausedTop = await scrollTop(body)
   const pausedBashTop = await topEdge(bash)
   await harness(page, 'growTail', 90)
@@ -370,15 +344,16 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
   expect(await scrollTop(body)).toBe(pausedTop)
   expect(await topEdge(bash)).toBeCloseTo(pausedBashTop, 0)
 
-  // 2) 用户用真实滚轮回底恢复跟随，然后展开末尾卡片（交互意图）→ 再次暂停。
+  // 2) 用户用真实滚轮回底恢复跟随，然后展开末尾 read 卡片（交互意图）→ 再次暂停。
   await scrollTranscript(page, 10_000)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
   await readToggle.click()
   await expect(readToggle).toHaveAttribute('aria-expanded', 'true')
   await page.waitForTimeout(150)
 
-  // 展开的静态正文（read 文本结果）从顶部读，绝不自动贴到底部。
-  expect(await scrollTop(readCard.locator('.thread-tool-output').first())).toBe(0)
+  // 展开的静态正文从顶部读，不创建内部滚动。
+  expect(await readCard.locator('.thread-tool-output').first().evaluate((el) => el.scrollTop)).toBe(0)
+  await expect(readCard.locator('.thread-tool-output').first()).not.toHaveClass(/is-bounded/)
 
   // 展开让内容在下方长出来：外层已不贴底，出现贴底就说明阅读位置被抢走。
   const expandedTop = await scrollTop(body)
@@ -392,16 +367,16 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
   expect(await topEdge(bash)).toBeCloseTo(expandedBashTop, 0)
   expect(await topEdge(readCard)).toBeCloseTo(expandedReadTop, 0)
 
-  // 3) 流式期间新增图片卡片并完成解码：布局确实增大，但不是 stream signal，
+  // 3) 流式期间新增 read 图片卡片并完成解码：布局确实增大，但不是 stream signal，
   //    外层与卡片顶边都必须原地不动。
   const mediaCard = page.locator('.thread-turn-tool').nth(2)
   const mediaTop = await scrollTop(body)
   const mediaBashTop = await topEdge(bash)
   const mediaReadTop = await topEdge(readCard)
 
-  // 新卡片先以收起形态加入（正文高度 0），权威 MIME 解析完成后才默认预览。
   await harness(page, 'addImageMid', 160)
   await expect(mediaCard).toHaveCount(1)
+  await clickWithoutScrolling(mediaCard.locator('.thread-disclosure-toggle'))
   const collapsedHeight = await body.evaluate((element) => element.scrollHeight)
 
   const image = mediaCard.locator('img').first()
@@ -422,16 +397,11 @@ test('does not reopen following when a shrink clamps the outer position to the b
   // （滚轮意图）才恢复跟随。
   await harness(page, 'streamingTail', 40)
   const body = dialogue(page)
-  const viewport = bashViewport(page)
   const outerDistance = () =>
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
   await expect.poll(outerDistance, { timeout: 2500 }).toBeLessThanOrEqual(1)
 
-  // 1) 内层回看（冒泡阅读意图）＋ 用户真实滚轮上滚：外层暂停跟随。
-  await viewport.evaluate((element) => {
-    element.scrollTop = 20
-  })
-  await page.waitForTimeout(120)
+  // 1) 用户真实滚轮上滚：外层暂停跟随。
   await scrollTranscript(page, -240)
   await expect.poll(() => outerDistance()).toBeGreaterThan(1)
   const pausedTop = await scrollTop(body)
@@ -458,32 +428,59 @@ test('does not reopen following when a shrink clamps the outer position to the b
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
 })
 
+test('shows the bottom collapse action only for an expanded card taller than the viewport and aligns its top', async ({ page }) => {
+  await harness(page, 'longExpanded', 120)
+  const body = dialogue(page)
+  const card = bashCard(page)
+  await card.scrollIntoViewIfNeeded()
+
+  await expect(card.locator('.thread-disclosure-collapse')).toHaveCount(0)
+  await toggle(page).click()
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
+  const collapse = card.locator('.thread-disclosure-collapse')
+  await expect(collapse).toBeVisible()
+
+  await collapse.scrollIntoViewIfNeeded()
+  await collapse.click()
+  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('.thread-disclosure-collapse')).toHaveCount(0)
+
+  // 收起后把卡片顶部滚到可视区顶部（按 transcript 的 padding 留少量容差）。
+  const dialogueBox = await body.boundingBox()
+  const cardBox = await card.boundingBox()
+  expect((cardBox?.y ?? 0) - (dialogueBox?.y ?? 0)).toBeLessThan(24)
+  expect(await scrollTop(body)).toBeGreaterThan(0)
+})
+
 test.describe('narrow pane header', () => {
   test.use({ viewport: { width: 420, height: 640 } })
 
-  test('wraps unknown/MCP parameters with the toggle pinned to the first row', async ({ page }) => {
+  test('clamps long parameters and pins the toggle to the first row top-right', async ({ page }) => {
     await harness(page, 'unknownLong', 4000)
     const body = dialogue(page)
     const plainCard = page.locator('.thread-turn-tool').nth(0)
     const bodyCard = page.locator('.thread-turn-tool').nth(1)
     const detail = plainCard.locator('.thread-tool-summary-detail')
-    const header = plainCard.locator('.thread-tool-header')
-    const toggle = plainCard.locator('.thread-tool-toggle')
+    const header = plainCard.locator('.thread-disclosure-header')
+    const toggle = plainCard.locator('.thread-disclosure-toggle')
 
     await plainCard.scrollIntoViewIfNeeded()
     await expect(detail).toBeVisible()
 
-    // 数千字参数在可用宽度内折行（不再单行横向滚动），完整原文仍在 DOM 中可选中复制。
+    // 数千字参数完整保留在 DOM 中可选中复制，收起时只做两行视觉截断。
     const text = await detail.textContent()
     expect(text?.length ?? 0).toBeGreaterThan(4_000)
     expect(text).toContain('tail-marker')
     expect(await detail.getAttribute('title')).toBeNull()
 
-    const headerBox = await header.boundingBox()
-    const detailBox = await detail.boundingBox()
-    // 折行：header 与详情都远超一行高度。
-    expect(headerBox?.height ?? 0).toBeGreaterThan(40)
-    expect(detailBox?.height ?? 0).toBeGreaterThan(40)
+    // 收起时 header 被截断，chevron 必须出现；展开后完整参数可见。
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const collapsedHeader = await header.boundingBox()
+    expect(collapsedHeader?.height ?? 0).toBeLessThan(60)
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    const expandedHeader = await header.boundingBox()
+    expect(expandedHeader?.height ?? 0).toBeGreaterThan(collapsedHeader?.height ?? 0)
 
     // 无横向溢出：详情自身与整个对话流都不产生水平滚动。
     const detailOverflow = await detail.evaluate((element) => ({
@@ -508,23 +505,21 @@ test.describe('narrow pane header', () => {
     })
     expect(copied).toBe(text)
 
-    // 无正文的未知卡片没有可展开箭头。
-    await expect(toggle).toHaveCount(0)
-
-    // 有正文的未知卡片：箭头固定在首行右上角，不覆盖参数文本，也没有横向滚动可推动它。
+    // 有结果正文的 MCP 卡片：preview 可见，箭头固定在首行右上角，不覆盖参数文本。
     await bodyCard.scrollIntoViewIfNeeded()
     const bodyDetail = bodyCard.locator('.thread-tool-summary-detail')
-    const bodyToggle = bodyCard.locator('.thread-tool-toggle')
-    const bodyHeader = bodyCard.locator('.thread-tool-header')
+    const bodyToggle = bodyCard.locator('.thread-disclosure-toggle')
+    const bodyHeader = bodyCard.locator('.thread-disclosure-header')
     await expect(bodyDetail).toContainText('line one')
     const bodyText = await bodyDetail.textContent()
     expect(bodyText).toContain('\n')
-    await expect(bodyCard.locator('.thread-tool-body')).toHaveCount(0)
+    await expect(bodyCard.locator('.thread-disclosure-preview')).toContainText('no matches')
+    await expect(bodyCard.locator('.thread-disclosure-body')).toHaveCount(0)
 
     const bodyHeaderBox = await bodyHeader.boundingBox()
     const bodyDetailBox = await bodyDetail.boundingBox()
     const toggleBox = await bodyToggle.boundingBox()
-    expect(bodyHeaderBox?.height ?? 0).toBeGreaterThan(40)
+    expect(bodyHeaderBox?.height ?? 0).toBeGreaterThan(20)
     // 箭头位于首行（顶部）与参数区右侧的留白里，不覆盖参数文本。
     expect((toggleBox?.y ?? 0) - (bodyHeaderBox?.y ?? 0)).toBeLessThan(24)
     expect(toggleBox?.x ?? 0).toBeGreaterThanOrEqual(
@@ -549,7 +544,7 @@ test.describe('narrow pane header', () => {
       const first = range.getBoundingClientRect()
       range.selectNodeContents(name)
       const nameBox = range.getBoundingClientRect()
-      const tail = element.querySelector('.thread-tool-tail')!.getBoundingClientRect()
+      const tail = element.querySelector('.thread-disclosure-toggle')!.getBoundingClientRect()
       const summary = element.querySelector('.thread-tool-summary')!.getBoundingClientRect()
       return { firstY: first.y, nameY: nameBox.y, firstX: first.x, nameEnd: nameBox.right,
         summaryEnd: summary.right, tailX: tail.x,
@@ -559,8 +554,8 @@ test.describe('narrow pane header', () => {
     expect(metrics.firstX).toBeGreaterThan(metrics.nameEnd)
     expect(metrics.tailX).toBeGreaterThanOrEqual(metrics.summaryEnd)
     expect(metrics.scroll).toBeLessThanOrEqual(metrics.width + 1)
-    await expect(card.locator('.thread-tool-tail svg')).toHaveCount(1)
-    await expect(card.locator('.thread-tool-toggle')).toBeVisible()
+    await expect(card.locator('.thread-disclosure-header svg')).toHaveCount(1)
+    await expect(card.locator('.thread-disclosure-toggle')).toBeVisible()
     await expect(card.locator('.thread-tool-summary-detail')).toContainText('end.txt')
   })
 })
@@ -572,7 +567,6 @@ test('all durable states retain accessible labels without visible status icons o
     await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveCount(1)
     await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveAttribute('aria-label', /bash: .+/)
   }
-  await expect(page.locator('.thread-tool-tail > svg, .thread-tool-state-label')).toHaveCount(0)
+  await expect(page.locator('.thread-tool-state-label, .thread-disclosure-toggle')).toHaveCount(0)
   await expect(page.locator('[data-invocation-state="running"]')).toHaveAttribute('aria-busy', 'true')
 })
-

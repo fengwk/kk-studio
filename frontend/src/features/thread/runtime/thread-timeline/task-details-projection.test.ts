@@ -226,7 +226,7 @@ describe('durable tool result status after invocation deletion', () => {
     expect(result.errorMessage).toBe('Original terminal result')
     expect(result.contents).toEqual([{ type: 'text', text: 'Original terminal result' }])
     expect(buildToolMessageView({
-      message: result, expanded: true, hasCallRecordRenderer: false,
+      message: result, hasCallRecordRenderer: false,
     }).executionState).toBe(expected)
   })
 })

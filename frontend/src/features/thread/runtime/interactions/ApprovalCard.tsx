@@ -136,7 +136,7 @@ export function ApprovalCard({
       {isMutation ? (
         mutationPreview ? (
           <div className="interaction-approval-mutation-preview">
-            <ToolCallPreview preview={mutationPreview} streaming={false} />
+            <ToolCallPreview preview={mutationPreview} streaming={false} variant="approval" />
           </div>
         ) : null
       ) : argumentsJson ? (

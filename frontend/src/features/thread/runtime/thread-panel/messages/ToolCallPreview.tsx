@@ -4,21 +4,25 @@ import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/r
 import './tool-card.css'
 
 /**
- * Shared mutation review component used by chat tool cards and actionable ApprovalCard.
+ * 共享 mutation 审查组件：对话记录与审批卡片使用同一份数据。
  *
- * - write: shows target path/workdir and exact complete content before approval in bounded scroll default expanded,
- *   preserving all whitespace and newlines without line truncation (including explicit empty files).
- * - edit: streamed incoming old/new input explicitly labeled as input, then real persisted
- *   approval.editReview / result details.editReview with real multi-hunk diff, or preparing state while waiting.
+ * - `variant="approval"`：保留路径行与有界内部滚动，审批卡片行为不变；
+ * - `variant="transcript"`：普通正文、无内部滚动，Header 已有路径时不重复路径行；
+ * - write 展示目标与完整内容（含空文件标识），edit 展示流式输入、准备态或后端冻结 diff。
  */
 export function ToolCallPreview({
   preview,
   streaming,
+  variant,
 }: {
   preview: ToolCallPreviewData
   streaming: boolean
+  /** 调用方必须显式区分只读记录与审批交互卡片。 */
+  variant: 'transcript' | 'approval'
 }) {
   const { t } = useI18n()
+  const bounded = variant === 'approval'
+  const showTarget = variant === 'approval'
 
   if (preview.kind === 'write') {
     if (!preview.hasContent && !preview.content && !preview.path) {
@@ -26,14 +30,16 @@ export function ToolCallPreview({
     }
     return (
       <div className="thread-tool-call-body">
-        <div className="thread-tool-preview-target">
-          <span className="thread-tool-preview-target-path">{preview.path}</span>
-          {preview.workdir ? (
-            <span className="thread-tool-preview-target-workdir">· {preview.workdir}</span>
-          ) : null}
-        </div>
+        {showTarget && preview.path ? (
+          <div className="thread-tool-preview-target">
+            <span className="thread-tool-preview-target-path">{preview.path}</span>
+            {preview.workdir ? (
+              <span className="thread-tool-preview-target-workdir">· {preview.workdir}</span>
+            ) : null}
+          </div>
+        ) : null}
         <ToolOutputViewport
-          followKey={preview.content}
+          bounded={bounded}
           className={[
             'thread-tool-preview-body',
             'is-write',
@@ -54,7 +60,7 @@ export function ToolCallPreview({
   if (preview.mode === 'preparing') {
     return (
       <div className="thread-tool-call-body">
-        {preview.path ? (
+        {showTarget && preview.path ? (
           <div className="thread-tool-preview-target">
             <span className="thread-tool-preview-target-path">{preview.path}</span>
           </div>
@@ -74,7 +80,7 @@ export function ToolCallPreview({
     }
     return (
       <div className="thread-tool-call-body">
-        {preview.path ? (
+        {showTarget && preview.path ? (
           <div className="thread-tool-preview-target">
             <span className="thread-tool-preview-target-path">{preview.path}</span>
           </div>
@@ -85,7 +91,7 @@ export function ToolCallPreview({
             <div className="thread-tool-preview-input-block">
               <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.oldString')}</span>
               <ToolOutputViewport
-                followKey={preview.oldText}
+                bounded={bounded}
                 className="thread-tool-preview-body is-input-old"
               >
                 {preview.oldText}
@@ -96,7 +102,7 @@ export function ToolCallPreview({
             <div className="thread-tool-preview-input-block">
               <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.newString')}</span>
               <ToolOutputViewport
-                followKey={preview.newText}
+                bounded={bounded}
                 className="thread-tool-preview-body is-input-new"
               >
                 {preview.newText}
@@ -114,13 +120,13 @@ export function ToolCallPreview({
   }
   return (
     <div className="thread-tool-call-body">
-      {preview.path ? (
+      {showTarget && preview.path ? (
         <div className="thread-tool-preview-target">
           <span className="thread-tool-preview-target-path">{preview.path}</span>
         </div>
       ) : null}
       <ToolOutputViewport
-        followKey={preview.diff}
+        bounded={bounded}
         className={[
           'thread-tool-preview-body',
           'is-edit',

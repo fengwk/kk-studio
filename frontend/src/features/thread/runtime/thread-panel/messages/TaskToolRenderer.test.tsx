@@ -7,7 +7,6 @@ import {
   parseTaskReceipt,
 } from '@/features/thread/runtime/task-tool-parser'
 import type { ToolRendererMessage } from '@/platform/extensions/types'
-import { setLocale } from '@/shared/i18n'
 
 function message(overrides: Partial<ToolRendererMessage> = {}): ToolRendererMessage {
   return {
@@ -214,8 +213,8 @@ describe('TaskToolRenderer call phase', () => {
 })
 
 describe('TaskToolRenderer result phase', () => {
-  it('renders a canonical details receipt as a readable link and handles an empty result without inventing one', () => {
-    const { rerender } = render(
+  it('suppresses a canonical receipt and its natural language contents (link lives in the host header)', () => {
+    const { container, rerender } = render(
       <MemoryRouter>
         <TaskToolRenderer
           message={message({
@@ -230,8 +229,9 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 00000000-0000-4000-8000-000000000004 的执行' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
     rerender(
       <MemoryRouter>
         <TaskToolRenderer
@@ -243,7 +243,7 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('link')).toBeNull()
+    expect(container.textContent).toBe('   ')
   })
 
   it('preserves user-owned Thread ID text including a UUID in the prompt', () => {
@@ -259,7 +259,7 @@ describe('TaskToolRenderer result phase', () => {
     expect(container.querySelector('dt')).toBeNull()
   })
 
-  it('shows only the thread link for a canonical accepted receipt and suppresses natural language contents', () => {
+  it('suppresses natural language contents for a canonical accepted receipt', () => {
     render(
       <MemoryRouter>
         <TaskToolRenderer
@@ -278,26 +278,10 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    const link = screen.getByRole('link', { name: '查看 subagent 00000000-0000-0000-0000-000000000202 的执行' })
-    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
-    // 受理收据既不重复打印正文，也不宣称子任务完成。
+    // 导航与 UUID 由宿主 Header 承载；renderer 不重复链接，也不宣称子任务完成。
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行|已完成|报告/)).not.toBeInTheDocument()
-  })
-
-  it('shows the full receipt thread ID in the English link label', () => {
-    // 英文插值必须与实际导航目标一致，不能显示未替换的占位符。
-    setLocale('en-US')
-    render(
-      <MemoryRouter>
-        <TaskToolRenderer message={message({
-          phase: 'result',
-          details: { kind: 'task.accepted', thread_id: '00000000-0000-4000-8000-000000000004' },
-        })} />
-      </MemoryRouter>,
-    )
-    expect(screen.getByRole('link', { name: 'View subagent 00000000-0000-4000-8000-000000000004 execution' }))
-      .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
   })
 
   it('falls back to the full contents when details is missing or invalid', () => {
@@ -404,7 +388,7 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.queryByText(/已接受|后台执行/)).not.toBeInTheDocument()
   })
 
-  it('renders the complete ordered fallback text in the bounded viewport', () => {
+  it('renders the complete ordered fallback text in a plain transcript viewport', () => {
     const lines = Array.from({ length: 7 }, (_, i) => `fallback-line-${i + 1}`).join('\n')
     const terminal = message({
       phase: 'result',
@@ -414,8 +398,9 @@ describe('TaskToolRenderer result phase', () => {
     const { container } = render(<TaskToolRenderer message={terminal} expanded />)
     const output = container.querySelector('.thread-tool-output')
 
-    // 正文完整可见（折叠由卡片外壳处理）。
+    // 正文完整可见，且对话记录不创建有界滚动。
     expect(output).toHaveTextContent('fallback-line-1')
     expect(output).toHaveTextContent('fallback-line-7')
+    expect(output).not.toHaveClass('is-bounded')
   })
 })

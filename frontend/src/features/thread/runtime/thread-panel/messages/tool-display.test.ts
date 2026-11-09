@@ -35,13 +35,17 @@ describe('tool display', () => {
     )
   })
 
-  it('keeps task thread_id in the same options and the user prompt out of the header', () => {
-    expect(formatToolCallSummary('task', JSON.stringify({
+  it('hides task thread_id while collapsed and keeps it in the expanded header', () => {
+    const resume = JSON.stringify({
       subagent_type: 'explorer',
       thread_id: 'child-1',
       max_turns: 12,
       prompt: 'inspect the repository',
-    })).text).toBe('task explorer [max_turns=12 thread_id=child-1]')
+    })
+    expect(formatToolCallSummary('task', resume).text)
+      .toBe('task explorer [max_turns=12]')
+    expect(formatToolCallSummary('task', resume, { expanded: true }).text)
+      .toBe('task explorer [max_turns=12 thread_id=child-1]')
     expect(formatToolCallSummary('task', '{"subagent_type":"Explorer","max_turns":4}').text)
       .toBe('task Explorer [max_turns=4]')
   })
@@ -49,7 +53,7 @@ describe('tool display', () => {
   it.each([
     [String.raw`{"max_turns":15,"prompt":"Objective\n...未闭合片段`, 'task [max_turns=15]'],
     [JSON.stringify({ max_turns: 15, thread_id: 'child-1', prompt: 'Objective\ncomplete' }),
-      'task [max_turns=15 thread_id=child-1]'],
+      'task [max_turns=15]'],
     [JSON.stringify({ prompt: 'Objective\nprompt only' }), 'task'],
     ['not-json {', 'task'],
   ])('keeps task raw arguments out of the header without subagent_type', (argumentsValue, expected) => {
