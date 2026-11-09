@@ -426,7 +426,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 运行快照与 IDE 拒绝路径也属于免费 L1：
 `environment.runtime_absent_unavailable` 验证无本代 READY 时返回
 `409` / `code: unavailable` / `reason: ENVIRONMENT_UNAVAILABLE`，而不是伪造空快照；
-`environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭
+`environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、纯读恢复、目录列举与切换、终端、移动布局及关闭
 在无 READY owner 时的 `409` / `code: unavailable` / `reason: DAEMON_NOT_READY`，并验证非 canonical
 environmentId 返回 `400` / `code: validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、

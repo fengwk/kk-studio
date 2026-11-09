@@ -11,13 +11,15 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下用 BrowserRouter 包裹
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → IdePanel。
+QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
 [`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 汇总所有待处理的问卷与审批，并按
 `owner` 提供来源导航；无产品页面的独立 `AGENT_TASK` 只在这里显示来源标签，不生成导航入口。
-其余路由交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
+AppRouter 在唯一 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx) 中组合路由，
+通过 `renderContent` 组合 Chat 持久宿主与页面；即使进入 `/interactions`，宿主也不卸载。
+非 Chat 内容在宿主外独立渲染，注册页面的路由与 OverlayHost 仍由平台管理。
 AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 [`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
 PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
