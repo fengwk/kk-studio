@@ -137,6 +137,7 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "ck_harness_execution_exit_kind",
+            "ck_harness_execution_exit_owner_exited",
             "ck_harness_execution_exit_state",
             "ck_harness_execution_exit_time"),
         checks);
@@ -169,6 +170,53 @@ class PostgresqlHarnessSchemaTest {
                     "update harness_execution_exit set kind = 'BOGUS' where execution_id = ?",
                     executionId));
     assertTrue(unknownKind.getMessage().contains("ck_harness_execution_exit_kind"));
+
+    // ABANDONED 只写 abandoned_at；后续 OWNER_EXITED 增加真实确认时间并保留原放弃证据，二者独立。
+    jdbc.update(
+        "update harness_execution_exit"
+            + " set state = 'ABANDONED', confirmed_at = null,"
+            + " abandoned_at = registered_at + interval '1 millisecond'"
+            + " where execution_id = ?",
+        executionId);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from harness_execution_exit"
+                + " where execution_id = ? and state = 'ABANDONED'"
+                + " and confirmed_at is null and abandoned_at >= registered_at",
+            Integer.class,
+            executionId));
+    jdbc.update(
+        "update harness_execution_exit"
+            + " set state = 'OWNER_EXITED', confirmed_at = registered_at"
+            + " where execution_id = ?",
+        executionId);
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from harness_execution_exit"
+                + " where execution_id = ? and state = 'OWNER_EXITED'"
+                + " and confirmed_at is not null and abandoned_at is not null",
+            Integer.class,
+            executionId));
+
+    // 本地所有者退出只属于 DRIVER/TOOL；REMOTE 不能冒领 OWNER_EXITED。
+    DataIntegrityViolationException remoteOwnerExited =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_execution_exit (execution_id, thread_id, invocation_id,"
+                        + " attempt, owner_lease_token, kind, parent_execution_id, environment_id,"
+                        + " state, registered_at, confirmed_at, abandoned_at) values (?, ?, ?, 1,"
+                        + " '00000000-0000-0000-0000-0000000000a4', 'REMOTE', ?, null,"
+                        + " 'OWNER_EXITED', timestamp with time zone '2026-01-01 00:00:00.123+00',"
+                        + " timestamp with time zone '2026-01-01 00:00:00.124+00', null)",
+                    UUID.randomUUID(),
+                    threadId,
+                    UUID.randomUUID(),
+                    executionId));
+    assertTrue(remoteOwnerExited.getMessage().contains("ck_harness_execution_exit_owner_exited"));
   }
 
   @Test
