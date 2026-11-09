@@ -84,6 +84,7 @@ class ToolProcessorPreflightTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(gated, fixture.clock),
             TestExecutionExitConfirmer.create(gated, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     ClaimedWork claimA =
@@ -271,6 +272,7 @@ class ToolProcessorPreflightTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(recording, fixture.clock),
             TestExecutionExitConfirmer.create(recording, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
 
@@ -1014,6 +1016,7 @@ class ToolProcessorPreflightTest {
             fixture.clock,
             dead,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     fixture.gateway.queuePreflightAllow();
@@ -1240,6 +1243,7 @@ class ToolProcessorPreflightTest {
             fixture.clock,
             scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(failingStore, fixture.clock),
             TestExecutionExitConfirmer.create(failingStore, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     ClaimedWork claim =
@@ -1311,6 +1315,7 @@ class ToolProcessorPreflightTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     try {

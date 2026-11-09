@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
@@ -70,6 +71,7 @@ import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
@@ -239,6 +241,11 @@ public final class ToolProcessorTestSupport {
         null);
   }
 
+  /** 测试生命周期：内存 journal + 已启动的共享物理集合。 */
+  static LocalExecutionLifecycle testLifecycle(HarnessStore store, Clock clock) {
+    return TestExecutionLifecycle.create(store, clock);
+  }
+
   static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
@@ -318,6 +325,7 @@ public final class ToolProcessorTestSupport {
               clock,
               scheduler,
               Runnable::run,
+              testLifecycle(store, clock),
               TestExecutionExitConfirmer.create(store, clock),
               STABLE_MATERIALIZER);
     }

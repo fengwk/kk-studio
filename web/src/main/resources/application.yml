@@ -1,5 +1,9 @@
 spring:
 
+  # 优雅停止允许的总预算：大于 drain-timeout + dispatcher lease，且小于容器 stop_grace_period。
+  lifecycle:
+    timeout-per-shutdown-phase: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:100s}
+
   application:
     # 应用名称
     name: kk-studio

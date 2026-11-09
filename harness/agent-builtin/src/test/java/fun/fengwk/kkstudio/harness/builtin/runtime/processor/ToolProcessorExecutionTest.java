@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -23,7 +24,10 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.FakeRun;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.runtime.ToolOutcomeQuery;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
+import fun.fengwk.kkstudio.harness.runtime.execution.MemoryExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolExecution;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
@@ -47,7 +51,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -262,6 +268,7 @@ class ToolProcessorExecutionTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER)) {
       assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claim(fixture)));
@@ -494,6 +501,151 @@ class ToolProcessorExecutionTest {
     assertTrue(run.exitedBeforeClose);
     assertEquals(ToolInvocationStatus.RUNNING, tool(fixture).status());
     assertNotNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+  }
+
+  /** admission 取消不清理物理句柄：body 与 run close 结束后才确认 STUDIO_EXITED。 */
+  @Test
+  void cancelAfterBodyStartedKeepsPreparedUntilRunAndResourcesClose() throws Exception {
+    Fixture fixture = approvedFixture();
+    MemoryExecutionExitJournal journal = new MemoryExecutionExitJournal();
+    ExecutionLifecycle lifecycle =
+        TestExecutionLifecycle.create(fixture.store, fixture.clock, journal);
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicBoolean interrupted = new AtomicBoolean();
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              entered.countDown();
+              while (true) {
+                try {
+                  if (release.await(10, TimeUnit.MILLISECONDS)) {
+                    break;
+                  }
+                } catch (InterruptedException cancelled) {
+                  interrupted.set(true);
+                }
+              }
+              Thread.interrupted();
+              return ToolProcessorTestSupport.succeeded("call-1");
+            });
+    ToolProcessor processor =
+        new ToolProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run,
+            lifecycle,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
+            ToolProcessorTestSupport.STABLE_MATERIALIZER);
+    try {
+      assertEquals(ProcessResult.STARTED, processor.process(claim(fixture)));
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      ExecutionExitFact registered =
+          fixture.store.transaction(
+              tx ->
+                  tx.exits().loadUnconfirmed(fixture.baseline.threadId()).stream()
+                      .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
+                      .findFirst()
+                      .orElseThrow());
+      assertEquals(1, journal.loadAll().records().size(), "PREPARED must cover the live body");
+
+      assertTrue(processor.cancel(fixture.toolInvocationId));
+      ToolProcessorTestSupport.awaitTrue(interrupted::get, WAIT);
+      assertFalse(processor.hasActiveExecution(), "admission entry is removed on cancel");
+      assertEquals(
+          ExecutionExitState.UNCONFIRMED,
+          fixture.store.transaction(
+              tx -> tx.exits().find(registered.executionId()).orElseThrow().state()),
+          "cancelling admission is not physical exit");
+      assertFalse(journal.loadAll().records().isEmpty());
+
+      release.countDown();
+      assertTrue(run.awaitExited());
+      ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);
+      var drain = lifecycle.drain(Duration.ofSeconds(5));
+      assertTrue(drain.settled(), drain.toString());
+      assertEquals(
+          ExecutionExitState.STUDIO_EXITED,
+          fixture.store.transaction(
+              tx -> tx.exits().find(registered.executionId()).orElseThrow().state()),
+          "body exit after cancel must confirm STUDIO_EXITED");
+      assertTrue(journal.loadAll().records().isEmpty());
+    } finally {
+      processor.close();
+    }
+  }
+
+  /** run.close 失败时保留 PREPARED、未确认事实与 journal 锁，不把清理失败当退出。 */
+  @Test
+  void closeFailureKeepsPreparedAndJournalLockUnproven() throws Exception {
+    Fixture fixture = approvedFixture();
+    MemoryExecutionExitJournal journal = new MemoryExecutionExitJournal();
+    ExecutionLifecycle lifecycle =
+        TestExecutionLifecycle.create(fixture.store, fixture.clock, journal);
+    ToolGateway.Run run =
+        new ToolGateway.Run() {
+          @Override
+          public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+            return ToolProcessorTestSupport.succeeded("call-1");
+          }
+
+          @Override
+          public void close() {
+            throw new IllegalStateException(ExecutionExitFailureStore.SYNTHETIC_SECRET);
+          }
+        };
+    fixture.gateway.queueAdmit(new ToolGateway.Admitted(run));
+    ToolProcessor processor =
+        new ToolProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run,
+            lifecycle,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
+            ToolProcessorTestSupport.STABLE_MATERIALIZER);
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
+    try {
+      assertEquals(ProcessResult.STARTED, processor.process(claim(fixture)));
+      awaitStatus(fixture, ToolInvocationStatus.SUCCEEDED);
+      ToolProcessorTestSupport.awaitTrue(() -> !processor.hasActiveExecution(), WAIT);
+
+      List<ExecutionExitFact> unconfirmed =
+          fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
+      assertEquals(1, unconfirmed.size());
+      assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
+      assertEquals(1, journal.loadAll().records().size(), "PREPARED must survive unproven close");
+      assertTrue(journal.holdRequests() >= 1, "journal lock must be retained");
+      assertFalse(lifecycle.drain(Duration.ZERO).settled());
+      exitLogs.assertSingleSafeFailure(
+          "cannot release tool run resources",
+          "TOOL_RUN_CLOSE",
+          IllegalStateException.class,
+          ExecutionExitFailureStore.SYNTHETIC_SECRET);
+    } finally {
+      try {
+        processor.close();
+      } finally {
+        exitLogs.close();
+      }
+    }
   }
 
   /** close：同样 interrupt 全部本地执行，durable 保持 RUNNING 待 lease 恢复为 UNKNOWN。 */
@@ -793,6 +945,7 @@ class ToolProcessorExecutionTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER)) {
       assertEquals(ProcessResult.STARTED, processor.process(claim(fixture)));
@@ -908,6 +1061,7 @@ class ToolProcessorExecutionTest {
         fixture.clock,
         fixture.scheduler,
         Runnable::run,
+        ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
         TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
         materializer);
   }

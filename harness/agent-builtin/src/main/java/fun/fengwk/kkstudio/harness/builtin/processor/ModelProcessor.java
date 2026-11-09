@@ -24,9 +24,9 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
@@ -70,7 +70,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
 
   private final HarnessStore store;
   private final BuiltinStore builtinStore;
-  private final ExecutionExitConfirmer exitConfirmer;
+  private final LocalExecutionLifecycle lifecycle;
   private final ModelGateway gateway;
   private final RealtimeEventSink realtimeEventSink;
   private final ModelProcessorConfig config;
@@ -93,10 +93,10 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       Executor executionExecutor,
-      ExecutionExitConfirmer exitConfirmer) {
+      LocalExecutionLifecycle lifecycle) {
     this.store = Objects.requireNonNull(store, "store");
     this.builtinStore = requireBuiltinStore(store);
-    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
+    this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
@@ -210,7 +210,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
             heartbeatWorker,
             executionExecutor,
             executions::release,
-            exitConfirmer);
+            lifecycle);
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed() ? abortStart(claim) : ProcessResult.LOST_OWNERSHIP;
@@ -318,11 +318,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     }
     try {
       if (!execution.markRunning()) {
-        if (execution.registered()) {
-          releaseUnstarted(execution, admitted);
-        } else {
-          closeAdmitted(admitted);
-        }
+        releaseUnstarted(execution, admitted);
         return ProcessResult.LOST_OWNERSHIP;
       }
       if (execution.abandoned() || ticket.isSuperseded()) {
@@ -339,10 +335,12 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     }
   }
 
-  /** 已登记但确定未进入 body：清理成功才确认未启动，失败保持未确认且不重复关闭。 */
+  /** 已取得物理句柄但确定未进入 body：资源释放成功才确认未启动，失败保持未证明退出。 */
   private void releaseUnstarted(ModelExecution execution, ModelGateway.Admitted admitted) {
     if (closeAdmitted(admitted)) {
       execution.confirmNotStarted();
+    } else {
+      execution.exitNotProven();
     }
   }
 
@@ -363,6 +361,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
         } else {
           execution.confirmNotStarted();
         }
+      } else {
+        execution.exitNotProven();
       }
     }
   }

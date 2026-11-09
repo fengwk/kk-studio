@@ -20,8 +20,10 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
@@ -258,15 +260,17 @@ public class HarnessRuntimeConfiguration {
   public SmartLifecycle harnessRuntimeLifecycle(
       HarnessRuntimeProperties properties,
       HarnessWorkDispatcher dispatcher,
-      DriverRegistry driverRegistry,
+      LocalExecutionLifecycle executionLifecycle,
       ToolProcessor toolProcessor,
+      ProcessorLeaseConfig processorLeaseConfig,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
     return new HarnessRuntimeLifecycle(
         properties.isWorkersEnabled(),
         dispatcher,
-        driverRegistry::hasActiveWork,
+        executionLifecycle,
         toolProcessor,
         daemonServerProvider,
-        properties.getDrainTimeout());
+        properties.getDrainTimeout(),
+        processorLeaseConfig.leaseDuration());
   }
 }

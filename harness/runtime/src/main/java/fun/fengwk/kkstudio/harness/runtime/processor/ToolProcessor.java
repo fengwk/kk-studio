@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway.ExecutionScope;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
@@ -70,6 +71,7 @@ import java.util.concurrent.ScheduledExecutorService;
 public final class ToolProcessor implements AutoCloseable {
 
   private final HarnessStore store;
+  private final LocalExecutionLifecycle lifecycle;
   private final ExecutionExitConfirmer exitConfirmer;
   private final ToolGateway gateway;
   private final RealtimeEventSink realtimeEventSink;
@@ -88,9 +90,11 @@ public final class ToolProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
+      LocalExecutionLifecycle lifecycle,
       ExecutionExitConfirmer exitConfirmer,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
     this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -155,14 +159,18 @@ public final class ToolProcessor implements AutoCloseable {
     executions.close();
   }
 
-  /** 排空并移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用 deadline），然后调用 close 处理其余执行。 */
-  public void drain() {
-    Instant deadline = Instant.now().plus(config.leaseConfig().leaseDuration());
+  /** 在调用方给定的总停机预算内移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用单调 deadline），然后调用 close 处理其余执行。 */
+  public void drain(Duration timeout) {
+    Objects.requireNonNull(timeout, "timeout");
+    if (timeout.isNegative()) {
+      throw new IllegalArgumentException("drain timeout must not be negative");
+    }
+    long deadlineNanos = System.nanoTime() + timeout.toNanos();
     List<ToolExecution> awaiting =
         executions.activeExecutions().stream().filter(ToolExecution::isAwaitingRemote).toList();
     for (ToolExecution execution : awaiting) {
       try {
-        execution.handover(deadline);
+        execution.handover(remainingUntil(deadlineNanos));
       } catch (RuntimeException failure) {
         log.warn(
             "Failed to handover awaiting remote tool execution for invocation {}; its claim remains until lease expiry",
@@ -171,6 +179,12 @@ public final class ToolProcessor implements AutoCloseable {
       }
     }
     close();
+  }
+
+  /** 只使用单调时钟计算调用方剩余预算；已到期返回零，避免扩大上层 deadline。 */
+  private static Duration remainingUntil(long deadlineNanos) {
+    long remainingNanos = deadlineNanos - System.nanoTime();
+    return remainingNanos <= 0 ? Duration.ZERO : Duration.ofNanos(remainingNanos);
   }
 
   /** 当前 JVM 是否持有任何活跃的本地 Tool execution。 */
@@ -938,6 +952,7 @@ public final class ToolProcessor implements AutoCloseable {
         scheduler,
         heartbeatWorker,
         executions::release,
+        lifecycle,
         exitConfirmer,
         toolResultHistoryMaterializer);
   }

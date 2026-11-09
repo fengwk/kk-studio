@@ -216,6 +216,7 @@ class ToolExecutionRemoteExitTest {
         support.scheduler,
         Runnable::run,
         ignored -> {},
+        ToolProcessorTestSupport.testLifecycle(store, support.clock),
         confirmer,
         ToolProcessorTestSupport.STABLE_MATERIALIZER);
   }

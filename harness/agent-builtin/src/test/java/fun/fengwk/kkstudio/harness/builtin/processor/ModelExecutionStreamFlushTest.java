@@ -56,7 +56,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -944,7 +944,7 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             Runnable::run,
             e -> {},
-            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+            TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -1016,7 +1016,7 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             Runnable::run,
             e -> {},
-            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+            TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -1077,7 +1077,7 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             Runnable::run,
             e -> {},
-            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+            TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -1289,7 +1289,7 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             flushExecutor,
             ignored -> {},
-            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+            TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
     return new Fixture(store, baseline, invocationId, sink, execution, flushConfig);
   }
 

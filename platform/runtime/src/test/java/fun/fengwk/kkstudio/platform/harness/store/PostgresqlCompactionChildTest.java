@@ -316,6 +316,7 @@ class PostgresqlCompactionChildTest {
         Clock.fixed(T1, ZoneOffset.UTC),
         scheduler,
         Runnable::run,
+        ExecutionExitTestSupport.lifecycle(store, Clock.fixed(T1, ZoneOffset.UTC)),
         ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)),
         (sessionId, toolName, result) -> result);
   }
@@ -482,7 +483,7 @@ class PostgresqlCompactionChildTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            ExecutionExitTestSupport.confirmer(store, clock));
+            ExecutionExitTestSupport.lifecycle(store, clock));
   }
 
   @AfterEach
@@ -1026,7 +1027,7 @@ class PostgresqlCompactionChildTest {
               scheduler,
               Runnable::run,
               executionExecutor,
-              ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)));
+              ExecutionExitTestSupport.lifecycle(store, Clock.fixed(T1, ZoneOffset.UTC)));
       HarnessRuntime stoppingRuntime =
           new HarnessRuntime(
               store,

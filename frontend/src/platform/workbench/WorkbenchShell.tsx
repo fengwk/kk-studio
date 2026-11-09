@@ -58,19 +58,25 @@ function StudioRoutes() {
  * 显式传入 children 的自定义页面（如 `/interactions`）不在 registered page 组合链上，
  * 由 shell 在根部提供唯一 OverlayHost；registered page 路径已由页面自身挂载，
  * 两条路径各自只挂载一次，不重复渲染。
+ *
+ * 应用组合层可组合页面路由与持久区域；平台不依赖具体业务页面。
  */
 interface WorkbenchShellProps {
   navItems: readonly PrimaryNavItem[]
   children?: ReactNode
+  renderContent?: (registeredContent: ReactNode) => ReactNode
 }
 
 export function WorkbenchShell({
   navItems,
   children,
+  renderContent,
 }: WorkbenchShellProps) {
+  const content = children ?? <StudioRoutes />
+
   return (
     <AppShell navItems={navItems}>
-      {children ?? <StudioRoutes />}
+      {renderContent == null ? content : renderContent(content)}
       {children ? <OverlayHost /> : null}
     </AppShell>
   )

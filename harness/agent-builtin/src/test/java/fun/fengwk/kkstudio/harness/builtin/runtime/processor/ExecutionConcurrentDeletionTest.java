@@ -223,6 +223,7 @@ class ExecutionConcurrentDeletionTest {
             support.scheduler,
             Runnable::run,
             ignored -> releases.incrementAndGet(),
+            ToolProcessorTestSupport.testLifecycle(store, support.clock),
             TestExecutionExitConfirmer.create(store, support.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
     ToolProcessorTestSupport.FakeRun run =
@@ -374,7 +375,7 @@ class ExecutionConcurrentDeletionTest {
               Runnable::run,
               Runnable::run,
               ignored -> releases.incrementAndGet(),
-              TestExecutionExitConfirmer.create(
+              ToolProcessorTestSupport.testLifecycle(
                   store, Clock.fixed(ThreadProcessorTestSupport.NOW, ZoneOffset.UTC)));
     }
 

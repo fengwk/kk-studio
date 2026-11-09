@@ -5289,7 +5289,7 @@ describe('AgentPane root control mounting', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5355,7 +5355,7 @@ describe('AgentPane root control mounting', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { rerender } = render(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5383,7 +5383,7 @@ describe('AgentPane root control mounting', () => {
 
     rerender(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false, activateChatEnvironment: vi.fn() }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5411,14 +5411,19 @@ describe('AgentPane root control mounting', () => {
     expect(openEnvironment).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the panel without inventing an environment when the configured name is unknown', async () => {
-    // 测试意图：未知 name 不得冒充 UUID；面板收到 null 后由自身呈现选择态。
+  it('does not expose empty IDE commands when the configured name cannot resolve to an environment', async () => {
+    // 测试意图：不可解析的 name 不得提供空 IDE 入口；Chat 内其他命令仍正常。
     const user = userEvent.setup()
     const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={client}>
-        <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
+        <IdePanelContext.Provider value={{
+          openEnvironment,
+          togglePanel: vi.fn(),
+          panelVisible: false,
+          activateChatEnvironment: vi.fn(),
+        }}>
           <MemoryRouter>
             <TestAgentPane
               owner={{ kind: 'CHAT', id: CHAT_ID }}
@@ -5435,12 +5440,10 @@ describe('AgentPane root control mounting', () => {
 
     const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
     await user.click(plusBtn)
-    await user.click(await screen.findByText('files'))
-
-    await waitFor(() => {
-      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
-    })
-    expect(openEnvironment).toHaveBeenCalledTimes(1)
+    await screen.findByText('models')
+    expect(screen.queryByText('files')).not.toBeInTheDocument()
+    expect(screen.queryByText('shell')).not.toBeInTheDocument()
+    expect(openEnvironment).not.toHaveBeenCalled()
   })
 
 })

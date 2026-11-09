@@ -18,7 +18,7 @@ export interface ViewRecord {
   connectionId: string
   claimId: string
   bindingEpoch: string
-  /** A binding CAS is in flight; snapshots wait and data streams must not attach. */
+  /** A binding CAS is in flight; data streams and lease proofs must not attach until it commits. */
   bindingPending?: boolean
   directory: string
   workspacePath: string
@@ -43,10 +43,10 @@ export interface ClaimRecord {
 }
 
 /**
- * Complete visible IDE state at one committed revision.
+ * Complete visible IDE state frozen at the current committed revision.
  *
- * <p>Views are ordered by viewId and carry no heartbeat timestamps. A reservation keeps the
- * reserved revision invisible to snapshots until its binding commit lands.
+ * <p>Views are ordered by viewId and carry no heartbeat timestamps. A reservation is not part of
+ * this snapshot, and a snapshot never waits for an in-flight binding operation.
  */
 export interface IdeSnapshot {
   revision: string

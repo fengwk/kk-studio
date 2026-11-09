@@ -112,7 +112,7 @@ class ToolProcessorDrainTest {
                     .orElseThrow());
 
     // 触发排空移交
-    fixture.processor.drain();
+    fixture.processor.drain(ToolProcessorTestSupport.LEASE_CONFIG.leaseDuration());
 
     // 1. 本地执行体已停止
     assertTrue(
@@ -171,7 +171,7 @@ class ToolProcessorDrainTest {
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
     assertTrue(bodyStartedLatch.await(5, TimeUnit.SECONDS));
 
-    fixture.processor.drain();
+    fixture.processor.drain(ToolProcessorTestSupport.LEASE_CONFIG.leaseDuration());
 
     assertTrue(waitInterruptedLatch.await(5, TimeUnit.SECONDS));
     assertTrue(run.awaitExited());
@@ -232,6 +232,7 @@ class ToolProcessorDrainTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
 
@@ -247,7 +248,7 @@ class ToolProcessorDrainTest {
                     .orElseThrow());
 
     // 触发排空移交，50ms 租约 deadline 会超时
-    shortLeaseProcessor.drain();
+    shortLeaseProcessor.drain(shortLease.leaseDuration());
 
     // 超时下 Work 租约依然被 release
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
@@ -361,6 +362,7 @@ class ToolProcessorDrainTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
             ToolProcessorTestSupport.STABLE_MATERIALIZER);
 
@@ -413,7 +415,7 @@ class ToolProcessorDrainTest {
     shouldFailRelease.set(true);
 
     // 触发排空
-    processor.drain();
+    processor.drain(ToolProcessorTestSupport.LEASE_CONFIG.leaseDuration());
 
     assertTrue(r1Interrupted.await(5, TimeUnit.SECONDS));
     assertTrue(r2Interrupted.await(5, TimeUnit.SECONDS));
@@ -503,7 +505,7 @@ class ToolProcessorDrainTest {
                       .orElseThrow());
 
       // 触发排空
-      fixture.processor.drain();
+      fixture.processor.drain(ToolProcessorTestSupport.LEASE_CONFIG.leaseDuration());
 
       assertTrue(
           waitInterruptedLatch.await(5, TimeUnit.SECONDS),
