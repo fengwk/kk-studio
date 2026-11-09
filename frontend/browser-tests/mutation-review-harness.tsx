@@ -61,6 +61,7 @@ export function MutationReviewHarnessApp() {
             {state.toolBlock ? (
               <div className="mutation-pane" data-testid="tool-message-pane">
                 <ToolMessageBlock
+                  key={state.toolBlock.message.callIdentity ?? state.toolBlock.message.toolCallId}
                   message={state.toolBlock.message}
                   result={state.toolBlock.result}
                 />

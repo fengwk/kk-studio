@@ -5,6 +5,7 @@
   flex: 0 0 auto;
   min-height: 36px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 5px 14px 5px 16px;
@@ -34,5 +35,7 @@
 
   .agent-pane-thread-title {
     min-width: 4ch;
+    flex-basis: 100%;
+    order: 1;
   }
 }

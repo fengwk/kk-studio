@@ -225,7 +225,9 @@ describe('visible thread presentation', () => {
 
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
     fireEvent.click(screen.getByRole('button', { name: '复制 thread ID' }))
-    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(threadId))
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(
+      threadId, { shouldFallback: expect.any(Function) },
+    ))
   })
 
   it('keeps the short id and copy action out of non-subagent thread headers', () => {

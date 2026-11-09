@@ -9,6 +9,7 @@ import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messa
 import {
   disclosureHint,
   discloseText,
+  COLLAPSED_MAX_CHARS,
   ERROR_COLLAPSED_LINES,
   isMcpToolName,
   toolDisclosureQuota,
@@ -93,7 +94,6 @@ export function ToolMessageBlock({
   const normalizedName = view.toolName.trim().toLowerCase()
   const isBash = normalizedName === 'bash'
   const isMcp = isMcpToolName(normalizedName)
-  const isRead = normalizedName === 'read'
   const isTask = normalizedName === 'task'
   const isAskUser = normalizedName === 'ask_user'
   const isMutation = normalizedName === 'write' || normalizedName === 'edit'
@@ -103,25 +103,31 @@ export function ToolMessageBlock({
 
   const errorText = view.errorText?.trim() ? view.errorText : undefined
   const errorTrimmed = errorText?.trim() ?? ''
+  const errorIsOutput = errorTrimmed !== ''
+    && joinTextContents(view.contents.filter((content) => content.type === 'text')).trim() === errorTrimmed
   // 失败原文被错误块完整承载时，不再在正文中重复同一段文本；bash 的失败说明
   // 通常在输出末尾，由尾部窗口直接显示，因此只在可见输出不含错误时补错误块。
   const contents = errorTrimmed !== '' && !isBash
     ? view.contents.filter((content) =>
-      !(content.type === 'text' && content.text.trim() === errorTrimmed))
+      !(content.type === 'text' && (errorIsOutput || content.text.trim() === errorTrimmed)))
     : view.contents
   const split = splitContents(contents)
   const text = showTextPreview ? joinTextContents(split.text) : ''
-  const textWindow = showTextPreview
-    ? discloseText(text, expanded ? -1 : quota.preview, isBash ? 'end' : 'start')
-    : null
+  // bash 的失败原文常常就是整份输出：收起和展开都只显示一次输出，而非重复错误块。
+  const showErrorBlock = errorText != null
+    && !(isBash && text.includes(errorTrimmed))
   const errorWindow = errorText == null
     ? null
     : discloseText(errorText, expanded ? -1 : ERROR_COLLAPSED_LINES)
-  const showErrorBlock = errorText != null
-    && !(isBash && (textWindow?.text.includes(errorTrimmed) ?? false))
+  // 错误块与普通 preview 共用字符预算，避免失败时显示两份 1500 字符。
+  const previewMaxChars = COLLAPSED_MAX_CHARS
+    - (showErrorBlock && errorWindow != null ? Array.from(errorWindow.text).length : 0)
+  const textWindow = showTextPreview
+    ? discloseText(text, expanded ? -1 : quota.preview, isBash ? 'end' : 'start', previewMaxChars)
+    : null
 
   const mutation = isMutation
-    ? windowMutationPreview(view.preview, expanded ? -1 : quota.preview)
+    ? windowMutationPreview(view.preview, expanded ? -1 : quota.preview, previewMaxChars)
     : null
   const taskPromptAvailable = isTask && Renderer != null && view.hasCallRecordBody
   const askRecordAvailable = isAskUser && view.hasCallRecordBody
@@ -133,7 +139,6 @@ export function ToolMessageBlock({
   const bodyContents = toolBodyContents(contents, {
     isTask,
     taskReceipt,
-    isRead,
     isAskUser,
     isMutation,
     isMutationSuccess: view.isMutationSuccess,
@@ -161,6 +166,7 @@ export function ToolMessageBlock({
     } else if (textWindow != null) {
       const textHint = (
         <DisclosureHint
+          key="text-preview"
           disclosure={textWindow}
           edge={isBash ? 'end' : 'start'}
           onExpand={expandFromHint}
@@ -179,14 +185,16 @@ export function ToolMessageBlock({
       }
     }
   }
-  if (mutation?.preview != null) {
+  if (mutation != null && (mutation.preview != null || mutation.window?.truncated)) {
     mainPreview.push(
       <span key="mutation-preview" className="thread-tool-mutation-preview">
-        <ToolCallPreview
-          preview={mutation.preview}
-          streaming={view.argumentsStreaming}
-          variant="transcript"
-        />
+        {mutation.preview != null ? (
+          <ToolCallPreview
+            preview={mutation.preview}
+            streaming={view.argumentsStreaming}
+            variant="transcript"
+          />
+        ) : null}
         <DisclosureHint
           disclosure={mutation.window}
           edge="start"
@@ -244,12 +252,15 @@ export function ToolMessageBlock({
   const body = expanded && hasBody ? (
     isMutation ? (
       view.isMutationSuccess ? (
-        <div className="thread-tool-mutation-success">
-          <Check size={14} aria-hidden="true" className="mutation-success-icon" />
-          <span>{normalizedName === 'write'
-            ? t('ai.runtime.mutation.writeSuccess')
-            : t('ai.runtime.mutation.editSuccess')}</span>
-        </div>
+        <>
+          <div className="thread-tool-mutation-success">
+            <Check size={14} aria-hidden="true" className="mutation-success-icon" />
+            <span>{normalizedName === 'write'
+              ? t('ai.runtime.mutation.writeSuccess')
+              : t('ai.runtime.mutation.editSuccess')}</span>
+          </div>
+          {bodyContents.length > 0 ? <ToolContentView contents={bodyContents} /> : null}
+        </>
       ) : (
         <ToolContentView contents={bodyContents} />
       )
@@ -284,7 +295,7 @@ export function ToolMessageBlock({
         aria-label={t('ai.runtime.disclosure.viewSubagentExecution')}
       >
         <ArrowUpRight aria-hidden="true" />
-        <span>{t('ai.runtime.disclosure.viewSubagentExecutionShort')}</span>
+        <span>{t('ai.runtime.notification.entry.viewSubagentExecution')}</span>
       </ThreadLink>
     )
     : undefined
@@ -374,19 +385,21 @@ function withoutExactError(
 function windowMutationPreview(
   preview: ToolCallPreviewData | null,
   limit: number,
+  maxChars: number,
 ): { preview: ToolCallPreviewData | null; window: TextDisclosure | null } {
   if (preview == null || limit < 0) {
     return { preview, window: null }
   }
   if (preview.kind === 'write') {
-    const window = discloseText(preview.content, limit)
+    const window = discloseText(preview.content, limit, 'start', maxChars)
     return {
-      preview: { ...preview, content: window.text, lines: splitWindowLines(window.text) },
+      preview: preview.content !== '' && window.text === '' ? null
+        : { ...preview, content: window.text, lines: splitWindowLines(window.text) },
       window,
     }
   }
   if (preview.mode === 'review') {
-    const window = discloseText(preview.diff, limit)
+    const window = discloseText(preview.diff, limit, 'start', maxChars)
     return {
       preview: { ...preview, diff: window.text, lines: splitWindowLines(window.text) },
       window,
@@ -404,7 +417,6 @@ function toolBodyContents(
   {
     isTask,
     taskReceipt,
-    isRead,
     isAskUser,
     isMutation,
     isMutationSuccess,
@@ -412,7 +424,6 @@ function toolBodyContents(
   }: {
     isTask: boolean
     taskReceipt: TaskToolReceipt | null
-    isRead: boolean
     isAskUser: boolean
     isMutation: boolean
     isMutationSuccess: boolean
@@ -423,14 +434,11 @@ function toolBodyContents(
     return []
   }
   if (isMutation) {
-    // 成功终态只保留短成功说明；失败终态的其他结果内容仍要在展开态可见。
-    return isMutationSuccess ? [] : contents
+    // 成功正文已有审查预览，去重文本但保留附件；失败的其他结果内容仍完整展示。
+    return isMutationSuccess ? contents.filter((content) => content.type === 'resource') : contents
   }
   if (isTask) {
     return taskReceipt == null ? contents : []
-  }
-  if (isRead) {
-    return contents
   }
   // bash/MCP 的展开态在 preview 中按原始顺序渲染全部内容，不再拆出 body。
   return showTextPreview ? [] : contents

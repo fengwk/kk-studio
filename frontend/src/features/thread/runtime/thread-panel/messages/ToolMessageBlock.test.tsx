@@ -1414,6 +1414,73 @@ describe('ToolMessageBlock resources and approvals', () => {
   })
 })
 
+describe('ToolMessageBlock integrated disclosure boundaries', () => {
+  it('keeps a long bash failure in the same output region when collapsed and expanded', async () => {
+    const user = userEvent.setup()
+    const log = [...Array.from({ length: 30 }, (_, i) => `step-${i}`), '[Command exited with code 2.]'].join('\n')
+    // 真实投影把失败的所有文本合成 errorMessage；不得因此额外展示日志头的错误副本。
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'bash', status: 'error', errorMessage: log, contents: [text(log)],
+    })} />)
+    expect(container.querySelector('.thread-disclosure-error')).toBeNull()
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toBe(log.split('\n').slice(-10).join('\n'))
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-disclosure-error')).toBeNull()
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(log)
+    expect(card()).toHaveClass('is-error')
+  })
+
+  it('shares the collapsed 1500-character budget between the error and normal preview', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'mcp_server_tool', status: 'error', errorMessage: 'E'.repeat(1000),
+      contents: [text('x'.repeat(2000))],
+    })} />)
+    const error = container.querySelector('.thread-disclosure-error-text')!.textContent!
+    const preview = container.querySelector('.thread-tool-output')!.textContent!
+    expect(Array.from(error + preview)).toHaveLength(1500)
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-output')!.textContent).toHaveLength(2000)
+  })
+
+  it('does not call a truncated write preview an empty file when the error used its budget', () => {
+    // 错误已占满预算时隐藏写入内容并保留展开提示，不能伪称写入的是空文件。
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'write', status: 'error', errorMessage: 'E'.repeat(2000),
+      arguments: JSON.stringify({ path: 'a.txt', content: 'real content' }),
+    })} />)
+    expect(container.querySelector('.thread-tool-empty-content')).toBeNull()
+    expect(container.querySelector('.thread-tool-preview-body')).toBeNull()
+    expect(expandButton()).toBeInTheDocument()
+  })
+
+  it('deduplicates multi-part failure text without discarding its attachment', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'mcp_server_tool', status: 'error', errorMessage: 'first\nsecond',
+      contents: [text('first'), resource({ name: 'trace.txt', data: 'https://example.test/trace.txt' }), text('second')],
+    })} />)
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-disclosure-error-text')).toHaveTextContent('first second')
+    expect(container.querySelectorAll('.thread-tool-output')).toHaveLength(0)
+    expect(screen.getByRole('link', { name: '下载 trace.txt' })).toBeInTheDocument()
+  })
+
+  it('keeps resource results when deduplicating a successful mutation body', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'write', arguments: JSON.stringify({ path: 'a.txt', content: 'hello' }),
+      contents: [text('written hello'), resource({ name: 'artifact.txt', data: 'https://example.test/artifact.txt' })],
+    })} />)
+    expect(screen.queryByRole('link')).toBeNull()
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-mutation-success')).toHaveTextContent('写入成功')
+    expect(screen.getByRole('link', { name: '下载 artifact.txt' })).toBeInTheDocument()
+    expect(container).not.toHaveTextContent('written hello')
+  })
+})
+
 describe('ToolMessageBlock identity', () => {
   it('keeps the user expand choice across the streaming to terminal transition', async () => {
     const user = userEvent.setup()

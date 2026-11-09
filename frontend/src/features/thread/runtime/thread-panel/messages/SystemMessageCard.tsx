@@ -33,7 +33,7 @@ export function SystemMessageCard({
       tone="neutral"
       expanded={expanded}
       onExpandedChange={setExpanded}
-      hasDetails={hasContent}
+      hasDetails={hasContent && !showContent}
       label={label ?? (typeof title === 'string' ? title : '')}
       preview={showContent ? children : undefined}
     />

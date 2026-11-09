@@ -446,6 +446,7 @@ for (const scenario of ['thread-child', 'pane-child']) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
       const first = header.locator('a, button').first()
       await expect(first).toHaveText('回到父 agent')
+      await expect(first).toHaveCSS('white-space', 'nowrap')
     }
     await copy.click()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(CHILD_ID)

@@ -26,14 +26,22 @@ type HarnessApi = {
   restorePosition(offset: number): void
 }
 
-function harness(page: Page, method: keyof HarnessApi, arg?: number): Promise<void> {
-  return page.evaluate(
+async function harness(page: Page, method: keyof HarnessApi, arg?: number): Promise<void> {
+  await page.evaluate(
     ([name, value]) => {
       const api = window.toolCardHarness as unknown as Record<string, (size?: number) => void>
       api[name as string](value as number)
     },
     [method, arg] as const,
   )
+  await flushLayout(page)
+}
+
+/** 等 React 提交与 transcript 的下一帧布局工作，不用固定毫秒延时猜测何时完成。 */
+async function flushLayout(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  }))
 }
 
 const dialogue = (page: Page): Locator => page.locator('.thread-dialogue')
@@ -151,7 +159,7 @@ test('follows streaming growth, keeps the tail window, pauses on user scroll-up,
   // 挂载即贴底；bash 收起时只显示最后 10 个逻辑行。
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
   await expect(bashViewport(page)).toContainText('build step 20')
-  await expect(bashViewport(page)).not.toContainText('build step 1')
+  expect((await bashViewport(page).textContent())!.split('\n')).not.toContain('build step 1')
   await expect(page.locator('.thread-disclosure-hint').first()).toHaveText('… 10 earlier lines')
 
   // 流式增长：外层继续贴底，尾部窗口继续跟随。
@@ -166,7 +174,6 @@ test('follows streaming growth, keeps the tail window, pauses on user scroll-up,
   await expect.poll(outerDistance).toBeGreaterThan(1)
   const pausedTop = await scrollTop(body)
   await harness(page, 'grow', 120)
-  await page.waitForTimeout(200)
   expect(await scrollTop(body)).toBe(pausedTop)
 
   // 用户用真实滚轮主动回到底部：恢复跟随。
@@ -193,7 +200,7 @@ test('keeps the outer reading anchor when a tool card is expanded manually while
 
   // 空闲态手动展开：内容只在卡片内向下增长，外层不得被强制贴底，卡片顶边必须不动。
   await toggle(page).click()
-  await page.waitForTimeout(200)
+  await flushLayout(page)
   await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
   await expect(bashViewport(page)).toBeVisible()
   await expect(bashViewport(page)).not.toHaveClass(/is-bounded/)
@@ -223,8 +230,8 @@ test('keeps the restored reading position while a tool card image loads', async 
   await clickWithoutScrolling(readCard.locator('.thread-disclosure-toggle'))
   const image = readCard.locator('img').first()
   await expect(image).toBeVisible()
-  await image.evaluate((element: HTMLImageElement) => element.decode().catch(() => undefined))
-  await page.waitForTimeout(300)
+  await image.evaluate((element: HTMLImageElement) => element.decode())
+  await flushLayout(page)
 
   expect(await readCard.boundingBox().then((box) => box?.height ?? 0))
     .toBeGreaterThan(heightBefore?.height ?? 0)
@@ -253,7 +260,6 @@ test('keeps identity and expanded state across streaming to terminal', async ({ 
 
   // 流式转终态：同一条 bash 调用的持久结果到达。
   await harness(page, 'settle', 60)
-  await page.waitForTimeout(150)
 
   // 同一 DOM 节点（身份未重置），展开状态保留，完整日志仍在。
   await expect(page.locator('.thread-turn-tool')).toHaveCount(1)
@@ -270,14 +276,14 @@ test('expands the full log from the hint and never creates an inner scroll regio
 
   // 终态 bash 收起为最后 10 行。
   expect(await viewport.textContent()).toBe(
-    Array.from({ length: 10 }, (_, index) => `build step ${index + 71}`).join('\n'),
+    Array.from({ length: 10 }, (_, index) => `build step ${index + 71} completed`).join('\n'),
   )
   await expect(page.locator('.thread-disclosure-hint').first()).toHaveText('… 70 earlier lines')
 
   await page.locator('.thread-disclosure-hint').first().click()
   await expect(page.locator('.thread-disclosure-hint')).toHaveCount(0)
   expect(await viewport.textContent()).toBe(
-    Array.from({ length: 80 }, (_, index) => `build step ${index + 1}`).join('\n'),
+    Array.from({ length: 80 }, (_, index) => `build step ${index + 1} completed`).join('\n'),
   )
   // 展开视图没有内部滚动：pre 自身不可滚动。
   expect(await viewport.evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true)
@@ -290,7 +296,6 @@ test('keeps read text collapsed, previews read images after expanding, and keeps
   await expect(page.locator('.thread-disclosure-toggle')).toHaveCount(1)
 
   await harness(page, 'readUnknown')
-  await page.waitForTimeout(900)
   const unknownCard = page.locator('.thread-turn-tool').first()
   await expect(page.locator('.thread-turn-tool')).toHaveCount(1)
   // 未知 MIME 的 read 附件保持收起：没有内联图片，也没有展开后的正文。
@@ -340,7 +345,6 @@ test('keeps the card anchor while streaming growth runs with expansion and media
   const pausedTop = await scrollTop(body)
   const pausedBashTop = await topEdge(bash)
   await harness(page, 'growTail', 90)
-  await page.waitForTimeout(300)
   expect(await scrollTop(body)).toBe(pausedTop)
   expect(await topEdge(bash)).toBeCloseTo(pausedBashTop, 0)
 
@@ -349,7 +353,7 @@ test('keeps the card anchor while streaming growth runs with expansion and media
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
   await readToggle.click()
   await expect(readToggle).toHaveAttribute('aria-expanded', 'true')
-  await page.waitForTimeout(150)
+  await flushLayout(page)
 
   // 展开的静态正文从顶部读，不创建内部滚动。
   expect(await readCard.locator('.thread-tool-output').first().evaluate((el) => el.scrollTop)).toBe(0)
@@ -362,7 +366,6 @@ test('keeps the card anchor while streaming growth runs with expansion and media
   expect(await outerDistance()).toBeGreaterThan(10)
 
   await harness(page, 'growTail', 140)
-  await page.waitForTimeout(300)
   expect(await scrollTop(body)).toBe(expandedTop)
   expect(await topEdge(bash)).toBeCloseTo(expandedBashTop, 0)
   expect(await topEdge(readCard)).toBeCloseTo(expandedReadTop, 0)
@@ -381,8 +384,8 @@ test('keeps the card anchor while streaming growth runs with expansion and media
 
   const image = mediaCard.locator('img').first()
   await expect(image).toBeVisible()
-  await image.evaluate((element: HTMLImageElement) => element.decode().catch(() => undefined))
-  await page.waitForTimeout(300)
+  await image.evaluate((element: HTMLImageElement) => element.decode())
+  await flushLayout(page)
 
   // 媒体确实加载并改变布局，但外层与卡片顶边都必须原地不动。
   expect(await body.evaluate((element) => element.scrollHeight)).toBeGreaterThan(collapsedHeight)
@@ -406,7 +409,6 @@ test('does not reopen following when a shrink clamps the outer position to the b
   await expect.poll(() => outerDistance()).toBeGreaterThan(1)
   const pausedTop = await scrollTop(body)
   await harness(page, 'growTail', 60)
-  await page.waitForTimeout(250)
   expect(await scrollTop(body)).toBe(pausedTop)
 
   // 2) 内容大幅收起：外层 scrollTop 被浏览器钳制到新的底部。
@@ -417,7 +419,6 @@ test('does not reopen following when a shrink clamps the outer position to the b
 
   // 3) 下一轮流式更新：暂停没有被 clamp 重开，位置一动不动。
   await harness(page, 'growTail', 200)
-  await page.waitForTimeout(300)
   expect(await scrollTop(body)).toBe(clampedTop)
   expect(await outerDistance()).toBeGreaterThan(1)
 

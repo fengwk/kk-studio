@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -38,6 +38,7 @@ function baseProps(overrides: Partial<ControlledProps> = {}): ControlledProps {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('ThreadDisclosure', () => {
@@ -160,5 +161,68 @@ describe('ThreadDisclosure', () => {
         configurable: true,
       })
     }
+  })
+
+  it('collapses a long card, aligns its top in the nearest scroller and returns keyboard focus', () => {
+    let frame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.matches('.thread-disclosure') ? 140 : 40
+      return new DOMRect(0, top, 600, 800)
+    })
+    const { container } = render(
+      <div style={{ overflowY: 'auto' }}>
+        <ControlledDisclosure {...baseProps({ initialExpanded: true })} />
+      </div>,
+    )
+    const scroller = container.firstElementChild as HTMLElement
+    scroller.scrollTop = 20
+
+    // 验证收起后的定位与焦点，不只断言按钮存在；布局回调在 React 提交后执行。
+    fireEvent.click(screen.getByRole('button', { name: /^收起$/ }))
+    expect(screen.getByRole('button', { name: '展开详情' })).toHaveAttribute('aria-expanded', 'false')
+    act(() => frame?.(0))
+    expect(scroller.scrollTop).toBe(120)
+    expect(screen.getByRole('button', { name: '展开详情' })).toHaveFocus()
+    expect(screen.queryByRole('button', { name: /^收起$/ })).toBeNull()
+  })
+
+  it('uses document scrolling for a long standalone card without a transcript scroller', () => {
+    let frame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    }))
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 600, 2000))
+    const { container } = render(<ControlledDisclosure {...baseProps({ initialExpanded: true })} />)
+    const card = container.querySelector('.thread-disclosure') as HTMLElement
+    const scrollIntoView = vi.spyOn(card, 'scrollIntoView')
+    fireEvent.click(screen.getByRole('button', { name: /^收起$/ }))
+    act(() => frame?.(0))
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+    expect(screen.getByRole('button', { name: '展开详情' })).toHaveFocus()
+  })
+
+  it('updates the header and long-card affordance on resize without ResizeObserver and releases listeners', () => {
+    // 覆盖无 observer 时的真实 resize 降级，确保容器卸载后不遗留 window 监听。
+    vi.stubGlobal('ResizeObserver', undefined)
+    let height = 40
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => height)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(40)
+    const removeListener = vi.spyOn(window, 'removeEventListener')
+    const { unmount } = render(<ControlledDisclosure {...baseProps({ hasDetails: false })} />)
+    expect(screen.queryByRole('button', { name: '展开详情' })).toBeNull()
+    height = 60
+    fireEvent(window, new Event('resize'))
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 2000))
+    fireEvent(window, new Event('resize'))
+    expect(screen.getByRole('button', { name: /^收起$/ })).toBeInTheDocument()
+    unmount()
+    expect(removeListener.mock.calls.filter(([event]) => event === 'resize')).toHaveLength(2)
   })
 })

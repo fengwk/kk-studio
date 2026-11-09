@@ -91,16 +91,15 @@ export function SubagentReceipt({
   // 回执 Markdown 分区只支持 0 行（收起）与全部（展开）；错误块单独受行数/字符限制。
   const showAll = expanded || SUBAGENT_RECEIPT_DISCLOSURE.preview === -1
   const showSections = expanded || SUBAGENT_RECEIPT_DISCLOSURE.preview !== 0
+  const showBody = expanded || SUBAGENT_RECEIPT_DISCLOSURE.body !== 0
   const errorWindow = errorText == null
     ? null
     : discloseText(errorText, showAll ? -1 : ERROR_COLLAPSED_LINES)
   const errorHint = errorWindow == null ? null : disclosureHint(errorWindow, 'start')
   const cancelledText = receipt.state === 'cancelled' ? receipt.error : null
-  const hasSections = receipt.result != null
-    || receipt.task != null
-    || receipt.partial != null
-    || cancelledText != null
-  const hasDetails = hasSections || errorHint != null
+  const hasDetails = (!showSections && (receipt.result != null || cancelledText != null))
+    || (!showBody && (receipt.task != null || receipt.partial != null))
+    || errorHint != null
   const identity = [receipt.agent ?? t('ai.runtime.task.subagent'), t(STATE_LABEL_KEYS[receipt.state])]
   const label = [...identity, taskPreview].filter(Boolean).join(' · ')
   const preview = errorWindow != null
@@ -130,7 +129,7 @@ export function SubagentReceipt({
       </>
     )
     : undefined
-  const body = showSections && (receipt.task != null || receipt.partial != null)
+  const body = showBody && (receipt.task != null || receipt.partial != null)
     ? (
       <>
         {receipt.task != null && (

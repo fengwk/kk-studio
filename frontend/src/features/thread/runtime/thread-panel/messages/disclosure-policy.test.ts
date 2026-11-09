@@ -26,6 +26,9 @@ describe('tool disclosure quota', () => {
     expect(toolDisclosureQuota('read', 'settled')).toEqual({ preview: 0, body: 0 })
     expect(toolDisclosureQuota('ask_user', 'active')).toEqual({ preview: 0, body: 0 })
     expect(toolDisclosureQuota('unknown', 'settled')).toEqual({ preview: 0, body: 0 })
+    // 外部工具可与 Object 原型方法同名，仍必须使用未知工具的隐藏配额。
+    expect(toolDisclosureQuota('constructor', 'settled')).toEqual({ preview: 0, body: 0 })
+    expect(toolDisclosureQuota('__proto__', 'active')).toEqual({ preview: 0, body: 0 })
   })
 })
 

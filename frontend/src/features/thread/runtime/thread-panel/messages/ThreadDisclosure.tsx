@@ -119,14 +119,19 @@ export function ThreadDisclosure({
     const scroller = findScrollContainer(element)
     announceTranscriptReading(element, 'disclosure-collapse')
     onExpandedChange(false)
-    if (scroller == null) {
-      element.scrollIntoView({ block: 'start' })
-      return
-    }
     // 收起只改变卡片自身高度；下一帧把卡片顶边对齐到滚动容器顶部。
     requestAnimationFrame(() => {
-      const offset = element.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-      scroller.scrollTop += offset
+      if (!element.isConnected) {
+        return
+      }
+      if (scroller == null) {
+        element.scrollIntoView({ block: 'start' })
+      } else {
+        const offset = element.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        scroller.scrollTop += offset
+      }
+      // 底部按钮已随收起卸载，把键盘焦点交还顶部 chevron，而不是落到 document.body。
+      element.querySelector<HTMLButtonElement>('.thread-disclosure-toggle')?.focus({ preventScroll: true })
     })
   }
 

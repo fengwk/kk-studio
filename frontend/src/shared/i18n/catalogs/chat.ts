@@ -1072,10 +1072,6 @@ export const chatCatalog = {
     'en-US': 'View subagent execution',
     'zh-CN': '查看 subagent 执行',
   },
-  'ai.runtime.disclosure.viewSubagentExecutionShort': {
-    'en-US': 'View execution',
-    'zh-CN': '查看执行',
-  },
   'ai.runtime.disclosure.waitingForAnswer': {
     'en-US': 'This tool call needs your answer',
     'zh-CN': '此工具调用需要你回答',
@@ -1242,14 +1238,6 @@ export const chatCatalog = {
   'ai.runtime.message.retryingNow': {
     'en-US': 'Retrying (request #{{nextAttempt}})',
     'zh-CN': '正在重试（请求 #{{nextAttempt}}）',
-  },
-  'ai.runtime.message.expandTool': {
-    'en-US': 'Expand tool preview',
-    'zh-CN': '展开工具预览',
-  },
-  'ai.runtime.message.collapseTool': {
-    'en-US': 'Collapse tool preview',
-    'zh-CN': '收起工具预览',
   },
   'ai.runtime.message.attachment': {
     'en-US': '{{type}} attachment',
@@ -1490,14 +1478,6 @@ export const chatCatalog = {
   'ai.runtime.entry.compactionTitle': {
     'en-US': 'Context compacted',
     'zh-CN': '上下文已压缩',
-  },
-  'ai.runtime.entry.compactionExpand': {
-    'en-US': 'Expand compaction summary',
-    'zh-CN': '展开压缩摘要',
-  },
-  'ai.runtime.entry.compactionCollapse': {
-    'en-US': 'Collapse compaction summary',
-    'zh-CN': '收起压缩摘要',
   },
   'ai.runtime.entry.forkTitle': {
     'en-US': 'Thread forked',

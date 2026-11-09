@@ -77,7 +77,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
-  test('Case 1: Write 全文（含缩进与空白、超高滚动）审批前完整且默认展开，390px 与 1280px 有界滚动不撑宽 pane', async ({
+  test('Case 1: Write 审查全文在时间线无内部滚动，审批卡片仍有界且窄屏不溢出', async ({
     page,
   }) => {
     // 1. 桌面视口 1280px
@@ -359,7 +359,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await page.screenshot({ path: path.join(REPORTS_DIR, 'mutation-failure-notice.png') })
   })
 
-  test('Case 6: 经真实 detailsJson 解码后的 durable 历史恢复，在清理 invocation/刷新后 diff 相同可读且有界滚动', async ({
+  test('Case 6: durable 历史恢复默认截取 10 行，展开后 diff 完整且没有内部滚动', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -373,9 +373,12 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
     const editViewport = toolPane.locator('.thread-tool-preview-body.is-edit')
     await expect(editViewport).toBeVisible()
+    expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF.split('\n').slice(0, 10).join('\n'))
+    await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 17 more lines')
+    await toolPane.locator('.thread-disclosure-toggle').click()
     expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)
     await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
-    await verifyBoundedScrollAndNoBlowout(editViewport)
+    await verifyNoInnerScroll(editViewport)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-durable-history.png') })
   })

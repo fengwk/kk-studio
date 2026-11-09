@@ -41,7 +41,9 @@ export function toolDisclosureQuota(toolName: string, phase: DisclosurePhase): D
   const normalizedName = toolName.trim().toLowerCase()
   const entry = isMcpToolName(normalizedName)
     ? TOOL_DISCLOSURE.mcp
-    : TOOL_DISCLOSURE[normalizedName] ?? TOOL_DISCLOSURE['*']
+    : Object.hasOwn(TOOL_DISCLOSURE, normalizedName)
+      ? TOOL_DISCLOSURE[normalizedName]
+      : TOOL_DISCLOSURE['*']
   return entry[phase]
 }
 

@@ -94,6 +94,11 @@
   white-space: nowrap;
 }
 
+.thread-parent-action {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .chat-workspace-title {
   min-width: 0;
 }
@@ -149,6 +154,7 @@
   /* 窄屏顶栏：身份文字先让位，短 ID 与复制保持完整，名称仍占一行并保留省略号。 */
   .chat-workspace-header .chat-workspace-title {
     gap: 6px;
+    flex-wrap: wrap;
   }
 
   .chat-workspace-title .workspace-view-identity {
@@ -157,6 +163,16 @@
 
   .chat-workspace-title h1 {
     min-width: 4ch;
+  }
+
+  /* 先保证返回、身份与复制动作可读，标题另起稳定一行，避免 320px 时挤成零宽。 */
+  .chat-workspace-title > h1,
+  .chat-workspace-title .chat-workspace-breadcrumb {
+    flex: 1 0 100%;
+  }
+
+  .chat-workspace-title > .thread-breadcrumb-separator {
+    display: none;
   }
 }
 
