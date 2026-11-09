@@ -138,7 +138,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   /**
    * 原 claim 结果未知时通过公开的纯读路径对账：只有 view/browserSession/eventNode/connection/claim 全部一致才认领。
    *
-   * <p>快照不存在 view 是有效 absent 事实，但不是命令未执行的证明，因此保持 OUTCOME_UNKNOWN；实例已换代或出现更新的绑定则返回相应结构化原因。
+   * <p>快照不存在 view 是有效 absent 事实，但不是命令未执行的证明，因此保持 IDE_OUTCOME_UNKNOWN；实例已换代或出现更新的绑定则返回相应结构化原因。
    */
   private EnvironmentIdeViewDTO reconcileOpen(
       EnvironmentId environmentId,
@@ -650,7 +650,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
           "IDE_UNAVAILABLE", "browser IDE usage intent is unavailable", error);
     }
     if (!matched) {
-      throw viewGone("browser IDE usage intent is no longer confirmed");
+      throw staleBinding("browser IDE usage intent is no longer confirmed");
     }
   }
 
@@ -665,10 +665,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private void requireExpectedInstance(
       DaemonConnectionIdentity identity, String expectedDaemonInstanceId) {
-    if (expectedDaemonInstanceId == null || expectedDaemonInstanceId.isBlank()) {
-      throw DomainException.validation("environment", "expectedDaemonInstanceId is required");
-    }
-    if (!expectedDaemonInstanceId.equals(identity.daemonInstanceId())) {
+    String expected =
+        parseRequiredInstance(expectedDaemonInstanceId, "expectedDaemonInstanceId is required");
+    if (!expected.equals(identity.daemonInstanceId())) {
       throw viewGone("environment daemon instance has been replaced");
     }
   }
@@ -677,14 +676,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       EnvironmentIdeOpenMode mode,
       String expectedDaemonInstanceId,
       DaemonConnectionIdentity current) {
-    if (expectedDaemonInstanceId == null || expectedDaemonInstanceId.isBlank()) {
-      throw DomainException.validation(
-          "environment", "expectedDaemonInstanceId is required for " + mode.wireValue());
-    }
-    if (!expectedDaemonInstanceId.equals(current.daemonInstanceId())) {
+    String expected =
+        parseRequiredInstance(
+            expectedDaemonInstanceId,
+            "expectedDaemonInstanceId is required for " + mode.wireValue());
+    if (!expected.equals(current.daemonInstanceId())) {
       throw viewGone("environment daemon instance has been replaced");
     }
-    return expectedDaemonInstanceId;
+    return expected;
   }
 
   private static long expectedOpenEpoch(EnvironmentIdeOpenMode mode, Long expectedBindingEpoch) {
@@ -834,10 +833,19 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (value == null) {
       return null;
     }
-    if (value.isBlank()) {
-      throw DomainException.validation("environment", "expectedDaemonInstanceId must not be blank");
+    return parseRequiredInstance(value, "expectedDaemonInstanceId must not be blank");
+  }
+
+  private static String parseRequiredInstance(String value, String requiredMessage) {
+    if (value == null || value.isBlank()) {
+      throw DomainException.validation("environment", requiredMessage);
     }
-    return value;
+    try {
+      return Uuids.parseCanonical(value, "expectedDaemonInstanceId").toString();
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(
+          "environment", "expectedDaemonInstanceId must be a canonical UUID");
+    }
   }
 
   private static EnvironmentIdeViewState requireViewState(EnvironmentIdeViewState state) {
@@ -876,15 +884,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       case "VIEW_OWNED_BY_OTHER_SESSION" -> viewOwnedByOther();
       case "STALE_BINDING" -> staleBinding(message);
       case "CLAIM_CONFLICT" -> DomainException.conflict("CLAIM_CONFLICT", message);
-      case "CAPACITY_EXCEEDED", "IDE_CAPACITY_EXCEEDED", "VIEW_LIMIT_REACHED" -> DomainException
-          .conflict("IDE_CAPACITY_EXCEEDED", message);
-      case "CLEANUP_FAILED", "IDE_CLEANUP_FAILED" -> DomainException.unavailable(
-          "IDE_CLEANUP_FAILED", message);
+      case "IDE_CAPACITY_EXCEEDED" -> DomainException.conflict("IDE_CAPACITY_EXCEEDED", message);
+      case "CLEANUP_FAILED" -> DomainException.unavailable("IDE_CLEANUP_FAILED", message);
       case "CANCELLED" -> DomainException.validationReason("IDE_CLOSE_CANCELLED", message);
       case "DIRTY" -> DomainException.validationReason("DIRTY", message);
-      case "DAEMON_NOT_READY" -> DomainException.unavailable("DAEMON_NOT_READY", message);
-      case "OUTCOME_UNKNOWN", "IDE_OUTCOME_UNKNOWN" -> DomainException.unavailable(
-          "IDE_OUTCOME_UNKNOWN", message);
       case "UNAVAILABLE", "BUSY", "VIEW_IN_USE" -> DomainException.unavailable(
           "IDE_UNAVAILABLE", message);
       default -> DomainException.validation("environment", message);
