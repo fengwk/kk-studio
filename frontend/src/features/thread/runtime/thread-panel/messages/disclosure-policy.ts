@@ -81,6 +81,9 @@ export function discloseText(
   if (maxChars < 0) {
     return { text: selected.join('\n'), hiddenLines: lines.length - selected.length, truncated: false }
   }
+  if (edge === 'end') {
+    return keepCodePointSuffix(selected, lines.length, maxChars)
+  }
   const kept: string[] = []
   let usedChars = 0
   let truncated = false
@@ -107,6 +110,37 @@ export function discloseText(
     text: kept.join('\n'),
     hiddenLines: lines.length - kept.length,
     truncated,
+  }
+}
+
+/**
+ * bash 等尾部窗口必须保留窗口末尾：先取最后 N 行，再保留最后 maxChars 个
+ * code point，确保末尾的退出码/错误说明不会被早期大行挤掉。
+ */
+function keepCodePointSuffix(
+  selected: string[],
+  totalLines: number,
+  maxChars: number,
+): TextDisclosure {
+  const joined = selected.join('\n')
+  if (joined === '' || maxChars === 0) {
+    return { text: '', hiddenLines: totalLines, truncated: joined !== '' }
+  }
+  const codePoints = Array.from(joined)
+  if (codePoints.length <= maxChars) {
+    return {
+      text: joined,
+      hiddenLines: totalLines - selected.length,
+      truncated: false,
+    }
+  }
+  const suffix = codePoints.slice(-maxChars).join('')
+  // 截断恰好落在换行上时，该换行是上一条隐藏行的分隔符，不应变成可见空行。
+  const text = suffix.startsWith('\n') ? suffix.slice(1) : suffix
+  return {
+    text,
+    hiddenLines: totalLines - (text === '' ? 0 : text.split('\n').length),
+    truncated: true,
   }
 }
 

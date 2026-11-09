@@ -3,8 +3,8 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
- * 工具卡片样式已迁出全局 `styles.css`，独立为 `tool-card.css`（由 ToolMessageBlock 引入）。
- * 设计系统级按钮 token（`.ghost-btn.danger`）仍留在全局样式，故同时读取两者。
+ * 工具适配器只保留 Header 内容与正文样式；卡片外壳、chevron 与底部收起由
+ * ThreadDisclosure 负责。对话记录禁止内部滚动，审批卡片通过 `.is-bounded` 例外。
  */
 const css = readFileSync(
   resolve(
@@ -28,37 +28,37 @@ function rule(source: string, pattern: RegExp): string {
 }
 
 describe('tool card style contracts', () => {
-  it('wraps the header with no horizontal scroll and pins the toggle to the first row top-right', () => {
+  it('wraps the header parameters without truncating the complete text', () => {
     const summary = rule(css, /\.thread-tool-summary\s*\{[^}]*\}/)
     const detail = rule(css, /\.thread-tool-summary-detail\s*\{[^}]*\}/)
-    const toggle = rule(css, /\.thread-tool-toggle\s*\{[^}]*\}/)
 
-    // 参数与名称属于同一 inline 流，不把 detail 作为 flex 整块提前下移。
     expect(summary).toContain('display: block')
-    expect(summary).not.toContain('flex-wrap')
-    expect(detail).not.toContain('flex:')
+    expect(summary).toContain('white-space: pre-wrap')
+    expect(summary).toContain('overflow-wrap: anywhere')
     expect(detail).toContain('white-space: pre-wrap')
     expect(detail).toContain('overflow-wrap: anywhere')
-    expect(detail).not.toContain('white-space: nowrap')
-    expect(detail).not.toContain('overflow-x: auto')
     expect(detail).not.toContain('text-overflow: ellipsis')
-    // 状态与展开按钮占独立、不收缩的尾部，不覆盖参数。
-    const tail = rule(css, /\.thread-tool-tail\s*\{[^}]*\}/)
-    expect(tail).toContain('flex: 0 0 auto')
-    expect(toggle).toContain('width: 28px')
-    expect(toggle).toContain('opacity: 1')
-    expect(toggle).not.toContain('margin-left: auto')
+    expect(detail).not.toContain('overflow-x: auto')
   })
 
-  it('uses exactly one bounded readonly viewport with monospace text and native boundary chaining', () => {
+  it('keeps transcript output unbounded and only bounds the approval card viewport', () => {
     const output = rule(css, /\.thread-tool-output\s*\{[^}]*\}/)
+    const bounded = rule(css, /\.thread-tool-output\.is-bounded\s*\{[^}]*\}/)
     const pre = rule(css, /\.thread-tool-pre\s*\{[^}]*margin: 0[^}]*\}/)
 
-    // 唯一只读视口：有界高度 + 内部滚动 + 等宽字体；边界处滚轮自然链到外层。
-    expect(output).toContain('max-height')
-    expect(output).toContain('overflow: auto')
-    expect(output).toContain('overscroll-behavior: auto')
+    expect(output).not.toContain('max-height')
+    expect(output).not.toContain('overflow: auto')
+    expect(bounded).toContain('max-height')
+    expect(bounded).toContain('overflow: auto')
+    expect(bounded).toContain('overscroll-behavior: auto')
     expect(pre).toContain('font-family: var(--mono)')
+  })
+
+  it('styles the header subagent action without a UUID-width layout', () => {
+    const link = rule(css, /\.thread-tool-thread-link\s*\{[^}]*\}/)
+    expect(link).toContain('display: inline-flex')
+    expect(link).toContain('white-space: nowrap')
+    expect(link).not.toContain('overflow-wrap: anywhere')
   })
 
   it('uses the danger token for approval rejection borders', () => {

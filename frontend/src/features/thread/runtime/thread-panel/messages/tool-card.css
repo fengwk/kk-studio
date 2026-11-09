@@ -1,76 +1,34 @@
 /*
- * 工具卡片的独立样式：由 ToolMessageBlock 引入，覆盖 Header、正文视口与工具 renderer。
- *
- * 只包含工具卡片自身的布局；共享的 .thread-turn / .thread-block 基类、资源下载链接
- * （.resource-attachment-*）仍由全局样式提供，不在此文件重复。
+ * 工具卡片适配器样式：Header 内容、mutation 预览、结果正文与 task/ask_user 记录。
+ * 卡片外壳（padding/border/背景/chevron）由 ThreadDisclosure 统一提供；对话记录里的
+ * 正文没有内部滚动，只有审批卡片通过 `.is-bounded` 保留有界视口。
  */
 
-.thread-block-tool,
 .thread-turn-tool,
-.thread-tool-surface,
+.thread-block-tool,
 .thread-tool-call-body,
 .thread-tool-pre {
   width: 100%;
   min-width: 0;
 }
 
-.thread-tool-surface {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  transition: border-color var(--duration-fast), background-color var(--duration-fast);
-}
-
-.thread-turn-tool.tool-state-pending .thread-tool-surface {
-  border-color: var(--warning-border);
-  background:
-    linear-gradient(var(--warning-soft), var(--warning-soft)),
-    var(--surface);
-}
-
-.thread-turn-tool.tool-state-success .thread-tool-surface {
-  border-color: var(--accent-border);
-  background:
-    linear-gradient(var(--accent-soft), var(--accent-soft)),
-    var(--surface);
-}
-
-.thread-turn-tool.tool-state-error .thread-tool-surface {
-  border-color: var(--danger-border);
-  background:
-    linear-gradient(var(--danger-soft), var(--danger-soft)),
-    var(--surface);
-}
-
 /*
- * Header 允许换行：任意长度的参数（未知/MCP 的数千字 JSON 也不例外）在可用宽度内
- * 折行，完整原文留在 DOM 中可选中复制；不做横向滚动，也不撑破 pane。
- * 右侧是不会收缩的展开尾部，参数不能挤掉或覆盖箭头。
+ * 工具卡片的高度变化不参与外层 transcript 的滚动锚定：卡片自身长高（媒体解码、
+ * 展开、懒渲染落地）时，浏览器不会为了「保持卡片下方内容不动」而移动外层
+ * scrollTop——卡片顶边与用户正在读的位置都停在原处。正文区同样排除，理由相同。
  */
-.thread-tool-header {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  text-align: left;
-  cursor: default;
+.thread-turn-tool {
+  overflow-anchor: none;
 }
 
+/* Header 参数与名称属于同一 inline 文本流，完整原文留在 DOM 中可选中复制。 */
 .thread-tool-summary {
-  min-width: 0;
-  flex: 1 1 auto;
   display: block;
   padding: 4px 0;
-  line-height: 20px;
-  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
   font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -78,15 +36,14 @@
 .thread-tool-name {
   display: inline-block;
   vertical-align: top;
-  line-height: 20px;
   color: var(--fg);
   font-family: var(--mono);
   font-size: var(--font-size-xs);
   font-weight: 600;
+  line-height: 20px;
   white-space: normal;
 }
 
-/* 参数与名称属于同一 inline 文本流，保留换行且无横向滚动。 */
 .thread-tool-summary-detail {
   min-width: 0;
   color: var(--fg-muted);
@@ -103,122 +60,42 @@
   outline-offset: 2px;
 }
 
-.thread-tool-toggle {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  place-items: center;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  opacity: 1;
-  transition: opacity var(--duration-fast), background-color var(--duration-fast);
-}
-
-.thread-tool-toggle svg {
-  width: 14px;
-  height: 14px;
-}
-
-.thread-tool-tail {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  min-height: 28px;
-}
-
 .thread-tool-state-label {
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
 }
 
-.thread-tool-surface:hover .thread-tool-toggle,
-.thread-tool-toggle:focus-visible {
-  opacity: 1;
-}
-
-.thread-tool-toggle:hover {
-  background: var(--stage-dot);
-}
-
-.thread-tool-toggle:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-@media (hover: none) {
-  .thread-tool-toggle {
-    opacity: 1;
-  }
-}
-
-.thread-turn-tool.tool-state-pending .thread-tool-toggle {
-  color: var(--warning);
-}
-
-.thread-turn-tool.tool-state-success .thread-tool-toggle {
-  color: var(--accent);
-}
-
-.thread-turn-tool.tool-state-error .thread-tool-toggle {
-  color: var(--danger);
-}
-
-/*
- * 工具卡片的高度变化不参与外层 transcript 的滚动锚定：卡片自身长高（媒体解码、
- * 展开、懒渲染落地）时，浏览器不会为了「保持卡片下方内容不动」而移动外层
- * scrollTop——卡片顶边与用户正在读的位置都停在原处。正文区同样排除，理由相同。
- */
-.thread-turn-tool {
-  overflow-anchor: none;
-}
-
-/* 卡片正文：调用正文与结果内容共用一层分隔与间距，展开/收起只切换这一层。 */
-.thread-tool-body {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-top: 9px;
-  padding-top: 9px;
-  border-top: 1px solid var(--border);
-  overflow-anchor: none;
-}
-
-.thread-tool-body:empty {
-  display: none;
-}
-
-.thread-tool-call-body:empty {
-  display: none;
-}
-
-/* 只读审批记录：人工决策在根交互区完成，时间线不提供写入路径。 */
+/* 只读审批/等待记录：人工决策在根交互区完成，时间线不提供写入路径。 */
 .thread-tool-approval-note {
-  margin: 9px 0 0;
+  margin: 0 0 6px;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-/* write 正文与 edit diff 使用同一个只读视口；内部滚动不把外层卡片滚走。 */
-.thread-tool-preview-target {
-  margin-bottom: 6px;
-  font-size: var(--font-size-xs);
-  font-family: var(--mono);
+.thread-tool-approval-note:last-child {
+  margin-bottom: 0;
+}
+
+.thread-tool-text-preview {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.thread-tool-preview-target {
+  display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
 }
 
 .thread-tool-preview-target-path {
-  font-weight: 600;
   color: var(--fg);
+  font-weight: 600;
 }
 
 .thread-tool-preview-target-workdir {
@@ -229,9 +106,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 0;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
-  padding: 6px 0;
 }
 
 .thread-tool-preview-input-section {
@@ -242,11 +119,11 @@
 }
 
 .thread-tool-preview-input-label {
+  color: var(--fg-muted);
   font-size: var(--font-size-xs);
   font-weight: 600;
-  color: var(--fg-muted);
-  text-transform: uppercase;
   letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .thread-tool-preview-input-block {
@@ -256,8 +133,8 @@
 }
 
 .thread-tool-preview-input-sublabel {
-  font-size: var(--font-size-xs);
   color: var(--fg-muted);
+  font-size: var(--font-size-xs);
 }
 
 .thread-tool-preview-body.is-edit .is-added {
@@ -281,9 +158,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--font-size-xs);
   color: var(--success);
-  margin-top: 6px;
+  font-size: var(--font-size-xs);
 }
 
 .thread-tool-empty-content {
@@ -303,19 +179,21 @@
 }
 
 /*
- * 唯一只读有界视口：长内容/持续日志在卡片内滚动，不撑高外层 transcript。
- * overscroll-behavior: auto 让滚轮在内部到达边界后自然链到外层 transcript，
- * 不做 JS 滚轮路由；跟随/手动阅读位置仍由组件状态机决定。
+ * 对话记录中的正文是普通内容，不创建内部滚动；只有审批卡片显式加 `.is-bounded`。
+ * overscroll-behavior: auto 让审批卡片到达边界后自然链到外层。
  */
 .thread-tool-output {
   line-height: 1.5;
-  max-height: min(24em, 42vh);
-  overflow: auto;
-  overscroll-behavior: auto;
   overflow-anchor: none;
 }
 
-.thread-tool-output:focus-visible {
+.thread-tool-output.is-bounded {
+  max-height: min(24em, 42vh);
+  overflow: auto;
+  overscroll-behavior: auto;
+}
+
+.thread-tool-output.is-bounded:focus-visible {
   outline: 1px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -332,10 +210,7 @@
 }
 
 .thread-tool-error {
-  margin: 9px 0 0;
-  font-size: var(--font-size-xs);
-  color: var(--danger);
-  overflow-wrap: anywhere;
+  margin: 0 0 6px;
 }
 
 .thread-tool-resource {
@@ -367,10 +242,6 @@
   overflow-wrap: anywhere;
 }
 
-.thread-tool-attachment-preview {
-  max-height: min(12em, 30vh);
-}
-
 /* ask_user 只读问题/回答记录：没有输入控件，也没有提交路径。 */
 .ask-user-record {
   display: flex;
@@ -389,7 +260,7 @@
   color: var(--fg-muted);
 }
 
-/* task 工具 renderer：prompt 与可点击 Thread 链接；不显示受理/完成文案。 */
+/* task 工具 renderer：prompt 与完整结果；不显示受理/完成文案。 */
 .task-tool-renderer {
   display: flex;
   flex-direction: column;
@@ -403,14 +274,28 @@
   font-family: inherit;
 }
 
-.task-tool-thread-link {
-  color: inherit;
-  font: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  overflow-wrap: anywhere;
+/* Header 操作：subagent 入口不显示完整 UUID。 */
+.thread-tool-thread-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--info);
+  font-size: var(--font-size-xs);
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.task-tool-thread-link:hover {
-  color: inherit;
+.thread-tool-thread-link svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.thread-tool-thread-link:hover {
+  text-decoration: underline;
+}
+
+.thread-tool-thread-link:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
 }

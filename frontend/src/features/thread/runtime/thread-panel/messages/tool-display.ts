@@ -19,11 +19,12 @@ export interface ToolCallSummary {
 export function formatToolCallSummary(
   toolName: string,
   rawArguments: string,
+  options?: { expanded?: boolean },
 ): ToolCallSummary {
   const name = toolName.trim() || 'Tool'
   const normalizedName = name.toLowerCase()
   const parsed = parseToolArguments(rawArguments)
-  const detail = formatKnownToolDetail(normalizedName, parsed.values)
+  const detail = formatKnownToolDetail(normalizedName, parsed.values, options?.expanded === true)
     ?? formatRawArguments(parsed, rawArguments)
   return {
     name,
@@ -35,6 +36,7 @@ export function formatToolCallSummary(
 function formatKnownToolDetail(
   toolName: string,
   values: Record<string, unknown>,
+  expanded: boolean,
 ): string | null {
   switch (toolName) {
     case 'read':
@@ -109,10 +111,13 @@ function formatKnownToolDetail(
       return ''
     case 'task': {
       const subagentType = stringField(values.subagent_type)
-      return withOptions(subagentType, [
-        ['max_turns', values.max_turns],
-        ['thread_id', values.thread_id],
-      ])
+      const options: Array<[string, unknown]> = [['max_turns', values.max_turns]]
+      // 收起时由 Header 操作「查看执行」承载目标，不展示完整 thread_id；
+      // 展开后仍保留原始参数供核对。
+      if (expanded) {
+        options.push(['thread_id', values.thread_id])
+      }
+      return withOptions(subagentType, options)
     }
     default:
       return null

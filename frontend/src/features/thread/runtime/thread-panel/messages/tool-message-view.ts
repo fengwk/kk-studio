@@ -1,7 +1,4 @@
-import {
-  formatToolCallSummary,
-  type ToolCallSummary,
-} from '@/features/thread/runtime/thread-panel/messages/tool-display'
+import type { DisclosurePhase } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import {
   previewForToolCall,
   type ToolCallPreview,
@@ -11,8 +8,8 @@ import type {
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
 
-type ToolVisualState = 'pending' | 'success' | 'error'
-type ToolExecutionState =
+export type ToolVisualState = 'pending' | 'success' | 'error'
+export type ToolExecutionState =
   | 'preparing' | 'queued' | 'environment' | 'approval' | 'input'
   | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 
@@ -36,18 +33,25 @@ export function toolExecutionState(
   }
 }
 
-/** 正文默认可见的工具：写入正文、执行前 diff、持续输出、任务 prompt 与问答记录。 */
-const BODY_VISIBLE_BY_DEFAULT_TOOLS = new Set(['write', 'edit', 'bash', 'task', 'ask_user'])
+/**
+ * active：生成调用、排队、等待审批/输入/环境、执行中；
+ * settled：成功、失败、已停止、结果未知。
+ */
+export function toolDisclosurePhase(state: ToolExecutionState): DisclosurePhase {
+  return ['preparing', 'queued', 'environment', 'approval', 'input', 'running'].includes(state)
+    ? 'active'
+    : 'settled'
+}
+
 /** 调用正文由 diff/正文预览组件承载的工具。 */
 const CALL_PREVIEW_TOOLS = new Set(['write', 'edit'])
 /** 调用参数下移到正文的工具（task prompt、ask_user 问题）：Header 只保留小型参数。 */
 const CALL_RECORD_TOOLS = new Set(['task', 'ask_user'])
 
-interface ToolMessageView {
+export interface ToolMessageView {
   callMessage?: ToolDialogueMessage
   resultMessage?: ToolDialogueMessage
   preview: ToolCallPreview | null
-  summary: ToolCallSummary
   visualState: ToolVisualState
   executionState: ToolExecutionState
   /** 结果的有序内容：durable result 优先，否则退回瞬态 partial。 */
@@ -56,17 +60,11 @@ interface ToolMessageView {
   errorText?: string
   /** 结果或调用是否处于失败态（失败摘要不得被折叠隐藏）。 */
   hasError: boolean
-  /** 存在可展开/收起的正文（调用正文或结果内容）。 */
-  hasBody: boolean
   /** 调用正文是否由 write/edit 预览组件渲染。 */
   hasCallPreview: boolean
   /** 调用正文是否由 task renderer / ask_user 记录渲染。 */
   hasCallRecordBody: boolean
-  /** 正文当前是否可见。 */
-  showBody: boolean
   argumentsStreaming: boolean
-  /** 正文内容是否仍来自瞬态流式消息（bash 持续输出）：唯一允许跟随尾部的信号。 */
-  contentsStreaming: boolean
   arguments: string
   toolName: string
   isMutationSuccess: boolean
@@ -90,19 +88,15 @@ export function toolMessageContents(
 
 /**
  * 合并 call/result/partial 事实，并计算宿主 shell 所需的纯展示状态。
- *
- * `expanded` 是用户选择与默认值合成后的最终展开状态，同时覆盖调用正文与结果内容：
- * 所有存在有意义正文的卡片都可折叠，prompt/diff 默认可见不等于不可收起。
+ * 展开状态、配额与截取由宿主和 disclosure policy 决定，这里只提供事实。
  */
 export function buildToolMessageView({
   message,
   result,
-  expanded,
   hasCallRecordRenderer,
 }: {
   message: ToolDialogueMessage
   result?: ToolDialogueMessage
-  expanded: boolean
   /** 正文侧是否具备渲染 task/ask_user 调用正文的能力（扩展 renderer 或内置记录）。 */
   hasCallRecordRenderer: boolean
 }): ToolMessageView {
@@ -115,11 +109,6 @@ export function buildToolMessageView({
     callMessage != null
     && callMessage.subjectEntryId == null
     && callMessage.status === 'streaming'
-  // partial 属于执行中的调用，即使调用 Entry 已持久化，输出仍是瞬态流。
-  const contentsSource = resultMessage ?? callMessage
-  const contentsStreaming =
-    contentsSource != null
-    && contentsSource.status === 'streaming'
   const contents = toolMessageContents(message, result)
   const facts = toolErrorFacts({ message, result })
   const rawExecutionState = toolExecutionState(
@@ -180,18 +169,14 @@ export function buildToolMessageView({
     callMessage,
     resultMessage,
     preview,
-    summary: formatToolCallSummary(toolName, argumentsValue),
     visualState: facts.visualState,
     executionState,
     contents,
     errorText: facts.errorText,
     hasError: facts.hasError,
-    hasBody: contents.length > 0 || hasCallPreview || hasCallRecordBody || isMutationSuccess,
     hasCallPreview,
     hasCallRecordBody,
-    showBody: expanded,
     argumentsStreaming,
-    contentsStreaming,
     arguments: argumentsValue,
     toolName,
     isMutationSuccess,
@@ -199,66 +184,20 @@ export function buildToolMessageView({
 }
 
 /**
- * 工具卡片的默认展开状态。
+ * 工具卡片的默认展开状态（不含用户选择）。
  *
- * 默认值只由工具与首次结果事实决定（不含用户选择），因此流式转终态、参数增长和
- * 重新渲染都不会改变它；用户主动选择由调用方覆盖。
+ * 仅 write/edit 审查期间默认完整显示审查材料；审查完成后与其他工具一样收起，
+ * 由各自配额决定收起时可见的行数。用户主动选择由调用方覆盖。
  */
 export function toolDefaultExpanded({
   toolName,
-  contents,
-  hasError,
-  mediaDefault = false,
+  phase,
 }: {
   toolName: string
-  contents: ToolContent[]
-  hasError: boolean
-  mediaDefault?: boolean
+  phase: DisclosurePhase
 }): boolean {
   const normalizedName = toolName.trim().toLowerCase()
-  // 失败事实优先于 read 的媒体默认值：错误结果默认展开，不让 read 分支把错误藏起来；
-  // 但空白 Text 不构成可展开正文（避免只展开一个空框）。
-  if (hasError && hasMeaningfulContents(contents)) {
-    return true
-  }
-  if (BODY_VISIBLE_BY_DEFAULT_TOOLS.has(normalizedName)) {
-    return true
-  }
-  if (normalizedName === 'read') {
-    return mediaDefault
-  }
-  // 未知/MCP 的成功结果默认折叠。
-  return false
-}
-
-/** 结果内容是否包含可展示的非空事实：空/空白 Text 不算有意义正文。 */
-function hasMeaningfulContents(contents: ToolContent[]): boolean {
-  return contents.some((content) => content.type !== 'text' || content.text.trim() !== '')
-}
-
-/**
- * 正文已完整呈现同一失败文本时不再重复渲染摘要；正文被收起时摘要必须可见。
- */
-export function shouldShowErrorNotice({
-  showBody,
-  bodyTexts,
-  errorNotice,
-}: {
-  showBody: boolean
-  bodyTexts: string[]
-  errorNotice: string
-}): boolean {
-  const notice = errorNotice.trim()
-  if (!notice) {
-    return false
-  }
-  if (!showBody) {
-    return true
-  }
-  return !bodyTexts.some((text) => {
-    const bodyText = text.trim()
-    return bodyText !== '' && (bodyText === notice || bodyText.includes(notice))
-  })
+  return phase === 'active' && (normalizedName === 'write' || normalizedName === 'edit')
 }
 
 /** 参数是否承载可展示的调用正文（避免空对象渲染空正文）。 */

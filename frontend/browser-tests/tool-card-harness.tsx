@@ -14,12 +14,15 @@ import type {
   DialogueMessage,
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
+import { setLocale } from '@/shared/i18n'
 
 /**
  * Slice C 的真实浏览器 harness：挂载真实 ThreadConversationView + 工具卡片，
  * 用最少的夹具驱动「流式增长跟随 / 空闲高度变化不抢锚点 / 图片加载 / 流式转终态身份」。
  * 不启动后端与模型；资源解析使用固定夹具。
  */
+
+setLocale('zh-CN')
 
 type HarnessState = {
   messages: DialogueMessage[]
@@ -463,6 +466,18 @@ const toolCardHarness = {
   settle(lines = 40) {
     publish({
       messages: [...filler(6), bashTool('call-bash', lines, false), bashResult('call-bash', lines)],
+      streaming: false,
+    })
+  },
+  /** 长卡片：展开后必须高于 transcript 可视区，底部收起才有意义。 */
+  longExpanded(lines = 120) {
+    publish({
+      messages: [
+        ...filler(5),
+        bashTool('call-long', lines, false),
+        bashResult('call-long', lines),
+        ...filler(5),
+      ],
       streaming: false,
     })
   },

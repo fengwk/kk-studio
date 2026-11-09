@@ -8,6 +8,7 @@ describe('ToolCallPreview 参数流开始', () => {
     const { container } = render(
       <ToolCallPreview
         streaming
+        variant="transcript"
         preview={{ kind: 'write', path: '', content: '', hasContent: false, lines: [] }}
       />,
     )
@@ -19,6 +20,7 @@ describe('ToolCallPreview 参数流开始', () => {
     const { container } = render(
       <ToolCallPreview
         streaming
+        variant="transcript"
         preview={{
           kind: 'edit',
           mode: 'input',

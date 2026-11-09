@@ -20,35 +20,26 @@ import './resource-attachments.css'
  * 有序结果内容的只读渲染：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染。
  * 内容顺序不被重排，也不把资源挪到所有文本之后。
  *
- * `followTail` 只由持续日志（bash 流式输出）的调用方开启；默认 false 时 Text/JSON
- * 都从顶部读，内容增长也不强拉到底部。
+ * 对话记录中的正文没有内部滚动；需要按行截取时由调用方先截取文本。
  */
 export function ToolContentView({
   contents,
-  followTail = false,
 }: {
   contents: ToolContent[]
-  followTail?: boolean
 }) {
   return (
     <div className="thread-tool-contents">
       {contents.map((content, index) => (
-        <ToolContentItem key={contentKey(content, index)} content={content} followTail={followTail} />
+        <ToolContentItem key={contentKey(content, index)} content={content} />
       ))}
     </div>
   )
 }
 
-function ToolContentItem({
-  content,
-  followTail,
-}: {
-  content: ToolContent
-  followTail: boolean
-}) {
+function ToolContentItem({ content }: { content: ToolContent }) {
   if (content.type === 'text') {
     return (
-      <ToolOutputViewport followKey={content.text} followTail={followTail}>
+      <ToolOutputViewport bounded={false}>
         {content.text}
       </ToolOutputViewport>
     )
@@ -56,7 +47,7 @@ function ToolContentItem({
   if (content.type === 'json') {
     const text = formatJsonContent(content.value)
     return (
-      <ToolOutputViewport followKey={text} followTail={followTail} className="is-json">
+      <ToolOutputViewport bounded={false} className="is-json">
         {text}
       </ToolOutputViewport>
     )
@@ -85,7 +76,7 @@ function ToolResourceView({ attachment }: { attachment: ToolAttachment }) {
         <ResourceAttachmentChip attachment={attachment} />
         {preview ? (
           <ToolOutputViewport
-            followKey={preview}
+            bounded={false}
             className="thread-tool-attachment-preview"
           >
             {preview}
@@ -121,7 +112,7 @@ function ToolResourceView({ attachment }: { attachment: ToolAttachment }) {
           {preview ? (
             // ResourceMessageContent.preview 是文本摘录，不是媒体 URL。
             <ToolOutputViewport
-              followKey={preview}
+              bounded={false}
               className="thread-tool-attachment-preview"
             >
               {preview}

@@ -23,13 +23,13 @@ const message: ToolDialogueMessage = {
   arguments: '{"path":"README.md"}',
 }
 
-const expandButton = () => screen.queryByRole('button', { name: '展开工具预览' })
+const expandButton = () => screen.queryByRole('button', { name: '展开详情' })
 
 describe('MessageList tool renderer dispatch', () => {
   it('renders an empty list without crashing and without any tool surface', () => {
     const { container } = render(<MessageList messages={[]} />)
     expect(container.querySelector('.thread-block')).not.toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-surface')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-block-tool')).not.toBeInTheDocument()
   })
 
   it('does not pair a tool call and result by tool name when both toolCallIds are absent', () => {
@@ -94,7 +94,7 @@ describe('MessageList tool renderer dispatch', () => {
       />,
     )
     // rendererKey 不同时 result 不并入 call，两张卡片各自保留。
-    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(2)
+    expect(container.querySelectorAll('.thread-block-tool')).toHaveLength(2)
     expect(screen.queryByText('orphan result')).not.toBeInTheDocument()
   })
 
@@ -127,7 +127,7 @@ describe('MessageList tool renderer dispatch', () => {
       <MessageList messages={[{ ...message, id: 'unknown-role' } as unknown as DialogueMessage]} />,
     )
     // 未知 role 走 tool single 分支；单卡渲染、结果文本默认收起。
-    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelectorAll('.thread-block-tool')).toHaveLength(1)
     expect(screen.queryByText('full result')).not.toBeInTheDocument()
     expect(expandButton()).toBeInTheDocument()
   })
@@ -204,7 +204,7 @@ describe('MessageList tool renderer dispatch', () => {
       />,
     )
     // 单张卡片；read 文本默认收起。
-    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelectorAll('.thread-block-tool')).toHaveLength(1)
     expect(screen.queryByText('standalone output')).not.toBeInTheDocument()
     expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
   })
