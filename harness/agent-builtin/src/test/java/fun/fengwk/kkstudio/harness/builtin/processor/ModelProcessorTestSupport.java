@@ -74,7 +74,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -477,7 +477,7 @@ abstract class ModelProcessorTestSupport {
               scheduler,
               Runnable::run,
               executionExecutor,
-              TestExecutionExitConfirmer.create(store, clock));
+              TestExecutionLifecycle.create(store, clock));
       gateway.owner = processor;
     }
   }
@@ -554,7 +554,7 @@ abstract class ModelProcessorTestSupport {
         newScheduler(),
         Runnable::run,
         newExecutionExecutor(),
-        TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+        TestExecutionLifecycle.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
   }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */

@@ -25,7 +25,9 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
+import fun.fengwk.kkstudio.harness.runtime.execution.MemoryExecutionExitJournal;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
@@ -493,7 +495,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
     fixture.gateway.beforeReturn = ignored -> fail.set(true);
     try {
@@ -528,7 +530,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                       tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).getFirst()));
               throw new RejectedExecutionException("rejected");
             },
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
     try {
       assertEquals(
@@ -588,7 +590,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             ignored -> {
               throw new RejectedExecutionException("rejected");
             },
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     ExitLogCapture exitLogs = ExitLogCapture.attach(ModelProcessor.class);
     try {
       assertEquals(
@@ -650,7 +652,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             queued::set,
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     try {
       assertEquals(
           ProcessResult.STARTED,
@@ -687,6 +689,85 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
     assertEquals(1, closes.get(), "processor close must not close an already released admission");
   }
 
+  /** admission 取消只中断 body，不释放物理句柄；body 与资源结束后才确认 Studio 退出。 */
+  @Test
+  void cancelAfterBodyStartedKeepsPreparedUntilBodyAndResourcesClose() throws Exception {
+    Fixture fixture = fixture();
+    MemoryExecutionExitJournal journal = new MemoryExecutionExitJournal();
+    ExecutionLifecycle lifecycle =
+        TestExecutionLifecycle.create(fixture.store, fixture.clock, journal);
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicBoolean interrupted = new AtomicBoolean();
+    fixture.gateway.queue(
+        new ModelGateway.Admitted() {
+          @Override
+          public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+            entered.countDown();
+            while (true) {
+              try {
+                if (release.await(10, TimeUnit.MILLISECONDS)) {
+                  break;
+                }
+              } catch (InterruptedException cancelled) {
+                interrupted.set(true);
+              }
+            }
+            Thread.interrupted();
+            return new ModelGateway.Unknown(
+                new ModelInvocationError(ProviderErrorKind.TRANSIENT, "cancelled"));
+          }
+
+          @Override
+          public void close() {}
+        });
+    ModelProcessor processor =
+        new ModelProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            newExecutionExecutor(),
+            lifecycle);
+    try {
+      assertEquals(
+          ProcessResult.STARTED,
+          processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"))));
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      ExecutionExitFact registered =
+          fixture.store.transaction(
+              tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).getFirst());
+      assertEquals(1, journal.loadAll().records().size(), "PREPARED must cover the live body");
+
+      assertTrue(processor.cancel(fixture.invocationId));
+      awaitTrue(interrupted::get);
+      assertFalse(processor.hasActiveExecution(), "admission entry is removed on cancel");
+      assertEquals(
+          ExecutionExitState.UNCONFIRMED,
+          fixture.store.transaction(
+              tx -> tx.exits().find(registered.executionId()).orElseThrow().state()),
+          "cancelling admission is not physical exit");
+      assertFalse(
+          journal.loadAll().records().isEmpty(), "PREPARED stays until body and resources end");
+
+      release.countDown();
+      var drain = lifecycle.drain(Duration.ofSeconds(5));
+      assertTrue(drain.settled(), drain.toString());
+      assertEquals(
+          ExecutionExitState.STUDIO_EXITED,
+          fixture.store.transaction(
+              tx -> tx.exits().find(registered.executionId()).orElseThrow().state()),
+          "body exit after cancel must confirm STUDIO_EXITED");
+      assertTrue(journal.loadAll().records().isEmpty());
+    } finally {
+      processor.close();
+    }
+  }
+
   /** 已过期 A 在前置检查后恢复，不得中断新 owner B 的合法执行。 */
   @Test
   void expiredClaimCannotCancelNewOwnerAfterOwnershipCheck() throws Exception {
@@ -705,7 +786,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     ClaimedWork claimA =
         claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"));
     AtomicReference<ProcessResult> result = new AtomicReference<>();
@@ -788,7 +869,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixtureA.store, fixtureA.clock));
+            TestExecutionLifecycle.create(fixtureA.store, fixtureA.clock));
     assertEquals(ProcessResult.STARTED, processorB.process(claimedB));
     awaitTrue(() -> !processorB.hasActiveExecution());
 
@@ -829,7 +910,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -875,7 +956,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             hooked,
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled(); // 不应被消费
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
@@ -975,7 +1056,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                 newScheduler(),
                 Runnable::run,
                 Runnable::run,
-                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
+                TestExecutionLifecycle.create(fixture.store, fixture.clock)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -988,7 +1069,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                 newScheduler(),
                 null,
                 Runnable::run,
-                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
+                TestExecutionLifecycle.create(fixture.store, fixture.clock)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -1001,7 +1082,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                 newScheduler(),
                 Runnable::run,
                 null,
-                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
+                TestExecutionLifecycle.create(fixture.store, fixture.clock)));
   }
 
   /** ProcessorLeaseConfig：interval 必须为正且严格小于 leaseDuration。 */
@@ -1098,7 +1179,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(store, Clock.systemUTC()));
+            TestExecutionLifecycle.create(store, Clock.systemUTC()));
     ControlledRun run = new ControlledRun();
     gateway.queue(run);
     ClaimedWork claimed =
@@ -1146,7 +1227,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             dead,
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
 
     assertEquals(
@@ -1253,7 +1334,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
+            TestExecutionLifecycle.create(fixture.store, fixture.clock))) {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
           processor.process(claim(fixture.store, fixture.invocationId)));
@@ -1288,7 +1369,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
+            TestExecutionLifecycle.create(fixture.store, fixture.clock))) {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
           processor.process(claim(fixture.store, fixture.invocationId)));
@@ -1328,7 +1409,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             newScheduler(),
             Runnable::run,
             newExecutionExecutor(),
-            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
+            TestExecutionLifecycle.create(fixture.store, fixture.clock));
 
     assertEquals(
         ProcessResult.TERMINATED, processor.process(claim(fixture.store, fixture.invocationId)));

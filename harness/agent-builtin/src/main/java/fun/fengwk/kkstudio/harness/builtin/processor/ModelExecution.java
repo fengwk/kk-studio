@@ -16,9 +16,11 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionHandle;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
+import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -66,15 +68,15 @@ public final class ModelExecution
 
   private final HarnessStore store;
   private final BuiltinStore builtinStore;
-  private final ExecutionExitConfirmer exitConfirmer;
+  private final LocalExecutionLifecycle lifecycle;
   private final ClaimedWork claim;
   private final UUID invocationId;
   private final UUID executionId = UUID.randomUUID();
   private final UUID threadId;
   private final int attempt;
 
-  /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
-  private volatile ExecutionExitFact registered;
+  /** PREPARED 之后、登记事务提交后由生命周期端口返回的物理句柄。 */
+  private volatile LocalExecutionHandle localHandle;
 
   private final WorkHeartbeat heartbeat;
   private final Consumer<ModelExecution> ownerRelease;
@@ -82,12 +84,7 @@ public final class ModelExecution
 
   private final AtomicBoolean abandoned = new AtomicBoolean();
 
-  /** 保护 {@link #runner}：abandon 只在 Gateway 运行窗口内中断运行线程，绝不打断持久化事务。 */
-  private final Object runGuard = new Object();
-
-  private Thread runner;
-
-  /** 是否真正进入 Gateway body；在 runner 登记锁内与 cancel 判定串行化。 */
+  /** 是否真正进入 Gateway body；attach 与取消由物理句柄串行化。 */
   private volatile boolean bodyStarted;
 
   private final ModelStreamPublisher stream;
@@ -113,7 +110,7 @@ public final class ModelExecution
       Executor heartbeatWorker,
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease,
-      ExecutionExitConfirmer exitConfirmer) {
+      LocalExecutionLifecycle lifecycle) {
     this(
         store,
         gateway,
@@ -131,7 +128,7 @@ public final class ModelExecution
         flushExecutor,
         ownerRelease,
         System::nanoTime,
-        exitConfirmer);
+        lifecycle);
   }
 
   public ModelExecution(
@@ -151,10 +148,10 @@ public final class ModelExecution
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease,
       LongSupplier nanoTime,
-      ExecutionExitConfirmer exitConfirmer) {
+      LocalExecutionLifecycle lifecycle) {
     this.store = Objects.requireNonNull(store, "store");
     this.builtinStore = requireBuiltinStore(store);
-    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
+    this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
     this.claim = Objects.requireNonNull(claim, "claim");
     this.invocationId = claim.target().id();
     this.threadId = Objects.requireNonNull(threadId, "threadId");
@@ -230,22 +227,26 @@ public final class ModelExecution
     confirm(ExecutionExitState.STUDIO_EXITED);
   }
 
+  /** 无法证明退出：保留 PREPARED 与未确认事实，并要求日志目录锁保留到 JVM 退出。 */
+  void exitNotProven() {
+    LocalExecutionHandle handle = localHandle;
+    if (handle != null) {
+      handle.exitNotProven();
+    }
+  }
+
   private void confirm(ExecutionExitState state) {
-    ExecutionExitFact local = registered;
-    if (local == null) {
+    LocalExecutionHandle handle = localHandle;
+    if (handle == null) {
       log.warn("model execution {} was not registered and remains unconfirmed", executionId);
       return;
     }
     try {
-      ExecutionExitConfirmer.Result result = exitConfirmer.confirm(local, state);
-      if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
-        // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
-        return;
-      }
+      handle.provenExit(state);
     } catch (RuntimeException failure) {
       log.warn(
           "cannot confirm model execution exit for {}; phase=MODEL_EXIT_CONFIRM; exception={}",
-          local.executionId(),
+          executionId,
           failure.getClass().getSimpleName());
     }
   }
@@ -275,71 +276,85 @@ public final class ModelExecution
     return heartbeat.start(claim);
   }
 
-  /** READY -&gt; RUNNING（attempt + 1），先于任何请求发出持久化。lost / stale / Stop 获胜时返回 false，调用方不得发出请求。 */
+  /**
+   * 先持久化 PREPARED，再在事务内把 READY 推进为 RUNNING（attempt + 1）并登记本代执行事实；只有事务提交成功且未取消时返回 {@code true}。
+   *
+   * <p>持久句柄由生命周期端口持有：lost / stale / Stop 获胜或 PREPARED 写入失败时不返回可执行句柄，调用方必须先释放已取得资源再结束句柄。
+   */
   public boolean markRunning() {
-    boolean committed;
+    LocalExecutionHandle handle;
     try {
-      committed =
-          Boolean.TRUE.equals(
-              inTransaction(
-                  tx -> {
-                    Instant now = tx.now();
-                    ThreadState thread = tx.threads().lock(threadId).orElse(null);
-                    if (thread == null) {
-                      return false;
-                    }
-                    ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-                    if (model == null || tx.work().lockClaimed(claim).isEmpty()) {
-                      return false;
-                    }
-                    if (model.status() != ModelInvocationStatus.READY
-                        || model.attempt() != attempt - 1) {
-                      return false;
-                    }
-                    tx.updateModelInvocation(model.markRunning(now));
-                    tx.threads().update(thread.touchVersion(now));
-                    registered =
-                        ExecutionExitLedger.register(
-                            tx,
-                            executionId(),
-                            threadId,
-                            invocationId,
-                            attempt,
-                            claim.leaseToken(),
-                            ExecutionExitKind.DRIVER,
-                            null);
-                    return true;
-                  }));
+      handle =
+          lifecycle.begin(
+              new LocalExecutionIdentity(
+                  executionId,
+                  threadId,
+                  invocationId,
+                  attempt,
+                  claim.leaseToken(),
+                  ExecutionExitKind.DRIVER),
+              this::registerRunning);
     } catch (RuntimeException failure) {
-      log.warn("cannot persist model running state for {}", invocationId, failure);
-      committed = false;
+      log.warn("cannot prepare model execution state for {}", invocationId, failure);
+      return false;
     }
-    return committed && !abandoned.get();
+    localHandle = handle;
+    return handle.registered() && !abandoned.get();
+  }
+
+  /** 在 PREPARED 已落盘后登记 RUNNING + 退出事实；事务提交成功但未登记（stale / Stop / 失权）时返回 {@code null}。 */
+  private ExecutionExitFact registerRunning() {
+    return inTransaction(
+        tx -> {
+          Instant now = tx.now();
+          ThreadState thread = tx.threads().lock(threadId).orElse(null);
+          if (thread == null) {
+            return null;
+          }
+          ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+          if (model == null || tx.work().lockClaimed(claim).isEmpty()) {
+            return null;
+          }
+          if (model.status() != ModelInvocationStatus.READY || model.attempt() != attempt - 1) {
+            return null;
+          }
+          tx.updateModelInvocation(model.markRunning(now));
+          tx.threads().update(thread.touchVersion(now));
+          return ExecutionExitLedger.register(
+              tx,
+              executionId(),
+              threadId,
+              invocationId,
+              attempt,
+              claim.leaseToken(),
+              ExecutionExitKind.DRIVER,
+              null);
+        });
   }
 
   /** 本代是否已经持久登记。启动失败只在登记成功后才能确认未启动。 */
   boolean registered() {
-    return registered != null;
+    LocalExecutionHandle handle = localHandle;
+    return handle != null && handle.registered();
   }
 
-  /** RUNNING 已登记但执行线程确定没有启动。登记失败时不确认。 */
+  /** 已登记或已持有 PREPARED 但执行线程确定没有启动；资源释放成功后由生命周期端口结束该代次。 */
   public void confirmNotStarted() {
-    if (registered != null) {
+    if (localHandle != null) {
       confirm(ExecutionExitState.NOT_STARTED);
     }
   }
 
   /**
-   * 在当前（运行）线程上阻塞执行 Gateway；abandon 在此窗口内中断本线程。返回 {@code null} 表示 execution 已被 abandon，调用方不得再提交任何状态。
+   * 在当前（运行）线程上阻塞执行 Gateway；取消早于 body attach 时返回 {@code null} 且绝不再进入 body。返回 {@code null} 表示
+   * execution 已被 abandon，调用方不得再提交任何状态。
    */
   public ModelGateway.Outcome run(ModelGateway.Admitted admitted) {
-    synchronized (runGuard) {
-      if (abandoned.get()) {
-        return null;
-      }
-      runner = Thread.currentThread();
-      bodyStarted = true;
+    LocalExecutionHandle handle = localHandle;
+    if (abandoned.get() || handle == null || !handle.attachBody(Thread.currentThread())) {
+      return null;
     }
+    bodyStarted = true;
     try {
       ModelGateway.Outcome outcome = admitted.run(this);
       return abandoned.get() ? null : outcome;
@@ -356,9 +371,7 @@ public final class ModelExecution
               ProviderErrorKind.TRANSIENT,
               "model gateway run failed unexpectedly; provider outcome cannot be confirmed"));
     } finally {
-      synchronized (runGuard) {
-        runner = null;
-      }
+      handle.detachBody();
       // 清除 abandon 留下的中断标记，之后的持久化事务不受影响。
       Thread.interrupted();
     }
@@ -425,7 +438,7 @@ public final class ModelExecution
     };
   }
 
-  /** 停止 heartbeat 与 tick、中断运行线程（仅 Gateway 运行窗口内）并从 registry 释放；幂等。 */
+  /** 停止 heartbeat 与 tick、请求取消物理 body（含迟到 attach）并从 registry 释放；幂等。 */
   @Override
   public void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
@@ -433,10 +446,9 @@ public final class ModelExecution
     }
     heartbeat.stop();
     stream.cancelTick();
-    synchronized (runGuard) {
-      if (runner != null && runner != Thread.currentThread()) {
-        runner.interrupt();
-      }
+    LocalExecutionHandle handle = localHandle;
+    if (handle != null) {
+      handle.requestCancel();
     }
     ownerRelease.accept(this);
   }

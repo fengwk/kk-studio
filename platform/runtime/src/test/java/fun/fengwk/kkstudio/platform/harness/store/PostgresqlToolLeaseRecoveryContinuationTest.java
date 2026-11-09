@@ -373,6 +373,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         Clock.systemUTC(),
         scheduler,
         Runnable::run,
+        ExecutionExitTestSupport.lifecycle(store, Clock.systemUTC()),
         ExecutionExitTestSupport.confirmer(store, Clock.systemUTC()),
         (sessionId, toolName, result) -> result);
   }
