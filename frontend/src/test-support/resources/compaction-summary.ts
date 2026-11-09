@@ -31,7 +31,7 @@ export const FULL_COMPACTION_SUMMARY = [
 ].join('\n')
 
 /**
- * 长正文 fixture：超出卡片正文最大高度，用于验证唯一有界滚动区。
+ * 长正文 fixture：展开后完整显示且无内部滚动，用于验证统一容器不按行截断。
  */
 export const LONG_COMPACTION_SUMMARY = [
   '# 长摘要',

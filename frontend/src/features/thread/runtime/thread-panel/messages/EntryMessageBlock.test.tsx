@@ -93,7 +93,7 @@ describe('EntryMessageBlock', () => {
     expect(screen.getByText('无法识别消息 Entry 的摘要')).toBeInTheDocument()
   })
 
-  it('renders FORK entries as system message cards with the fixed English notice', () => {
+  it('renders FORK entries as collapsible system message cards with the fixed English notice', () => {
     const notice = 'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.'
     const { container } = render(
       <EntryMessageBlock
@@ -109,6 +109,9 @@ describe('EntryMessageBlock', () => {
     expect(card).toBeInTheDocument()
     expect(card).toHaveAttribute('data-fork-mode', 'SESSION')
     expect(screen.getByText('已从历史切点复制为新会话')).toBeInTheDocument()
+    // 系统消息正文默认 0 行，展开后才显示固定英文提示。
+    expect(screen.queryByText(notice)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
     expect(screen.getByText(notice)).toBeInTheDocument()
   })
 })

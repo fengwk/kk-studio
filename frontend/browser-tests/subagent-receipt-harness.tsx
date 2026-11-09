@@ -115,6 +115,22 @@ const ENTRIES: HarnessSessionEntryDTO[] = [
     task: 'second run of the same subagent',
     result: 'second report',
   }),
+  // 长失败原因：固定错误块收起 3 行 + 提示，展开完整显示。
+  receiptEntry('child-thread-5', 'entry-long-error', {
+    agent: 'explorer',
+    state: 'error',
+    task: 'Diagnose the long failure report and summarize the root cause.',
+    result: 'diagnostic result text',
+    error: [
+      'failure line one',
+      'failure line two',
+      'failure line three',
+      'failure line four',
+      'failure line five',
+      'failure line six',
+    ].join('\n'),
+    partial: 'partial diagnostics',
+  }),
   notificationEntry('budget **exhausted**', 'entry-budget', 'TASK_BUDGET'),
   notificationEntry('opaque system fact', 'entry-unknown', 'SOMETHING_ELSE'),
 ]
