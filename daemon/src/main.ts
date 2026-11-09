@@ -128,7 +128,9 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       fileChanged: (file) => lspGroup.fileChanged(file),
     })
 
+    const daemonInstanceId = randomUUID()
     const ide = await createIdeService(config, supervisor, {
+      daemonInstanceId,
       // IDE 生命周期事件必须显式落到诊断出口；消息由 service 生成且不含凭据或任意上游正文。
       onEvent: (event) => {
         const view = event.viewId === undefined ? '' : ` view=${event.viewId}`
@@ -140,7 +142,7 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const transport = createDaemonTransport({
       config: () => runtime?.getAppliedConfig() ?? config,
       ide,
-      daemonInstanceId: randomUUID(),
+      daemonInstanceId,
     })
     closers.push(() => transport.close())
 

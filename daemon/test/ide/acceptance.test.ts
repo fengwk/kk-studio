@@ -20,7 +20,8 @@ import { exchangeUpstreamWebSocket, requestUpstream } from './acceptance-helpers
 
 const ACCEPTANCE_DIR = process.env.KK_STUDIO_IDE_ACCEPTANCE_DIR
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
-const DOCUMENT_ID = '22222222-2222-4222-8222-222222222222'
+const BROWSER_SESSION_ID = '22222222-2222-4222-8222-222222222222'
+const DAEMON_INSTANCE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -114,7 +115,9 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
       const distribution = await createDistribution()
       const supervisor = new RealSupervisor()
       cleanups.push(() => supervisor.close())
-      const service = await createIdeService(makeConfig(distribution), supervisor)
+      const service = await createIdeService(makeConfig(distribution), supervisor, {
+        daemonInstanceId: DAEMON_INSTANCE_ID,
+      })
       cleanups.push(() => service.close())
 
       const project = join(distribution, 'project')
@@ -123,12 +126,14 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
         {
           action: 'OPEN_VIEW',
           viewId: VIEW_ID,
-          documentId: DOCUMENT_ID,
+          browserSessionId: BROWSER_SESSION_ID,
           eventNodeId: '33333333-4444-4555-8666-777777777777',
           connectionId: '44444444-5555-4666-8777-888888888888',
           claimId: '55555555-6666-4777-8888-999999999999',
           mode: 'create',
           directory: project,
+          expectedBindingEpoch: '0',
+          expectedDaemonInstanceId: DAEMON_INSTANCE_ID,
         },
         signal(),
       )
@@ -182,7 +187,14 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
       expect(message).toContain('"event":"health"')
 
       const closed = await service.handle(
-        { action: 'CLOSE_VIEW', viewId: VIEW_ID, documentId: DOCUMENT_ID, bindingEpoch: epoch, discard: true },
+        {
+          action: 'CLOSE_VIEW',
+          viewId: VIEW_ID,
+          browserSessionId: BROWSER_SESSION_ID,
+          bindingEpoch: epoch,
+          discard: true,
+          expectedDaemonInstanceId: DAEMON_INSTANCE_ID,
+        },
         signal(),
       )
       expect(closed.ok).toBe(true)

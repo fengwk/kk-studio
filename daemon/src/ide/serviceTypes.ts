@@ -1,4 +1,4 @@
-import type { IdeReply } from '../contracts.js'
+import type { IdeReply, IdeViewSummary } from '../contracts.js'
 
 export interface ActiveStream {
   viewId: string
@@ -11,11 +11,15 @@ export interface ActiveStream {
 
 export interface ViewRecord {
   viewId: string
-  documentId: string
+  /** Stable owner of the managed workspace; only this browser session may rebind it. */
+  browserSessionId: string
+  /** Current connection proof; changed by every successful binding CAS. */
   eventNodeId: string
   connectionId: string
   claimId: string
   bindingEpoch: string
+  /** A binding CAS is in flight; snapshots wait and data streams must not attach. */
+  bindingPending?: boolean
   directory: string
   workspacePath: string
   workspaceOwned: boolean
@@ -34,7 +38,23 @@ export interface ViewRecord {
 
 export interface ClaimRecord {
   shape: string
-  reply: IdeReply
   viewId: string
   bindingEpoch: string
+}
+
+/**
+ * Complete visible IDE state at one committed revision.
+ *
+ * <p>Views are ordered by viewId and carry no heartbeat timestamps. A reservation keeps the
+ * reserved revision invisible to snapshots until its binding commit lands.
+ */
+export interface IdeSnapshot {
+  revision: string
+  views: IdeViewSummary[]
+}
+
+export interface BindingReservation {
+  epoch: string
+  /** Publishes the reserved revision after the state mutation is complete. */
+  complete(): void
 }

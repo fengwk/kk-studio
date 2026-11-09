@@ -23,7 +23,13 @@ import { createClosePath } from './serviceClose.js'
 import { createCommandHandler } from './serviceCommands.js'
 import { createViewLease } from './serviceLease.js'
 import { createViewRegistry } from './serviceRegistry.js'
-import type { ActiveStream, ClaimRecord, ViewRecord } from './serviceTypes.js'
+import type {
+  ActiveStream,
+  BindingReservation,
+  ClaimRecord,
+  IdeSnapshot,
+  ViewRecord,
+} from './serviceTypes.js'
 import {
   RecoveryQuotaError,
   canonicalDirectory,
@@ -36,15 +42,15 @@ import {
 /**
  * Managed code-server IDE lifecycle for one Environment.
  *
- * <p>All view claims, document exclusivity and binding epochs are decided in this process under
- * a per-view lock. A claim reservation counts toward the fixed view quota before any process or
- * filesystem work starts, so concurrent opens cannot oversubscribe one Environment. Usage proof
- * never creates or extends a view beyond its own epoch: Runtime supplies the local monotonic time
- * at which the lease round was sent; old binding epochs cannot be renewed.
+ * <p>Every visible state commit advances one IDE revision. bindingEpoch is a reservation from
+ * that same sequence and becomes visible only with the binding commit; snapshots wait for such
+ * reservations, so no revision is ever observed with pre-commit content. A view's workspace is
+ * owned by browserSessionId, and only that session can CAS a new binding epoch. Usage proof
+ * never creates or extends a view beyond its own binding epoch: Runtime supplies the local
+ * monotonic time at which the lease round was sent; old binding epochs cannot be renewed.
  */
 
 const IDE_MAX_VIEWS = 64
-export const IDE_PROOF_EXCLUSIVITY_MILLIS = 45_000
 export const IDE_VIEW_EXPIRY_MILLIS = 600_000
 export const IDE_IDLE_STOP_MILLIS = 60_000
 const IDE_CLOSE_BUDGET_MILLIS = 10_000
@@ -88,6 +94,8 @@ export interface IdeServiceEvent {
 }
 
 export interface IdeServiceOptions {
+  /** Actual process identity shared with the control transport; never generated per subsystem. */
+  daemonInstanceId: string
   bridge?: IdeBridge
   manager?: CodeServerManager
   scheduler?: IdeScheduler
@@ -142,7 +150,7 @@ function boundedText(value: string | undefined, field: string): string | undefin
 function summary(view: ViewRecord): IdeViewSummary {
   return {
     viewId: view.viewId,
-    documentId: view.documentId,
+    browserSessionId: view.browserSessionId,
     eventNodeId: view.eventNodeId,
     connectionId: view.connectionId,
     claimId: view.claimId,
@@ -226,12 +234,13 @@ function upstreamHeaders(headers: [string, string][]): { headers: [string, strin
 export async function createIdeService(
   config: DaemonConfig,
   processes: ProcessSupervisor,
-  options: IdeServiceOptions = {},
+  options: IdeServiceOptions,
 ): Promise<IdeService> {
   const paths = idePaths(config)
   const scheduler = options.scheduler ?? systemScheduler
   const maxViews = options.maxViews ?? IDE_MAX_VIEWS
   const recoveryQuotaBytes = options.recoveryQuotaBytes ?? DEFAULT_RECOVERY_QUOTA_BYTES
+  const daemonInstanceId = options.daemonInstanceId
   const bridge = options.bridge ?? (await createIdeBridge())
   const manager =
     options.manager ??
@@ -247,7 +256,7 @@ export async function createIdeService(
   const claimLocks = new Map<string, Promise<void>>()
   const lifetime = new AbortController()
   let closed = false
-  let nextEpoch = 1n
+  let revision = 0n
   let idleTimer: unknown
   let managerStop: Promise<void> | undefined
   let crashEpoch = 0
@@ -262,13 +271,51 @@ export async function createIdeService(
     }
   }
 
-  const allocateEpoch = (): string => {
-    if (nextEpoch > LONG_MAX) {
-      throw new IdeError('bindingEpoch space is exhausted', 'BUSY')
+  const commitRevision = (): string => {
+    if (revision >= LONG_MAX) {
+      throw new IdeError('IDE revision space is exhausted', 'BUSY')
     }
-    const value = nextEpoch.toString()
-    nextEpoch++
-    return value
+    revision += 1n
+    return revision.toString()
+  }
+
+  /**
+   * Binding epochs are reserved from the same revision sequence as every visible commit.
+   * The reservation barrier keeps the reserved revision out of snapshots until its view
+   * mutation lands, so a revision never describes pre-commit content.
+   */
+  const pendingBindingCommits = new Set<Promise<void>>()
+  const reserveBinding = (): BindingReservation => {
+    const epoch = commitRevision()
+    let release: () => void = () => {}
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    pendingBindingCommits.add(pending)
+    let settled = false
+    return {
+      epoch,
+      complete: () => {
+        if (settled) {
+          return
+        }
+        settled = true
+        pendingBindingCommits.delete(pending)
+        release()
+      },
+    }
+  }
+  const awaitPendingBindingCommits = async (): Promise<void> => {
+    while (pendingBindingCommits.size > 0) {
+      await Promise.all([...pendingBindingCommits])
+    }
+  }
+  const snapshot = async (): Promise<IdeSnapshot> => {
+    await awaitPendingBindingCommits()
+    const viewSummaries = [...views.values()]
+      .map(summary)
+      .sort((left, right) => (left.viewId < right.viewId ? -1 : left.viewId > right.viewId ? 1 : 0))
+    return { revision: revision.toString(), views: viewSummaries }
   }
 
   const withLock = <T>(locks: Map<string, Promise<void>>, key: string, task: () => Promise<T>): Promise<T> => {
@@ -368,7 +415,6 @@ export async function createIdeService(
         continue
       }
       clearTimer(view)
-      dropClaimsForView(view.viewId)
       bridge.revoke(view.viewId, view.bindingEpoch)
       if (view.workspaceOwned) {
         try {
@@ -378,6 +424,7 @@ export async function createIdeService(
         }
       }
       if (views.get(view.viewId) === view) {
+        commitRevision()
         views.delete(view.viewId)
       }
     }
@@ -445,18 +492,18 @@ export async function createIdeService(
     }
   }
 
-  const { openView, requireBoundView, dropClaimsForView } = createViewRegistry({
-    paths, views, reservations, claims, scheduler, bridge, manager, maxViews,
-    proofExclusivityMillis: IDE_PROOF_EXCLUSIVITY_MILLIS, closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,
+  const { openView, requireBoundView } = createViewRegistry({
+    paths, views, reservations, claims, scheduler, bridge, manager, maxViews, daemonInstanceId,
+    closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,
     getCrashEpoch: () => crashEpoch, emit, withViewLock, withClaimLock, scheduleExpiry, scheduleIdleStop,
-    cancelIdle, allocateEpoch, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash, abortViewStreams,
-    required, boundedText,
+    cancelIdle, reserveBinding, snapshot, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash,
+    abortViewStreams, required, boundedText,
   })
 
   const { closeView, expireView } = createClosePath({
     config, views, scheduler, bridge, manager, lifetime, recoveryQuotaBytes,
     closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS, expiryMillis: IDE_VIEW_EXPIRY_MILLIS,
-    emit, withViewLock, clearTimer, scheduleExpiry, dropClaimsForView, scheduleIdleStop,
+    emit, withViewLock, clearTimer, scheduleExpiry, commitRevision, snapshot, scheduleIdleStop,
     waitForViewStreams, waitWithSignal, required, requireBoundView,
   })
 
@@ -479,13 +526,14 @@ export async function createIdeService(
         current !== view ||
         current.state !== 'OPEN' ||
         current.bindingEpoch !== view.bindingEpoch ||
-        current.documentId !== view.documentId
+        current.browserSessionId !== view.browserSessionId
       ) {
         throw new IdeError('view binding changed', 'VIEW_GONE')
       }
       await writePrivateFile(view.workspacePath, workspaceFileContent(directory))
+      commitRevision()
       view.directory = directory
-      return { ok: true, viewId: view.viewId, directory: view.directory }
+      return { ok: true, viewId: view.viewId, directory: view.directory, ...(await snapshot()) }
     })
   }
 
@@ -504,7 +552,7 @@ export async function createIdeService(
         current !== view ||
         current.state !== 'OPEN' ||
         current.bindingEpoch !== view.bindingEpoch ||
-        current.documentId !== view.documentId
+        current.browserSessionId !== view.browserSessionId
       ) {
         throw new IdeError('view binding changed', 'VIEW_GONE')
       }
@@ -518,7 +566,7 @@ export async function createIdeService(
         throw new IdeError(result.message ?? 'terminal could not be focused', result.code ?? 'UNAVAILABLE')
       }
       const after = views.get(view.viewId)
-      if (after !== view || after.bindingEpoch !== view.bindingEpoch || after.documentId !== view.documentId) {
+      if (after !== view || after.bindingEpoch !== view.bindingEpoch || after.browserSessionId !== view.browserSessionId) {
         throw new IdeError('view binding changed', 'VIEW_GONE')
       }
       return { ok: true, viewId: view.viewId }
@@ -544,14 +592,11 @@ export async function createIdeService(
     })
   }
 
-  const listViews = (): IdeReply => {
-    const values = [...views.values()].map(summary)
-    return { ok: true, views: values }
-  }
+  const listViews = async (): Promise<IdeReply> => ({ ok: true, ...(await snapshot()) })
 
   const handle = createCommandHandler({
     isClosed: () => closed, awaitCrashRecovery, openView, changeDirectory, focusTerminal, closeView,
-    collapseMobile, listViews, boundedText,
+    collapseMobile, listViews, snapshot, boundedText,
   })
 
   const getViewState = (viewId: string): IdeViewSummary | null => {
@@ -576,7 +621,12 @@ export async function createIdeService(
     const normalizedView = validateViewId(viewId)
     const normalizedEpoch = validateBindingEpoch(bindingEpoch)
     const view = views.get(normalizedView)
-    if (view === undefined || view.state !== 'OPEN' || view.bindingEpoch !== normalizedEpoch) {
+    if (
+      view === undefined ||
+      view.state !== 'OPEN' ||
+      view.bindingPending ||
+      view.bindingEpoch !== normalizedEpoch
+    ) {
       throw new IdeError('view is not open for this binding epoch', 'VIEW_GONE')
     }
     const session = manager.session()
@@ -671,11 +721,13 @@ export async function createIdeService(
     }
     crashEpoch++
     const affected = [...views.values()]
+    if (affected.length > 0) {
+      commitRevision()
+    }
     for (const view of affected) {
       view.state = 'CLOSING'
       view.cleanupFailed = true
       clearTimer(view)
-      dropClaimsForView(view.viewId)
       abortViewStreams(view)
       bridge.revoke(view.viewId, view.bindingEpoch)
     }

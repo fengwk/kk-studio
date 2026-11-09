@@ -1,5 +1,6 @@
 import type { IdeCommand, IdeReply } from '../contracts.js'
 import { IdeError, failureReply } from './errors.js'
+import type { IdeSnapshot } from './serviceTypes.js'
 import { hostHome, listDirectories } from './workspace.js'
 
 type CommandHandler = (command: IdeCommand, signal: AbortSignal) => Promise<IdeReply>
@@ -13,7 +14,8 @@ export function createCommandHandler(options: {
   focusTerminal: CommandHandler
   closeView: CommandHandler
   collapseMobile: CommandHandler
-  listViews: () => IdeReply
+  listViews: () => Promise<IdeReply>
+  snapshot: () => Promise<IdeSnapshot>
   boundedText: (value: string | undefined, field: string) => string | undefined
 }): CommandHandler {
   return async (command, signal) => {
@@ -32,7 +34,7 @@ export function createCommandHandler(options: {
         case 'CLOSE_VIEW':
           return await options.closeView(command, signal)
         case 'LIST_VIEWS':
-          return options.listViews()
+          return await options.listViews()
         case 'LIST_DIRECTORIES':
           return {
             ok: true,
@@ -44,7 +46,12 @@ export function createCommandHandler(options: {
           throw new IdeError('unknown ide action')
       }
     } catch (error) {
-      return failureReply(error)
+      // Any view action may have committed CLOSING/cleanup state before failing; the failed
+      // receipt still carries the complete post-failure snapshot for reconciliation.
+      return failureReply(
+        error,
+        command.action === 'LIST_DIRECTORIES' ? undefined : await options.snapshot(),
+      )
     }
   }
 }
