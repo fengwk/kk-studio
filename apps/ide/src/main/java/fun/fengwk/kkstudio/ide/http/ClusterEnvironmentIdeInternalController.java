@@ -4,11 +4,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.JacksonException;
@@ -102,9 +102,20 @@ public class ClusterEnvironmentIdeInternalController {
   public EnvironmentIdeViewSnapshotDTO readView(
       @PathVariable UUID environmentId,
       @PathVariable String viewId,
-      @ModelAttribute EnvironmentIdeReadViewDTO readView,
+      @RequestParam("browserSessionId") UUID browserSessionId,
+      @RequestParam("eventNodeId") UUID eventNodeId,
+      @RequestParam("connectionId") UUID connectionId,
+      @RequestParam("claimId") UUID claimId,
+      @RequestParam(value = "expectedDaemonInstanceId", required = false)
+          String expectedDaemonInstanceId,
       HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    EnvironmentIdeReadViewDTO readView = new EnvironmentIdeReadViewDTO();
+    readView.setBrowserSessionId(browserSessionId.toString());
+    readView.setEventNodeId(eventNodeId.toString());
+    readView.setConnectionId(connectionId.toString());
+    readView.setClaimId(claimId.toString());
+    readView.setExpectedDaemonInstanceId(expectedDaemonInstanceId);
     return localEnvironmentIdeService.readView(environment, viewId, readView);
   }
 

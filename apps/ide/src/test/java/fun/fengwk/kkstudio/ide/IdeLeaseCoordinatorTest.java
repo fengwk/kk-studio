@@ -54,7 +54,7 @@ class IdeLeaseCoordinatorTest {
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
   private static final DaemonConnectionIdentity IDENTITY =
-      new DaemonConnectionIdentity(ENV, "daemon-instance");
+      new DaemonConnectionIdentity(ENV, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
   private FakeViews views;
   private FakeTransport transport;

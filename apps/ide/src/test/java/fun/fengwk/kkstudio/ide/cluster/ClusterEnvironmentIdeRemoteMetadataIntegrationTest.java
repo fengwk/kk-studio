@@ -571,7 +571,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     request.setClaimId(CLAIM);
     request.setMode(EnvironmentIdeOpenMode.CREATE);
     request.setExpectedBindingEpoch(0L);
-    request.setExpectedDaemonInstanceId("daemon-instance");
+    request.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     request.setDirectory(directory);
     return request;
   }
@@ -580,7 +580,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
     binding.setBrowserSessionId(DOCUMENT);
     binding.setBindingEpoch(epoch);
-    binding.setExpectedDaemonInstanceId("daemon-instance");
+    binding.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     return binding;
   }
 
@@ -620,7 +620,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       CompletableFuture<IdeResult> reply = new CompletableFuture<>();
       reply.complete(replyFor(command));
       return new IdeRequest(
-          new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
+          new DaemonConnectionIdentity(environmentId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+          UUID.randomUUID(),
+          reply);
     }
 
     private IdeResult replyFor(IdeCommand command) {
@@ -683,7 +685,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(new DaemonConnectionIdentity(environmentId, "daemon-instance"));
+      return Optional.of(
+          new DaemonConnectionIdentity(environmentId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
     }
 
     @Override

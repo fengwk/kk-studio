@@ -118,9 +118,9 @@ class ClusterEnvironmentIdeInternalControllerTest {
     read.setEventNodeId("22222222-2222-2222-2222-222222222222");
     read.setConnectionId("33333333-3333-3333-3333-333333333333");
     read.setClaimId("44444444-4444-4444-4444-444444444444");
-    read.setExpectedDaemonInstanceId("daemon-instance");
+    read.setExpectedDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     EnvironmentIdeViewSnapshotDTO snapshot = new EnvironmentIdeViewSnapshotDTO();
-    snapshot.setDaemonInstanceId("daemon-instance");
+    snapshot.setDaemonInstanceId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     snapshot.setRevision(3L);
     when(localEnvironmentIdeService.readView(eq(ENV), eq(VIEW), any())).thenReturn(snapshot);
     String path = IdeInternalPaths.viewPath(ENV, VIEW, read);

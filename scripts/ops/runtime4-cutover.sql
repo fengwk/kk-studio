@@ -16,6 +16,10 @@
 
 begin;
 
+-- 固定本次事务的 schema 解析范围：调用者的 PGOPTIONS/search_path 或其它 schema 的同名表
+-- 不得改变 guard 读取的 Flyway history、ALTER 目标或注释目标。
+set local search_path = pg_catalog, public;
+
 set local lock_timeout = '5s';
 
 do $cutover$

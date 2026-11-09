@@ -64,7 +64,7 @@ class ClusterEnvironmentIdeServiceTest {
   private static final String EVENT_NODE = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
   private static final String CONNECTION = "12345678-1234-1234-1234-123456789abc";
   private static final String CLAIM = "87654321-4321-4321-4321-cba987654321";
-  private static final String DAEMON_INSTANCE = "daemon-instance";
+  private static final String DAEMON_INSTANCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String SECRET = "test-cluster-secret-0123456789abcdef";
 
   private final StubRegistry registry = new StubRegistry();
