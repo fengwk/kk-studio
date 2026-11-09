@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft, FolderOpen, PanelRight } from 'lucide-react'
@@ -107,12 +107,25 @@ function ChatWorkspaceContent({
   const ideHintId = useId()
   const filesHintId = useId()
   const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
-  const ideEnvironment = chatEnvironment && isCanonicalUuid(chatEnvironment.id)
-    ? { id: chatEnvironment.id, name: chatEnvironment.name, ready: chatEnvironment.ready }
-    : null
+  const ideEnvironment = useMemo(() => (
+    chatEnvironment && isCanonicalUuid(chatEnvironment.id)
+      ? { id: chatEnvironment.id, name: chatEnvironment.name, ready: chatEnvironment.ready }
+      : null
+  ), [chatEnvironment?.id, chatEnvironment?.name, chatEnvironment?.ready])
   const ideHint = ideEnvironment != null
     ? t('ai.ide.toggle')
     : t(chat.environmentName ? 'ai.ide.chatEnvironmentUnavailable' : 'ai.ide.selectChatEnvironment')
+  const activatedIdeEnvironmentRef = useRef<string | null>(null)
+  useEffect(() => {
+    const key = ideEnvironment == null
+      ? null
+      : `${ideEnvironment.id}:${ideEnvironment.name}:${String(ideEnvironment.ready)}`
+    if (activatedIdeEnvironmentRef.current === key) {
+      return
+    }
+    activatedIdeEnvironmentRef.current = key
+    idePanel?.activateChatEnvironment(ideEnvironment)
+  }, [ideEnvironment?.id, ideEnvironment?.name, ideEnvironment?.ready, idePanel])
   const [initialPaneLoad] = useState(() => loadChatPaneState(chat.id))
   const [paneState, setPaneState] = useState<ChatPaneState>(initialPaneLoad.state)
   const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})

@@ -32,8 +32,9 @@ import {
   recoveryFromViews,
   type IdeViewState,
   type IdeViewStatus,
-} from '@/features/environment/ide/ide-claim-reducer'
+} from '@/features/environment/ide/ide-view-state'
 import { useIdeClaimReconciliation } from '@/features/environment/ide/use-ide-claim-reconciliation'
+import { useIdeBrowserSession } from '@/features/environment/ide/ide-browser-session'
 
 export type { IdeViewState, IdeViewStatus, IdeActionMode }
 
@@ -41,26 +42,38 @@ export interface IdePanelStorageProps {
   storage?: IdeTabStorage
 }
 
+export interface IdePanelProviderProps extends IdePanelStorageProps {
+  /** 仅 `/chats/:chatId` 时为 true；宿主离开 Chat 后保持 DOM 但 hidden + inert。 */
+  active: boolean
+}
+
 function toEnvironmentInfo(environment: EnvironmentDTO): IdeEnvironmentInfo {
   return { id: environment.id, name: environment.name, ready: environment.ready }
 }
 
+function clearRuntimePresentation(presentation: IdePresentation): IdePresentation {
+  return {
+    panelVisible: presentation.panelVisible,
+    selectedEnvironmentId: null,
+    openedEnvironmentIds: [],
+  }
+}
+
 /**
- * tab 全局 IDE 面板 Provider：组合 Context 与视图。
- * 内存是唯一事实源，session 保存恢复身份，local 只保存最后展示意图。
- * 内部职责拆分为：
- * 1. 纯 claim reducer（ide-claim-reducer.ts）：状态、尝试序号、飞行动作与身份跃迁；
- * 2. 存储适配（ide-tab-state.ts）：唯一 sessionStorage/localStorage 适配，无额外缓存；
- * 3. 连接身份 claim 对账（use-ide-claim-reconciliation.ts）：WS 身份订阅、对账、epoch 围栏；
- * 4. Provider 本身（IdePanelProvider.tsx）：组合 Context 与视图。
+ * Chat IDE 持久宿主：组合 Context、浏览器会话锁与恢复状态机。
+ *
+ * <p>该组件在应用组合层常驻；只有 Chat 详情路由激活它。离开 Chat 时宿主 hidden + inert，
+ * iframe 不移根、不卸载。视图状态机只按权威快照与结构化 reason 推进。
  */
 export function IdePanelProvider({
   children,
   storage,
-}: PropsWithChildren<IdePanelStorageProps>) {
+  active,
+}: PropsWithChildren<IdePanelProviderProps>) {
   const queryClient = useQueryClient()
   const [initial] = useState(() => initializeIdeTabState(storage))
   const [presentation, setPresentationState] = useState<IdePresentation>(initial.presentation)
+  const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(null)
   const [knownEnvironments, setKnownEnvironments] = useState<Record<string, IdeEnvironmentInfo>>({})
   const [storageUnavailable, setStorageUnavailable] = useState(!initial.sessionSaved)
 
@@ -69,11 +82,14 @@ export function IdePanelProvider({
   const actionsRef = useRef<{
     openEnvironment: (request: IdeOpenEnvironmentRequest) => void
   } | null>(null)
+  const cloneHandlerRef = useRef<() => void>(() => {})
+  const restoreHandlerRef = useRef<() => void>(() => {})
+  const suspendHandlerRef = useRef<() => void>(() => {})
 
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
-    enabled: presentation.panelVisible || presentation.openedEnvironmentIds.length > 0,
+    enabled: active || presentation.openedEnvironmentIds.length > 0,
   })
 
   const invalidateEnvironments = useCallback(() => {
@@ -128,20 +144,55 @@ export function IdePanelProvider({
     setStorageUnavailable(unavailable)
   }, [])
 
+  const session = useIdeBrowserSession({
+    initial,
+    storage,
+    onClone: () => cloneHandlerRef.current(),
+    onRestore: () => restoreHandlerRef.current(),
+    onSuspend: () => suspendHandlerRef.current(),
+  })
+
   const claimReconciliation = useIdeClaimReconciliation({
     storage,
-    initialPresentation: initial.presentation,
-    initialRecovery: initial.recoveryByEnvironment,
+    initial,
+    session,
+    activeEnvironmentId,
     getPresentation,
     getEnvironmentMap,
     onStorageStatusChange: handleStorageStatusChange,
   })
 
-  const commitPresentation = useCallback((next: IdePresentation, write: 'both' | 'session' | 'none' = 'both') => {
+  cloneHandlerRef.current = () => {
+    claimReconciliation.resetForClone()
+    const next = clearRuntimePresentation(presentationRef.current)
+    presentationRef.current = next
+    setPresentationState(next)
+    setActiveEnvironmentId(null)
+    const saved = saveIdePresentation(
+      session.browserSessionId,
+      next,
+      {},
+      storage,
+    )
+    setStorageUnavailable(!saved.sessionSaved)
+  }
+  restoreHandlerRef.current = () => {
+    claimReconciliation.restoreUsage()
+    claimReconciliation.reconcileAll()
+  }
+  suspendHandlerRef.current = () => {
+    claimReconciliation.withdrawUsage()
+  }
+
+  const commitPresentation = useCallback((
+    next: IdePresentation,
+    write: 'both' | 'session' | 'none' = 'both',
+  ) => {
     presentationRef.current = next
     setPresentationState(next)
     if (write === 'both') {
       const saved = saveIdePresentation(
+        session.browserSessionId,
         next,
         recoveryFromViews(claimReconciliation.viewsRef.current, next.openedEnvironmentIds),
         storage,
@@ -150,73 +201,102 @@ export function IdePanelProvider({
     } else if (write === 'session') {
       claimReconciliation.writeSession()
     }
-  }, [claimReconciliation, storage])
+  }, [claimReconciliation, session.browserSessionId, storage])
 
-  async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
-    const result = await claimReconciliation.closeEnvironment(environmentId, discard)
-    if (result.ok) {
-      const current = presentationRef.current
-      const openedEnvironmentIds = current.openedEnvironmentIds.filter(
-        (id) => id !== environmentId,
-      )
-      const selectedEnvironmentId = current.selectedEnvironmentId === environmentId
-        ? openedEnvironmentIds[0] ?? null
-        : current.selectedEnvironmentId
-      commitPresentation({
-        panelVisible: current.panelVisible && openedEnvironmentIds.length > 0,
-        selectedEnvironmentId,
-        openedEnvironmentIds,
-      }, 'both')
+  useEffect(() => {
+    if (!active) {
+      setActiveEnvironmentId(null)
     }
-    return result
+  }, [active])
+
+  function ensureOpened(
+    current: IdePresentation,
+    environmentId: string,
+    panelVisible: boolean,
+  ): IdePresentation {
+    const openedEnvironmentIds = current.openedEnvironmentIds.includes(environmentId)
+      ? current.openedEnvironmentIds
+      : [...current.openedEnvironmentIds, environmentId]
+    if (
+      current.panelVisible === panelVisible
+      && current.selectedEnvironmentId === environmentId
+      && openedEnvironmentIds === current.openedEnvironmentIds
+    ) {
+      return current
+    }
+    return {
+      panelVisible,
+      selectedEnvironmentId: environmentId,
+      openedEnvironmentIds,
+    }
   }
 
-  function applyOpenRequest(
-    request: IdeOpenEnvironmentRequest,
-    environment: IdeEnvironmentInfo | null,
-  ): void {
-    const environmentId = environment?.id ?? null
-    if (environment != null) {
-      rememberEnvironment(environment)
-    }
-    const current = presentationRef.current
-    const openedEnvironmentIds = environmentId == null
-      ? current.openedEnvironmentIds
-      : current.openedEnvironmentIds.includes(environmentId)
-        ? current.openedEnvironmentIds
-        : [...current.openedEnvironmentIds, environmentId]
-    const changed = (
-      current.panelVisible !== true
-      || current.selectedEnvironmentId !== environmentId
-      || openedEnvironmentIds !== current.openedEnvironmentIds
-    )
-    if (changed) {
-      commitPresentation({
-        panelVisible: true,
-        selectedEnvironmentId: environmentId,
-        openedEnvironmentIds,
-      }, 'both')
-    }
-    if (environmentId == null) {
-      pendingModeRef.current = request.mode ?? null
+  function activateChatEnvironment(environment: IdeEnvironmentInfo | null): void {
+    if (environment == null || !isCanonicalUuid(environment.id)) {
+      setActiveEnvironmentId(null)
       return
     }
-    pendingModeRef.current = null
-    claimReconciliation.startOrFocus(environmentId, environment, request.mode ?? 'files')
+    rememberEnvironment(environment)
+    setActiveEnvironmentId(environment.id)
+    const current = presentationRef.current
+    const view = claimReconciliation.viewsRef.current[environment.id]
+    if (view == null) {
+      // 切换 Chat 时没有已打开 view 不自动创建；只更新选择偏好。
+      commitPresentation({
+        ...current,
+        selectedEnvironmentId: environment.id,
+      }, 'session')
+      return
+    }
+    commitPresentation(ensureOpened(current, environment.id, true), 'both')
+    claimReconciliation.startOrFocus(environment.id, environment, 'files')
+  }
+
+  function togglePanel(environment: IdeEnvironmentInfo): void {
+    if (!isCanonicalUuid(environment.id)) {
+      return
+    }
+    rememberEnvironment(environment)
+    setActiveEnvironmentId(environment.id)
+    const current = presentationRef.current
+    const view = claimReconciliation.viewsRef.current[environment.id]
+    if (view == null) {
+      commitPresentation(ensureOpened(current, environment.id, true), 'both')
+      claimReconciliation.startOrFocus(environment.id, environment, 'files')
+      return
+    }
+    const nextVisible = current.selectedEnvironmentId === environment.id
+      ? !current.panelVisible
+      : true
+    commitPresentation(ensureOpened(current, environment.id, nextVisible), 'both')
+    if (nextVisible) {
+      claimReconciliation.startOrFocus(environment.id, environment, 'files')
+    }
   }
 
   function openEnvironment(request: IdeOpenEnvironmentRequest): void {
     const environment = request.environment != null && isCanonicalUuid(request.environment.id)
       ? request.environment
       : null
-    applyOpenRequest(request, environment)
+    if (environment == null) {
+      setActiveEnvironmentId(null)
+      pendingModeRef.current = request.mode ?? null
+      return
+    }
+    rememberEnvironment(environment)
+    setActiveEnvironmentId(environment.id)
+    pendingModeRef.current = null
+    commitPresentation(ensureOpened(presentationRef.current, environment.id, true), 'both')
+    claimReconciliation.startOrFocus(environment.id, environment, request.mode ?? 'files')
   }
 
   function selectEnvironment(environmentId: string): void {
     const environment = environmentMapRef.current.get(environmentId) ?? null
     const mode = pendingModeRef.current ?? 'files'
     pendingModeRef.current = null
-    applyOpenRequest({ environment, mode }, environment)
+    if (environment != null) {
+      openEnvironment({ environment, mode })
+    }
   }
 
   function collapsePanel(): void {
@@ -244,8 +324,7 @@ export function IdePanelProvider({
     const openedEnvironmentIds = current.openedEnvironmentIds.filter(
       (environmentId) => available.has(environmentId),
     )
-    const removed = openedEnvironmentIds.length !== current.openedEnvironmentIds.length
-    if (removed) {
+    if (openedEnvironmentIds.length !== current.openedEnvironmentIds.length) {
       const selectedEnvironmentId = current.selectedEnvironmentId != null
         && available.has(current.selectedEnvironmentId)
         ? current.selectedEnvironmentId
@@ -271,55 +350,84 @@ export function IdePanelProvider({
     claimReconciliation.reconcileEnvironments(available)
   }, [environmentsQuery.data, environmentsQuery.isSuccess, claimReconciliation, commitPresentation])
 
-  const contextValue = useMemo(
-    () => ({
-      openEnvironment: openEnvironmentStable,
-      panelVisible: presentation.panelVisible,
-      togglePanel: (environment: IdeEnvironmentInfo) => {
-        const current = presentationRef.current
-        if (current.openedEnvironmentIds.length === 0) {
-          openEnvironmentStable({ environment, mode: 'files' })
-        } else {
-          commitPresentation({ ...current, panelVisible: !current.panelVisible }, 'both')
-        }
-      },
-    }),
-    [openEnvironmentStable, presentation.panelVisible, commitPresentation],
-  )
+  const selectedEnvironmentId = activeEnvironmentId ?? presentation.selectedEnvironmentId
+  const selectedView = selectedEnvironmentId == null
+    ? undefined
+    : claimReconciliation.views[selectedEnvironmentId]
+  const panelVisible = active
+    && presentation.panelVisible
+    && selectedEnvironmentId != null
+    && selectedView != null
+
+  const contextValue = {
+    openEnvironment: openEnvironmentStable,
+    panelVisible,
+    togglePanel,
+    activateChatEnvironment,
+  }
 
   return (
     <IdePanelContext.Provider value={contextValue}>
-      <IdeSplitShell isOpen={presentation.panelVisible} panel={<IdeOverlayPanel
-        isOpen={presentation.panelVisible}
-        selectedEnvironmentId={presentation.selectedEnvironmentId}
-        openedEnvironmentIds={presentation.openedEnvironmentIds}
-        views={claimReconciliation.views}
-        environments={environments}
-        environmentsLoading={environmentsQuery.isLoading}
-        environmentsError={environmentsQuery.isError}
-        identityReady={claimReconciliation.identity != null}
-        storageUnavailable={storageUnavailable}
-        onSelectEnvironment={selectEnvironment}
-        onCollapse={collapsePanel}
-        onCloseEnvironment={closeEnvironment}
-        onDismissCloseError={claimReconciliation.dismissCloseError}
-        onChangeDirectory={claimReconciliation.changeDirectory}
-        onOpenTerminal={(environmentId) => {
-          claimReconciliation.setPendingShell(environmentId)
-          claimReconciliation.maybeRunPendingShell(environmentId)
-        }}
-        onIframeLoaded={claimReconciliation.handleIframeLoaded}
-        onOpenNewView={claimReconciliation.openNewView}
-        onRetryClaim={claimReconciliation.retryClaim}
-        onReloadEnvironments={() => {
-          void environmentsQuery.refetch()
-        }}
-        readRecentDirectories={(environmentId) => readRecentDirectories(environmentId, storage)}
-        recordRecentDirectory={(environmentId, directory) =>
-          recordRecentDirectory(environmentId, directory, storage)}
-      />}>
-        {children}
-      </IdeSplitShell>
+      <div
+        className="chat-ide-workspace"
+        data-testid="chat-ide-workspace"
+        data-active={active ? 'true' : 'false'}
+        hidden={!active}
+        inert={!active}
+      >
+        <IdeSplitShell isOpen={panelVisible} panel={<IdeOverlayPanel
+          isOpen={panelVisible}
+          selectedEnvironmentId={selectedEnvironmentId}
+          openedEnvironmentIds={presentation.openedEnvironmentIds}
+          views={claimReconciliation.views}
+          environments={environments}
+          environmentsLoading={environmentsQuery.isLoading}
+          environmentsError={environmentsQuery.isError}
+          identityReady={claimReconciliation.identity != null
+            && (session.status === 'ready' || session.status === 'cloned')}
+          sessionStatus={session.status}
+          storageUnavailable={storageUnavailable || !session.sessionSaved}
+          onSelectEnvironment={selectEnvironment}
+          onCollapse={collapsePanel}
+          onCloseEnvironment={closeEnvironment}
+          onDismissCloseError={claimReconciliation.dismissCloseError}
+          onChangeDirectory={claimReconciliation.changeDirectory}
+          onOpenTerminal={(environmentId) => {
+            claimReconciliation.setPendingShell(environmentId)
+            claimReconciliation.maybeRunPendingShell(environmentId)
+          }}
+          onIframeLoaded={claimReconciliation.handleIframeLoaded}
+          onOpenNewView={claimReconciliation.openNewView}
+          onRetryClaim={claimReconciliation.retryClaim}
+          onReloadEnvironments={() => {
+            void environmentsQuery.refetch()
+          }}
+          readRecentDirectories={(environmentId) => readRecentDirectories(environmentId, storage)}
+          recordRecentDirectory={(environmentId, directory) =>
+            recordRecentDirectory(environmentId, directory, storage)}
+        />}>
+          {children}
+        </IdeSplitShell>
+      </div>
     </IdePanelContext.Provider>
   )
+
+  async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
+    const result = await claimReconciliation.closeEnvironment(environmentId, discard)
+    if (result.ok) {
+      const current = presentationRef.current
+      const openedEnvironmentIds = current.openedEnvironmentIds.filter(
+        (id) => id !== environmentId,
+      )
+      const selectedEnvironmentId = current.selectedEnvironmentId === environmentId
+        ? openedEnvironmentIds[0] ?? null
+        : current.selectedEnvironmentId
+      commitPresentation({
+        panelVisible: current.panelVisible && openedEnvironmentIds.length > 0,
+        selectedEnvironmentId,
+        openedEnvironmentIds,
+      }, 'both')
+    }
+    return result
+  }
 }

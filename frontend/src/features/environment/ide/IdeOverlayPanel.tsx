@@ -16,6 +16,7 @@ import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
+import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
 import './ide-overlay-panel.css'
 
 export interface IdeCloseResult {
@@ -33,6 +34,7 @@ export interface IdeOverlayPanelProps {
   environmentsLoading: boolean
   environmentsError: boolean
   identityReady: boolean
+  sessionStatus: IdeBrowserSessionStatus
   storageUnavailable: boolean
   onSelectEnvironment: (environmentId: string) => void
   onCollapse: () => void
@@ -77,6 +79,7 @@ export function IdeOverlayPanel({
   environmentsLoading,
   environmentsError,
   identityReady,
+  sessionStatus,
   storageUnavailable,
   onSelectEnvironment,
   onCollapse,
@@ -164,7 +167,6 @@ export function IdeOverlayPanel({
   const selectedReady = selectedView?.status === 'ready'
   const selectedEpoch = selectedView?.bindingEpoch
   const actionsDisabled = selectedView == null
-    || selectedView.claimInFlight === true
     || selectedView.closeInFlight === true
     || !selectedReady
   const closeDisabled = actionsDisabled || selectedEpoch == null
@@ -258,14 +260,12 @@ export function IdeOverlayPanel({
   const terminalError = selectedView?.terminalError
   const closeError = selectedView?.closeError
   const claimError = selectedView?.errorMessage
-  const viewBusy = selectedView?.status === 'pending'
-    || selectedView?.status === 'registering'
-    || selectedView?.status === 'claiming'
-    || selectedView?.status === 'rebinding'
+  const viewBusy = selectedView?.status === 'reconciling'
+    || selectedView?.status === 'binding'
   const viewLayerVisible = isOpen && selectedEnvironmentId !== null
   const noEnvironment = selectedEnvironmentId == null
   const environmentOffline = selectedEnvironment?.ready === false
-    || selectedView?.status === 'offline'
+    || selectedView?.status === 'waiting-ready'
   const environmentUnknown = selectedView == null
     && !environmentsLoading
     && !environmentsError
@@ -407,62 +407,46 @@ export function IdeOverlayPanel({
           {t('ai.ide.storageUnavailable')}
         </div>
       ) : null}
+      {sessionStatus !== 'ready' && sessionStatus !== 'cloned' && sessionStatus !== 'acquiring'
+        && sessionStatus !== 'suspended' ? (
+        <div className="ide-panel-warning-banner" role="alert" data-testid="ide-session-unavailable">
+          {t(sessionStatus === 'unsupported'
+            ? 'ai.ide.sessionUnsupported'
+            : sessionStatus === 'conflict'
+              ? 'ai.ide.sessionConflict'
+              : 'ai.ide.sessionUnavailable')}
+        </div>
+      ) : null}
       {!identityReady ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-reconnecting">
           {t('ai.ide.reconnecting')}
         </div>
       ) : null}
-      {environmentOffline ? (
-        <div className="ide-panel-warning-banner" role="status" data-testid="ide-offline-banner">
-          {t('ai.ide.offline')}
+      {selectedView?.status === 'waiting-ready' ? (
+        <div className="ide-panel-warning-banner" role="status" data-testid="ide-waiting-ready">
+          {t('ai.ide.waitingReady')}
         </div>
       ) : null}
-      {selectedView?.status === 'unknown' ? (
-        <div className="ide-panel-recovery-banner" role="alert" data-testid="ide-claim-unknown">
-          <span>{t('ai.ide.claimUnknown')}</span>
+      {selectedView?.status === 'reconciling' ? (
+        <div className="ide-panel-warning-banner" role="status" data-testid="ide-reconciling">
+          {t('ai.ide.reconciling')}
+        </div>
+      ) : null}
+      {selectedView?.status === 'detached' ? (
+        <div className="ide-panel-recovery-banner" role="status" data-testid="ide-view-detached">
+          <span>{t('ai.ide.viewOwnedByOther')}</span>
           <Button
             variant="ghost"
             size="compact"
             onClick={() => {
               if (selectedEnvironmentId != null) {
-                onRetryClaim(selectedEnvironmentId)
+                onOpenNewView(selectedEnvironmentId)
               }
             }}
-            data-testid="ide-retry-claim-btn"
+            data-testid="ide-open-new-view-btn"
           >
-            {t('ai.ide.retryClaim')}
+            {t('ai.ide.openNewView')}
           </Button>
-        </div>
-      ) : null}
-      {selectedView?.status === 'in-use' ? (
-        <div className="ide-panel-recovery-banner" role="status" data-testid="ide-view-in-use">
-          <span>{t('ai.ide.viewInUse')}</span>
-          <div className="ide-panel-recovery-actions">
-            <Button
-              variant="ghost"
-              size="compact"
-              onClick={() => {
-                if (selectedEnvironmentId != null) {
-                  onRetryClaim(selectedEnvironmentId)
-                }
-              }}
-              data-testid="ide-retry-resume-btn"
-            >
-              {t('ai.ide.retryResume')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="compact"
-              onClick={() => {
-                if (selectedEnvironmentId != null) {
-                  onOpenNewView(selectedEnvironmentId)
-                }
-              }}
-              data-testid="ide-open-new-view-btn"
-            >
-              {t('ai.ide.openNewView')}
-            </Button>
-          </div>
         </div>
       ) : null}
       {selectedView?.status === 'gone' ? (
@@ -484,14 +468,26 @@ export function IdeOverlayPanel({
       ) : null}
       {selectedView != null
       && selectedView.entryUrl != null
-      && selectedView.claimInFlight ? (
+      && viewBusy ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-rebinding">
           {t('ai.ide.reconnecting')}
         </div>
       ) : null}
       {selectedView?.status === 'error' ? (
         <div className="ide-panel-error-banner" role="alert" data-testid="ide-error-banner">
-          {claimError || t('ai.ide.error')}
+          <span>{claimError === 'IDE_CLOSING' ? t('ai.ide.cleanupPending') : claimError || t('ai.ide.error')}</span>
+          <Button
+            variant="ghost"
+            size="compact"
+            onClick={() => {
+              if (selectedEnvironmentId != null) {
+                onRetryClaim(selectedEnvironmentId)
+              }
+            }}
+            data-testid="ide-retry-claim-btn"
+          >
+            {t('ai.ide.retryClaim')}
+          </Button>
         </div>
       ) : null}
       {closeError ? (
