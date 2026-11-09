@@ -476,13 +476,17 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   }
 
   /**
-   * 排空移交：停止本地执行体（不写 durable 状态），在 deadline 之前等待执行线程退出，再 release TOOL Work claim，使其他节点立即可以认领。
-   * 执行线程退出时由 execute() 的 finally 自行以 STUDIO_EXITED 确认 TOOL 事实；超时则保持 UNCONFIRMED。
+   * 排空移交：停止本地执行体（不写 durable 状态），在剩余预算内等待执行线程退出，再 release TOOL Work claim，使其他节点立即可以认领。 执行线程退出时由
+   * execute() 的 finally 自行以 STUDIO_EXITED 确认 TOOL 事实；超时则保持 UNCONFIRMED。
    *
    * @return 若不满足移交条件返回 false，成功移交返回 true
    */
-  public boolean handover(Instant deadline) {
-    Objects.requireNonNull(deadline, "deadline");
+  public boolean handover(Duration remaining) {
+    Objects.requireNonNull(remaining, "remaining");
+    if (remaining.isNegative()) {
+      throw new IllegalArgumentException("handover remaining must not be negative");
+    }
+    long deadlineNanos = System.nanoTime() + remaining.toNanos();
     Thread targetThread;
     synchronized (monitor) {
       if (!inBody || abandoned.get() || registeredRemotes.isEmpty()) {
@@ -492,10 +496,10 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     }
     abandon();
     if (targetThread != null && targetThread != Thread.currentThread()) {
-      Duration remaining = Duration.between(Instant.now(), deadline);
-      if (!remaining.isNegative() && !remaining.isZero()) {
+      long remainingNanos = deadlineNanos - System.nanoTime();
+      if (remainingNanos > 0) {
         try {
-          targetThread.join(remaining);
+          targetThread.join(Duration.ofNanos(remainingNanos));
         } catch (InterruptedException error) {
           Thread.currentThread().interrupt();
         }

@@ -159,18 +159,18 @@ public final class ToolProcessor implements AutoCloseable {
     executions.close();
   }
 
-  /** 在调用方给定的总停机预算内移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用 deadline），然后调用 close 处理其余执行。 */
+  /** 在调用方给定的总停机预算内移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用单调 deadline），然后调用 close 处理其余执行。 */
   public void drain(Duration timeout) {
     Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("drain timeout must not be negative");
     }
-    Instant deadline = Instant.now().plus(timeout);
+    long deadlineNanos = System.nanoTime() + timeout.toNanos();
     List<ToolExecution> awaiting =
         executions.activeExecutions().stream().filter(ToolExecution::isAwaitingRemote).toList();
     for (ToolExecution execution : awaiting) {
       try {
-        execution.handover(deadline);
+        execution.handover(remainingUntil(deadlineNanos));
       } catch (RuntimeException failure) {
         log.warn(
             "Failed to handover awaiting remote tool execution for invocation {}; its claim remains until lease expiry",
@@ -179,6 +179,12 @@ public final class ToolProcessor implements AutoCloseable {
       }
     }
     close();
+  }
+
+  /** 只使用单调时钟计算调用方剩余预算；已到期返回零，避免扩大上层 deadline。 */
+  private static Duration remainingUntil(long deadlineNanos) {
+    long remainingNanos = deadlineNanos - System.nanoTime();
+    return remainingNanos <= 0 ? Duration.ZERO : Duration.ofNanos(remainingNanos);
   }
 
   /** 当前 JVM 是否持有任何活跃的本地 Tool execution。 */

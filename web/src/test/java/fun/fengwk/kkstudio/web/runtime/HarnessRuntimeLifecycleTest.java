@@ -282,7 +282,7 @@ class HarnessRuntimeLifecycleTest {
   }
 
   @Test
-  void singleDeadlineLeavesOnlyLeaseBudgetAfterNaturalDrain() {
+  void singleDeadlineCapsRemainingBudgetToTotal() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
     LocalExecutionLifecycle executionLifecycle = mock(LocalExecutionLifecycle.class);
     ToolProcessor toolProcessor = mock(ToolProcessor.class);
@@ -297,18 +297,17 @@ class HarnessRuntimeLifecycleTest {
     verify(executionLifecycle, times(2)).drain(lifecycleBudgets.capture());
     assertEquals(DRAIN_TIMEOUT, lifecycleBudgets.getAllValues().get(0));
 
+    Duration totalBudget = DRAIN_TIMEOUT.plus(LEASE_DURATION);
     Duration remainingBudget = lifecycleBudgets.getAllValues().get(1);
     assertTrue(
-        remainingBudget.compareTo(LEASE_DURATION) <= 0,
-        "remaining lifecycle drain must stay inside the lease budget: " + remainingBudget);
-    assertTrue(
-        remainingBudget.compareTo(LEASE_DURATION.minusSeconds(1)) >= 0,
-        "remaining lifecycle drain must not reopen a new window: " + remainingBudget);
+        remainingBudget.compareTo(totalBudget) <= 0,
+        "remaining lifecycle drain must stay inside the total budget: " + remainingBudget);
 
     ArgumentCaptor<Duration> toolBudget = ArgumentCaptor.forClass(Duration.class);
     verify(toolProcessor).drain(toolBudget.capture());
-    assertTrue(toolBudget.getValue().compareTo(LEASE_DURATION) <= 0);
-    assertTrue(toolBudget.getValue().compareTo(LEASE_DURATION.minusSeconds(1)) >= 0);
+    assertTrue(
+        toolBudget.getValue().compareTo(totalBudget) <= 0,
+        "tool handover must stay inside the same total budget: " + toolBudget.getValue());
   }
 
   @Test

@@ -179,7 +179,7 @@ public class HarnessProcessorConfiguration {
   }
 
   /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
-  @Bean(destroyMethod = "close")
+  @Bean(destroyMethod = "shutdown")
   public ExecutorService harnessModelExecutionExecutor(
       ContextSnapshotFactory contextSnapshotFactory) {
     return ContextExecutorService.wrap(
