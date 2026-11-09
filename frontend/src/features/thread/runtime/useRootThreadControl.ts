@@ -564,6 +564,7 @@ export function useRootThreadControl({
       canBranchFromRoot,
       allowSwitchAgent: capabilities?.allowSwitchAgent,
       allowBranching: capabilities?.allowBranching,
+      ideAvailable: onOpenIde != null,
     },
   )
   const boundGoal = isBoundTarget(target) && controller.thread?.branchSettings?.goal != null

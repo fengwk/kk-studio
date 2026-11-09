@@ -73,7 +73,9 @@ export function IdePanelProvider({
   const queryClient = useQueryClient()
   const [initial] = useState(() => initializeIdeTabState(storage))
   const [presentation, setPresentationState] = useState<IdePresentation>(initial.presentation)
-  const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(null)
+  const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(
+    () => (active ? initial.presentation.selectedEnvironmentId : null),
+  )
   const [knownEnvironments, setKnownEnvironments] = useState<Record<string, IdeEnvironmentInfo>>({})
   const [storageUnavailable, setStorageUnavailable] = useState(!initial.sessionSaved)
 
@@ -82,7 +84,7 @@ export function IdePanelProvider({
   const actionsRef = useRef<{
     openEnvironment: (request: IdeOpenEnvironmentRequest) => void
   } | null>(null)
-  const cloneHandlerRef = useRef<() => void>(() => {})
+  const cloneHandlerRef = useRef<(browserSessionId: string) => void>(() => {})
   const restoreHandlerRef = useRef<() => void>(() => {})
   const suspendHandlerRef = useRef<() => void>(() => {})
 
@@ -147,7 +149,7 @@ export function IdePanelProvider({
   const session = useIdeBrowserSession({
     initial,
     storage,
-    onClone: () => cloneHandlerRef.current(),
+    onClone: (browserSessionId) => cloneHandlerRef.current(browserSessionId),
     onRestore: () => restoreHandlerRef.current(),
     onSuspend: () => suspendHandlerRef.current(),
   })
@@ -162,14 +164,14 @@ export function IdePanelProvider({
     onStorageStatusChange: handleStorageStatusChange,
   })
 
-  cloneHandlerRef.current = () => {
+  cloneHandlerRef.current = (browserSessionId) => {
     claimReconciliation.resetForClone()
     const next = clearRuntimePresentation(presentationRef.current)
     presentationRef.current = next
     setPresentationState(next)
     setActiveEnvironmentId(null)
     const saved = saveIdePresentation(
-      session.browserSessionId,
+      browserSessionId,
       next,
       {},
       storage,

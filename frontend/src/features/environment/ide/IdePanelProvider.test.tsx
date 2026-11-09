@@ -1,38 +1,33 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApplicationEventProvider } from '@/shared/app-events'
+import { ApplicationEventProvider, useApplicationEvents } from '@/shared/app-events'
 import { FakeWebSocketHarness, type FakeWebSocket } from '@/shared/app-events/__tests__/fake-websocket'
 import { ApiError } from '@/shared/api/client'
-import type {
-  EnvironmentDTO,
-  EnvironmentIdeOpenViewDTO,
-} from '@/shared/api/generated/contracts'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { testEnvironment } from '@/test-support/environment-test-fixtures'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
-import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
+import { useIdePanel, type IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import {
-  IDE_RECENT_DIRECTORIES_KEY,
-  IDE_TAB_LAST_KEY,
   IDE_TAB_SESSION_KEY,
-  type IdePresentation,
+  saveIdeSession,
+  type IdePendingClaim,
   type IdeRecovery,
 } from '@/features/environment/ide/ide-tab-state'
+import { testEnvironment } from '@/test-support/environment-test-fixtures'
 
-const service = vi.hoisted(() => ({ listEnvironments: vi.fn() }))
-
-vi.mock('@/features/environment/environment-service', () => ({ environmentService: service }))
+const environmentService = vi.hoisted(() => ({ listEnvironments: vi.fn() }))
+vi.mock('@/features/environment/environment-service', () => ({ environmentService }))
 
 const ideService = vi.hoisted(() => ({
   openIdeView: vi.fn(),
+  readIdeView: vi.fn(),
   changeIdeViewDirectory: vi.fn(),
   focusIdeTerminal: vi.fn(),
   applyIdeMobileLayout: vi.fn(),
   closeIdeView: vi.fn(),
+  listIdeDirectories: vi.fn(),
 }))
-
 vi.mock('@/features/environment/ide/environment-ide-service', () => ideService)
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
@@ -41,16 +36,14 @@ const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
 const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
 const DAEMON_B = 'd2000000-0000-4000-8000-000000000002'
 const EVENT_NODE = 'e1000000-0000-4000-8000-000000000001'
-const CONNECTION = 'f1000000-0000-4000-8000-000000000001'
+const CONNECTION_1 = 'f1000000-0000-4000-8000-000000000001'
 const CONNECTION_2 = 'f1000000-0000-4000-8000-000000000002'
+const BROWSER_A = 'b1000000-0000-4000-8000-000000000001'
+const BROWSER_B = 'b2000000-0000-4000-8000-000000000002'
+const CLAIM_A = 'e1000000-0000-4000-8000-000000000011'
 const DIRECTORY_A = '/workspace/projects/a'
-const DIRECTORY_B = '/workspace/projects/b'
 
-function card(
-  id: string,
-  name: string,
-  ready = true,
-): EnvironmentDTO {
+function card(id: string, name: string, ready = true): EnvironmentDTO {
   return testEnvironment({
     id,
     name,
@@ -67,92 +60,108 @@ function card(
 
 const CARD_A = card(ENV_A, 'local-node')
 const CARD_B = card(ENV_B, 'remote-node')
+const ENV_INFO_A: IdeEnvironmentInfo = { id: ENV_A, name: CARD_A.name, ready: true }
 
-function ideViewResponse(
-  environmentId: string,
-  request: EnvironmentIdeOpenViewDTO,
-  sequence: number,
+function pending(overrides: Partial<IdePendingClaim> = {}): IdePendingClaim {
+  return {
+    mode: 'resume',
+    viewId: VIEW_A,
+    claimId: CLAIM_A,
+    expectedBindingEpoch: '10',
+    expectedDaemonInstanceId: DAEMON_A,
+    directory: DIRECTORY_A,
+    ...overrides,
+  }
+}
+
+function snapshot(
+  view: Record<string, unknown> | null,
+  overrides: Record<string, unknown> = {},
 ) {
   return {
+    daemonInstanceId: DAEMON_A,
+    revision: '20',
+    view,
+    ...overrides,
+  }
+}
+
+function viewDto(request: Record<string, unknown>, sequence: number) {
+  return {
     viewId: request.viewId,
-    environmentId,
-    documentId: request.documentId,
+    environmentId: ENV_A,
+    browserSessionId: request.browserSessionId,
     eventNodeId: request.eventNodeId,
     connectionId: request.connectionId,
     claimId: request.claimId,
-    daemonInstanceId: environmentId === ENV_A ? DAEMON_A : DAEMON_B,
+    daemonInstanceId: request.expectedDaemonInstanceId ?? DAEMON_A,
     bindingEpoch: String(sequence + 10),
-    directory: environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B,
-    workspacePath: environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B,
+    directory: DIRECTORY_A,
+    workspacePath: DIRECTORY_A,
     state: 'OPEN',
-    entryUrl: `/ide/${environmentId}/${request.viewId}/__ide/bootstrap?token=t-${sequence}`,
+    entryUrl: `/ide/${ENV_A}/${String(request.viewId)}/__ide/bootstrap?token=t-${sequence}`,
   }
 }
 
-function usageFrames(socket: FakeWebSocket) {
-  return socket.sentMessages().filter((message) => message.type === 'ide-use')
-}
-
-function sessionSnapshot(
-  presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
-): string {
-  return JSON.stringify({
-    presentation,
-    recoveryByEnvironment,
-  })
-}
-
-function lastSnapshot(presentation: IdePresentation): string {
-  return JSON.stringify({ presentation })
-}
-
-function sessionRecovery(environmentId: string): IdeRecovery | undefined {
-  const snapshot = JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
-    recoveryByEnvironment?: Record<string, IdeRecovery>
+function recovery(overrides: Partial<IdeRecovery> = {}): IdeRecovery {
+  return {
+    viewId: VIEW_A,
+    daemonInstanceId: DAEMON_A,
+    bindingEpoch: '10',
+    directory: DIRECTORY_A,
+    ...overrides,
   }
-  return snapshot.recoveryByEnvironment?.[environmentId]
+}
+
+function seedSession(browserSessionId = BROWSER_A, recoveryValue: IdeRecovery = recovery()): void {
+  saveIdeSession(
+    browserSessionId,
+    {
+      panelVisible: true,
+      selectedEnvironmentId: ENV_A,
+      openedEnvironmentIds: [ENV_A],
+    },
+    { [ENV_A]: recoveryValue },
+    { sessionStorage, localStorage },
+  )
+}
+
+function sessionSnapshot(): {
+  browserSessionId: string
+  recoveryByEnvironment: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
+} {
+  return JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
+    browserSessionId: string
+    recoveryByEnvironment: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
+  }
 }
 
 function Harness() {
-  const { openEnvironment, togglePanel } = useIdePanel()
+  const { activateChatEnvironment, togglePanel } = useIdePanel()
+  const events = useApplicationEvents()
   return (
     <div>
-      <button data-testid="toggle-a" onClick={() => togglePanel({ id: ENV_A, name: 'local-node', ready: true })}>
+      <button data-testid="activate-a" onClick={() => activateChatEnvironment(ENV_INFO_A)}>
+        Activate
+      </button>
+      <button data-testid="toggle-a" onClick={() => togglePanel(ENV_INFO_A)}>
         Toggle
       </button>
       <button
-        data-testid="open-a"
-        onClick={() => openEnvironment({
-          environment: { id: ENV_A, name: 'local-node', ready: true },
-          mode: 'files',
-        })}
+        data-testid="reconnect"
+        onClick={() => {
+          events.disconnect()
+          events.connect()
+        }}
       >
-        A
+        Reconnect
       </button>
-      <button
-        data-testid="open-b"
-        onClick={() => openEnvironment({
-          environment: { id: ENV_B, name: 'remote-node', ready: true },
-          mode: 'files',
-        })}
-      >
-        B
-      </button>
-      <button
-        data-testid="open-b-shell"
-        onClick={() => openEnvironment({
-          environment: { id: ENV_B, name: 'remote-node', ready: true },
-          mode: 'shell',
-        })}
-      >
-        B shell
-      </button>
+      <button data-testid="state-probe" aria-label="state-probe" />
     </div>
   )
 }
 
-function renderPanel() {
+function renderPanel(options: { active?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   })
@@ -160,19 +169,16 @@ function renderPanel() {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
-        <IdePanelProvider storage={{ sessionStorage, localStorage }}>
+        <IdePanelProvider active={options.active ?? true} storage={{ sessionStorage, localStorage }}>
           <Harness />
         </IdePanelProvider>
       </ApplicationEventProvider>
     </QueryClientProvider>,
   )
-  return { ...view, queryClient, sockets }
+  return { ...view, sockets }
 }
 
-function connect(
-  sockets: FakeWebSocketHarness,
-  connectionId = CONNECTION,
-): FakeWebSocket {
+function connect(sockets: FakeWebSocketHarness, connectionId = CONNECTION_1): FakeWebSocket {
   const socket = sockets.openLatest()
   const originalSend = socket.send.bind(socket)
   socket.send = (data: string) => {
@@ -191,494 +197,509 @@ function connect(
   return socket
 }
 
-async function clickOpenA(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByTestId('open-a'))
+function fakeLocks(options: { deny?: string[] } = {}) {
+  const held = new Set(options.deny ?? [])
+  return {
+    held,
+    request: vi.fn(async (
+      name: string,
+      _requestOptions: LockOptions,
+      callback: (lock: Lock | null) => Promise<unknown>,
+    ) => {
+      if (held.has(name)) {
+        return callback(null)
+      }
+      held.add(name)
+      try {
+        return await callback({ name } as Lock)
+      } finally {
+        held.delete(name)
+      }
+    }),
+  }
 }
 
-async function openA(user: ReturnType<typeof userEvent.setup>) {
-  await clickOpenA(user)
-  await waitFor(() => {
-    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+function installLocks(locks: unknown): void {
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: locks,
   })
 }
 
-describe('IdePanelProvider', () => {
+const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks')
+
+describe('IdePanelProvider recovery state machine', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    service.listEnvironments.mockReset()
-    ideService.openIdeView.mockReset()
-    ideService.changeIdeViewDirectory.mockReset()
-    ideService.focusIdeTerminal.mockReset()
-    ideService.applyIdeMobileLayout.mockReset()
-    ideService.applyIdeMobileLayout.mockResolvedValue(undefined)
-    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
-    ideService.closeIdeView.mockReset()
-    service.listEnvironments.mockResolvedValue([CARD_A, CARD_B])
+    sessionStorage.clear()
+    localStorage.clear()
+    environmentService.listEnvironments.mockReset()
+    for (const mock of Object.values(ideService)) {
+      mock.mockReset()
+    }
+    environmentService.listEnvironments.mockResolvedValue([CARD_A, CARD_B])
+    ideService.openIdeView.mockImplementation(async (environmentId: string, request: Record<string, unknown>) => (
+      viewDto({ ...request, environmentId }, 0)
+    ))
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
     ideService.closeIdeView.mockResolvedValue(undefined)
     ideService.focusIdeTerminal.mockResolvedValue(undefined)
-    ideService.changeIdeViewDirectory.mockResolvedValue({
-      viewId: VIEW_A,
-      environmentId: ENV_A,
-      documentId: '00000000-0000-4000-8000-000000000001',
-      eventNodeId: EVENT_NODE,
-      connectionId: CONNECTION,
-      claimId: '99999999-9999-4999-8999-999999999999',
-      daemonInstanceId: DAEMON_A,
-      bindingEpoch: '11',
-      directory: '/workspace/projects/next',
-      workspacePath: '/workspace/projects/next',
-      state: 'OPEN',
+    ideService.applyIdeMobileLayout.mockResolvedValue(undefined)
+    ideService.listIdeDirectories.mockResolvedValue({
+      path: '/workspace/projects/a',
+      parentPath: '/workspace/projects',
+      truncated: false,
+      children: [{ name: 'next', path: '/workspace/projects/a/next' }],
     })
-    let sequence = 0
-    ideService.openIdeView.mockImplementation(
-      async (environmentId: string, request: EnvironmentIdeOpenViewDTO) => {
-        sequence += 1
-        return ideViewResponse(environmentId, request, sequence)
-      },
-    )
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
+    installLocks(fakeLocks())
   })
 
   afterEach(() => {
+    if (originalLocks == null) {
+      Reflect.deleteProperty(navigator, 'locks')
+    } else {
+      Object.defineProperty(navigator, 'locks', originalLocks)
+    }
     vi.useRealTimers()
   })
 
-  it('opens the conversation environment once and toggles the same mounted view', async () => {
-    // 首次切换创建视图，之后收起和展开不能重建 iframe 或再次 claim。
+  it('does not auto-create when a Chat environment is activated, and creates once on explicit toggle', async () => {
     const user = userEvent.setup()
+    let pendingAtOpen: IdePendingClaim | null | undefined
+    ideService.openIdeView.mockImplementationOnce(async (_environmentId: string, request: Record<string, unknown>) => {
+      pendingAtOpen = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending
+      return viewDto(request, 0)
+    })
     const { sockets } = renderPanel()
     connect(sockets)
+
+    await user.click(screen.getByTestId('activate-a'))
+    expect(ideService.readIdeView).not.toHaveBeenCalled()
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+
     await user.click(screen.getByTestId('toggle-a'))
-    const iframe = await screen.findByTestId('ide-iframe')
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    expect(ideService.openIdeView.mock.calls[0]?.[1]).not.toHaveProperty('directory')
+    await waitFor(() => {
+      expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, viewId, readQuery] = ideService.readIdeView.mock.calls[0] as [
+      string,
+      string,
+      Record<string, unknown>,
+    ]
+    expect(readQuery).toMatchObject({
+      browserSessionId: sessionSnapshot().browserSessionId,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_1,
+    })
+    expect(readQuery).not.toHaveProperty('expectedDaemonInstanceId')
+
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, openRequest] = ideService.openIdeView.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ]
+    expect(openRequest).toMatchObject({
+      viewId,
+      mode: 'create',
+      expectedBindingEpoch: '0',
+      expectedDaemonInstanceId: DAEMON_A,
+      browserSessionId: sessionSnapshot().browserSessionId,
+    })
+    // pending 必须在 POST 发出时已经存在于 sessionStorage。
+    expect(pendingAtOpen).toMatchObject({
+      mode: 'create',
+      viewId,
+      expectedBindingEpoch: '0',
+      expectedDaemonInstanceId: DAEMON_A,
+    })
+    await screen.findByTestId('ide-iframe')
+
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).not.toHaveAttribute('hidden')
-    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it('persists pending before sending OPEN and restores the same view on refresh', async () => {
+    // 刷新场景：session 已有 view/instance/epoch，必须先纯读权威快照再以 CAS 重新绑定当前连接。
+    seedSession()
+    ideService.readIdeView.mockResolvedValue(snapshot({
+      viewId: VIEW_A,
+      environmentId: ENV_A,
+      browserSessionId: BROWSER_A,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_1,
+      claimId: CLAIM_A,
+      daemonInstanceId: DAEMON_A,
+      bindingEpoch: '11',
+      directory: DIRECTORY_A,
+      workspacePath: DIRECTORY_A,
+      state: 'OPEN',
+    }, { revision: '20' }))
+    ideService.openIdeView.mockImplementation(async (_environmentId: string, request: Record<string, unknown>) => (
+      viewDto(request, 1)
+    ))
+
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, viewId, readQuery] = ideService.readIdeView.mock.calls[0] as [
+      string,
+      string,
+      Record<string, unknown>,
+    ]
+    expect(viewId).toBe(VIEW_A)
+    expect(readQuery).toMatchObject({
+      browserSessionId: BROWSER_A,
+      expectedDaemonInstanceId: DAEMON_A,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_1,
+    })
+
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, request] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
+    expect(request).toMatchObject({
+      viewId: VIEW_A,
+      mode: 'resume',
+      expectedBindingEpoch: '11',
+      expectedDaemonInstanceId: DAEMON_A,
+    })
+    expect(request).not.toHaveProperty('directory')
+    expect(sessionSnapshot().browserSessionId).toBe(BROWSER_A)
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('11')
+    await screen.findByTestId('ide-iframe')
+  })
+
+  it('rebinds immediately on a new WebSocket connection without waiting for the old one', async () => {
+    const user = userEvent.setup()
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
+    ideService.openIdeView.mockImplementation(async (_environmentId: string, request: Record<string, unknown>) => (
+      viewDto(request, 0)
+    ))
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    const openedViewId = sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId
+    const firstEpoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+
+    ideService.readIdeView.mockResolvedValue(snapshot({
+      viewId: openedViewId,
+      environmentId: ENV_A,
+      browserSessionId: sessionSnapshot().browserSessionId,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_2,
+      claimId: CLAIM_A,
+      daemonInstanceId: DAEMON_A,
+      bindingEpoch: firstEpoch,
+      directory: DIRECTORY_A,
+      workspacePath: DIRECTORY_A,
+      state: 'OPEN',
+    }, { revision: '21' }))
+    ideService.openIdeView.mockClear()
+
+    await user.click(screen.getByTestId('reconnect'))
+    await act(async () => {
+      connect(sockets, CONNECTION_2)
+    })
+
+    await waitFor(() => {
+      expect(ideService.readIdeView).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, request] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
+    expect(request).toMatchObject({
+      viewId: openedViewId,
+      mode: 'resume',
+      connectionId: CONNECTION_2,
+      expectedBindingEpoch: firstEpoch,
+      expectedDaemonInstanceId: DAEMON_A,
+    })
+  })
+
+  it('reconciles STALE_BINDING with one pure read and one new CAS, never a replacement create', async () => {
+    seedSession()
+    ideService.readIdeView
+      .mockResolvedValueOnce(snapshot({
+        viewId: VIEW_A,
+        environmentId: ENV_A,
+        browserSessionId: BROWSER_A,
+        eventNodeId: EVENT_NODE,
+        connectionId: CONNECTION_1,
+        claimId: CLAIM_A,
+        daemonInstanceId: DAEMON_A,
+        bindingEpoch: '11',
+        directory: DIRECTORY_A,
+        workspacePath: DIRECTORY_A,
+        state: 'OPEN',
+      }, { revision: '20' }))
+      .mockResolvedValueOnce(snapshot({
+        viewId: VIEW_A,
+        environmentId: ENV_A,
+        browserSessionId: BROWSER_A,
+        eventNodeId: EVENT_NODE,
+        connectionId: CONNECTION_1,
+        claimId: CLAIM_A,
+        daemonInstanceId: DAEMON_A,
+        bindingEpoch: '12',
+        directory: DIRECTORY_A,
+        workspacePath: DIRECTORY_A,
+        state: 'OPEN',
+      }, { revision: '21' }))
+    ideService.openIdeView
+      .mockRejectedValueOnce(new ApiError('stale', 409, 'conflict', undefined, 'STALE_BINDING'))
+      .mockImplementationOnce(async (_environmentId: string, request: Record<string, unknown>) => (
+        viewDto(request, 2)
+      ))
+
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
+    })
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(2)
+    const first = ideService.openIdeView.mock.calls[0]?.[1] as Record<string, unknown>
+    const second = ideService.openIdeView.mock.calls[1]?.[1] as Record<string, unknown>
+    expect(first).toMatchObject({ mode: 'resume', expectedBindingEpoch: '11' })
+    expect(second).toMatchObject({ mode: 'resume', expectedBindingEpoch: '12' })
+    expect(second.viewId).toBe(first.viewId)
+    expect(ideService.openIdeView.mock.calls.some(([, request]) => (
+      (request as Record<string, unknown>).mode === 'create'
+    ))).toBe(false)
+    await screen.findByTestId('ide-iframe')
+  })
+
+  it('shows detached on VIEW_OWNED_BY_OTHER_SESSION without sending OPEN or replacing the view', async () => {
+    seedSession()
+    ideService.readIdeView.mockRejectedValue(
+      new ApiError('owned', 409, 'conflict', undefined, 'VIEW_OWNED_BY_OTHER_SESSION'),
+    )
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-view-detached')).toBeVisible()
+    })
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId).toBe(VIEW_A)
+  })
+
+  it('keeps pending on DAEMON_NOT_READY and waits for READY without a timer retry', async () => {
+    seedSession(BROWSER_A, recovery({ pending: pending() }))
+    ideService.readIdeView.mockRejectedValue(
+      new ApiError('not ready', 409, 'unavailable', undefined, 'DAEMON_NOT_READY'),
+    )
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-waiting-ready')).toBeVisible()
+    })
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId).toBe(CLAIM_A)
+  })
+
+  it('isolates a copied tab through Web Locks and clears copied runtime identity', async () => {
+    seedSession()
+    installLocks(fakeLocks({ deny: [`kk-studio.ide-session:${BROWSER_A}`] }))
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(sessionSnapshot().browserSessionId).not.toBe(BROWSER_A)
+    })
+    expect(sessionSnapshot().recoveryByEnvironment).toEqual({})
+    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+    expect(ideService.readIdeView).not.toHaveBeenCalled()
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+    expect(sessionSnapshot().browserSessionId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('reports Web Locks capability failure without falling back to shared identity', async () => {
+    seedSession()
+    Reflect.deleteProperty(navigator, 'locks')
+    const { sockets } = renderPanel()
+    connect(sockets)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-session-unavailable')).toBeVisible()
+    })
+    expect(ideService.readIdeView).not.toHaveBeenCalled()
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+  })
+
+  it('closes with browser session, instance and epoch and removes the recovered view', async () => {
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
+    ideService.openIdeView.mockImplementation(async (_environmentId: string, request: Record<string, unknown>) => (
+      viewDto(request, 0)
+    ))
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    const epoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await waitFor(() => {
+      expect(ideService.closeIdeView).toHaveBeenCalledTimes(1)
+    })
+    expect(ideService.closeIdeView.mock.calls[0]?.[2]).toMatchObject({
+      browserSessionId: sessionSnapshot().browserSessionId,
+      bindingEpoch: epoch,
+      expectedDaemonInstanceId: DAEMON_A,
+      discard: false,
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    })
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]).toBeUndefined()
+  })
+
+  it('retries DAEMON_NOT_READY on a real new connection instead of freezing the view', async () => {
+    seedSession(BROWSER_A, recovery({
+      bindingEpoch: undefined,
+      pending: pending({
+        mode: 'create',
+        expectedBindingEpoch: '0',
+        directory: undefined,
+      }),
+    }))
+    ideService.readIdeView.mockRejectedValueOnce(
+      new ApiError('not ready', 409, 'unavailable', undefined, 'DAEMON_NOT_READY'),
+    )
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets, CONNECTION_1)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-waiting-ready')).toBeVisible()
+    })
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
+    ideService.openIdeView.mockImplementation(async (_environmentId: string, request: Record<string, unknown>) => (
+      viewDto(request, 4)
+    ))
+    await user.click(screen.getByTestId('reconnect'))
+    await act(async () => {
+      connect(sockets, CONNECTION_2)
+    })
+
+    await waitFor(() => {
+      expect(ideService.readIdeView).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    })
+    const [, request] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
+    expect(request).toMatchObject({
+      connectionId: CONNECTION_2,
+      mode: 'create',
+      claimId: CLAIM_A,
+      viewId: VIEW_A,
+      expectedDaemonInstanceId: DAEMON_A,
+    })
+    await screen.findByTestId('ide-iframe')
+  })
+
+  it('keeps the same epoch when a directory change stays inside the same workspacePath', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    const openedViewId = sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId
+    const epoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+    const readCalls = ideService.readIdeView.mock.calls.length
+
+    ideService.changeIdeViewDirectory.mockResolvedValue({
+      viewId: openedViewId,
+      environmentId: ENV_A,
+      browserSessionId: sessionSnapshot().browserSessionId,
+      eventNodeId: EVENT_NODE,
+      connectionId: CONNECTION_1,
+      claimId: CLAIM_A,
+      daemonInstanceId: DAEMON_A,
+      bindingEpoch: epoch,
+      directory: '/workspace/projects/a/native-subdir',
+      workspacePath: DIRECTORY_A,
+      state: 'OPEN',
+    })
+
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
+    await waitFor(() => {
+      expect(ideService.listIdeDirectories).toHaveBeenCalled()
+    })
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
+
+    await waitFor(() => {
+      expect(ideService.changeIdeViewDirectory).toHaveBeenCalledTimes(1)
+    })
+    expect(ideService.changeIdeViewDirectory.mock.calls[0]?.[2]).toMatchObject({
+      browserSessionId: sessionSnapshot().browserSessionId,
+      bindingEpoch: epoch,
+      expectedDaemonInstanceId: DAEMON_A,
+    })
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(epoch)
+    expect(ideService.readIdeView).toHaveBeenCalledTimes(readCalls)
     expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
   })
 
-  it('opens a new view in the last confirmed directory for that environment', async () => {
-    // 无视图时使用按 Environment 保存的最近目录；没有记录时省略目录，由 Daemon 使用宿主主目录。
-    localStorage.setItem(IDE_RECENT_DIRECTORIES_KEY, JSON.stringify({
-      byEnvironment: { [ENV_A]: [DIRECTORY_B, DIRECTORY_A] },
+  it('keeps the view when a late binding response belongs to a replaced connection', async () => {
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
+    let resolveOpen!: (value: unknown) => void
+    ideService.openIdeView.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveOpen = resolve
     }))
     const user = userEvent.setup()
     const { sockets } = renderPanel()
     connect(sockets)
     await user.click(screen.getByTestId('toggle-a'))
     await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
     })
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    expect(ideService.openIdeView.mock.calls[0]?.[1]).toMatchObject({
-      mode: 'create',
-      directory: DIRECTORY_B,
-    })
-  })
+    const request = ideService.openIdeView.mock.calls[0]?.[1] as Record<string, unknown>
 
-  it('restores the session viewId through an ack, resume claim and holding epoch without touching local', async () => {
-    const presentation: IdePresentation = {
-      panelVisible: true,
-      selectedEnvironmentId: ENV_A,
-      openedEnvironmentIds: [ENV_A],
-    }
-    const localValue = lastSnapshot({
-      panelVisible: true,
-      selectedEnvironmentId: ENV_B,
-      openedEnvironmentIds: [ENV_B],
-    })
-    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot(presentation, {
-      [ENV_A]: {
-        viewId: VIEW_A,
-        daemonInstanceId: DAEMON_A,
-        directory: DIRECTORY_A,
-      },
-    }))
-    localStorage.setItem(IDE_TAB_LAST_KEY, localValue)
-
-    const { sockets } = renderPanel()
-    const socket = connect(sockets)
-
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    })
-
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    const [environmentId, request] = ideService.openIdeView.mock.calls[0] as [
-      string,
-      EnvironmentIdeOpenViewDTO,
-    ]
-    expect(environmentId).toBe(ENV_A)
-    expect(request).toMatchObject({
-      viewId: VIEW_A,
-      mode: 'resume',
-      eventNodeId: EVENT_NODE,
-      connectionId: CONNECTION,
-    })
-    expect(request.claimId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(request.documentId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(request).not.toHaveProperty('directory')
-
-    await waitFor(() => {
-      const usage = usageFrames(socket).at(-1)
-      expect(usage?.views).toEqual([{
-        environmentId: ENV_A,
-        viewId: VIEW_A,
-        claimId: request.claimId,
-        bindingEpoch: '11',
-      }])
-    })
-    expect(localStorage.getItem(IDE_TAB_LAST_KEY)).toBe(localValue)
-    expect(JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}')).toMatchObject({
-      presentation,
-      recoveryByEnvironment: {
-        [ENV_A]: {
-          viewId: VIEW_A,
-          daemonInstanceId: DAEMON_A,
-          directory: DIRECTORY_A,
-        },
-      },
-    })
-    expect(screen.getByTestId('ide-iframe')).toHaveAttribute(
-      'src',
-      `/ide/${ENV_A}/${VIEW_A}/__ide/bootstrap?token=t-1`,
-    )
-  })
-
-  it('keeps one iframe per environment mounted and switches visibility without creating duplicate views', async () => {
-    const user = userEvent.setup()
-    const { sockets } = renderPanel()
-    const socket = connect(sockets)
-
-    await openA(user)
-    await user.click(screen.getByTestId('open-b'))
-    await waitFor(() => {
-      expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
-    })
-
-    const calls = ideService.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
-    expect(calls.map(([environmentId]) => environmentId)).toEqual([ENV_A, ENV_B])
-    expect(calls.map(([, request]) => request.mode)).toEqual(['create', 'create'])
-    expect(calls[0]?.[1].viewId).not.toBe(calls[1]?.[1].viewId)
-    expect(calls[0]?.[1].documentId).toBe(calls[1]?.[1].documentId)
-    expect(calls[0]?.[1]).not.toHaveProperty('directory')
-
-    const layerA = document.querySelector(`[data-testid="ide-view-layer"][data-ide-environment="${ENV_A}"]`)
-    const layerB = document.querySelector(`[data-testid="ide-view-layer"][data-ide-environment="${ENV_B}"]`)
-    expect(layerA).toHaveAttribute('hidden')
-    expect(layerB).not.toHaveAttribute('hidden')
-
-    await waitFor(() => {
-      const usage = usageFrames(socket).at(-1)
-      expect(usage?.views).toHaveLength(2)
-      expect(usage?.views.find((entry) => entry.environmentId === ENV_A)?.bindingEpoch).toBe('11')
-      expect(usage?.views.find((entry) => entry.environmentId === ENV_B)?.bindingEpoch).toBe('12')
-    })
-
-    await user.click(screen.getByTestId('open-a'))
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
-    expect(document.querySelector(`[data-testid="ide-view-layer"][data-ide-environment="${ENV_A}"]`))
-      .not.toHaveAttribute('hidden')
-    expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
-  })
-
-  it('preserves the session view on VIEW_IN_USE and retries it only after the user asks', async () => {
-    const user = userEvent.setup()
-    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
-      panelVisible: true,
-      selectedEnvironmentId: ENV_A,
-      openedEnvironmentIds: [ENV_A],
-    }, {
-      [ENV_A]: {
-        viewId: VIEW_A,
-        daemonInstanceId: DAEMON_A,
-        directory: DIRECTORY_A,
-      },
-    }))
-    ideService.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'unavailable',
-        undefined, 'IDE_UNAVAILABLE', 'VIEW_IN_USE'))
-
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-view-in-use')).toBeVisible()
-    })
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
-    expect(screen.getByTestId('ide-view-in-use')).toHaveTextContent('旧标签页可能仍在使用')
-
-    const firstRequest = ideService.openIdeView.mock.calls[0]?.[1] as EnvironmentIdeOpenViewDTO
-    expect(firstRequest).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
-    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
-
-    await user.click(screen.getByTestId('ide-retry-resume-btn'))
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    })
-
-    const calls = ideService.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
-    expect(calls).toHaveLength(2)
-    expect(calls[1]?.[1]).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
-    expect(calls[1]?.[1]).not.toHaveProperty('directory')
-    expect(calls[1]?.[1].claimId).not.toBe(firstRequest.claimId)
-    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
-    expect(ideService.closeIdeView).not.toHaveBeenCalled()
-  })
-
-  it('requires an explicit open-new-view action after VIEW_IN_USE and keeps the copied identity until then', async () => {
-    const user = userEvent.setup()
-    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
-      panelVisible: true,
-      selectedEnvironmentId: ENV_A,
-      openedEnvironmentIds: [ENV_A],
-    }, {
-      [ENV_A]: {
-        viewId: VIEW_A,
-        daemonInstanceId: DAEMON_A,
-        directory: DIRECTORY_A,
-      },
-    }))
-    ideService.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'unavailable',
-        undefined, 'IDE_UNAVAILABLE', 'VIEW_IN_USE'))
-
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-view-in-use')).toBeVisible()
-    })
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
-    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
-    expect(localStorage.getItem(IDE_TAB_LAST_KEY)).toBeNull()
-
-    await user.click(screen.getByTestId('ide-open-new-view-btn'))
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    })
-
-    const calls = ideService.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
-    expect(calls).toHaveLength(2)
-    expect(calls[0]?.[1]).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
-    expect(calls[1]?.[1].mode).toBe('create')
-    expect(calls[1]?.[1].viewId).not.toBe(VIEW_A)
-    expect(calls[1]?.[1].directory).toBe(DIRECTORY_A)
-    expect(calls[1]?.[1].claimId).not.toBe(calls[0]?.[1].claimId)
-    expect(ideService.closeIdeView).not.toHaveBeenCalled()
-
-    const recovery = sessionRecovery(ENV_A)
-    expect(recovery?.viewId).toBe(calls[1]?.[1].viewId)
-    expect(recovery?.daemonInstanceId).toBe(DAEMON_A)
-  })
-
-  it('requires an explicit open-new-view action after VIEW_GONE', async () => {
-    const user = userEvent.setup()
-    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
-      panelVisible: true,
-      selectedEnvironmentId: ENV_A,
-      openedEnvironmentIds: [ENV_A],
-    }, {
-      [ENV_A]: {
-        viewId: VIEW_A,
-        daemonInstanceId: DAEMON_A,
-        directory: DIRECTORY_A,
-      },
-    }))
-    ideService.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is gone', 409, 'unavailable',
-        undefined, 'IDE_UNAVAILABLE', 'VIEW_GONE'))
-
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-view-gone')).toBeVisible()
-    })
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
-
-    await user.click(screen.getByTestId('ide-open-new-view-btn'))
-    await waitFor(() => {
-      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
-    })
-    const calls = ideService.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
-    expect(calls[0]?.[1]).toMatchObject({ mode: 'resume', viewId: VIEW_A })
-    expect(calls[1]?.[1].mode).toBe('create')
-    expect(calls[1]?.[1].viewId).not.toBe(VIEW_A)
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    })
-  })
-
-  it('reconciles an unknown HTTP result only with the original claimId and request identity', async () => {
-    const user = userEvent.setup()
-    ideService.openIdeView.mockRejectedValueOnce(new ApiError('network unavailable'))
-
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await clickOpenA(user)
-
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-claim-unknown')).toBeVisible()
-    })
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    const firstRequest = ideService.openIdeView.mock.calls[0]?.[1] as EnvironmentIdeOpenViewDTO
-
-    await user.click(screen.getByTestId('ide-retry-claim-btn'))
-    await waitFor(() => {
-      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
-    })
-    const secondRequest = ideService.openIdeView.mock.calls[1]?.[1] as EnvironmentIdeOpenViewDTO
-    expect(secondRequest).toEqual(firstRequest)
-    expect(secondRequest.mode).toBe('create')
-    await waitFor(() => {
-      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    })
-    expect(ideService.changeIdeViewDirectory).not.toHaveBeenCalled()
-    expect(ideService.focusIdeTerminal).not.toHaveBeenCalled()
-  })
-
-  it('resumes the same view on a new connection and detaches usage on pagehide without deleting', async () => {
-    const user = userEvent.setup()
-    const { sockets } = renderPanel()
-    const socket = connect(sockets)
-    await openA(user)
-    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
-    const firstViewId = (ideService.openIdeView.mock.calls[0]?.[1] as EnvironmentIdeOpenViewDTO).viewId
-    const firstClaimId = (ideService.openIdeView.mock.calls[0]?.[1] as EnvironmentIdeOpenViewDTO).claimId
-
-    socket.emitServer({ type: 'connected', eventNodeId: EVENT_NODE, connectionId: CONNECTION_2 })
-    await waitFor(() => {
-      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
-    })
-    const reconnect = ideService.openIdeView.mock.calls[1]?.[1] as EnvironmentIdeOpenViewDTO
-    expect(reconnect).toMatchObject({
-      viewId: firstViewId,
-      mode: 'resume',
-      connectionId: CONNECTION_2,
-    })
-    expect(reconnect.claimId).not.toBe(firstClaimId)
-    expect(reconnect).not.toHaveProperty('directory')
-
-    const closeCallsBeforeHide = ideService.closeIdeView.mock.calls.length
-    const event = new Event('pagehide')
-    Object.defineProperty(event, 'persisted', { value: true })
-    act(() => {
-      window.dispatchEvent(event)
-    })
-    await waitFor(() => {
-      const usage = usageFrames(socket).at(-1)
-      expect(usage?.views).toEqual([])
-    })
-    expect(ideService.closeIdeView).toHaveBeenCalledTimes(closeCallsBeforeHide)
-
-    const pageShow = new Event('pageshow')
-    Object.defineProperty(pageShow, 'persisted', { value: true })
-    act(() => {
-      window.dispatchEvent(pageShow)
-    })
-    await waitFor(() => {
-      const usage = usageFrames(socket).at(-1)
-      expect(usage?.views).toHaveLength(1)
-      expect(usage?.views[0]?.viewId).toBe(firstViewId)
-    })
-  })
-
-  it('keeps the iframe when the bridge is unavailable and forces only after confirmation', async () => {
-    const user = userEvent.setup()
-    ideService.closeIdeView
-      .mockRejectedValueOnce(new ApiError('unavailable', 409, 'unavailable', undefined, 'IDE_UNAVAILABLE'))
-      .mockResolvedValueOnce(undefined)
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await openA(user)
-
-    await user.click(screen.getByTestId('ide-close-btn'))
-    await waitFor(() => {
-      expect(screen.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })).toBeInTheDocument()
-    })
-    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    expect(ideService.closeIdeView).toHaveBeenNthCalledWith(1, ENV_A, expect.any(String), expect.objectContaining({
-      bindingEpoch: '11',
-      discard: false,
-    }))
-
-    await user.click(screen.getByRole('button', { name: '强制关闭' }))
-    await waitFor(() => {
-      expect(ideService.closeIdeView).toHaveBeenCalledTimes(2)
-    })
-    expect(ideService.closeIdeView).toHaveBeenNthCalledWith(2, ENV_A, expect.any(String), expect.objectContaining({
-      bindingEpoch: '11',
-      discard: true,
-    }))
-    await waitFor(() => {
-      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
-    })
-    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
-    const last = JSON.parse(localStorage.getItem(IDE_TAB_LAST_KEY) ?? '{}') as {
-      presentation: IdePresentation
-    }
-    expect(last.presentation.openedEnvironmentIds).toEqual([])
-  })
-
-  it('does not offer force close after IDE cancellation', async () => {
-    ideService.closeIdeView.mockRejectedValueOnce(new ApiError(
-      'closing the view was cancelled or editors remain open', 400, 'validation',
-      undefined, 'IDE_CLOSE_CANCELLED',
+    ideService.readIdeView.mockResolvedValue(snapshot(null))
+    ideService.openIdeView.mockImplementation(async (_environmentId: string, next: Record<string, unknown>) => (
+      viewDto(next, 3)
     ))
-    const user = userEvent.setup()
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await openA(user)
-    await user.click(screen.getByTestId('ide-close-btn'))
-    await waitFor(() => expect(ideService.closeIdeView).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-  })
-
-  it('applies mobile layout once on narrow iframe load, reporting failures', async () => {
-    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
-    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
-    ideService.applyIdeMobileLayout.mockRejectedValueOnce(new Error('unavailable'))
-    const user = userEvent.setup()
-    const { sockets } = renderPanel()
-    connect(sockets)
-    await openA(user)
-    const iframe = screen.getByTestId('ide-iframe')
-    fireEvent.load(iframe)
-    fireEvent.load(iframe)
-    await waitFor(() => expect(report).toHaveBeenCalledWith('Failed to apply IDE mobile layout'))
-    expect(ideService.applyIdeMobileLayout).toHaveBeenCalledTimes(1)
-    expect(ideService.applyIdeMobileLayout).toHaveBeenCalledWith(ENV_A, expect.any(String), expect.objectContaining({
-      documentId: expect.any(String), bindingEpoch: '11',
-    }))
-    report.mockRestore()
-  })
-
-  it('retains an offline view and its iframe, but removes an authoritative deletion without DELETE', async () => {
-    const user = userEvent.setup()
-    const { sockets, queryClient } = renderPanel()
-    connect(sockets)
-    await openA(user)
-
-    act(() => {
-      queryClient.setQueryData(queryKeys.environments.list, [card(ENV_A, 'local-node', false)])
+    await user.click(screen.getByTestId('reconnect'))
+    await act(async () => {
+      connect(sockets, CONNECTION_2)
     })
     await waitFor(() => {
-      expect(screen.getByTestId('ide-offline-banner')).toBeVisible()
+      expect(ideService.readIdeView).toHaveBeenCalledTimes(2)
     })
-    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
-    expect(ideService.closeIdeView).not.toHaveBeenCalled()
+    await act(async () => {
+      resolveOpen(viewDto({ ...request, connectionId: CONNECTION_1 }, 9))
+    })
 
-    act(() => {
-      queryClient.setQueryData(queryKeys.environments.list, [])
-    })
     await waitFor(() => {
-      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+      expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
     })
-    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
-    expect(ideService.closeIdeView).not.toHaveBeenCalled()
+    const latest = ideService.openIdeView.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(latest.connectionId).toBe(CONNECTION_2)
+    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('13')
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
   })
 })

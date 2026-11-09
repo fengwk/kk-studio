@@ -256,15 +256,41 @@ function parseLocal(value: unknown): IdeLastSnapshot | null {
   return presentation == null ? null : { presentation }
 }
 
+function encodePending(pending: IdePendingClaim): Record<string, unknown> {
+  return {
+    mode: pending.mode,
+    viewId: pending.viewId,
+    claimId: pending.claimId,
+    expectedBindingEpoch: pending.expectedBindingEpoch,
+    expectedDaemonInstanceId: pending.expectedDaemonInstanceId,
+    directory: pending.directory ?? null,
+  }
+}
+
+function encodeRecovery(recovery: IdeRecovery): Record<string, unknown> {
+  return {
+    viewId: recovery.viewId,
+    daemonInstanceId: recovery.daemonInstanceId,
+    bindingEpoch: recovery.bindingEpoch ?? null,
+    directory: recovery.directory ?? null,
+    pending: recovery.pending == null ? null : encodePending(recovery.pending),
+  }
+}
+
 function serializeSession(
   browserSessionId: string,
   presentation: IdePresentation,
   recoveryByEnvironment: Record<string, IdeRecovery>,
 ): string | null {
-  const snapshot: IdeTabSnapshot = {
+  const snapshot = {
     browserSessionId,
     presentation,
-    recoveryByEnvironment,
+    recoveryByEnvironment: Object.fromEntries(
+      Object.entries(recoveryByEnvironment).map(([environmentId, recovery]) => [
+        environmentId,
+        encodeRecovery(recovery),
+      ]),
+    ),
   }
   return serializeTabSnapshot(snapshot, parseSession)
 }
@@ -286,7 +312,7 @@ function serializeLocal(presentation: IdePresentation): string | null {
  */
 export function initializeIdeTabState(storage?: IdeTabStorage): IdeTabLoadResult {
   const stores = resolveTabStorage(storage)
-  const { value, source } = loadTabSnapshot(
+  const { value, source } = loadTabSnapshot<IdeTabSnapshot | IdeLastSnapshot>(
     stores, IDE_TAB_SESSION_KEY, IDE_TAB_LAST_KEY, parseSession, parseLocal,
   )
   const browserSessionId = value != null && 'browserSessionId' in value

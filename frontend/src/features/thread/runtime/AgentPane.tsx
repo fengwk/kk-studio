@@ -240,6 +240,8 @@ export function AgentPane({
     },
     [idePanel, onFocus, resolvedEnvironment],
   )
+  // IDE 命令入口只在 Chat 的持久宿主与可用 Environment 同时存在时开放。
+  const ideAvailable = idePanel != null && resolvedEnvironment != null
 
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
@@ -298,7 +300,7 @@ export function AgentPane({
               onFocusTargetChange={setFocusTarget}
               presentationSelected={navigation.layers.length === 0}
               onPresentation={acceptPresentation}
-              onOpenIde={handleOpenIde}
+              onOpenIde={ideAvailable ? handleOpenIde : undefined}
               loadSessions={loadSessions}
               loadSession={loadSession}
             />

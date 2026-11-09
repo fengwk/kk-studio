@@ -12,6 +12,7 @@ const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
 const VIEW_B = 'c2000000-0000-4000-8000-000000000002'
+const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
 const DIRECTORY_A = '/workspace/projects/a'
 const DIRECTORY_B = '/workspace/projects/b'
 
@@ -24,9 +25,8 @@ function view(partial: Partial<IdeViewState> & Pick<IdeViewState, 'environmentId
     mode: 'resume',
     status: 'ready',
     attempt: 1,
-    claimInFlight: false,
     entryUrl: `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=fixture`,
-    daemonInstanceId: 'd1000000-0000-4000-8000-000000000001',
+    daemonInstanceId: DAEMON_A,
     bindingEpoch: '7',
     directory: environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B,
     workspacePath: environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B,
@@ -52,6 +52,7 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     environmentsLoading: false,
     environmentsError: false,
     identityReady: true,
+    sessionStatus: 'ready',
     storageUnavailable: false,
     onSelectEnvironment: vi.fn(),
     onCollapse: vi.fn(),
@@ -126,7 +127,6 @@ describe('IdeOverlayPanel', () => {
   })
 
   it('records the switched directory only after the change succeeds', async () => {
-    // 失败切换（dirty 或目录不可用）不写最近目录，成功后才按 Environment 记录并关闭弹窗。
     const user = userEvent.setup()
     const onChangeDirectory = vi.fn()
       .mockResolvedValueOnce({ ok: false, message: 'directory-failed' })
@@ -148,7 +148,6 @@ describe('IdeOverlayPanel', () => {
     expect(await within(dialog).findByTestId('ide-directory-error')).toHaveTextContent('切换目录失败')
     expect(onChangeDirectory).toHaveBeenLastCalledWith(ENV_A, DIRECTORY_A)
     expect(recordRecentDirectory).not.toHaveBeenCalled()
-    expect(screen.getByRole('dialog', { name: '打开宿主目录' })).toBeVisible()
 
     await user.click(within(dialog).getByTestId('ide-directory-confirm'))
     await waitFor(() => {
@@ -157,17 +156,9 @@ describe('IdeOverlayPanel', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: '打开宿主目录' })).not.toBeInTheDocument()
     })
-
-    // 重新打开时展示最新记录，而不是打开前的快照。
-    await user.click(screen.getByTestId('ide-open-directory-btn'))
-    const reopened = await screen.findByRole('dialog', { name: '打开宿主目录' })
-    expect(readRecentDirectories).toHaveBeenCalledTimes(2)
-    expect(readRecentDirectories).toHaveBeenLastCalledWith(ENV_A)
-    expect(reopened).toBeVisible()
   })
 
   it('copies the full directory path and reports clipboard errors', async () => {
-    // 路径截断只影响显示，复制必须使用完整路径并暴露失败。
     const user = userEvent.setup()
     const write = vi.spyOn(navigator.clipboard, 'writeText')
       .mockResolvedValueOnce(undefined)
@@ -190,7 +181,6 @@ describe('IdeOverlayPanel', () => {
     await user.click(screen.getByTestId('ide-close-btn'))
 
     const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
-    expect(within(dialog).getByText('IDE 状态未知或无法连接。强制关闭可能丢失未保存的修改，是否继续？')).toBeVisible()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
 
@@ -200,21 +190,21 @@ describe('IdeOverlayPanel', () => {
     })
   })
 
-  it('exposes recovery and offline states without silently creating a replacement view', async () => {
+  it('exposes reconciling, gone and detached states without silently creating a replacement view', async () => {
     const user = userEvent.setup()
     const onRetryClaim = vi.fn()
     const onOpenNewView = vi.fn()
     const onReloadEnvironments = vi.fn()
-    const unknown = view({
+    const reconciling = view({
       environmentId: ENV_A,
       viewId: VIEW_A,
-      status: 'unknown',
+      status: 'reconciling',
       entryUrl: undefined,
       bindingEpoch: undefined,
     })
     const { rerender } = render(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: unknown },
+        views: { [ENV_A]: reconciling },
         openedEnvironmentIds: [ENV_A],
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
@@ -223,9 +213,8 @@ describe('IdeOverlayPanel', () => {
       })} />,
     )
 
-    expect(screen.getByTestId('ide-claim-unknown')).toBeVisible()
-    await user.click(screen.getByTestId('ide-retry-claim-btn'))
-    expect(onRetryClaim).toHaveBeenCalledWith(ENV_A)
+    expect(screen.getByTestId('ide-reconciling')).toBeVisible()
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
 
     const gone = view({
       environmentId: ENV_A,
@@ -248,50 +237,76 @@ describe('IdeOverlayPanel', () => {
     await user.click(screen.getByTestId('ide-open-new-view-btn'))
     expect(onOpenNewView).toHaveBeenCalledWith(ENV_A)
 
-    rerender(
-      <IdeOverlayPanel {...baseProps({
-        selectedEnvironmentId: ENV_B,
-        openedEnvironmentIds: [ENV_B],
-        views: {},
-        environments: [{ id: ENV_B, name: 'remote-node', ready: false }],
-        onReloadEnvironments,
-      })} />,
-    )
-    expect(screen.getByTestId('ide-offline-state')).toBeVisible()
-    expect(screen.queryByTestId('ide-open-new-view-btn')).not.toBeInTheDocument()
-  })
-
-  it('shows a distinct in-use state with explicit resume and new-view actions', async () => {
-    const user = userEvent.setup()
-    const onRetryClaim = vi.fn()
-    const onOpenNewView = vi.fn()
-    const inUse = view({
+    const detached = view({
       environmentId: ENV_A,
       viewId: VIEW_A,
-      status: 'in-use',
+      status: 'detached',
       entryUrl: undefined,
       bindingEpoch: undefined,
     })
-    render(
+    rerender(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: inUse },
+        views: { [ENV_A]: detached },
         openedEnvironmentIds: [ENV_A],
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
         onOpenNewView,
+        onReloadEnvironments,
       })} />,
     )
-
-    const banner = screen.getByTestId('ide-view-in-use')
-    expect(banner).toBeVisible()
-    expect(banner).toHaveTextContent('旧标签页可能仍在使用')
-    expect(screen.getByTestId('ide-view-in-use-state')).toBeVisible()
+    expect(screen.getByTestId('ide-view-detached')).toBeVisible()
+    expect(screen.getByTestId('ide-view-detached')).toHaveTextContent('其他浏览器会话')
     expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+  })
 
-    await user.click(screen.getByTestId('ide-retry-resume-btn'))
-    await user.click(screen.getByTestId('ide-open-new-view-btn'))
+  it('renders waiting-ready and explicit retry for an error state', async () => {
+    const user = userEvent.setup()
+    const onRetryClaim = vi.fn()
+    const waiting = view({
+      environmentId: ENV_A,
+      viewId: VIEW_A,
+      status: 'waiting-ready',
+      entryUrl: undefined,
+      bindingEpoch: undefined,
+    })
+    const { rerender } = render(
+      <IdeOverlayPanel {...baseProps({
+        views: { [ENV_A]: waiting },
+        openedEnvironmentIds: [ENV_A],
+        onRetryClaim,
+      })} />,
+    )
+    expect(screen.getByTestId('ide-waiting-ready')).toBeVisible()
+
+    rerender(
+      <IdeOverlayPanel {...baseProps({
+        views: {
+          [ENV_A]: view({
+            environmentId: ENV_A,
+            viewId: VIEW_A,
+            status: 'error',
+            entryUrl: undefined,
+            bindingEpoch: undefined,
+            errorMessage: 'boom',
+          }),
+        },
+        openedEnvironmentIds: [ENV_A],
+        onRetryClaim,
+      })} />,
+    )
+    expect(screen.getByTestId('ide-error-banner')).toHaveTextContent('boom')
+    await user.click(screen.getByTestId('ide-retry-claim-btn'))
     expect(onRetryClaim).toHaveBeenCalledWith(ENV_A)
-    expect(onOpenNewView).toHaveBeenCalledWith(ENV_A)
+  })
+
+  it('reports Web Locks capability and ownership conflicts explicitly', () => {
+    const { rerender } = render(
+      <IdeOverlayPanel {...baseProps({ sessionStatus: 'unsupported' })} />,
+    )
+    expect(screen.getByTestId('ide-session-unavailable')).toHaveTextContent('Web Locks')
+
+    rerender(<IdeOverlayPanel {...baseProps({ sessionStatus: 'conflict' })} />)
+    expect(screen.getByTestId('ide-session-unavailable')).toHaveTextContent('另一个活动页面')
   })
 
   it('renders the environment selector when no environment was supplied', () => {

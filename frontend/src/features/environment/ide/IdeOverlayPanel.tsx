@@ -561,27 +561,23 @@ export function IdeOverlayPanel({
           viewBusy ? (
             <div className="ide-panel-state" data-testid="ide-opening-state">
               <LoadingSpinner />
-              <p>{t('ai.ide.loading')}</p>
+              <p>{t(selectedView.status === 'reconciling' ? 'ai.ide.reconciling' : 'ai.ide.loading')}</p>
             </div>
-          ) : selectedView.status === 'in-use' ? (
-            <div className="ide-panel-state is-warning" data-testid="ide-view-in-use-state">
-              <p>{t('ai.ide.viewInUse')}</p>
+          ) : selectedView.status === 'detached' ? (
+            <div className="ide-panel-state is-warning" data-testid="ide-view-detached-state">
+              <p>{t('ai.ide.viewOwnedByOther')}</p>
             </div>
           ) : selectedView.status === 'gone' ? (
             <div className="ide-panel-state is-warning" data-testid="ide-view-gone-state">
               <p>{t('ai.ide.viewGone')}</p>
             </div>
-          ) : selectedView.status === 'unknown' ? (
-            <div className="ide-panel-state is-error" data-testid="ide-error-state">
-              <p>{t('ai.ide.claimUnknown')}</p>
-            </div>
           ) : selectedView.status === 'error' ? (
             <div className="ide-panel-state is-error" data-testid="ide-error-state">
               <p>{claimError || t('ai.ide.error')}</p>
             </div>
-          ) : environmentOffline ? (
+          ) : selectedView.status === 'waiting-ready' || environmentOffline ? (
             <div className="ide-panel-state is-warning" data-testid="ide-offline-state">
-              <p>{t('ai.ide.offline')}</p>
+              <p>{t('ai.ide.waitingReady')}</p>
             </div>
           ) : null
         ) : null}

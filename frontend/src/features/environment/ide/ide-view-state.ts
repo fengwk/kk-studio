@@ -23,6 +23,8 @@ export interface IdeViewState {
   status: IdeViewStatus
   claimId: string
   attempt: number
+  /** waiting-ready 的阻塞来源：Daemon 未就绪时只能等新事件/显式重试，环境离线转就绪可再对账。 */
+  waitingReason?: 'daemon' | 'environment'
   pending?: IdePendingClaim
   daemonInstanceId?: string
   bindingEpoch?: string

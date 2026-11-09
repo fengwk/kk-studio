@@ -9,7 +9,6 @@ import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/pro
 import type {
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
-  EnvironmentIdeOpenViewDTO,
   EnvironmentIdeReadViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
@@ -17,9 +16,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
-import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
 import {
-  isIdeDirectory,
   readRecentDirectories,
   saveIdeSession,
   type IdePendingClaim,
@@ -37,19 +34,25 @@ import {
   readIdeView,
 } from '@/features/environment/ide/environment-ide-service'
 import {
+  buildOpenRequest,
+  compareDecimal,
+  IdeProtocolError,
+  isIdeProtocolError,
+  validateCommandView,
+  validateOpenResponse,
+  validateViewSnapshot,
+  viewFingerprint,
+} from '@/features/environment/ide/ide-contract'
+import {
   buildUsageViews,
   initialViews,
   isBoundToConnection,
-  POSITIVE_DECIMAL,
   recoveryFromViews,
   type IdeViewState,
-  type IdeViewStatus,
 } from '@/features/environment/ide/ide-view-state'
 import {
   failureStatus,
   ideFailureReason,
-  isDaemonNotReady,
-  isOutcomeUnknown,
   isUnknownIdeFailure,
   isViewGone,
   safeIdeError,
@@ -67,167 +70,12 @@ export interface UseIdeClaimReconciliationOptions {
 }
 
 interface SnapshotCacheEntry {
-  daemonInstanceId: string
   revision: string
   fingerprint: string
 }
 
 interface ReconcileOptions {
   allowRebind: boolean
-}
-
-function compareDecimal(left: string, right: string): number {
-  if (left.length !== right.length) {
-    return left.length < right.length ? -1 : 1
-  }
-  return left < right ? -1 : left > right ? 1 : 0
-}
-
-function viewFingerprint(view: EnvironmentIdeViewDTO | null): string {
-  if (view == null) {
-    return 'absent'
-  }
-  return [
-    view.viewId,
-    view.environmentId,
-    view.browserSessionId,
-    view.eventNodeId,
-    view.connectionId,
-    view.claimId,
-    view.daemonInstanceId,
-    view.bindingEpoch,
-    view.directory,
-    view.workspacePath,
-    view.state,
-  ].join('|')
-}
-
-function isViewDto(value: unknown): value is EnvironmentIdeViewDTO {
-  return value != null && typeof value === 'object'
-}
-
-function validateSnapshot(
-  environmentId: string,
-  viewId: string,
-  browserSessionId: string,
-  snapshot: EnvironmentIdeViewSnapshotDTO,
-): { daemonInstanceId: string; revision: string; view: EnvironmentIdeViewDTO | null } {
-  if (
-    snapshot == null
-    || typeof snapshot !== 'object'
-    || !isCanonicalUuid(snapshot.daemonInstanceId)
-    || typeof snapshot.revision !== 'string'
-    || !/^(0|[1-9][0-9]*)$/.test(snapshot.revision)
-    || (snapshot.view !== null && !isViewDto(snapshot.view))
-  ) {
-    throw new Error('Invalid IDE view snapshot')
-  }
-  if (snapshot.view == null) {
-    return {
-      daemonInstanceId: snapshot.daemonInstanceId,
-      revision: snapshot.revision,
-      view: null,
-    }
-  }
-  const view = snapshot.view
-  if (
-    view.viewId !== viewId
-    || view.environmentId !== environmentId
-    || view.browserSessionId !== browserSessionId
-    || view.daemonInstanceId !== snapshot.daemonInstanceId
-    || !isCanonicalUuid(view.daemonInstanceId)
-    || typeof view.bindingEpoch !== 'string'
-    || !POSITIVE_DECIMAL.test(view.bindingEpoch)
-    || !isIdeDirectory(view.directory)
-    || (view.state !== 'OPEN' && view.state !== 'CLOSING')
-  ) {
-    throw new Error('Invalid IDE view snapshot')
-  }
-  return {
-    daemonInstanceId: snapshot.daemonInstanceId,
-    revision: snapshot.revision,
-    view,
-  }
-}
-
-function validateOpenResponse(
-  environmentId: string,
-  browserSessionId: string,
-  pending: IdePendingClaim,
-  response: EnvironmentIdeViewDTO,
-): {
-  viewId: string
-  daemonInstanceId: string
-  bindingEpoch: string
-  directory: string
-  workspacePath: string
-  entryUrl: string
-} {
-  if (
-    response == null
-    || typeof response !== 'object'
-    || response.viewId !== pending.viewId
-    || response.environmentId !== environmentId
-    || response.browserSessionId !== browserSessionId
-    || response.claimId !== pending.claimId
-    || response.daemonInstanceId !== pending.expectedDaemonInstanceId
-    || !isCanonicalUuid(response.daemonInstanceId)
-    || typeof response.bindingEpoch !== 'string'
-    || !POSITIVE_DECIMAL.test(response.bindingEpoch)
-    || (pending.mode === 'resume'
-      && compareDecimal(response.bindingEpoch, pending.expectedBindingEpoch) < 0)
-    || !isIdeDirectory(response.directory)
-    || typeof response.workspacePath !== 'string'
-    || response.workspacePath.length === 0
-    || response.state !== 'OPEN'
-  ) {
-    throw new Error('Invalid IDE binding response')
-  }
-  return {
-    viewId: response.viewId,
-    daemonInstanceId: response.daemonInstanceId,
-    bindingEpoch: response.bindingEpoch,
-    directory: response.directory,
-    workspacePath: response.workspacePath,
-    entryUrl: validateIdeEntryUrl(response.entryUrl, environmentId, pending.viewId),
-  }
-}
-
-function validateCommandView(
-  environmentId: string,
-  browserSessionId: string,
-  viewId: string,
-  response: EnvironmentIdeViewDTO,
-): {
-  bindingEpoch: string
-  daemonInstanceId: string
-  directory: string
-  workspacePath: string
-  eventNodeId?: string
-  connectionId?: string
-} {
-  if (
-    response == null
-    || typeof response !== 'object'
-    || response.viewId !== viewId
-    || response.environmentId !== environmentId
-    || response.browserSessionId !== browserSessionId
-    || !isCanonicalUuid(response.daemonInstanceId)
-    || typeof response.bindingEpoch !== 'string'
-    || !POSITIVE_DECIMAL.test(response.bindingEpoch)
-    || !isIdeDirectory(response.directory)
-    || response.state !== 'OPEN'
-  ) {
-    throw new Error('Invalid IDE command response')
-  }
-  return {
-    bindingEpoch: response.bindingEpoch,
-    daemonInstanceId: response.daemonInstanceId,
-    directory: response.directory,
-    workspacePath: typeof response.workspacePath === 'string' ? response.workspacePath : response.directory,
-    eventNodeId: response.eventNodeId,
-    connectionId: response.connectionId,
-  }
 }
 
 /**
@@ -261,9 +109,13 @@ export function useIdeClaimReconciliation({
   const pageSuspendedRef = useRef(false)
   const revisionRef = useRef(0n)
   const bindingRef = useRef(false)
+  const operationConnectionRef = useRef<string | null>(null)
+  const operationGenerationRef = useRef(0)
   const operationQueueRef = useRef<Array<() => Promise<void>>>([])
   const sessionRef = useRef(session)
+  const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
+  const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
   const snapshotCacheRef = useRef(new Map<string, SnapshotCacheEntry>())
   const pendingShellEnvironmentsRef = useRef(new Set<string>())
   const actionsRef = useRef<{
@@ -391,18 +243,26 @@ export function useIdeClaimReconciliation({
     return attempt
   }
 
-  /** 连接内只允许一个在途绑定操作；后续对账串行执行，不并发抢占。 */
+  /** 当前连接内只允许一个在途绑定操作；旧连接的在途操作不阻塞新连接立即对账。 */
   function runExclusive(task: () => Promise<void>): void {
-    if (bindingRef.current) {
+    const connectionId = identityRef.current?.connectionId ?? null
+    if (bindingRef.current && operationConnectionRef.current === connectionId) {
       operationQueueRef.current.push(task)
       return
     }
+    const generation = operationGenerationRef.current + 1
+    operationGenerationRef.current = generation
     bindingRef.current = true
+    operationConnectionRef.current = connectionId
     void (async () => {
       try {
         await task()
       } finally {
+        if (operationGenerationRef.current !== generation) {
+          return
+        }
         bindingRef.current = false
+        operationConnectionRef.current = null
         const next = operationQueueRef.current.shift()
         if (next != null && mountedRef.current) {
           runExclusive(next)
@@ -411,9 +271,14 @@ export function useIdeClaimReconciliation({
     })()
   }
 
-  function setWaitingReady(environmentId: string, attempt: number): void {
+  function setWaitingReady(
+    environmentId: string,
+    attempt: number,
+    reason: 'daemon' | 'environment' = 'environment',
+  ): void {
     updateView(environmentId, attempt, {
       status: 'waiting-ready',
+      waitingReason: reason,
       errorMessage: undefined,
     })
   }
@@ -452,50 +317,82 @@ export function useIdeClaimReconciliation({
     return true
   }
 
-  function applyFailure(
+  /**
+   * 统一失败落点：先复核 attempt 与冻结连接身份，再按结构化 reason 决定状态。
+   * 只有 OPEN 的 STALE/未知结果允许一次纯读驱动的 CAS；纯读失败没有副作用，不自动重试。
+   */
+  async function settleFailure(
     environmentId: string,
     attempt: number,
     error: unknown,
-    retainPending: boolean,
-  ): { status: IdeViewStatus; message?: string } {
-    const mapped = failureStatus(error)
-    if (!retainPending && mapped.status !== 'reconciling') {
-      updateView(environmentId, attempt, { pending: undefined })
-    }
-    updateView(environmentId, attempt, {
-      status: mapped.status,
-      errorMessage: mapped.message,
-      closeInFlight: false,
-    })
-    writeSession()
-    return mapped
-  }
-
-  function handleIdentityFailure(): void {
-    if (identityRef.current != null) {
-      actionsRef.current?.reconcileAll()
-    }
-  }
-
-  async function failOpen(
-    environmentId: string,
-    attempt: number,
-    error: unknown,
+    kind: 'open' | 'read',
+    requestIdentity: ApplicationEventConnectionIdentity | null,
     options: ReconcileOptions,
   ): Promise<void> {
     if (!mountedRef.current) {
       return
     }
+    const current = viewsRef.current[environmentId]
+    if (current == null || current.attempt !== attempt) {
+      return
+    }
+    if (isIdeProtocolError(error)) {
+      updateView(environmentId, attempt, {
+        status: 'error',
+        errorMessage: error.message,
+        closeInFlight: false,
+      })
+      writeSession()
+      return
+    }
+    if (requestIdentity != null) {
+      const appliedIdentity = identityRef.current
+      if (
+        appliedIdentity == null
+        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
+        || appliedIdentity.connectionId !== requestIdentity.connectionId
+      ) {
+        updateView(environmentId, attempt, {
+          status: appliedIdentity == null ? 'waiting-ready' : 'reconciling',
+          errorMessage: undefined,
+        })
+        if (appliedIdentity != null) {
+          reconcile(environmentId, 'connection')
+        }
+        return
+      }
+    }
     const reason = ideFailureReason(error)
     if (reason === 'DAEMON_NOT_READY') {
-      setWaitingReady(environmentId, attempt)
+      setWaitingReady(environmentId, attempt, 'daemon')
       registerUsageQuiet()
       return
     }
-    if (
-      (reason === 'STALE_BINDING' || reason === 'IDE_OUTCOME_UNKNOWN' || isOutcomeUnknown(error))
-      && options.allowRebind
-    ) {
+    if (isViewGone(error)) {
+      updateView(environmentId, attempt, {
+        status: 'gone',
+        errorMessage: undefined,
+        entryUrl: undefined,
+        pending: undefined,
+        closeInFlight: false,
+      })
+      writeSession()
+      registerUsageQuiet()
+      return
+    }
+    if (reason === 'VIEW_OWNED_BY_OTHER_SESSION') {
+      updateView(environmentId, attempt, {
+        status: 'detached',
+        errorMessage: undefined,
+        pending: undefined,
+        closeInFlight: false,
+      })
+      writeSession()
+      registerUsageQuiet()
+      return
+    }
+    const unknown = reason === 'IDE_OUTCOME_UNKNOWN' || isUnknownIdeFailure(error)
+    if (kind === 'open' && (reason === 'STALE_BINDING' || unknown) && options.allowRebind) {
       updateView(environmentId, attempt, {
         status: 'reconciling',
         errorMessage: undefined,
@@ -503,21 +400,31 @@ export function useIdeClaimReconciliation({
       await reconcileNow(environmentId, 'outcome-unknown', { allowRebind: false })
       return
     }
-    const mapped = applyFailure(environmentId, attempt, error, false)
-    if (mapped.status === 'detached' || mapped.status === 'gone' || mapped.status === 'error') {
+    if (kind === 'read' && (reason === 'STALE_BINDING' || unknown) && options.allowRebind) {
+      updateView(environmentId, attempt, {
+        status: 'reconciling',
+        errorMessage: undefined,
+      })
+      await reconcileNow(environmentId, 'read-stale', { allowRebind: false })
+      return
+    }
+    const clearPending = reason === 'STALE_BINDING'
+      || reason === 'CLAIM_CONFLICT'
+      || reason === 'IDE_CAPACITY_EXCEEDED'
+    const mapped = failureStatus(error)
+    const status = unknown || reason === 'STALE_BINDING' ? 'error' : mapped.status
+    updateView(environmentId, attempt, {
+      status,
+      errorMessage: mapped.message || (unknown ? safeIdeError(error) : undefined),
+      ...(clearPending ? { pending: undefined } : {}),
+      closeInFlight: false,
+    })
+    writeSession()
+    if (status === 'detached' || status === 'gone' || status === 'error') {
       registerUsageQuiet()
     }
-    if (isUnknownIdeFailure(error)) {
-      const current = viewsRef.current[environmentId]
-      if (current != null && current.attempt === attempt) {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: mapped.message || safeIdeError(error),
-        })
-      }
-    }
     if (identityRef.current == null) {
-      handleIdentityFailure()
+      actionsRef.current?.reconcileAll()
     }
   }
 
@@ -539,19 +446,7 @@ export function useIdeClaimReconciliation({
       setWaitingReady(environmentId, attempt)
       return
     }
-    const request: EnvironmentIdeOpenViewDTO = {
-      viewId: pending.viewId,
-      browserSessionId: sessionRef.current.browserSessionId,
-      eventNodeId: currentIdentity.eventNodeId,
-      connectionId: currentIdentity.connectionId,
-      claimId: pending.claimId,
-      mode: pending.mode,
-      expectedBindingEpoch: pending.expectedBindingEpoch,
-      expectedDaemonInstanceId: pending.expectedDaemonInstanceId,
-      ...(pending.mode === 'create' && pending.directory != null
-        ? { directory: pending.directory }
-        : {}),
-    }
+    const request = buildOpenRequest(pending, sessionRef.current.browserSessionId, currentIdentity)
     try {
       const response = await openIdeView(environmentId, request)
       if (!mountedRef.current) {
@@ -565,6 +460,23 @@ export function useIdeClaimReconciliation({
       )
       const current = viewsRef.current[environmentId]
       if (current == null || current.attempt !== attempt) {
+        return
+      }
+      const appliedIdentity = identityRef.current
+      if (
+        appliedIdentity == null
+        || appliedIdentity.eventNodeId !== request.eventNodeId
+        || appliedIdentity.connectionId !== request.connectionId
+      ) {
+        // 迟到回执不能把旧连接绑定当成当前绑定；保留 pending 走新连接对账。
+        updateView(environmentId, attempt, {
+          status: appliedIdentity == null ? 'waiting-ready' : 'reconciling',
+          pending,
+          errorMessage: undefined,
+        })
+        if (appliedIdentity != null) {
+          reconcile(environmentId, 'connection')
+        }
         return
       }
       const entryChanged = current.entryUrl !== validated.entryUrl
@@ -596,14 +508,7 @@ export function useIdeClaimReconciliation({
       if (!mountedRef.current) {
         return
       }
-      if (error instanceof Error && error.message.startsWith('Invalid IDE')) {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: error.message,
-        })
-        return
-      }
-      await failOpen(environmentId, attempt, error, options)
+      await settleFailure(environmentId, attempt, error, 'open', request, options)
     }
   }
 
@@ -630,20 +535,18 @@ export function useIdeClaimReconciliation({
     try {
       await registerUsageNow(usageOverride(environmentId, viewId, claimId))
     } catch (error) {
-      if (identityRef.current?.connectionId !== currentIdentity.connectionId) {
-        setWaitingReady(environmentId, attempt)
-        handleIdentityFailure()
-        return
-      }
-      applyFailure(environmentId, attempt, error, false)
+      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
       return
     }
     if (!mountedRef.current) {
       return
     }
-    if (identityRef.current?.connectionId !== currentIdentity.connectionId) {
+    if (
+      identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
+      || identityRef.current?.connectionId !== currentIdentity.connectionId
+    ) {
       setWaitingReady(environmentId, attempt)
-      handleIdentityFailure()
+      reconcile(environmentId, 'connection')
       return
     }
     const query: EnvironmentIdeReadViewDTO = {
@@ -657,9 +560,28 @@ export function useIdeClaimReconciliation({
       if (!mountedRef.current) {
         return
       }
+      if (
+        identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
+        || identityRef.current?.connectionId !== currentIdentity.connectionId
+      ) {
+        setWaitingReady(environmentId, attempt)
+        reconcile(environmentId, 'connection')
+        return
+      }
       const accepted = acceptSnapshot(environmentId, viewId, snapshot)
       if (!accepted.accepted) {
-        setWaitingReady(environmentId, attempt)
+        updateView(environmentId, attempt, {
+          status: 'error',
+          errorMessage: 'stale snapshot revision',
+        })
+        return
+      }
+      if (accepted.view != null && accepted.view.state === 'CLOSING') {
+        updateView(environmentId, attempt, {
+          status: 'error',
+          errorMessage: 'IDE_CLOSING',
+        })
+        writeSession()
         return
       }
       if (accepted.view == null) {
@@ -683,45 +605,7 @@ export function useIdeClaimReconciliation({
         ...(accepted.view.directory == null ? {} : { directory: accepted.view.directory }),
       }, { allowRebind: true })
     } catch (error) {
-      if (!mountedRef.current) {
-        return
-      }
-      if (error instanceof Error && error.message.startsWith('Invalid IDE')) {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: error.message,
-        })
-        return
-      }
-      if (isViewGone(error)) {
-        updateView(environmentId, attempt, {
-          status: 'gone',
-          errorMessage: undefined,
-          entryUrl: undefined,
-          pending: undefined,
-        })
-        writeSession()
-        return
-      }
-      if (isDaemonNotReady(error)) {
-        setWaitingReady(environmentId, attempt)
-        return
-      }
-      const reason = ideFailureReason(error)
-      if (reason === 'VIEW_OWNED_BY_OTHER_SESSION') {
-        updateView(environmentId, attempt, {
-          status: 'detached',
-          errorMessage: undefined,
-          pending: undefined,
-        })
-        writeSession()
-        return
-      }
-      updateView(environmentId, attempt, {
-        status: 'error',
-        errorMessage: safeIdeError(error),
-      })
-      writeSession()
+      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
     }
   }
 
@@ -747,28 +631,28 @@ export function useIdeClaimReconciliation({
     viewId: string,
     snapshot: EnvironmentIdeViewSnapshotDTO,
   ): { accepted: boolean; daemonInstanceId: string; view: EnvironmentIdeViewDTO | null } {
-    const validated = validateSnapshot(
+    const validated = validateViewSnapshot(
       environmentId,
       viewId,
       sessionRef.current.browserSessionId,
       snapshot,
     )
-    const cached = snapshotCacheRef.current.get(environmentId)
-    if (cached != null && cached.daemonInstanceId === validated.daemonInstanceId) {
+    const cacheKey = `${validated.daemonInstanceId}:${viewId}`
+    const cached = snapshotCacheRef.current.get(cacheKey)
+    if (cached != null) {
       const compare = compareDecimal(validated.revision, cached.revision)
       if (compare < 0) {
         return {
           accepted: false,
-          daemonInstanceId: cached.daemonInstanceId,
+          daemonInstanceId: validated.daemonInstanceId,
           view: null,
         }
       }
       if (compare === 0 && cached.fingerprint !== viewFingerprint(validated.view)) {
-        throw new Error('Invalid IDE view snapshot: conflicting revision')
+        throw new IdeProtocolError('Invalid IDE view snapshot: conflicting revision')
       }
     }
-    snapshotCacheRef.current.set(environmentId, {
-      daemonInstanceId: validated.daemonInstanceId,
+    snapshotCacheRef.current.set(cacheKey, {
       revision: validated.revision,
       fingerprint: viewFingerprint(validated.view),
     })
@@ -803,20 +687,18 @@ export function useIdeClaimReconciliation({
         current.bindingEpoch,
       ))
     } catch (error) {
-      if (identityRef.current?.connectionId !== currentIdentity.connectionId) {
-        setWaitingReady(environmentId, attempt)
-        handleIdentityFailure()
-        return
-      }
-      applyFailure(environmentId, attempt, error, true)
+      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
       return
     }
     if (!mountedRef.current) {
       return
     }
-    if (identityRef.current?.connectionId !== currentIdentity.connectionId) {
+    if (
+      identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
+      || identityRef.current?.connectionId !== currentIdentity.connectionId
+    ) {
       setWaitingReady(environmentId, attempt)
-      handleIdentityFailure()
+      reconcile(environmentId, 'connection')
       return
     }
     const query: EnvironmentIdeReadViewDTO = {
@@ -833,13 +715,21 @@ export function useIdeClaimReconciliation({
       if (!mountedRef.current) {
         return
       }
+      if (
+        identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
+        || identityRef.current?.connectionId !== currentIdentity.connectionId
+      ) {
+        setWaitingReady(environmentId, attempt)
+        reconcile(environmentId, 'connection')
+        return
+      }
       const accepted = acceptSnapshot(environmentId, viewId, snapshot)
       if (!accepted.accepted) {
         const latest = viewsRef.current[environmentId]
         if (latest?.status === 'ready') {
           return
         }
-        throw new Error('Invalid IDE view snapshot: stale revision')
+        throw new IdeProtocolError('Invalid IDE view snapshot: stale revision')
       }
       const persisted = viewsRef.current[environmentId]
       if (
@@ -930,51 +820,7 @@ export function useIdeClaimReconciliation({
         ...(accepted.view.directory == null ? {} : { directory: accepted.view.directory }),
       }, options)
     } catch (error) {
-      if (!mountedRef.current) {
-        return
-      }
-      if (error instanceof Error && error.message.startsWith('Invalid IDE')) {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: error.message,
-        })
-        return
-      }
-      if (isDaemonNotReady(error)) {
-        setWaitingReady(environmentId, attempt)
-        return
-      }
-      if (isViewGone(error)) {
-        updateView(environmentId, attempt, {
-          status: 'gone',
-          errorMessage: undefined,
-          entryUrl: undefined,
-          pending: undefined,
-        })
-        writeSession()
-        return
-      }
-      const reason = ideFailureReason(error)
-      if (reason === 'VIEW_OWNED_BY_OTHER_SESSION') {
-        updateView(environmentId, attempt, {
-          status: 'detached',
-          errorMessage: undefined,
-          pending: undefined,
-        })
-        writeSession()
-        return
-      }
-      if ((reason === 'STALE_BINDING' || isOutcomeUnknown(error)) && options.allowRebind) {
-        await reconcileNow(environmentId, 'read-stale', { allowRebind: false })
-        return
-      }
-      updateView(environmentId, attempt, {
-        status: 'error',
-        errorMessage: isUnknownIdeFailure(error)
-          ? undefined
-          : safeIdeError(error),
-      })
-      writeSession()
+      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, options)
     }
   }
 
@@ -1148,6 +994,7 @@ export function useIdeClaimReconciliation({
       pendingShell: false,
       terminalError: undefined,
     })
+    const requestIdentity = identityRef.current
     try {
       await registerUsageNow(usageOverride(
         environmentId,
@@ -1163,7 +1010,14 @@ export function useIdeClaimReconciliation({
       await focusIdeTerminal(environmentId, view.viewId, body)
     } catch (error) {
       const current = viewsRef.current[environmentId]
-      if (current?.bindingEpoch !== view.bindingEpoch) {
+      const appliedIdentity = identityRef.current
+      if (
+        !bindingMatches(current, view)
+        || requestIdentity == null
+        || appliedIdentity == null
+        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
+        || appliedIdentity.connectionId !== requestIdentity.connectionId
+      ) {
         return
       }
       updateView(environmentId, view.attempt, {
@@ -1186,6 +1040,16 @@ export function useIdeClaimReconciliation({
       return
     }
     void runTerminal(environmentId)
+  }
+
+  function bindingMatches(
+    current: IdeViewState | undefined,
+    expected: Pick<IdeViewState, 'viewId' | 'daemonInstanceId' | 'bindingEpoch'>,
+  ): boolean {
+    return current != null
+      && current.viewId === expected.viewId
+      && current.daemonInstanceId === expected.daemonInstanceId
+      && current.bindingEpoch === expected.bindingEpoch
   }
 
   async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
@@ -1221,7 +1085,7 @@ export function useIdeClaimReconciliation({
       }
       await closeIdeView(environmentId, view.viewId, body)
       const current = viewsRef.current[environmentId]
-      if (current?.viewId !== view.viewId || current.bindingEpoch !== view.bindingEpoch) {
+      if (!bindingMatches(current, view)) {
         return { ok: false, dirty: false, message: 'binding-changed' }
       }
       const next = { ...viewsRef.current }
@@ -1232,7 +1096,7 @@ export function useIdeClaimReconciliation({
       return { ok: true, dirty: false }
     } catch (error) {
       const current = viewsRef.current[environmentId]
-      if (current?.viewId !== view.viewId || current.bindingEpoch !== view.bindingEpoch) {
+      if (!bindingMatches(current, view)) {
         return { ok: false, dirty: false, message: 'binding-changed' }
       }
       const unknown = isUnknownIdeFailure(error) || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
@@ -1273,6 +1137,7 @@ export function useIdeClaimReconciliation({
       return { ok: false, message: 'view-not-ready' }
     }
     const epoch = view.bindingEpoch
+    const requestIdentity = identityRef.current
     try {
       await registerUsageNow(usageOverride(
         environmentId,
@@ -1293,29 +1158,57 @@ export function useIdeClaimReconciliation({
         view.viewId,
         response,
       )
-      const current = viewsRef.current[environmentId]
       if (
-        current != null
-        && current.bindingEpoch === epoch
-        && current.viewId === view.viewId
+        validated.daemonInstanceId !== view.daemonInstanceId
+        || compareDecimal(validated.bindingEpoch, epoch) < 0
+        || (validated.workspacePath !== view.workspacePath
+          && compareDecimal(validated.bindingEpoch, epoch) === 0)
       ) {
+        throw new IdeProtocolError('Invalid IDE command response: binding regression')
+      }
+      const current = viewsRef.current[environmentId]
+      const appliedIdentity = identityRef.current
+      if (
+        requestIdentity == null
+        || appliedIdentity == null
+        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
+        || appliedIdentity.connectionId !== requestIdentity.connectionId
+      ) {
+        if (appliedIdentity != null) {
+          reconcile(environmentId, 'connection')
+        }
+        return { ok: false, message: 'binding-changed' }
+      }
+      if (bindingMatches(current, view)) {
         updateView(environmentId, view.attempt, {
           daemonInstanceId: validated.daemonInstanceId,
           bindingEpoch: validated.bindingEpoch,
+          eventNodeId: validated.eventNodeId,
+          connectionId: validated.connectionId,
           directory: validated.directory,
           workspacePath: validated.workspacePath,
         })
         writeSession()
         if (validated.bindingEpoch !== epoch) {
-          void reconcile(environmentId, 'directory', { allowRebind: true })
+          reconcile(environmentId, 'directory', { allowRebind: true })
         }
       }
       return { ok: true }
     } catch (error) {
       const current = viewsRef.current[environmentId]
-      if (current != null && current.bindingEpoch === epoch) {
-        if (isOutcomeUnknown(error) || ideFailureReason(error) === 'STALE_BINDING') {
-          void reconcile(environmentId, 'directory', { allowRebind: false })
+      if (bindingMatches(current, view)) {
+        if (isIdeProtocolError(error)) {
+          updateView(environmentId, view.attempt, {
+            status: 'error',
+            errorMessage: error.message,
+          })
+          return { ok: false, message: error.message }
+        }
+        const unknown = isUnknownIdeFailure(error)
+          || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
+          || ideFailureReason(error) === 'STALE_BINDING'
+        if (unknown) {
+          reconcile(environmentId, 'directory', { allowRebind: false })
           return { ok: false, message: 'directory-result-unknown' }
         }
         return {
@@ -1375,19 +1268,25 @@ export function useIdeClaimReconciliation({
       commitViews(next)
       writeSession()
     }
-    if (!sessionReady() || identityRef.current == null) {
-      return
-    }
-    for (const environmentId of getPresentation().openedEnvironmentIds) {
-      const view = viewsRef.current[environmentId]
-      if (view == null) {
-        continue
+    const environmentMap = getEnvironmentMap()
+    const previousReady = lastEnvironmentReadyRef.current
+    for (const environmentId of available) {
+      const ready = environmentMap.get(environmentId)?.ready === true
+      if (ready && sessionReady() && identityRef.current != null) {
+        const view = viewsRef.current[environmentId]
+        if (view?.status === 'waiting-ready') {
+          // Daemon 未就绪只能等新事件或显式重试；环境从离线转就绪才自动再对账。
+          const wasReady = previousReady.get(environmentId)
+          if (view.waitingReason !== 'daemon' || wasReady === false) {
+            reconcile(environmentId, 'connection')
+          }
+        }
       }
-      if (
-        (view.status === 'waiting-ready' || (view.status === 'reconciling' && view.attempt === 0))
-        && getEnvironmentMap().get(environmentId)?.ready === true
-      ) {
-        void reconcile(environmentId, 'connection')
+      previousReady.set(environmentId, ready)
+    }
+    for (const environmentId of [...previousReady.keys()]) {
+      if (!available.has(environmentId)) {
+        previousReady.delete(environmentId)
       }
     }
   }
@@ -1411,7 +1310,9 @@ export function useIdeClaimReconciliation({
     lastIdentityRef.current = null
     snapshotCacheRef.current.clear()
     operationQueueRef.current = []
+    operationGenerationRef.current += 1
     bindingRef.current = false
+    operationConnectionRef.current = null
     pageSuspendedRef.current = false
   }
 
@@ -1444,6 +1345,17 @@ export function useIdeClaimReconciliation({
   }
 
   useEffect(() => {
+    if (identity == null) {
+      return
+    }
+    // 连接变化使旧连接的在途绑定立即失效；新连接不得排在旧请求后面。
+    operationGenerationRef.current += 1
+    bindingRef.current = false
+    operationConnectionRef.current = null
+    operationQueueRef.current = []
+  }, [identity?.connectionId])
+
+  useEffect(() => {
     if (identity == null || !sessionReady()) {
       return
     }
@@ -1457,7 +1369,14 @@ export function useIdeClaimReconciliation({
   }, [identity, session.browserSessionId, session.status])
 
   useEffect(() => {
-    if (activeEnvironmentId == null || !sessionReady() || identity == null) {
+    const previous = lastActiveEnvironmentRef.current
+    lastActiveEnvironmentRef.current = activeEnvironmentId
+    // 首次挂载/会话就绪由 identity 对账入口处理；这里只响应用户切换 Chat 的环境。
+    if (activeEnvironmentId == null || previous === activeEnvironmentId) {
+      return
+    }
+    const currentIdentity = identityRef.current
+    if (!sessionReady() || currentIdentity == null) {
       return
     }
     const view = viewsRef.current[activeEnvironmentId]
@@ -1466,15 +1385,15 @@ export function useIdeClaimReconciliation({
     }
     if (
       view.status === 'ready'
-      && isBoundToConnection(view, identity.eventNodeId, identity.connectionId)
+      && isBoundToConnection(view, currentIdentity.eventNodeId, currentIdentity.connectionId)
     ) {
       registerUsageQuiet()
       maybeRunPendingShell(activeEnvironmentId)
       return
     }
-    void reconcile(activeEnvironmentId, 'focus')
+    reconcile(activeEnvironmentId, 'focus')
     // activeEnvironmentId 切换只做聚焦/对账，不在没有 view 时自动创建。
-  }, [activeEnvironmentId, identity, session.browserSessionId, session.status])
+  }, [activeEnvironmentId, session.browserSessionId, session.status])
 
   return {
     views,

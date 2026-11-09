@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createUuid } from '@/shared/lib/uuid'
 import {
   saveIdeSession,
-  type IdePresentation,
   type IdeTabLoadResult,
   type IdeTabStorage,
 } from '@/features/environment/ide/ide-tab-state'
@@ -74,7 +73,7 @@ interface UseIdeBrowserSessionOptions {
   initial: IdeTabLoadResult
   storage?: IdeTabStorage
   /** 克隆 tab 丢弃复制来的运行身份；只保留展示偏好。 */
-  onClone: () => void
+  onClone: (browserSessionId: string) => void
   /** 正常页面恢复（含 BFCache）后重新确认权威绑定。 */
   onRestore: () => void
   /** pagehide 立即撤回使用证明，不作为服务端恢复正确性的前提。 */
@@ -145,7 +144,7 @@ export function useIdeBrowserSession({
         sessionSaved,
       })
       if (clone) {
-        callbacksRef.current.onClone()
+        callbacksRef.current.onClone(browserSessionId)
       } else {
         callbacksRef.current.onRestore()
       }
