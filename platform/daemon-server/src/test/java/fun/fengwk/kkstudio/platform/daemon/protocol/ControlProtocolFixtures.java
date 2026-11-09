@@ -8,6 +8,7 @@ import java.nio.file.Path;
 final class ControlProtocolFixtures {
 
   static final String ENVIRONMENT_ID = "3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f";
+  static final String DAEMON_INSTANCE_ID = "a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5";
   static final String INVOCATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   static final String CAPABILITY_ID = "fs.edit";
   static final String ARGUMENTS_JSON =

@@ -54,7 +54,7 @@ import {
   requireUuid,
 } from './runtime.js'
 
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 const MAX_INVOCATION_ID_CHARS = 256
 const MAX_CALL_ID_CHARS = 256
 export const MAX_ARGUMENTS_JSON_UTF8_BYTES = MAX_MESSAGE_BYTES
@@ -708,11 +708,22 @@ function validateIdeCommand(command: IdeCommand): void {
   switch (command.action) {
     case IdeAction.OPEN_VIEW:
       requireOpenIdentity(command)
+      requireExpectedDaemonInstance(command)
+      if (command.expectedBindingEpoch === undefined) {
+        throw new Error('ideCommand.expectedBindingEpoch is required')
+      }
+      requireNonNegative(command.expectedBindingEpoch, 'ideCommand.expectedBindingEpoch')
       if (command.bindingEpoch !== undefined || command.discard !== undefined) {
         throw new Error('OPEN_VIEW must not declare bindingEpoch or discard')
       }
       if (command.mode !== IdeOpenMode.CREATE && command.mode !== IdeOpenMode.RESUME) {
         throw new Error('ideCommand.mode is required for OPEN_VIEW')
+      }
+      if (command.mode === IdeOpenMode.CREATE && command.expectedBindingEpoch !== 0n) {
+        throw new Error('OPEN_VIEW create requires expectedBindingEpoch 0')
+      }
+      if (command.mode === IdeOpenMode.RESUME && command.expectedBindingEpoch <= 0n) {
+        throw new Error('OPEN_VIEW resume requires a positive expectedBindingEpoch')
       }
       if (command.directory !== undefined) {
         requireIdePath(command.directory, 'ideCommand.directory')
@@ -720,6 +731,7 @@ function validateIdeCommand(command: IdeCommand): void {
       return
     case IdeAction.CHANGE_DIRECTORY:
       requireBoundView(command, false)
+      requireExpectedDaemonInstance(command)
       if (command.directory === undefined) {
         throw new Error('ideCommand.directory is required')
       }
@@ -729,6 +741,7 @@ function validateIdeCommand(command: IdeCommand): void {
     case IdeAction.FOCUS_TERMINAL:
     case IdeAction.COLLAPSE_MOBILE:
       requireBoundView(command, false)
+      requireExpectedDaemonInstance(command)
       if (command.directory !== undefined) {
         throw new Error('ideCommand.directory is not valid for this action')
       }
@@ -736,6 +749,7 @@ function validateIdeCommand(command: IdeCommand): void {
       return
     case IdeAction.CLOSE_VIEW:
       requireBoundView(command, true)
+      requireExpectedDaemonInstance(command)
       if (command.directory !== undefined) {
         throw new Error('CLOSE_VIEW must not declare directory')
       }
@@ -745,11 +759,13 @@ function validateIdeCommand(command: IdeCommand): void {
     case IdeAction.LIST_DIRECTORIES:
       if (
         command.viewId !== undefined ||
-        command.documentId !== undefined ||
+        command.browserSessionId !== undefined ||
         command.eventNodeId !== undefined ||
         command.connectionId !== undefined ||
         command.claimId !== undefined ||
         command.bindingEpoch !== undefined ||
+        command.expectedBindingEpoch !== undefined ||
+        command.expectedDaemonInstanceId !== undefined ||
         command.mode !== IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED ||
         (command.action === IdeAction.LIST_VIEWS && command.directory !== undefined) ||
         command.discard !== undefined
@@ -767,15 +783,19 @@ function validateIdeCommand(command: IdeCommand): void {
 
 function requireOpenIdentity(command: IdeCommand): void {
   requireUuid(command.viewId, 'ideCommand.viewId')
-  requireUuid(command.documentId, 'ideCommand.documentId')
+  requireUuid(command.browserSessionId, 'ideCommand.browserSessionId')
   requireUuid(command.eventNodeId, 'ideCommand.eventNodeId')
   requireUuid(command.connectionId, 'ideCommand.connectionId')
   requireUuid(command.claimId, 'ideCommand.claimId')
 }
 
+function requireExpectedDaemonInstance(command: IdeCommand): void {
+  requireUuid(command.expectedDaemonInstanceId, 'ideCommand.expectedDaemonInstanceId')
+}
+
 function requireBoundView(command: IdeCommand, discardRequired: boolean): void {
   requireUuid(command.viewId, 'ideCommand.viewId')
-  requireUuid(command.documentId, 'ideCommand.documentId')
+  requireUuid(command.browserSessionId, 'ideCommand.browserSessionId')
   requirePositive(command.bindingEpoch, 'ideCommand.bindingEpoch')
   if (discardRequired && command.discard === undefined) {
     throw new Error('ideCommand.discard is required')
@@ -790,6 +810,7 @@ function rejectOpenFields(command: IdeCommand): void {
     command.eventNodeId !== undefined ||
     command.connectionId !== undefined ||
     command.claimId !== undefined ||
+    command.expectedBindingEpoch !== undefined ||
     command.mode !== IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED
   ) {
     throw new Error('ideCommand declares fields that do not belong to its action')
@@ -802,16 +823,34 @@ function validateIdeResult(result: IdeResult): void {
     throw new Error('ideResult.ok is required')
   }
   if (!result.ok) {
-    if (
+    if (result.revision !== undefined) {
+      if (
+        result.viewId !== undefined ||
+        result.browserSessionId !== undefined ||
+        result.eventNodeId !== undefined ||
+        result.connectionId !== undefined ||
+        result.claimId !== undefined ||
+        result.bindingEpoch !== undefined ||
+        result.directory !== undefined ||
+        result.workspacePath !== undefined ||
+        result.directoryListing !== undefined
+      ) {
+        throw new Error(
+          'failed IDE result with a snapshot must only declare code, message, revision and views',
+        )
+      }
+      validateIdeSnapshot(result)
+    } else if (result.views.length > 0) {
+      throw new Error('ideResult.revision is required with views')
+    } else if (
       result.viewId !== undefined ||
-      result.documentId !== undefined ||
+      result.browserSessionId !== undefined ||
       result.eventNodeId !== undefined ||
       result.connectionId !== undefined ||
       result.claimId !== undefined ||
       result.bindingEpoch !== undefined ||
       result.directory !== undefined ||
       result.workspacePath !== undefined ||
-      result.views.length > 0 ||
       result.directoryListing !== undefined
     ) {
       throw new Error('failed IDE result must only declare code and message')
@@ -825,11 +864,13 @@ function validateIdeResult(result: IdeResult): void {
   }
   if (result.directoryListing !== undefined) {
     if (
-      result.viewId !== undefined || result.documentId !== undefined || result.eventNodeId !== undefined ||
-      result.connectionId !== undefined || result.claimId !== undefined || result.bindingEpoch !== undefined ||
-      result.directory !== undefined || result.workspacePath !== undefined || result.views.length > 0
+      result.revision !== undefined || result.views.length > 0 ||
+      result.viewId !== undefined || result.browserSessionId !== undefined ||
+      result.eventNodeId !== undefined || result.connectionId !== undefined ||
+      result.claimId !== undefined || result.bindingEpoch !== undefined ||
+      result.directory !== undefined || result.workspacePath !== undefined
     ) {
-      throw new Error('directory listing result must not contain view fields')
+      throw new Error('directory listing result must not contain view or snapshot fields')
     }
     const listing = result.directoryListing
     assertNoUnknown(listing, 'directoryListing')
@@ -847,34 +888,13 @@ function validateIdeResult(result: IdeResult): void {
     }
     return
   }
-  if (result.views.length > 0) {
-    if (
-      result.viewId !== undefined ||
-      result.documentId !== undefined ||
-      result.directory !== undefined ||
-      result.workspacePath !== undefined ||
-      result.eventNodeId !== undefined ||
-      result.connectionId !== undefined ||
-      result.claimId !== undefined ||
-      result.bindingEpoch !== undefined
-    ) {
-      throw new Error('IDE list result must only declare views')
-    }
-    if (result.views.length > MAX_LISTED_IDE_VIEWS) {
-      throw new Error(`ideResult.views must not exceed ${MAX_LISTED_IDE_VIEWS} entries`)
-    }
-    const viewIds = new Set<string>()
-    result.views.forEach((view, index) => {
-      validateView(view, `ideResult.views[${index}]`)
-      if (viewIds.has(view.viewId ?? '')) {
-        throw new Error('ideResult.views must not repeat viewId')
-      }
-      viewIds.add(view.viewId ?? '')
-    })
-    return
+  if (result.revision !== undefined) {
+    validateIdeSnapshot(result)
+  } else if (result.views.length > 0) {
+    throw new Error('ideResult.revision is required with views')
   }
   const binding =
-    result.documentId !== undefined ||
+    result.browserSessionId !== undefined ||
     result.eventNodeId !== undefined ||
     result.connectionId !== undefined ||
     result.claimId !== undefined ||
@@ -882,7 +902,7 @@ function validateIdeResult(result: IdeResult): void {
     result.workspacePath !== undefined
   if (binding) {
     requireUuid(result.viewId, 'ideResult.viewId')
-    requireUuid(result.documentId, 'ideResult.documentId')
+    requireUuid(result.browserSessionId, 'ideResult.browserSessionId')
     requireUuid(result.eventNodeId, 'ideResult.eventNodeId')
     requireUuid(result.connectionId, 'ideResult.connectionId')
     requireUuid(result.claimId, 'ideResult.claimId')
@@ -898,13 +918,39 @@ function validateIdeResult(result: IdeResult): void {
   }
   if (result.viewId !== undefined) {
     requireUuid(result.viewId, 'ideResult.viewId')
+    return
   }
+  if (result.revision === undefined) {
+    throw new Error('successful IDE result must declare an outcome')
+  }
+}
+
+function validateIdeSnapshot(result: IdeResult): void {
+  requireNonNegative(result.revision, 'ideResult.revision')
+  if (result.views.length > MAX_LISTED_IDE_VIEWS) {
+    throw new Error(`ideResult.views must not exceed ${MAX_LISTED_IDE_VIEWS} entries`)
+  }
+  let previousViewId: string | null = null
+  result.views.forEach((view, index) => {
+    validateView(view, `ideResult.views[${index}]`)
+    if (previousViewId !== null && view.viewId !== undefined) {
+      if (previousViewId === view.viewId) {
+        throw new Error('ideResult.views must not repeat viewId')
+      }
+      if (previousViewId > view.viewId) {
+        throw new Error('ideResult.views must be sorted by viewId')
+      }
+    }
+    if (view.viewId !== undefined) {
+      previousViewId = view.viewId
+    }
+  })
 }
 
 function validateView(view: IdeViewSummary, path: string): void {
   assertNoUnknown(view, path)
   requireUuid(view.viewId, `${path}.viewId`)
-  requireUuid(view.documentId, `${path}.documentId`)
+  requireUuid(view.browserSessionId, `${path}.browserSessionId`)
   requireUuid(view.eventNodeId, `${path}.eventNodeId`)
   requireUuid(view.connectionId, `${path}.connectionId`)
   requireUuid(view.claimId, `${path}.claimId`)
@@ -930,7 +976,7 @@ function validateIdeLease(lease: IdeLease): void {
       throw new Error('ideLease.bindings must not repeat viewId')
     }
     viewIds.add(viewId)
-    requireUuid(binding.documentId, `ideLease.bindings[${index}].documentId`)
+    requireUuid(binding.browserSessionId, `ideLease.bindings[${index}].browserSessionId`)
     requirePositive(binding.bindingEpoch, `ideLease.bindings[${index}].bindingEpoch`)
   })
 }
@@ -1036,6 +1082,10 @@ function requireDaemonVersion(value: unknown, name: string): string {
 
 function requirePositive(value: unknown, name: string): bigint {
   return requireSafeLong(value, name, 1n, LONG_MAX)
+}
+
+function requireNonNegative(value: unknown, name: string): bigint {
+  return requireSafeLong(value, name, 0n, LONG_MAX)
 }
 
 function requireSingleLine(value: unknown, name: string, maxChars = Number.MAX_SAFE_INTEGER): string {

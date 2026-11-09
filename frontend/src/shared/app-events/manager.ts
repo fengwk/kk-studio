@@ -73,7 +73,7 @@ export class ApplicationEventManager {
   >()
   private readonly pendingUsages = new Map<string, PendingUsage>()
   private connectionIdentity: ApplicationEventConnectionIdentity | null = null
-  private acceptedDocumentId: string | null = null
+  private acceptedBrowserSessionId: string | null = null
 
   constructor(options: ApplicationEventManagerOptions) {
     this.connection = new ApplicationEventConnection({
@@ -165,10 +165,10 @@ export class ApplicationEventManager {
       return Promise.reject(new Error('application event connection is not ready'))
     }
     if (
-      this.acceptedDocumentId != null
-      && this.acceptedDocumentId !== normalized.documentId
+      this.acceptedBrowserSessionId != null
+      && this.acceptedBrowserSessionId !== normalized.browserSessionId
     ) {
-      return Promise.reject(new Error('documentId is fixed for this connection'))
+      return Promise.reject(new Error('browserSessionId is fixed for this connection'))
     }
     const fingerprint = JSON.stringify(normalized)
     const existing = this.pendingUsages.get(normalized.revision)
@@ -210,7 +210,7 @@ export class ApplicationEventManager {
   private sendUsage(usage: ApplicationEventIdeUse): boolean {
     return this.connection.send({
       type: 'ide-use',
-      documentId: usage.documentId,
+      browserSessionId: usage.browserSessionId,
       revision: usage.revision,
       views: usage.views,
     })
@@ -218,14 +218,14 @@ export class ApplicationEventManager {
 
   private handleOpen(): void {
     this.setConnectionIdentity(null)
-    this.acceptedDocumentId = null
+    this.acceptedBrowserSessionId = null
     this.rejectPendingUsages('application event connection reopened')
     this.resubscribeAll()
   }
 
   private handleClose(): void {
     this.setConnectionIdentity(null)
-    this.acceptedDocumentId = null
+    this.acceptedBrowserSessionId = null
     this.rejectPendingUsages('application event connection closed')
   }
 
@@ -247,7 +247,7 @@ export class ApplicationEventManager {
       const pending = this.pendingUsages.get(message.revision)
       if (pending != null) {
         this.pendingUsages.delete(message.revision)
-        this.acceptedDocumentId = pending.request.documentId
+        this.acceptedBrowserSessionId = pending.request.browserSessionId
         pending.resolve({ revision: message.revision })
       }
       return
@@ -334,8 +334,8 @@ function resourceKey(resource: ApplicationEventResource): string {
 
 /** 校验并规范化 ide-use：固定排序保证同 revision 的集合内容与顺序无关。 */
 function normalizeUsage(usage: ApplicationEventIdeUse): ApplicationEventIdeUse {
-  if (!isCanonicalUuid(usage.documentId)) {
-    throw new Error('documentId must be a canonical UUID')
+  if (!isCanonicalUuid(usage.browserSessionId)) {
+    throw new Error('browserSessionId must be a canonical UUID')
   }
   const revision = parseRevision(usage.revision)
   if (revision == null) {
@@ -351,7 +351,7 @@ function normalizeUsage(usage: ApplicationEventIdeUse): ApplicationEventIdeUse {
       left.environmentId.localeCompare(right.environmentId)
       || left.viewId.localeCompare(right.viewId),
   )
-  return { documentId: usage.documentId, revision, views }
+  return { browserSessionId: usage.browserSessionId, revision, views }
 }
 
 function normalizeView(

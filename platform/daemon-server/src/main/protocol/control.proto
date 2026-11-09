@@ -377,7 +377,7 @@ message UpdateResult {
 message IdeCommand {
   IdeAction action = 1;
   optional string view_id = 2;
-  optional string document_id = 3;
+  optional string browser_session_id = 3;
   optional string event_node_id = 4;
   optional string connection_id = 5;
   optional string claim_id = 6;
@@ -385,6 +385,10 @@ message IdeCommand {
   IdeOpenMode mode = 8;
   optional string directory = 9;
   optional bool discard = 10;
+  // OPEN_VIEW 的绑定条件：create 为 0，resume 为最后确认的正 epoch。
+  optional int64 expected_binding_epoch = 11;
+  // OPEN_VIEW 及绑定操作必须核对的 Daemon 进程代次。
+  optional string expected_daemon_instance_id = 12;
 }
 
 message IdeResult {
@@ -392,7 +396,7 @@ message IdeResult {
   optional string code = 2;
   optional string message = 3;
   optional string view_id = 4;
-  optional string document_id = 5;
+  optional string browser_session_id = 5;
   optional string event_node_id = 6;
   optional string connection_id = 7;
   optional string claim_id = 8;
@@ -401,6 +405,8 @@ message IdeResult {
   optional string workspace_path = 11;
   repeated IdeViewSummary views = 12;
   IdeDirectoryListing directory_listing = 13;
+  // 与 views 同一提交点冻结的完整可见快照代次；不存在 view 时也可为 0。
+  optional int64 revision = 14;
 }
 
 message IdeDirectoryListing {
@@ -417,7 +423,7 @@ message IdeDirectoryEntry {
 
 message IdeViewSummary {
   optional string view_id = 1;
-  optional string document_id = 2;
+  optional string browser_session_id = 2;
   optional string event_node_id = 3;
   optional string connection_id = 4;
   optional string claim_id = 5;
@@ -434,7 +440,7 @@ message IdeLease {
 
 message IdeLeaseBinding {
   optional string view_id = 1;
-  optional string document_id = 2;
+  optional string browser_session_id = 2;
   optional int64 binding_epoch = 3;
 }
 
