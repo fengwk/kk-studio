@@ -84,6 +84,16 @@
   font-size: var(--font-size-xs);
 }
 
+/* 子代理顶栏的短 ID：等宽字只做展示，完整 ID 在悬停提示与复制按钮里，不换行铺开。 */
+.workspace-view-short-id {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .chat-workspace-title {
   min-width: 0;
 }

@@ -898,6 +898,18 @@ export const chatCatalog = {
     'en-US': 'Environment: not selected · Follows the main conversation',
     'zh-CN': '环境：未选择 · 跟随主对话',
   },
+  'ai.runtime.childThread.copyThreadId': {
+    'en-US': 'Copy thread ID',
+    'zh-CN': '复制 thread ID',
+  },
+  'ai.runtime.childThread.threadIdCopied': {
+    'en-US': 'Thread ID copied',
+    'zh-CN': '已复制 thread ID',
+  },
+  'ai.runtime.childThread.copyThreadIdFailed': {
+    'en-US': 'Failed to copy thread ID',
+    'zh-CN': '无法复制 thread ID',
+  },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',
     'zh-CN': '活跃子代理',
@@ -1053,6 +1065,8 @@ export const chatCatalog = {
     'zh-CN': '未获取到有效的编辑审查信息，无法允许。',
   },
   'ai.interaction.viewSource': { 'en-US': 'View source', 'zh-CN': '查看来源' },
+  'ai.interaction.subagentSource': { 'en-US': 'subagent', 'zh-CN': 'subagent' },
+  'ai.interaction.openSubagent': { 'en-US': 'Open subagent', 'zh-CN': '打开 subagent' },
   'ai.runtime.thread.status.RUNNING': {
     'en-US': 'Running',
     'zh-CN': '运行中',
@@ -1322,8 +1336,8 @@ export const chatCatalog = {
     'zh-CN': '已返回',
   },
   'ai.runtime.notification.entry.viewSubagentExecution': {
-    'en-US': 'View subagent {{threadId}} execution',
-    'zh-CN': '查看 subagent {{threadId}} 的执行',
+    'en-US': 'View execution',
+    'zh-CN': '查看执行',
   },
   'ai.runtime.notification.entry.invalidReceipt': {
     'en-US': 'The subagent receipt is not a valid XML envelope and cannot be displayed.',
