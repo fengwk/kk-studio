@@ -15,7 +15,10 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalStage;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.runtime.execution.MemoryExecutionExitJournal;
@@ -25,6 +28,7 @@ import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionDrain;
 import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionHandle;
 import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionIdentity;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,6 +38,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 物理生命周期端口的定向行为：PREPARED 先于登记、失权正常返回、精确对账、排空与锁保留。 */
 class ExecutionLifecycleTest {
@@ -356,6 +362,156 @@ class ExecutionLifecycleTest {
     assertTrue(drain.retainsJournalLock());
   }
 
+  @Test
+  void preparedWriteFailureDoesNotRegisterOrFabricateAFact() {
+    // PREPARED 都写不下去时不能登记或进入 body；物理句柄必须释放，后续同 ID 仍可重新开始。
+    MemoryExecutionExitJournal delegate = new MemoryExecutionExitJournal();
+    FailingWriteJournal failingJournal = new FailingWriteJournal(delegate);
+    ExecutionLifecycle isolated =
+        new ExecutionLifecycle(
+            store, failingJournal, new ExecutionExitConfirmer(store, failingJournal, CLOCK));
+    isolated.start();
+    LocalExecutionIdentity identity = identity();
+    AtomicInteger registrations = new AtomicInteger();
+    store.resetTransactionCount();
+
+    ExecutionExitJournalException failure =
+        assertThrows(
+            ExecutionExitJournalException.class,
+            () ->
+                isolated.begin(
+                    identity,
+                    () -> {
+                      registrations.incrementAndGet();
+                      return register(identity);
+                    }));
+
+    assertTrue(failure.getCause() instanceof IOException);
+    assertEquals(0, registrations.get());
+    assertEquals(0, store.transactionCount());
+    assertTrue(delegate.loadAll().records().isEmpty());
+    assertTrue(store.transaction(tx -> tx.exits().find(identity.executionId())).isEmpty());
+    assertTrue(isolated.accepting());
+    assertEquals(0, delegate.holdRequests());
+
+    LocalExecutionHandle recovered = isolated.begin(identity, () -> register(identity));
+    assertTrue(recovered.registered());
+    recovered.provenExit(ExecutionExitState.STUDIO_EXITED);
+    assertEquals(ExecutionExitState.STUDIO_EXITED, stored(identity).state());
+    assertTrue(isolated.drain(Duration.ZERO).settled());
+  }
+
+  @Test
+  void uncertainRegistrationWithFailedLookupKeepsPreparedAndLock() {
+    // 登记事务可能已提交，锁内 lookup 又失败：不能猜测 NOT_STARTED，PREPARED 与目录锁必须保留。
+    LocalExecutionIdentity identity = identity();
+    AtomicInteger transactions = new AtomicInteger();
+    store.beforeTransaction =
+        () -> {
+          if (transactions.incrementAndGet() == 2) {
+            throw new IllegalStateException("lookup unavailable");
+          }
+        };
+    LocalExecutionHandle handle;
+    try {
+      handle =
+          lifecycle.begin(
+              identity,
+              () -> {
+                register(identity);
+                throw new IllegalStateException("commit result unknown");
+              });
+    } finally {
+      store.beforeTransaction = null;
+    }
+
+    assertFalse(handle.registered());
+    assertNull(handle.fact());
+    assertFalse(handle.attachBody(Thread.currentThread()));
+    assertEquals(1, journal.loadAll().records().size());
+
+    handle.provenExit(ExecutionExitState.NOT_STARTED);
+
+    assertTrue(journal.holdRequests() >= 1);
+    assertEquals(
+        ExecutionExitJournalStage.PREPARED, journal.loadAll().records().getFirst().stage());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+    LocalExecutionDrain drain = lifecycle.drain(Duration.ZERO);
+    assertTrue(drain.unfinishedExecutionIds().isEmpty());
+    assertTrue(drain.retainsJournalLock());
+  }
+
+  @Test
+  void identityConflictAfterUncertainRegistrationKeepsPreparedAndLock() {
+    // 同一 executionId 已被其他 owner/attempt 登记：不确定结果不能确认或删除他人事实。
+    LocalExecutionIdentity identity = identity();
+    registerConflicting(identity);
+    LocalExecutionHandle handle =
+        lifecycle.begin(
+            identity,
+            () -> {
+              throw new IllegalStateException("commit result unknown");
+            });
+
+    assertFalse(handle.registered());
+    assertNull(handle.fact());
+    assertFalse(handle.attachBody(Thread.currentThread()));
+    assertEquals(1, journal.loadAll().records().size());
+
+    handle.provenExit(ExecutionExitState.NOT_STARTED);
+
+    assertTrue(journal.holdRequests() >= 1);
+    assertEquals(
+        ExecutionExitJournalStage.PREPARED, journal.loadAll().records().getFirst().stage());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored(identity).state());
+    assertEquals(identity.attempt() + 1, stored(identity).attempt());
+    LocalExecutionDrain drain = lifecycle.drain(Duration.ZERO);
+    assertTrue(drain.unfinishedExecutionIds().isEmpty());
+    assertTrue(drain.retainsJournalLock());
+  }
+
+  @Test
+  void interruptedDrainKeepsThePhysicalHandleAndRequestsCancel() throws Exception {
+    // 排空等待被中断时必须返回真实未完成 ID、请求取消并保留物理句柄，不能把 active 清空。
+    LocalExecutionIdentity identity = identity();
+    LocalExecutionHandle handle = lifecycle.begin(identity, () -> register(identity));
+    AtomicReference<LocalExecutionDrain> result = new AtomicReference<>();
+    Thread drainThread =
+        Thread.ofPlatform()
+            .name("interrupted-drain")
+            .start(() -> result.set(lifecycle.drain(Duration.ofSeconds(30))));
+    try {
+      for (int i = 0; i < 500 && drainThread.getState() != Thread.State.TIMED_WAITING; i++) {
+        Thread.sleep(10);
+      }
+      assertEquals(Thread.State.TIMED_WAITING, drainThread.getState());
+      drainThread.interrupt();
+      drainThread.join(5_000);
+      assertFalse(drainThread.isAlive());
+    } finally {
+      if (drainThread.isAlive()) {
+        drainThread.interrupt();
+        drainThread.join(5_000);
+      }
+    }
+
+    LocalExecutionDrain drain = result.get();
+    assertNotNull(drain);
+    assertFalse(drain.settled());
+    assertEquals(List.of(identity.executionId()), drain.unfinishedExecutionIds());
+    assertTrue(drain.retainsJournalLock());
+    assertTrue(journal.holdRequests() >= 1);
+    // requestCancel 已在中断分支执行：之后的 body 不能再附着。
+    assertFalse(handle.attachBody(Thread.currentThread()));
+    assertEquals(
+        List.of(identity.executionId()), lifecycle.drain(Duration.ZERO).unfinishedExecutionIds());
+
+    handle.provenExit(ExecutionExitState.NOT_STARTED);
+    assertTrue(lifecycle.drain(Duration.ZERO).unfinishedExecutionIds().isEmpty());
+    assertTrue(journal.loadAll().records().isEmpty());
+    assertEquals(ExecutionExitState.NOT_STARTED, stored(identity).state());
+  }
+
   private LocalExecutionIdentity identity() {
     sequence++;
     return new LocalExecutionIdentity(
@@ -394,7 +550,70 @@ class ExecutionLifecycleTest {
         });
   }
 
+  private ExecutionExitFact registerConflicting(LocalExecutionIdentity identity) {
+    return store.transaction(
+        tx -> {
+          tx.threads().lock(identity.threadId());
+          return tx.exits()
+              .register(
+                  new ExecutionExitFact(
+                      identity.executionId(),
+                      identity.threadId(),
+                      identity.invocationId(),
+                      identity.attempt() + 1,
+                      UUID.randomUUID(),
+                      identity.kind(),
+                      null,
+                      null,
+                      ExecutionExitState.UNCONFIRMED,
+                      Instant.ofEpochMilli(T0.toEpochMilli()),
+                      null,
+                      null));
+        });
+  }
+
   private ExecutionExitFact stored(LocalExecutionIdentity identity) {
     return store.transaction(tx -> tx.exits().find(identity.executionId())).orElseThrow();
+  }
+
+  /** PREPARED 落盘失败的最小注入：第一次写抛携带 IOException 的运行异常。 */
+  private static final class FailingWriteJournal implements ExecutionExitJournal {
+
+    private final ExecutionExitJournal delegate;
+    private boolean failNextWrite = true;
+
+    private FailingWriteJournal(ExecutionExitJournal delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public ExecutionExitJournalRecord write(ExecutionExitJournalRecord record) {
+      if (failNextWrite) {
+        failNextWrite = false;
+        throw new ExecutionExitJournalException(
+            "cannot persist prepared record", new IOException());
+      }
+      return delegate.write(record);
+    }
+
+    @Override
+    public void delete(UUID executionId) {
+      delegate.delete(executionId);
+    }
+
+    @Override
+    public ExecutionExitJournalSnapshot loadAll() {
+      return delegate.loadAll();
+    }
+
+    @Override
+    public void holdUntilProcessExit() {
+      delegate.holdUntilProcessExit();
+    }
+
+    @Override
+    public void close() {
+      delegate.close();
+    }
   }
 }
