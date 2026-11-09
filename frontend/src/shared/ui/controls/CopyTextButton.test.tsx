@@ -49,7 +49,10 @@ describe('CopyTextButton', () => {
     fireEvent.click(button)
     await act(async () => {})
 
-    expect(copyTextToClipboard).toHaveBeenCalledWith('/workspace/a')
+    // 兜底必须绑定请求代次，避免旧目标在失败后插入 textarea 抢焦点。
+    expect(copyTextToClipboard).toHaveBeenCalledWith('/workspace/a', {
+      shouldFallback: expect.any(Function),
+    })
     expect(button.querySelector('.lucide-check')).not.toBeNull()
     expect(button).toHaveAttribute('title', '目录路径已复制')
     expect(button).toHaveAttribute('aria-label', '复制目录路径')
@@ -120,7 +123,9 @@ describe('CopyTextButton', () => {
 
     await user.click(button)
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
-    expect(copyTextToClipboard).toHaveBeenLastCalledWith('/workspace/b')
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith('/workspace/b', {
+      shouldFallback: expect.any(Function),
+    })
     await act(async () => {
       second.resolve(true)
     })
