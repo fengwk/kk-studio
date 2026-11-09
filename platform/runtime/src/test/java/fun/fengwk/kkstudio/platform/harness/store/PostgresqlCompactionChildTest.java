@@ -1144,6 +1144,7 @@ class PostgresqlCompactionChildTest {
           childExecutionId == null
               ? null
               : store.transaction(tx -> tx.exits().find(childExecutionId).orElse(null));
+      ThreadSnapshot childAfterExit = snapshot(child.childThreadId());
       ThreadJoin childJoinAfter = findJoin(child.joinInvocationId());
       ThreadJoin outerJoinAfter = stoppingRuntime.findJoin(outerJoinId).orElseThrow();
       int outerNotificationsAfter = notificationCount(outerThreadId);
@@ -1177,7 +1178,11 @@ class PostgresqlCompactionChildTest {
           () -> assertEquals(1, unconfirmedHeld.size()),
           () -> assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmedHeld.getFirst().state()),
           () -> assertTrue(childHeld.hasUnconfirmedExecution()),
-          () -> assertEquals(ThreadRuntimeStatus.RUNNING, childHeld.runtimeStatus()),
+          () ->
+              assertEquals(
+                  ThreadRuntimeStatus.EXIT_PENDING,
+                  childHeld.runtimeStatus(),
+                  "held summary body is no longer active, so its unconfirmed exit projects EXIT_PENDING"),
           () -> assertFalse(childJoinHeld.matched()),
           () ->
               assertEquals(
@@ -1211,6 +1216,7 @@ class PostgresqlCompactionChildTest {
                   "held body must finish after explicit release, not the gate timeout"),
           () -> assertNotNull(childExecutionAfter),
           () -> assertEquals(ExecutionExitState.STUDIO_EXITED, childExecutionAfter.state()),
+          () -> assertEquals(ThreadRuntimeStatus.IDLE, childAfterExit.runtimeStatus()),
           () -> assertTrue(childJoinAfter.matched()),
           () -> assertTrue(outerJoinAfter.matched()),
           () -> assertEquals(1, outerNotificationsAfter),

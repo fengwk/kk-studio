@@ -100,7 +100,11 @@ exports.activate = async () => {
   }
 };
 `)
-    service = await createIdeService(config, processes, { manager, bridge })
+    service = await createIdeService(config, processes, {
+      manager,
+      bridge,
+      daemonInstanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    })
     child = spawn(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
       join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
       '--user-data-dir', userData, '--extensions-dir', extensions,
@@ -125,13 +129,26 @@ exports.activate = async () => {
       await writeFile(join(root, 'case'), choice)
       await writeFile(join(workspace, `${choice}.txt`), 'before')
       const viewId = randomUUID()
-      const documentId = randomUUID()
+      const browserSessionId = randomUUID()
       const opened = await service.handle({
-        action: 'OPEN_VIEW', viewId, documentId, claimId: randomUUID(), mode: 'create', directory: workspace,
-        eventNodeId: randomUUID(), connectionId: randomUUID(),
+        action: 'OPEN_VIEW',
+        viewId,
+        browserSessionId,
+        claimId: randomUUID(),
+        mode: 'create',
+        directory: workspace,
+        eventNodeId: randomUUID(),
+        connectionId: randomUUID(),
+        expectedBindingEpoch: '0',
+        expectedDaemonInstanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       }, signal())
       assert.equal(opened.ok, true, JSON.stringify(opened))
-      const binding = { viewId, documentId, bindingEpoch: opened.bindingEpoch }
+      const binding = {
+        viewId,
+        browserSessionId,
+        bindingEpoch: opened.bindingEpoch,
+        expectedDaemonInstanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      }
       page = await browser.newPage()
       page.on('console', message => { output += '\nBROWSER: ' + message.text() })
       await page.goto(`${url}/?workspace=${encodeURIComponent(calls.registers.at(-1).workspacePath)}`)
@@ -162,7 +179,9 @@ exports.activate = async () => {
       assert.equal(await readFile(join(workspace, `${choice}.txt`), 'utf8'), 'before')
       const accepted = close()
       await page.getByRole('button', { name: choice === 'save' ? /^Save$/ : /don.t save/i }).click({ timeout: 10_000 })
-      assert.deepEqual(await accepted, { ok: true, viewId })
+      const acceptedReply = await accepted
+      assert.equal(acceptedReply.ok, true)
+      assert.equal(acceptedReply.viewId, viewId)
       assert.equal((await service.handle({ action: 'LIST_VIEWS' }, signal())).views.length, 0)
       assert.deepEqual(calls.closes.at(-1), { viewId, bindingEpoch: opened.bindingEpoch, mode: 'discard' })
       assert.equal(await readFile(join(workspace, `${choice}.txt`), 'utf8'), choice === 'save' ? 'changed save' : 'before')

@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeGenerationState;
+import fun.fengwk.kkstudio.ide.IdeViewSnapshotStore;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -19,21 +21,25 @@ import java.util.UUID;
 /**
  * 浏览器 IDE 的 bootstrap/session 入口：只处理 view 基址下的两个保留端点。
  *
- * <p>bootstrap 消费一次性票据后设置 view 作用域的 HttpOnly cookie；session 只报告当前 cookie/代际是否仍可进入数据面。
+ * <p>bootstrap 消费一次性票据后，只依据唯一权威视图快照确认 ticket 的实例/view/epoch/workspace，再设置 view 作用域的 HttpOnly
+ * cookie；session 只报告当前 cookie、权威快照与代际是否仍可进入数据面。
  */
 @Component
 public final class IdeBrowserSessionHandler {
 
   private final IdeBootstrapTicketService bootstrapTickets;
   private final IdeBrowserSessionRegistry sessions;
+  private final IdeViewSnapshotStore snapshots;
   private final IdeCommandTransport transport;
 
   public IdeBrowserSessionHandler(
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserSessionRegistry sessions,
+      IdeViewSnapshotStore snapshots,
       IdeCommandTransport transport) {
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
+    this.snapshots = Objects.requireNonNull(snapshots, "snapshots");
     this.transport = Objects.requireNonNull(transport, "transport");
   }
 
@@ -63,15 +69,21 @@ public final class IdeBrowserSessionHandler {
       response.sendError(HttpServletResponse.SC_GONE);
       return;
     }
-    String cookieValue;
-    try {
-      cookieValue =
-          sessions.open(
-              ticket.identity(), ticket.viewId(), ticket.bindingEpoch(), ticket.workspacePath());
-    } catch (IllegalStateException error) {
+    boolean current =
+        snapshots
+            .snapshot(ticket.identity())
+            .flatMap(snapshot -> snapshot.find(viewId))
+            .filter(view -> view.state() == IdeViewState.OPEN)
+            .filter(view -> view.bindingEpoch() == ticket.bindingEpoch())
+            .filter(view -> view.workspacePath().equals(ticket.workspacePath()))
+            .isPresent();
+    if (!current) {
       response.sendError(HttpServletResponse.SC_GONE);
       return;
     }
+    String cookieValue =
+        sessions.open(
+            ticket.identity(), ticket.viewId(), ticket.bindingEpoch(), ticket.workspacePath());
 
     String base = IdeDataPaths.viewBase(request, environmentId, viewId);
     StringBuilder cookie =
@@ -104,6 +116,18 @@ public final class IdeBrowserSessionHandler {
     IdeBrowserSessionRegistry.Session session = session(request, environmentId, viewId);
     if (session == null) {
       response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+      return;
+    }
+    boolean current =
+        snapshots
+            .snapshot(session.identity())
+            .flatMap(snapshot -> snapshot.find(viewId))
+            .filter(view -> view.state() == IdeViewState.OPEN)
+            .filter(view -> view.bindingEpoch() == session.bindingEpoch())
+            .filter(view -> view.workspacePath().equals(session.workspacePath()))
+            .isPresent();
+    if (!current) {
+      response.setStatus(HttpServletResponse.SC_CONFLICT);
       return;
     }
     int rejection = generationRejection(IdeGenerationState.of(transport, session.identity()));

@@ -5,12 +5,16 @@ import java.util.Objects;
 
 /** 事件节点返回的已绑定使用证明快照；只包含带 binding epoch、当前仍可续租的持有项。 */
 public record IdeBrowserUseSnapshot(
-    String eventNodeId, String connectionId, String documentId, Long revision, List<View> views) {
+    String eventNodeId,
+    String connectionId,
+    String browserSessionId,
+    Long revision,
+    List<View> views) {
 
   public IdeBrowserUseSnapshot {
     eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
     connectionId = Objects.requireNonNull(connectionId, "connectionId");
-    documentId = Objects.requireNonNull(documentId, "documentId");
+    browserSessionId = Objects.requireNonNull(browserSessionId, "browserSessionId");
     revision = Objects.requireNonNull(revision, "revision");
     views = List.copyOf(Objects.requireNonNull(views, "views"));
   }
@@ -43,7 +47,7 @@ public record IdeBrowserUseSnapshot(
     return new IdeBrowserUseSnapshot(
         identity.eventNodeId().toString(),
         identity.connectionId().toString(),
-        activeBoundProofs.documentId().toString(),
+        activeBoundProofs.browserSessionId().toString(),
         activeBoundProofs.revision(),
         viewBodies);
   }
@@ -60,6 +64,6 @@ public record IdeBrowserUseSnapshot(
                     IdeBrowserUseView.parse(
                         view.environmentId(), view.viewId(), view.claimId(), view.bindingEpoch()))
             .toList();
-    return IdeBrowserUse.parse(documentId, revision, parsed);
+    return IdeBrowserUse.parse(browserSessionId, revision, parsed);
   }
 }

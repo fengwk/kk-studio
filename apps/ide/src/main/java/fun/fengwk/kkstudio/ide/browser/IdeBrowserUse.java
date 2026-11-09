@@ -13,17 +13,17 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 一个浏览器 document 在单条事件连接上确认的完整 IDE 使用列表。
+ * 一个浏览器 tab 在单条事件连接上确认的完整 IDE 使用列表。
  *
  * <p>列表至多 64 项，按 {@code environmentId,viewId} 规范化排序；{@code viewId} 在列表内唯一。revision 是连接内单调递增的正整数， 同一
  * revision 的相同内容幂等，不同内容拒绝。没有 epoch 的项只是打开意图，不产生续租证明。
  */
-public record IdeBrowserUse(UUID documentId, long revision, List<IdeBrowserUseView> views) {
+public record IdeBrowserUse(UUID browserSessionId, long revision, List<IdeBrowserUseView> views) {
 
   public static final int MAX_VIEWS = 64;
 
   public IdeBrowserUse {
-    documentId = Objects.requireNonNull(documentId, "documentId");
+    browserSessionId = Objects.requireNonNull(browserSessionId, "browserSessionId");
     if (revision <= 0) {
       throw new IllegalArgumentException("revision must be positive");
     }
@@ -46,10 +46,11 @@ public record IdeBrowserUse(UUID documentId, long revision, List<IdeBrowserUseVi
     views = List.copyOf(canonical);
   }
 
-  /** 解析 wire 的 documentId；revision 已由入口按正整数校验，列表由已校验的 typed view 组成。 */
+  /** 解析 wire 的 browserSessionId；revision 已由入口按正整数校验，列表由已校验的 typed view 组成。 */
   public static IdeBrowserUse parse(
-      String documentId, long revision, List<IdeBrowserUseView> views) {
-    return new IdeBrowserUse(Uuids.parseCanonical(documentId, "documentId"), revision, views);
+      String browserSessionId, long revision, List<IdeBrowserUseView> views) {
+    return new IdeBrowserUse(
+        Uuids.parseCanonical(browserSessionId, "browserSessionId"), revision, views);
   }
 
   /** 查找文档中与给定打开/恢复意图完全相同的项（不要求已绑定 epoch）。 */
@@ -72,6 +73,6 @@ public record IdeBrowserUse(UUID documentId, long revision, List<IdeBrowserUseVi
     List<IdeBrowserUseView> bound = views.stream().filter(IdeBrowserUseView::bound).toList();
     return bound.isEmpty()
         ? Optional.empty()
-        : Optional.of(new IdeBrowserUse(documentId, revision, bound));
+        : Optional.of(new IdeBrowserUse(browserSessionId, revision, bound));
   }
 }

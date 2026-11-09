@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
-/** 意图：bootstrap 票据绑定 Daemon 实例 + view + epoch + workspace，且按实例与视图精确撤销，不误伤同环境其它实例或其它环境。 */
+/** 意图：bootstrap 票据按完整绑定精确撤销；晚到的旧清理和 older-than 清理都不能删除新 epoch 票据。 */
 class IdeBootstrapTicketServiceTest {
 
   private static final EnvironmentId ENV =
@@ -25,16 +25,18 @@ class IdeBootstrapTicketServiceTest {
   private static final String VIEW_2 = "66666666-7777-8888-9999-aaaaaaaaaaaa";
 
   @Test
-  void revokeViewClearsOnlyThatViewAndInstance() {
+  void revokeOnlyExactViewInstanceAndEpoch() {
     IdeBootstrapTicketService service = new IdeBootstrapTicketService();
     String first = service.issue(CURRENT, VIEW_1, 1L, "/ws/1");
+    String nextEpoch = service.issue(CURRENT, VIEW_1, 2L, "/ws/1");
     String second = service.issue(CURRENT, VIEW_2, 2L, "/ws/2");
     String otherEnvSameView = service.issue(OTHER, VIEW_1, 1L, "/ws/other");
     String replacementSameView = service.issue(REPLACEMENT, VIEW_1, 1L, "/ws/1");
 
-    service.revokeView(CURRENT, VIEW_1);
+    service.revoke(CURRENT, VIEW_1, 1L);
 
     assertTrue(service.consume(first).isEmpty());
+    assertTrue(service.consume(nextEpoch).isPresent());
     IdeBootstrapTicketService.Ticket surviving = service.consume(second).orElseThrow();
     assertEquals(CURRENT, surviving.identity());
     assertEquals(VIEW_2, surviving.viewId());
@@ -43,5 +45,19 @@ class IdeBootstrapTicketServiceTest {
     assertTrue(service.consume(otherEnvSameView).isPresent());
     // 旧实例迟到的撤销只作用于自己的票据，新实例复用同 view 的票据仍然有效。
     assertTrue(service.consume(replacementSameView).isPresent());
+  }
+
+  @Test
+  void revokeOlderThanIsOneWayAndKeepsCurrentAndNewerEpochs() {
+    IdeBootstrapTicketService service = new IdeBootstrapTicketService();
+    String old = service.issue(CURRENT, VIEW_1, 1L, "/ws/1");
+    String current = service.issue(CURRENT, VIEW_1, 2L, "/ws/1");
+    String newer = service.issue(CURRENT, VIEW_1, 3L, "/ws/1");
+
+    service.revokeOlderThan(CURRENT, VIEW_1, 2L);
+
+    assertTrue(service.consume(old).isEmpty());
+    assertTrue(service.consume(current).isPresent());
+    assertTrue(service.consume(newer).isPresent());
   }
 }

@@ -11,9 +11,9 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 事件节点本地 IDE 使用登记表。
  *
- * <p>只在真实物理连接建立后登记，断连即由该连接自己的 generation 删除；不写数据库、不做跨节点同步。每条连接第一次 accepted 的 documentId 固定下来，后续不同
- * document 一律拒绝。列表 revision 单调，同 revision 相同内容幂等，同 revision 不同内容与更低 revision 拒绝，更高 revision
- * 原子替换。查找严格绑定 {@link ConnectionIdentity}，因此旧连接关闭不可能删除或查询新连接的状态。
+ * <p>只在真实物理连接建立后登记，断连即由该连接自己的 generation 删除；不写数据库、不做跨节点同步。每条连接第一次 accepted 的 browserSessionId
+ * 固定下来，后续不同 browser session 一律拒绝。列表 revision 单调，同 revision 相同内容幂等，同 revision 不同内容与更低 revision 拒绝，更高
+ * revision 原子替换。查找严格绑定 {@link ConnectionIdentity}，因此旧连接关闭不可能删除或查询新连接的状态。
  */
 public final class IdeBrowserUseRegistry {
 
@@ -23,8 +23,8 @@ public final class IdeBrowserUseRegistry {
     ACCEPTED,
     /** 同 revision 且内容完全相同，保持原状态。 */
     UNCHANGED,
-    /** 该连接已经固定到另一个 documentId。 */
-    DOCUMENT_MISMATCH,
+    /** 该连接已经固定到另一个 browserSessionId。 */
+    BROWSER_SESSION_MISMATCH,
     /** 同 revision 内容不同，或 revision 未前进。 */
     REVISION_CONFLICT,
     /** 连接已关闭或 generation 已过期。 */
@@ -98,8 +98,8 @@ public final class IdeBrowserUseRegistry {
         entry.usage = usage;
         return Acceptance.ACCEPTED;
       }
-      if (!current.documentId().equals(usage.documentId())) {
-        return Acceptance.DOCUMENT_MISMATCH;
+      if (!current.browserSessionId().equals(usage.browserSessionId())) {
+        return Acceptance.BROWSER_SESSION_MISMATCH;
       }
       if (usage.revision() < current.revision()) {
         return Acceptance.REVISION_CONFLICT;
@@ -127,27 +127,28 @@ public final class IdeBrowserUseRegistry {
     }
   }
 
-  /** 在指定活动连接的固定 document 中查找完全相同的打开/恢复意图。 */
+  /** 在指定活动连接的固定 browser session 中查找完全相同的打开/恢复意图。 */
   public Optional<IdeBrowserUseView> findExactIntent(
       ConnectionIdentity identity,
-      UUID documentId,
+      UUID browserSessionId,
       EnvironmentId environmentId,
       UUID viewId,
       UUID claimId) {
-    Objects.requireNonNull(documentId, "documentId");
+    Objects.requireNonNull(browserSessionId, "browserSessionId");
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(claimId, "claimId");
     return usage(identity)
-        .filter(usage -> usage.documentId().equals(documentId))
+        .filter(usage -> usage.browserSessionId().equals(browserSessionId))
         .flatMap(usage -> usage.findExactIntent(environmentId, viewId, claimId));
   }
 
-  /** 指定活动连接/document 中仍可用于续租的持有项。 */
-  public Optional<IdeBrowserUse> activeBoundProofs(ConnectionIdentity identity, UUID documentId) {
-    Objects.requireNonNull(documentId, "documentId");
+  /** 指定活动连接/browser session 中仍可用于续租的持有项。 */
+  public Optional<IdeBrowserUse> activeBoundProofs(
+      ConnectionIdentity identity, UUID browserSessionId) {
+    Objects.requireNonNull(browserSessionId, "browserSessionId");
     return usage(identity)
-        .filter(usage -> usage.documentId().equals(documentId))
+        .filter(usage -> usage.browserSessionId().equals(browserSessionId))
         .flatMap(IdeBrowserUse::activeBoundProofs);
   }
 }

@@ -4,7 +4,7 @@ import type { BridgeDocument, BridgeResult, IdeBridge } from './bridge.js'
 import type { CodeServerManager, ManagedViewCloseMode } from './codeServer.js'
 import { IdeError, failureReply } from './errors.js'
 import type { IdeScheduler, IdeServiceEvent } from './service.js'
-import type { ViewRecord } from './serviceTypes.js'
+import type { IdeSnapshot, ViewRecord } from './serviceTypes.js'
 import { RecoveryQuotaError, validateViewId, writeRecoveryBackup, type RecoveryBackup } from './workspace.js'
 
 interface ClosePathDependencies {
@@ -21,7 +21,8 @@ interface ClosePathDependencies {
   withViewLock: <T>(viewId: string, task: () => Promise<T>) => Promise<T>
   clearTimer: (view: ViewRecord) => void
   scheduleExpiry: (view: ViewRecord, notBefore?: number) => void
-  dropClaimsForView: (viewId: string) => void
+  commitRevision: () => string
+  snapshot: () => IdeSnapshot
   scheduleIdleStop: () => void
   waitForViewStreams: (view: ViewRecord) => Promise<void>
   waitWithSignal: <T>(promise: Promise<T>, signal: AbortSignal) => Promise<T>
@@ -31,12 +32,15 @@ interface ClosePathDependencies {
 
 export function createClosePath({
   config, views, scheduler, bridge, manager, lifetime, recoveryQuotaBytes, closeBudgetMillis,
-  expiryMillis, emit, withViewLock, clearTimer, scheduleExpiry, dropClaimsForView, scheduleIdleStop,
-  waitForViewStreams, waitWithSignal, required, requireBoundView,
+  expiryMillis, emit, withViewLock, clearTimer, scheduleExpiry, commitRevision, snapshot,
+  scheduleIdleStop, waitForViewStreams, waitWithSignal, required, requireBoundView,
 }: ClosePathDependencies) {
   const rollbackOpen = (view: ViewRecord): void => {
     if (views.get(view.viewId) !== view || view.cleanupFailed) {
       return
+    }
+    if (view.state !== 'OPEN') {
+      commitRevision()
     }
     view.state = 'OPEN'
     // A cancellation or lost control connection must not immediately trigger expired cleanup.
@@ -77,16 +81,19 @@ export function createClosePath({
         }
         clearTimer(view)
         bridge.revoke(viewId, epoch)
-        dropClaimsForView(viewId)
         if (view.workspaceOwned) {
           await rm(view.workspacePath, { force: true })
         }
+        commitRevision()
         views.delete(viewId)
         scheduleIdleStop()
-        return { ok: true, viewId }
+        return { ok: true, ...snapshot() }
       } catch (error) {
         if (views.get(viewId) === view && view.bindingEpoch === epoch) {
           view.cleanupFailed = true
+          if (view.state !== 'CLOSING') {
+            commitRevision()
+          }
           view.state = 'CLOSING'
           clearTimer(view)
           emit({
@@ -99,6 +106,7 @@ export function createClosePath({
           error instanceof IdeError
             ? error
             : new IdeError('view cleanup failed', 'CLEANUP_FAILED'),
+          snapshot(),
         )
       }
     })()
@@ -177,13 +185,14 @@ export function createClosePath({
       }
       const mode: ManagedViewCloseMode = command.discard === true ? 'discard' : 'normal'
       const epoch = view.bindingEpoch
-      const documentId = view.documentId
+      const browserSessionId = view.browserSessionId
       if (mode === 'discard' && bridge.isConnected(viewId, epoch) && !view.forceAllowed) {
         throw new IdeError('force close is only available when the window state is unknown', 'BUSY')
       }
       // Keep the data plane available while the native dialog awaits the user.
       view.nativeClosePending = mode === 'normal'
       if (mode !== 'normal') {
+        commitRevision()
         view.state = 'CLOSING'
       }
       clearTimer(view)
@@ -209,7 +218,7 @@ export function createClosePath({
           }
           throw error
         }
-        if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.documentId !== documentId) {
+        if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.browserSessionId !== browserSessionId) {
           throw new IdeError('view binding changed', 'VIEW_GONE')
         }
         if (signal.aborted || lifetime.signal.aborted || !bridge.isConnected(viewId, epoch)) {
@@ -229,11 +238,12 @@ export function createClosePath({
         }
         view.forceAllowed = false
         view.nativeClosePending = false
+        commitRevision()
         view.state = 'CLOSING'
       } else {
         await snapshotForClose(view)
       }
-      if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.documentId !== documentId) {
+      if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.browserSessionId !== browserSessionId) {
         throw new IdeError('view binding changed', 'VIEW_GONE')
       }
       return performClose(view, mode)
@@ -246,6 +256,7 @@ export function createClosePath({
       if (view === undefined || view.bindingEpoch !== epoch || view.state !== 'OPEN') {
         return
       }
+      commitRevision()
       view.state = 'CLOSING'
       clearTimer(view)
       // An expired lease is not permission to discard a dirty or unobservable editor.
@@ -267,6 +278,7 @@ export function createClosePath({
         return
       }
       if (!confirmed) {
+        commitRevision()
         view.state = 'OPEN'
         view.forceAllowed = !bridge.isConnected(viewId, epoch)
         emit({ kind: 'expiry-deferred', viewId, message: 'view expiry requires an explicit close' })

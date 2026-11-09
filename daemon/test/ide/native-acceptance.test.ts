@@ -23,8 +23,9 @@ import { awaitGone, isAlive } from '../native/process-test-util.js'
 const ACCEPTANCE_DIR = process.env.KK_STUDIO_IDE_ACCEPTANCE_DIR
 const VIEW_ONE = '11111111-1111-4111-8111-111111111111'
 const VIEW_TWO = '22222222-2222-4222-8222-222222222222'
-const DOCUMENT_ONE = '33333333-4444-4555-8666-777777777777'
-const DOCUMENT_TWO = '44444444-5555-4666-8777-888888888888'
+const BROWSER_SESSION_ONE = '33333333-4444-4555-8666-777777777777'
+const BROWSER_SESSION_TWO = '44444444-5555-4666-8777-888888888888'
+const DAEMON_INSTANCE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -107,7 +108,9 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', 
       const distribution = await createDistribution()
       const observed = createObservedSupervisor()
       cleanups.push(() => observed.supervisor.close())
-      const service = await createIdeService(makeConfig(distribution), observed.supervisor)
+      const service = await createIdeService(makeConfig(distribution), observed.supervisor, {
+        daemonInstanceId: DAEMON_INSTANCE_ID,
+      })
       cleanups.push(() => service.close())
 
       const dirOne = join(distribution, 'workspace-one')
@@ -121,12 +124,14 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', 
         {
           action: 'OPEN_VIEW',
           viewId: VIEW_ONE,
-          documentId: DOCUMENT_ONE,
+          browserSessionId: BROWSER_SESSION_ONE,
           eventNodeId: '77777777-8888-4999-8aaa-bbbbbbbbbbbb',
           connectionId: '88888888-9999-4aaa-8bbb-cccccccccccc',
           claimId: claimOne,
           mode: 'create',
           directory: dirOne,
+          expectedBindingEpoch: '0',
+          expectedDaemonInstanceId: DAEMON_INSTANCE_ID,
         },
         signal(),
       )
@@ -135,12 +140,14 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', 
         {
           action: 'OPEN_VIEW',
           viewId: VIEW_TWO,
-          documentId: DOCUMENT_TWO,
+          browserSessionId: BROWSER_SESSION_TWO,
           eventNodeId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
           connectionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
           claimId: claimTwo,
           mode: 'create',
           directory: dirTwo,
+          expectedBindingEpoch: '0',
+          expectedDaemonInstanceId: DAEMON_INSTANCE_ID,
         },
         signal(),
       )
@@ -205,9 +212,10 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', 
         {
           action: 'CLOSE_VIEW',
           viewId: VIEW_ONE,
-          documentId: DOCUMENT_ONE,
+          browserSessionId: BROWSER_SESSION_ONE,
           bindingEpoch: one.bindingEpoch as string,
           discard: true,
+          expectedDaemonInstanceId: DAEMON_INSTANCE_ID,
         },
         signal(),
       )

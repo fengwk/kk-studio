@@ -32,7 +32,9 @@ import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.http.ClusterEnvironmentIdeInternalController;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
@@ -102,9 +104,34 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .headers(mockHeaders(authentication.sign("POST", mobile, NODE_B)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}"))
+                    "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}"))
         .andExpect(status().isOk());
     verify(localEnvironmentIdeService).collapseMobile(eq(ENV), eq(VIEW), any());
+  }
+
+  /** 纯读 GET 内部端点同样先认证 owner，再把显式 query 转发给本地服务。 */
+  @Test
+  void readViewAuthenticatesAndDelegatesExplicitQuery() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    EnvironmentIdeReadViewDTO read = new EnvironmentIdeReadViewDTO();
+    read.setBrowserSessionId("11111111-1111-1111-1111-111111111111");
+    read.setEventNodeId("22222222-2222-2222-2222-222222222222");
+    read.setConnectionId("33333333-3333-3333-3333-333333333333");
+    read.setClaimId("44444444-4444-4444-4444-444444444444");
+    read.setExpectedDaemonInstanceId("daemon-instance");
+    EnvironmentIdeViewSnapshotDTO snapshot = new EnvironmentIdeViewSnapshotDTO();
+    snapshot.setDaemonInstanceId("daemon-instance");
+    snapshot.setRevision(3L);
+    when(localEnvironmentIdeService.readView(eq(ENV), eq(VIEW), any())).thenReturn(snapshot);
+    String path = IdeInternalPaths.viewPath(ENV, VIEW, read);
+
+    mockMvc
+        .perform(
+            get(URI.create(path)).headers(mockHeaders(authentication.sign("GET", path, NODE_B))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.revision").value(3));
+
+    verify(localEnvironmentIdeService).readView(eq(ENV), eq(VIEW), any());
   }
 
   /** 远端关闭的签名路径必须与实际内部 controller 路由一致。 */
@@ -118,7 +145,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .headers(mockHeaders(authentication.sign("POST", path, NODE_B)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\",\"discard\":false}"))
+                    "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\",\"discard\":false}"))
         .andExpect(status().isOk());
     verify(localEnvironmentIdeService).closeView(eq(ENV), eq(VIEW), any());
   }
@@ -128,7 +155,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   void boundCommandPathsMatchClientContract() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
     String body =
-        "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}";
+        "{\"browserSessionId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}";
     String directory = IdeInternalPaths.directoryPath(ENV, VIEW);
     mockMvc
         .perform(
@@ -216,7 +243,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
           ClusterOwnerRoute.remote(
               NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
-      request.setDocumentId("11111111-1111-1111-1111-111111111111");
+      request.setBrowserSessionId("11111111-1111-1111-1111-111111111111");
       request.setBindingEpoch(1L);
       request.setDiscard(false);
       DomainException cancelled =

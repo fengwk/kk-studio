@@ -368,7 +368,7 @@ class EventFrameCodecTest {
   void decodesIdeUseWithOptionalBindingEpochAndCanonicalValues() {
     String json =
         """
-        {"type":"ide-use","documentId":"%s","revision":"3","views":[
+        {"type":"ide-use","browserSessionId":"%s","revision":"3","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s"},
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"9223372036854775807"}
         ]}
@@ -396,7 +396,8 @@ class EventFrameCodecTest {
             + "\",\"claimId\":\""
             + CLAIM
             + "\"}]";
-    String prefix = "{\"type\":\"ide-use\",\"documentId\":\"" + DOCUMENT + "\",\"revision\":\"";
+    String prefix =
+        "{\"type\":\"ide-use\",\"browserSessionId\":\"" + DOCUMENT + "\",\"revision\":\"";
     String suffix = "\",\"views\":" + validViews + "}";
     for (String revision : List.of("0", "01", "-1", "9223372036854775808", "1.0")) {
       assertThrows(
@@ -408,7 +409,7 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\""
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
                     + DOCUMENT
                     + "\",\"revision\":1,\"views\":"
                     + validViews
@@ -417,12 +418,14 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\"" + DOCUMENT + "\",\"revision\":\"1\"}"));
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\""
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
                     + DOCUMENT
                     + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
                     + ENVIRONMENT
@@ -435,7 +438,7 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\""
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
                     + DOCUMENT
                     + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
                     + ENVIRONMENT
@@ -448,7 +451,7 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\""
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
                     + DOCUMENT
                     + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
                     + ENVIRONMENT
@@ -467,7 +470,7 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"type\":\"ide-use\",\"documentId\":\""
+                "{\"type\":\"ide-use\",\"browserSessionId\":\""
                     + DOCUMENT
                     + "\",\"revision\":\"1\",\"views\":"
                     + oversizedViews()
@@ -482,7 +485,7 @@ class EventFrameCodecTest {
             IllegalArgumentException.class,
             () ->
                 CODEC.decode(
-                    "{\"type\":\"ide-use\",\"documentId\":\""
+                    "{\"type\":\"ide-use\",\"browserSessionId\":\""
                         + DOCUMENT
                         + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
                         + invalidEnvironment
@@ -499,7 +502,7 @@ class EventFrameCodecTest {
             IllegalArgumentException.class,
             () ->
                 CODEC.decode(
-                    "{\"type\":\"ide-use\",\"documentId\":\""
+                    "{\"type\":\"ide-use\",\"browserSessionId\":\""
                         + invalidDocument
                         + "\",\"revision\":\"1\",\"views\":[]}"));
     assertEquals("frame ide-use is invalid", documentError.getMessage());

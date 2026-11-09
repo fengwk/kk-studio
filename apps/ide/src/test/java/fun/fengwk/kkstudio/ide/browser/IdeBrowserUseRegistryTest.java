@@ -65,9 +65,9 @@ class IdeBrowserUseRegistryTest {
     assertEquals(Acceptance.ACCEPTED, registry.accept(IDENTITY, generation, usage(1, intent())));
 
     assertEquals(
-        Acceptance.DOCUMENT_MISMATCH,
+        Acceptance.BROWSER_SESSION_MISMATCH,
         registry.accept(IDENTITY, generation, new IdeBrowserUse(OTHER_DOCUMENT, 2, List.of())));
-    assertEquals(DOCUMENT, registry.usage(IDENTITY).orElseThrow().documentId());
+    assertEquals(DOCUMENT, registry.usage(IDENTITY).orElseThrow().browserSessionId());
   }
 
   @Test

@@ -5,8 +5,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 
 /**
@@ -34,4 +36,8 @@ public interface EnvironmentIdeService {
 
   /** owner 的当前视图快照；不创建视图，也不续租。 */
   EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId);
+
+  /** 纯读单个视图：只返回当前 owner 的权威资源和绑定，不创建、不续租、不发票据。 */
+  EnvironmentIdeViewSnapshotDTO readView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request);
 }

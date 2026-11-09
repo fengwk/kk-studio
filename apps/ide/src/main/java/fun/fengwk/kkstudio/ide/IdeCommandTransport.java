@@ -62,7 +62,7 @@ public class IdeCommandTransport implements IdeCurrentGeneration {
       builder.addBindings(
           IdeLeaseBinding.newBuilder()
               .setViewId(binding.viewId().toString())
-              .setDocumentId(binding.documentId().toString())
+              .setBrowserSessionId(binding.browserSessionId().toString())
               .setBindingEpoch(binding.bindingEpoch()));
     }
     server.sendIdeLease(environmentId, expectedIdentity, builder.build());
