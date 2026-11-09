@@ -1057,6 +1057,10 @@ export const chatCatalog = {
     'en-US': 'Running',
     'zh-CN': '运行中',
   },
+  'ai.runtime.thread.status.EXIT_PENDING': {
+    'en-US': 'Exit pending',
+    'zh-CN': '等待退出确认',
+  },
   'ai.runtime.thread.status.WAITING': {
     'en-US': 'Waiting for async result',
     'zh-CN': '等待异步结果',
@@ -1069,6 +1073,10 @@ export const chatCatalog = {
     'en-US': 'Stopped',
     'zh-CN': '已停止',
   },
+  'ai.runtime.thread.exitPending': {
+    'en-US': 'Waiting for execution exit confirmation',
+    'zh-CN': '等待执行退出确认',
+  },
   'ai.runtime.thread.stopExitUnconfirmed': {
     'en-US': 'Stop requested; exit not yet confirmed',
     'zh-CN': '已请求停止，退出尚未确认',
@@ -1080,6 +1088,14 @@ export const chatCatalog = {
   'ai.runtime.unconfirmedExecutions.hint': {
     'en-US': 'These executions have not confirmed exit. Abandoning only stops waiting for confirmation; it does not stop local or remote execution.',
     'zh-CN': '这些执行尚未确认退出。放弃等待只停止等待确认，不会终止本地或远端执行。',
+  },
+  'ai.runtime.unconfirmedExecutions.hintRunnable': {
+    'en-US': 'Executions are still active, so exit is not confirmed. Stop the Thread before deciding whether to abandon waiting.',
+    'zh-CN': '执行仍在进行，因此尚未确认退出。停止会话后才能选择是否放弃等待。',
+  },
+  'ai.runtime.unconfirmedExecutions.stopAndHandle': {
+    'en-US': 'Stop and handle',
+    'zh-CN': '停止并处理',
   },
   'ai.runtime.unconfirmedExecutions.itemKind': {
     'en-US': 'Type {{kind}}',

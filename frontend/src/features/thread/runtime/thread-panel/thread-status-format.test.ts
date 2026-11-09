@@ -3,6 +3,8 @@ import {
   buildThreadStatusModel,
   formatThreadStatusLabel,
   formatUsageDetails,
+  isExitPendingStatus,
+  isThreadActiveStatus,
 } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { UsageCost } from '@/features/thread/runtime/thread-timeline-types'
 import { setLocale, translate as t } from '@/shared/i18n'
@@ -19,7 +21,7 @@ const EMPTY_USAGE = {
 
 describe('thread status formatting', () => {
   it.each([
-    'RUNNING', 'WAITING', 'IDLE',
+    'RUNNING', 'EXIT_PENDING', 'WAITING', 'IDLE',
   ])('localizes %s through its runtime status key', (status) => {
     expect(formatThreadStatusLabel(status, (key) => `translated:${key}`))
       .toBe(`translated:ai.runtime.thread.status.${status}`)
@@ -34,10 +36,22 @@ describe('thread status formatting', () => {
     expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('WAITING_APPROVAL')
   })
 
-  it('formats genuine three-state labels with default translator', () => {
+  it('formats genuine four-state labels with default translator', () => {
     expect(formatThreadStatusLabel('RUNNING')).toBe('运行中')
+    expect(formatThreadStatusLabel('EXIT_PENDING')).toBe('等待退出确认')
     expect(formatThreadStatusLabel('WAITING')).toBe('等待异步结果')
     expect(formatThreadStatusLabel('IDLE')).toBe('空闲')
+  })
+
+  it('classifies exit pending and every non-idle status without treating it as idle', () => {
+    // 测试意图：EXIT_PENDING 是显式退出待确认事实，所有非 IDLE 状态都仍有待收敛工作。
+    expect(isExitPendingStatus('EXIT_PENDING')).toBe(true)
+    expect(isExitPendingStatus('RUNNING')).toBe(false)
+    expect(isThreadActiveStatus('EXIT_PENDING')).toBe(true)
+    expect(isThreadActiveStatus('RUNNING')).toBe(true)
+    expect(isThreadActiveStatus('WAITING')).toBe(true)
+    expect(isThreadActiveStatus('IDLE')).toBe(false)
+    expect(isThreadActiveStatus(undefined)).toBe(false)
   })
 
   // 缺失或无效窗口不能制造上下文占用事实；用量摘要仍应稳定显示。

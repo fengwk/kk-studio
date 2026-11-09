@@ -101,7 +101,7 @@ class ControlProtocolCodecTest {
                     .setIdeResult(
                         IdeResult.newBuilder()
                             .setOk(true)
-                            .setRevision(1)
+                            .setRevision(3)
                             .addViews(
                                 view.toBuilder()
                                     .setViewId("9".repeat(8) + "-1111-4111-8111-111111111111"))
@@ -114,7 +114,7 @@ class ControlProtocolCodecTest {
                     .setOk(false)
                     .setCode("VIEW_GONE")
                     .setMessage("gone")
-                    .setRevision(2)
+                    .setRevision(3)
                     .addViews(view))
             .build());
     assertThrows(
@@ -130,6 +130,118 @@ class ControlProtocolCodecTest {
                             .setRevision(2)
                             .setBrowserSessionId(open.getBrowserSessionId()))
                     .build()));
+  }
+
+  /** 快照 summary 的 epoch 不得超前 revision；top 完整绑定与快照 summary 必须同源，简单无快照回执保持可用。 */
+  @Test
+  void validatesIdeSnapshotRevisionAndTopBindingInvariants() {
+    Envelope envelope =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-result.bin"));
+    IdeResult bound = envelope.getIdeResult();
+    IdeViewSummary view = bound.getViews(0);
+
+    ControlProtocolCodec.encodeBinary(
+        envelope.toBuilder()
+            .setIdeResult(bound.toBuilder().setRevision(bound.getRevision() + 1))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(bound.toBuilder().setRevision(bound.getBindingEpoch() - 1))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        IdeResult.newBuilder()
+                            .setOk(false)
+                            .setCode("VIEW_GONE")
+                            .setMessage("gone")
+                            .setRevision(bound.getBindingEpoch() - 1)
+                            .addViews(view))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder().setIdeResult(bound.toBuilder().clearViews()).build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        bound.toBuilder().setViewId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        bound.toBuilder()
+                            .setBrowserSessionId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        bound.toBuilder()
+                            .setEventNodeId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        bound.toBuilder()
+                            .setConnectionId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(
+                        bound.toBuilder()
+                            .setClaimId("9".repeat(8) + "-1111-4111-8111-111111111111"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(bound.toBuilder().setDirectory("/other"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(bound.toBuilder().setWorkspacePath("/other"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                envelope.toBuilder()
+                    .setIdeResult(bound.toBuilder().setBindingEpoch(bound.getBindingEpoch() - 1))
+                    .build()));
+
+    // FOCUS_TERMINAL/COLLAPSE_MOBILE 等既有简单回执不携带快照，不能被新不变量误拒绝。
+    ControlProtocolCodec.encodeBinary(
+        envelope.toBuilder()
+            .setIdeResult(IdeResult.newBuilder().setOk(true).setViewId(view.getViewId()))
+            .build());
   }
 
   /** 目录结果与视图回执互斥，新命令遵守绑定和路径边界。 */

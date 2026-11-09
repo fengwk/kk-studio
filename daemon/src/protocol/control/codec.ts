@@ -909,6 +909,9 @@ function validateIdeResult(result: IdeResult): void {
     requirePositive(result.bindingEpoch, 'ideResult.bindingEpoch')
     requireIdePath(result.directory, 'ideResult.directory')
     requireIdePath(result.workspacePath, 'ideResult.workspacePath')
+    if (result.revision !== undefined) {
+      validateSnapshotBinding(result)
+    }
     return
   }
   if (result.directory !== undefined) {
@@ -926,13 +929,18 @@ function validateIdeResult(result: IdeResult): void {
 }
 
 function validateIdeSnapshot(result: IdeResult): void {
-  requireNonNegative(result.revision, 'ideResult.revision')
+  const revision = requireNonNegative(result.revision, 'ideResult.revision')
   if (result.views.length > MAX_LISTED_IDE_VIEWS) {
     throw new Error(`ideResult.views must not exceed ${MAX_LISTED_IDE_VIEWS} entries`)
   }
   let previousViewId: string | null = null
   result.views.forEach((view, index) => {
     validateView(view, `ideResult.views[${index}]`)
+    if (view.bindingEpoch !== undefined && view.bindingEpoch > revision) {
+      throw new Error(
+        `ideResult.views[${index}].bindingEpoch must not exceed ideResult.revision`,
+      )
+    }
     if (previousViewId !== null && view.viewId !== undefined) {
       if (previousViewId === view.viewId) {
         throw new Error('ideResult.views must not repeat viewId')
@@ -945,6 +953,29 @@ function validateIdeSnapshot(result: IdeResult): void {
       previousViewId = view.viewId
     }
   })
+}
+
+/**
+ * top-level 完整绑定与同一快照中的 summary 必须一致，防止旧绑定套在新 revision 快照上。
+ *
+ * <p>没有快照的简单回执（例如 FOCUS_TERMINAL/COLLAPSE_MOBILE 只带 viewId）不经过本校验。
+ */
+function validateSnapshotBinding(result: IdeResult): void {
+  const view = result.views.find((candidate) => candidate.viewId === result.viewId)
+  if (view === undefined) {
+    throw new Error('ideResult snapshot must contain the top-level binding view')
+  }
+  if (
+    view.browserSessionId !== result.browserSessionId ||
+    view.eventNodeId !== result.eventNodeId ||
+    view.connectionId !== result.connectionId ||
+    view.claimId !== result.claimId ||
+    view.bindingEpoch !== result.bindingEpoch ||
+    view.directory !== result.directory ||
+    view.workspacePath !== result.workspacePath
+  ) {
+    throw new Error('ideResult snapshot view must match the top-level binding')
+  }
 }
 
 function validateView(view: IdeViewSummary, path: string): void {

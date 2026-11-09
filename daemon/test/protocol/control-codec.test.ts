@@ -1462,7 +1462,6 @@ describe('control binary codec', () => {
           bindingEpoch: 1n,
           directory: '/workspace/dir',
           workspacePath: '/workspace/dir/project.code-workspace',
-          revision: 1n,
         }),
       },
     })
@@ -1687,6 +1686,77 @@ describe('control framing', () => {
         views: [makeValidView()],
       }))),
     ).toThrow(/revision is required with views/)
+  })
+
+  it('validates IDE snapshot revision and top-level binding invariants', () => {
+    const golden = decodeBinary(readGolden('ide-result.bin'))
+    if (golden.payload.case !== 'ideResult') throw new Error('fixture must contain an IDE result')
+    const bound = golden.payload.value
+    const view = bound.views[0]
+    if (view === undefined || bound.revision === undefined || bound.bindingEpoch === undefined) {
+      throw new Error('fixture must contain a bound snapshot view')
+    }
+    const resultEnvelope = (value: IdeResult) =>
+      create(EnvelopeSchema, {
+        messageType: MessageType.IDE_RESULT,
+        environmentId: ENVIRONMENT_ID,
+        invocationId: INVOCATION_ID,
+        payload: { case: 'ideResult', value },
+      })
+    const resultWith = (changes: Partial<IdeResult>): IdeResult =>
+      create(IdeResultSchema, { ...bound, ...changes })
+
+    // revision 可以大于已提交 bindingEpoch；summary epoch 不得超前 revision。
+    validate(resultEnvelope(resultWith({ revision: bound.revision + 1n })))
+    expect(() => validate(resultEnvelope(resultWith({ revision: bound.bindingEpoch! - 1n }))))
+      .toThrow(/bindingEpoch must not exceed ideResult\.revision/)
+    expect(() =>
+      validate(resultEnvelope(create(IdeResultSchema, {
+        ok: false,
+        code: 'VIEW_GONE',
+        message: 'gone',
+        revision: bound.bindingEpoch! - 1n,
+        views: [view],
+      }))),
+    ).toThrow(/bindingEpoch must not exceed ideResult\.revision/)
+
+    // 有 top 完整绑定的成功回执只要携带快照，就必须包含同源 summary。
+    expect(() => validate(resultEnvelope(resultWith({ views: [] }))))
+      .toThrow(/snapshot must contain the top-level binding view/)
+    expect(() =>
+      validate(resultEnvelope(resultWith({
+        viewId: '99999999-1111-4111-8111-111111111111',
+      }))),
+    ).toThrow(/snapshot must contain the top-level binding view/)
+    expect(() =>
+      validate(resultEnvelope(resultWith({
+        browserSessionId: '99999999-1111-4111-8111-111111111111',
+      }))),
+    ).toThrow(/snapshot view must match the top-level binding/)
+    expect(() =>
+      validate(resultEnvelope(resultWith({
+        eventNodeId: '99999999-1111-4111-8111-111111111111',
+      }))),
+    ).toThrow(/snapshot view must match the top-level binding/)
+    expect(() =>
+      validate(resultEnvelope(resultWith({
+        connectionId: '99999999-1111-4111-8111-111111111111',
+      }))),
+    ).toThrow(/snapshot view must match the top-level binding/)
+    expect(() =>
+      validate(resultEnvelope(resultWith({
+        claimId: '99999999-1111-4111-8111-111111111111',
+      }))),
+    ).toThrow(/snapshot view must match the top-level binding/)
+    expect(() => validate(resultEnvelope(resultWith({ directory: '/other' }))))
+      .toThrow(/snapshot view must match the top-level binding/)
+    expect(() => validate(resultEnvelope(resultWith({ workspacePath: '/other' }))))
+      .toThrow(/snapshot view must match the top-level binding/)
+    expect(() => validate(resultEnvelope(resultWith({ bindingEpoch: bound.bindingEpoch! - 1n }))))
+      .toThrow(/snapshot view must match the top-level binding/)
+
+    // FOCUS_TERMINAL/COLLAPSE_MOBILE 等既有简单回执不携带快照，不能被新不变量误拒绝。
+    validate(resultEnvelope(create(IdeResultSchema, { ok: true, viewId: view.viewId })))
   })
 
   it('validates and roundtrips SKILL_SYNC and SKILL_STATE', () => {

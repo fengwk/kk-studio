@@ -27,7 +27,8 @@ public interface ExecutionExitJournal extends AutoCloseable {
   /**
    * 声明本进程仍有无法证明退出的物理执行：{@link #close()} 不得释放内核目录锁，直到 JVM 退出由操作系统回收。
    *
-   * <p>幂等且不可撤销。用于排空失败、资源关闭失败或退出证明未落账，避免新进程在旧执行体仍可能运行时接管同一目录。
+   * <p>实现必须以进程级强引用保留锁与通道，避免 GC/Cleaner 提前释放；不得注册提前释放锁的 shutdown hook。幂等；journal 已关闭时抛出 {@link
+   * ExecutionExitJournalException}，不得假装锁仍被持有。
    */
   void holdUntilProcessExit();
 

@@ -54,6 +54,9 @@ public record ExecutionExitJournalRecord(
     }
     stage = Objects.requireNonNull(stage, "stage");
     if (stage == ExecutionExitJournalStage.PREPARED) {
+      if (kind == ExecutionExitKind.REMOTE) {
+        throw new IllegalArgumentException("a remote execution has no local prepared lifecycle");
+      }
       if (targetState != null) {
         throw new IllegalArgumentException("a prepared execution has no exit evidence");
       }

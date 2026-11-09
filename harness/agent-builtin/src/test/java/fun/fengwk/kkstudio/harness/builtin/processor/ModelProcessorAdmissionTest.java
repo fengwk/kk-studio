@@ -362,7 +362,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           ExecutionExitState.UNCONFIRMED,
           fixture.store.transaction(tx -> tx.exits().find(heldExecutionId).orElseThrow().state()));
       assertEquals(
-          ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(basis.threadId()).runtimeStatus());
+          ThreadRuntimeStatus.EXIT_PENDING,
+          runtime.getThreadSnapshot(basis.threadId()).runtimeStatus());
       assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
       assertEquals(0, notificationCount(fixture.store, parentId));
 
@@ -383,7 +384,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
                     ExecutionExitState.UNCONFIRMED,
                     state,
                     "failed confirmation must preserve the exit fact"),
-            () -> assertEquals(ThreadRuntimeStatus.RUNNING, after.runtimeStatus()),
+            () -> assertEquals(ThreadRuntimeStatus.EXIT_PENDING, after.runtimeStatus()),
             () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
             () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
             () -> assertEquals(0, notificationCount(fixture.store, parentId)));

@@ -186,6 +186,8 @@ export function RootAgentPane({
           working: pane.controller.working || pane.composer.pending,
           actionError: pane.error,
           onDismissActionError,
+          onStop: () => { void pane.controller.stopThread() },
+          stopPending: pane.controller.stopPending || pane.controller.stopReplayPending,
           widgets: boundIsRoot && boundThreadId != null && !debugActive
             ? (
               <ActiveThreadTree

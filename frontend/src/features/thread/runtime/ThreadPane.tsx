@@ -18,6 +18,7 @@ import type { EnvironmentStatusIdentity } from '@/features/thread/runtime/thread
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import { toolExecutionState } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
+import { isExitPendingStatus } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
@@ -34,6 +35,9 @@ export interface ThreadPaneActivityInput {
   workingLabel?: string
   actionError?: string | null
   onDismissActionError?: () => void
+  /** EXIT_PENDING + RUNNABLE 时把“停止并处理”接到现有 Stop 流程；只读视图可不提供。 */
+  onStop?: () => void
+  stopPending?: boolean
   widgets?: ReactNode
 }
 
@@ -81,22 +85,15 @@ export function ThreadPane({
     waitingForEnvironment: pendingTool.waitingForEnvironment,
     phase: 'call',
   }) : null
-  // 只有 STOPPED 才允许放弃等待；RUNNABLE 的普通在途执行不是“未确认退出”事实。
-  const unconfirmedExecutions = projection.thread?.executionControl === 'STOPPED'
-    ? projection.unconfirmedExecutions
-    : []
-
-  // 已请求停止但 Thread 仍 RUNNING、且没有真实 RUNNING model/tool：退出尚未确认。
-  // 这只是现有 executionControl 与 status 的静态组合，不代表执行即将结束。
-  const stopExitUnconfirmed = projection.thread?.executionControl === 'STOPPED'
-    && projection.thread.status === 'RUNNING'
-    && !executing
+  // 活跃执行中的 UNCONFIRMED 是正常在途事实，不进入异常/待处理面板；只有真正 EXIT_PENDING 才展示详情。
+  const exitPending = isExitPendingStatus(projection.thread?.status)
+  const unconfirmedExecutions = exitPending ? projection.unconfirmedExecutions : []
 
   // 事实优先级：
   // 1. 真实 RUNNING model/tool 优先，STOPPED 不可遮在途执行
-  // 2. STOPPED+RUNNING 且无真实执行：静态提示退出尚未确认；残留排队/审批不再暗示可继续
+  // 2. EXIT_PENDING：没有活跃流程但退出未确认；RUNNABLE 无异常告警，STOPPED 才可显式放弃
   // 3. pendingTool 阻塞：审批 / 问卷 / environment 文案准确且无动画
-  // 4. status 三态：RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
+  // 4. 其它 status：RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
   // 5. 其余回退外部 activity
   let resolvedWorking = activity.working
   let resolvedWorkingLabel: string | undefined = activity.workingLabel
@@ -104,9 +101,11 @@ export function ThreadPane({
   if (executing) {
     resolvedWorking = true
     resolvedWorkingLabel = t('ai.runtime.thread.working')
-  } else if (stopExitUnconfirmed) {
+  } else if (exitPending) {
     resolvedWorking = true
-    resolvedWorkingLabel = t('ai.runtime.thread.stopExitUnconfirmed')
+    resolvedWorkingLabel = projection.thread?.executionControl === 'STOPPED'
+      ? t('ai.runtime.thread.stopExitUnconfirmed')
+      : t('ai.runtime.thread.exitPending')
   } else if (pendingToolState) {
     resolvedWorking = true
     resolvedWorkingLabel = t(`ai.runtime.tool.${pendingToolState}`, {
@@ -144,7 +143,10 @@ export function ThreadPane({
             threadId={projection.threadId}
             rootThreadId={projection.thread?.rootThreadId ?? ''}
             expectedVersion={projection.thread?.version ?? ''}
+            executionControl={projection.thread?.executionControl ?? 'RUNNABLE'}
             executions={unconfirmedExecutions}
+            onStop={activity.onStop}
+            stopPending={activity.stopPending}
           />
           {activity.widgets}
         </>
