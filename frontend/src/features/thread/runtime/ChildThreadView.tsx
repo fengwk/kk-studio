@@ -83,10 +83,10 @@ export function ThreadView({
         {views.mode === 'debug' ? <Button variant="ghost" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
           {t('ai.runtime.debug.close')}
         </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
-        {views.mode !== 'debug' ? <>
+        {views.mode !== 'debug' ? <div className="agent-pane-thread-caption">
           {presentation.name ? <h2 className="agent-pane-thread-title" title={presentation.name}>{presentation.name}</h2> : null}
           {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
-        </> : null}
+        </div> : null}
       </header> : null}
       {showChildEnvironment ? (
         <div className="thread-readonly-environment">

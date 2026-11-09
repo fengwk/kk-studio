@@ -447,6 +447,10 @@ for (const scenario of ['thread-child', 'pane-child']) {
       const first = header.locator('a, button').first()
       await expect(first).toHaveText('回到父 agent')
       await expect(first).toHaveCSS('white-space', 'nowrap')
+      // 复制必须与短 ID 同行，不能挤到标题上方单独占一行。
+      const idBox = (await shortId.boundingBox())!
+      const copyBox = (await copy.boundingBox())!
+      expect(Math.abs(idBox.y + idBox.height / 2 - copyBox.y - copyBox.height / 2)).toBeLessThanOrEqual(2)
     }
     await copy.click()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(CHILD_ID)

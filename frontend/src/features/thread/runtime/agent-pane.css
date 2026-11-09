@@ -14,6 +14,14 @@
   container: pane-title / inline-size;
 }
 
+.agent-pane-thread-caption {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .agent-pane-thread-title {
   flex: 1;
   min-width: 0;
@@ -29,12 +37,11 @@
 
 /* 狭窄 pane 优先压缩模型身份，保留标题、返回入口与短 ID 复制动作。 */
 @container pane-title (max-width: 560px) {
-  .workspace-view-identity {
+  .agent-pane-thread-heading .workspace-view-identity {
     max-width: 5ch;
   }
 
-  .agent-pane-thread-title {
-    min-width: 4ch;
+  .agent-pane-thread-caption {
     flex-basis: 100%;
     order: 1;
   }

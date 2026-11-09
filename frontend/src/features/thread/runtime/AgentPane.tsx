@@ -270,10 +270,10 @@ export function AgentPane({
             onClick={() => visiblePresentation.act(visiblePresentation.viewKey, 'close-debug')}>
             {t('ai.runtime.debug.close')}
           </Button> : <ThreadPresentationActions view={visiblePresentation} />}
-          {visiblePresentation?.mode !== 'debug' ? <>
+          {visiblePresentation?.mode !== 'debug' ? <div className="agent-pane-thread-caption">
             {visiblePresentation?.name ? <h2 className="agent-pane-thread-title" title={visiblePresentation.name}>{visiblePresentation.name}</h2> : null}
             <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
-          </> : null}
+          </div> : null}
         </header> : null}
         {/* 被覆盖的根层保持挂载但完全惰性：不可聚焦、不可点、不参与无障碍树。 */}
         <div className="chat-pane-layer" hidden={covered} inert={covered}>
