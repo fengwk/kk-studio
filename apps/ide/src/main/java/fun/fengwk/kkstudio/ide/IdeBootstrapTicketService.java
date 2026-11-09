@@ -14,7 +14,7 @@ import java.util.Optional;
  * IdeGenerationState} 与唯一权威视图快照。撤销按完整 {@code (Daemon 身份, viewId, bindingEpoch)} 精确进行，旧 epoch
  * 的回滚或清理不能删除新绑定票据。
  */
-public final class IdeBootstrapTicketService {
+public class IdeBootstrapTicketService {
 
   private final OneTimeTicketStore<Ticket> store = new OneTimeTicketStore<>();
 
@@ -44,8 +44,8 @@ public final class IdeBootstrapTicketService {
                 && ticket.bindingEpoch() == bindingEpoch);
   }
 
-  /** 撤销同 view 的其它 epoch，保留当前已接受 epoch 的票据（重复签发仍保持有效）。 */
-  public void revokeOtherEpochs(
+  /** 只单向撤销同 view 严格早于 {@code currentBindingEpoch} 的遗留票据；当前与更新 epoch 永不受影响。 */
+  public void revokeOlderThan(
       DaemonConnectionIdentity identity, String viewId, long currentBindingEpoch) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
@@ -56,7 +56,7 @@ public final class IdeBootstrapTicketService {
         ticket ->
             ticket.identity().equals(identity)
                 && ticket.viewId().equals(viewId)
-                && ticket.bindingEpoch() != currentBindingEpoch);
+                && ticket.bindingEpoch() < currentBindingEpoch);
   }
 
   int pendingCount() {

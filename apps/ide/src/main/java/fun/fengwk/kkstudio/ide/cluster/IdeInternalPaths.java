@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
@@ -34,18 +36,40 @@ public final class IdeInternalPaths {
             .append('/')
             .append(viewId)
             .append("?browserSessionId=")
-            .append(UrlEncoding.encode(request.getBrowserSessionId()))
+            .append(
+                UrlEncoding.encode(requireUuid(request.getBrowserSessionId(), "browserSessionId")))
             .append("&eventNodeId=")
-            .append(UrlEncoding.encode(request.getEventNodeId()))
+            .append(UrlEncoding.encode(requireUuid(request.getEventNodeId(), "eventNodeId")))
             .append("&connectionId=")
-            .append(UrlEncoding.encode(request.getConnectionId()))
+            .append(UrlEncoding.encode(requireUuid(request.getConnectionId(), "connectionId")))
             .append("&claimId=")
-            .append(UrlEncoding.encode(request.getClaimId()));
+            .append(UrlEncoding.encode(requireUuid(request.getClaimId(), "claimId")));
     if (request.getExpectedDaemonInstanceId() != null) {
       path.append("&expectedDaemonInstanceId=")
-          .append(UrlEncoding.encode(request.getExpectedDaemonInstanceId()));
+          .append(
+              UrlEncoding.encode(
+                  requireNonBlank(
+                      request.getExpectedDaemonInstanceId(), "expectedDaemonInstanceId")));
     }
     return path.toString();
+  }
+
+  private static String requireUuid(String value, String field) {
+    if (value == null) {
+      throw DomainException.validation("environment", field + " is required");
+    }
+    try {
+      return Uuids.parseCanonical(value, field).toString();
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("environment", field + " must be a canonical UUID");
+    }
+  }
+
+  private static String requireNonBlank(String value, String field) {
+    if (value.isBlank()) {
+      throw DomainException.validation("environment", field + " must not be blank");
+    }
+    return value;
   }
 
   public static String directoryPath(EnvironmentId environmentId, String viewId) {

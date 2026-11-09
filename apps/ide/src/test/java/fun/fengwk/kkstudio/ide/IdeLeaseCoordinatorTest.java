@@ -16,8 +16,10 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
@@ -203,7 +205,7 @@ class IdeLeaseCoordinatorTest {
     EnvironmentIdeViewDTO dto = new EnvironmentIdeViewDTO();
     dto.setViewId(viewId.toString());
     dto.setEnvironmentId(ENV.toString());
-    dto.setDocumentId(DOCUMENT.toString());
+    dto.setBrowserSessionId(DOCUMENT.toString());
     dto.setEventNodeId(EVENT_NODE.toString());
     dto.setConnectionId(CONNECTION.toString());
     dto.setClaimId(CLAIM.toString());
@@ -215,11 +217,11 @@ class IdeLeaseCoordinatorTest {
     return dto;
   }
 
-  private static IdeBrowserUseGateway.Proof proof(UUID viewId, UUID documentId, long epoch) {
-    return new IdeBrowserUseGateway.Proof(ENV, viewId, documentId, epoch);
+  private static IdeBrowserUseGateway.Proof proof(UUID viewId, UUID browserSessionId, long epoch) {
+    return new IdeBrowserUseGateway.Proof(ENV, viewId, browserSessionId, epoch);
   }
 
-  private record Group(UUID eventNodeId, UUID connectionId, UUID documentId) {}
+  private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId) {}
 
   private static final class FakeViews implements EnvironmentIdeService {
 
@@ -260,6 +262,12 @@ class IdeLeaseCoordinatorTest {
     public EnvironmentIdeDirectoryListingDTO listDirectories(
         EnvironmentId environmentId, String path) {
       throw new AssertionError("unexpected directory listing");
+    }
+
+    @Override
+    public EnvironmentIdeViewSnapshotDTO readView(
+        EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
+      throw new AssertionError("unexpected read");
     }
 
     @Override
@@ -322,7 +330,7 @@ class IdeLeaseCoordinatorTest {
     public boolean findExactIntent(
         UUID eventNodeId,
         UUID connectionId,
-        UUID documentId,
+        UUID browserSessionId,
         EnvironmentId environmentId,
         UUID viewId,
         UUID claimId) {
@@ -331,8 +339,8 @@ class IdeLeaseCoordinatorTest {
 
     @Override
     public Optional<Proofs> activeBoundProofs(
-        UUID eventNodeId, UUID connectionId, UUID documentId) {
-      Group group = new Group(eventNodeId, connectionId, documentId);
+        UUID eventNodeId, UUID connectionId, UUID browserSessionId) {
+      Group group = new Group(eventNodeId, connectionId, browserSessionId);
       if (failures.contains(group)) {
         throw new IllegalStateException("event node unavailable");
       }

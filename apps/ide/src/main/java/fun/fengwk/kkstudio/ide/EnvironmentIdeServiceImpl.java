@@ -195,8 +195,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     } catch (IdeOutcomeUnknownException error) {
       throw outcomeUnknown(unknown.getMessage(), unknown);
     } catch (DomainException error) {
-      if ("STALE_BINDING".equals(error.reason())) {
-        throw viewGone("environment daemon instance has been replaced");
+      // readView 只有在当前 READY 实例已不等于发送实例时才用 VIEW_GONE 表示真实换代；
+      // 同一实例上的 intent 消失仍是命令结果未知，不能倒因为“未发送”。
+      if ("VIEW_GONE".equals(error.reason())) {
+        Optional<DaemonConnectionIdentity> currentAfter =
+            transport.connectionIdentity(environmentId);
+        if (currentAfter.isPresent() && !currentAfter.get().equals(sentIdentity)) {
+          throw error;
+        }
       }
       if ("VIEW_GONE".equals(error.reason()) || "IDE_UNAVAILABLE".equals(error.reason())) {
         unknown.addSuppressed(error);
@@ -261,9 +267,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       acceptFailureSnapshot(result);
       throw rejection(result.reply());
     }
-    IdeViewSnapshotStore.Snapshot snapshot = requireReplySnapshot(result);
+    IdeViewSnapshotStore.Snapshot snapshot =
+        requireReplySnapshotForBinding(result, binding.view(), parsedViewId);
     IdeViewSnapshotStore.View current =
-        requireCurrentView(snapshot, parsedViewId, browserSessionId, bindingEpoch);
+        requireCurrentView(snapshot, binding.view(), parsedViewId, browserSessionId, bindingEpoch);
     return toDto(binding.identity(), current);
   }
 
@@ -309,7 +316,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       acceptFailureSnapshot(result);
       throw rejection(result.reply());
     }
-    acceptOptionalSnapshot(result);
+    acceptOptionalSnapshot(result, binding.view(), parsedViewId);
   }
 
   @Override
@@ -345,13 +352,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       }
       throw rejection(result.reply());
     }
-    IdeViewSnapshotStore.Snapshot snapshot = requireReplySnapshot(result);
+    IdeViewSnapshotStore.Snapshot snapshot =
+        requireReplySnapshotForBinding(result, binding.view(), parsedViewId);
     IdeViewSnapshotStore.View current = snapshot.find(parsedViewId).orElse(null);
     if (current != null) {
       if (!current.browserSessionId().equals(browserSessionId)) {
         throw viewOwnedByOther();
       }
-      if (current.bindingEpoch() != bindingEpoch) {
+      if (!sameBinding(current, binding.view())) {
         throw staleBinding("IDE close result belongs to an older binding");
       }
       if (current.state() == IdeViewState.OPEN) {
@@ -461,15 +469,40 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return acceptSnapshot(result.identity(), result.reply());
   }
 
+  /** 变更/关闭命令的普通成功回执只能确认原有 owner 绑定；绑定字段漂移的回执必须在写入缓存前拒绝， 不能让旧 claim/epoch 覆盖新快照。 */
+  private IdeViewSnapshotStore.Snapshot requireReplySnapshotForBinding(
+      IdeCall result, IdeViewSnapshotStore.View expected, UUID viewId) {
+    if (!result.reply().hasRevision()) {
+      throw protocolFailure("daemon did not return a complete IDE snapshot");
+    }
+    requireReplyViewMatches(result.reply(), expected, viewId);
+    return acceptSnapshot(result.identity(), result.reply());
+  }
+
   private void acceptFailureSnapshot(IdeCall result) {
     if (result.reply().hasRevision()) {
       acceptSnapshot(result.identity(), result.reply());
     }
   }
 
-  private void acceptOptionalSnapshot(IdeCall result) {
+  private void acceptOptionalSnapshot(
+      IdeCall result, IdeViewSnapshotStore.View expected, UUID viewId) {
     if (result.reply().hasRevision()) {
+      requireReplyViewMatches(result.reply(), expected, viewId);
       acceptSnapshot(result.identity(), result.reply());
+    }
+  }
+
+  private static void requireReplyViewMatches(
+      IdeResult reply, IdeViewSnapshotStore.View expected, UUID viewId) {
+    for (IdeViewSummary view : reply.getViewsList()) {
+      if (expected.viewId().equals(protocolUuid(view.getViewId(), "viewId"))) {
+        IdeViewSnapshotStore.View actual = toSnapshotView(view);
+        if (!sameBinding(actual, expected)) {
+          throw staleBinding("IDE command reply contains a different binding");
+        }
+        return;
+      }
     }
   }
 
@@ -486,7 +519,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return acceptance.snapshot();
   }
 
-  /** 旧快照中消失或换 epoch 的票据按精确 epoch 撤销；仍存在的新绑定票据不受影响。 */
+  /** 旧快照中消失或换 epoch 的票据按精确 epoch 撤销；绝不按“其它 epoch”批量撤销。 */
   private void cleanupReplacedTickets(
       DaemonConnectionIdentity identity,
       IdeViewSnapshotStore.Snapshot previous,
@@ -499,8 +532,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         bootstrapTickets.revoke(identity, old.viewId().toString(), old.bindingEpoch());
       }
     }
+    // 只单向清理严格更早的遗留票据；并发晚执行的 Rev2 清理不得删除已接受 Rev3 的票据。
     for (IdeViewSnapshotStore.View view : current.views()) {
-      bootstrapTickets.revokeOtherEpochs(identity, view.viewId().toString(), view.bindingEpoch());
+      bootstrapTickets.revokeOlderThan(identity, view.viewId().toString(), view.bindingEpoch());
     }
   }
 
@@ -529,6 +563,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private IdeViewSnapshotStore.View requireCurrentView(
       IdeViewSnapshotStore.Snapshot snapshot,
+      IdeViewSnapshotStore.View expected,
       UUID viewId,
       UUID browserSessionId,
       long bindingEpoch) {
@@ -539,10 +574,24 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (!view.browserSessionId().equals(browserSessionId)) {
       throw viewOwnedByOther();
     }
+    if (!sameBinding(view, expected)) {
+      throw staleBinding("IDE view binding has been replaced");
+    }
     if (view.bindingEpoch() != bindingEpoch) {
       throw staleBinding("IDE view binding has been replaced");
     }
     return view;
+  }
+
+  /** 比较稳定的 owner 绑定字段；目录可在 CHANGE_DIRECTORY 中合法变化。 */
+  private static boolean sameBinding(
+      IdeViewSnapshotStore.View actual, IdeViewSnapshotStore.View expected) {
+    return actual.viewId().equals(expected.viewId())
+        && actual.browserSessionId().equals(expected.browserSessionId())
+        && actual.eventNodeId().equals(expected.eventNodeId())
+        && actual.connectionId().equals(expected.connectionId())
+        && actual.claimId().equals(expected.claimId())
+        && actual.bindingEpoch() == expected.bindingEpoch();
   }
 
   private EnvironmentIdeViewBindingContext requireBinding(
@@ -575,7 +624,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         environmentId,
         viewId,
         view.claimId());
-    return new EnvironmentIdeViewBindingContext(identity);
+    return new EnvironmentIdeViewBindingContext(identity, view);
   }
 
   private void requireIntent(
@@ -628,15 +677,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       EnvironmentIdeOpenMode mode,
       String expectedDaemonInstanceId,
       DaemonConnectionIdentity current) {
-    if (expectedDaemonInstanceId == null) {
-      if (mode == EnvironmentIdeOpenMode.RESUME) {
-        throw DomainException.validation(
-            "environment", "expectedDaemonInstanceId is required for resume");
-      }
-      return current.daemonInstanceId();
-    }
-    if (expectedDaemonInstanceId.isBlank()) {
-      throw DomainException.validation("environment", "expectedDaemonInstanceId must not be blank");
+    if (expectedDaemonInstanceId == null || expectedDaemonInstanceId.isBlank()) {
+      throw DomainException.validation(
+          "environment", "expectedDaemonInstanceId is required for " + mode.wireValue());
     }
     if (!expectedDaemonInstanceId.equals(current.daemonInstanceId())) {
       throw viewGone("environment daemon instance has been replaced");
@@ -898,7 +941,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private record IdeCall(IdeResult reply, DaemonConnectionIdentity identity) {}
 
-  private record EnvironmentIdeViewBindingContext(DaemonConnectionIdentity identity) {}
+  private record EnvironmentIdeViewBindingContext(
+      DaemonConnectionIdentity identity, IdeViewSnapshotStore.View view) {}
 
   /** 命令可能已到达 Daemon 但未收到确定回执；只允许 OPEN 按原 claim 纯读对账。 */
   private static final class IdeOutcomeUnknownException extends RuntimeException {

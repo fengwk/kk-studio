@@ -13,11 +13,11 @@
  * {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<canonical UUID>"}}
  * {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * {"type":"unsubscribe","resource":{...}}
- * {"type":"ide-use","documentId":"<canonical UUID>","revision":"<positive decimal>","views":[{"environmentId":"<canonical UUID>","viewId":"<canonical UUID>","claimId":"<canonical UUID>","bindingEpoch":"<positive decimal>"}]}
+ * {"type":"ide-use","browserSessionId":"<canonical UUID>","revision":"<positive decimal>","views":[{"environmentId":"<canonical UUID>","viewId":"<canonical UUID>","claimId":"<canonical UUID>","bindingEpoch":"<positive decimal>"}]}
  * }</pre>
  *
  * <p>{@code ide-use} 至多 64 项，列表内 viewId 唯一；缺省 bindingEpoch 表示尚未 claim 的意图，不能用于续租。同一 revision
- * 相同内容幂等，不同内容拒绝；更高 revision 原子替换。每个连接固定一个 documentId。
+ * 相同内容幂等，不同内容拒绝；更高 revision 原子替换。每个连接固定一个 browserSessionId。
  *
  * <p>服务端帧：
  *

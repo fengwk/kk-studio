@@ -4,7 +4,7 @@
 // no request is intercepted, mocked or fulfilled.
 //
 // Protocol (stdin): the first line is the JSON configuration:
-//   {playwrightModule, baseUrl, environmentId, documentId, workspaceDirectory,
+//   {playwrightModule, baseUrl, environmentId, browserSessionId, workspaceDirectory,
 //    browserTempDirectory, entryUrl, viewId, bindingEpoch}
 // later lines are {"continue":true} for synchronization.
 //
@@ -69,7 +69,7 @@ function parseConfig(raw) {
     'playwrightModule',
     'baseUrl',
     'environmentId',
-    'documentId',
+    'browserSessionId',
     'workspaceDirectory',
     'browserTempDirectory',
     'entryUrl',
@@ -85,7 +85,7 @@ function parseConfig(raw) {
     playwrightModule: resolve(config.playwrightModule),
     baseUrl: config.baseUrl,
     environmentId: config.environmentId,
-    documentId: config.documentId,
+    browserSessionId: config.browserSessionId,
     workspaceDirectory: resolve(config.workspaceDirectory),
     browserTempDirectory: resolve(config.browserTempDirectory),
     entryUrl: config.entryUrl,

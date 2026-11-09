@@ -95,7 +95,7 @@ class IdeBrowserUseClientTest {
     // 内部 HTTP 响应遵循统一 Long wire：revision 与 bindingEpoch 都是 canonical 十进制字符串。
     String payload =
         """
-        {"eventNodeId":"%s","connectionId":"%s","documentId":"%s","revision":"7","views":[
+        {"eventNodeId":"%s","connectionId":"%s","browserSessionId":"%s","revision":"7","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"12"}]}
         """
             .formatted(REMOTE_NODE, CONNECTION, DOCUMENT, ENVIRONMENT, VIEW, CLAIM);
@@ -159,7 +159,7 @@ class IdeBrowserUseClientTest {
                   + REMOTE_NODE
                   + "\",\"connectionId\":\""
                   + CONNECTION
-                  + "\",\"documentId\":\""
+                  + "\",\"browserSessionId\":\""
                   + DOCUMENT
                   + "\",\"revision\":\"7\",\"views\":[]}");
         });

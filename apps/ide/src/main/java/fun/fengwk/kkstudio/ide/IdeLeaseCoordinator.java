@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 在 owner 上把 Daemon 的一轮 {@code ideLeaseRound} 翻译为一次 {@code IDE_LEASE}。
  *
- * <p>流程固定为：{@code LIST_VIEWS} 读取 Daemon 当前绑定 → 按 eventNode/connection/document 分组查询事件节点已确认的使用列表 →
- * 只保留 viewId/browserSessionId/bindingEpoch 完全匹配的条目。事件节点查询失败、快照缺失或控制代际已换代都不续租；Daemon
- * 心跳本身永远不被当作浏览器活跃证明。
+ * <p>流程固定为：{@code LIST_VIEWS} 读取 Daemon 当前绑定 → 按 eventNode/connection/browser session
+ * 分组查询事件节点已确认的使用列表 → 只保留 viewId/browserSessionId/bindingEpoch
+ * 完全匹配的条目。事件节点查询失败、快照缺失或控制代际已换代都不续租；Daemon 心跳本身永远不被当作浏览器活跃证明。
  *
  * <p>每个 Environment 至多一个在途轮次；同一轮不会重放，下一轮由下一次正常心跳触发。回调只投递到有界执行器，不阻塞会话核心。
  */

@@ -31,7 +31,7 @@ import java.util.UUID;
  * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
  * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe',resource}} 与 {@code
- * {type:'ide-use',documentId,revision,views}} 字段集精确。服务端帧 {@code connected} / {@code
+ * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。服务端帧 {@code connected} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
  * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
  * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
@@ -54,7 +54,7 @@ final class EventFrameCodec {
 
   private static final Set<String> SUBSCRIPTION_FIELDS = orderedSet("type", "resource");
   private static final Set<String> IDE_USE_FIELDS =
-      orderedSet("type", "documentId", "revision", "views");
+      orderedSet("type", "browserSessionId", "revision", "views");
   private static final Set<String> IDE_USE_VIEW_REQUIRED_FIELDS =
       orderedSet("environmentId", "viewId", "claimId");
   private static final Set<String> IDE_USE_VIEW_OPTIONAL_FIELDS = orderedSet("bindingEpoch");
@@ -307,11 +307,11 @@ final class EventFrameCodec {
         throw new IllegalArgumentException("frame.views[] is invalid", error);
       }
     }
-    String documentId = requiredText(node, "documentId", "frame");
+    String browserSessionId = requiredText(node, "browserSessionId", "frame");
     try {
       long revision =
           DecimalLongs.parsePositive(requiredText(node, "revision", "frame"), "revision");
-      return IdeBrowserUse.parse(documentId, revision, views);
+      return IdeBrowserUse.parse(browserSessionId, revision, views);
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("frame ide-use is invalid", error);
     }

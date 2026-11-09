@@ -249,7 +249,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(UUID.randomUUID(), "3", IDE_CLAIM, 7L)));
     assertEquals(
-        "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"documentId is fixed for"
+        "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"browserSessionId is fixed for"
             + " this connection\"}",
         recorder.sent.get(4));
   }
@@ -733,12 +733,12 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   private static String ideUseFrame(
-      UUID documentId, String revision, UUID claimId, long bindingEpoch) {
+      UUID browserSessionId, String revision, UUID claimId, long bindingEpoch) {
     return """
-        {"type":"ide-use","documentId":"%s","revision":"%s","views":[
+        {"type":"ide-use","browserSessionId":"%s","revision":"%s","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"%d"}]}
         """
-        .formatted(documentId, revision, IDE_ENVIRONMENT, IDE_VIEW, claimId, bindingEpoch);
+        .formatted(browserSessionId, revision, IDE_ENVIRONMENT, IDE_VIEW, claimId, bindingEpoch);
   }
 
   private static String unsubscribeFrame(UUID threadId) {
