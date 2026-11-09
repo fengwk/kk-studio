@@ -44,13 +44,6 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): st
   ].filter(Boolean).join(' · ')
 }
 
-/**
- * 顶栏短 ID：只取前 8 位用于展示，路由与复制始终使用完整 threadId。
- */
-export function shortThreadId(threadId: string): string {
-  return threadId.slice(0, 8)
-}
-
 /** 动作稳定但只使用 commit 后最新查看层；过期身份和隐藏层不能执行。 */
 export function useThreadPresentation({
   views, projection, threadId, selected, active, onReport, onParent, onRestoreFocus,
