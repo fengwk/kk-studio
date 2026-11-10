@@ -9,9 +9,11 @@ import {
   type ApplyTiming,
 } from '@/features/settings/settings-primitives'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
+import { SettingsModelSelectionField } from '@/features/settings/SettingsModelSelectionField'
 import {
   getDraftValue,
   setDraftValue,
+  type ModelSelectionDraft,
   type PermissionGroupDraft,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
@@ -140,6 +142,18 @@ function SchemaField({
             label: t(requireTranslationKey(option.labelKey)),
           }))}
           hint={hint}
+          onChange={update}
+        />
+      )
+    case 'MODEL_SELECTION':
+      return (
+        <SettingsModelSelectionField
+          fieldPath={field.path}
+          nullable={field.nullable}
+          label={label}
+          hint={hint}
+          unsetLabel={t('settings.field.modelSelection.unset')}
+          value={value as ModelSelectionDraft}
           onChange={update}
         />
       )

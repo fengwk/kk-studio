@@ -1,6 +1,7 @@
 import type { SystemSettingsSectionsDTO } from '@/shared/api/contracts/system-settings'
 import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
 import type {
+  HarnessModelSelectionDTO,
   InvocationRetryBackoffStrategy,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/generated/contracts'
@@ -25,12 +26,20 @@ export interface SystemSettingsToolDraft {
   toolGatewayOverloadRetryMillis: DraftNumericField
 }
 
+/** 可空的模型引用：modelName 为空串表示未设置；variant 为空串表示使用模型默认变体。 */
+export interface ModelSelectionDraft {
+  modelName: string
+  variant: string
+}
+
 export interface SystemSettingsAiRuntimeDraft {
   retryMaxRetries: DraftNumericField
   retryBackoffStrategy: string
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
+  compactionModel: ModelSelectionDraft
   compactionKeepRecentTokens: DraftNumericField
+  compactionReserveTokens: DraftNumericField
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
@@ -167,7 +176,12 @@ function aiRuntimeToDraft(
     retryBackoffStrategy: dto.retryBackoffStrategy,
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
+    compactionModel: {
+      modelName: dto.compactionModel?.modelName ?? '',
+      variant: dto.compactionModel?.variant ?? '',
+    },
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
+    compactionReserveTokens: String(dto.compactionReserveTokens),
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
@@ -176,6 +190,16 @@ function aiRuntimeToDraft(
       ? [...dto.modelHttpRetryStatusCodes]
       : [],
   }
+}
+
+/** 未设置模型时为 null；变体为空表示使用模型默认变体，wire 上省略。 */
+function assembleModelSelection(selection: ModelSelectionDraft): HarnessModelSelectionDTO | null {
+  const modelName = selection.modelName.trim()
+  if (modelName === '') {
+    return null
+  }
+  const variant = selection.variant.trim()
+  return variant === '' ? { modelName } : { modelName, variant }
 }
 
 /** 把可编辑 draft 组装为 PUT 请求体；空/非法数字、空 tool 名、trim 后重复的 canonical tool 名与空 pattern 都会抛 {@link DraftValidationError}。 */
@@ -225,7 +249,9 @@ export function assembleSettingsUpdate(
         draft.aiRuntime.retryBackoffStrategy as InvocationRetryBackoffStrategy,
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
+      compactionModel: assembleModelSelection(draft.aiRuntime.compactionModel),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
+      compactionReserveTokens: requiredInt(draft.aiRuntime.compactionReserveTokens),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: requiredInt(
@@ -339,6 +365,7 @@ export function assembleHttpStatusList(items: unknown): number[] {
 
 const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
   'tool.permission',
+  'aiRuntime.compactionModel',
   'aiRuntime.modelHttpRetryStatusCodes',
 ])
 
