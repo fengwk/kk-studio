@@ -25,7 +25,8 @@ final class OpenAiResponsesErrorMapper {
 
   static final String MSG_AUTH = "OpenAI Responses authentication failed";
   static final String MSG_BILLING = "OpenAI Responses billing or quota error";
-  static final String MSG_OVERFLOW = "OpenAI Responses request context overflow";
+  static final String MSG_CONTEXT_LIMIT = "OpenAI Responses request context limit exceeded";
+  static final String MSG_REQUEST_BODY_LIMIT = "OpenAI Responses request body limit exceeded";
   static final String MSG_TRANSIENT = "OpenAI Responses transient failure";
   static final String MSG_INVALID_REQUEST = "OpenAI Responses invalid request";
   static final String MSG_INVALID_RESPONSE = "OpenAI Responses invalid response";
@@ -34,7 +35,8 @@ final class OpenAiResponsesErrorMapper {
       new ProviderErrorHelper.FallbackMessages(
           MSG_AUTH,
           MSG_BILLING,
-          MSG_OVERFLOW,
+          MSG_CONTEXT_LIMIT,
+          MSG_REQUEST_BODY_LIMIT,
           MSG_INVALID_REQUEST,
           MSG_TRANSIENT,
           MSG_INVALID_RESPONSE);
@@ -75,11 +77,8 @@ final class OpenAiResponsesErrorMapper {
             || lower.contains("model_context_window_exceeded")
             || lower.contains("tokens exceeded")
             || (lower.contains("context") && lower.contains("overflow")),
-        lower.contains("request_too_large")
-            || lower.contains("invalid_request")
-            || status == 400
-            || status == 413
-            || status == 422,
+        lower.contains("request_too_large"),
+        lower.contains("invalid_request") || status == 400 || status == 422,
         lower.contains("overloaded")
             || lower.contains("rate_limit")
             || lower.contains("server_error")

@@ -25,7 +25,8 @@ final class OpenAiChatErrorMapper {
 
   static final String MSG_AUTH = "OpenAI authentication failed";
   static final String MSG_BILLING = "OpenAI billing or quota error";
-  static final String MSG_OVERFLOW = "OpenAI request context overflow";
+  static final String MSG_CONTEXT_LIMIT = "OpenAI request context limit exceeded";
+  static final String MSG_REQUEST_BODY_LIMIT = "OpenAI request body limit exceeded";
   static final String MSG_TRANSIENT = "OpenAI transient failure";
   static final String MSG_INVALID_REQUEST = "OpenAI invalid request";
   static final String MSG_INVALID_RESPONSE = "OpenAI invalid response";
@@ -34,7 +35,8 @@ final class OpenAiChatErrorMapper {
       new ProviderErrorHelper.FallbackMessages(
           MSG_AUTH,
           MSG_BILLING,
-          MSG_OVERFLOW,
+          MSG_CONTEXT_LIMIT,
+          MSG_REQUEST_BODY_LIMIT,
           MSG_INVALID_REQUEST,
           MSG_TRANSIENT,
           MSG_INVALID_RESPONSE);
@@ -79,7 +81,8 @@ final class OpenAiChatErrorMapper {
         matchesAny(typeLower, codeLower, "billing", "insufficient_quota", "quota", "credit"),
         matchesAny(typeLower, codeLower, "context_length_exceeded", "model_context_window_exceeded")
             || matchesContextOverflow(typeLower, codeLower),
-        matchesAny(typeLower, codeLower, "request_too_large") || status == 413,
+        matchesAny(typeLower, codeLower, "request_too_large"),
+        false,
         matchesAny(
             typeLower,
             codeLower,

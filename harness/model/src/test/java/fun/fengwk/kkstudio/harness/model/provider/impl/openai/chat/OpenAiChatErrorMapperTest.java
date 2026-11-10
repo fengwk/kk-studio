@@ -139,7 +139,7 @@ class OpenAiChatErrorMapperTest {
             null,
             null);
     ProviderException peOverflow = OpenAiChatErrorMapper.mapTransportException(exOverflow);
-    assertEquals(ProviderErrorKind.OVERFLOW, peOverflow.kind());
+    assertEquals(ProviderErrorKind.CONTEXT_LIMIT, peOverflow.kind());
     assertEquals("HTTP 400\n" + bodyOverflow, peOverflow.getMessage());
 
     // 413
@@ -147,8 +147,8 @@ class OpenAiChatErrorMapperTest {
         new TransportException(
             TransportErrorKind.HTTP_STATUS, "status", 413, new byte[0], null, null);
     ProviderException pe413 = OpenAiChatErrorMapper.mapTransportException(ex413);
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, pe413.kind());
-    assertEquals("HTTP 413: " + OpenAiChatErrorMapper.MSG_INVALID_REQUEST, pe413.getMessage());
+    assertEquals(ProviderErrorKind.REQUEST_BODY_LIMIT, pe413.kind());
+    assertEquals("HTTP 413: " + OpenAiChatErrorMapper.MSG_REQUEST_BODY_LIMIT, pe413.getMessage());
 
     // 429 rate limit
     TransportException ex429 =
@@ -177,7 +177,7 @@ class OpenAiChatErrorMapperTest {
             null,
             null);
     ProviderException peTooLarge = OpenAiChatErrorMapper.mapTransportException(ex500TooLarge);
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, peTooLarge.kind());
+    assertEquals(ProviderErrorKind.REQUEST_BODY_LIMIT, peTooLarge.kind());
     assertEquals("HTTP 500\n" + bodyTooLarge, peTooLarge.getMessage());
   }
 
@@ -294,7 +294,8 @@ class OpenAiChatErrorMapperTest {
             null,
             null);
     assertEquals(
-        ProviderErrorKind.OVERFLOW, OpenAiChatErrorMapper.mapTransportException(exWindow).kind());
+        ProviderErrorKind.CONTEXT_LIMIT,
+        OpenAiChatErrorMapper.mapTransportException(exWindow).kind());
 
     TransportException exOverloaded =
         new TransportException(

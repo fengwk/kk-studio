@@ -1,12 +1,18 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
-/** 用于 Runtime 重试与压缩决策的 Provider 错误分类。 */
+/** 用于 Runtime 重试与压缩决策的 Provider 错误分类（PLAN 7.4）。 */
 public enum ProviderErrorKind {
   /** 可重试的瞬态网络错误或服务过载。 */
   TRANSIENT,
 
-  /** 请求上下文超出模型最大窗口限制。 */
-  OVERFLOW,
+  /** 请求 token 总量超出模型上下文窗口；回合以 ASSISTANT_ERROR(CONTEXT_LIMIT) 关闭并触发 OVERFLOW 压缩。 */
+  CONTEXT_LIMIT,
+
+  /** HTTP 413 或本地计量的请求体超出已知限制；存在可省略旧媒体时允许一次重投影。 */
+  REQUEST_BODY_LIMIT,
+
+  /** 单个媒体超出该端点已知的尺寸、数量、边长或时长限制。 */
+  MEDIA_LIMIT,
 
   /** 凭据缺失、无效或已过期导致认证失败。 */
   AUTHENTICATION,

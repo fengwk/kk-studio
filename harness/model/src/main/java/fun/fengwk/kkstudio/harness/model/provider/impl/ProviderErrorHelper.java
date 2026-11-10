@@ -101,7 +101,7 @@ public final class ProviderErrorHelper {
       return ProviderErrorKind.BILLING;
     }
     if (status == 413) {
-      return ProviderErrorKind.INVALID_REQUEST;
+      return ProviderErrorKind.REQUEST_BODY_LIMIT;
     }
     if (status == 429 || (status >= 500 && status <= 599)) {
       return ProviderErrorKind.TRANSIENT;
@@ -120,7 +120,8 @@ public final class ProviderErrorHelper {
       int status,
       boolean authentication,
       boolean billing,
-      boolean overflow,
+      boolean contextLimit,
+      boolean requestBodyLimit,
       boolean invalidBeforeTransient,
       boolean transientError,
       boolean invalidAfterTransient,
@@ -131,8 +132,11 @@ public final class ProviderErrorHelper {
     if (billing || status == 402) {
       return ProviderErrorKind.BILLING;
     }
-    if (overflow) {
-      return ProviderErrorKind.OVERFLOW;
+    if (contextLimit) {
+      return ProviderErrorKind.CONTEXT_LIMIT;
+    }
+    if (requestBodyLimit || status == 413) {
+      return ProviderErrorKind.REQUEST_BODY_LIMIT;
     }
     if (invalidBeforeTransient) {
       return ProviderErrorKind.INVALID_REQUEST;
@@ -153,7 +157,8 @@ public final class ProviderErrorHelper {
   public record FallbackMessages(
       String authMessage,
       String billingMessage,
-      String overflowMessage,
+      String contextLimitMessage,
+      String requestBodyLimitMessage,
       String invalidRequestMessage,
       String transientMessage,
       String invalidResponseMessage) {
@@ -162,7 +167,9 @@ public final class ProviderErrorHelper {
       return switch (kind) {
         case AUTHENTICATION -> authMessage;
         case BILLING -> billingMessage;
-        case OVERFLOW -> overflowMessage;
+        case CONTEXT_LIMIT -> contextLimitMessage;
+        case REQUEST_BODY_LIMIT -> requestBodyLimitMessage;
+        case MEDIA_LIMIT -> requestBodyLimitMessage;
         case INVALID_REQUEST -> invalidRequestMessage;
         case TRANSIENT -> transientMessage;
         case INVALID_RESPONSE, CANCELLED, NO_AVAILABLE_MODEL -> invalidResponseMessage;
