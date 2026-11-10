@@ -3549,6 +3549,44 @@ describe('runtime execution exit confirmation', () => {
     }
   })
 
+  it('applies one invocation deadline to both execution and resource delivery', async () => {
+    // 执行已返回、上传仍在进行：同一个 deadline 继续约束交付，到期中止上传并以 TIMED_OUT 失败结束。
+    let uploadSignal: AbortSignal | null = null
+    const setup = buildRuntime({
+      resources: {
+        upload(_invocationId, _content, signal) {
+          uploadSignal = signal
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new ResourceUploadError('put', 'cancelled', true)))
+          })
+        },
+      },
+      capabilities: {
+        'fs.read': async (call) => ({
+          callId: call.invocationId,
+          error: false,
+          details: {},
+          contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+        }),
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-deadline', payload: invokePayload('fs.read', 50) }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+      expect(uploadSignal?.aborted).toBe(true)
+      expect(String(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload?.message)).toContain(
+        'timed out after 50ms',
+      )
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
+  })
+
   it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {
     // 同一调用的正向对照：上传成功且终态发送后，已留下的证据才变成一次 ACK。
     let uploadEntered = false
