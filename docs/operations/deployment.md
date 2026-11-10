@@ -30,8 +30,8 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
-test -f web/target/kk-studio-web-4.0.0.jar
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-4.0.0.jar
+test -f web/target/kk-studio-web-1.0.0.jar
+"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.0.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -54,7 +54,7 @@ test -f web/target/kk-studio-web-4.0.0.jar
 验证静态资源已进入产物：
 
 ```bash
-"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-4.0.0.jar \
+"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.0.jar \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -188,40 +188,6 @@ Flyway 校验失败时停止切换并查明差异。标准 `repair` 只用于已
 有数据的数据库不能重放 V1，也不能依靠运行时兼容层启动。需要空库时走独立的
 [共享数据库重建](development-and-testing.md#共享数据库重建)，它通过产品配置导出、数据库备份与重建、当前 Schema
 初始化和产品导入恢复配置，不是自动迁移。
-
-### 已有业务库的 4.0.0 一次性切换
-
-4.0.0 的 V1 与 3.0.0 的 V1 checksum 不同，但仓库仍只保留一个 V1，不提供 V2、旧格式解析器或运行时迁移兼容。
-保留已有业务数据必须停机执行一次性离线 DDL，不能无备份自动 apply/repair，也不能默认清库：
-
-1. 在旧版本仍可运行时完成“设置 → 同步”配置导出，另存 App/Daemon 镜像、运行配置与密钥文件、全库 dump 与
-   S3 业务对象，并验证备份可恢复。停止全部 Studio App、Worker、preview 写入与 Daemon 写入，等待在途操作收敛；
-   **新 bind mount 不会自动搬运旧容器内的 journal**，先保存旧 journal 目录，再逐条治理旧 `UNCONFIRMED` 执行。
-   有旧 owner 的 Stop/退出证据按原身份确认；没有旧 owner 证据的只保留未确认事实或走显式放弃，不能批量猜成成功。
-2. 确认目标库是 3.0.0 基线、只有一条成功的 V1 记录、对象位于 `public` schema，且没有其它客户端会话。不要终止
-   其它会话；先由对应客户端主动断开。执行前把连接 `search_path` 固定为 `pg_catalog,public`。
-3. 由操作者在停机窗口执行
-   [`runtime4-cutover.sql`](../../scripts/ops/runtime4-cutover.sql)：
-
-   ```bash
-   PGOPTIONS='-c search_path=pg_catalog,public' \
-     psql -X -v ON_ERROR_STOP=1 -d <target-database> \
-     -f scripts/ops/runtime4-cutover.sql
-   ```
-
-   脚本以单事务 guard 核对唯一成功 V1 的版本、脚本名与 3.0.0 checksum、旧退出约束、无活动客户端会话和未切换状态；
-   任一不符即整体失败且不改数据库。它只调整 `harness_execution_exit` 的状态 CHECK、增加本地 `OWNER_EXITED` 约束并
-   更新列注释，不读写业务行，不改 `flyway_schema_history`/checksum，不终止会话，也不执行 Flyway repair。
-4. DDL 提交后，操作者必须显式用同一 4.0.0 发行物的标准 Flyway repair 更新目标库的 V1 checksum，再执行 validate
-   或由唯一 Flyway owner 启动并完成校验。repair 前后都应确认 history 仍只有成功 baseline 1；不得手工
-   `UPDATE`/`DELETE` history 或伪造 checksum，也不得把 repair 配置成启动时自动执行。
-5. validate 通过后再启动 4.0.0，检查健康、关键业务操作、旧退出事实与 Daemon 重连；任何一步失败都停止切换并从
-   已验证的备份回退。隔离 PostgreSQL 上的一次性切换由
-   [`Runtime4CutoverSchemaUpgradeTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/Runtime4CutoverSchemaUpgradeTest.java)
-   守护 guard 拒绝、业务行保留、重复执行、会话不终止和显式 repair 后才恢复 validate。
-
-没有既有业务数据、且数据所有者明确授权重建时，才走下一节的空库重建；它不是本次切换的默认路径，也不会自动迁移
-旧会话、运行历史或 Blob 引用。
 
 ### 空库重建与恢复
 
@@ -544,8 +510,7 @@ tag 不同：
 镜像自身的 `chown` 也不代替挂载卷的初始化。该卷不与任何其它 Studio 实例共享，保存退出确认 journal
 供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。外部 Compose 还需设置
 `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s` 与 `stop_grace_period: 120s`，让 `60s + 30s`
-的 Harness deadline 在容器被强制终止前完成；首次新增 bind mount 不会搬运旧容器内的 journal，切换前按
-[已有业务库切换](#已有业务库的-400-一次性切换) 保存并治理旧记录。
+的 Harness deadline 在容器被强制终止前完成；首次新增 bind mount 不会搬运旧容器内的 journal。
 
 镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志由 Platform 的
 [`logback-spring.xml`](../../platform/runtime/src/main/resources/logback-spring.xml) 与运行环境共同配置。

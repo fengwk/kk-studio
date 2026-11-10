@@ -36,7 +36,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-4.0.0.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.0.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -90,7 +90,6 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 受管 code-server 真实视图验收（需冻结发行目录，默认跳过） | `KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> npm --prefix daemon run test -- test/ide/acceptance.test.ts`（Node 24；未设置该变量时用例整组跳过） |
 | Studio → 生产 Daemon → code-server 真实链路（需 Node 24、Docker、已构建 Daemon 与发行目录） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeProductionChainAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false -Dkk-studio.it.ide.node="$(command -v node)" -Dkk-studio.it.ide.code-server-release=<absolute-release-dir>`；追加 `-Dkk-studio.it.ide.playwright-module=<absolute-frontend/node_modules/@playwright/test>` 运行真实 Chromium，用例不拦截网络；显式无效路径使测试失败 |
 | IDE 协议、revision 与绑定生命周期 | `npm --prefix daemon run test -- test/protocol/control-codec.test.ts test/ide/lifecycle.test.ts`；后端快照/服务定向测试用 `env JAVA_HOME="$JAVA_HOME_21" mvn -pl apps/ide -am test -Dtest=IdeViewSnapshotStoreTest,EnvironmentIdeServiceImplTest` |
-| 3.0.0 业务库的 4.0.0 离线切换 | `env JAVA_HOME="$JAVA_HOME_21" mvn -pl schema -am test -Dtest=Runtime4CutoverSchemaUpgradeTest -Dsurefire.failIfNoSpecifiedTests=false`（需 Docker/PG 17；只使用隔离数据库） |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）

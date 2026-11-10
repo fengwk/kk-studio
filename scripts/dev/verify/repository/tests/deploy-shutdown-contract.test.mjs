@@ -1,4 +1,4 @@
-/** 4.0.0 自带部署模板的停机预算与退出确认卷独占契约。 */
+/** 自带部署模板的停机预算与退出确认卷独占契约。 */
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
