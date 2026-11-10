@@ -14,6 +14,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import type { ApplicationEventConnectionState } from '@/shared/app-events/connection'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
@@ -33,9 +34,10 @@ export interface IdeOverlayPanelProps {
   environments: IdeEnvironmentInfo[]
   environmentsLoading: boolean
   environmentsError: boolean
-  identityReady: boolean
   sessionStatus: IdeBrowserSessionStatus
   storageUnavailable: boolean
+  /** 浏览器事件连接快照；与 IDE 会话状态、iframe 内部连接分别呈现。 */
+  connectionState: ApplicationEventConnectionState
   onSelectEnvironment: (environmentId: string) => void
   onCollapse: () => void
   onCloseEnvironment: (environmentId: string, discard: boolean) => Promise<IdeCloseResult>
@@ -66,6 +68,43 @@ const COMMAND_MESSAGES: Record<string, TranslationKey> = {
   'close-failed': 'ai.ide.error',
 }
 
+/** backoff 原因到文案的映射：结构化 reason 驱动，不解析消息文本。 */
+function connectionBackoffMessageKey(
+  cause: 'transport-lost' | 'handshake-timeout' | 'liveness-timeout' | 'server-restart',
+): TranslationKey {
+  switch (cause) {
+    case 'handshake-timeout': {
+      return 'ai.ide.backoffHandshake'
+    }
+    case 'liveness-timeout': {
+      return 'ai.ide.backoffLiveness'
+    }
+    case 'server-restart': {
+      return 'ai.ide.backoffServerRestart'
+    }
+    default: {
+      return 'ai.ide.backoffReconnecting'
+    }
+  }
+}
+
+/** stopped 原因到文案的映射：protocol/policy 终止明确提示需要人工介入。 */
+function connectionStopMessageKey(
+  cause: 'manual' | 'protocol' | 'policy',
+): TranslationKey {
+  switch (cause) {
+    case 'protocol': {
+      return 'ai.ide.stoppedProtocol'
+    }
+    case 'policy': {
+      return 'ai.ide.stoppedPolicy'
+    }
+    default: {
+      return 'ai.ide.stoppedManual'
+    }
+  }
+}
+
 /**
  * tab 全局 IDE 面板：只渲染当前选中 view 的可见性，其他已打开 iframe 保持挂载。
  * 面板自身不发起 claim/关闭之外的隐式动作；所有环境/目录/终端操作都由用户入口触发。
@@ -78,9 +117,9 @@ export function IdeOverlayPanel({
   environments,
   environmentsLoading,
   environmentsError,
-  identityReady,
   sessionStatus,
   storageUnavailable,
+  connectionState,
   onSelectEnvironment,
   onCollapse,
   onCloseEnvironment,
@@ -402,9 +441,18 @@ export function IdeOverlayPanel({
               : 'ai.ide.sessionUnavailable')}
         </div>
       ) : null}
-      {!identityReady ? (
+      {/* 浏览器事件连接状态与 IDE 会话状态是两个事实，分别呈现；terminal 停止不显示持续重连。 */}
+      {connectionState.reason?.kind === 'connecting' ? (
+        <div className="ide-panel-warning-banner" role="status" data-testid="ide-connecting">
+          {t('ai.ide.connecting')}
+        </div>
+      ) : connectionState.reason?.kind === 'backoff' ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-reconnecting">
-          {t('ai.ide.reconnecting')}
+          {t(connectionBackoffMessageKey(connectionState.reason.cause))}
+        </div>
+      ) : connectionState.reason?.kind === 'stopped' ? (
+        <div className="ide-panel-error-banner" role="alert" data-testid="ide-connection-stopped">
+          {t(connectionStopMessageKey(connectionState.reason.cause))}
         </div>
       ) : null}
       {selectedView?.status === 'waiting-ready' ? (
@@ -455,7 +503,7 @@ export function IdeOverlayPanel({
       && selectedView.entryUrl != null
       && viewBusy ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-rebinding">
-          {t('ai.ide.reconnecting')}
+          {t('ai.ide.reconciling')}
         </div>
       ) : null}
       {selectedView?.status === 'error' ? (

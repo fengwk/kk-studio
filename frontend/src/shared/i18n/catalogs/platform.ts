@@ -57,6 +57,22 @@ export const platformCatalog = {
     'en-US': 'AI resources',
     'zh-CN': 'AI 资源',
   },
+  'platform.connection.live': {
+    'en-US': 'Live updates connected',
+    'zh-CN': '实时事件已连接',
+  },
+  'platform.connection.connecting': {
+    'en-US': 'Connecting to live updates…',
+    'zh-CN': '正在连接实时事件…',
+  },
+  'platform.connection.backoff': {
+    'en-US': 'Live updates lost; reconnecting automatically.',
+    'zh-CN': '实时事件已断开，正在自动重连。',
+  },
+  'platform.connection.stopped': {
+    'en-US': 'Live updates stopped; reload the page to reconnect.',
+    'zh-CN': '实时事件已停止，请刷新页面后重连。',
+  },
   'platform.pageUnavailable': {
     'en-US': 'Page unavailable',
     'zh-CN': '页面不可用',

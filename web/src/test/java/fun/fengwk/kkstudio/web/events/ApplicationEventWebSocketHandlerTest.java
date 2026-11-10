@@ -204,6 +204,9 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals("connected", connected.path("type").asText());
     assertEquals(EVENT_NODE.toString(), connected.path("eventNodeId").asText());
     UUID connectionId = UUID.fromString(connected.path("connectionId").asText());
+    // connected 帧声明服务端实际 heartbeat 间隔，客户端据此推导失联预算而非写死默认值。
+    assertEquals(
+        TEST_HEARTBEAT_INTERVAL_MILLIS, connected.path("heartbeatIntervalMillis").asLong());
     assertTrue(recorder.sent.isEmpty(), "connected must be the first logical frame");
     assertFalse(
         browserUseRegistry.usage(new ConnectionIdentity(EVENT_NODE, connectionId)).isPresent());

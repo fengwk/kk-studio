@@ -40,9 +40,9 @@ import java.util.function.LongSupplier;
  * AsyncTextSender} 异步串行发送，不使用同步 Spring sendMessage。会话状态（订阅表、发送队列、IDE 使用登记）按物理连接维护：重复 subscribe
  * 幂等、断线释放全部订阅与本次连接自己的 IDE 证明。
  *
- * <p>连接建立后的第一帧是 {@code connected{eventNodeId,connectionId}}。服务端每 15 秒发送原生 ping，45 秒没有收到有效 pong 即停止
- * 为该连接提供使用证明并关闭连接；浏览器的后台 JS 定时器不参与保活。资源不存在只回资源级 error（{@code RESOURCE_NOT_FOUND}）并保持连接；
- * 非法协议帧与发送过载/失败才关闭连接。
+ * <p>连接建立后的第一帧是 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}}，其中 heartbeat
+ * 间隔是服务端实际配置值；服务端每 15 秒发送原生 ping，45 秒没有收到有效 pong 即停止 为该连接提供使用证明并关闭连接；浏览器的后台 JS 定时器不参与保活。资源不存在只回资源级
+ * error（{@code RESOURCE_NOT_FOUND}）并保持连接； 非法协议帧与发送过载/失败才关闭连接。
  */
 @Component
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
@@ -59,6 +59,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   private final int senderCapacity;
   private final long maxBytes;
   private final long sendTimeoutMillis;
+  private final long heartbeatIntervalMillis;
   private final ScheduledExecutorService heartbeatScheduler;
   private final LongSupplier nanoClock;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
@@ -112,6 +113,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     this.senderCapacity = settings.queueCapacity();
     this.maxBytes = settings.maxBytes();
     this.sendTimeoutMillis = settings.sendTimeoutMillis();
+    this.heartbeatIntervalMillis = settings.heartbeatIntervalMillis();
     this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
     this.heartbeatTask =
         heartbeatScheduler.scheduleAtFixedRate(
@@ -135,7 +137,14 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     long generation = browserUseRegistry.register(identity);
     ConnectionState state =
         new ConnectionState(
-            hub, codec, browserUseRegistry, identity, generation, sender, nanoClock.getAsLong());
+            hub,
+            codec,
+            browserUseRegistry,
+            identity,
+            generation,
+            heartbeatIntervalMillis,
+            sender,
+            nanoClock.getAsLong());
     ConnectionState previous = connections.putIfAbsent(session.getId(), state);
     if (previous != null) {
       state.close();
@@ -235,6 +244,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final IdeBrowserUseRegistry browserUseRegistry;
     private final ConnectionIdentity identity;
     private final long generation;
+    private final long heartbeatIntervalMillis;
     private final AsyncTextSender sender;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final Object closeLock = new Object();
@@ -247,6 +257,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         IdeBrowserUseRegistry browserUseRegistry,
         ConnectionIdentity identity,
         long generation,
+        long heartbeatIntervalMillis,
         AsyncTextSender sender,
         long nowNanos) {
       this.hub = hub;
@@ -254,6 +265,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       this.browserUseRegistry = browserUseRegistry;
       this.identity = identity;
       this.generation = generation;
+      this.heartbeatIntervalMillis = heartbeatIntervalMillis;
       this.sender = sender;
       this.lastPongNanos = nowNanos;
     }
@@ -263,7 +275,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         if (closed) {
           return;
         }
-        if (!sender.enqueue(codec.connected(identity.eventNodeId(), identity.connectionId()))) {
+        if (!sender.enqueue(
+            codec.connected(
+                identity.eventNodeId(), identity.connectionId(), heartbeatIntervalMillis))) {
           fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
         }
       }

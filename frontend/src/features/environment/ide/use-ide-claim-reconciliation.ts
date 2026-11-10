@@ -325,7 +325,10 @@ export function useIdeClaimReconciliation({
     attempt: number,
     error: unknown,
     kind: 'open' | 'read',
-    requestIdentity: ApplicationEventConnectionIdentity | null,
+    requestIdentity: Pick<
+      ApplicationEventConnectionIdentity,
+      'eventNodeId' | 'connectionId'
+    > | null,
     options: ReconcileOptions,
   ): Promise<void> {
     if (!mountedRef.current) {

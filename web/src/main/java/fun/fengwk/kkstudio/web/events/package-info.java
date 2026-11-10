@@ -4,8 +4,11 @@
  * <p>连接建立后的第一帧（严格 JSON）：
  *
  * <pre>{@code
- * {"type":"connected","eventNodeId":"<canonical UUID>","connectionId":"<canonical UUID>"}
+ * {"type":"connected","eventNodeId":"<canonical UUID>","connectionId":"<canonical UUID>","heartbeatIntervalMillis":"<positive decimal>"}
  * }</pre>
+ *
+ * <p>{@code connected} 的 {@code heartbeatIntervalMillis} 是服务端实际使用的文本 heartbeat
+ * 间隔（字符串形式的正十进制，便于客户端按同一 canonical 规则校验）；客户端以它推导失联预算（连续若干个间隔没有合法帧即重连），不写死默认值。
  *
  * <p>客户端帧（严格 JSON，字段集精确）：
  *
