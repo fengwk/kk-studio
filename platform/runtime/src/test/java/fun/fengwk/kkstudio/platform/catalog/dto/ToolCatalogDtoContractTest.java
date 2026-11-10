@@ -35,15 +35,4 @@ class ToolCatalogDtoContractTest {
     assertEquals(3, EnvironmentSupport.values().length);
     assertEquals(4, ToolProviderKind.values().length);
   }
-
-  @Test
-  void providerIsAlwaysSerializedEvenBeforeItIsFilled() throws Exception {
-    // 意图：全局 NON_NULL 会省略 null 字段；provider 是目录条目的必要事实，序列化必须始终输出。
-    ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
-    dto.setName("read");
-    dto.setDescription("Read a file.");
-
-    String json = MAPPER.writeValueAsString(dto);
-    assertTrue(json.contains("\"provider\":null"), json);
-  }
 }

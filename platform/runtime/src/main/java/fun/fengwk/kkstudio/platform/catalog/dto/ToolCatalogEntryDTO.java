@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.dto;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
@@ -19,7 +18,6 @@ public class ToolCatalogEntryDTO {
   /** Tool 与 Environment 的关系。 */
   private @Nullable EnvironmentSupport environmentSupport;
 
-  /** 工具提供者；目录条目必然来自某个 provider，因此序列化必须始终输出。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable ToolProviderDTO provider;
+  /** 工具提供者；目录条目必然来自某个 provider。 */
+  private ToolProviderDTO provider;
 }
