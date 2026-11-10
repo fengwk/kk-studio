@@ -679,7 +679,7 @@ class PostgresqlCompactionChildTest {
     UUID childModelId = openChildModel(child.childThreadId());
     gateway.queue(
         new ModelGateway.Failed(
-            new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded")));
+            new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "context window exceeded")));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     assertEquals(ModelInvocationStatus.FAILED, findModel(childModelId).status());
     assertFalse(hasWork(BuiltinWorkType.MODEL, childModelId));

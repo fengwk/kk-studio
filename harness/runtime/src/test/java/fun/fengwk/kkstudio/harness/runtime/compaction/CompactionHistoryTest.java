@@ -252,7 +252,8 @@ class CompactionHistoryTest {
                 id(30),
                 ROOT_ID,
                 new AssistantErrorPayload(
-                    new AssistantError(ProviderErrorKind.OVERFLOW.name(), "overflow"), null))));
+                    new AssistantError(ProviderErrorKind.CONTEXT_LIMIT.name(), "overflow"),
+                    null))));
     assertFalse(
         CompactionHistory.isContextWall(
             start,

@@ -28,8 +28,9 @@ final class ModelGroupFailureDecider {
       boolean retryAllowed) {
     Objects.requireNonNull(error, "error");
     Objects.requireNonNull(group, "group");
-    // 取消与上下文溢出沿用专用终止/压缩语义，不能把模型组当作普通上游失败降级。
-    if (error.kind() == ProviderErrorKind.CANCELLED || error.kind() == ProviderErrorKind.OVERFLOW) {
+    // 取消与上下文超限沿用专用终止/压缩语义，不能把模型组当作普通上游失败降级。
+    if (error.kind() == ProviderErrorKind.CANCELLED
+        || error.kind() == ProviderErrorKind.CONTEXT_LIMIT) {
       return Action.DEDICATED_TERMINAL;
     }
     if (error.httpStatus() != null && group.fallbackStatusCodes().contains(error.httpStatus())) {

@@ -260,8 +260,8 @@ final class ModelTerminalCommitter {
   }
 
   /**
-   * 模型失败是否重试：先做统一候选判定（OVERFLOW/CANCELLED 排除，非 HTTP AUTHENTICATION/BILLING 排除），带 HTTP 状态时由现读的 {@link
-   * fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
+   * 模型失败是否重试：先做统一候选判定（CONTEXT_LIMIT/CANCELLED 排除，非 HTTP AUTHENTICATION/BILLING 排除），带 HTTP 状态时由现读的
+   * {@link fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
    * TRANSIENT/INVALID_RESPONSE 走 共享 {@link
    * fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy} 预算。
    */

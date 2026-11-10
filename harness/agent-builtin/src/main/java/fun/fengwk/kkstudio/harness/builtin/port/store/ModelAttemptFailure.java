@@ -13,7 +13,7 @@ import java.util.Objects;
  *
  * <p>failed attempts 记录真实失败 attempt；普通单模型重试仍只接受 {@link
  * ModelInvocationError#retryCandidate()}。模型组切换到下一成员时，确定性 AUTHENTICATION / BILLING 也可作为审计进入， 但仍由
- * Invocation transition 限定只能随组推进。OVERFLOW 与 CANCELLED 永不进入。它不是对话历史，也不参与任何 Provider request。
+ * Invocation transition 限定只能随组推进。CONTEXT_LIMIT 与 CANCELLED 永不进入。它不是对话历史，也不参与任何 Provider request。
  */
 public record ModelAttemptFailure(
     int attempt,
@@ -37,9 +37,10 @@ public record ModelAttemptFailure(
     thinking = Objects.requireNonNull(thinking, "thinking");
     model = Objects.requireNonNull(model, "model");
     error = Objects.requireNonNull(error, "error");
-    if (error.kind() == ProviderErrorKind.CANCELLED || error.kind() == ProviderErrorKind.OVERFLOW) {
+    if (error.kind() == ProviderErrorKind.CANCELLED
+        || error.kind() == ProviderErrorKind.CONTEXT_LIMIT) {
       throw new IllegalArgumentException(
-          "cancelled or overflow attempts are not model fallback audit failures");
+          "cancelled or context-limit attempts are not model fallback audit failures");
     }
     if (requestedAt != null) {
       requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "requestedAt");

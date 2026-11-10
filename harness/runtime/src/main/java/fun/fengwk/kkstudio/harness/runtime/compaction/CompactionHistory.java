@@ -180,7 +180,7 @@ public final class CompactionHistory {
       return false;
     }
     if (resultEntry.payload() instanceof AssistantErrorPayload error) {
-      return ProviderErrorKind.OVERFLOW.name().equals(error.error().code());
+      return ProviderErrorKind.CONTEXT_LIMIT.name().equals(error.error().code());
     }
     if (resultEntry.payload() instanceof MessagePayload message
         && message.message().role() == AgentMessageRole.ASSISTANT
