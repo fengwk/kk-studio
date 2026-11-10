@@ -46,6 +46,10 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.tool.permission['bash'][0].action").value("ask"))
         .andExpect(jsonPath("$.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
         .andExpect(jsonPath("$.aiRuntime.retryMaxRetries").value(3))
+        // 压缩模型默认未配置（可空引用在 wire 上省略）；回复预留默认 16,384。
+        .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
+        .andExpect(jsonPath("$.aiRuntime.compactionKeepRecentTokens").value(20000))
+        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
         .andExpect(jsonPath("$.environment.maxResourceBytes").value("16777216"))
         .andExpect(jsonPath("$.environment.maxResourceBytes").isString())
@@ -99,11 +103,21 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.sections[0].groups[1].fields[0].min").value(400))
         .andExpect(jsonPath("$.sections[0].groups[1].fields[0].max").value(599))
         .andExpect(
-            jsonPath("$.sections[0].groups[2].fields[0].path")
-                .value("aiRuntime.compactionKeepRecentTokens"))
+            jsonPath("$.sections[0].groups[2].fields[0].path").value("aiRuntime.compactionModel"))
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
-        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].type").value("INTEGER"))
-        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].min").value(1))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].type").value("MODEL_SELECTION"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].nullable").value(true))
+        .andExpect(
+            jsonPath("$.sections[0].groups[2].fields[1].path")
+                .value("aiRuntime.compactionKeepRecentTokens"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[1].type").value("INTEGER"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[1].min").value(1))
+        .andExpect(
+            jsonPath("$.sections[0].groups[2].fields[2].path")
+                .value("aiRuntime.compactionReserveTokens"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[2].type").value("INTEGER"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[2].min").value(1))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields.length()").value(3))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(jsonPath("$.sections[0].groups[0].fields[1].options[0].value").value("FIXED"))
@@ -360,6 +374,79 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"));
+  }
+
+  /** 压缩模型引用与预算的完整 wire 往返：设置模型（含组）、清空回 null、非法引用 400。 */
+  @Test
+  public void compactionModelAndReserveTokensRoundTrip() throws Exception {
+    String withModel =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "0");
+              update
+                  .withObject("aiRuntime")
+                  .withObject("compactionModel")
+                  .put("modelName", "fallback-group");
+              update.withObject("aiRuntime").put("compactionReserveTokens", 8192);
+            });
+    mockMvc
+        .perform(
+            put("/api/platform/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(withModel))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.version").value("1"))
+        .andExpect(jsonPath("$.aiRuntime.compactionModel.modelName").value("fallback-group"))
+        .andExpect(jsonPath("$.aiRuntime.compactionModel.variant").doesNotExist())
+        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(8192));
+    mockMvc
+        .perform(get("/api/platform/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.aiRuntime.compactionModel.modelName").value("fallback-group"));
+
+    String cleared =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "1");
+              update.withObject("aiRuntime").putNull("compactionModel");
+              update.withObject("aiRuntime").put("compactionReserveTokens", 16384);
+            });
+    mockMvc
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(cleared))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.version").value("2"))
+        .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
+        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384));
+
+    Consumer<ObjectNode> stringModel =
+        update -> update.withObject("aiRuntime").put("compactionModel", "not-an-object");
+    Consumer<ObjectNode> variantWithoutModel =
+        update -> update.withObject("aiRuntime").withObject("compactionModel").put("variant", "v");
+    Consumer<ObjectNode> blankModelName =
+        update ->
+            update.withObject("aiRuntime").withObject("compactionModel").put("modelName", " ");
+    Consumer<ObjectNode> zeroReserve =
+        update -> update.withObject("aiRuntime").put("compactionReserveTokens", 0);
+    for (Consumer<ObjectNode> invalid :
+        List.of(stringModel, variantWithoutModel, blankModelName, zeroReserve)) {
+      String body =
+          bodyFromGet(
+              update -> {
+                update.put("expectedVersion", "2");
+                invalid.accept(update);
+              });
+      mockMvc
+          .perform(
+              put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isBadRequest());
+    }
+    mockMvc
+        .perform(get("/api/platform/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.version").value("2"))
+        .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
+        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384));
   }
 
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {

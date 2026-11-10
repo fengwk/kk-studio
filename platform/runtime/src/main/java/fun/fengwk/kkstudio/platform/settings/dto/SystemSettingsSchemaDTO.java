@@ -89,6 +89,7 @@ public class SystemSettingsSchemaDTO {
     LONG,
     TEXT,
     ENUM,
+    MODEL_SELECTION,
     PERMISSION
   }
 }

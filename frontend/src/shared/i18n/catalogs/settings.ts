@@ -656,8 +656,8 @@ export const settingsCatalog = {
 
   // --- AI Runtime ---
   'settings.section.aiRuntime.description': {
-    'en-US': 'Shared invocation retry, automatic compaction and subagent budgets.',
-    'zh-CN': '共享调用重试、自动压缩与子代理预算。',
+    'en-US': 'Shared invocation retry, context compaction and subagent budgets.',
+    'zh-CN': '共享调用重试、上下文压缩与子代理预算。',
   },
   'settings.section.aiRuntime.retry.title': {
     'en-US': 'Invocation retry',
@@ -668,12 +668,13 @@ export const settingsCatalog = {
     'zh-CN': '模型/工具调用的共享重试策略。',
   },
   'settings.section.aiRuntime.compaction.title': {
-    'en-US': 'Automatic compaction',
-    'zh-CN': '自动压缩',
+    'en-US': 'Context compaction',
+    'zh-CN': '上下文压缩',
   },
   'settings.section.aiRuntime.compaction.description': {
-    'en-US': 'Token budget for automatic conversation compaction.',
-    'zh-CN': '对话自动压缩的 token 预算。',
+    'en-US':
+      "When a conversation nears the model's context limit, earlier content is merged into a summary and recent messages are kept verbatim.",
+    'zh-CN': '对话接近模型上下文上限时自动压缩：较早的内容合并为摘要，最近的对话保留原文。',
   },
   'settings.section.aiRuntime.subagent.title': {
     'en-US': 'Subagent budget',
@@ -715,13 +716,40 @@ export const settingsCatalog = {
     'en-US': 'Upper limit in milliseconds for exponential backoff delay. Calculated delays exceeding this value will be clamped.',
     'zh-CN': '指数退避策略下的最大重试等待毫秒数。计算出的重试延迟超过此值时会被截断。',
   },
+  'settings.field.aiRuntime.compactionModel': {
+    'en-US': 'Compaction model',
+    'zh-CN': '压缩模型',
+  },
+  'settings.field.aiRuntime.compactionModel.hint': {
+    'en-US':
+      "Model used to write the summary. Leave empty to use the conversation's current model; the current model is also used if the selected model is deleted or disabled.",
+    'zh-CN': '用于生成摘要的模型。留空时使用对话当前的模型；所选模型被删除或停用时同样改用当前模型。',
+  },
   'settings.field.aiRuntime.compactionKeepRecentTokens': {
     'en-US': 'Recent tokens to keep',
     'zh-CN': '保留最近 token',
   },
   'settings.field.aiRuntime.compactionKeepRecentTokens.hint': {
-    'en-US': 'Token budget for recent context to preserve during automatic conversation compaction. Messages within this budget remain uncompressed.',
-    'zh-CN': '对话自动压缩时保留的最近上下文 Token 预算。低于此预算的最新消息将被完整保留而不被压缩。',
+    'en-US':
+      'Approximate amount of recent conversation, in tokens, kept verbatim when compacting; earlier content is merged into the summary. Models with a small context window use half the window instead.',
+    'zh-CN': '压缩时保留原文的最近对话量，按 token 估算；更早的内容合并为摘要。上下文窗口较小的模型按窗口的一半计算。',
+  },
+  'settings.field.aiRuntime.compactionReserveTokens': {
+    'en-US': 'Reply reserve tokens',
+    'zh-CN': '回复预留 token',
+  },
+  'settings.field.aiRuntime.compactionReserveTokens.hint': {
+    'en-US':
+      "Space reserved for the model's reply: compaction starts when the conversation exceeds the context window minus this value. The reserve never exceeds the model's maximum output; models with a separate input limit use that limit instead.",
+    'zh-CN': '为模型回复预留的空间：对话超过“上下文窗口减去此值”时自动压缩。实际预留不超过模型的最大输出；单独限制输入长度的模型按输入上限判断。',
+  },
+  'settings.field.modelSelection.unset': {
+    'en-US': 'Not set',
+    'zh-CN': '未设置',
+  },
+  'settings.field.modelSelection.variant': {
+    'en-US': 'Variant',
+    'zh-CN': '变体',
   },
   'settings.field.aiRuntime.subagentMaxDepth': {
     'en-US': 'Max depth',

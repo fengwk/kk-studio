@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -15,8 +16,10 @@ import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.type.LogicalType;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
@@ -220,13 +223,41 @@ public class SystemSettingsCodec {
         strategy,
         requiredMillis(dto.getRetryBaseDelayMillis(), "aiRuntime.retryBaseDelayMillis"),
         requiredMillis(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
+        toModelSelection(dto.getCompactionModel(), "aiRuntime.compactionModel"),
         requiredInt(dto.getCompactionKeepRecentTokens(), "aiRuntime.compactionKeepRecentTokens"),
+        requiredInt(dto.getCompactionReserveTokens(), "aiRuntime.compactionReserveTokens"),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
         requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"),
         requiredStatusCodes(
             dto.getModelHttpRetryStatusCodes(), "aiRuntime.modelHttpRetryStatusCodes"));
+  }
+
+  /** 可空压缩模型引用的 wire→领域转换：缺失 modelName 或非法 canonical 形态给出 field 级错误。 */
+  private static @Nullable ModelSelection toModelSelection(
+      @Nullable HarnessModelSelectionDTO dto, String field) {
+    if (dto == null) {
+      return null;
+    }
+    String modelName = requiredText(dto.getModelName(), field + ".modelName");
+    try {
+      return new ModelSelection(modelName, dto.getVariant());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " is invalid", error);
+    }
+  }
+
+  /** 可空压缩模型引用的领域→wire 转换：组引用不携带 variant。 */
+  private static @Nullable HarnessModelSelectionDTO fromModelSelection(
+      @Nullable ModelSelection selection) {
+    if (selection == null) {
+      return null;
+    }
+    HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
+    dto.setModelName(selection.modelName());
+    dto.setVariant(selection.variant());
+    return dto;
   }
 
   private static SystemSettings.Environment toEnvironment(SystemSettingsEnvironmentDTO dto) {
@@ -372,7 +403,9 @@ public class SystemSettingsCodec {
     dto.setRetryBackoffStrategy(aiRuntime.retryBackoffStrategy());
     dto.setRetryBaseDelayMillis(aiRuntime.retryBaseDelayMillis());
     dto.setRetryMaxDelayMillis(aiRuntime.retryMaxDelayMillis());
+    dto.setCompactionModel(fromModelSelection(aiRuntime.compactionModel()));
     dto.setCompactionKeepRecentTokens(aiRuntime.compactionKeepRecentTokens());
+    dto.setCompactionReserveTokens(aiRuntime.compactionReserveTokens());
     dto.setSubagentMaxDepth(aiRuntime.subagentMaxDepth());
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());

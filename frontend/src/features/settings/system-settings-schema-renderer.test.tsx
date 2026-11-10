@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -107,7 +107,9 @@ describe('system settings schema renderer', () => {
       'aiRuntime.retryBaseDelayMillis',
       'aiRuntime.retryMaxDelayMillis',
       'aiRuntime.modelHttpRetryStatusCodes',
+      'aiRuntime.compactionModel',
       'aiRuntime.compactionKeepRecentTokens',
+      'aiRuntime.compactionReserveTokens',
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
@@ -406,5 +408,69 @@ describe('system settings schema renderer', () => {
     // Assemble settings update roundtrip
     const update = assembleSettingsUpdate(updatedDraft2, '0')
     expect(update.aiRuntime.modelHttpRetryStatusCodes).toEqual([408, 429, 500, 503, 504, 520])
+  })
+
+  /** 渲染 aiRuntime 分区的有状态 harness，返回每次变更后的草稿。 */
+  function renderAiRuntime(draft: SystemSettingsSectionsDraft) {
+    const section = renderSection(makeSettingsSchema(), 'aiRuntime')
+    const savedDrafts: SystemSettingsSectionsDraft[] = []
+    function StatefulHarness() {
+      const [current, setCurrent] = useState(draft)
+      return (
+        <SystemSettingsSchemaRenderer
+          schema={{ sections: [section] }}
+          draft={current}
+          onChange={(next) => {
+            savedDrafts.push(next)
+            setCurrent(next)
+          }}
+        />
+      )
+    }
+    renderRenderer(<StatefulHarness />)
+    return savedDrafts
+  }
+
+  it('selects a compaction model and variant, then clears it back to null', async () => {
+    // 意图：MODEL_SELECTION 的选项来自模型目录；改选模型重置变体；选“未设置”后提交为 null。
+    const savedDrafts = renderAiRuntime(settingsSectionsToDraft(makeSettingsDto()))
+    const user = userEvent.setup()
+    const modelSelect = screen.getByLabelText('压缩模型')
+    expect(modelSelect).toHaveAttribute('data-value', '')
+    expect(screen.queryByLabelText('变体')).toBeNull()
+
+    await user.click(modelSelect)
+    await user.click(await screen.findByRole('option', { name: 'MiniMax' }))
+    await user.click(screen.getByLabelText('变体'))
+    await user.click(screen.getByRole('option', { name: 'fast' }))
+    expect(savedDrafts.at(-1)!.aiRuntime.compactionModel).toEqual({ modelName: 'MiniMax', variant: 'fast' })
+    expect(assembleSettingsUpdate(savedDrafts.at(-1)!, '0').aiRuntime.compactionModel).toEqual({
+      modelName: 'MiniMax',
+      variant: 'fast',
+    })
+
+    await user.click(screen.getByLabelText('压缩模型'))
+    await user.click(screen.getByRole('option', { name: '未设置' }))
+    expect(savedDrafts.at(-1)!.aiRuntime.compactionModel).toEqual({ modelName: '', variant: '' })
+    expect(assembleSettingsUpdate(savedDrafts.at(-1)!, '0').aiRuntime.compactionModel).toBeNull()
+  })
+
+  it('shows a compaction model missing from the catalog as unavailable and lets it be cleared', async () => {
+    // 意图：引用的模型已删除时保留原值并标为不可用，用户仍可改回“未设置”。
+    const dto = makeSettingsDto()
+    const savedDrafts = renderAiRuntime(
+      settingsSectionsToDraft({
+        ...dto,
+        aiRuntime: { ...dto.aiRuntime, compactionModel: { modelName: 'Removed', variant: 'v1' } },
+      }),
+    )
+    const user = userEvent.setup()
+    const modelSelect = screen.getByLabelText('压缩模型')
+    expect(modelSelect).toHaveAttribute('data-value', 'Removed')
+    await waitFor(() => expect(agentService.listModels).toHaveBeenCalled())
+    await user.click(modelSelect)
+    expect(await screen.findByRole('option', { name: 'Removed · 不可用' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: '未设置' }))
+    expect(savedDrafts.at(-1)!.aiRuntime.compactionModel).toEqual({ modelName: '', variant: '' })
   })
 })

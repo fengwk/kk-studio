@@ -9,7 +9,12 @@ import path from 'node:path'
 // New dependencies require review.
 const featureDependencies = {
   projects: ['thread/runtime/AgentPane', 'environment/environment-service'],
-  settings: ['thread/runtime/thread-notifications', 'extensions/PluginsTab', 'catalog/agent-capability-candidates'],
+  settings: [
+    'thread/runtime/thread-notifications',
+    'extensions/PluginsTab',
+    'catalog/agent-capability-candidates',
+    'catalog/ai-draft-variant-options',
+  ],
   chat: ['thread/*', 'catalog', 'environment/ide/ide-panel-context', 'environment/environment-service'],
   thread: ['catalog', 'environment/ide/ide-panel-context'],
   catalog: ['environment/environment-service'],

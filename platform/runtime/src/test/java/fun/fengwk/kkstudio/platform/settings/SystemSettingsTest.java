@@ -46,7 +46,10 @@ class SystemSettingsTest {
         InvocationRetryBackoffStrategy.EXPONENTIAL, defaults.aiRuntime().retryBackoffStrategy());
     assertEquals(2_000L, defaults.aiRuntime().retryBaseDelayMillis());
     assertEquals(60_000L, defaults.aiRuntime().retryMaxDelayMillis());
+    // 压缩模型默认未配置（运行时用对话当前模型）；回复预留默认 16,384。
+    assertEquals(null, defaults.aiRuntime().compactionModel());
     assertEquals(20_000, defaults.aiRuntime().compactionKeepRecentTokens());
+    assertEquals(16_384, defaults.aiRuntime().compactionReserveTokens());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
@@ -137,7 +140,31 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 60_000L,
                 2_000L,
+                base.compactionModel(),
                 base.compactionKeepRecentTokens(),
+                base.compactionReserveTokens(),
+                base.subagentMaxDepth(),
+                base.subagentMaxConcurrency(),
+                base.subagentMaxTotalConcurrency(),
+                base.subagentMaxTurns(),
+                base.modelHttpRetryStatusCodes()));
+  }
+
+  /** 回复预留 token 与保留最近 token 一样必须为正整数。 */
+  @Test
+  void rejectsNonPositiveCompactionReserveTokens() {
+    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.AiRuntime(
+                base.retryMaxRetries(),
+                base.retryBackoffStrategy(),
+                base.retryBaseDelayMillis(),
+                base.retryMaxDelayMillis(),
+                base.compactionModel(),
+                base.compactionKeepRecentTokens(),
+                0,
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -156,7 +183,9 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
+                base.compactionModel(),
                 base.compactionKeepRecentTokens(),
+                base.compactionReserveTokens(),
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -170,7 +199,9 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
+                base.compactionModel(),
                 base.compactionKeepRecentTokens(),
+                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
@@ -184,7 +215,9 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
+                base.compactionModel(),
                 base.compactionKeepRecentTokens(),
+                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -210,7 +243,9 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
+                base.compactionModel(),
                 base.compactionKeepRecentTokens(),
+                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -227,7 +262,9 @@ class SystemSettingsTest {
                   base.retryBackoffStrategy(),
                   base.retryBaseDelayMillis(),
                   base.retryMaxDelayMillis(),
+                  base.compactionModel(),
                   base.compactionKeepRecentTokens(),
+                  base.compactionReserveTokens(),
                   base.subagentMaxDepth(),
                   base.subagentMaxConcurrency(),
                   base.subagentMaxTotalConcurrency(),

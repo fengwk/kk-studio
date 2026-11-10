@@ -17,6 +17,7 @@ const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'LONG',
   'TEXT',
   'ENUM',
+  'MODEL_SELECTION',
   'PERMISSION',
   'INTEGER_LIST',
 ])
@@ -168,6 +169,13 @@ function matchesFieldType(type: SystemSettingsSchemaFieldType, value: unknown): 
       return typeof value === 'string'
     case 'ENUM':
       return typeof value === 'string'
+    case 'MODEL_SELECTION':
+      return (
+        value !== null
+        && typeof value === 'object'
+        && typeof (value as { modelName?: unknown }).modelName === 'string'
+        && typeof (value as { variant?: unknown }).variant === 'string'
+      )
     case 'PERMISSION':
       return Array.isArray(value)
     case 'INTEGER_LIST':
