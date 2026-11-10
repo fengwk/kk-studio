@@ -531,9 +531,9 @@ class ProviderResourceMaterializerTest {
     verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
   }
 
-  /** 意图：未指定档位的媒体按当前契约以默认 720P 送达，而不是原图。 */
+  /** 意图：未指定档位的媒体按系统设置的默认档位送达（这里设为 1080P），而不是原图或写死的 720P。 */
   @Test
-  void unspecifiedImageTierUsesDefault720() {
+  void unspecifiedImageTierUsesTheConfiguredDefault() {
     byte[] png = TestImages.png(4000, 2000);
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
@@ -543,8 +543,10 @@ class ProviderResourceMaterializerTest {
     ProviderResourceBlock withoutTier =
         ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", null);
 
-    assertEquals(
-        1280, materializedImageWidth(materializer(blobManager, contentService), withoutTier));
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(blobManager, contentService, () -> ImageInputTier.P1080);
+
+    assertEquals(1920, materializedImageWidth(materializer, withoutTier));
   }
 
   /** 意图：档位框内的图片逐字节直通（不重编码、不加任何前缀），字节数与原文件一致。 */
@@ -1223,14 +1225,21 @@ class ProviderResourceMaterializerTest {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     assertThrows(
-        NullPointerException.class, () -> new ProviderResourceMaterializer(null, contentService));
+        NullPointerException.class,
+        () -> new ProviderResourceMaterializer(null, contentService, () -> ImageInputTier.P720));
     assertThrows(
-        NullPointerException.class, () -> new ProviderResourceMaterializer(blobManager, null));
+        NullPointerException.class,
+        () -> new ProviderResourceMaterializer(blobManager, null, () -> ImageInputTier.P720));
     assertThrows(
         NullPointerException.class,
         () ->
             new ProviderResourceMaterializer(
-                    blobManager, contentService, defaultReaderLimits(), Ticker.systemTicker(), 1L)
+                    blobManager,
+                    contentService,
+                    () -> ImageInputTier.P720,
+                    defaultReaderLimits(),
+                    Ticker.systemTicker(),
+                    1L)
                 .materialize(null, Set.of(), ProviderMediaCapabilities.NONE));
     assertThrows(
         NullPointerException.class,
@@ -1244,14 +1253,19 @@ class ProviderResourceMaterializerTest {
         IllegalArgumentException.class,
         () ->
             new ProviderResourceMaterializer(
-                blobManager, contentService, defaultReaderLimits(), Ticker.systemTicker(), 0L));
+                blobManager,
+                contentService,
+                () -> ImageInputTier.P720,
+                defaultReaderLimits(),
+                Ticker.systemTicker(),
+                0L));
   }
 
   // ---------- 测试基座 ----------
 
   private static ProviderResourceMaterializer materializer(
       StorageBlobManager blobManager, StorageBlobContentService contentService) {
-    return new ProviderResourceMaterializer(blobManager, contentService);
+    return new ProviderResourceMaterializer(blobManager, contentService, () -> ImageInputTier.P720);
   }
 
   private static ProviderResourceMaterializer materializer(
@@ -1260,7 +1274,12 @@ class ProviderResourceMaterializerTest {
       ProviderInlineBlobReader.Limits limits,
       long maxRequestInlineChars) {
     return new ProviderResourceMaterializer(
-        blobManager, contentService, limits, Ticker.systemTicker(), maxRequestInlineChars);
+        blobManager,
+        contentService,
+        () -> ImageInputTier.P720,
+        limits,
+        Ticker.systemTicker(),
+        maxRequestInlineChars);
   }
 
   private static List<ProviderMessage> materialize(

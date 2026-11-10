@@ -18,8 +18,11 @@ public class HarnessResourceConfiguration {
   /** Provider attempt 的 Resource 物化端口（支持的媒体有界内联为 Base64，绝不产生 URL，瞬时 source 绝不持久化）。 */
   @Bean
   public ProviderResourceMaterializer providerResourceMaterializer(
-      StorageBlobManager storageBlobManager, StorageBlobContentService blobContentService) {
-    return new ProviderResourceMaterializer(storageBlobManager, blobContentService);
+      StorageBlobManager storageBlobManager,
+      StorageBlobContentService blobContentService,
+      SystemSettingsSnapshot snapshot) {
+    return new ProviderResourceMaterializer(
+        storageBlobManager, blobContentService, () -> snapshot.get().storageMedia().imageTier());
   }
 
   /**

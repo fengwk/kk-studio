@@ -737,7 +737,7 @@ class DatabaseProviderResolutionServiceTest {
         factories.stream()
             .collect(
                 Collectors.toUnmodifiableMap(ProviderFactory::providerType, Function.identity())),
-        new ProviderResourceMaterializer(blobManager, contentService));
+        new ProviderResourceMaterializer(blobManager, contentService, () -> ImageInputTier.P720));
   }
 
   private static ProviderFactory openAiFactory(PromptCacheRetention retention) {

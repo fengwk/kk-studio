@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -49,7 +50,8 @@ public class HarnessCommandAcceptanceOrchestrator {
       ObjectProvider<HarnessRuntime> runtimes,
       StorageUploadService uploadService,
       SessionBlobRefManager refManager,
-      StorageBlobManager blobManager) {
+      StorageBlobManager blobManager,
+      SystemSettingsSnapshot settingsSnapshot) {
     this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
@@ -58,7 +60,8 @@ public class HarnessCommandAcceptanceOrchestrator {
         new UserMessageContentPreparer(
             this.refManager,
             Objects.requireNonNull(blobManager, "blobManager"),
-            this::consumeAttachment);
+            this::consumeAttachment,
+            () -> settingsSnapshot.get().storageMedia().imageTier());
   }
 
   /** 接受一次 owner-aware 的命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */

@@ -42,6 +42,8 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchContro
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -100,7 +102,8 @@ class HarnessAcceptanceProblemWireTest {
             provider,
             uploads,
             mock(SessionBlobRefManager.class),
-            mock(StorageBlobManager.class));
+            mock(StorageBlobManager.class),
+            new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT));
     HarnessCommandBatchService service = new HarnessCommandBatchService(acceptance, runtime);
     mvc =
         MockMvcBuilders.standaloneSetup(
