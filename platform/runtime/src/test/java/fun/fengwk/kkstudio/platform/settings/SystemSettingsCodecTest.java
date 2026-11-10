@@ -12,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO;
@@ -257,6 +258,28 @@ class SystemSettingsCodecTest {
                 withStorageMediaField(
                     canonical, "thumbnailQuality", mapper.getNodeFactory().booleanNode(true))),
         "boolean integer");
+  }
+
+  /** 图片档位以规范 wire 名称存储：未知名称与缺失字段都必须在存储边界失败。 */
+  @Test
+  void rejectsUnknownAndMissingImageTier() throws Exception {
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
+    ObjectNode unknown = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) unknown.get("storageMedia")).put("imageTier", "4K");
+    assertThrows(
+        IllegalStateException.class, () -> codec.decode(mapper.writeValueAsString(unknown)));
+
+    ObjectNode missing = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) missing.get("storageMedia")).remove("imageTier");
+    assertThrows(
+        IllegalStateException.class, () -> codec.decode(mapper.writeValueAsString(missing)));
+
+    // 合法档位值可以往返，且聚合内部始终是强类型枚举。
+    ObjectNode renamed = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) renamed.get("storageMedia")).put("imageTier", "1080P");
+    assertEquals(
+        ImageInputTier.P1080,
+        codec.decode(mapper.writeValueAsString(renamed)).storageMedia().imageTier());
   }
 
   @Test

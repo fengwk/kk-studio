@@ -56,6 +56,9 @@ import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedExcept
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -96,6 +99,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final SessionOwner CHAT_OWNER = new SessionOwner("CHAT", CHAT_ID.toString());
   private static final SessionOwner ISSUE_AGENT_OWNER =
       new SessionOwner("ISSUE_AGENT", ISSUE_ID + ":" + AGENT_NAME);
+
+  /** 系统设置的默认图片档位取非出厂值 1080P，以区分“读取设置”与“写死 720P”。 */
+  private static final SystemSettingsSnapshot SYSTEM_SETTINGS =
+      new SystemSettingsSnapshot(withDefaultImageTier(ImageInputTier.P1080));
+
   private static final BranchSettings SETTINGS =
       new BranchSettings(
           "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), null);
@@ -140,7 +148,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             runtimes,
             uploadService,
             refManager,
-            blobManager);
+            blobManager,
+            SYSTEM_SETTINGS);
   }
 
   /** Chat NEW_SESSION preflight 建立归属边并保留命令；Issue+Agent 直接命令被拒绝。 */
@@ -434,7 +443,10 @@ class HarnessCommandAcceptanceOrchestratorTest {
     order.verify(uploadService).delete(UPLOAD_ID);
   }
 
-  /** 意图：图片输入档位随命令冻结，且只对图片媒体有意义——wire 缺省即平台默认 720P，非图片媒体与无法确认媒体类型的 blob 一律收敛为 null。 */
+  /**
+   * 意图：图片输入档位随命令冻结，且只对图片媒体有意义——wire 缺省取系统设置 {@code media.imageTier}，非图片媒体与无法确认媒体类型的 blob 一律收敛为
+   * null。
+   */
   @Test
   void freezesAttachmentImageTierButDropsItForNonImageMedia() {
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
@@ -443,11 +455,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png"));
 
     assertEquals(
-        ImageInputTier.P1080,
-        preparedAttachmentTier(41L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.P1080)));
-    // wire 未选择档位：图片按平台默认 720P 冻结，绝不落成 null（否则历史重放会退回原图）。
+        ImageInputTier.ORIGINAL,
+        preparedAttachmentTier(
+            41L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.ORIGINAL)));
+    // wire 未选择档位：图片按系统设置的默认档位冻结，绝不落成 null（否则历史重放会退回原图）。
     assertEquals(
-        ImageInputTier.P720,
+        ImageInputTier.P1080,
         preparedAttachmentTier(42L, new AttachmentMessageContent(UPLOAD_ID, null)));
 
     when(uploadService.lockReady(UPLOAD_ID))
@@ -477,6 +490,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png"));
     assertSame(imageResource, preparedResource(46L, imageResource));
+    // 未携带档位的图片 RESOURCE 同样按系统设置补齐。
+    assertEquals(
+        ImageInputTier.P1080,
+        preparedResource(50L, ResourceMessageContent.media(BLOB_ID, "photo.png", "preview", null))
+            .imageTier());
 
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("video/mp4"));
     ResourceMessageContent normalized = preparedResource(47L, videoResource);
@@ -583,7 +601,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             runtimes,
             uploadService,
             refManager,
-            blobManager);
+            blobManager,
+            SYSTEM_SETTINGS);
     assertThrows(IllegalStateException.class, () -> ambiguous.accept(ISSUE_AGENT_OWNER, command));
     verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
     verify(duplicate, never()).lockForAcceptance(any(), any());
@@ -597,17 +616,27 @@ class HarnessCommandAcceptanceOrchestratorTest {
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                null, runtimes, uploadService, refManager, blobManager));
+                null, runtimes, uploadService, refManager, blobManager, SYSTEM_SETTINGS));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                List.of(issueAgentOwnership), runtimes, null, refManager, blobManager));
+                List.of(issueAgentOwnership),
+                runtimes,
+                null,
+                refManager,
+                blobManager,
+                SYSTEM_SETTINGS));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                List.of(issueAgentOwnership), runtimes, uploadService, refManager, null));
+                List.of(issueAgentOwnership),
+                runtimes,
+                uploadService,
+                refManager,
+                null,
+                SYSTEM_SETTINGS));
     assertThrows(
         NullPointerException.class,
         () -> service.accept(null, newSession(THREAD_ID, user(new TextMessageContent("null")))));
@@ -850,5 +879,26 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   private static UUID id(long value) {
     return new UUID(0L, value);
+  }
+
+  private static SystemSettings withDefaultImageTier(ImageInputTier imageTier) {
+    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
+    SystemSettings.StorageMedia media = defaults.storageMedia();
+    return new SystemSettings(
+        defaults.tool(),
+        defaults.aiRuntime(),
+        defaults.environment(),
+        defaults.backendNetwork(),
+        new SystemSettings.StorageMedia(
+            media.uploadExpiresSeconds(),
+            media.s3PresignDefaultExpiresSeconds(),
+            media.s3PresignMaxExpiresSeconds(),
+            media.canvasMediaProcessTimeoutMillis(),
+            media.thumbnailMaxDimension(),
+            media.thumbnailQuality(),
+            imageTier,
+            media.temporaryResourceTtlSeconds(),
+            media.temporaryResourceCleanupIntervalSeconds()),
+        defaults.advanced());
   }
 }

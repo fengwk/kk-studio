@@ -2912,6 +2912,7 @@ export interface SystemSettingsStorageMediaDTO {
   canvasMediaProcessTimeoutMillis: string
   thumbnailMaxDimension: number
   thumbnailQuality: number
+  imageTier: string
   temporaryResourceTtlSeconds: string
   temporaryResourceCleanupIntervalSeconds: string
 }

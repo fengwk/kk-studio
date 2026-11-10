@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Provider attempt 的 Resource 物化：把 durable-safe 的 {@link
@@ -75,12 +76,19 @@ public final class ProviderResourceMaterializer {
   private final StorageBlobManager blobManager;
   private final ProviderInlineBlobReader blobReader;
   private final long maxRequestInlineChars;
+  private final Supplier<ImageInputTier> defaultImageTier;
 
+  /**
+   * @param defaultImageTier 未携带档位的图片资源使用的档位（系统设置 {@code media.imageTier} 的当前值）
+   */
   public ProviderResourceMaterializer(
-      StorageBlobManager blobManager, StorageBlobContentService blobContentService) {
+      StorageBlobManager blobManager,
+      StorageBlobContentService blobContentService,
+      Supplier<ImageInputTier> defaultImageTier) {
     this(
         blobManager,
         blobContentService,
+        defaultImageTier,
         ProviderInlineBlobReader.Limits.DEFAULT,
         Ticker.systemTicker(),
         MAX_REQUEST_INLINE_CHARS);
@@ -90,10 +98,12 @@ public final class ProviderResourceMaterializer {
   ProviderResourceMaterializer(
       StorageBlobManager blobManager,
       StorageBlobContentService blobContentService,
+      Supplier<ImageInputTier> defaultImageTier,
       ProviderInlineBlobReader.Limits limits,
       Ticker ticker,
       long maxRequestInlineChars) {
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.defaultImageTier = Objects.requireNonNull(defaultImageTier, "defaultImageTier");
     this.blobReader =
         new ProviderInlineBlobReader(
             Objects.requireNonNull(blobContentService, "blobContentService"), limits, ticker);
@@ -365,8 +375,9 @@ public final class ProviderResourceMaterializer {
    */
   private ProviderImageBlock inlineImage(
       ProviderResourceBlock resource, StorageBlob blob, InlineBudget budget) {
-    // 未指定图片档位的媒体按当前契约使用默认 720P；显式档位保持冻结值。
-    ImageInputTier tier = resource.imageTier() == null ? ImageInputTier.P720 : resource.imageTier();
+    // 未指定图片档位的媒体按系统设置的默认档位；显式档位保持冻结值。
+    ImageInputTier tier =
+        resource.imageTier() == null ? defaultImageTier.get() : resource.imageTier();
     boolean original = tier.isOriginal();
     long allowedChars =
         original

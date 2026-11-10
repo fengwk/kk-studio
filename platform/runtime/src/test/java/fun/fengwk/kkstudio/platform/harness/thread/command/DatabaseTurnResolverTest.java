@@ -71,6 +71,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -1685,7 +1686,7 @@ class DatabaseTurnResolverTest {
             fixture.providers,
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
-            new ProviderResourceMaterializer(blobs, content));
+            new ProviderResourceMaterializer(blobs, content, () -> ImageInputTier.P720));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
     assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());

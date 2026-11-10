@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector.ProjectedMessage;
 import fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -164,7 +165,8 @@ class ProviderReplayMaterializationTransportTest {
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeTextBlob());
     // 该回归只使用文本 Resource：内联能力保持 NONE，wire 上仍是确定性文本回退，与内联媒体能力无关。
     ProviderResourceMaterializer materializer =
-        new ProviderResourceMaterializer(blobManager, mock(StorageBlobContentService.class));
+        new ProviderResourceMaterializer(
+            blobManager, mock(StorageBlobContentService.class), () -> ImageInputTier.P720);
     ProviderDescriptor descriptor = descriptor();
     ModelProvider provider = new OpenAiChatProviderAdapter(transport, "sk-test").create(descriptor);
 
@@ -243,7 +245,8 @@ class ProviderReplayMaterializationTransportTest {
     when(manager.getBlob(BLOB_ID)).thenReturn(blob);
     when(content.readBlobContent(BLOB_ID, ProviderInlineBlobReader.Limits.DEFAULT.maxBlobBytes()))
         .thenReturn(new StorageBlobContent(BLOB_ID, bytes, "application/pdf", bytes.length));
-    ProviderResourceMaterializer materializer = new ProviderResourceMaterializer(manager, content);
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(manager, content, () -> ImageInputTier.P720);
 
     AgentMessageJsonCodec messages = new AgentMessageJsonCodec();
     String durableUserJson =
