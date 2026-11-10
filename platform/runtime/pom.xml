@@ -54,6 +54,11 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-model</artifactId>
         </dependency>
+        <!-- ImageIO WebP 解码：ProviderImageScaler 按档位物化 WebP 图片时直接使用。 -->
+        <dependency>
+            <groupId>com.twelvemonkeys.imageio</groupId>
+            <artifactId>imageio-webp</artifactId>
+        </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-work</artifactId>

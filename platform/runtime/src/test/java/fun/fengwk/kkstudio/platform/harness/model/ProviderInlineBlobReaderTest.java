@@ -22,10 +22,12 @@ import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -489,7 +491,7 @@ class ProviderInlineBlobReaderTest {
   @Test
   void unsupportedImageMediaTypeFailsExplicitlyWithoutPoisoningRawReads() {
     byte[] png = TestImages.png(2000, 1000);
-    stub(BLOB_ID, png, "image/webp");
+    stub(BLOB_ID, png, "image/x-icon");
     ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
 
     IllegalArgumentException error =
@@ -497,33 +499,74 @@ class ProviderInlineBlobReaderTest {
             IllegalArgumentException.class,
             () ->
                 reader.readImage(
-                    BLOB_ID, "image/webp", png.length, ImageInputTier.P720, IMAGE_CHARS));
+                    BLOB_ID, "image/x-icon", png.length, ImageInputTier.P720, IMAGE_CHARS));
     assertTrue(error.getMessage().contains("unsupported image media type"), error.getMessage());
     assertEquals(0L, reader.cachedEntryCount(), "失败绝不写入缓存");
 
     assertEquals(
-        rawDataUri("image/webp", png),
-        reader.readDataUri(BLOB_ID, "image/webp", png.length, IMAGE_CHARS));
+        rawDataUri("image/x-icon", png),
+        reader.readDataUri(BLOB_ID, "image/x-icon", png.length, IMAGE_CHARS));
   }
 
-  /** 意图：ORIGINAL 只做原字节直通，因此对没有解码器的格式也必须成功，并且与未指定档位共用一条缓存记录。 */
+  /** 意图：ORIGINAL 只做原字节直通（头校验通过后不重新编码），并且与未指定档位共用一条缓存记录。 */
   @Test
-  void originalTierNeverDecodesAndSharesRawCacheEntry() {
-    byte[] webpLike = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'};
-    stub(BLOB_ID, webpLike, "image/webp");
+  void originalTierValidatesHeaderThenSharesRawCacheEntry() {
+    byte[] png = TestImages.png(2000, 1000);
+    stub(BLOB_ID, png, "image/png");
     ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
 
     ProviderInlineBlobReader.InlineBlob original =
-        reader.readImage(
-            BLOB_ID, "image/webp", webpLike.length, ImageInputTier.ORIGINAL, IMAGE_CHARS);
+        reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.ORIGINAL, IMAGE_CHARS);
 
-    assertEquals(rawDataUri("image/webp", webpLike), original.dataUri());
+    assertEquals(rawDataUri("image/png", png), original.dataUri());
     assertEquals(
-        original.dataUri(),
-        reader.readDataUri(BLOB_ID, "image/webp", webpLike.length, IMAGE_CHARS));
+        original.dataUri(), reader.readDataUri(BLOB_ID, "image/png", png.length, IMAGE_CHARS));
     reader.cleanUp();
     assertEquals(1L, reader.cachedEntryCount(), "ORIGINAL 与原字节必须是同一条记录");
     verify(contentService, times(1)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：WebP（TwelveMonkeys 解码）按档位缩小后正常内联，mediaType 与实际编码格式一致。 */
+  @Test
+  void webpIsDecodedScaledAndCachedPerTier() throws Exception {
+    byte[] webp = webpSample("images/red-2000x1000.webp");
+    stub(BLOB_ID, webp, "image/webp");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    ProviderInlineBlobReader.InlineBlob scaled =
+        reader.readImage(BLOB_ID, "image/webp", webp.length, ImageInputTier.P720, IMAGE_CHARS);
+
+    assertEquals("image/png", scaled.mediaType(), "无 alpha 的 WebP 缩放后输出 PNG");
+    assertEquals(1280, decodedWidth(scaled));
+    // 同档位第二次读取命中缓存。
+    assertEquals(
+        scaled.dataUri(),
+        reader
+            .readImage(BLOB_ID, "image/webp", webp.length, ImageInputTier.P720, IMAGE_CHARS)
+            .dataUri());
+    verify(contentService, times(1)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：落在档位框内的 WebP 逐字节直通，不发生重编码。 */
+  @Test
+  void webpWithinTierBoxPassesThroughByteForByte() throws Exception {
+    byte[] webp = webpSample("images/red-1800x900.webp");
+    stub(BLOB_ID, webp, "image/webp");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    ProviderInlineBlobReader.InlineBlob inline =
+        reader.readImage(BLOB_ID, "image/webp", webp.length, ImageInputTier.P1080, IMAGE_CHARS);
+
+    assertEquals(rawDataUri("image/webp", webp), inline.dataUri(), "框内图片必须保留原始 WebP 字节");
+    assertEquals("image/webp", inline.mediaType());
+  }
+
+  /** WebP 测试样例：真实 VP8 编码的资源文件。 */
+  private static byte[] webpSample(String name) throws Exception {
+    try (InputStream input = ProviderInlineBlobReaderTest.class.getResourceAsStream(name)) {
+      Objects.requireNonNull(input, "missing test resource " + name);
+      return input.readAllBytes();
+    }
   }
 
   /** 意图：转化后的实际大小超过单条目记账上限时不得长期占用缓存预算，但本次调用仍然成功返回产物。 */

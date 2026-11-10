@@ -26,9 +26,9 @@ import java.util.Objects;
  * <p>本类只处理已经是权威 ACTIVE Blob 的内容，产物只用于当前 attempt 的瞬时 data URI，绝不写回任何存储（无派生 Blob）。失败一律显式，绝不静默降级：
  *
  * <ul>
- *   <li>声明 MIME 无可用解码器（webp/heic 等 JDK 不支持的格式）或字节与声明 MIME 不一致时失败；
- *   <li>解码前先用图片头校验宽高，超过 {@link #MAX_DECODED_PIXELS} 的像素预算立即失败，避免解压炸弹；
- *   <li>动画或多帧图片（如多帧 GIF）失败，绝不只取第一帧；
+ *   <li>所有档位（含 {@link ImageInputTier#ORIGINAL} 与命中档位框的图片）先经同一套头校验：声明 MIME
+ *       必须有可用解码器、字节必须可解析为图片、宽高为正且像素数不超过 {@link #MAX_DECODED_PIXELS}（解压炸弹在解码像素前显式失败）；
+ *   <li>动画或多帧图片（如多帧 GIF）在需要缩放时失败，绝不只取第一帧；
  *   <li>JPEG 按 EXIF orientation 归一化显示方向；EXIF 段存在但不可解析时失败，绝不静默按未旋转处理。
  * </ul>
  *
@@ -61,11 +61,12 @@ final class ProviderImageScaler {
   private record Box(int maxWidth, int maxHeight) {}
 
   /**
-   * 按 {@code tier} 物化 {@code bytes}：命中档位框时逐字节返回原内容（保留原始编码与 EXIF），超出时缩小重新编码。
+   * 按 {@code tier} 物化 {@code bytes}：命中档位框时逐字节返回原内容（保留原始编码与 EXIF），超出时缩小重新编码； {@link
+   * ImageInputTier#ORIGINAL} 与缩放档位执行同一套格式与预算校验，只是永不重新编码。
    *
    * @param mediaType 权威 MIME（解码器与 data URI header 都以此为准）
    * @param bytes 权威原始字节
-   * @param tier 目标档位；{@link ImageInputTier#ORIGINAL} 表示永不转换
+   * @param tier 目标档位；{@link ImageInputTier#ORIGINAL} 表示校验但永不转换
    * @param maxOutputBytes 重新编码后的字节上限，超出显式失败
    * @throws IllegalArgumentException 格式不支持、内容不可解析、超出像素预算或输出字节预算时抛出
    */
@@ -73,9 +74,6 @@ final class ProviderImageScaler {
     Objects.requireNonNull(mediaType, "mediaType");
     Objects.requireNonNull(bytes, "bytes");
     Objects.requireNonNull(tier, "tier");
-    if (tier.isOriginal()) {
-      return new Scaled(mediaType, bytes);
-    }
     int orientation = JpegExifOrientation.read(mediaType, bytes);
     try (ImageInputStream stream =
         ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
@@ -85,35 +83,30 @@ final class ProviderImageScaler {
       ImageReader reader = firstReader(mediaType);
       try {
         reader.setInput(stream, false, true);
-        int width = reader.getWidth(0);
-        int height = reader.getHeight(0);
-        long pixels = (long) width * height;
-        if (width <= 0 || height <= 0 || pixels > MAX_DECODED_PIXELS) {
-          throw new IllegalArgumentException(
-              "image of "
-                  + width
-                  + "x"
-                  + height
-                  + " pixels exceeds the decodable pixel budget "
-                  + MAX_DECODED_PIXELS);
+        Facts facts = facts(reader, mediaType);
+        int displayWidth =
+            JpegExifOrientation.swapsAxes(orientation) ? facts.height() : facts.width();
+        int displayHeight =
+            JpegExifOrientation.swapsAxes(orientation) ? facts.width() : facts.height();
+        if (tier.isOriginal()) {
+          return new Scaled(mediaType, bytes);
         }
-        int displayWidth = JpegExifOrientation.swapsAxes(orientation) ? height : width;
-        int displayHeight = JpegExifOrientation.swapsAxes(orientation) ? width : height;
         Box box = box(tier, displayWidth, displayHeight);
         if (displayWidth <= box.maxWidth() && displayHeight <= box.maxHeight()) {
           return new Scaled(mediaType, bytes);
         }
-        // 只有在确实需要缩放时才枚举帧：命中档位框的图片逐字节直通，不存在「取第一帧」的语义损失。
-        int frames = reader.getNumImages(true);
-        if (frames > 1) {
+        // 只有在确实需要缩放时才解码像素：命中档位框的图片逐字节直通，不存在「取第一帧」的语义损失。
+        if (facts.frames() > 1) {
           throw new IllegalArgumentException(
               "multi-frame image with "
-                  + frames
+                  + facts.frames()
                   + " frames must not be resized to "
                   + tier.wireName());
         }
         BufferedImage decoded = reader.read(0);
-        if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
+        if (decoded == null
+            || decoded.getWidth() != facts.width()
+            || decoded.getHeight() != facts.height()) {
           throw new IllegalArgumentException(
               "image content of " + mediaType + " does not match its declared dimensions");
         }
@@ -125,7 +118,7 @@ final class ProviderImageScaler {
         BufferedImage resized =
             resize(
                 decoded,
-                JpegExifOrientation.transform(orientation, width, height),
+                JpegExifOrientation.transform(orientation, facts.width(), facts.height()),
                 displayWidth,
                 displayHeight,
                 targetWidth,
@@ -139,6 +132,33 @@ final class ProviderImageScaler {
           "image content declared as " + mediaType + " cannot be decoded", error);
     }
   }
+
+  /** 解码前的图片事实：声明宽高、帧数与像素预算。读取像素之前先确认格式可解析、尺寸为正且不超过 {@link #MAX_DECODED_PIXELS}，避免解压炸弹与畸形声明。 */
+  private static Facts facts(ImageReader reader, String mediaType) throws IOException {
+    int width;
+    int height;
+    try {
+      width = reader.getWidth(0);
+      height = reader.getHeight(0);
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException(
+          "image content declared as " + mediaType + " cannot be parsed", error);
+    }
+    long pixels = (long) width * height;
+    if (width <= 0 || height <= 0 || pixels > MAX_DECODED_PIXELS) {
+      throw new IllegalArgumentException(
+          "image of "
+              + width
+              + "x"
+              + height
+              + " pixels exceeds the decodable pixel budget "
+              + MAX_DECODED_PIXELS);
+    }
+    int frames = reader.getNumImages(true);
+    return new Facts(width, height, frames);
+  }
+
+  private record Facts(int width, int height, int frames) {}
 
   /** 档位框：横向用最长边、纵向交换长短边、正方形由短边界定。 */
   private static Box box(ImageInputTier tier, int displayWidth, int displayHeight) {
