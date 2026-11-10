@@ -48,4 +48,9 @@ describe('detectMediaMimeType 与 Java MediaTypeSniffer 共用样例', () => {
     expect(detectMediaMimeType(new Uint8Array([0x01, 0x02, 0x03]))).toBeNull()
     expect(detectMediaMimeType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBeNull()
   })
+
+  it('MP3 裸帧头只接受 FB/F3/F2，与 Java 判定逐字节一致', () => {
+    expect(detectMediaMimeType(new Uint8Array([0xff, 0xf2, 0x90, 0x00]))).toBe('audio/mpeg')
+    expect(detectMediaMimeType(new Uint8Array([0xff, 0xfa, 0x90, 0x00]))).toBeNull()
+  })
 })

@@ -1,5 +1,3 @@
-import { PROBE_BYTES } from './text.js'
-
 /**
  * Daemon 侧媒体类型判定：只看文件头 magic 特征，从不信任扩展名。
  *
@@ -45,14 +43,11 @@ export function detectMediaMimeType(head: Uint8Array): MediaMimeType | null {
     }
     return 'video/mp4'
   }
-  if (head[0] === 0xff && MP3_SYNC_SECOND_BYTES.has((head[1] as number) & 0xf7)) {
+  if (head[0] === 0xff && MP3_SYNC_SECOND_BYTES.has(head[1] as number)) {
     return 'audio/mpeg'
   }
   return null
 }
-
-/** 读取文件头探测字节（与文本探测共用 PROBE_BYTES 窗口）。 */
-export { PROBE_BYTES }
 
 function startsWithAscii(head: Uint8Array, prefix: string): boolean {
   if (head.length < prefix.length) {
