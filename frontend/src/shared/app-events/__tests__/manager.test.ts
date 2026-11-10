@@ -162,6 +162,7 @@ describe('ApplicationEventManager', () => {
     expect(manager.getIdentity()).toEqual({
       eventNodeId: EVENT_NODE_A,
       connectionId: CONNECTION_A,
+      heartbeatIntervalMillis: '20000',
     })
 
     socket.fail()
@@ -173,12 +174,13 @@ describe('ApplicationEventManager', () => {
     expect(manager.getIdentity()).toEqual({
       eventNodeId: EVENT_NODE_B,
       connectionId: CONNECTION_B,
+      heartbeatIntervalMillis: '20000',
     })
     expect(identities).toEqual([
       null,
-      { eventNodeId: EVENT_NODE_A, connectionId: CONNECTION_A },
+      { eventNodeId: EVENT_NODE_A, connectionId: CONNECTION_A, heartbeatIntervalMillis: '20000' },
       null,
-      { eventNodeId: EVENT_NODE_B, connectionId: CONNECTION_B },
+      { eventNodeId: EVENT_NODE_B, connectionId: CONNECTION_B, heartbeatIntervalMillis: '20000' },
     ])
     unsubscribe()
   })

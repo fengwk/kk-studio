@@ -1,5 +1,6 @@
 import {
   ApplicationEventConnection,
+  type ApplicationEventConnectionState,
   type ApplicationEventSocketFactory,
 } from '@/shared/app-events/connection'
 import type {
@@ -58,10 +59,10 @@ const MAX_IDE_USE_VIEWS = 64
  * - 同一资源无论多少消费者都只有一条 wire 订阅：首 ref 发 subscribe（listener
  *   先登记再发送），末 ref 发 unsubscribe；同一 listener 重复 subscribe 有真实
  *   refcount，首个 unsubscribe 不拆 wire；
- * - 连接（重连）open 后重发所有 active subscriptions；connected 帧提供每次物理
- *   连接新的 eventNodeId/connectionId；
+ * - 连接（重连）transport open 后重发所有 active subscriptions；connected 帧提供每次物理
+ *   连接新的 eventNodeId/connectionId/heartbeatIntervalMillis；
  * - subscribed/event/resync/error 按资源分发给 listeners；
- * - registerUsage 只在当前 open 且已收到 connected 时发送 ide-use，并以
+ * - registerUsage 只在当前 ready（已收到 connected）时发送 ide-use，并以
  *   ide-use-accepted 确认；断线、协议错误或服务端拒绝会 reject，绝不在重连后自动
  *   重放该调用。
  */
@@ -107,6 +108,18 @@ export class ApplicationEventManager {
     return () => {
       this.identityListeners.delete(listener)
     }
+  }
+
+  /** 当前连接状态快照（connecting/ready/backoff/stopped 与结构化原因）。 */
+  getConnectionState(): ApplicationEventConnectionState {
+    return this.connection.getState()
+  }
+
+  /** 订阅连接状态快照；立即回调当前值，返回取消函数。 */
+  subscribeConnectionState(
+    listener: (state: ApplicationEventConnectionState) => void,
+  ): () => void {
+    return this.connection.subscribeState(listener)
   }
 
   /** 注册资源 listener；返回取消函数（幂等；同 listener 重复注册计真实 refcount）。 */
@@ -161,7 +174,7 @@ export class ApplicationEventManager {
     } catch (error) {
       return Promise.reject(asError(error))
     }
-    if (this.connectionIdentity == null || this.connection.getStatus() !== 'open') {
+    if (this.connectionIdentity == null || this.connection.getStatus() !== 'ready') {
       return Promise.reject(new Error('application event connection is not ready'))
     }
     if (
@@ -240,6 +253,7 @@ export class ApplicationEventManager {
       this.setConnectionIdentity({
         eventNodeId: message.eventNodeId,
         connectionId: message.connectionId,
+        heartbeatIntervalMillis: message.heartbeatIntervalMillis,
       })
       return
     }

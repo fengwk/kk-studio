@@ -74,8 +74,8 @@ export type ApplicationEventRevision = string
 export interface ApplicationEventConnectionIdentity {
   eventNodeId: string
   connectionId: string
-  /** 服务端实际使用的文本 heartbeat 间隔（毫秒，正整数）；失联预算按它推导。 */
-  heartbeatIntervalMillis: number
+  /** 服务端实际使用的文本 heartbeat 间隔（canonical 正十进制毫秒）；失联预算按它推导。 */
+  heartbeatIntervalMillis: string
 }
 
 /** 一项 IDE 使用意图；没有 bindingEpoch 的项不能用于续租。 */
@@ -175,7 +175,7 @@ type ApplicationEventEnvironmentsChangedEvent = {
 }
 
 export type ApplicationEventServerMessage =
-  | { type: 'connected'; eventNodeId: string; connectionId: string }
+  | { type: 'connected'; eventNodeId: string; connectionId: string; heartbeatIntervalMillis: string }
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadVersionEvent
@@ -223,7 +223,12 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
       if (eventNodeId == null || connectionId == null || heartbeatIntervalMillis == null) {
         return null
       }
-      return { type: 'connected', eventNodeId, connectionId, heartbeatIntervalMillis }
+      return {
+        type: 'connected',
+        eventNodeId,
+        connectionId,
+        heartbeatIntervalMillis,
+      }
     }
     case 'heartbeat': {
       if (!hasOnlyFields(parsed, ['type'])) {
@@ -436,7 +441,7 @@ function parseRevision(value: unknown): ApplicationEventRevision | null {
  * connected 帧的 heartbeat 间隔：canonical 正十进制字符串，且必须是可用毫秒数
  * （不超过 {@code Number.MAX_SAFE_INTEGER}），保证失联预算计算不丢精度。
  */
-function parseHeartbeatIntervalMillis(value: unknown): number | null {
+function parseHeartbeatIntervalMillis(value: unknown): string | null {
   const text = parseRevision(value)
   if (text == null || text.length > MAX_SAFE_INTEGER_DECIMAL.length) {
     return null
@@ -444,7 +449,7 @@ function parseHeartbeatIntervalMillis(value: unknown): number | null {
   if (text.length === MAX_SAFE_INTEGER_DECIMAL.length && text > MAX_SAFE_INTEGER_DECIMAL) {
     return null
   }
-  return Number(text)
+  return text
 }
 
 /** durable version 事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */

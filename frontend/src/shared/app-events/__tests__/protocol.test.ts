@@ -62,7 +62,7 @@ describe('connection identity and ide-use', () => {
       type: 'connected',
       eventNodeId: EVENT_NODE_ID,
       connectionId: CONNECTION_ID,
-      heartbeatIntervalMillis: 20000,
+      heartbeatIntervalMillis: '20000',
     })
     expect(decodeServerMessage(JSON.stringify({ ...connected, version: 2 }))).toBeNull()
     expect(
@@ -71,19 +71,19 @@ describe('connection identity and ide-use', () => {
     expect(decodeServerMessage(JSON.stringify({ ...connected, extra: true }))).toBeNull()
   })
 
-  it('decodes heartbeatIntervalMillis as a positive millisecond count within safe integer range', () => {
+  it('decodes heartbeatIntervalMillis as a canonical positive millisecond string within safe integer range', () => {
     const connected = {
       type: 'connected',
       eventNodeId: EVENT_NODE_ID,
       connectionId: CONNECTION_ID,
       heartbeatIntervalMillis: '20000',
     }
-    // canonical 正十进制字符串转为 number；边界值是 Number.MAX_SAFE_INTEGER。
+    // canonical 正十进制字符串；边界值是 Number.MAX_SAFE_INTEGER。
     expect(
       decodeServerMessage(
         JSON.stringify({ ...connected, heartbeatIntervalMillis: '9007199254740991' }),
       ),
-    ).toMatchObject({ heartbeatIntervalMillis: 9007199254740991 })
+    ).toMatchObject({ heartbeatIntervalMillis: '9007199254740991' })
     for (const bad of ['0', '-1', '01', '1.0', '9007199254740992', 20000, undefined]) {
       expect(
         decodeServerMessage(JSON.stringify({ ...connected, heartbeatIntervalMillis: bad })),

@@ -125,6 +125,7 @@ describe('IDE contract validation', () => {
     const request = buildOpenRequest(pending(), BROWSER, {
       eventNodeId: EVENT_NODE,
       connectionId: CONNECTION,
+      heartbeatIntervalMillis: '20000',
     })
     const response = view({
       entryUrl: `/ide/${ENV}/${VIEW}/__ide/bootstrap?token=t`,
@@ -159,6 +160,7 @@ describe('IDE contract validation', () => {
     const resume = buildOpenRequest(pending(), BROWSER, {
       eventNodeId: EVENT_NODE,
       connectionId: CONNECTION,
+      heartbeatIntervalMillis: '20000',
     })
     expect(resume).toMatchObject({
       viewId: VIEW,
@@ -179,6 +181,7 @@ describe('IDE contract validation', () => {
     }), BROWSER, {
       eventNodeId: EVENT_NODE,
       connectionId: CONNECTION,
+      heartbeatIntervalMillis: '20000',
     })
     expect(create).toMatchObject({
       mode: 'create',
