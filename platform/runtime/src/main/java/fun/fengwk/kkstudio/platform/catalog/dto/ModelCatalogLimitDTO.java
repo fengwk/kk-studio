@@ -9,5 +9,8 @@ public class ModelCatalogLimitDTO {
 
   private @Nullable Integer context;
 
+  /** models.dev 的可选输入上限（{@code limit.input}）；未声明或格式错误时为 null。 */
+  private @Nullable Integer input;
+
   private @Nullable Integer output;
 }
