@@ -10,8 +10,8 @@ import java.util.Objects;
  * <p>只承载 400–599 的 HTTP error 状态：状态命中 retry 集合时允许进入既有重试预算，未列出即直接失败。该策略只决定 retry
  * eligibility，不是第二个重试预算；实际延迟与次数仍由 {@link InvocationRetryPolicy} 唯一决策。
  *
- * <p>OVERFLOW 与 CANCELLED 等专用语义、以及无 HTTP 的网络 / 破损响应不经过本策略。默认白名单为 {@code [408, 429, 500, 502, 503,
- * 504]}，与系统设置默认聚合及初始化 SQL 保持一致。
+ * <p>CONTEXT_LIMIT 与 CANCELLED 等专用语义、以及无 HTTP 的网络 / 破损响应不经过本策略。默认白名单为 {@code [408, 429, 500, 502,
+ * 503, 504]}，与系统设置默认聚合及初始化 SQL 保持一致。
  */
 public record ModelHttpErrorPolicy(List<Integer> retryStatusCodes) {
 

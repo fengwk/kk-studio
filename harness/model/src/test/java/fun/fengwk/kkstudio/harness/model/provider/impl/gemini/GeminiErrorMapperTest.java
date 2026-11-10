@@ -36,7 +36,7 @@ class GeminiErrorMapperTest {
   @Test
   void preservesClassificationPrecedence() {
     assertEquals(
-        ProviderErrorKind.TRANSIENT,
+        ProviderErrorKind.REQUEST_BODY_LIMIT,
         GeminiErrorMapper.fromHttp(413, "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}").kind());
     assertEquals(
         ProviderErrorKind.TRANSIENT,

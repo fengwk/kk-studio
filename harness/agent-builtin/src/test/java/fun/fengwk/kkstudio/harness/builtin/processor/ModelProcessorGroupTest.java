@@ -238,11 +238,11 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
     fixture
         .gateway
         .controlled(fixture.invocationId)
-        .fail(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context too long"));
+        .fail(new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "context too long"));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
-    assertEquals(ProviderErrorKind.OVERFLOW, failed.error().kind());
+    assertEquals(ProviderErrorKind.CONTEXT_LIMIT, failed.error().kind());
     assertTrue(failed.failedAttempts().isEmpty());
     assertEquals(0, groupProgress(failed).memberIndex());
     assertFalse(cooling(fixture, "model"));

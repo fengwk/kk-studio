@@ -25,7 +25,8 @@ final class AnthropicErrorMapper {
 
   static final String MSG_AUTH = "Anthropic authentication failed";
   static final String MSG_BILLING = "Anthropic billing or quota error";
-  static final String MSG_OVERFLOW = "Anthropic request context overflow";
+  static final String MSG_CONTEXT_LIMIT = "Anthropic request context limit exceeded";
+  static final String MSG_REQUEST_BODY_LIMIT = "Anthropic request body limit exceeded";
   static final String MSG_TRANSIENT = "Anthropic transient failure";
   static final String MSG_INVALID_REQUEST = "Anthropic invalid request";
   static final String MSG_INVALID_RESPONSE = "Anthropic invalid response";
@@ -34,7 +35,8 @@ final class AnthropicErrorMapper {
       new ProviderErrorHelper.FallbackMessages(
           MSG_AUTH,
           MSG_BILLING,
-          MSG_OVERFLOW,
+          MSG_CONTEXT_LIMIT,
+          MSG_REQUEST_BODY_LIMIT,
           MSG_INVALID_REQUEST,
           MSG_TRANSIENT,
           MSG_INVALID_RESPONSE);
@@ -74,7 +76,8 @@ final class AnthropicErrorMapper {
         typeLower.contains("context_length_exceeded")
             || typeLower.contains("model_context_window_exceeded")
             || (typeLower.contains("context") && typeLower.contains("overflow")),
-        typeLower.contains("request_too_large") || status == 413,
+        typeLower.contains("request_too_large"),
+        false,
         typeLower.contains("overloaded")
             || typeLower.contains("rate_limit")
             || typeLower.contains("api_error"),

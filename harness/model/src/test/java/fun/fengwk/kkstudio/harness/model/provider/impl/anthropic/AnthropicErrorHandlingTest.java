@@ -171,7 +171,7 @@ class AnthropicErrorHandlingTest {
         Arguments.of(401, ProviderErrorKind.AUTHENTICATION),
         Arguments.of(403, ProviderErrorKind.AUTHENTICATION),
         Arguments.of(404, ProviderErrorKind.INVALID_REQUEST),
-        Arguments.of(413, ProviderErrorKind.INVALID_REQUEST),
+        Arguments.of(413, ProviderErrorKind.REQUEST_BODY_LIMIT),
         Arguments.of(429, ProviderErrorKind.TRANSIENT),
         Arguments.of(500, ProviderErrorKind.TRANSIENT),
         Arguments.of(503, ProviderErrorKind.TRANSIENT));

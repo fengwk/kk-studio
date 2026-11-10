@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -1044,15 +1045,16 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void rejectsExceedingMaxRequestBodyLimit() {
-    String hugeText = "A".repeat(33 * 1024 * 1024);
+    // 应用层内存守卫（与其他协议共用）；端点 body 限制由 RequestLimits 在发送前检查。
     ProviderRequest req =
         request(
             defaultVariant(),
-            List.of(userMsg(new ProviderTextBlock(hugeText))),
+            List.of(userMsg(new ProviderTextBlock("A".repeat(2048)))),
             List.of(),
             ProviderCacheControl.none());
+    AnthropicRequestEncoder guarded = new AnthropicRequestEncoder(new RequestBodySizeGuard(1024));
     ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(req, descriptor));
+        assertThrows(ProviderException.class, () -> guarded.encode(req, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("exceeds"));
   }

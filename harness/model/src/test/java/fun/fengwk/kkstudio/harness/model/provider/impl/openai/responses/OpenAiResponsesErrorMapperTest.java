@@ -33,7 +33,7 @@ class OpenAiResponsesErrorMapperTest {
                 httpStatus(400, "{\"error\":{\"code\":\"rate_limit\"}}"))
             .kind());
     assertEquals(
-        ProviderErrorKind.OVERFLOW,
+        ProviderErrorKind.CONTEXT_LIMIT,
         OpenAiResponsesErrorMapper.mapTransportException(
                 httpStatus(413, "{\"error\":{\"code\":\"tokens exceeded\"}}"))
             .kind());
@@ -126,7 +126,7 @@ class OpenAiResponsesErrorMapperTest {
             new TransportException(
                 TransportErrorKind.HTTP_STATUS, "error", 400, overflowBody, null));
     assertNotNull(exOverflow);
-    assertEquals(ProviderErrorKind.OVERFLOW, exOverflow.kind());
+    assertEquals(ProviderErrorKind.CONTEXT_LIMIT, exOverflow.kind());
     assertEquals("HTTP 400\n" + overflowJson, exOverflow.getMessage());
 
     String billingJson =
@@ -166,7 +166,7 @@ class OpenAiResponsesErrorMapperTest {
     ProviderException ex3 =
         OpenAiResponsesErrorMapper.mapSseErrorEnvelope(OBJECT_MAPPER.readTree(json3));
     assertNotNull(ex3);
-    assertEquals(ProviderErrorKind.OVERFLOW, ex3.kind());
+    assertEquals(ProviderErrorKind.CONTEXT_LIMIT, ex3.kind());
     assertEquals(OBJECT_MAPPER.readTree(json3).toString(), ex3.getMessage());
 
     String json4 =
@@ -186,7 +186,7 @@ class OpenAiResponsesErrorMapperTest {
             + "\"param\":\"input\",\"sequence_number\":12}";
     ProviderException ex =
         OpenAiResponsesErrorMapper.mapSseErrorEnvelope(OBJECT_MAPPER.readTree(overflow));
-    assertEquals(ProviderErrorKind.OVERFLOW, ex.kind());
+    assertEquals(ProviderErrorKind.CONTEXT_LIMIT, ex.kind());
     assertEquals(OBJECT_MAPPER.readTree(overflow).toString(), ex.getMessage());
 
     String rateLimit =
@@ -295,9 +295,9 @@ class OpenAiResponsesErrorMapperTest {
                 new TransportException(TransportErrorKind.HTTP_STATUS, "err", 402, null, null))
             .kind());
 
-    // 413 invalid request
+    // 413 request body limit
     assertEquals(
-        ProviderErrorKind.INVALID_REQUEST,
+        ProviderErrorKind.REQUEST_BODY_LIMIT,
         OpenAiResponsesErrorMapper.mapTransportException(
                 new TransportException(TransportErrorKind.HTTP_STATUS, "err", 413, null, null))
             .kind());
@@ -334,7 +334,7 @@ class OpenAiResponsesErrorMapperTest {
 
     byte[] directTypeBody = "{\"type\": \"tokens exceeded\"}".getBytes(StandardCharsets.UTF_8);
     assertEquals(
-        ProviderErrorKind.OVERFLOW,
+        ProviderErrorKind.CONTEXT_LIMIT,
         OpenAiResponsesErrorMapper.mapTransportException(
                 new TransportException(
                     TransportErrorKind.HTTP_STATUS, "err", 400, directTypeBody, null))
@@ -343,7 +343,7 @@ class OpenAiResponsesErrorMapperTest {
     byte[] errorTypeBody =
         "{\"error\": {\"type\": \"tokens exceeded\"}}".getBytes(StandardCharsets.UTF_8);
     assertEquals(
-        ProviderErrorKind.OVERFLOW,
+        ProviderErrorKind.CONTEXT_LIMIT,
         OpenAiResponsesErrorMapper.mapTransportException(
                 new TransportException(
                     TransportErrorKind.HTTP_STATUS, "err", 400, errorTypeBody, null))

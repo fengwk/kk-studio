@@ -350,7 +350,7 @@ class OpenAiResponsesModelProviderTest {
       assertEquals(
           "rate_limit_exceeded".equals(code)
               ? ProviderErrorKind.TRANSIENT
-              : ProviderErrorKind.OVERFLOW,
+              : ProviderErrorKind.CONTEXT_LIMIT,
           handler.error.kind());
       assertEquals(error, handler.error.getMessage());
       assertNull(handler.completion);

@@ -764,7 +764,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     transitionModel(
         fixture.store,
         continuation.id(),
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "still too large"), NOW));
+        m ->
+            m.fail(
+                new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "still too large"), NOW));
 
     requestThreadWork(fixture.store, baseline.threadId());
     // 单个 claim：失败 overflow 重试关闭 turn；闭合后 compactionPreparation 经 isOverflowRecoveryRetry guard 返回
@@ -1542,7 +1544,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       sessionId,
                       secondUserEntryId,
                       new AssistantErrorPayload(
-                          new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
+                          new AssistantError(
+                              ProviderErrorKind.CONTEXT_LIMIT.name(), "context overflow"),
                           null),
                       NOW));
           tx.entries()

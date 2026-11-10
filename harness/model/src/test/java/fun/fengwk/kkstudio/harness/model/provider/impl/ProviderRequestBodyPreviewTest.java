@@ -28,9 +28,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -57,6 +59,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -250,6 +253,70 @@ class ProviderRequestBodyPreviewTest {
       assertTrue(previewed.length > 0, protocol.toString());
     }
     assertEquals(0, transportCalls.get(), "preview must never reach transport");
+  }
+
+  /** 已知端点限制在发送前生效：超限请求以 MEDIA_LIMIT 结束，既不触达 transport 也不触发定价观察。 */
+  @ParameterizedTest(name = "{0} 超出官方端点图片数量上限时不发送")
+  @EnumSource(
+      value = Protocol.class,
+      names = {"OPENAI_CHAT", "ANTHROPIC"})
+  void rejectsRequestsOverAKnownEndpointLimitBeforeSending(Protocol protocol) {
+    AtomicInteger transportCalls = new AtomicInteger();
+    ProviderAdapter adapter = adapterFor(protocol, offlineTransport(transportCalls));
+    String officialEndpoint =
+        protocol == Protocol.ANTHROPIC
+            ? "https://api.anthropic.com/v1"
+            : "https://api.openai.com/v1";
+    ProviderDescriptor official =
+        new ProviderDescriptor(
+            protocol.label,
+            protocol.providerType,
+            officialEndpoint,
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+    // 预设上限：Claude 直连 100 张、OpenAI 官方 1,500 张；多一张即超限。
+    int images = protocol == Protocol.ANTHROPIC ? 101 : 1501;
+    List<ProviderContentBlock> contents =
+        Collections.nCopies(
+            images, new ProviderImageBlock("image/png", "data:image/png;base64,AQIDBA=="));
+    ProviderRequest request =
+        new ProviderRequest(
+            new ModelDescriptor(
+                protocol.label,
+                protocol.wireModelId,
+                protocol.wireModelId,
+                Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+                true,
+                false),
+            variant(protocol),
+            1024,
+            "Preview system instruction.",
+            List.of(new ProviderMessage(ProviderMessageRole.USER, contents)),
+            List.of(),
+            ProviderCacheControl.none());
+    AtomicReference<ProviderException> error = new AtomicReference<>();
+
+    adapter.create(official).stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {}
+
+          @Override
+          public void onRequestBody(byte[] bodyUtf8Bytes) {
+            throw new AssertionError("a request over the limit must not be observed as sent");
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
+
+          @Override
+          public void onError(ProviderException failure) {
+            error.set(failure);
+          }
+        });
+
+    assertEquals(ProviderErrorKind.MEDIA_LIMIT, error.get().kind(), protocol.toString());
+    assertEquals(0, transportCalls.get(), "超限请求不得触发 transport");
   }
 
   /** 编码失败必须原样传播 INVALID_REQUEST，而不是被预览入口吞掉或改写。 */

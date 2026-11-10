@@ -31,6 +31,8 @@ final class GeminiErrorMapper {
 
   static final String MSG_AUTH = "Gemini authentication failed";
   static final String MSG_BILLING = "Gemini billing or quota error";
+  static final String MSG_CONTEXT_LIMIT = "Gemini request context limit exceeded";
+  static final String MSG_REQUEST_BODY_LIMIT = "Gemini request body limit exceeded";
   static final String MSG_TRANSIENT = "Gemini transient failure";
   static final String MSG_INVALID_REQUEST = "Gemini invalid request";
   static final String MSG_INVALID_RESPONSE = "Gemini invalid response";
@@ -39,7 +41,8 @@ final class GeminiErrorMapper {
       new ProviderErrorHelper.FallbackMessages(
           MSG_AUTH,
           MSG_BILLING,
-          MSG_INVALID_RESPONSE,
+          MSG_CONTEXT_LIMIT,
+          MSG_REQUEST_BODY_LIMIT,
           MSG_INVALID_REQUEST,
           MSG_TRANSIENT,
           MSG_INVALID_RESPONSE);
@@ -104,6 +107,7 @@ final class GeminiErrorMapper {
     return ProviderErrorHelper.classify(
         statusCode,
         statusUpper.contains("UNAUTHENTICATED") || statusUpper.contains("PERMISSION_DENIED"),
+        false,
         false,
         false,
         false,

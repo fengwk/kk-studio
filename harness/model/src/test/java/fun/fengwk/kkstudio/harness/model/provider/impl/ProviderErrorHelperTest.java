@@ -113,7 +113,7 @@ class ProviderErrorHelperTest {
     assertEquals(ProviderErrorKind.AUTHENTICATION, ProviderErrorHelper.classifyHttpStatus(401));
     assertEquals(ProviderErrorKind.AUTHENTICATION, ProviderErrorHelper.classifyHttpStatus(403));
     assertEquals(ProviderErrorKind.BILLING, ProviderErrorHelper.classifyHttpStatus(402));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ProviderErrorHelper.classifyHttpStatus(413));
+    assertEquals(ProviderErrorKind.REQUEST_BODY_LIMIT, ProviderErrorHelper.classifyHttpStatus(413));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(429));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(500));
     assertEquals(ProviderErrorKind.TRANSIENT, ProviderErrorHelper.classifyHttpStatus(503));
@@ -132,10 +132,12 @@ class ProviderErrorHelperTest {
   void testFallbackMessages() {
     ProviderErrorHelper.FallbackMessages messages =
         new ProviderErrorHelper.FallbackMessages(
-            "auth", "billing", "overflow", "invalid_req", "transient", "invalid_resp");
+            "auth", "billing", "context", "body_limit", "invalid_req", "transient", "invalid_resp");
     assertEquals("auth", messages.fallbackForKind(ProviderErrorKind.AUTHENTICATION));
     assertEquals("billing", messages.fallbackForKind(ProviderErrorKind.BILLING));
-    assertEquals("overflow", messages.fallbackForKind(ProviderErrorKind.OVERFLOW));
+    assertEquals("context", messages.fallbackForKind(ProviderErrorKind.CONTEXT_LIMIT));
+    assertEquals("body_limit", messages.fallbackForKind(ProviderErrorKind.REQUEST_BODY_LIMIT));
+    assertEquals("body_limit", messages.fallbackForKind(ProviderErrorKind.MEDIA_LIMIT));
     assertEquals("invalid_req", messages.fallbackForKind(ProviderErrorKind.INVALID_REQUEST));
     assertEquals("transient", messages.fallbackForKind(ProviderErrorKind.TRANSIENT));
     assertEquals("invalid_resp", messages.fallbackForKind(ProviderErrorKind.INVALID_RESPONSE));
@@ -148,7 +150,7 @@ class ProviderErrorHelperTest {
   void testMapTransportException() {
     ProviderErrorHelper.FallbackMessages fallbacks =
         new ProviderErrorHelper.FallbackMessages(
-            "auth", "billing", "overflow", "invalid_req", "transient", "invalid_resp");
+            "auth", "billing", "context", "body_limit", "invalid_req", "transient", "invalid_resp");
 
     // null exception
     ProviderException exNull =

@@ -77,7 +77,7 @@ class ModelGroupFailureDeciderTest {
     assertEquals(
         ModelGroupFailureDecider.Action.DEDICATED_TERMINAL,
         ModelGroupFailureDecider.decide(
-            new ModelInvocationError(ProviderErrorKind.OVERFLOW, "too large"),
+            new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "too large"),
             GROUP,
             false,
             false));

@@ -29,9 +29,9 @@ class AnthropicErrorMapperTest {
   void preservesClassificationPrecedence() {
     assertMappedStatus(429, "{\"error\":{\"type\":\"auth\"}}", ProviderErrorKind.AUTHENTICATION);
     assertMappedStatus(
-        413, "{\"error\":{\"type\":\"context_overflow\"}}", ProviderErrorKind.OVERFLOW);
+        413, "{\"error\":{\"type\":\"context_overflow\"}}", ProviderErrorKind.CONTEXT_LIMIT);
     assertMappedStatus(
-        503, "{\"error\":{\"type\":\"request_too_large\"}}", ProviderErrorKind.INVALID_REQUEST);
+        503, "{\"error\":{\"type\":\"request_too_large\"}}", ProviderErrorKind.REQUEST_BODY_LIMIT);
   }
 
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
@@ -97,15 +97,15 @@ class AnthropicErrorMapperTest {
     // 402 / billing
     assertMappedStatus(402, "{\"error\":{\"type\":\"billing_error\"}}", ProviderErrorKind.BILLING);
 
-    // 413 / request_too_large -> INVALID_REQUEST
+    // 413 / request_too_large -> REQUEST_BODY_LIMIT
     assertMappedStatus(
-        413, "{\"error\":{\"type\":\"request_too_large\"}}", ProviderErrorKind.INVALID_REQUEST);
+        413, "{\"error\":{\"type\":\"request_too_large\"}}", ProviderErrorKind.REQUEST_BODY_LIMIT);
 
-    // context overflow -> OVERFLOW
+    // context overflow -> CONTEXT_LIMIT
     assertMappedStatus(
         400,
         "{\"error\":{\"type\":\"model_context_window_exceeded\"}}",
-        ProviderErrorKind.OVERFLOW);
+        ProviderErrorKind.CONTEXT_LIMIT);
 
     // 429 / overloaded / 5xx
     assertMappedStatus(
