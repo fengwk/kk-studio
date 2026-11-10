@@ -432,6 +432,34 @@ export interface OutboundNetwork {
 
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 
+/**
+ * cleanup failure 的类型标记。
+ *
+ * <p>释放失败按原始错误对象交付（调用方可依赖同一实例），同时登记到模块级标记表；判定一律用
+ * {@link isOutboundCleanupFailure}，绝不从 message 文案或 AggregateError 结构猜测。
+ */
+const cleanupFailures = new WeakSet<object>()
+
+function markOutboundCleanupFailure(error: unknown): void {
+  if (typeof error === 'object' && error !== null) {
+    cleanupFailures.add(error)
+  }
+}
+
+/** 按类型判定错误是否携带网络清理失败事实；聚合错误逐项检查，不解析 message。 */
+export function isOutboundCleanupFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false
+  }
+  if (cleanupFailures.has(error)) {
+    return true
+  }
+  if (error instanceof AggregateError) {
+    return error.errors.some((entry) => isOutboundCleanupFailure(entry))
+  }
+  return false
+}
+
 class DefaultOutboundNetwork implements OutboundNetwork {
   private readonly dispatchers = new Set<Dispatcher>()
   private readonly retires = new Map<Dispatcher, Promise<unknown>>()
@@ -616,8 +644,11 @@ class DefaultOutboundNetwork implements OutboundNetwork {
   }
 
   /**
-   * 移出活跃集合后关闭/销毁；每个 dispatcher 只 retire 一次，并发调用共享同一 Promise。
+   * 关闭/销毁独占 dispatcher；每个 dispatcher 只 retire 一次，并发调用共享同一 Promise。
    * 返回失败而非抛出；由 lifeAbort 触发的 expected request abort 不算 cleanup failure。
+   *
+   * <p>所有权只在真实关闭成功后移出 owned 集合：失败时 dispatcher 留在集合里，close 汇总必须仍统计它；
+   * 重复 close 等待同一收尾事实，第二次调用不会把第一次的失败变成伪成功。
    */
   private retire(dispatcher: Dispatcher, force: boolean): Promise<unknown> {
     const existing = this.retires.get(dispatcher)
@@ -629,17 +660,24 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     }
     this.retired.add(dispatcher)
     const promise = (async (): Promise<unknown> => {
-      this.dispatchers.delete(dispatcher)
       try {
         if (force) {
           await dispatcher.destroy()
         } else {
           await dispatcher.close()
         }
-        return undefined
       } catch (error) {
-        return isExpectedAbort(error, this.lifetime.signal.aborted) ? undefined : error
+        if (isExpectedAbort(error, this.lifetime.signal.aborted)) {
+          this.dispatchers.delete(dispatcher)
+          return undefined
+        }
+        // 关闭失败：所有权保留在 owned 集合中，close 汇总必须仍统计它；错误按原始实例交付并登记类型。
+        markOutboundCleanupFailure(error)
+        return error
       }
+      // 只有真实关闭成功才放弃所有权；close 的汇总以本集合为准。
+      this.dispatchers.delete(dispatcher)
+      return undefined
     })()
     this.retires.set(dispatcher, promise)
     const settle = (): void => {
@@ -656,7 +694,7 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     for (const dispatcher of [...this.dispatchers]) {
       void this.retire(dispatcher, true)
     }
-    // 等待所有 in-flight retire 真正 settle，再汇总其保留的 cleanup failure。
+    // 等待所有 in-flight retire 真正 settle，再按 owned 集合汇总其保留的 cleanup failure。
     const retireResults = await Promise.allSettled([...this.retires.values()])
     await Promise.allSettled([...this.inflight])
     const failures: unknown[] = []
@@ -667,6 +705,7 @@ class DefaultOutboundNetwork implements OutboundNetwork {
         failures.push(result.value)
       }
     }
+    // 关闭失败的 dispatcher 仍在本集合中：其 cleanup failure 已登记类型并按原始实例汇总，不静默吞掉。
     throwFailures(failures)
   }
 }

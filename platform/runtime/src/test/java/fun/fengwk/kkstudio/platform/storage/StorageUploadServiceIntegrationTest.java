@@ -362,6 +362,34 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         "declared size must be persisted exactly");
   }
 
+  /** 测试意图：登记 upload 行之后签票失败时，必须为已创建的行登记耐久清理请求，不能让调用方无诊断地等 TTL。 */
+  @Test
+  void reservePresignFailureRegistersDurableCleanupForTheCreatedUpload() {
+    s3Presigner.failNextCreateOnly(new IllegalStateException("kms unavailable"));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> reserve("orphan.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1})));
+
+    // 调用方拿不到 uploadId：耐久清理请求必须落在这一行上，并随后台回收收敛，而不是裸等 TTL。
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where cleanup_requested_at is not null",
+            Integer.class),
+        "post-registration signing failure must persist a durable cleanup request");
+    UUID uploadId =
+        jdbc.queryForObject(
+            "select id from storage_upload where cleanup_requested_at is not null", UUID.class);
+    // 签票失败发生在任何对象写入之前：行内没有已绑定的 blob。
+    assertNull(
+        jdbc.queryForObject(
+            "select blob_id from storage_upload where id = ?", UUID.class, uploadId));
+    // 后台回收按清理请求幂等收敛该行。
+    assertEquals(1, storageUploadService.expireOnce());
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+  }
+
   @Test
   void reserveHitReturnsReadyAndRetainsExistingBlob() {
     byte[] content = "hello".getBytes(StandardCharsets.UTF_8);
