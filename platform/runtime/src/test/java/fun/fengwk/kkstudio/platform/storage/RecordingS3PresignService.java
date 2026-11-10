@@ -32,18 +32,30 @@ public class RecordingS3PresignService extends S3PresignService {
   }
 
   private final List<PresignRecord> records = new ArrayList<>();
+  private RuntimeException nextCreateOnlyFailure;
 
   public synchronized void clear() {
     records.clear();
+    nextCreateOnlyFailure = null;
   }
 
   public synchronized List<PresignRecord> records() {
     return List.copyOf(records);
   }
 
+  /** 让下一次 checksummedCreateOnly 预签名抛出给定异常，用于模拟签票失败。 */
+  public synchronized void failNextCreateOnly(RuntimeException failure) {
+    this.nextCreateOnlyFailure = failure;
+  }
+
   @Override
   public synchronized S3PresignedUrl presignChecksummedCreateOnlyUpload(
       String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
+    if (nextCreateOnlyFailure != null) {
+      RuntimeException failure = nextCreateOnlyFailure;
+      nextCreateOnlyFailure = null;
+      throw failure;
+    }
     records.add(
         new PresignRecord(
             "checksummedCreateOnly", key, contentType, checksumSha256Base64, expiresInSeconds));

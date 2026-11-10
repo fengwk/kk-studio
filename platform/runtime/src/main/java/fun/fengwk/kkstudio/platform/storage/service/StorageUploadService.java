@@ -195,13 +195,24 @@ public class StorageUploadService {
 
     StoragePresignedUrlDTO presignedPut = null;
     if (outcome.blobId == null) {
-      S3PresignedUrl signed =
-          s3PresignService.presignChecksummedCreateOnlyUpload(
-              StorageObjectKeys.uploadOriginal(uploadId),
-              mediaType,
-              Base64.getEncoder().encodeToString(decodeHex(sha256)),
-              presignExpiresSeconds(media));
-      presignedPut = StoragePresignedUrls.from(signed);
+      try {
+        S3PresignedUrl signed =
+            s3PresignService.presignChecksummedCreateOnlyUpload(
+                StorageObjectKeys.uploadOriginal(uploadId),
+                mediaType,
+                Base64.getEncoder().encodeToString(decodeHex(sha256)),
+                presignExpiresSeconds(media));
+        presignedPut = StoragePresignedUrls.from(signed);
+      } catch (RuntimeException failure) {
+        // 上传行已登记但签票失败：调用方拿不到 uploadId，不能让它无诊断地等 TTL；
+        // 这里登记耐久清理请求，后台 TTL 继续兜底回收；清理请求本身失败不得掩盖签票失败。
+        try {
+          requestFailedStageCleanup(outcome.upload);
+        } catch (RuntimeException cleanupFailure) {
+          failure.addSuppressed(cleanupFailure);
+        }
+        throw failure;
+      }
     } else {
       generatePreviewBestEffort(outcome.blobId);
     }
