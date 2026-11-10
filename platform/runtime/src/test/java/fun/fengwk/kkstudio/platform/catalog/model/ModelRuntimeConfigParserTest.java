@@ -552,6 +552,61 @@ class ModelRuntimeConfigParserTest {
         parsed.variants().get(0));
   }
 
+  /** 可选 limit.input：合法值可 round-trip，非正数与超过 context 必须拒绝；缺省保持缺省。 */
+  @Test
+  void parsesOptionalInputLimitAndRejectsInvalidBounds() {
+    // input 大于 context 的原始 JSON：candidate 导入常见形态，必须拒绝而不是静默收敛。
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"limit\":{\"context\":128000,\"output\":8192}",
+                "\"limit\":{\"context\":128000,\"input\":128001,\"output\":8192}"),
+        "config.limit.input must not exceed limit.context");
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"limit\":{\"context\":128000,\"output\":8192}",
+                "\"limit\":{\"context\":128000,\"input\":0,\"output\":8192}"),
+        "config.limit.input must be a positive integer");
+
+    ModelConfigDTO valid =
+        parser.decode(
+            validConfig()
+                .replace(
+                    "\"limit\":{\"context\":128000,\"output\":8192}",
+                    "\"limit\":{\"context\":128000,\"input\":100000,\"output\":8192}"));
+    assertEquals(100000, valid.getLimit().getInput());
+    String encoded = parser.encode(valid);
+    assertTrue(encoded.contains("\"input\":100000"), encoded);
+    assertEquals(100000, parser.decode(encoded).getLimit().getInput());
+
+    // 缺省与显式 null 等价：decode 后都不参与 runtime，且 encode -> decode 保持等价。
+    // （canonical 编码是否写出 null 由注入 mapper 的 inclusion 决定，不属于 parser 契约。）
+    assertNull(parser.decode(validConfig()).getLimit().getInput());
+    ModelConfigDTO nullInput =
+        parser.decode(
+            validConfig()
+                .replace(
+                    "\"limit\":{\"context\":128000,\"output\":8192}",
+                    "\"limit\":{\"context\":128000,\"input\":null,\"output\":8192}"));
+    assertNull(nullInput.getLimit().getInput());
+    assertNull(parser.decode(parser.encode(nullInput)).getLimit().getInput());
+
+    // input 与 output 一样拒绝字符串与小数形态。
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"limit\":{\"context\":128000,\"output\":8192}",
+                "\"limit\":{\"context\":128000,\"input\":\"100000\",\"output\":8192}"),
+        "limit.input");
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"limit\":{\"context\":128000,\"output\":8192}",
+                "\"limit\":{\"context\":128000,\"input\":100000.5,\"output\":8192}"),
+        "limit.input");
+  }
+
   /** 缺失字段、错误的 JSON 类型、未知枚举与无效 variant 都明确失败。 */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {

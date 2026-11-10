@@ -385,6 +385,42 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(undefined)).toBe('')
   })
 
+  /** 可选输入上限：读取 null/缺省为空串，填写合法值写入 wire，空白省略，非法值拒绝。 */
+  it('round-trips the optional input limit and omits blank values', () => {
+    // 持久化 config 带 input：读入表单并在重新序列化后保留。
+    const withInput = model({ ...fullConfig(), limit: { context: 200000, input: 150000, output: 16000 } })
+    const loaded = toModelDraft(withInput)
+    expect(loaded.inputLimit).toBe('150000')
+    expect(buildModelConfig(loaded).limit).toEqual({ context: 200000, input: 150000, output: 16000 })
+
+    // config.limit.input 缺省（generated 契约允许缺字段）：表单为空串，wire 省略 input 键。
+    const withoutInput = model()
+    expect(toModelDraft(withoutInput).inputLimit).toBe('')
+    expect(buildModelConfig(toModelDraft(withoutInput)).limit).toEqual({ context: 200000, output: 16000 })
+    expect(buildModelConfig(toModelDraft(withoutInput)).limit).not.toHaveProperty('input')
+
+    // 空白输入与空串等价：省略 wire 字段。
+    const blank = draft({ inputLimit: '   ' })
+    expect(buildModelConfig(blank).limit).not.toHaveProperty('input')
+
+    // 非正整数、非数字与超过 context 的输入在提交前被拒绝。
+    expect(() => buildModelConfig(draft({ inputLimit: '0' }))).toThrow(
+      'config.limit.input must be a positive integer',
+    )
+    expect(() => buildModelConfig(draft({ inputLimit: '-5' }))).toThrow(
+      'config.limit.input must be a positive integer',
+    )
+    expect(() => buildModelConfig(draft({ inputLimit: '1.5' }))).toThrow(
+      'config.limit.input must be a positive integer',
+    )
+    expect(() => buildModelConfig(draft({ inputLimit: '999999999999999999999' }))).toThrow(
+      'config.limit.input must be a safe positive integer',
+    )
+    expect(() => buildModelConfig(draft({ inputLimit: '200001' }))).toThrow(
+      'config.limit.input must not exceed limit.context',
+    )
+  })
+
   /** 缺失 config 的不可信模型输入不得让投影崩溃。 */
   it('tolerates models whose structured config is missing', () => {
     const incomplete = { name: 'broken', providerName: 'broken' }

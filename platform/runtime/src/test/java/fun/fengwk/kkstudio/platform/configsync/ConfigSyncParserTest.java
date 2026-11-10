@@ -370,6 +370,44 @@ class ConfigSyncParserTest {
     assertEquals("m", document.models().get(0).name());
   }
 
+  /** 模型 config 的可选 limit.input 是 known 字段：合法值随 config 解析，非法值走硬校验拒绝。 */
+  @Test
+  void modelConfigInputLimitRoundTripsThroughKnownValidation() {
+    // fixture limit: {context: 1000, output: 100}；合法 input 追加为普通整数字段。
+    String yaml =
+        "providers:\n"
+            + provider("p", "openai")
+            + "models:\n"
+            + "  - kind: MODEL\n    providerName: p\n"
+            + "    name: m\n"
+            + "    modelId: gpt\n"
+            + VALID_MODEL_CONFIG.replace(
+                "      limit: {context: 1000, output: 100}",
+                "      limit: {context: 1000, input: 100, output: 100}");
+    ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
+
+    assertEquals(
+        List.of(),
+        document.skipped().stream().map(Object::toString).toList(),
+        () -> "model entry must not be skipped: " + yaml);
+    assertEquals(1, document.models().size());
+    assertEquals(100, document.models().get(0).config().getLimit().getInput());
+
+    // input 超过 context 属于已知非法值：必须硬拒绝，而不是当作未知字段静默 skip。
+    String invalidInputYaml =
+        "providers:\n"
+            + provider("p", "openai")
+            + "models:\n"
+            + "  - kind: MODEL\n    providerName: p\n"
+            + "    name: m\n"
+            + "    modelId: gpt\n"
+            + VALID_MODEL_CONFIG.replace(
+                "      limit: {context: 1000, output: 100}",
+                "      limit: {context: 1000, input: 1001, output: 100}");
+    assertNotEquals(yaml, invalidInputYaml, "invalid mutation must change the document");
+    assertThrows(DomainException.class, () -> parser.parse(invalidInputYaml));
+  }
+
   /** 意图：类别不是 list、条目不是 map 都属于结构错误而非条目 skip。 */
   @Test
   void nonListCategoryAndNonMapEntryAreHardErrors() {

@@ -2014,6 +2014,7 @@ export interface ModelCatalogCandidateDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogLimitDTO */
 export interface ModelCatalogLimitDTO {
   context?: number | null
+  input?: number | null
   output?: number | null
 }
 
@@ -2121,6 +2122,7 @@ export const MODEL_INPUT_MODALITY_VALUES: readonly ModelInputModality[] = [
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO */
 export interface ModelLimitDTO {
   context: number
+  input?: number | null
   output: number
 }
 

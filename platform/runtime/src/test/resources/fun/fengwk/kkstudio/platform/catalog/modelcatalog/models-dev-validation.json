@@ -5,7 +5,7 @@
       "capable": {
         "id": "capable",
         "name": "Capable Model",
-        "limit": { "context": 128000, "output": 8192 },
+        "limit": { "context": 128000, "input": 272000, "output": 8192 },
         "capabilities": { "tools": false, "reasoning": true },
         "modalities": { "input": ["text", "image", "application/pdf", "unknown"] },
         "cost": {
@@ -23,6 +23,14 @@
         "cost": { "text": { "input": { "price": 1 }, "output": { "price": 2 } } }
       },
       "no-cost": {},
+      "input-limit-only": {
+        "limit": { "input": 272000 },
+        "cost": { "text": { "input": { "price": 1 }, "output": { "price": 2 } } }
+      },
+      "input-limit-invalid": {
+        "limit": { "context": 128000, "input": "272000", "output": 8192 },
+        "cost": { "text": { "input": { "price": 1 }, "output": { "price": 2 } } }
+      },
       "null-prices": {
         "cost": { "text": { "input": { "price": null }, "output": {} } }
       },

@@ -217,6 +217,24 @@ export function ModelForm({
               <span className="field-error">{fieldErrors.contextWindow}</span>
             ) : null}
           </label>
+          <label className={`form-group${fieldErrors.inputLimit ? ' is-error' : ''}`}>
+            <FieldLabel>{t('ai.catalog.form.inputLimit')}</FieldLabel>
+            <NumberInput
+              value={draft.inputLimit}
+              min={1}
+              placeholder="272000"
+              onChange={(inputLimit) => onChange({ ...draft, inputLimit })}
+              aria-label={t('ai.catalog.form.inputLimit')}
+              aria-describedby="model-input-limit-hint"
+              invalid={Boolean(fieldErrors.inputLimit)}
+            />
+            <span id="model-input-limit-hint" className="inline-hint">
+              {t('ai.catalog.form.inputLimitHint')}
+            </span>
+            {fieldErrors.inputLimit ? (
+              <span className="field-error">{fieldErrors.inputLimit}</span>
+            ) : null}
+          </label>
           <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
             <FieldLabel required>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
             <NumberInput

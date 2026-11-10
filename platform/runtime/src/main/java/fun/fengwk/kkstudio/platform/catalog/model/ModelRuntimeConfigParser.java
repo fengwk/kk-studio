@@ -204,6 +204,12 @@ public final class ModelRuntimeConfigParser {
     if (limit.getOutput() > limit.getContext()) {
       throw invalid("config.limit.output must not exceed limit.context");
     }
+    if (limit.getInput() != null && limit.getInput() <= 0) {
+      throw invalid("config.limit.input must be a positive integer");
+    }
+    if (limit.getInput() != null && limit.getInput() > limit.getContext()) {
+      throw invalid("config.limit.input must not exceed limit.context");
+    }
   }
 
   private static ModelAbilitiesDTO validateAbilities(ModelAbilitiesDTO abilities) {

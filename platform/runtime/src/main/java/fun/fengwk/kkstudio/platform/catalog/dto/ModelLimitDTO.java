@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /** Agent 模型配置携带的 Token 限制；{@code output} 必须满足 {@code <= context}。 */
 @Data
@@ -11,6 +12,9 @@ public class ModelLimitDTO {
    * 配置为字符串序列化的影响。
    */
   private Integer context;
+
+  /** 可选的单独输入上限；声明时必须满足 {@code > 0} 且 {@code <= context}。缺省表示输入只受上下文窗口约束。 */
+  private @Nullable Integer input;
 
   /** 每轮最大输出 Token 数；必须满足 {@code > 0} 且 {@code <= context}。 */
   private Integer output;
