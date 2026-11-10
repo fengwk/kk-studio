@@ -35,6 +35,8 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
@@ -129,6 +131,15 @@ class PluginRuntimeToolCatalogSourceTest {
 
     when(currentHarnessCatalog.tools()).thenReturn(List.of(pluginTool, builtinTool));
     when(currentHarnessCatalog.selectableTools()).thenReturn(List.of(pluginTool, builtinTool));
+    // 生产 Lease 会读取快照冻结的 contributor provider；这里提供与setUp中两个 contributor 一致的映射。
+    when(currentSnapshot.providers())
+        .thenReturn(
+            Map.of(
+                PLUGIN_CONTRIBUTOR_ID,
+                new ToolProviderDTO(ToolProviderKind.PLUGIN, PLUGIN_ID, "Demo Plugin"),
+                BUILTIN_CONTRIBUTOR_ID,
+                new ToolProviderDTO(
+                    ToolProviderKind.APP, BUILTIN_CONTRIBUTOR_ID.value(), "Test Host")));
 
     when(runtime.acquire()).thenReturn(currentRuntimeLease);
   }
@@ -222,18 +233,34 @@ class PluginRuntimeToolCatalogSourceTest {
             ToolRequirements.none());
 
     when(mcpSnapshot.plannableTools()).thenReturn(List.of(mcpSelectable, mcpPlannableOnly));
-    when(mcpSnapshot.selectableTools()).thenReturn(List.of(mcpSelectable));
+    when(mcpSnapshot.selectableTools())
+        .thenReturn(List.of(new SelectableTool(mcpSelectable, McpToolCatalog.provider("github"))));
 
     PluginRuntimeToolCatalogSource source = new PluginRuntimeToolCatalogSource(runtime, mcpCatalog);
     RuntimeToolCatalogSource.Lease lease = source.acquire();
     RuntimeToolCatalog catalog = lease.catalog();
 
-    List<ToolContribution> selectables = catalog.selectableTools();
+    List<SelectableTool> selectables = catalog.selectableTools();
     assertEquals(2, selectables.size());
-    assertTrue(selectables.contains(pluginTool));
-    assertTrue(selectables.contains(mcpSelectable));
-    assertFalse(selectables.contains(internalHarness));
-    assertFalse(selectables.contains(mcpPlannableOnly));
+    assertTrue(selectables.stream().anyMatch(s -> s.contribution() == pluginTool));
+    assertTrue(selectables.stream().anyMatch(s -> s.contribution() == mcpSelectable));
+    // 选择面上的 MCP 工具带 MCP provider，Harness 工具带快照冻结的 PLUGIN provider。
+    assertEquals(
+        new ToolProviderDTO(ToolProviderKind.PLUGIN, PLUGIN_ID, "Demo Plugin"),
+        selectables.stream()
+            .filter(s -> s.contribution() == pluginTool)
+            .findFirst()
+            .orElseThrow()
+            .provider());
+    assertEquals(
+        McpToolCatalog.provider("github"),
+        selectables.stream()
+            .filter(s -> s.contribution() == mcpSelectable)
+            .findFirst()
+            .orElseThrow()
+            .provider());
+    assertFalse(selectables.stream().anyMatch(s -> s.contribution() == internalHarness));
+    assertFalse(selectables.stream().anyMatch(s -> s.contribution() == mcpPlannableOnly));
 
     Optional<ToolContribution> foundPlugin = catalog.findTool("echo-tool");
     assertTrue(foundPlugin.isPresent());

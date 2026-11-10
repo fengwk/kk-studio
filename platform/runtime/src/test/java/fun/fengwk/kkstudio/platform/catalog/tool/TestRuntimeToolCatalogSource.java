@@ -3,12 +3,19 @@ package fun.fengwk.kkstudio.platform.catalog.tool;
 import static org.mockito.Mockito.mock;
 
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -36,12 +43,43 @@ public final class TestRuntimeToolCatalogSource implements RuntimeToolCatalogSou
     return of(harnessCatalog, emptyMcpCatalog());
   }
 
-  /** 冻结给定 Harness 目录与 MCP 目录的 source。 */
+  /**
+   * 冻结给定 Harness 目录与 MCP 目录的 source。
+   *
+   * <p>Harness provider 由 {@code builtin} contributor 的固定 provider 推导，与其余 contributor 的 provider
+   * 显式给出。
+   */
   public static TestRuntimeToolCatalogSource of(
       HarnessCatalog harnessCatalog, McpToolCatalog mcpCatalog) {
+    return of(harnessCatalog, Map.of(), mcpCatalog);
+  }
+
+  /**
+   * 冻结给定 Harness 目录、显式 provider 映射与 MCP 目录的 source。
+   *
+   * <p>与生产 PluginCatalogSnapshot 同构：{@code builtin} contributor 固定为 BUILTIN，显式映射之外其余 contributor 视为
+   * APP，显示名取 contributor descriptor。
+   */
+  public static TestRuntimeToolCatalogSource of(
+      HarnessCatalog harnessCatalog,
+      Map<ContributorId, ToolProviderDTO> explicitProviders,
+      McpToolCatalog mcpCatalog) {
+    Map<ContributorId, ToolProviderDTO> providers = new LinkedHashMap<>(explicitProviders);
+    for (ContributorDescriptor descriptor : harnessCatalog.descriptors()) {
+      providers.computeIfAbsent(
+          descriptor.id(),
+          id ->
+              new ToolProviderDTO(
+                  BuiltinHarnessContributor.ID.equals(id)
+                      ? ToolProviderKind.BUILTIN
+                      : ToolProviderKind.APP,
+                  id.value(),
+                  descriptor.name()));
+    }
     return new TestRuntimeToolCatalogSource(
         harnessCatalog,
-        PluginRuntimeToolCatalogSource.FrozenRuntimeToolCatalog.freeze(harnessCatalog, mcpCatalog));
+        PluginRuntimeToolCatalogSource.FrozenRuntimeToolCatalog.freeze(
+            harnessCatalog, providers, mcpCatalog));
   }
 
   /** 只含 MCP 工具的 source。 */

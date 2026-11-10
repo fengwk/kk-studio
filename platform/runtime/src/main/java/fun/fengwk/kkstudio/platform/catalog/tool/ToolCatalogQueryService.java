@@ -33,7 +33,8 @@ public class ToolCatalogQueryService {
     }
   }
 
-  private static ToolCatalogEntryDTO toDto(ToolContribution contribution) {
+  private static ToolCatalogEntryDTO toDto(SelectableTool selectable) {
+    ToolContribution contribution = selectable.contribution();
     ToolDescriptor descriptor = contribution.definition().descriptor();
     ToolRequirements requirements = contribution.requirements();
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
@@ -41,6 +42,7 @@ public class ToolCatalogQueryService {
     dto.setDescription(descriptor.description());
     dto.setEnvironmentSupport(
         requirements == null ? EnvironmentSupport.NONE : requirements.environmentSupport());
+    dto.setProvider(selectable.provider());
     return dto;
   }
 }

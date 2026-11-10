@@ -120,6 +120,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.SelectableTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
@@ -1210,9 +1211,7 @@ class DatabaseTurnResolverTest {
         boolean selectable = enabled && status == McpDiscoveryStatus.AVAILABLE;
         assertEquals(
             selectable ? List.of("mcp_srv_echo", "mcp_srv_sibling") : List.of(),
-            mcpCatalog.selectableTools().stream()
-                .map(contribution -> contribution.definition().descriptor().name())
-                .toList(),
+            mcpCatalog.selectableTools().stream().map(SelectableTool::name).toList(),
             "status=" + status + " enabled=" + enabled);
 
         Fixture fixture =
