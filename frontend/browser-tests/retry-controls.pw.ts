@@ -65,11 +65,14 @@ test('provider and system settings retry controls render correct theme, borders,
     const focusRing = await tokenColor(page, '--focus-ring')
     await providerTagInputField.focus()
     await expect(providerTagInput).toHaveCSS('border-top-color', accent)
-    expect(await providerTagInput.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(focusRing)
+    // border 与 shadow 的过渡独立完成；等待最终焦点色，不在动画中途单次采样。
+    await expect.poll(() => providerTagInput.evaluate((el) => getComputedStyle(el).boxShadow))
+      .toContain(focusRing)
 
     await settingsTagInputField.focus()
     await expect(settingsTagInput).toHaveCSS('border-top-color', accent)
-    expect(await settingsTagInput.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(focusRing)
+    await expect.poll(() => settingsTagInput.evaluate((el) => getComputedStyle(el).boxShadow))
+      .toContain(focusRing)
 
     // 3. Verify tag Enter and X removal interactions in ProviderForm
     await providerTagInputField.fill('502')

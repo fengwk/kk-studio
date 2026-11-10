@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonControlChannel;
@@ -199,10 +200,11 @@ class EnvironmentDaemonWebSocketIntegrationTest {
           h.put("Authorization", "Bearer " + TEST_TOKEN);
           h.put("KK-Daemon-Instance", TEST_INSTANCE);
           h.put("KK-Environment-Id", TEST_ENV.value().toString());
-          h.put("KK-Daemon-Protocol", "2");
+          h.put("KK-Daemon-Protocol", Integer.toString(ControlProtocolCodec.PROTOCOL_VERSION));
         });
 
-    upgradeRequest.sendAsync();
+    // 等待真实升级结果；协议被拒绝时直接报告握手异常，而非等待不会到来的 onOpen。
+    upgradeRequest.sendAsync().get(5, TimeUnit.SECONDS);
     CoreSession session = openFuture.get(5, TimeUnit.SECONDS);
     assertNotNull(session);
 
@@ -261,10 +263,10 @@ class EnvironmentDaemonWebSocketIntegrationTest {
           h.put("Authorization", "Bearer " + TEST_TOKEN);
           h.put("KK-Daemon-Instance", TEST_INSTANCE);
           h.put("KK-Environment-Id", TEST_ENV.value().toString());
-          h.put("KK-Daemon-Protocol", "2");
+          h.put("KK-Daemon-Protocol", Integer.toString(ControlProtocolCodec.PROTOCOL_VERSION));
         });
 
-    upgradeRequest.sendAsync();
+    upgradeRequest.sendAsync().get(5, TimeUnit.SECONDS);
     CoreSession session = openFuture.get(5, TimeUnit.SECONDS);
     assertNotNull(session);
 
@@ -286,10 +288,10 @@ class EnvironmentDaemonWebSocketIntegrationTest {
           h.put("Authorization", "Bearer " + TEST_TOKEN);
           h.put("KK-Daemon-Instance", TEST_INSTANCE);
           h.put("KK-Environment-Id", TEST_ENV.value().toString());
-          h.put("KK-Daemon-Protocol", "2");
+          h.put("KK-Daemon-Protocol", Integer.toString(ControlProtocolCodec.PROTOCOL_VERSION));
         });
 
-    upgradeRequest.sendAsync();
+    upgradeRequest.sendAsync().get(5, TimeUnit.SECONDS);
     CoreSession session = openFuture.get(5, TimeUnit.SECONDS);
     assertNotNull(session);
 
