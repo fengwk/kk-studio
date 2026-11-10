@@ -22,6 +22,7 @@ export type ResourceFieldKey =
   | 'providerName'
   | 'baseUrl'
   | 'contextWindow'
+  | 'inputLimit'
   | 'maxOutputTokens'
   | 'inputModalities'
   | 'variants'
@@ -61,6 +62,10 @@ function mapError(error: unknown): ResourceFormValidationResult {
   }
   if (/variant|defaultVariant/i.test(raw)) {
     return { ok: false, message, fields: { variants: message, defaultVariant: message } }
+  }
+  // limit.input 的“must not exceed”必须先于 maxOutputTokens 的 exceed 规则命中，否则被吞掉。
+  if (/limit\.input|inputLimit/i.test(raw)) {
+    return { ok: false, message, fields: { inputLimit: message } }
   }
   if (/maxOutputTokens|limit\.output|exceed/i.test(raw)) {
     return { ok: false, message, fields: { maxOutputTokens: message } }

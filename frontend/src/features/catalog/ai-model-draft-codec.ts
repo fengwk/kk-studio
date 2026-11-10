@@ -13,6 +13,7 @@ import type {
   ModelConfigDTO,
   ModelDTO,
   ModelInputModality,
+  ModelLimitDTO,
   ModelVariantDTO,
   ProviderDTO,
   SingleModelCreateDTO,
@@ -40,6 +41,7 @@ export function emptyModelDraft(
     modelId: '',
     description: '',
     contextWindow: '128000',
+    inputLimit: '',
     maxOutputTokens: '8192',
     tools: true,
     reasoning: false,
@@ -99,6 +101,7 @@ export function toModelDraft(model: ModelDTO): ModelDraft {
     modelId: model.modelId ?? '',
     description: model.description || '',
     contextWindow: String(config.limit.context),
+    inputLimit: config.limit.input == null ? '' : String(config.limit.input),
     maxOutputTokens: String(config.limit.output),
     tools: config.abilities.tools,
     reasoning: config.abilities.reasoning,
@@ -187,6 +190,14 @@ export function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
   if (maxOutputTokens > contextWindow) {
     throw new Error('config.limit.output must not exceed limit.context')
   }
+  // 空白表示未设置：wire 上省略 limit.input，交给后端按“只受上下文窗口约束”处理。
+  const inputLimitValue = draft.inputLimit.trim()
+  const inputLimit = inputLimitValue
+    ? requirePositiveInt(inputLimitValue, 'config.limit.input')
+    : undefined
+  if (inputLimit !== undefined && inputLimit > contextWindow) {
+    throw new Error('config.limit.input must not exceed limit.context')
+  }
   const modalities = normalizeModalities(draft.inputModalities, 'config.abilities.inputModalities')
 
   const variants = serializeVariants(draft.variants, draft.reasoning)
@@ -195,8 +206,13 @@ export function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
     throw new Error('config.defaultVariant must match a variant id')
   }
 
+  const limit: ModelLimitDTO =
+    inputLimit === undefined
+      ? { context: contextWindow, output: maxOutputTokens }
+      : { context: contextWindow, input: inputLimit, output: maxOutputTokens }
+
   return {
-    limit: { context: contextWindow, output: maxOutputTokens },
+    limit,
     abilities: {
       tools: draft.tools,
       reasoning: draft.reasoning,

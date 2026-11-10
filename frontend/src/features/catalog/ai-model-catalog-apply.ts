@@ -21,6 +21,9 @@ export function applyCatalogCandidate(
   if (candidate.limit?.context != null) {
     next.contextWindow = String(candidate.limit.context)
   }
+  if (candidate.limit?.input != null) {
+    next.inputLimit = String(candidate.limit.input)
+  }
   if (candidate.limit?.output != null) {
     next.maxOutputTokens = String(candidate.limit.output)
   }
