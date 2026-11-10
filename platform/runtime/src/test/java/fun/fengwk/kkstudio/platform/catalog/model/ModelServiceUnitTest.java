@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
@@ -321,6 +322,63 @@ class ModelServiceUnitTest {
     assertThrows(
         DomainException.class,
         () -> service.toDto(group.toBuilder().groupConfigJson(null).version(0L).build()));
+  }
+
+  /** 组输入上限按声明成员取最小值：无成员声明保持缺省，最小值不小于派生上下文时不产出无意义的上限。 */
+  @Test
+  void derivesGroupInputLimitFromDeclaredMembersOnly() {
+    // 无成员声明 limit.input：派生 limit 不带 input。
+    stubMember(existing("plain-a", 0L));
+    stubMember(existing("plain-b", 0L));
+    Model noInput =
+        createAndCapture(
+            groupCreate("no-input", member("plain-a", "default"), member("plain-b", "default")));
+    assertNull(derivedLimit(noInput).getInput());
+
+    // 只有部分成员声明：取声明成员的最小值。
+    ModelConfigDTO declared = declaredWithInput(10000);
+    stubMember(existing("input-10k", 0L).toBuilder().configJson(parser.encode(declared)).build());
+    stubMember(
+        existing("input-20k", 0L).toBuilder()
+            .configJson(parser.encode(declaredWithInput(20000)))
+            .build());
+    Model partial =
+        createAndCapture(
+            groupCreate(
+                "partial-input", member("input-10k", "default"), member("input-20k", "default")));
+    assertEquals(10000, derivedLimit(partial).getInput());
+
+    // 声明成员的最小值不小于派生 context：保持缺省。
+    // 派生 context 取成员最小 4096，声明的 input 最小值也是 4096，上限相对派生窗口无意义。
+    ModelConfigDTO tighterContext = validConfig();
+    tighterContext.getLimit().setContext(4096);
+    tighterContext.getLimit().setOutput(4096);
+    tighterContext.getLimit().setInput(4096);
+    stubMember(
+        existing("small-ctx", 0L).toBuilder().configJson(parser.encode(tighterContext)).build());
+    stubMember(
+        existing("wide-input", 0L).toBuilder()
+            .configJson(parser.encode(declaredWithInput(32768)))
+            .build());
+    Model bounded =
+        createAndCapture(
+            groupCreate(
+                "bounded-input", member("wide-input", "default"), member("small-ctx", "default")));
+    ModelGroupDTO boundedDto =
+        (ModelGroupDTO) service.toDto(bounded.toBuilder().version(0L).build());
+    assertEquals(4096, boundedDto.getConfig().getLimit().getContext());
+    assertNull(boundedDto.getConfig().getLimit().getInput());
+  }
+
+  private static ModelConfigDTO declaredWithInput(int input) {
+    ModelConfigDTO config = validConfig();
+    config.getLimit().setInput(input);
+    return config;
+  }
+
+  private ModelLimitDTO derivedLimit(Model group) {
+    ModelGroupDTO dto = (ModelGroupDTO) service.toDto(group.toBuilder().version(0L).build());
+    return dto.getConfig().getLimit();
   }
 
   private Model createAndCapture(ModelCreateDTO create) {
