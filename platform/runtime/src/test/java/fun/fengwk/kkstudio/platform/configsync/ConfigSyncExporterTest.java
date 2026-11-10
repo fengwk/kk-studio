@@ -12,12 +12,14 @@ import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapsho
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshotWithPlugins;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
@@ -221,6 +223,43 @@ class ConfigSyncExporterTest {
     assertFalse(document.containsKey("models"));
     assertFalse(document.containsKey("agents"));
     assertFalse(document.containsKey("settings"));
+  }
+
+  /** 导出的模型 config 携带可选 limit.input，重新导入得到等价配置：带 input 的保留，无 input 的保持无值。 */
+  @Test
+  void modelExportCarriesOptionalInputLimit() {
+    Model withInput =
+        ConfigSyncFixtures.model("p", "m", ConfigSyncFixtures.modelConfigWithInputLimit(500));
+    Model withoutInput = ConfigSyncFixtures.model("p", "plain");
+    ConfigSyncSnapshot snapshot =
+        snapshot(
+            List.of(),
+            List.of(withInput, withoutInput),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of());
+
+    String yamlText =
+        exporter.export(
+            snapshot,
+            List.of(
+                new ConfigSyncRef(ConfigSyncKind.MODELS, "m"),
+                new ConfigSyncRef(ConfigSyncKind.MODELS, "plain")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> models = (List<Map<String, Object>>) document.get("models");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> inputLimit =
+        (Map<String, Object>) ((Map<String, Object>) models.get(0).get("config")).get("limit");
+    assertEquals(500, inputLimit.get("input"));
+
+    ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
+    List<ConfigSyncParser.ModelSpec> specs = parser.parse(yamlText).models();
+    assertEquals(500, specs.get(0).config().getLimit().getInput());
+    assertNull(specs.get(1).config().getLimit().getInput());
   }
 
   @Test

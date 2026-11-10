@@ -214,6 +214,13 @@ final class ConfigSyncFixtures {
     return config;
   }
 
+  /** 带 limit.input 的模型配置；input 为 0 时表示显式非法值，用于未知字段不得绕过硬校验的用例。 */
+  static ModelConfigDTO modelConfigWithInputLimit(int input) {
+    ModelConfigDTO config = modelConfig();
+    config.getLimit().setInput(input);
+    return config;
+  }
+
   static AgentConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
     AgentConfigDTO config = new AgentConfigDTO();
