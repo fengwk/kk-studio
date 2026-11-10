@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * USER_MESSAGE 内容的共享规范化：正式发送 preflight 与只读请求预览复用同一份「ATTACHMENT 换算 + Session 归属校验 + imageTier
@@ -54,14 +55,20 @@ public final class UserMessageContentPreparer {
   private final SessionBlobRefManager refManager;
   private final StorageBlobManager blobManager;
   private final ReadyAttachmentSource attachmentSource;
+  private final Supplier<ImageInputTier> defaultImageTier;
 
+  /**
+   * @param defaultImageTier 未显式选择档位的图片使用的档位（系统设置 {@code media.imageTier} 的当前值）
+   */
   public UserMessageContentPreparer(
       SessionBlobRefManager refManager,
       StorageBlobManager blobManager,
-      ReadyAttachmentSource attachmentSource) {
+      ReadyAttachmentSource attachmentSource,
+      Supplier<ImageInputTier> defaultImageTier) {
     this.refManager = Objects.requireNonNull(refManager, "refManager");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.attachmentSource = Objects.requireNonNull(attachmentSource, "attachmentSource");
+    this.defaultImageTier = Objects.requireNonNull(defaultImageTier, "defaultImageTier");
   }
 
   /** 转换整个 batch 的 USER_MESSAGE 内容；非 USER_MESSAGE 命令原样保留。 */
@@ -109,9 +116,6 @@ public final class UserMessageContentPreparer {
     if (!refManager.contains(sessionId, resource.blobId())) {
       throw DomainException.validation("resource", "Resource is not owned by the current session");
     }
-    if (resource.imageTier() == null) {
-      return resource;
-    }
     ImageInputTier imageTier = imageTierForBlob(resource.blobId(), resource.imageTier());
     if (imageTier == resource.imageTier()) {
       return resource;
@@ -121,8 +125,8 @@ public final class UserMessageContentPreparer {
   }
 
   /**
-   * 只有图片媒体真正使用档位：wire 上的档位对 ATTACHMENT/RESOURCE 缺省即 720P，非图片媒体在这里收敛为 null，绝不持久化 无意义的档位（音频、视频、PDF
-   * 与外部化文本都不携带档位）。
+   * 只有图片媒体真正使用档位：wire 上的档位对 ATTACHMENT/RESOURCE 缺省即系统设置的默认档位，非图片媒体在这里收敛为 null，绝不持久化
+   * 无意义的档位（音频、视频、PDF 与外部化文本都不携带档位）。
    */
   private ImageInputTier imageTierForBlob(UUID blobId, ImageInputTier requested) {
     StorageBlob blob = blobManager.getBlob(blobId);
@@ -132,6 +136,6 @@ public final class UserMessageContentPreparer {
         || !blob.getMediaType().startsWith("image/")) {
       return null;
     }
-    return requested == null ? ImageInputTier.P720 : requested;
+    return requested == null ? defaultImageTier.get() : requested;
   }
 }

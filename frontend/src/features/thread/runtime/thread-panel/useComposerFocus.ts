@@ -7,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from 'react'
-import { placeCaretAtEnd } from '@/features/thread/composer/composer-dom'
+import { isEditorComposing, placeCaretAtEnd } from '@/features/thread/composer/composer-dom'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 
 const MAX_FOCUS_ATTEMPTS = 5
@@ -149,6 +149,11 @@ export function useComposerFocus({
           if (attempt < MAX_FOCUS_ATTEMPTS) {
             scheduleFocus(attempt + 1, FOCUS_RETRY_DELAY_MS)
           }
+          return
+        }
+        if (isEditorComposing(el)) {
+          // 组合期间不强制 focus、不移动光标：组合态归输入法所有，
+          // 外部改动与焦点恢复统一等到 compositionend 之后。
           return
         }
         if (document.activeElement !== el) {

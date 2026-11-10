@@ -212,16 +212,15 @@ class HarnessRuntimeRequestMapperCommandTest {
   }
 
   /**
-   * 图片输入档位的 wire 契约：ATTACHMENT / RESOURCE 缺省即平台默认 720P，显式取值必须无损映射。
+   * 图片输入档位的 wire 契约：ATTACHMENT / RESOURCE 缺省保持未指定（由命令接受边界按系统设置补齐），显式取值必须无损映射。
    *
-   * <p>测试意图：档位决定真正送达的像素尺寸，因此缺省绝不能被解释成「原图」。
+   * <p>测试意图：档位决定真正送达的像素尺寸，因此缺省绝不能在 wire 层被解释成任何具体档位，尤其不能是「原图」。
    */
   @Test
-  void mapsUserContentImageTierWithPlatformDefault() {
+  void mapsUserContentImageTierLeavingDefaultToSettings() {
     HarnessUserMessageContentDTO attachment =
         new HarnessUserMessageContentDTO.AttachmentDTO(idText(70), null);
-    assertEquals(
-        ImageInputTier.P720,
+    assertNull(
         assertInstanceOf(AttachmentMessageContent.class, mapContent(attachment)).imageTier());
 
     attachment =
@@ -234,7 +233,7 @@ class HarnessRuntimeRequestMapperCommandTest {
         new HarnessUserMessageContentDTO.ResourceDTO(idText(71), "photo.png", null, null);
     ResourceMessageContent defaultTier =
         assertInstanceOf(ResourceMessageContent.class, mapContent(resource));
-    assertEquals(ImageInputTier.P720, defaultTier.imageTier());
+    assertNull(defaultTier.imageTier());
     assertEquals("photo.png", defaultTier.name());
 
     resource =

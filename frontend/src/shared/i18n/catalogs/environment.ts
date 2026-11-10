@@ -42,6 +42,42 @@ export const environmentCatalog = {
     'en-US': 'Connection lost. Reconnecting; the IDE will resume automatically.',
     'zh-CN': '连接已断开，正在重连，IDE 将自动恢复。',
   },
+  'ai.ide.connecting': {
+    'en-US': 'Connecting to the live event stream...',
+    'zh-CN': '正在建立实时事件连接…',
+  },
+  'ai.ide.connectionReady': {
+    'en-US': 'Live updates connected.',
+    'zh-CN': '实时事件已连接。',
+  },
+  'ai.ide.backoffReconnecting': {
+    'en-US': 'Connection lost; reconnecting automatically.',
+    'zh-CN': '连接已断开，正在自动重连。',
+  },
+  'ai.ide.backoffHandshake': {
+    'en-US': 'The event connection did not finish its handshake; retrying.',
+    'zh-CN': '事件连接握手未完成，正在重试。',
+  },
+  'ai.ide.backoffLiveness': {
+    'en-US': 'The event connection stopped responding; reconnecting.',
+    'zh-CN': '事件连接失去响应，正在重连。',
+  },
+  'ai.ide.backoffServerRestart': {
+    'en-US': 'The server is restarting; reconnecting.',
+    'zh-CN': '服务正在重启，正在重连。',
+  },
+  'ai.ide.stoppedProtocol': {
+    'en-US': 'The event connection was closed for a protocol error. Reload the page to reconnect.',
+    'zh-CN': '事件连接因协议错误被关闭，请刷新页面后重连。',
+  },
+  'ai.ide.stoppedPolicy': {
+    'en-US': 'The event connection was closed for a policy violation. Check your session or permissions and reload the page.',
+    'zh-CN': '事件连接因策略限制被关闭，请检查会话或权限后刷新页面。',
+  },
+  'ai.ide.stoppedManual': {
+    'en-US': 'The event connection is stopped.',
+    'zh-CN': '事件连接已停止。',
+  },
   'ai.ide.storageUnavailable': {
     'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
     'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',

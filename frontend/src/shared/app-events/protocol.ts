@@ -9,8 +9,9 @@
  *    "views":[{"environmentId":"<UUID>","viewId":"<UUID>","claimId":"<UUID>","bindingEpoch":"<positive decimal>"}]}
  *
  * server -> client（JSON 文本）：
- * - {"type":"connected","eventNodeId":"<UUID>","connectionId":"<UUID>"}
- *   连接建立后的第一帧；每次重连都是新的 connectionId。
+ * - {"type":"connected","eventNodeId":"<UUID>","connectionId":"<UUID>","heartbeatIntervalMillis":"<positive decimal>"}
+ *   连接建立后的第一帧；每次重连都是新的 connectionId。heartbeatIntervalMillis 是服务端
+ *   实际使用的文本 heartbeat 间隔，客户端以它推导失联预算，不写死默认值。
  * - {"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
  * - {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision","data":{...},"cursor":"<canonical>"}
@@ -36,7 +37,8 @@
  * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
  * 存在且与 data 值完全相等，提示型资源（projects/thread-tree/interactions/environments）
  * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
- * 对象且不得携带 cursor。connected 的两个身份、revision 与 bindingEpoch 都是
+ * 对象且不得携带 cursor。connected 的两个身份与 heartbeatIntervalMillis（不超过
+ * Number.MAX_SAFE_INTEGER 的正毫秒数）、revision 与 bindingEpoch 都是
  * canonical UUID / 正十进制字符串（不超过 9223372036854775807）。畸形消息永远不会
  * 到达 listeners。
  */
@@ -72,6 +74,8 @@ export type ApplicationEventRevision = string
 export interface ApplicationEventConnectionIdentity {
   eventNodeId: string
   connectionId: string
+  /** 服务端实际使用的文本 heartbeat 间隔（canonical 正十进制毫秒）；失联预算按它推导。 */
+  heartbeatIntervalMillis: string
 }
 
 /** 一项 IDE 使用意图；没有 bindingEpoch 的项不能用于续租。 */
@@ -171,7 +175,7 @@ type ApplicationEventEnvironmentsChangedEvent = {
 }
 
 export type ApplicationEventServerMessage =
-  | { type: 'connected'; eventNodeId: string; connectionId: string }
+  | { type: 'connected'; eventNodeId: string; connectionId: string; heartbeatIntervalMillis: string }
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadVersionEvent
@@ -188,6 +192,7 @@ export type ApplicationEventServerMessage =
 const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
 const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 const MAX_SIGNED_LONG_DECIMAL = '9223372036854775807'
+const MAX_SAFE_INTEGER_DECIMAL = '9007199254740991'
 const EVENT_FIELDS = ['type', 'resource', 'name', 'data', 'cursor'] as const
 
 export function encodeClientMessage(message: ApplicationEventClientMessage): string {
@@ -206,15 +211,24 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
   }
   switch (parsed.type) {
     case 'connected': {
-      if (!hasOnlyFields(parsed, ['type', 'eventNodeId', 'connectionId'])) {
+      if (!hasOnlyFields(parsed, ['type', 'eventNodeId', 'connectionId', 'heartbeatIntervalMillis'])) {
         return null
       }
       const eventNodeId = parseUuid(parsed.eventNodeId)
       const connectionId = parseUuid(parsed.connectionId)
-      if (eventNodeId == null || connectionId == null) {
+      // heartbeat 间隔必须是正整数数量级内的 canonical 正十进制字符串。
+      const heartbeatIntervalMillis = parseHeartbeatIntervalMillis(
+        parsed.heartbeatIntervalMillis,
+      )
+      if (eventNodeId == null || connectionId == null || heartbeatIntervalMillis == null) {
         return null
       }
-      return { type: 'connected', eventNodeId, connectionId }
+      return {
+        type: 'connected',
+        eventNodeId,
+        connectionId,
+        heartbeatIntervalMillis,
+      }
     }
     case 'heartbeat': {
       if (!hasOnlyFields(parsed, ['type'])) {
@@ -421,6 +435,21 @@ function parseRevision(value: unknown): ApplicationEventRevision | null {
     return null
   }
   return value
+}
+
+/**
+ * connected 帧的 heartbeat 间隔：canonical 正十进制字符串，且必须是可用毫秒数
+ * （不超过 {@code Number.MAX_SAFE_INTEGER}），保证失联预算计算不丢精度。
+ */
+function parseHeartbeatIntervalMillis(value: unknown): string | null {
+  const text = parseRevision(value)
+  if (text == null || text.length > MAX_SAFE_INTEGER_DECIMAL.length) {
+    return null
+  }
+  if (text.length === MAX_SAFE_INTEGER_DECIMAL.length && text > MAX_SAFE_INTEGER_DECIMAL) {
+    return null
+  }
+  return text
 }
 
 /** durable version 事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */

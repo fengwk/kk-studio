@@ -12,10 +12,13 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.tool.SelectableTool;
 
 import java.util.List;
 import java.util.Map;
@@ -40,17 +43,18 @@ class McpToolCatalogTest {
 
   @Test
   void listsSelectableToolsAcrossAllServers() {
-    // 意图：从全部 Server 聚合工具并按模型可见工具名排序，工具名即 ContributionId.localName
+    // 意图：从全部 Server 聚合工具并按模型可见工具名排序，工具名即 ContributionId.localName；
+    // 选择面每条工具都携带所属服务的 provider（kind=MCP，id/name=服务名）。
     McpServer server = server("github", McpDiscoveryStatus.AVAILABLE, true);
     McpTool tool = tool("mcp_github_list_repos", "github", "list_repos", "List repositories");
 
     when(repository.listAllServers()).thenReturn(List.of(server));
     when(repository.listTools("github")).thenReturn(List.of(tool));
 
-    List<ToolContribution> tools = catalog.selectableTools();
+    List<SelectableTool> tools = catalog.selectableTools();
     assertEquals(1, tools.size());
 
-    ToolContribution contribution = tools.get(0);
+    ToolContribution contribution = tools.get(0).contribution();
     assertEquals(ToolVisibility.SELECTABLE, contribution.definition().visibility());
     assertEquals("mcp_github_list_repos", contribution.definition().descriptor().name());
     assertEquals("List repositories", contribution.definition().descriptor().description());
@@ -61,6 +65,8 @@ class McpToolCatalogTest {
     assertEquals("platform.mcp", contribution.id().contributorId().value());
     assertEquals("mcp-github-list-repos", contribution.id().localName());
     assertEquals(EnvironmentSupport.NONE, contribution.requirements().environmentSupport());
+    assertEquals(
+        new ToolProviderDTO(ToolProviderKind.MCP, "github", "github"), tools.get(0).provider());
   }
 
   @Test

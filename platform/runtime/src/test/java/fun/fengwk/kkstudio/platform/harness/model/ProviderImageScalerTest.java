@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Objects;
 
 /**
  * {@link ProviderImageScaler} 的图片档位物化契约：方向、比例、原字节直通与显式失败。
@@ -20,8 +23,9 @@ import java.awt.image.BufferedImage;
  *   <li>横向 1280x720、纵向 720x1280、正方形由短边 720 界定的档位框，且只缩小不放大、不裁剪、不拉伸；
  *   <li>命中档位框的图片逐字节保留原内容（即使携带 EXIF），解码与重编码绝不发生；
  *   <li>JPEG 的 EXIF orientation 1/3/6/8 必须按显示方向归一（用左右两半的红/蓝像素验证方向，而不是只看尺寸）；
+ *   <li>WebP（TwelveMonkeys 解码）与 PNG/GIF/JPEG 一样可解析、可缩放，样例来自真实 VP8 编码资源；
  *   <li>含 alpha 的产物无损 PNG，不含 alpha 的 JPEG 源保持 JPEG、其余源无损 PNG；
- *   <li>动画/多帧、声明 MIME 无解码器、MIME 与字节不一致、超出解码像素预算或输出字节预算时显式失败。
+ *   <li>所有档位（含 ORIGINAL 与命中档位框）都先执行同一套头校验：声明 MIME 无解码器、字节与 MIME 不一致、超出解码像素预算时显式失败；动画/多帧在需要缩放时显式失败。
  * </ul>
  */
 class ProviderImageScalerTest {
@@ -114,15 +118,32 @@ class ProviderImageScalerTest {
   }
 
   @Test
-  void originalTierNeverDecodesUnsupportedFormats() {
-    // ORIGINAL 不转换，因此不受解码器可用性限制（未支持的格式在需要缩放时才失败）。
+  void originalTierStillValidatesFormatHeaderAndPixelBudget() {
+    // ORIGINAL 不重新编码，但与缩放档位执行同一套格式与像素校验：假 WebP 头必须显式失败。
     byte[] webpLike = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'};
 
-    ProviderImageScaler.Scaled scaled =
-        ProviderImageScaler.scale("image/webp", webpLike, ImageInputTier.ORIGINAL, GENEROUS_BYTES);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProviderImageScaler.scale(
+                    "image/webp", webpLike, ImageInputTier.ORIGINAL, GENEROUS_BYTES));
 
-    assertEquals("image/webp", scaled.mediaType());
-    assertArrayEquals(webpLike, scaled.bytes());
+    assertTrue(error.getMessage().contains("cannot be decoded"), error.getMessage());
+  }
+
+  @Test
+  void originalTierRejectsOversizedPixelBudgetBeforeDecoding() {
+    byte[] hugeHeader = TestImages.pngWithDeclaredDimensions(20_000, 20_000);
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProviderImageScaler.scale(
+                    "image/png", hugeHeader, ImageInputTier.ORIGINAL, GENEROUS_BYTES));
+
+    assertTrue(error.getMessage().contains("pixel budget"), error.getMessage());
   }
 
   // ---------- EXIF 方向 ----------
@@ -236,6 +257,79 @@ class ProviderImageScalerTest {
     assertEquals(1280, TestImages.decode("image/png", scaled.bytes()).getWidth());
   }
 
+  // ---------- WebP ----------
+
+  /** WebP 缩放样例：真实 VP8 编码的 2000x1000 红色图片（超出 720P 与 1080P 档位框）。 */
+  private static byte[] webpSample() throws IOException {
+    try (InputStream input =
+        ProviderImageScalerTest.class.getResourceAsStream("images/red-2000x1000.webp")) {
+      Objects.requireNonNull(input, "missing test resource images/red-2000x1000.webp");
+      return input.readAllBytes();
+    }
+  }
+
+  /** WebP 直通样例：真实 VP8 编码的 1800x900 红色图片（落在 1080P 档位框内）。 */
+  private static byte[] webpWithinBoxSample() throws IOException {
+    try (InputStream input =
+        ProviderImageScalerTest.class.getResourceAsStream("images/red-1800x900.webp")) {
+      Objects.requireNonNull(input, "missing test resource images/red-1800x900.webp");
+      return input.readAllBytes();
+    }
+  }
+
+  @Test
+  void webpIsDecodedAndResizedWithinTheTierBox() throws IOException {
+    ProviderImageScaler.Scaled scaled =
+        ProviderImageScaler.scale("image/webp", webpSample(), ImageInputTier.P720, GENEROUS_BYTES);
+
+    // VP8 是 YUV 有损编码且无 alpha：按契约输出为 PNG。
+    assertEquals("image/png", scaled.mediaType());
+    BufferedImage image = TestImages.decode(scaled.mediaType(), scaled.bytes());
+    assertEquals(1280, image.getWidth());
+    assertEquals(640, image.getHeight());
+    assertTrue(TestImages.isRed(image.getRGB(image.getWidth() / 4, image.getHeight() / 2)));
+  }
+
+  @Test
+  void webpWithinTierBoxKeepsOriginalBytes() throws IOException {
+    byte[] webp = webpWithinBoxSample();
+
+    ProviderImageScaler.Scaled scaled =
+        ProviderImageScaler.scale("image/webp", webp, ImageInputTier.P1080, GENEROUS_BYTES);
+
+    assertArrayEquals(webp, scaled.bytes());
+    assertEquals("image/webp", scaled.mediaType());
+  }
+
+  @Test
+  void webpOriginalTierValidatesThenKeepsOriginalBytes() throws IOException {
+    byte[] webp = webpSample();
+
+    ProviderImageScaler.Scaled scaled =
+        ProviderImageScaler.scale("image/webp", webp, ImageInputTier.ORIGINAL, GENEROUS_BYTES);
+
+    assertArrayEquals(webp, scaled.bytes());
+  }
+
+  @Test
+  void animatedWebpIsRejectedWhenResizing() throws IOException {
+    byte[] animated;
+    try (InputStream input =
+        ProviderImageScalerTest.class.getResourceAsStream("images/animated-2000x1000.webp")) {
+      Objects.requireNonNull(input, "missing test resource images/animated-2000x1000.webp");
+      animated = input.readAllBytes();
+    }
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProviderImageScaler.scale(
+                    "image/webp", animated, ImageInputTier.P720, GENEROUS_BYTES));
+
+    assertTrue(error.getMessage().contains("multi-frame"), error.getMessage());
+  }
+
   // ---------- 显式失败 ----------
 
   @Test
@@ -265,12 +359,16 @@ class ProviderImageScalerTest {
 
   @Test
   void unsupportedMediaTypeFailsExplicitly() {
+    // image/x-icon 没有 JDK 或 TwelveMonkeys 解码器：缩放档位必须显式失败。
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
                 ProviderImageScaler.scale(
-                    "image/webp", TestImages.png(2000, 1000), ImageInputTier.P720, GENEROUS_BYTES));
+                    "image/x-icon",
+                    TestImages.png(2000, 1000),
+                    ImageInputTier.P720,
+                    GENEROUS_BYTES));
 
     assertTrue(error.getMessage().contains("unsupported image media type"), error.getMessage());
   }

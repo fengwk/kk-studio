@@ -425,6 +425,8 @@ class ModelsDevCatalogParserTest {
         List.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         capable.getAbilities().getInputModalities());
     assertEquals(128000, capable.getLimit().getContext());
+    assertEquals(272000, capable.getLimit().getInput());
+    assertEquals(8192, capable.getLimit().getOutput());
     assertTrue(hasIssue(capable, "unsupported input modality"));
     assertNull(capable.getVariants());
     assertNull(capable.getDefaultVariant());
@@ -433,6 +435,29 @@ class ModelsDevCatalogParserTest {
     assertNull(missing.getAbilities().getTools());
     assertNull(missing.getAbilities().getReasoning());
     assertNull(missing.getLimit());
+  }
+
+  /** models.dev 的可选 limit.input：合法值带入候选，缺省保持 null，非法形态丢弃整份 limit 并报告 issue。 */
+  @Test
+  void parsesOptionalCatalogInputLimit() {
+    ModelCatalogCandidateDTO inputOnly = validation.get("validation/input-limit-only");
+    assertNotNull(inputOnly.getLimit());
+    assertNull(inputOnly.getLimit().getContext());
+    assertEquals(272000, inputOnly.getLimit().getInput());
+    assertNull(inputOnly.getLimit().getOutput());
+
+    // "272000" 不是整数：整份 limit 丢弃（与 context/output 错误同规则），价格与能力不受影响。
+    ModelCatalogCandidateDTO invalid = validation.get("validation/input-limit-invalid");
+    assertNull(invalid.getLimit());
+    assertTrue(hasIssue(invalid, "limit.input"));
+    assertEquals(
+        1,
+        validation
+            .get("validation/input-limit-invalid")
+            .getPricing()
+            .getBase()
+            .getInput()
+            .signum());
   }
 
   /** supported 候选的 pricing DTO 必须能经唯一 parser 保存并保持等价定价。 */

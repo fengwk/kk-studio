@@ -9,6 +9,7 @@ import type {
   ProcessSupervisor,
   ResourceUploader,
 } from './contracts.js'
+import { isResourceUploadError, type ResourceUploadError } from './contracts.js'
 import {
   CancelledSchema,
   MessageType,
@@ -33,6 +34,7 @@ import {
   safeMessage,
 } from './runtime-encoding.js'
 import type { OutboundControl } from './runtime-outbound.js'
+import { boundaryUpload, describeUploadFailure } from './runtime-upload-boundary.js'
 
 type InvocationTerminationCause = 'TIMED_OUT' | 'CANCELLED' | 'SHUTDOWN'
 
@@ -221,6 +223,15 @@ export class InvocationRuntime {
     }
   }
 
+  /** 上传失败的安全诊断：最接近失败的边界记录一次，不重复堆栈，不含 URL/headers/令牌。 */
+  private reportUploadFailure(phase: string, error: ResourceUploadError): void {
+    try {
+      process.stderr.write(`daemon ${phase}: ${describeUploadFailure(error)}\n`)
+    } catch {
+      // 诊断输出失败不影响失败事实的交付。
+    }
+  }
+
   private async execute(
     invocation: RunningInvocation,
     executor: CapabilityExecutor,
@@ -249,7 +260,7 @@ export class InvocationRuntime {
         if (resources === null) {
           throw new Error('resource upload is not configured')
         }
-        return resources.upload(invocation.invocationId, content, invocation.controller.signal)
+        return boundaryUpload(resources, invocation.invocationId, content, invocation.controller.signal)
       })
       this.terminal(
         invocation.invocationId,
@@ -260,6 +271,16 @@ export class InvocationRuntime {
       invocation.finishOwnedCleanup()
     } catch (error) {
       const executorFailed = !invocation.executorReturned
+      // 收尾失败事实只来自明确的资源上传边界：cleanupConfirmed=false 时退出仍未知；
+      // 普通失败（含存储拒绝、控制面不可用）在完成实际释放后按已确认处理。
+      const uploadFailure = isResourceUploadError(error) ? error : null
+      const cleanupUnconfirmed = uploadFailure !== null && !uploadFailure.cleanupConfirmed
+      if (uploadFailure !== null) {
+        this.reportUploadFailure(
+          cleanupUnconfirmed ? 'invocation upload cleanup unconfirmed' : 'invocation upload failed',
+          uploadFailure,
+        )
+      }
       if (invocation.terminalClaimed) {
         if (executorFailed) {
           invocation.finishOwnedCleanup()
@@ -301,8 +322,8 @@ export class InvocationRuntime {
         failedPayload(safeMessage(error)),
         null,
       )
-      // executor 抛错仍可能已有正向范围证据；后续上传/收尾抛错则不能确认清理完成。
-      if (executorFailed) {
+      // executor 抛错仍可能已有正向范围证据；收尾失败（cleanupConfirmed=false）则退出事实保持未知。
+      if (executorFailed || !cleanupUnconfirmed) {
         invocation.finishOwnedCleanup()
       }
     }
@@ -319,7 +340,7 @@ export class InvocationRuntime {
           if (resources === null) {
             return Promise.reject(new Error('resource upload is not configured'))
           }
-          return resources.upload(invocationId, content, signal)
+          return boundaryUpload(resources, invocationId, content, signal)
         },
       },
       progress: async (result: CapabilityResult) => {

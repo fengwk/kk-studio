@@ -10,11 +10,14 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.SelectableTool;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -36,6 +39,8 @@ import java.util.Optional;
  * <p>工具身份就是模型可见工具名（{@code mcp_tool.name}）。该名含 {@code _} 分隔段，而 ContributionId.localName 要求 canonical
  * 小写 dotted/dashed 形式，因此贡献身份按 {@code _ -> -} 转换；模型可见名只有 {@code [a-z0-9_]} 字符， 该转换在目录内一一对应，不引入任何隐藏
  * UUID 或修订号。
+ *
+ * <p>选择面上的 MCP 工具都携带所属服务的 provider（kind=MCP，id/name=服务名）；planning 面不受影响。
  */
 public final class McpToolCatalog implements RuntimeToolCatalog {
 
@@ -51,7 +56,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   }
 
   @Override
-  public List<ToolContribution> selectableTools() {
+  public List<SelectableTool> selectableTools() {
     return readSnapshot().selectableTools();
   }
 
@@ -76,7 +81,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
    */
   public Snapshot readSnapshot() {
     List<ToolContribution> plannable = new ArrayList<>();
-    List<ToolContribution> selectable = new ArrayList<>();
+    List<SelectableTool> selectable = new ArrayList<>();
     for (McpServer server : repository.listAllServers()) {
       if (server == null) {
         continue;
@@ -89,7 +94,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
         ToolContribution contribution = contribution(tool, server);
         plannable.add(contribution);
         if (selectableServer) {
-          selectable.add(contribution);
+          selectable.add(new SelectableTool(contribution, provider(server.name())));
         }
       }
     }
@@ -105,10 +110,10 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   public static final class Snapshot {
 
     private final List<ToolContribution> plannableTools;
-    private final List<ToolContribution> selectableTools;
+    private final List<SelectableTool> selectableTools;
     private final Map<String, ToolContribution> plannableByName;
 
-    Snapshot(List<ToolContribution> plannableTools, List<ToolContribution> selectableTools) {
+    Snapshot(List<ToolContribution> plannableTools, List<SelectableTool> selectableTools) {
       this.plannableTools =
           plannableTools.stream()
               .sorted(
@@ -116,11 +121,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
                       contribution -> contribution.definition().descriptor().name()))
               .toList();
       this.selectableTools =
-          selectableTools.stream()
-              .sorted(
-                  Comparator.comparing(
-                      contribution -> contribution.definition().descriptor().name()))
-              .toList();
+          selectableTools.stream().sorted(Comparator.comparing(SelectableTool::name)).toList();
       Map<String, ToolContribution> byName = new LinkedHashMap<>();
       for (ToolContribution contribution : this.plannableTools) {
         byName.putIfAbsent(contribution.definition().descriptor().name(), contribution);
@@ -132,13 +133,19 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
       return plannableTools;
     }
 
-    public List<ToolContribution> selectableTools() {
+    public List<SelectableTool> selectableTools() {
       return selectableTools;
     }
 
     private Map<String, ToolContribution> plannableByName() {
       return plannableByName;
     }
+  }
+
+  /** MCP 工具的 provider：kind 固定为 MCP，身份与显示名都是所属服务名。 */
+  public static ToolProviderDTO provider(String serverName) {
+    Objects.requireNonNull(serverName, "serverName");
+    return new ToolProviderDTO(ToolProviderKind.MCP, serverName, serverName);
   }
 
   private boolean isServerSelectable(McpServer server) {

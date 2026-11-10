@@ -151,8 +151,17 @@ describe('AgentForm current contracts', () => {
           models={[modelWithVariants()]}
           skills={skills}
           toolCatalog={[
-            { name: 'bash', description: longDescription },
-            { name: 'lsp', description: 'lsp', environmentSupport: 'REQUIRED' },
+            {
+              name: 'bash',
+              description: longDescription,
+              provider: { kind: 'BUILTIN', id: 'builtin', name: 'Built-in' },
+            },
+            {
+              name: 'lsp',
+              description: 'lsp',
+              environmentSupport: 'REQUIRED',
+              provider: { kind: 'BUILTIN', id: 'builtin', name: 'Built-in' },
+            },
           ]}
           onChange={setDraft}
         />

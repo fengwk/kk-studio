@@ -356,8 +356,10 @@ class EventFrameCodecTest {
             + THREAD
             + "\",\"connectionId\":\""
             + CANVAS
-            + "\"}",
-        CODEC.connected(THREAD, CANVAS));
+            + "\",\"heartbeatIntervalMillis\":\"20000\"}",
+        CODEC.connected(THREAD, CANVAS, 20_000L));
+    // heartbeat 间隔声明的是服务端实际配置，非正数直接拒绝，防止客户端推导出无效失联预算。
+    assertThrows(IllegalArgumentException.class, () -> CODEC.connected(THREAD, CANVAS, 0));
     assertEquals(
         "{\"type\":\"ide-use-accepted\",\"revision\":\"9223372036854775807\"}",
         CODEC.ideUseAccepted(Long.MAX_VALUE));

@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ensureCaretSlots,
   extractPartsFromEditor,
   extractPartsKeyFromEditor,
   findAdjacentPill,
   insertPillsAtCaret,
   insertTextAtCaret,
+  isCaretSlot,
   isPillElement,
   normalizeEditorDom,
+  placeCaretAtEnd,
   renderPartsToEditor,
+  selectionTouchesCaretSlot,
+  serializeSelectionText,
 } from '@/features/thread/composer/composer-dom'
 import {
   createAttachmentPart,
@@ -76,14 +81,15 @@ function resourcePill(blobId: string, name: string, preview?: string): HTMLSpanE
   return pillSpan(attributes, `[${name}]`)
 }
 
-/** 读取 root 的 childNodes 序列，断言其恰好是给定文本与 pill 引用。 */
+/** 读取 root 的 childNodes 序列，断言其恰好是给定文本与 pill 引用（忽略 DOM-only caret slot）。 */
 function expectCanonicalDom(
   root: HTMLElement,
   expected: Array<{ kind: 'text'; text: string } | { kind: 'pill'; uploadId?: string; blobId?: string }>,
 ): void {
-  expect(root.childNodes.length).toBe(expected.length)
+  const nodes = Array.from(root.childNodes).filter((node) => !isCaretSlot(node))
+  expect(nodes.length).toBe(expected.length)
   expected.forEach((item, index) => {
-    const node = root.childNodes[index]
+    const node = nodes[index]
     if (item.kind === 'text') {
       expect(node?.nodeType).toBe(Node.TEXT_NODE)
       expect((node as Text).textContent).toBe(item.text)
@@ -98,6 +104,16 @@ function expectCanonicalDom(
       ).toBe(item.uploadId ?? item.blobId)
     }
   })
+}
+
+/** 断言 pill 两侧都是可编辑边界（文本节点或 DOM-only caret slot）。 */
+function expectEditableNeighbors(pill: Node): void {
+  for (const neighbor of [pill.previousSibling, pill.nextSibling]) {
+    expect(neighbor).not.toBeNull()
+    expect(
+      neighbor?.nodeType === Node.TEXT_NODE || isCaretSlot(neighbor),
+    ).toBe(true)
+  }
 }
 
 describe('composer durable resource pills', () => {
@@ -261,16 +277,18 @@ describe('extractPartsFromEditor', () => {
 })
 
 describe('normalizeEditorDom', () => {
-  it('leaves already canonical DOM untouched', () => {
-    // 已规范形态（仅文本节点与 pill）必须原样保留——保存光标位置。
+  it('leaves already canonical DOM untouched and only adds the missing editable boundary', () => {
+    // 已规范形态（文本节点 + pill 两侧都有可编辑位置）原样保留——保存文本节点身份与光标。
     const root = document.createElement('div')
-    root.append(textNode('text'), attachmentPill('upload-1', 'a.txt'))
+    const pill = attachmentPill('upload-1', 'a.txt')
+    root.append(textNode('text'), pill, textNode('tail'))
     const before = Array.from(root.childNodes)
     normalizeEditorDom(root)
     expect(Array.from(root.childNodes)).toEqual(before)
     expectCanonicalDom(root, [
       { kind: 'text', text: 'text' },
       { kind: 'pill', uploadId: 'upload-1' },
+      { kind: 'text', text: 'tail' },
     ])
   })
 
@@ -561,8 +579,11 @@ describe('normalizeEditorDom', () => {
       const selection = document.getSelection()
       const range = selection!.getRangeAt(0)
       expect(range.collapsed).toBe(true)
-      // 位于 pill 之后的 text 节点起点 0 处
-      expect(range.startContainer).toBe(root.childNodes[1])
+      // 位于 pill 之后的可编辑文本起点（pill 与前导 slot 之后、content 之前）。
+      const contentNode = Array.from(root.childNodes).find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent === 'content',
+      )
+      expect(range.startContainer).toBe(contentNode)
       expect(range.startOffset).toBe(0)
     } finally {
       unmountRoot(root)
@@ -652,7 +673,7 @@ describe('isPillElement', () => {
 
 describe('insertPillsAtCaret with a live selection', () => {
   it('inserts pills at the caret and moves the caret behind the last pill', () => {
-    // 光标在编辑器内：pills 插入光标处，selection 折叠到最后一颗 pill 之后。
+    // 光标在编辑器内：pills 插入光标处，selection 落在最后一颗 pill 之后的可编辑 slot 里。
     const root = mountRoot(document.createElement('div'))
     try {
       root.append(textNode('ab'))
@@ -661,18 +682,21 @@ describe('insertPillsAtCaret with a live selection', () => {
         createAttachmentPart('upload-1', 'a.txt'),
         createResourcePart('00000000-0000-0000-0000-000000000001', 'r.txt'),
       ])
-      // deleteContents 会把光标处文本切分为前后两段：text -> pill -> pill -> text。
-      expect(root.childNodes).toHaveLength(4)
-      expect((root.childNodes[0] as Text).textContent).toBe('a')
-      expect((root.childNodes[1] as HTMLElement).getAttribute('data-upload-id')).toBe('upload-1')
-      expect((root.childNodes[2] as HTMLElement).getAttribute('data-blob-id')).toBe(
-        '00000000-0000-0000-0000-000000000001',
-      )
-      expect((root.childNodes[3] as Text).textContent).toBe('b')
+      // deleteContents 会把光标处文本切分为前后两段：text -> pill -> pill -> text（外加 DOM-only slot）。
+      expectCanonicalDom(root, [
+        { kind: 'text', text: 'a' },
+        { kind: 'pill', uploadId: 'upload-1' },
+        { kind: 'pill', blobId: '00000000-0000-0000-0000-000000000001' },
+        { kind: 'text', text: 'b' },
+      ])
+      const secondPill = root.querySelectorAll('.composer-pill')[1]
+      expectEditableNeighbors(secondPill)
+      // 光标落在最后一颗 pill 之后的可编辑文本位置（暴露边界），不在 pill 内或裸父节点间隙。
       const caret = document.getSelection()?.getRangeAt(0)
       expect(caret?.collapsed).toBe(true)
-      expect(caret?.startContainer).toBe(root)
-      expect(caret?.startOffset).toBe(3)
+      expect(caret?.startContainer.nodeType).toBe(Node.TEXT_NODE)
+      expect(caret?.startOffset).toBe(0)
+      expect((caret?.startContainer as Text).textContent).toBe('b')
     } finally {
       unmountRoot(root)
     }
@@ -686,8 +710,10 @@ describe('insertPillsAtCaret with a live selection', () => {
       root.append(textNode('a'))
       setCaret(outside, 0)
       insertPillsAtCaret(root, [createAttachmentPart('upload-2', 'b.txt')])
-      expect(root.childNodes).toHaveLength(2)
-      expect((root.childNodes[1] as HTMLElement).getAttribute('data-upload-id')).toBe('upload-2')
+      expectCanonicalDom(root, [
+        { kind: 'text', text: 'a' },
+        { kind: 'pill', uploadId: 'upload-2' },
+      ])
     } finally {
       unmountRoot(root)
       unmountRoot(outside)
@@ -763,17 +789,20 @@ describe('insertPillsAtCaret', () => {
         createAttachmentPart('upload-1', 'a.txt'),
         createResourcePart('00000000-0000-0000-0000-000000000001', 'r.txt', 'preview'),
       ])
-      expect(root.childNodes).toHaveLength(2)
-      const attachment = root.childNodes[0] as HTMLElement
+      const pills = Array.from(root.querySelectorAll('.composer-pill'))
+      expect(pills).toHaveLength(2)
+      const attachment = pills[0]
       expect(attachment.getAttribute('data-part-type')).toBe('attachment')
       expect(attachment.getAttribute('data-upload-id')).toBe('upload-1')
       expect(attachment.getAttribute('data-filename')).toBe('a.txt')
       expect(attachment.textContent).toBe('[a.txt]')
-      const resource = root.childNodes[1] as HTMLElement
+      const resource = pills[1]
       expect(resource.getAttribute('data-part-type')).toBe('resource')
       expect(resource.getAttribute('data-blob-id')).toBe('00000000-0000-0000-0000-000000000001')
       expect(resource.getAttribute('data-preview')).toBe('preview')
       expect(resource.textContent).toBe('[r.txt]')
+      // 末尾 pill 之后仍有可编辑边界。
+      expect(resource.nextSibling == null || resource.nextSibling.nodeType === Node.TEXT_NODE || isCaretSlot(resource.nextSibling)).toBe(true)
     } finally {
       unmountRoot(root)
     }
@@ -920,6 +949,234 @@ describe('findAdjacentPill', () => {
       root.append(textNode('ab'), attachmentPill('upload-1', 'a.txt'))
       setCaret(root.childNodes[0]!, 1)
       expect(findAdjacentPill(root, 'before')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+})
+
+describe('caret slot boundaries', () => {
+  it('gives every pill an editable neighbor without turning the slot into a part', () => {
+    // 每个不可编辑 pill 两侧都必须有可编辑位置；slot 本身不是 part，也不进 parts 文本。
+    const root = document.createElement('div')
+    const parts = [
+      createTextPart('before'),
+      createAttachmentPart('upload-1', 'a.txt'),
+      createResourcePart('00000000-0000-0000-0000-000000000001', 'b.txt'),
+    ]
+    renderPartsToEditor(root, parts)
+
+    for (const pill of Array.from(root.querySelectorAll('.composer-pill'))) {
+      expectEditableNeighbors(pill)
+    }
+    expect(partsToMessageContents(extractPartsFromEditor(root))).toEqual([
+      { type: 'TEXT', text: 'before' },
+      { type: 'ATTACHMENT', uploadId: 'upload-1' },
+      { type: 'RESOURCE', blobId: '00000000-0000-0000-0000-000000000001', name: 'b.txt' },
+    ])
+    // 占位不是用户正文：提取与序列化都不得含 U+200B。
+    expect(JSON.stringify(extractPartsFromEditor(root))).not.toContain('\u200B')
+  })
+
+  it('keeps leading and trailing pill boundaries editable and slot-free in parts', () => {
+    // pill 在首/尾：编辑器起点与终点都必须留可编辑位置，否则输入法无处驻留。
+    const root = document.createElement('div')
+    renderPartsToEditor(root, [createAttachmentPart('upload-1', 'a.txt')])
+    expectEditableNeighbors(root.querySelector('[data-part-type="attachment"]')!)
+    expect(extractPartsFromEditor(root)).toEqual([
+      expect.objectContaining({ type: 'attachment', uploadId: 'upload-1' }),
+    ])
+  })
+
+  it('lets typed text live inside a slot and still extracts in order', () => {
+    // slot 内真正输入的字符按原顺序进入 text part；用户自己的空格原样保留。
+    const root = document.createElement('div')
+    renderPartsToEditor(root, [createAttachmentPart('upload-1', 'a.txt')])
+    const slot = root.lastChild as HTMLElement
+    expect(isCaretSlot(slot)).toBe(true)
+    slot.textContent = '\u200B 中文 '
+    expect(extractPartsFromEditor(root)).toEqual([
+      expect.objectContaining({ type: 'attachment', uploadId: 'upload-1' }),
+      expect.objectContaining({ type: 'text', text: ' 中文 ' }),
+    ])
+  })
+
+  it('removes a slot that no longer sits next to a pill', () => {
+    // pill 被删后残留的 slot 提升为普通文本，占位不留在编辑器里。
+    const root = document.createElement('div')
+    const pill = attachmentPill('upload-1', 'a.txt')
+    root.append(pill)
+    renderPartsToEditor(root, [])
+    expect(root.querySelector('.composer-pill')).toBeNull()
+    normalizeEditorDom(root)
+    expect(root.textContent).toBe('')
+  })
+
+  it('finds the adjacent pill when the caret sits inside the boundary slot', () => {
+    // 光标在 slot 文本节点内等同位于 pill 边界：Backspace/Delete 仍能整颗删除。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(attachmentPill('upload-1', 'a.txt'))
+      normalizeEditorDom(root)
+      const pill = root.querySelector('[data-part-type="attachment"]')!
+      const trailingSlot = pill.nextSibling as HTMLElement
+      const slotText = trailingSlot.firstChild as Text
+
+      setCaret(slotText, 1)
+      expect(findAdjacentPill(root, 'before')).toBe(pill)
+
+      const leadingSlot = pill.previousSibling as HTMLElement
+      setCaret(leadingSlot.firstChild as Text, 1)
+      expect(findAdjacentPill(root, 'after')).toBe(pill)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('finds the pill across a caret text node that sits outside a slot', () => {
+    // 文本节点边界同样命中：pill + 后续文本时，文本起点 Backspace 删除 pill。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      const pill = attachmentPill('upload-1', 'a.txt')
+      const after = textNode('tail')
+      root.append(pill, after)
+      setCaret(after, 0)
+      expect(findAdjacentPill(root, 'before')).toBe(pill)
+      setCaret(root, 0)
+      expect(findAdjacentPill(root, 'after')).toBe(pill)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('does not treat a multi-character slot as an empty boundary', () => {
+    // slot 内已有用户文本时，光标不在 pill 边界上：Backspace 只删除用户字符。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(attachmentPill('upload-1', 'a.txt'))
+      normalizeEditorDom(root)
+      const pill = root.querySelector('[data-part-type="attachment"]')!
+      const trailingSlot = pill.nextSibling as HTMLElement
+      trailingSlot.textContent = '\u200B中文'
+      setCaret(trailingSlot.firstChild as Text, 3)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+      // 光标退到槽边界（占位之后、用户文本之前）时才重新命中 pill。
+      setCaret(trailingSlot.firstChild as Text, 1)
+      expect(findAdjacentPill(root, 'before')).toBe(pill)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('serializes the selection without placeholder sentinels', () => {
+    // 复制/剪切序列化跳过占位：剪贴板文本与可见文本一致。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      renderPartsToEditor(root, [
+        createTextPart('ab'),
+        createAttachmentPart('upload-1', 'a.txt'),
+      ])
+      const range = document.createRange()
+      range.selectNodeContents(root)
+      const selection = document.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      expect(serializeSelectionText(root)).toBe('ab[a.txt]')
+      expect(selectionTouchesCaretSlot(root)).toBe(true)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('leaves selection serialization alone when the range avoids slots', () => {
+    // 选区只覆盖普通文本（未触及任何 slot）时不需要接管剪贴板。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('plain'))
+      const range = document.createRange()
+      range.setStart(root.firstChild!, 1)
+      range.setEnd(root.firstChild!, 4)
+      const selection = document.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      expect(selectionTouchesCaretSlot(root)).toBe(false)
+      expect(serializeSelectionText(root)).toBe('lai')
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('normalizes a slot with placeholder only into a bare editable gap', () => {
+    // 保持规范形态时不改写 DOM（保留文本身份）；插值占位不进入 parts 与可见文本。
+    const root = document.createElement('div')
+    renderPartsToEditor(root, [
+      createAttachmentPart('upload-1', 'a.txt'),
+      createTextPart('tail'),
+    ])
+    const pill = root.querySelector('[data-part-type="attachment"]')!
+    const before = Array.from(root.childNodes)
+    normalizeEditorDom(root)
+    expect(Array.from(root.childNodes)).toEqual(before)
+    expectEditableNeighbors(pill)
+    expect(extractPartsFromEditor(root)).toEqual([
+      expect.objectContaining({ type: 'attachment', uploadId: 'upload-1' }),
+      expect.objectContaining({ type: 'text', text: 'tail' }),
+    ])
+    expect(JSON.stringify(extractPartsFromEditor(root))).not.toContain('\u200B')
+  })
+
+  it('drops slot placeholders when a non-canonical DOM is rebuilt', () => {
+    // 非规范 DOM（块包装）重建时 slot 展开为逻辑文本：占位消失，边界重新补齐。
+    const root = document.createElement('div')
+    const block = document.createElement('div')
+    block.append(attachmentPill('upload-1', 'a.txt'))
+    root.append(block)
+    normalizeEditorDom(root)
+    expectCanonicalDom(root, [{ kind: 'pill', uploadId: 'upload-1' }])
+    expect(isCaretSlot(root.querySelector('[data-part-type="attachment"]')!.nextSibling)).toBe(true)
+    expect(extractPartsFromEditor(root)).toEqual([
+      expect.objectContaining({ type: 'attachment', uploadId: 'upload-1' }),
+    ])
+  })
+
+  it('replaces a cursor selection that spans a pill and its slots', () => {
+    // 选区跨 pill：删除后不残留占位，剩余文本按语义边界拼接。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      renderPartsToEditor(root, [
+        createTextPart('keep'),
+        createAttachmentPart('upload-1', 'a.txt'),
+      ])
+      const pill = root.querySelector('[data-part-type="attachment"]')!
+      const range = document.createRange()
+      range.setStart(root.firstChild!, 2)
+      range.setEndAfter(pill)
+      const selection = document.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      expect(serializeSelectionText(root)).toBe('ep[a.txt]')
+
+      range.deleteContents()
+      ensureCaretSlots(root)
+      expect(extractPartsFromEditor(root)).toEqual([
+        expect.objectContaining({ type: 'text', text: 'ke' }),
+      ])
+      expect(root.textContent).not.toContain('\u200B')
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('places the caret at the trailing editable boundary of the editor', () => {
+    // placeCaretAtEnd 落在末尾可编辑位置：尾随 pill 时进入其 slot，而不是裸父节点。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      renderPartsToEditor(root, [createAttachmentPart('upload-1', 'a.txt')])
+      placeCaretAtEnd(root)
+      const caret = document.getSelection()!.getRangeAt(0)
+      expect(caret.collapsed).toBe(true)
+      expect(isCaretSlot(caret.startContainer.parentNode)).toBe(true)
+      expect(caret.startContainer.textContent).toBe('\u200B')
     } finally {
       unmountRoot(root)
     }

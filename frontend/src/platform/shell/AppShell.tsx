@@ -8,8 +8,9 @@ import type { PageContribution } from '@/platform/extensions/types'
 import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
 import { interactionService } from '@/shared/api/interaction-service'
 import { useApplicationEvents } from '@/shared/app-events'
+import { useApplicationEventConnectionState } from '@/shared/app-events/context'
 import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
@@ -56,6 +57,44 @@ function usePendingInteractionsCount(): number {
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */
 function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[role="listbox"], [role="menu"]') != null
+}
+
+/**
+ * 全局应用事件连接指示：只呈现浏览器事件连接这一层事实（连接中/已连接/重连中/已停止），
+ * 不合并 Daemon 控制连接与 iframe 内部连接的状态。
+ */
+function ConnectionIndicator() {
+  const { t } = useI18n()
+  const connectionState = useApplicationEventConnectionState()
+  let key: TranslationKey
+  switch (connectionState.status) {
+    case 'ready': {
+      key = 'platform.connection.live'
+      break
+    }
+    case 'connecting': {
+      key = 'platform.connection.connecting'
+      break
+    }
+    case 'backoff': {
+      key = 'platform.connection.backoff'
+      break
+    }
+    default: {
+      // idle / stopped 都表示当前没有可用连接；terminal 停止需要人工刷新。
+      key = 'platform.connection.stopped'
+    }
+  }
+  return (
+    <span
+      className={`connection-indicator is-${connectionState.status}`}
+      role="status"
+      aria-label={t(key)}
+      title={t(key)}
+      data-testid="connection-indicator"
+      data-status={connectionState.status}
+    />
+  )
 }
 
 interface ResolvedLayout {
@@ -235,6 +274,7 @@ export function AppShell({
             </nav>
           </div>
           <div className="topbar-right">
+            <ConnectionIndicator />
             <LocaleSelector />
             <div
               className="avatar"

@@ -2014,6 +2014,7 @@ export interface ModelCatalogCandidateDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogLimitDTO */
 export interface ModelCatalogLimitDTO {
   context?: number | null
+  input?: number | null
   output?: number | null
 }
 
@@ -2121,6 +2122,7 @@ export const MODEL_INPUT_MODALITY_VALUES: readonly ModelInputModality[] = [
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO */
 export interface ModelLimitDTO {
   context: number
+  input?: number | null
   output: number
 }
 
@@ -2910,6 +2912,7 @@ export interface SystemSettingsStorageMediaDTO {
   canvasMediaProcessTimeoutMillis: string
   thumbnailMaxDimension: number
   thumbnailQuality: number
+  imageTier: string
   temporaryResourceTtlSeconds: string
   temporaryResourceCleanupIntervalSeconds: string
 }
@@ -2999,6 +3002,7 @@ export interface ToolCatalogEntryDTO {
   name: string
   description: string
   environmentSupport?: EnvironmentSupport | null
+  provider: ToolProviderDTO
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO */
@@ -3046,6 +3050,27 @@ export const TOOL_INVOCATION_STATUS_VALUES: readonly ToolInvocationStatus[] = [
   'FAILED',
   'CANCELLED',
   'UNKNOWN',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO */
+export interface ToolProviderDTO {
+  kind: ToolProviderKind
+  id: string
+  name: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind */
+export type ToolProviderKind =
+  | 'BUILTIN'
+  | 'APP'
+  | 'PLUGIN'
+  | 'MCP'
+
+export const TOOL_PROVIDER_KIND_VALUES: readonly ToolProviderKind[] = [
+  'BUILTIN',
+  'APP',
+  'PLUGIN',
+  'MCP',
 ]
 
 /** Java：fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO */

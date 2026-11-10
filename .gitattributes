@@ -18,6 +18,7 @@
 *.flac -text
 *.mov -text
 *.webm -text
+*.pdf -text
 *.woff -text
 *.woff2 -text
 *.ttf -text

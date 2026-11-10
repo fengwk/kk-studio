@@ -18,6 +18,7 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
@@ -299,6 +300,7 @@ public class SystemSettingsCodec {
             "storageMedia.canvasMediaProcessTimeoutMillis"),
         requiredInt(dto.getThumbnailMaxDimension(), "storageMedia.thumbnailMaxDimension"),
         requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"),
+        requiredImageTier(dto.getImageTier(), "storageMedia.imageTier"),
         requiredMillis(
             dto.getTemporaryResourceTtlSeconds(), "storageMedia.temporaryResourceTtlSeconds"),
         requiredMillis(
@@ -429,6 +431,7 @@ public class SystemSettingsCodec {
     dto.setCanvasMediaProcessTimeoutMillis(storageMedia.canvasMediaProcessTimeoutMillis());
     dto.setThumbnailMaxDimension(storageMedia.thumbnailMaxDimension());
     dto.setThumbnailQuality(storageMedia.thumbnailQuality());
+    dto.setImageTier(storageMedia.imageTier().wireName());
     dto.setTemporaryResourceTtlSeconds(storageMedia.temporaryResourceTtlSeconds());
     dto.setTemporaryResourceCleanupIntervalSeconds(
         storageMedia.temporaryResourceCleanupIntervalSeconds());
@@ -473,6 +476,15 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException(field + " is required");
     }
     return value;
+  }
+
+  /** 解析图片档位的规范 wire 名称；未知名称给出 field 级错误，绝不回退到默认档位。 */
+  private static ImageInputTier requiredImageTier(String value, String field) {
+    try {
+      return ImageInputTier.fromWireName(requiredText(value, field));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " is invalid: " + error.getMessage());
+    }
   }
 
   private static List<Integer> requiredStatusCodes(List<Integer> value, String field) {

@@ -49,3 +49,9 @@
   line-height: 20px;
   user-select: none;
 }
+
+/* IME caret 边界：DOM-only 的可编辑位置，不带任何可见外观。 */
+.composer-caret-slot {
+  display: inline;
+  white-space: pre-wrap;
+}

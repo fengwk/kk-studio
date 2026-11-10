@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 
@@ -42,7 +43,8 @@ public final class SystemSettingsTestFixture {
       new SystemSettings.BackendNetwork(null, "localhost,127.*,::1");
 
   public static final SystemSettings.StorageMedia STORAGE_MEDIA =
-      new SystemSettings.StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L);
+      new SystemSettings.StorageMedia(
+          86_400L, 1_800L, 3_600L, 30_000L, 512, 80, ImageInputTier.P720, 259_200L, 1_800L);
 
   public static final SystemSettings.Advanced ADVANCED =
       new SystemSettings.Advanced(

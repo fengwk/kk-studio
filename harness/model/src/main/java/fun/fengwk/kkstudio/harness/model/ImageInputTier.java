@@ -1,21 +1,27 @@
 package fun.fengwk.kkstudio.harness.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * 用户为图片输入选择的档位：{@code 720P} / {@code 1080P} 在 provider attempt 按图片方向等比缩小到档位框内， {@code ORIGINAL}
  * 始终使用上传时的原字节。
  *
  * <p>档位只对图片媒体有意义，并且只描述「允许的最大显示尺寸」，不描述任何 Provider 协议参数：物化时命中档位框的图片保留原字节（含 EXIF 元数据），
- * 超出才重新编码；音频、视频、文档等非图片资源不携带档位。durable 与 wire 都使用 {@link #wireName()}，绝不使用枚举名。
+ * 超出才重新编码；音频、视频、文档等非图片资源不携带档位。durable 与 wire 都使用 {@link #wireName()}，绝不使用枚举名； {@link JsonProperty}
+ * 让 Jackson 绑定（system settings canonical JSON 等）同样使用 wire 名称。
  */
 public enum ImageInputTier {
 
   /** 横向最长边 1280、纵向最长边 720；正方形由较短的 720 界定。 */
+  @JsonProperty("720P")
   P720("720P", 1280, 720),
 
   /** 横向最长边 1920、纵向最长边 1080；正方形由较短的 1080 界定。 */
+  @JsonProperty("1080P")
   P1080("1080P", 1920, 1080),
 
   /** 原字节，永不缩放。 */
+  @JsonProperty("ORIGINAL")
   ORIGINAL("ORIGINAL", Integer.MAX_VALUE, Integer.MAX_VALUE);
 
   private final String wireName;

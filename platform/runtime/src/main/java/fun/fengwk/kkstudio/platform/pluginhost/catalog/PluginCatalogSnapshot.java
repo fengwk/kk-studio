@@ -2,9 +2,13 @@ package fun.fengwk.kkstudio.platform.pluginhost.catalog;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
@@ -36,6 +40,12 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   private final List<ConfiguredPlugin> configuredPlugins;
   private final HarnessCatalog harnessCatalog;
 
+  /**
+   * 构建期冻结的 contributor 来源：每个 contributor 到其 provider（kind/id/name）。插件实例贡献为 PLUGIN（名称取插件
+   * descriptor），宿主 contributor 中 BuiltinHarnessContributor 为 BUILTIN，其余为 APP。
+   */
+  private final Map<ContributorId, ToolProviderDTO> providers;
+
   /** 构建期由产品目录投影一次性冻结，快照发布前完成赋值，此后只读。 */
   private Object productCatalog;
 
@@ -43,9 +53,12 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   private boolean closed;
 
   private PluginCatalogSnapshot(
-      List<ConfiguredPlugin> configuredPlugins, HarnessCatalog harnessCatalog) {
+      List<ConfiguredPlugin> configuredPlugins,
+      HarnessCatalog harnessCatalog,
+      Map<ContributorId, ToolProviderDTO> providers) {
     this.configuredPlugins = configuredPlugins;
     this.harnessCatalog = harnessCatalog;
+    this.providers = Map.copyOf(providers);
   }
 
   /**
@@ -65,6 +78,16 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
     Objects.requireNonNull(productCatalog, "productCatalog");
     List<ConfiguredPlugin> configured = new ArrayList<>();
     List<HarnessContributor> contributors = new ArrayList<>(builtins);
+    Map<ContributorId, ToolProviderDTO> providers = new LinkedHashMap<>();
+    for (HarnessContributor builtin : builtins) {
+      ContributorDescriptor descriptor = builtin.descriptor();
+      ToolProviderKind kind =
+          BuiltinHarnessContributor.ID.equals(descriptor.id())
+              ? ToolProviderKind.BUILTIN
+              : ToolProviderKind.APP;
+      providers.put(
+          descriptor.id(), new ToolProviderDTO(kind, descriptor.id().value(), descriptor.name()));
+    }
     String stage = "configure";
     String activeId = null;
     try {
@@ -87,11 +110,17 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
         configured.add(entry);
         stage = "collect-contributions";
         contributors.addAll(instance.harnessContributors());
+        ToolProviderDTO provider =
+            new ToolProviderDTO(ToolProviderKind.PLUGIN, activeId, plugin.descriptor().name());
+        for (HarnessContributor contributor : instance.harnessContributors()) {
+          providers.put(contributor.descriptor().id(), provider);
+        }
       }
       stage = "catalog";
       activeId = null;
       PluginCatalogSnapshot candidate =
-          new PluginCatalogSnapshot(List.copyOf(configured), HarnessCatalog.from(contributors));
+          new PluginCatalogSnapshot(
+              List.copyOf(configured), HarnessCatalog.from(contributors), providers);
       candidate.productCatalog =
           Objects.requireNonNull(productCatalog.apply(candidate), "product catalog view");
       return candidate;
@@ -124,6 +153,14 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   /** 插件贡献与内置贡献合并后的完整 Harness 目录。 */
   public HarnessCatalog harnessCatalog() {
     return harnessCatalog;
+  }
+
+  /**
+   * 构建期冻结的 contributor provider：插件实例贡献为 PLUGIN（名称取插件 descriptor），宿主 contributor 中
+   * BuiltinHarnessContributor 为 BUILTIN，其余为 APP。
+   */
+  public Map<ContributorId, ToolProviderDTO> providers() {
+    return providers;
   }
 
   /**

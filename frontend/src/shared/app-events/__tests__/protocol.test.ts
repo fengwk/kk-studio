@@ -56,17 +56,39 @@ describe('connection identity and ide-use', () => {
       type: 'connected',
       eventNodeId: EVENT_NODE_ID,
       connectionId: CONNECTION_ID,
+      heartbeatIntervalMillis: '20000',
     }
     expect(decodeServerMessage(JSON.stringify(connected))).toEqual({
       type: 'connected',
       eventNodeId: EVENT_NODE_ID,
       connectionId: CONNECTION_ID,
+      heartbeatIntervalMillis: '20000',
     })
     expect(decodeServerMessage(JSON.stringify({ ...connected, version: 2 }))).toBeNull()
     expect(
       decodeServerMessage(JSON.stringify({ ...connected, connectionId: CONNECTION_ID.toUpperCase() })),
     ).toBeNull()
     expect(decodeServerMessage(JSON.stringify({ ...connected, extra: true }))).toBeNull()
+  })
+
+  it('decodes heartbeatIntervalMillis as a canonical positive millisecond string within safe integer range', () => {
+    const connected = {
+      type: 'connected',
+      eventNodeId: EVENT_NODE_ID,
+      connectionId: CONNECTION_ID,
+      heartbeatIntervalMillis: '20000',
+    }
+    // canonical 正十进制字符串；边界值是 Number.MAX_SAFE_INTEGER。
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...connected, heartbeatIntervalMillis: '9007199254740991' }),
+      ),
+    ).toMatchObject({ heartbeatIntervalMillis: '9007199254740991' })
+    for (const bad of ['0', '-1', '01', '1.0', '9007199254740992', 20000, undefined]) {
+      expect(
+        decodeServerMessage(JSON.stringify({ ...connected, heartbeatIntervalMillis: bad })),
+      ).toBeNull()
+    }
   })
 
   it('decodes ide-use-accepted only for a canonical positive signed-64 revision', () => {

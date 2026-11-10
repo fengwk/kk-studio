@@ -470,6 +470,14 @@ export const resourcesCatalog = {
     'en-US': 'Max Output Tokens',
     'zh-CN': 'Max Output Tokens',
   },
+  'ai.catalog.form.inputLimit': {
+    'en-US': 'Input Limit',
+    'zh-CN': '输入上限',
+  },
+  'ai.catalog.form.inputLimitHint': {
+    'en-US': 'Optional cap on prompt tokens per request; leave empty to use the context window.',
+    'zh-CN': '可选的每次请求输入 token 上限；留空表示仅受上下文窗口约束。',
+  },
   'ai.catalog.form.limit': {
     'en-US': 'Limit',
     'zh-CN': 'Limit',

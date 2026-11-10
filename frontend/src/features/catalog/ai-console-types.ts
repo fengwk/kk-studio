@@ -57,6 +57,8 @@ export interface ModelDraft {
   description: string
   providerName: string
   contextWindow: string
+  /** 可选的单独输入上限；空串表示未设置，提交时省略 wire 的 limit.input。 */
+  inputLimit: string
   maxOutputTokens: string
   tools: boolean
   reasoning: boolean

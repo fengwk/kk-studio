@@ -11,6 +11,7 @@ import { Agent } from 'undici'
 
 import {
   getOutboundNetwork,
+  isOutboundCleanupFailure,
   NetworkRuntime,
   ProxyConfigurationError,
   withLoopbackResponse,
@@ -596,6 +597,46 @@ describe('outbound network lifecycle and connect deadlines', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+
+  it('reports a typed cleanup failure when a dispatcher close fails and never masks it on a second close', async () => {
+    const origin = await startOrigin()
+    cleanups.push(origin.close)
+    const installed = new NetworkRuntime(null)
+    const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
+    expect(response.statusCode).toBe(200)
+    const failure = new Error('retire failed')
+    const spy = vi.spyOn(Agent.prototype, 'destroy').mockImplementation(() => Promise.reject(failure))
+    try {
+      // close 失败按原始错误实例交付，同时登记 cleanup failure 类型；判定用 isOutboundCleanupFailure。
+      const firstError = await installed.close().then(
+        () => undefined,
+        (reason: unknown) => reason,
+      )
+      expect(isOutboundCleanupFailure(firstError)).toBe(true)
+      expect(firstError).toBe(failure)
+      // 第二次 close 等待同一收尾事实：不能伪成功，也不能用新错误掩盖第一次失败。
+      const secondError = await installed.close().then(
+        () => undefined,
+        (reason: unknown) => reason,
+      )
+      expect(isOutboundCleanupFailure(secondError)).toBe(true)
+      expect(secondError).toBe(firstError)
+    } finally {
+      spy.mockRestore()
+      // 兜底释放本地 origin；网络句柄已收敛，不再产生额外副作用。
+      await origin.close()
+    }
+  })
+
+  it('converges on close without a cleanup failure when every dispatcher closes', async () => {
+    const origin = await startOrigin()
+    cleanups.push(origin.close)
+    const installed = new NetworkRuntime(null)
+    const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
+    expect(response.statusCode).toBe(200)
+    // 成功关闭后 owned 集合排空，close 不得携带任何清理失败。
+    await expect(installed.close()).resolves.toBeUndefined()
   })
 })
 

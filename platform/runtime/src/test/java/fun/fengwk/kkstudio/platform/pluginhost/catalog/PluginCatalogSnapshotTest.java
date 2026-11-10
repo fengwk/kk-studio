@@ -14,6 +14,9 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -111,7 +114,39 @@ class PluginCatalogSnapshotTest {
         snapshot.configuredPlugins().get(0).contributorIds());
     assertEquals(Set.of("beta.contrib"), contributorIds(snapshot.configuredPlugins().get(1)));
     assertEquals(Map.of(PLUGIN_ALPHA, 0L, PLUGIN_BETA, 0L), snapshot.revisions());
+    // provider 来源：插件贡献为 PLUGIN（名称取插件 descriptor），宿主 contributor 为 APP。
+    assertEquals(
+        new ToolProviderDTO(ToolProviderKind.PLUGIN, PLUGIN_ALPHA, "Plugin " + PLUGIN_ALPHA),
+        snapshot.providers().get(new ContributorId("alpha.contrib")));
+    assertEquals(
+        new ToolProviderDTO(ToolProviderKind.PLUGIN, PLUGIN_BETA, "Plugin " + PLUGIN_BETA),
+        snapshot.providers().get(new ContributorId("beta.contrib")));
+    assertEquals(
+        new ToolProviderDTO(ToolProviderKind.APP, "builtin.contrib", "contributor builtin.contrib"),
+        snapshot.providers().get(new ContributorId("builtin.contrib")));
     snapshot.close();
+  }
+
+  /** 宿主 contributor 中 BuiltinHarnessContributor 记录为 BUILTIN provider，其余宿主为 APP。 */
+  @Test
+  void providersDistinguishBuiltinHostContributorsFromAppOnes() {
+    TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
+    PluginRegistry registry = new PluginRegistry(List.of(plugin));
+    HarnessContributor builtin = builtinContributor("builtin");
+    HarnessContributor app = contributor("project.host");
+
+    try (PluginCatalogSnapshot snapshot =
+        build(registry, initialConfigurations(registry), List.of(builtin, app))) {
+      assertEquals(
+          new ToolProviderDTO(
+              ToolProviderKind.BUILTIN,
+              BuiltinHarnessContributor.ID.value(),
+              BuiltinHarnessContributor.NAME),
+          snapshot.providers().get(BuiltinHarnessContributor.ID));
+      assertEquals(
+          new ToolProviderDTO(ToolProviderKind.APP, "project.host", "contributor project.host"),
+          snapshot.providers().get(new ContributorId("project.host")));
+    }
   }
 
   /** 产品目录视图只按类型读取：请求未冻结的类型时固定失败，绝不返回其它产品的视图。 */
@@ -366,6 +401,14 @@ class PluginCatalogSnapshotTest {
   private static HarnessContributor contributor(String id) {
     return HarnessContributor.of(
         new ContributorDescriptor(new ContributorId(id), "contributor " + id, "1.0", Set.of()),
+        registrar -> {});
+  }
+
+  /** 一个使用真实 BuiltinHarnessContributor 身份的空宿主 contributor，用于验证 BUILTIN provider 来源。 */
+  private static HarnessContributor builtinContributor(String id) {
+    return HarnessContributor.of(
+        new ContributorDescriptor(
+            new ContributorId(id), BuiltinHarnessContributor.NAME, "1.0", Set.of()),
         registrar -> {});
   }
 

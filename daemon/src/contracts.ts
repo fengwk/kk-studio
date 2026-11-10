@@ -116,6 +116,59 @@ export interface ResourceUploader {
   upload(invocationId: string, content: Extract<ResultContent, { type: 'binary' }>, signal: AbortSignal): Promise<Extract<ResultContent, { type: 'resource' }>>
 }
 
+/** 资源上传的安全错误分类：只含固定类别，不含 URL、headers 或令牌。 */
+export type ResourceUploadErrorCategory =
+  | 'storage-rejected'
+  | 'control-unavailable'
+  | 'ticket-failed'
+  | 'cancelled'
+  | 'cleanup-failed'
+  | 'boundary-violation'
+  | 'unknown'
+
+/** 资源上传阶段：失败发生在哪一层。 */
+export type ResourceUploadStage =
+  | 'request'
+  | 'put'
+  | 'commit'
+  | 'cleanup'
+  | 'internal'
+
+/**
+ * 资源上传边界的明确失败类型：区分「交付失败但上传范围已退场」与「退出仍未知」。
+ *
+ * <p>契约（PLAN 13 节）：
+ * - 普通失败（resolve 之外的拒绝）在完成实际网络/控制面释放后必须 `cleanupConfirmed: true`；
+ * - 释放本身失败或未能证明完成时 `cleanupConfirmed: false`，调用方不得确认退出；
+ * - 注入的 uploader 违反契约（如拒绝且未标记）时由边界转换为 `cleanupConfirmed: false` 的保守事实，
+ *   并记录边界违约诊断，绝不自动认定释放成功。
+ *
+ * <p>message 是安全文案：绝不能携带预签名 URL、signed headers 或令牌；cause 保留原始错误。
+ */
+export class ResourceUploadError extends Error {
+  readonly stage: ResourceUploadStage
+  readonly category: ResourceUploadErrorCategory
+  readonly cleanupConfirmed: boolean
+
+  constructor(
+    stage: ResourceUploadStage,
+    category: ResourceUploadErrorCategory,
+    cleanupConfirmed: boolean,
+    options?: { cause?: unknown },
+  ) {
+    super(`resource upload failed during ${stage} (${category})`, options)
+    this.name = 'ResourceUploadError'
+    this.stage = stage
+    this.category = category
+    this.cleanupConfirmed = cleanupConfirmed
+  }
+}
+
+/** 按类型判定上传失败是否已确认释放；不从 message 或 cause 文案推断。 */
+export function isResourceUploadError(error: unknown): error is ResourceUploadError {
+  return error instanceof ResourceUploadError
+}
+
 export interface CapabilityContext {
   config: DaemonConfig
   signal: AbortSignal

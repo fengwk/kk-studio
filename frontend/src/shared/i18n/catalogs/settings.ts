@@ -755,6 +755,18 @@ export const settingsCatalog = {
     'en-US': 'Soft interaction-turn budget for a subagent task. At the limit, the subagent is reminded to finish the current phase and report.',
     'zh-CN': '单个子代理任务的交互轮数软预算。达到上限后提醒子代理结束当前阶段并汇报。',
   },
+  'settings.option.imageTier.720p': {
+    'en-US': '720p (fits 1280×720)',
+    'zh-CN': '720p（不超过 1280×720）',
+  },
+  'settings.option.imageTier.1080p': {
+    'en-US': '1080p (fits 1920×1080)',
+    'zh-CN': '1080p（不超过 1920×1080）',
+  },
+  'settings.option.imageTier.original': {
+    'en-US': 'Original',
+    'zh-CN': '原图',
+  },
   'settings.option.retryBackoff.fixed': {
     'en-US': 'Fixed',
     'zh-CN': '固定',
@@ -1001,6 +1013,14 @@ export const settingsCatalog = {
   'settings.field.storageMedia.thumbnailQuality.hint': {
     'en-US': 'JPEG compression quality (1-100) for generated thumbnails. Higher values improve quality with larger file sizes.',
     'zh-CN': '缩略图生成的 JPEG 压缩质量（1-100）。数值越高画质越好但体积越大。',
+  },
+  'settings.field.storageMedia.imageTier': {
+    'en-US': 'Image size sent to models',
+    'zh-CN': '发送给模型的图片尺寸',
+  },
+  'settings.field.storageMedia.imageTier.hint': {
+    'en-US': 'Default size for images without a size of their own. Images are only scaled down for the request; the original file is kept.',
+    'zh-CN': '未单独选择尺寸的图片按此发送。仅在请求时缩小，原文件保持不变。',
   },
   'settings.field.storageMedia.temporaryResourceTtlSeconds': {
     'en-US': 'Temporary resource retention (s)',

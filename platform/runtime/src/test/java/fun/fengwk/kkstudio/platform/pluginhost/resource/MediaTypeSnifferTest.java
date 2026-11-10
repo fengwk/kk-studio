@@ -5,14 +5,63 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 /** 媒体类型特征嗅探与请求头规范化测试。 */
 class MediaTypeSnifferTest {
+
+  /**
+   * Daemon 与 Java 共用同一组二进制样例（platform 测试资源目录），逐个验证五类媒体的正例识别与伪装扩展名反例
+   * （字节不是该格式特征时必须判不出）。反例扩展名仍以真实格式结尾，确保判定只来自字节而非名称。
+   */
+  @ParameterizedTest
+  @CsvSource({
+    "video/sample.mp4, video/mp4",
+    "video/sample.mov, video/quicktime",
+    "audio/sample.wav, audio/wav",
+    "audio/sample-id3.mp3, audio/mpeg",
+    "audio/sample-frame.mp3, audio/mpeg",
+    "doc/sample.pdf, application/pdf",
+  })
+  void sniffsSharedSamplePositives(String resource, String expectedType) {
+    assertEquals(Optional.of(expectedType), MediaTypeSniffer.sniff(readSample(resource)));
+  }
+
+  /** 伪装样例的字节特征不成立，不得判为对应格式。 */
+  @ParameterizedTest
+  @CsvSource({
+    "video/sample.mp4.fake, video/mp4",
+    "video/sample.mov.fake, video/mp4",
+    "audio/sample.wav.fake, audio/wav",
+    "audio/sample-id3.mp3.fake, audio/mpeg",
+    "audio/sample-frame.mp3.fake, audio/mpeg",
+    "doc/sample.pdf.fake, application/pdf",
+  })
+  void rejectsSharedSampleDisguises(String resource, String claimedType) {
+    Optional<String> sniffed = MediaTypeSniffer.sniff(readSample(resource));
+    assertTrue(sniffed.isEmpty() || !sniffed.get().equals(claimedType));
+  }
+
+  private static byte[] readSample(String resource) {
+    try (InputStream input =
+        MediaTypeSnifferTest.class.getResourceAsStream(
+            "/fun/fengwk/kkstudio/platform/storage/media/" + resource)) {
+      if (input == null) {
+        throw new IllegalStateException("missing media sample: " + resource);
+      }
+      return input.readAllBytes();
+    } catch (IOException error) {
+      throw new IllegalStateException("cannot read media sample: " + resource, error);
+    }
+  }
 
   /** 验证图片格式的魔数特征识别：JPEG, PNG, GIF, BMP, TIFF, WEBP, HEIC, AVIF。 */
   @Test

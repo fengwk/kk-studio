@@ -1,8 +1,12 @@
 export {
   ApplicationEventConnection,
   createApplicationEventUrl,
+  type ApplicationEventConnectionBackoffCause,
   type ApplicationEventConnectionOptions,
+  type ApplicationEventConnectionReason,
+  type ApplicationEventConnectionState,
   type ApplicationEventConnectionStatus,
+  type ApplicationEventConnectionStopCause,
   type ApplicationEventSocketFactory,
 } from '@/shared/app-events/connection'
 export {
@@ -13,6 +17,7 @@ export {
 } from '@/shared/app-events/manager'
 export {
   ApplicationEventProvider,
+  useApplicationEventConnectionState,
   useApplicationEventIdentity,
   useApplicationEvents,
   type ApplicationEventProviderProps,

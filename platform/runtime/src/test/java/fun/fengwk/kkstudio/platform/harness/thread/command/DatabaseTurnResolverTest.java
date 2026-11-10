@@ -71,6 +71,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
@@ -120,6 +121,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.SelectableTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
@@ -1210,9 +1212,7 @@ class DatabaseTurnResolverTest {
         boolean selectable = enabled && status == McpDiscoveryStatus.AVAILABLE;
         assertEquals(
             selectable ? List.of("mcp_srv_echo", "mcp_srv_sibling") : List.of(),
-            mcpCatalog.selectableTools().stream()
-                .map(contribution -> contribution.definition().descriptor().name())
-                .toList(),
+            mcpCatalog.selectableTools().stream().map(SelectableTool::name).toList(),
             "status=" + status + " enabled=" + enabled);
 
         Fixture fixture =
@@ -1686,7 +1686,7 @@ class DatabaseTurnResolverTest {
             fixture.providers,
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
-            new ProviderResourceMaterializer(blobs, content));
+            new ProviderResourceMaterializer(blobs, content, () -> ImageInputTier.P720));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
     assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());

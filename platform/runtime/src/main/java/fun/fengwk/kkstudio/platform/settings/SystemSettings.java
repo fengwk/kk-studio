@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 
@@ -164,7 +165,7 @@ public record SystemSettings(
     }
   }
 
-  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理与受控临时资源的非敏感预算。 */
+  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理、请求时图片档位与受控临时资源的非敏感预算。 */
   public record StorageMedia(
       long uploadExpiresSeconds,
       long s3PresignDefaultExpiresSeconds,
@@ -172,6 +173,7 @@ public record SystemSettings(
       long canvasMediaProcessTimeoutMillis,
       int thumbnailMaxDimension,
       int thumbnailQuality,
+      ImageInputTier imageTier,
       long temporaryResourceTtlSeconds,
       long temporaryResourceCleanupIntervalSeconds) {
 
@@ -193,6 +195,7 @@ public record SystemSettings(
           thumbnailMaxDimension, "storageMedia.thumbnailMaxDimension");
       SystemSettingsValidation.requireBounded(
           thumbnailQuality, 1, 100, "storageMedia.thumbnailQuality");
+      imageTier = Objects.requireNonNull(imageTier, "storageMedia.imageTier");
       SystemSettingsValidation.requirePositive(
           temporaryResourceTtlSeconds, "storageMedia.temporaryResourceTtlSeconds");
       SystemSettingsValidation.requirePositive(

@@ -9,6 +9,7 @@ import type {
   CapabilityResult,
 } from '../contracts.js'
 import { textResult } from '../contracts.js'
+import { detectMediaMimeType } from './media-sniff.js'
 import { MAX_DETAILS_JSON_UTF8_BYTES } from '../protocol/control/codec.js'
 import {
   CancelledError,
@@ -136,6 +137,18 @@ async function readExisting(
       contents: [{ type: 'binary', bytes, mediaType: imageMime }],
     }
   }
+  // 音视频与 PDF 不转码：只凭文件头判型并按原字节上传，扩展名不参与判定。
+  const mediaMime = detectMediaMimeType(probeBytes)
+  if (mediaMime !== null) {
+    const bytes = await readAllBytes(path)
+    requireActive(context)
+    return {
+      callId: call.invocationId,
+      error: false,
+      details: {},
+      contents: [{ type: 'binary', bytes, mediaType: mediaMime, name: baseName(display) }],
+    }
+  }
   const encoding = detectEncoding(probeBytes)
   if (looksBinary(probeBytes, encoding)) {
     throw new ToolRunFailureError('file appears to be binary', 'CODEC')
@@ -151,6 +164,14 @@ async function readExisting(
     () => requireActive(context),
   )
   return textResult(call.invocationId, text)
+}
+
+/** 从展示路径取最后一段作为资源名；只剩根时返回 null。 */
+function baseName(display: string): string | null {
+  const trimmed = display.replace(/\/+$/, '')
+  const separator = trimmed.lastIndexOf('/')
+  const name = separator >= 0 ? trimmed.slice(separator + 1) : trimmed
+  return name.length > 0 ? name : null
 }
 
 async function directoryResponse(

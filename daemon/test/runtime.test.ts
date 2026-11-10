@@ -16,6 +16,7 @@ import type {
   ProcessSupervisor,
   ResourceUploader,
 } from '../src/contracts.js'
+import { ResourceUploadError } from '../src/contracts.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import {
   CancelSchema,
@@ -3430,7 +3431,8 @@ describe('runtime execution exit confirmation', () => {
   })
 
   it('does not ACK when owned upload cleanup throws after the executor confirmed', async () => {
-    // 正向证据不能抢在本次资源上传之前发出。上传抛错说明收尾未完成，终态之后也不补 ACK。
+    // 正向证据不能抢在本次资源上传之前发出。契约外的上传失败按边界违约保守交付：
+    // 失败文案固定安全、退出事实保持未知，终态之后也不补 ACK。
     const setup = buildRuntime({
       resources: {
         async upload() {
@@ -3453,7 +3455,9 @@ describe('runtime execution exit confirmation', () => {
       await handshake(setup)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload', payload: invokePayload() }))
       await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
-      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({ message: 'upload failed' })
+      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({
+        message: 'resource upload failed during internal (boundary-violation)',
+      })
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
     } finally {
       try {
@@ -3464,6 +3468,123 @@ describe('runtime execution exit confirmation', () => {
     }
     // Runtime 已真正收尾；失败的上传不能留下可在重连后重放的退出事实。
     expect(setup.runtime.getJournal().find('inv-upload')?.exitConfirmed).toBe(false)
+  })
+
+  it('ACKs exit when the result fails but the upload range was proven released', async () => {
+    // 结果失败与退出证明相互独立：storage 拒绝（cleanupConfirmed=true）→ FAILED 终态 + 一次 ACK。
+    const setup = buildRuntime({
+      resources: {
+        async upload() {
+          throw new ResourceUploadError('put', 'storage-rejected', true)
+        },
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+          }
+        },
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload-rejected', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({
+        message: 'resource upload failed during put (storage-rejected)',
+      })
+      // 清理已证明完成：FAILED 结果不阻止退出确认。
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
+    expect(setup.runtime.getJournal().find('inv-upload-rejected')?.exitConfirmed).toBe(true)
+  })
+
+  it('keeps exit unconfirmed when the upload boundary reports an unproven cleanup', async () => {
+    // cleanupConfirmed=false：结果失败且退出仍未知；journal 不落退出事实，重连后也不重放 ACK。
+    const setup = buildRuntime({
+      resources: {
+        async upload() {
+          throw new ResourceUploadError('put', 'cleanup-failed', false)
+        },
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+          }
+        },
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cleanup-failed', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({
+        message: 'resource upload failed during put (cleanup-failed)',
+      })
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      // 迟到的正向证据不能推翻未释放事实：退出确认保持未知。
+      expect(setup.runtime.getJournal().find('inv-cleanup-failed')?.exitConfirmed).toBe(false)
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
+  })
+
+  it('applies one invocation deadline to both execution and resource delivery', async () => {
+    // 执行已返回、上传仍在进行：同一个 deadline 继续约束交付，到期中止上传并以 TIMED_OUT 失败结束。
+    let uploadSignal: AbortSignal | null = null
+    const setup = buildRuntime({
+      resources: {
+        upload(_invocationId, _content, signal) {
+          uploadSignal = signal
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new ResourceUploadError('put', 'cancelled', true)))
+          })
+        },
+      },
+      capabilities: {
+        'fs.read': async (call) => ({
+          callId: call.invocationId,
+          error: false,
+          details: {},
+          contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+        }),
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-deadline', payload: invokePayload('fs.read', 50) }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+      expect(uploadSignal?.aborted).toBe(true)
+      expect(String(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload?.message)).toContain(
+        'timed out after 50ms',
+      )
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
   })
 
   it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {

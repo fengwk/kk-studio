@@ -31,7 +31,8 @@ import java.util.UUID;
  * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
  * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe',resource}} 与 {@code
- * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。服务端帧 {@code connected} / {@code
+ * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。服务端帧 {@code
+ * connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
  * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
  * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
@@ -117,14 +118,20 @@ final class EventFrameCodec {
     };
   }
 
-  /** 编码连接建立后的第一条 {@code connected} 帧；携带本地事件节点与本次物理连接身份。 */
-  String connected(UUID eventNodeId, UUID connectionId) {
+  /**
+   * 编码连接建立后的第一条 {@code connected} 帧；携带本地事件节点、本次物理连接身份与服务端实际使用的文本 heartbeat 间隔，客户端以该间隔推导失联预算，不写死默认值。
+   */
+  String connected(UUID eventNodeId, UUID connectionId, long heartbeatIntervalMillis) {
     Objects.requireNonNull(eventNodeId, "eventNodeId");
     Objects.requireNonNull(connectionId, "connectionId");
+    if (heartbeatIntervalMillis <= 0) {
+      throw new IllegalArgumentException("heartbeatIntervalMillis must be positive");
+    }
     ObjectNode node = NODES.objectNode();
     node.put("type", "connected");
     node.put("eventNodeId", eventNodeId.toString());
     node.put("connectionId", connectionId.toString());
+    node.put("heartbeatIntervalMillis", Long.toString(heartbeatIntervalMillis));
     return write(node);
   }
 

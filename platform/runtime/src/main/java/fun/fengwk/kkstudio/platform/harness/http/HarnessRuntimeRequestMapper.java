@@ -406,13 +406,13 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 解析 ATTACHMENT / RESOURCE 的图片输入档位：缺省使用平台默认 720P，显式提供时必须是受支持的档位名（非图片媒体由 Platform 在权威 MIME 上收敛为
-   * null）。
+   * 解析 ATTACHMENT / RESOURCE 的图片输入档位：缺省保持 null，由命令接受边界按系统设置 {@code media.imageTier} 补齐；非图片媒体由
+   * Platform 在权威 MIME 上收敛为 null。
    */
-  private static ImageInputTier toImageTier(
+  private static @Nullable ImageInputTier toImageTier(
       @Nullable HarnessImageInputTier imageTier, String context) {
     if (imageTier == null) {
-      return ImageInputTier.P720;
+      return null;
     }
     return switch (imageTier) {
       case P720 -> ImageInputTier.P720;

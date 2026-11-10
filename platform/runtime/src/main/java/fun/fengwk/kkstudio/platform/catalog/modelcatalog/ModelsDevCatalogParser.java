@@ -115,12 +115,14 @@ public class ModelsDevCatalogParser {
     try {
       JsonNode object = CatalogJson.requireObject(node, "limit");
       Integer context = CatalogJson.nonNegativeInt(object.get("context"), "limit.context");
+      Integer input = CatalogJson.nonNegativeInt(object.get("input"), "limit.input");
       Integer output = CatalogJson.nonNegativeInt(object.get("output"), "limit.output");
-      if (context == null && output == null) {
+      if (context == null && input == null && output == null) {
         return null;
       }
       ModelCatalogLimitDTO limit = new ModelCatalogLimitDTO();
       limit.setContext(context);
+      limit.setInput(input);
       limit.setOutput(output);
       return limit;
     } catch (CatalogPriceException error) {

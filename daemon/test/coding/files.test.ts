@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { fileCapabilities } from '../../src/coding/files.js'
 import type { CapabilityContext } from '../../src/contracts.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
@@ -152,6 +154,46 @@ describe('fs.read', () => {
     await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]))
     const result = await callCapability(read, 'fs.read', { path: file }, makeContext(dir))
     expect(result.contents[0]).toMatchObject({ type: 'binary', mediaType: 'image/png' })
+  })
+
+  it('音视频与 PDF 按原字节返回并带嗅探出的媒体类型与文件名', async () => {
+    // 与 Java MediaTypeSniffer 共用的 platform 测试资源样例。
+    const samples = fileURLToPath(
+      new URL(
+        '../../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/storage/media/',
+        import.meta.url,
+      ),
+    )
+    const dir = await tempDir()
+    for (const [sample, mediaType] of [
+      ['video/sample.mp4', 'video/mp4'],
+      ['video/sample.mov', 'video/quicktime'],
+      ['audio/sample.wav', 'audio/wav'],
+      ['audio/sample-id3.mp3', 'audio/mpeg'],
+      ['audio/sample-frame.mp3', 'audio/mpeg'],
+      ['doc/sample.pdf', 'application/pdf'],
+    ] as const) {
+      const bytes = new Uint8Array(readFileSync(join(samples, sample)))
+      // 伪装反例沿用真实扩展名落地：判型只看字节，扩展名不参与。
+      const file = join(dir, sample.replace('/', '-'))
+      await writeFile(file, bytes)
+      const result = await callCapability(read, 'fs.read', { path: file }, makeContext(dir))
+      expect(result.error, file).toBe(false)
+      const content = result.contents[0]
+      expect(content, file).toMatchObject({ type: 'binary', mediaType, name: file.replace(/\\/g, '/').split('/').pop() })
+      if (content.type === 'binary') {
+        expect(Buffer.from(content.bytes).equals(Buffer.from(bytes)), file).toBe(true)
+      }
+    }
+  })
+
+  it('伪装成媒体扩展名的普通文本按文本读取，扩展名不参与判定', async () => {
+    const dir = await tempDir()
+    const file = join(dir, 'movie.mp4')
+    await writeFile(file, 'plain text, not a movie\n')
+    const result = await callCapability(read, 'fs.read', { path: file }, makeContext(dir))
+    expect(result.error).toBe(false)
+    expect(textOf(result)).toContain('plain text, not a movie')
   })
 
   it('相对路径先于文件系统访问被拒绝', async () => {
