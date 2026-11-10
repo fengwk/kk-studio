@@ -51,9 +51,9 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     ],
     environmentsLoading: false,
     environmentsError: false,
-    identityReady: true,
     sessionStatus: 'ready',
     storageUnavailable: false,
+    connectionState: { status: 'ready', reason: null },
     onSelectEnvironment: vi.fn(),
     onCollapse: vi.fn(),
     onCloseEnvironment: vi.fn().mockResolvedValue({ ok: true, dirty: false }),
@@ -343,6 +343,36 @@ describe('IdeOverlayPanel', () => {
 
     rerender(<IdeOverlayPanel {...baseProps({ sessionStatus: 'conflict' })} />)
     expect(screen.getByTestId('ide-session-unavailable')).toHaveTextContent('另一个活动页面')
+  })
+
+  it('presents the browser event connection state separately from the IDE session', () => {
+    const { rerender } = render(
+      <IdeOverlayPanel {...baseProps({
+        connectionState: { status: 'connecting', reason: { kind: 'connecting', transportOpen: true } },
+      })} />,
+    )
+    expect(screen.getByTestId('ide-connecting')).toHaveTextContent('正在建立实时事件连接')
+
+    rerender(<IdeOverlayPanel {...baseProps({
+      connectionState: {
+        status: 'backoff',
+        reason: { kind: 'backoff', cause: 'liveness-timeout', retryAt: 0 },
+      },
+    })} />)
+    expect(screen.getByTestId('ide-reconnecting')).toHaveTextContent('失去响应')
+
+    // terminal 停止显示需要人工介入的原因，不显示持续重连。
+    rerender(<IdeOverlayPanel {...baseProps({
+      connectionState: { status: 'stopped', reason: { kind: 'stopped', cause: 'policy' } },
+    })} />)
+    expect(screen.getByTestId('ide-connection-stopped')).toHaveTextContent('策略限制')
+    expect(screen.queryByTestId('ide-reconnecting')).not.toBeInTheDocument()
+
+    // ready 无横幅。
+    rerender(<IdeOverlayPanel {...baseProps()} />)
+    expect(screen.queryByTestId('ide-connecting')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ide-reconnecting')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ide-connection-stopped')).not.toBeInTheDocument()
   })
 
   it('renders the environment selector when no environment was supplied', () => {

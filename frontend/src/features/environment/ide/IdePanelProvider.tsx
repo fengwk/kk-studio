@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useApplicationEventConnectionState } from '@/shared/app-events'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { environmentService } from '@/features/environment/environment-service'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
@@ -71,6 +72,7 @@ export function IdePanelProvider({
   active,
 }: PropsWithChildren<IdePanelProviderProps>) {
   const queryClient = useQueryClient()
+  const connectionState = useApplicationEventConnectionState()
   const [initial] = useState(() => initializeIdeTabState(storage))
   const [presentation, setPresentationState] = useState<IdePresentation>(initial.presentation)
   const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(
@@ -383,10 +385,9 @@ export function IdePanelProvider({
           environments={environments}
           environmentsLoading={environmentsQuery.isLoading}
           environmentsError={environmentsQuery.isError}
-          identityReady={claimReconciliation.identity != null
-            && (session.status === 'ready' || session.status === 'cloned')}
           sessionStatus={session.status}
           storageUnavailable={storageUnavailable || !session.sessionSaved}
+          connectionState={connectionState}
           onSelectEnvironment={selectEnvironment}
           onCollapse={collapsePanel}
           onCloseEnvironment={closeEnvironment}

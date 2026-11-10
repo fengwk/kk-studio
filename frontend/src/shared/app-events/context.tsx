@@ -1,6 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react'
-import { createApplicationEventUrl, type ApplicationEventSocketFactory } from '@/shared/app-events/connection'
+import {
+  createApplicationEventUrl,
+  type ApplicationEventConnectionState,
+  type ApplicationEventSocketFactory,
+} from '@/shared/app-events/connection'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 
@@ -47,8 +51,8 @@ export function useApplicationEvents(): ApplicationEventManager {
 }
 
 /**
- * 当前应用事件连接的 eventNodeId/connectionId；尚未收到 connected 或断线时为 null。
- * 仅用于全局 IDE 面板的关联与使用登记，不是认证凭据。
+ * 当前应用事件连接的 eventNodeId/connectionId/heartbeatIntervalMillis；尚未收到 connected
+ * 或断线时为 null。仅用于全局 IDE 面板的关联与使用登记，不是认证凭据。
  */
 export function useApplicationEventIdentity(): ApplicationEventConnectionIdentity | null {
   const manager = useApplicationEvents()
@@ -57,4 +61,17 @@ export function useApplicationEventIdentity(): ApplicationEventConnectionIdentit
   )
   useEffect(() => manager.subscribeIdentity(setIdentity), [manager])
   return identity
+}
+
+/**
+ * 当前应用事件连接的状态快照（connecting/ready/backoff/stopped 与结构化原因）。
+ * 同一份状态驱动全局连接提示与 IDE 面板横幅，不把"没有 identity"当唯一诊断。
+ */
+export function useApplicationEventConnectionState(): ApplicationEventConnectionState {
+  const manager = useApplicationEvents()
+  const [state, setState] = useState<ApplicationEventConnectionState>(() =>
+    manager.getConnectionState(),
+  )
+  useEffect(() => manager.subscribeConnectionState(setState), [manager])
+  return state
 }

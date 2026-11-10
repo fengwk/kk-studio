@@ -368,3 +368,40 @@ html[lang="en-US"] .topnav a small {
   background: var(--danger);
   border-radius: var(--radius-pill);
 }
+
+/* 应用事件连接指示：一个圆点加读屏/悬停文案，只表达浏览器事件连接本身的状态。 */
+.connection-indicator {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+
+.connection-indicator.is-ready {
+  background: var(--success);
+}
+
+.connection-indicator.is-connecting {
+  background: var(--warning);
+}
+
+.connection-indicator.is-backoff {
+  background: var(--warning);
+  animation: connection-indicator-pulse 1.6s ease-in-out infinite;
+}
+
+.connection-indicator.is-stopped {
+  background: var(--danger);
+}
+
+@keyframes connection-indicator-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}

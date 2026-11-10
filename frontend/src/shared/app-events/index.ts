@@ -17,6 +17,7 @@ export {
 } from '@/shared/app-events/manager'
 export {
   ApplicationEventProvider,
+  useApplicationEventConnectionState,
   useApplicationEventIdentity,
   useApplicationEvents,
   type ApplicationEventProviderProps,
