@@ -2122,7 +2122,7 @@ export const MODEL_INPUT_MODALITY_VALUES: readonly ModelInputModality[] = [
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO */
 export interface ModelLimitDTO {
   context: number
-  input: number
+  input?: number | null
   output: number
 }
 
