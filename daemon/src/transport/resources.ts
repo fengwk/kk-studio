@@ -1,9 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
-import type { ResourceUploader, ResultContent } from '../contracts.js'
+import {
+  isResourceUploadError,
+  ResourceUploadError,
+  type ResourceUploadErrorCategory,
+  type ResourceUploader,
+} from '../contracts.js'
+import type { ResultContent } from '../contracts.js'
 import { delay } from '../delay.js'
-import { getOutboundNetwork } from '../network.js'
+import { getOutboundNetwork, isOutboundCleanupFailure } from '../network.js'
 import {
   EnvelopeSchema,
   MessageType,
@@ -200,7 +206,11 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
                 }),
                 signal,
               )
-        } catch {
+        } catch (error) {
+          // 控制帧发送失败/票据超时属于可重试的连接事实；abort 是确定的终局。
+          if (signal.aborted) {
+            throw new ResourceUploadError('request', 'cancelled', true, { cause: error })
+          }
           await this.backoff(signal)
           continue
         }
@@ -215,11 +225,15 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           }
         }
         if (ticket.state === TicketState.TICKET_FAILED) {
-          // 提交失败说明对象确实不在存储中，回到上传阶段；申请失败则本来就没有上传过。
-          uploaded = false
-          uploadId = null
-          await this.backoff(signal)
-          continue
+          // TICKET_FAILED 是本 transfer 的失败结论：立即结束本次交付，不退避重试同一张票据掩盖错误。
+          // 字节可能已落盘（提交被拒）或从未上传（申请被拒）：平台已对该 transfer 给出权威结论，
+          // 残留对象由平台登记的清理回收，Daemon 侧上传范围已退场。
+          throw new ResourceUploadError(
+            uploaded ? 'commit' : 'request',
+            'ticket-failed',
+            true,
+            { cause: new Error(safeTicketMessage(ticket)) },
+          )
         }
         // PENDING
         if (uploaded) {
@@ -230,7 +244,10 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           uploaded = true
           try {
             await this.putObject(ticket.presignedPut as PresignedPut, bytes, signal)
-          } catch {
+          } catch (error) {
+            if (signal.aborted) {
+              throw new ResourceUploadError('put', 'cancelled', true, { cause: error })
+            }
             // 对象存储拒绝或不确定字节是否落盘：下一次提交做权威判定，失败时再回到上传阶段。
             await this.backoff(signal)
           }
@@ -287,9 +304,52 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
 
   private throwIfAborted(signal: AbortSignal): void {
     if (signal.aborted) {
-      throw new Error(FAILURE_MESSAGE)
+      throw new ResourceUploadError('request', 'cancelled', true, {
+        cause: new Error(FAILURE_MESSAGE),
+      })
     }
   }
+}
+
+/** 票据 message 是平台给出的安全、有界文案：作为 cause 保留，不拼接 URL/headers。 */
+function safeTicketMessage(ticket: ResourceUploadTicket): string {
+  return typeof ticket.message === 'string' && ticket.message.trim() !== ''
+    ? ticket.message
+    : FAILURE_MESSAGE
+}
+
+/**
+ * 上传边界转换：把内部失败统一为 ResourceUploadError 契约。
+ *
+ * <p>cleanupConfirmed 只来自明确的网络清理事实，绝不从 cause 文案推断：
+ * - 网络层确认 cleanup failure（isOutboundCleanupFailure）→ false；
+ * - 其余失败（存储拒绝、控制面不可用等）在完成实际释放后按 true 保守交付；
+ * - 已经是契约错误的原样保留。
+ */
+export function toResourceUploadBoundaryError(error: unknown): ResourceUploadError {
+  if (isResourceUploadError(error)) {
+    return error
+  }
+  if (isOutboundCleanupFailure(error)) {
+    return new ResourceUploadError('put', 'cleanup-failed', false, { cause: error })
+  }
+  const category = categorizeBoundaryFailure(error)
+  return new ResourceUploadError('put', category, true, { cause: error })
+}
+
+/** 按错误身份归类；无法识别的实现错误保守视为边界违约，不自动认定释放成功。 */
+function categorizeBoundaryFailure(error: unknown): ResourceUploadErrorCategory {
+  if (typeof error !== 'object' || error === null) {
+    return 'unknown'
+  }
+  const candidate = error as { name?: string; code?: string }
+  if (candidate.name === 'AbortError' || candidate.code === 'UND_ERR_ABORTED') {
+    return 'cancelled'
+  }
+  if (candidate.code === 'UND_ERR_CONNECT_TIMEOUT' || candidate.code === 'UND_ERR_SOCKET') {
+    return 'control-unavailable'
+  }
+  return 'unknown'
 }
 
 function transferKey(invocationId: string, transferId: string): string {
