@@ -7,8 +7,6 @@ import {
   type IdeLease as ProtoIdeLease,
   type ResourceUploadTicket,
   type Settings,
-  type SkillPackageState,
-  type SkillSync,
   type TemporaryResourcePolicy,
   type UpgradeRequired,
 } from './generated/control_pb.js'
@@ -29,7 +27,6 @@ import type { TemporaryResourceSweeper } from './runtime-ports.js'
 import type { ResourceRuntime } from './runtime-resources.js'
 import { describeFailureType } from './runtime-shutdown.js'
 import type { UpdateRuntime } from './runtime-update.js'
-import type { SkillReconciler } from './skill/reconcile.js'
 
 export interface ControlSessionOptions {
   connection: ConnectionLifecycle
@@ -59,7 +56,6 @@ export interface ControlSessionOptions {
  * 不取消已受理执行。
  */
 export class ControlSession {
-  private skillReconciler: SkillReconciler | null = null
   private heartbeatTimer: NodeJS.Timeout | null = null
   private sweepTimer: NodeJS.Timeout | null = null
   private maxResourceBytesValue = 0
@@ -105,14 +101,6 @@ export class ControlSession {
 
   clearLeaseRound(): void {
     this.activeIdeLeaseRound = null
-  }
-
-  setSkillReconciler(reconciler: SkillReconciler): void {
-    this.skillReconciler = reconciler
-  }
-
-  sendSkillState(states: SkillPackageState[]): boolean {
-    return this.options.outbound.sendSkillState(states)
   }
 
   onEnvelope(generation: number, envelope: Envelope): void {
@@ -214,9 +202,6 @@ export class ControlSession {
         return
       case MessageType.IDE_COMMAND:
         this.handleIdeCommand(envelope)
-        return
-      case MessageType.SKILL_SYNC:
-        this.handleSkillSync(envelope)
         return
       case MessageType.ENVIRONMENT_CONFIG:
         this.options.track(
@@ -423,8 +408,7 @@ export class ControlSession {
     return (
       messageType === MessageType.INVOKE ||
       messageType === MessageType.IDE_COMMAND ||
-      messageType === MessageType.IDE_LEASE ||
-      messageType === MessageType.SKILL_SYNC
+      messageType === MessageType.IDE_LEASE
     )
   }
 
@@ -436,16 +420,6 @@ export class ControlSession {
     const ttl = Number(policy.temporaryResourceTtlSeconds)
     const cleanup = Number(policy.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
-  }
-
-  private handleSkillSync(envelope: Envelope): void {
-    if (!this.options.outbound.isReady || !envelope.environmentId || this.options.outbound.environmentId === null) {
-      throw new Error('SKILL_SYNC requires a READY bound connection')
-    }
-    const sync = envelope.payload.value as SkillSync
-    if (this.skillReconciler !== null) {
-      this.skillReconciler.onDesiredSet(sync.packages ?? [])
-    }
   }
 
   private applyTemporaryResourcePolicy(ttlSeconds: number, cleanupIntervalSeconds: number): void {

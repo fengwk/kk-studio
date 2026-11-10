@@ -159,7 +159,7 @@ describe('SkillPackageInstaller', () => {
     )
 
     expect(state.error).toBeDefined()
-    expect(state.installedSha256).toBeUndefined()
+    expect(state.installedSha256).toBe('')
     expect(fs.existsSync(path.join(skillsRoot, 'bad-sha-pkg'))).toBe(false)
   })
 
@@ -181,7 +181,7 @@ describe('SkillPackageInstaller', () => {
     )
 
     expect(state.error).toBeDefined()
-    expect(state.installedSha256).toBeUndefined()
+    expect(state.installedSha256).toBe('')
     expect(fs.existsSync(path.join(skillsRoot, 'oversize-pkg'))).toBe(false)
   })
 
@@ -245,7 +245,7 @@ describe('SkillPackageInstaller', () => {
     )
 
     expect(state.error).toBeDefined()
-    expect(state.installedSha256).toBeUndefined()
+    expect(state.installedSha256).toBe('')
     expect(fs.existsSync(path.join(skillsRoot, 'symlink-pkg'))).toBe(false)
   })
 

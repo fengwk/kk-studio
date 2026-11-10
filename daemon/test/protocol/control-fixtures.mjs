@@ -23,6 +23,7 @@ import {
   JsonContentSchema,
   MessageType,
   OperatingSystem,
+  PresignedGetSchema,
   PresignedPutSchema,
   ProgressSchema,
   ReadySchema,
@@ -30,6 +31,8 @@ import {
   RecoverSchema,
   ResourceBudgetsSchema,
   ResourceContentSchema,
+  ResourceDownloadRequestSchema,
+  ResourceDownloadTicketSchema,
   ResourceUploadCommitSchema,
   ResourceUploadRequestSchema,
   ResourceUploadTicketSchema,
@@ -340,8 +343,48 @@ export function uploadTicketEnvelope() {
         method: 'PUT',
         url: 'https://uploads.example/object',
         headers: { 'content-type': 'text/plain' },
-        expiresAt: '2026-10-31T00:00:00Z',
+        expiresAtEpochMs: 1795411200000n,
       }),
+    }),
+  })
+}
+
+const BLOB = '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d'
+
+export function downloadRequestEnvelope() {
+  return envelope(MessageType.RESOURCE_DOWNLOAD_REQUEST, {
+    case: 'resourceDownloadRequest',
+    value: create(ResourceDownloadRequestSchema, {
+      transferId: TRANSFER,
+      blobId: BLOB,
+    }),
+  })
+}
+
+export function downloadTicketEnvelope() {
+  return envelope(MessageType.RESOURCE_DOWNLOAD_TICKET, {
+    case: 'resourceDownloadTicket',
+    value: create(ResourceDownloadTicketSchema, {
+      transferId: TRANSFER,
+      state: TicketState.TICKET_READY,
+      size: 4n,
+      sha256: SHA_A,
+      presignedGet: create(PresignedGetSchema, {
+        method: 'GET',
+        url: 'https://objects.example/blob',
+        expiresAtEpochMs: 1795411200000n,
+      }),
+    }),
+  })
+}
+
+export function downloadTicketFailedEnvelope() {
+  return envelope(MessageType.RESOURCE_DOWNLOAD_TICKET, {
+    case: 'resourceDownloadTicket',
+    value: create(ResourceDownloadTicketSchema, {
+      transferId: TRANSFER,
+      state: TicketState.TICKET_FAILED,
+      message: 'blob expired',
     }),
   })
 }
@@ -489,6 +532,9 @@ export const GOLDEN_FIXTURES = [
   ['upload-request.bin', uploadRequestEnvelope],
   ['upload-ticket.bin', uploadTicketEnvelope],
   ['upload-commit.bin', uploadCommitEnvelope],
+  ['download-request.bin', downloadRequestEnvelope],
+  ['download-ticket.bin', downloadTicketEnvelope],
+  ['download-ticket-failed.bin', downloadTicketFailedEnvelope],
   ['policy.bin', policyEnvelope],
   ['update.bin', updateEnvelope],
   ['update-result.bin', updateResultEnvelope],

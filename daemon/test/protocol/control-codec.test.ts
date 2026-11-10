@@ -39,6 +39,7 @@ import {
   JsonContentSchema,
   MessageType,
   OperatingSystem,
+  PresignedGetSchema,
   PresignedPutSchema,
   ProgressSchema,
   ReadySchema,
@@ -46,6 +47,8 @@ import {
   RecoverSchema,
   ResourceBudgetsSchema,
   ResourceContentSchema,
+  ResourceDownloadRequestSchema,
+  ResourceDownloadTicketSchema,
   ResourceUploadCommitSchema,
   ResourceUploadRequestSchema,
   ResourceUploadTicketSchema,
@@ -53,10 +56,6 @@ import {
   RuntimeSnapshotSchema,
   RuntimeStatusSchema,
   SettingsSchema,
-  SkillPackageSchema,
-  SkillPackageStateSchema,
-  SkillStateSchema,
-  SkillSyncSchema,
   StartedSchema,
   TemporaryResourcePolicySchema,
   TextContentSchema,
@@ -160,8 +159,8 @@ function validInvoke() {
 }
 
 describe('control binary codec', () => {
-  it('pins the public control protocol version to v3', () => {
-    expect(PROTOCOL_VERSION).toBe(3)
+  it('pins the public control protocol version to v4', () => {
+    expect(PROTOCOL_VERSION).toBe(4)
   })
 
   it('roundtrips directory listing and mobile actions with their payloads', () => {
@@ -829,7 +828,7 @@ describe('control binary codec', () => {
               presignedPut: create(PresignedPutSchema, {
                 method: 'PUT',
                 url: 'https://example.com/upload',
-                expiresAt: '2026-10-31T00:00:00Z',
+                expiresAtEpochMs: 1795411200000n,
               }),
             }),
           },
@@ -852,7 +851,7 @@ describe('control binary codec', () => {
               presignedPut: create(PresignedPutSchema, {
                 method: 'POST',
                 url: 'https://example.com/upload',
-                expiresAt: '2026-10-31T00:00:00Z',
+                expiresAtEpochMs: 1795411200000n,
               }),
             }),
           },
@@ -875,13 +874,13 @@ describe('control binary codec', () => {
               presignedPut: create(PresignedPutSchema, {
                 method: 'PUT',
                 url: 'https://example.com/upload',
-                expiresAt: 'not-a-date',
+                expiresAtEpochMs: 0n,
               }),
             }),
           },
         }),
       ),
-    ).toThrow(/canonical ISO-8601/)
+    ).toThrow(/presignedPut\.expiresAtEpochMs/)
 
     expect(() =>
       encodeBinary(
@@ -898,6 +897,146 @@ describe('control binary codec', () => {
         }),
       ),
     ).toThrow(/uploadCommit\.uploadId/)
+  })
+
+  it('validates DOWNLOAD requests and tickets', () => {
+    // 请求：transferId 与 blob id 必填。
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_REQUEST,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadRequest',
+            value: create(ResourceDownloadRequestSchema, {
+              blobId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/downloadRequest\.transferId/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_REQUEST,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadRequest',
+            value: create(ResourceDownloadRequestSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/downloadRequest\.blobId/)
+
+    // READY 票据不允许携带 message。
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadTicket',
+            value: create(ResourceDownloadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_READY,
+              message: 'should not be here',
+              size: 4n,
+              sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              presignedGet: create(PresignedGetSchema, {
+                method: 'GET',
+                url: 'https://example.com/blob',
+                expiresAtEpochMs: 1795411200000n,
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/READY download ticket must not declare a message/)
+
+    // READY 票据的 presignedGet.method 必须是 GET。
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadTicket',
+            value: create(ResourceDownloadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_READY,
+              size: 4n,
+              sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              presignedGet: create(PresignedGetSchema, {
+                method: 'POST',
+                url: 'https://example.com/blob',
+                expiresAtEpochMs: 1795411200000n,
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/presignedGet\.method must be GET/)
+
+    // FAILED 票据只允许 message。
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadTicket',
+            value: create(ResourceDownloadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_FAILED,
+              message: 'blob expired',
+              size: 4n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/FAILED download ticket requires a message only/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadTicket',
+            value: create(ResourceDownloadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_FAILED,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/downloadTicket\.message/)
+
+    // 缺少 state 直接拒绝。
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_DOWNLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceDownloadTicket',
+            value: create(ResourceDownloadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/downloadTicket\.state is required/)
   })
 
   it('validates UPDATE and POLICY bounds', () => {
@@ -1757,303 +1896,6 @@ describe('control framing', () => {
 
     // FOCUS_TERMINAL/COLLAPSE_MOBILE 等既有简单回执不携带快照，不能被新不变量误拒绝。
     validate(resultEnvelope(create(IdeResultSchema, { ok: true, viewId: view.viewId })))
-  })
-
-  it('validates and roundtrips SKILL_SYNC and SKILL_STATE', () => {
-    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    const syncEnv = create(EnvelopeSchema, {
-      messageType: MessageType.SKILL_SYNC,
-      environmentId: ENVIRONMENT_ID,
-      payload: {
-        case: 'skillSync',
-        value: create(SkillSyncSchema, {
-          packages: [
-            create(SkillPackageSchema, {
-              packageName: 'weather-skill',
-              sha256: validSha,
-              sizeBytes: 1024n,
-              downloadUrl: 'https://example.com/download/weather.zip',
-            }),
-          ],
-        }),
-      },
-    })
-    const encodedSync = encodeBinary(syncEnv)
-    const decodedSync = decodeBinary(encodedSync)
-    expect(decodedSync).toEqual(syncEnv)
-
-    const stateEnv = create(EnvelopeSchema, {
-      messageType: MessageType.SKILL_STATE,
-      environmentId: ENVIRONMENT_ID,
-      payload: {
-        case: 'skillState',
-        value: create(SkillStateSchema, {
-          packages: [
-            create(SkillPackageStateSchema, {
-              packageName: 'weather-skill',
-              installedSha256: validSha,
-              localPath: '/data/skills/weather-skill',
-            }),
-            create(SkillPackageStateSchema, {
-              packageName: 'failed-skill',
-              error: 'Download timeout',
-            }),
-          ],
-        }),
-      },
-    })
-    const encodedState = encodeBinary(stateEnv)
-    const decodedState = decodeBinary(encodedState)
-    expect(decodedState).toEqual(stateEnv)
-  })
-
-  it('validates SKILL_SYNC bounds and rejection rules', () => {
-    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-
-    // 1. InvocationId not allowed
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_SYNC,
-          environmentId: ENVIRONMENT_ID,
-          invocationId: INVOCATION_ID,
-          payload: {
-            case: 'skillSync',
-            value: create(SkillSyncSchema, { packages: [] }),
-          },
-        }),
-      ),
-    ).toThrow(/must not declare invocationId/)
-
-    // 2. Non-canonical package name
-    for (const badName of ['Invalid_Name', 'UPPER', 'bad@pkg', '-leading', 'trailing-']) {
-      expect(() =>
-        encodeBinary(
-          create(EnvelopeSchema, {
-            messageType: MessageType.SKILL_SYNC,
-            environmentId: ENVIRONMENT_ID,
-            payload: {
-              case: 'skillSync',
-              value: create(SkillSyncSchema, {
-                packages: [
-                  create(SkillPackageSchema, {
-                    packageName: badName,
-                    sha256: validSha,
-                    sizeBytes: 100n,
-                    downloadUrl: 'https://example.com/pkg.zip',
-                  }),
-                ],
-              }),
-            },
-          }),
-        ),
-      ).toThrow(/not a canonical skill package name/)
-    }
-
-    // 3. Duplicate package name
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_SYNC,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillSync',
-            value: create(SkillSyncSchema, {
-              packages: [
-                create(SkillPackageSchema, {
-                  packageName: 'dup-pkg',
-                  sha256: validSha,
-                  sizeBytes: 100n,
-                  downloadUrl: 'https://example.com/1.zip',
-                }),
-                create(SkillPackageSchema, {
-                  packageName: 'dup-pkg',
-                  sha256: validSha,
-                  sizeBytes: 200n,
-                  downloadUrl: 'https://example.com/2.zip',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/duplicate package/)
-
-    // 4. Invalid sha256 (not 64 lowercase hex)
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_SYNC,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillSync',
-            value: create(SkillSyncSchema, {
-              packages: [
-                create(SkillPackageSchema, {
-                  packageName: 'pkg',
-                  sha256: 'UPPERCASE0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
-                  sizeBytes: 100n,
-                  downloadUrl: 'https://example.com/pkg.zip',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/sha256/)
-
-    // 5. Negative sizeBytes
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_SYNC,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillSync',
-            value: create(SkillSyncSchema, {
-              packages: [
-                create(SkillPackageSchema, {
-                  packageName: 'pkg',
-                  sha256: validSha,
-                  sizeBytes: -1n,
-                  downloadUrl: 'https://example.com/pkg.zip',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/sizeBytes must not be negative/)
-
-    // 6. Invalid downloadUrl (non-http/https or control chars)
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_SYNC,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillSync',
-            value: create(SkillSyncSchema, {
-              packages: [
-                create(SkillPackageSchema, {
-                  packageName: 'pkg',
-                  sha256: validSha,
-                  sizeBytes: 100n,
-                  downloadUrl: 'ftp://example.com/pkg.zip',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/must be an http\(s\) URL/)
-  })
-
-  it('validates SKILL_STATE bounds and rejection rules', () => {
-    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-
-    // 1. InvocationId not allowed
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_STATE,
-          environmentId: ENVIRONMENT_ID,
-          invocationId: INVOCATION_ID,
-          payload: {
-            case: 'skillState',
-            value: create(SkillStateSchema, { packages: [] }),
-          },
-        }),
-      ),
-    ).toThrow(/must not declare invocationId/)
-
-    // 2. installedSha256 and localPath must be declared together
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_STATE,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillState',
-            value: create(SkillStateSchema, {
-              packages: [
-                create(SkillPackageStateSchema, {
-                  packageName: 'pkg',
-                  installedSha256: validSha,
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/must declare installedSha256 and localPath together/)
-
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_STATE,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillState',
-            value: create(SkillStateSchema, {
-              packages: [
-                create(SkillPackageStateSchema, {
-                  packageName: 'pkg',
-                  localPath: '/data/skills/pkg',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/must declare installedSha256 and localPath together/)
-
-    // 3. Duplicate package
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_STATE,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillState',
-            value: create(SkillStateSchema, {
-              packages: [
-                create(SkillPackageStateSchema, {
-                  packageName: 'dup-pkg',
-                  installedSha256: validSha,
-                  localPath: '/data/skills/dup-pkg',
-                }),
-                create(SkillPackageStateSchema, {
-                  packageName: 'dup-pkg',
-                  error: 'failed',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/duplicate package/)
-
-    // 4. Control character in error
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          messageType: MessageType.SKILL_STATE,
-          environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'skillState',
-            value: create(SkillStateSchema, {
-              packages: [
-                create(SkillPackageStateSchema, {
-                  packageName: 'pkg',
-                  error: 'bad\ncontrol\rerror',
-                }),
-              ],
-            }),
-          },
-        }),
-      ),
-    ).toThrow(/error must not contain control characters/)
   })
 })
 

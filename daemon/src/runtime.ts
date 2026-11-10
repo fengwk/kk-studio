@@ -1,7 +1,6 @@
 import type { DaemonConfig } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
 import { DAEMON_VERSION_PATTERN } from './release.js'
-import type { SkillPackageState } from './generated/control_pb.js'
 import { EnvironmentConfigRuntime } from './environment-config.js'
 import { InMemoryInvocationJournal, type InvocationJournal } from './journal.js'
 import { ConnectionLifecycle, type RuntimeState } from './runtime-connection.js'
@@ -16,7 +15,6 @@ import { ControlSession } from './runtime-session.js'
 import { ShutdownRuntime } from './runtime-shutdown.js'
 import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate } from './runtime-status.js'
 import { UpdateRuntime } from './runtime-update.js'
-import type { SkillReconciler } from './skill/reconcile.js'
 import type { ControlTransport } from './transport/index.js'
 
 /**
@@ -227,14 +225,6 @@ export class Runtime {
   /** 当前已应用（或启动缓存）配置快照；transport 每次连接前读取。 */
   getAppliedConfig(): DaemonConfig {
     return this.configuration.config
-  }
-
-  setSkillReconciler(reconciler: SkillReconciler): void {
-    this.session.setSkillReconciler(reconciler)
-  }
-
-  sendSkillState(states: SkillPackageState[]): boolean {
-    return this.session.sendSkillState(states)
   }
 
   getJournal(): InvocationJournal {

@@ -3,12 +3,10 @@ import path from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import type { Readable } from 'node:stream'
 import yauzl from 'yauzl'
-import { create } from '@bufbuild/protobuf'
 
 import type { DaemonConfig } from '../contracts.js'
 import { getOutboundNetwork } from '../network.js'
-import { MAX_SKILL_PACKAGE_NAME_CHARS, SHA256_LOWER_PATTERN, SKILL_PACKAGE_NAME_PATTERN } from '../validation-constants.js'
-import { SkillPackageStateSchema, type SkillPackageState } from '../generated/control_pb.js'
+import { SHA256_LOWER_PATTERN } from '../validation-constants.js'
 import {
   type DirectoryMover,
   type InstalledSkillPackage,
@@ -19,6 +17,8 @@ import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile, 
 export const MARKER_FILENAME = '.kkstudio-sha256'
 export const MAX_ZIP_ENTRIES = 5000
 export const MAX_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024 // 256 MiB
+const MAX_SKILL_PACKAGE_NAME_CHARS = 64
+const SKILL_PACKAGE_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 class PackageLocks {
   private chains = new Map<string, Promise<unknown>>()
@@ -159,7 +159,7 @@ export class SkillPackageInstaller {
     sha256: string,
     sizeBytes: number | bigint,
     downloadUrl: string,
-  ): Promise<SkillPackageState> {
+  ): Promise<InstalledSkillPackage> {
     try {
       validatePackageName(packageName)
       validateSha256(sha256)
@@ -174,12 +174,12 @@ export class SkillPackageInstaller {
       })
     } catch (error) {
       const prev = await this.readInstalledPackageQuietly(packageName)
-      return create(SkillPackageStateSchema, {
+      return {
         packageName,
-        installedSha256: prev?.installedSha256,
-        localPath: prev?.localPath,
+        installedSha256: prev?.installedSha256 ?? '',
+        localPath: prev?.localPath ?? '',
         error: sanitizeErrorMessage(error),
-      })
+      }
     }
   }
 
@@ -188,15 +188,15 @@ export class SkillPackageInstaller {
     sha256: string,
     sizeBytes: number,
     downloadUrl: string,
-  ): Promise<SkillPackageState> {
+  ): Promise<InstalledSkillPackage> {
     const packageDir = path.join(this._skillsRoot, packageName)
     const currentMarker = await this.readMarker(packageName)
     if (currentMarker !== null && currentMarker === sha256.toLowerCase()) {
-      return create(SkillPackageStateSchema, {
+      return {
         packageName,
         installedSha256: currentMarker,
         localPath: packageDir,
-      })
+      }
     }
 
     const uuid = randomUUID()
@@ -237,11 +237,11 @@ export class SkillPackageInstaller {
       }
       await deleteFileQuietly(tempZipPath)
 
-      return create(SkillPackageStateSchema, {
+      return {
         packageName,
         installedSha256: sha256.toLowerCase(),
         localPath: packageDir,
-      })
+      }
     } catch (err) {
       if (tempZipPath) {
         await deleteFileQuietly(tempZipPath)

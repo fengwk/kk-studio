@@ -14,7 +14,6 @@ import {
   ProgressSchema,
   RuntimeBodySchema,
   RuntimeSnapshotSchema,
-  SkillPackageStateSchema,
   StartedSchema,
   UpdatePhase,
   UpdateResultSchema,
@@ -120,7 +119,6 @@ describe('outbound control', () => {
     expect(outbound.sendExecutionExited('inv-1')).toBe(false)
     expect(outbound.sendProgress('inv-1', progress())).toBe(false)
     expect(outbound.sendRecoverNotFound('inv-1')).toBe(false)
-    expect(outbound.sendSkillState([])).toBe(false)
     expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(false)
     expect(outbound.sendUpdateResult(preparedResult())).toBe(false)
     expect(outbound.sendIdeResult('inv-1', create(IdeResultSchema, { ok: true }))).toBe(false)
@@ -132,7 +130,7 @@ describe('outbound control', () => {
 
   /**
    * 绑定先于 READY 成立：invocation 终态与恢复重放必须能在 READY 握手完成的同一时刻发出，
-   * 而 SKILL_STATE/RUNTIME_STATUS/UPDATE_RESULT 这类在线状态帧只在 READY 后发送。
+   * 而 RUNTIME_STATUS/UPDATE_RESULT 这类在线状态帧只在 READY 后发送。
    */
   it('sends bound invocation frames before READY and READY-gated frames only after markReady', async () => {
     const { transport, connection, active, outbound } = await connectedOutbound()
@@ -154,7 +152,7 @@ describe('outbound control', () => {
     expect(outbound.sendRecoverNotFound('inv-1')).toBe(true)
     expect(outbound.sendIdeResult('inv-1', create(IdeResultSchema, { ok: false, code: 'BUSY', message: 'busy' }))).toBe(true)
 
-    expect(outbound.sendSkillState([])).toBe(false)
+    // CONNECTING 已绑定会话必须能上报运行快照（含配置错误），只是不能执行业务能力。
     // CONNECTING 已绑定会话必须能上报运行快照（含配置错误），只是不能执行业务能力。
     expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(true)
     expect(outbound.sendUpdateResult(preparedResult())).toBe(false)
@@ -163,12 +161,6 @@ describe('outbound control', () => {
 
     expect(connection.markReady(active)).toBe(true)
     expect(outbound.canSend).toBe(true)
-
-    expect(outbound.sendSkillState([create(SkillPackageStateSchema, { packageName: 'demo' })])).toBe(true)
-    const skillState = transport.sent.at(-1)
-    expect(skillState?.messageType).toBe(MessageType.SKILL_STATE)
-    expect(skillState?.environmentId).toBe(ENVIRONMENT_ID)
-    expect(skillState?.payload.case).toBe('skillState')
 
     expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(true)
     expect(transport.sent.at(-1)?.messageType).toBe(MessageType.RUNTIME_STATUS)
@@ -211,12 +203,12 @@ describe('outbound control', () => {
     const { transport, connection, active, outbound } = await connectedOutbound()
     outbound.bind(ENVIRONMENT_ID)
     expect(connection.markReady(active)).toBe(true)
-    expect(outbound.sendSkillState([])).toBe(true)
+    expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(true)
 
     outbound.unbind()
     expect(outbound.environmentId).toBeNull()
     expect(outbound.canSend).toBe(false)
-    expect(outbound.sendSkillState([])).toBe(false)
+    expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(false)
     expect(outbound.sendRuntimeStatus(SNAPSHOT)).toBe(false)
     expect(outbound.sendStarted(active, 'inv-1', false)).toBe(false)
     expect(transport.sent).toHaveLength(1)

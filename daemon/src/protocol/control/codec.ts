@@ -21,15 +21,16 @@ import {
   type IdeResult,
   type IdeViewSummary,
   type Invoke,
+  type PresignedGet,
   type PresignedPut,
   type Ready,
   type ResourceContent,
+  type ResourceDownloadRequest,
+  type ResourceDownloadTicket,
   type ResourceUploadRequest,
   type ResourceUploadTicket,
   type RuntimeSnapshot,
   type Settings,
-  type SkillState,
-  type SkillSync,
   type Started,
   type TemporaryResourcePolicy,
   type Update,
@@ -40,7 +41,7 @@ import {
 import { DAEMON_VERSION_PATTERN } from '../../release.js'
 import { parseDaemonConfiguration } from '../../config.js'
 import type { DaemonConfiguration } from '../../contracts.js'
-import { LONG_MAX, MAX_SKILL_PACKAGE_NAME_CHARS, SKILL_PACKAGE_NAME_PATTERN } from '../../validation-constants.js'
+import { LONG_MAX } from '../../validation-constants.js'
 import { frame, requireMessageLength, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -54,7 +55,7 @@ import {
   requireUuid,
 } from './runtime.js'
 
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 const MAX_INVOCATION_ID_CHARS = 256
 const MAX_CALL_ID_CHARS = 256
 export const MAX_ARGUMENTS_JSON_UTF8_BYTES = MAX_MESSAGE_BYTES
@@ -75,10 +76,6 @@ const MAX_UPDATE_MESSAGE_CHARS = 500
 const MAX_PRESIGNED_URL_CHARS = 4096
 const MAX_PRESIGNED_HEADERS = 16
 const MAX_PRESIGNED_HEADER_CHARS = 1024
-const MAX_SKILL_PACKAGES = 512
-const MAX_SKILL_DOWNLOAD_URL_CHARS = 4096
-const MAX_SKILL_LOCAL_PATH_CHARS = 4096
-const MAX_SKILL_ERROR_CHARS = 512
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
@@ -109,8 +106,8 @@ const BOUND = new Set<MessageType>([
   MessageType.IDE_RESULT,
   MessageType.IDE_LEASE,
   MessageType.ERROR,
-  MessageType.SKILL_SYNC,
-  MessageType.SKILL_STATE,
+  MessageType.RESOURCE_DOWNLOAD_REQUEST,
+  MessageType.RESOURCE_DOWNLOAD_TICKET,
   MessageType.ENVIRONMENT_CONFIG,
 ])
 
@@ -128,6 +125,8 @@ const INVOCATION = new Set<MessageType>([
   MessageType.RESOURCE_UPLOAD_REQUEST,
   MessageType.RESOURCE_UPLOAD_TICKET,
   MessageType.RESOURCE_UPLOAD_COMMIT,
+  MessageType.RESOURCE_DOWNLOAD_REQUEST,
+  MessageType.RESOURCE_DOWNLOAD_TICKET,
   MessageType.IDE_COMMAND,
   MessageType.IDE_RESULT,
 ])
@@ -141,8 +140,6 @@ const NO_INVOCATION = new Set<MessageType>([
   MessageType.UPDATE,
   MessageType.UPDATE_RESULT,
   MessageType.IDE_LEASE,
-  MessageType.SKILL_SYNC,
-  MessageType.SKILL_STATE,
   MessageType.ENVIRONMENT_CONFIG,
 ])
 
@@ -256,6 +253,14 @@ export function validate(envelope: Envelope): Envelope {
       requireCase(envelope, 'resourceUploadCommit', 'RESOURCE_UPLOAD_COMMIT')
       validateUploadCommit(envelope.payload.value as { transferId?: string; uploadId?: string })
       break
+    case MessageType.RESOURCE_DOWNLOAD_REQUEST:
+      requireCase(envelope, 'resourceDownloadRequest', 'RESOURCE_DOWNLOAD_REQUEST')
+      validateDownloadRequest(envelope.payload.value as ResourceDownloadRequest)
+      break
+    case MessageType.RESOURCE_DOWNLOAD_TICKET:
+      requireCase(envelope, 'resourceDownloadTicket', 'RESOURCE_DOWNLOAD_TICKET')
+      validateDownloadTicket(envelope.payload.value as ResourceDownloadTicket)
+      break
     case MessageType.TEMPORARY_RESOURCE_POLICY:
       requireCase(envelope, 'temporaryResourcePolicy', 'TEMPORARY_RESOURCE_POLICY')
       validatePolicy(envelope.payload.value as TemporaryResourcePolicy)
@@ -283,14 +288,6 @@ export function validate(envelope: Envelope): Envelope {
     case MessageType.ERROR:
       requireCase(envelope, 'error', 'ERROR')
       validateError(envelope.payload.value as ProtocolErrorMessage)
-      break
-    case MessageType.SKILL_SYNC:
-      requireCase(envelope, 'skillSync', 'SKILL_SYNC')
-      validateSkillSync(envelope.payload.value as SkillSync)
-      break
-    case MessageType.SKILL_STATE:
-      requireCase(envelope, 'skillState', 'SKILL_STATE')
-      validateSkillState(envelope.payload.value as SkillState)
       break
     case MessageType.ENVIRONMENT_CONFIG:
       requireCase(envelope, 'environmentConfig', 'ENVIRONMENT_CONFIG')
@@ -654,17 +651,52 @@ function validatePresigned(put: PresignedPut): void {
     requireText(name, 'presignedPut.header', { nonBlank: true, maxChars: MAX_PRESIGNED_HEADER_CHARS })
     requireText(value, 'presignedPut.header', { nonBlank: true, maxChars: MAX_PRESIGNED_HEADER_CHARS })
   }
-  const expires = requireText(put.expiresAt, 'presignedPut.expiresAt', { nonBlank: true })
-  const parsed = new Date(expires)
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().replace('.000Z', 'Z') !== expires) {
-    throw new Error('presignedPut.expiresAt must be a canonical ISO-8601 instant')
-  }
+  requireSafeLong(put.expiresAtEpochMs, 'presignedPut.expiresAtEpochMs', 1n, LONG_MAX)
 }
 
 function validateUploadCommit(commit: { transferId?: string; uploadId?: string }): void {
   assertNoUnknown(commit as UnknownCarrier, 'uploadCommit')
   requireUuid(commit.transferId, 'uploadCommit.transferId')
   requireUuid(commit.uploadId, 'uploadCommit.uploadId')
+}
+
+/** 下载申请：transferId 与全局 blob id 必填；业务票据签发由服务端 download 端口完成。 */
+function validateDownloadRequest(request: ResourceDownloadRequest): void {
+  assertNoUnknown(request, 'downloadRequest')
+  requireUuid(request.transferId, 'downloadRequest.transferId')
+  requireUuid(request.blobId, 'downloadRequest.blobId')
+}
+
+/** 下载票据：READY 携带预签名 GET、大小与摘要；FAILED 只携带去敏说明。 */
+function validateDownloadTicket(ticket: ResourceDownloadTicket): void {
+  assertNoUnknown(ticket, 'downloadTicket')
+  requireUuid(ticket.transferId, 'downloadTicket.transferId')
+  if (ticket.state === TicketState.TICKET_READY) {
+    if (ticket.message !== undefined) {
+      throw new Error('READY download ticket must not declare a message')
+    }
+    validatePresignedGet(ticket.presignedGet as PresignedGet)
+    requireSafeLong(ticket.size, 'downloadTicket.size', 0n, MAX_SAFE_BIGINT)
+    requireLowerSha256(ticket.sha256, 'downloadTicket.sha256')
+    return
+  }
+  if (ticket.state === TicketState.TICKET_FAILED) {
+    if (ticket.presignedGet !== undefined || ticket.size !== undefined || ticket.sha256 !== undefined) {
+      throw new Error('FAILED download ticket requires a message only')
+    }
+    requireText(ticket.message, 'downloadTicket.message', { nonBlank: true, maxChars: MAX_FAILURE_MESSAGE_CHARS })
+    return
+  }
+  throw new Error('downloadTicket.state is required')
+}
+
+function validatePresignedGet(get: PresignedGet): void {
+  assertNoUnknown(get, 'presignedGet')
+  if (requireText(get.method, 'presignedGet.method', { nonBlank: true }) !== 'GET') {
+    throw new Error('presignedGet.method must be GET')
+  }
+  requireText(get.url, 'presignedGet.url', { nonBlank: true, maxChars: MAX_PRESIGNED_URL_CHARS })
+  requireSafeLong(get.expiresAtEpochMs, 'presignedGet.expiresAtEpochMs', 1n, LONG_MAX)
 }
 
 function validatePolicy(policy: TemporaryResourcePolicy): void {
@@ -1015,89 +1047,6 @@ function validateIdeLease(lease: IdeLease): void {
 function validateError(error: ProtocolErrorMessage): void {
   assertNoUnknown(error, 'error')
   requireMessage(error.message, 'error.message')
-}
-
-function validateSkillSync(sync: SkillSync): void {
-  assertNoUnknown(sync, 'skillSync')
-  if (sync.packages.length > MAX_SKILL_PACKAGES) {
-    throw new Error('skillSync.packages exceeds the entry limit')
-  }
-  const names = new Set<string>()
-  sync.packages.forEach((skillPackage, index) => {
-    const path = `skillSync.packages[${index}]`
-    assertNoUnknown(skillPackage, path)
-    const packageName = requireSkillPackageName(skillPackage.packageName, `${path}.packageName`)
-    if (names.has(packageName)) {
-      throw new Error(`skillSync contains a duplicate package: ${packageName}`)
-    }
-    names.add(packageName)
-    requireLowerSha256(skillPackage.sha256, `${path}.sha256`)
-    if (skillPackage.sizeBytes === undefined || skillPackage.sizeBytes < 0n) {
-      throw new Error(`${path}.sizeBytes must not be negative`)
-    }
-    requireSkillDownloadUrl(skillPackage.downloadUrl, `${path}.downloadUrl`)
-  })
-}
-
-function validateSkillState(state: SkillState): void {
-  assertNoUnknown(state, 'skillState')
-  if (state.packages.length > MAX_SKILL_PACKAGES) {
-    throw new Error('skillState.packages exceeds the entry limit')
-  }
-  const names = new Set<string>()
-  state.packages.forEach((entry, index) => {
-    const path = `skillState.packages[${index}]`
-    assertNoUnknown(entry, path)
-    const packageName = requireSkillPackageName(entry.packageName, `${path}.packageName`)
-    if (names.has(packageName)) {
-      throw new Error(`skillState contains a duplicate package: ${packageName}`)
-    }
-    names.add(packageName)
-    const hasSha = entry.installedSha256 !== undefined
-    const hasPath = entry.localPath !== undefined
-    if (hasSha !== hasPath) {
-      throw new Error(`${path} must declare installedSha256 and localPath together`)
-    }
-    if (hasSha) {
-      requireLowerSha256(entry.installedSha256, `${path}.installedSha256`)
-      requireSkillLocalPath(entry.localPath, `${path}.localPath`)
-    }
-    if (entry.error !== undefined) {
-      const errorText = requireText(entry.error, `${path}.error`, { maxChars: MAX_SKILL_ERROR_CHARS })
-      if (CONTROL_CHARACTER_PATTERN.test(errorText)) {
-        throw new Error(`${path}.error must not contain control characters`)
-      }
-    }
-  })
-}
-
-function requireSkillPackageName(value: unknown, name: string): string {
-  const packageName = requireText(value, name, { nonBlank: true, maxChars: MAX_SKILL_PACKAGE_NAME_CHARS })
-  if (!SKILL_PACKAGE_NAME_PATTERN.test(packageName)) {
-    throw new Error(`${name} is not a canonical skill package name`)
-  }
-  return packageName
-}
-
-function requireSkillDownloadUrl(value: unknown, name: string): string {
-  const url = requireText(value, name, { nonBlank: true, maxChars: MAX_SKILL_DOWNLOAD_URL_CHARS })
-  const schemeIndex = url.indexOf('://')
-  if (
-    schemeIndex <= 0 ||
-    !(url.startsWith('http://') || url.startsWith('https://')) ||
-    CONTROL_CHARACTER_PATTERN.test(url)
-  ) {
-    throw new Error(`${name} must be an http(s) URL`)
-  }
-  return url
-}
-
-function requireSkillLocalPath(value: unknown, name: string): string {
-  const localPath = requireText(value, name, { maxChars: MAX_SKILL_LOCAL_PATH_CHARS })
-  if (CONTROL_CHARACTER_PATTERN.test(localPath)) {
-    throw new Error(`${name} must not contain control characters`)
-  }
-  return localPath
 }
 
 function requireCase(envelope: Envelope, expected: string, messageType: string): void {
