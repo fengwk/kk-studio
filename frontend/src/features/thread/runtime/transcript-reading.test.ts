@@ -18,6 +18,7 @@ function tool(
   id: string,
   partialContents: ToolDialogueMessage['partialContents'],
   status: DialogueMessage['status'],
+  args = '{}',
 ): ToolDialogueMessage {
   return {
     id,
@@ -27,7 +28,7 @@ function tool(
     subjectEntryId: id,
     toolCallId: `call-${id}`,
     toolName: 'bash',
-    arguments: '{}',
+    arguments: args,
     contents: [],
     partialContents,
     createdAt: 1785232800000,
@@ -52,6 +53,21 @@ describe('transcriptStreamRevision', () => {
     expect(longer).not.toBeNull()
     expect(first).not.toBe(longer)
     expect(toolFirst).not.toBe(toolLonger)
+  })
+
+  it('changes while streaming write/edit arguments grow before any output exists', () => {
+    // 意图：write/edit 的参数逐帧变长时卡片长高，必须产生新的 revision 以继续贴底。
+    const short = transcriptStreamRevision([tool('t1', [], 'streaming', '{"path":"a.ts","content":"x"')])
+    const longer = transcriptStreamRevision([
+      tool('t1', [], 'streaming', '{"path":"a.ts","content":"xyz"'),
+    ])
+    expect(short).not.toBeNull()
+    expect(short).not.toBe(longer)
+    // 同样长度但换了调用身份（另一次 attempt）不能沿用旧签名。
+    const otherCall = transcriptStreamRevision([
+      { ...tool('t1', [], 'streaming', '{"path":"a.ts","content":"x"'), toolCallId: 'call-other' },
+    ])
+    expect(otherCall).not.toBe(short)
   })
 
   it('ignores media and thinking-only updates (no revision, no auto-scroll)', () => {
