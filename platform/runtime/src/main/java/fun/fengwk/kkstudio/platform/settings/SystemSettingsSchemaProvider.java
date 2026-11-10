@@ -121,7 +121,7 @@ public class SystemSettingsSchemaProvider {
         field(
             "aiRuntime.compactionModel",
             "settings.field.aiRuntime.compactionModel",
-            null,
+            "settings.field.aiRuntime.compactionModel.hint",
             FieldType.MODEL_SELECTION,
             true,
             null,
@@ -137,7 +137,7 @@ public class SystemSettingsSchemaProvider {
         field(
             "aiRuntime.compactionReserveTokens",
             "settings.field.aiRuntime.compactionReserveTokens",
-            null,
+            "settings.field.aiRuntime.compactionReserveTokens.hint",
             FieldType.INTEGER,
             false,
             1,

@@ -96,6 +96,10 @@ class SystemSettingsSchemaProviderTest {
     assertFalse(group.isRestartRequired());
     assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_INVOCATION, group.getApplyTiming());
     assertEquals(3, group.getFields().size());
+    for (SystemSettingsSchemaDTO.FieldDTO field : group.getFields()) {
+      assertEquals("settings.field." + field.getPath(), field.getLabelKey());
+      assertEquals(field.getLabelKey() + ".hint", field.getHintKey());
+    }
 
     SystemSettingsSchemaDTO.FieldDTO model = group.getFields().get(0);
     assertEquals("aiRuntime.compactionModel", model.getPath());

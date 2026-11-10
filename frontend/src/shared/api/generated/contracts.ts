@@ -2797,7 +2797,9 @@ export interface SystemSettingsAiRuntimeDTO {
   retryBackoffStrategy: InvocationRetryBackoffStrategy
   retryBaseDelayMillis: string
   retryMaxDelayMillis: string
+  compactionModel?: HarnessModelSelectionDTO | null
   compactionKeepRecentTokens: number
+  compactionReserveTokens: number
   subagentMaxDepth: number
   subagentMaxConcurrency: number
   subagentMaxTotalConcurrency: number
@@ -2867,6 +2869,7 @@ export type SystemSettingsSchemaFieldType =
   | 'LONG'
   | 'TEXT'
   | 'ENUM'
+  | 'MODEL_SELECTION'
   | 'PERMISSION'
 
 export const SYSTEM_SETTINGS_SCHEMA_FIELD_TYPE_VALUES: readonly SystemSettingsSchemaFieldType[] = [
@@ -2876,6 +2879,7 @@ export const SYSTEM_SETTINGS_SCHEMA_FIELD_TYPE_VALUES: readonly SystemSettingsSc
   'LONG',
   'TEXT',
   'ENUM',
+  'MODEL_SELECTION',
   'PERMISSION',
 ]
 
