@@ -212,6 +212,47 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     expect(await editor.textContent()).toBe('测试')
   })
 
+  test('选区删除跨 pill 后仍保留可编辑边界，可继续输入并提交', async ({ page }) => {
+    const editor = page.locator('.composer-editor')
+    const client = await page.context().newCDPSession(page)
+    await editor.click()
+    await page.keyboard.type('keep ')
+
+    await page.setInputFiles('input[type="file"]', {
+      name: 'del.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('x'),
+    })
+    await expect(page.locator('.composer-pill')).toHaveCount(1)
+    await expect.poll(() => partsText(page)).toBe('keep [attachment]')
+
+    // 选中「空格 + pill + 其后边界」并按 Backspace：整段语义删除，pill 与占位一起消失。
+    await page.evaluate(() => {
+      const editorEl = document.querySelector('.composer-editor') as HTMLElement
+      const pill = editorEl.querySelector('.composer-pill') as HTMLElement
+      const lead = editorEl.firstChild as Text
+      const range = document.createRange()
+      range.setStart(lead, (lead.textContent ?? '').length - 1)
+      range.setEndAfter(pill)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    })
+    await page.keyboard.press('Backspace')
+    await expect(page.locator('.composer-pill')).toHaveCount(0)
+    await expect.poll(() => partsText(page)).toBe('keep')
+
+    // 删除后光标仍在可编辑文本里：中文组合照常上屏，正文无哨兵字符。
+    await client.send('Input.imeSetComposition', {
+      text: 'hou',
+      selectionStart: 3,
+      selectionEnd: 3,
+    })
+    await client.send('Input.insertText', { text: '后' })
+    await expect.poll(() => partsText(page)).toBe('keep后')
+    expect(visibleText(await editor.textContent())).toBe('keep后')
+  })
+
   test('active=false 的隐藏根不响应全局 Escape、不抢焦点，恢复可见后回到编辑器', async ({ page }) => {
     const editor = page.locator('.composer-editor')
     await expect(editor).toBeVisible()
