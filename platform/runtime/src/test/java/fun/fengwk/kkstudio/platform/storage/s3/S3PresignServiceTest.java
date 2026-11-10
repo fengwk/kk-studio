@@ -14,6 +14,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
@@ -170,7 +171,7 @@ public class S3PresignServiceTest {
       snapshot.replace(
           settingsWith(
               new SystemSettings.StorageMedia(
-                  86_400L, 900L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L)));
+                  86_400L, 900L, 3_600L, 30_000L, 512, 80, ImageInputTier.P720, 259_200L, 1_800L)));
       long secondBefore = System.currentTimeMillis();
       S3PresignedUrl second = context.service.presignDownload("docs/live.md", null);
       long secondDelta = second.getExpiresAt().toEpochMilli() - secondBefore;
@@ -203,7 +204,8 @@ public class S3PresignServiceTest {
   public void testRejectsExpiresOverMax() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
     SystemSettings.StorageMedia storageMedia =
-        new SystemSettings.StorageMedia(3_600L, 600L, 7_200L, 30_000L, 512, 80, 259_200L, 1_800L);
+        new SystemSettings.StorageMedia(
+            3_600L, 600L, 7_200L, 30_000L, 512, 80, ImageInputTier.P720, 259_200L, 1_800L);
     try (TestContext context = new TestContext(props, storageMedia)) {
       assertThrows(
           IllegalArgumentException.class,

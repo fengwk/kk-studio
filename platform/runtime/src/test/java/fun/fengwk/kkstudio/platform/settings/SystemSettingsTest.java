@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 
@@ -63,6 +64,7 @@ class SystemSettingsTest {
     assertEquals(30_000L, storageMedia.canvasMediaProcessTimeoutMillis());
     assertEquals(512, storageMedia.thumbnailMaxDimension());
     assertEquals(80, storageMedia.thumbnailQuality());
+    assertEquals(ImageInputTier.P720, storageMedia.imageTier());
     assertEquals(259_200L, storageMedia.temporaryResourceTtlSeconds());
     assertEquals(1_800L, storageMedia.temporaryResourceCleanupIntervalSeconds());
 
@@ -269,6 +271,7 @@ class SystemSettingsTest {
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
                 base.thumbnailQuality(),
+                base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
                 base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
@@ -281,6 +284,7 @@ class SystemSettingsTest {
                 0L,
                 base.thumbnailMaxDimension(),
                 base.thumbnailQuality(),
+                base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
                 base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
@@ -293,6 +297,7 @@ class SystemSettingsTest {
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
                 101,
+                base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
                 base.temporaryResourceCleanupIntervalSeconds()));
   }
@@ -310,6 +315,7 @@ class SystemSettingsTest {
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
                 base.thumbnailQuality(),
+                base.imageTier(),
                 0L,
                 base.temporaryResourceCleanupIntervalSeconds()));
     assertThrows(
@@ -322,8 +328,28 @@ class SystemSettingsTest {
                 base.canvasMediaProcessTimeoutMillis(),
                 base.thumbnailMaxDimension(),
                 base.thumbnailQuality(),
+                base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
                 0L));
+  }
+
+  /** 图片档位是 required 引用：null 直接失败，未知 wire 名称在 codec 边界拒绝。 */
+  @Test
+  void rejectsMissingImageTier() {
+    SystemSettings.StorageMedia base = SystemSettingsTestFixture.DEFAULT.storageMedia();
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                null,
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds()));
   }
 
   @Test
