@@ -584,6 +584,55 @@ describe('ComposerEditor', () => {
     expect(textSnapshot()).toBe('keep')
   })
 
+  it('defers programmatic pill insertion until the composition ends', async () => {
+    // 组合期间到达的附件插入不得改动组合态 DOM；compositionend 后按原语义插入。
+    const apiRef = createRef<ComposerEditorHandle>()
+    render(<Harness apiRef={apiRef} initialParts={[createTextPart('keep')]} />)
+    const editor = editorOf()
+
+    fireEvent.compositionStart(editor)
+    act(() => apiRef.current?.insertParts([createAttachmentPart('local-7', 'later.png')]))
+    expect(editor.querySelectorAll('.composer-pill')).toHaveLength(0)
+    expect(textSnapshot()).toBe('keep')
+
+    fireEvent.compositionEnd(editor)
+    await waitFor(() => expect(editor.querySelectorAll('.composer-pill')).toHaveLength(1))
+    expect(textSnapshot()).toBe('keep[attachment]')
+  })
+
+  it('serializes copy and cut without the caret slot placeholder', () => {
+    // 复制/剪切不能把 DOM 哨兵带到剪贴板：clipboardData 里只有用户可见文本。
+    render(
+      <Harness
+        initialParts={[createTextPart('ab'), createAttachmentPart('local-8', 'a.txt')]}
+      />,
+    )
+    const editor = editorOf()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    const setData = vi.fn()
+    // fireEvent 返回 false 表示默认行为被接管（preventDefault 已调用）。
+    const defaultKept = fireEvent.copy(editor, { clipboardData: { setData } })
+    expect(defaultKept).toBe(false)
+    expect(setData).toHaveBeenCalledWith('text/plain', 'ab[a.txt]')
+    expect(setData.mock.calls[0][1]).not.toContain('\u200B')
+
+    // 选区不含 slot 时保留浏览器默认复制行为。
+    const inner = document.createRange()
+    inner.setStart(editor.firstChild!, 0)
+    inner.setEnd(editor.firstChild!, 1)
+    selection?.removeAllRanges()
+    selection?.addRange(inner)
+    const passthrough = vi.fn()
+    // 返回 true 表示浏览器默认复制未被接管。
+    expect(fireEvent.copy(editor, { clipboardData: { setData: passthrough } })).toBe(true)
+    expect(passthrough).not.toHaveBeenCalled()
+  })
+
   it('patches the image tier of rendered attachment pills without rebuilding the draft', () => {
     const apiRef = createRef<ComposerEditorHandle>()
     const onPartsChange = vi.fn()
