@@ -23,6 +23,11 @@ async function partsText(page: Page): Promise<string> {
     .join('')
 }
 
+/** 编辑器可见文本：去掉 caret slot 的零宽占位，只保留真实正文。 */
+function visibleText(text: string | null): string {
+  return (text ?? '').replace(/\u200B/g, '')
+}
+
 async function openHarness(page: Page) {
   await page.goto('/browser-tests/composer-editor-harness.html')
   await expect(page.locator('[data-testid="root-pane"] .composer-editor')).toBeVisible()
@@ -90,12 +95,62 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     // 上屏：组合结束，汉字完整保留且只出现一次。
     await client.send('Input.insertText', { text: '测试' })
     await expect.poll(() => partsText(page)).toBe('测试')
-    expect(await editor.textContent()).toBe('测试')
+    expect(visibleText(await editor.textContent())).toBe('测试')
 
     // 组合结束后的 Enter 正常提交。
     await page.keyboard.press('Enter')
     await expect(page.locator('#submit-count')).toHaveText('1')
     expect(await page.locator('#last-submitted').textContent()).toContain('测试')
+  })
+
+  test('pill 相邻边界可连续 IME 组合，slot 不污染草稿与可见文本', async ({ page }) => {
+    // 事故根因：不可编辑 pill 之后缺少可编辑文本位置，首个键之后组合态进入 pill 而卡住。
+    // 本用例验证 pill 之后的 caret slot 能承载完整的多次组合，且不进入 parts 与正文。
+    const editor = page.locator('.composer-editor')
+    const client = await page.context().newCDPSession(page)
+    await editor.click()
+    await page.keyboard.type('原文')
+
+    await page.setInputFiles('input[type="file"]', {
+      name: 'shot.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([1, 2, 3]),
+    })
+    await expect(page.locator('.composer-pill')).toHaveCount(1)
+    await expect.poll(() => partsText(page)).toBe('原文[attachment]')
+
+    // 光标自动落在 pill 之后的 caret slot 内，且该位置确实是可编辑文本节点。
+    const caretInSlot = await page.evaluate(() => {
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0) {
+        return false
+      }
+      const range = selection.getRangeAt(0)
+      const element = range.startContainer.parentElement
+      return Boolean(range.collapsed && element?.hasAttribute('data-caret-slot'))
+    })
+    expect(caretInSlot).toBe(true)
+
+    // 连续两次组合：每次都必须完整上屏（首个键之后不得卡住）。
+    await client.send('Input.imeSetComposition', {
+      text: 'zhong',
+      selectionStart: 5,
+      selectionEnd: 5,
+    })
+    await client.send('Input.insertText', { text: '中' })
+    await expect.poll(() => partsText(page)).toBe('原文[attachment]中')
+
+    await client.send('Input.imeSetComposition', {
+      text: 'wen',
+      selectionStart: 3,
+      selectionEnd: 3,
+    })
+    await client.send('Input.insertText', { text: '文' })
+    await expect.poll(() => partsText(page)).toBe('原文[attachment]中文')
+
+    // slot 去掉哨兵后与真实输入完全一致，没有不可见字符污染。
+    expect(visibleText(await editor.textContent())).toBe('原文[shot.png]中文')
+    expect(await page.locator('#parts-json').textContent()).not.toContain('\u200B')
   })
 
   test('文件选择插入 pill，光标就位后 Backspace 整颗删除', async ({ page }) => {
@@ -155,6 +210,47 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     await expect(page.locator('.composer-pill')).toHaveCount(0)
     await expect.poll(() => partsText(page)).toBe('测试')
     expect(await editor.textContent()).toBe('测试')
+  })
+
+  test('选区删除跨 pill 后仍保留可编辑边界，可继续输入并提交', async ({ page }) => {
+    const editor = page.locator('.composer-editor')
+    const client = await page.context().newCDPSession(page)
+    await editor.click()
+    await page.keyboard.type('keep ')
+
+    await page.setInputFiles('input[type="file"]', {
+      name: 'del.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('x'),
+    })
+    await expect(page.locator('.composer-pill')).toHaveCount(1)
+    await expect.poll(() => partsText(page)).toBe('keep [attachment]')
+
+    // 选中「空格 + pill + 其后边界」并按 Backspace：整段语义删除，pill 与占位一起消失。
+    await page.evaluate(() => {
+      const editorEl = document.querySelector('.composer-editor') as HTMLElement
+      const pill = editorEl.querySelector('.composer-pill') as HTMLElement
+      const lead = editorEl.firstChild as Text
+      const range = document.createRange()
+      range.setStart(lead, (lead.textContent ?? '').length - 1)
+      range.setEndAfter(pill)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    })
+    await page.keyboard.press('Backspace')
+    await expect(page.locator('.composer-pill')).toHaveCount(0)
+    await expect.poll(() => partsText(page)).toBe('keep')
+
+    // 删除后光标仍在可编辑文本里：中文组合照常上屏，正文无哨兵字符。
+    await client.send('Input.imeSetComposition', {
+      text: 'hou',
+      selectionStart: 3,
+      selectionEnd: 3,
+    })
+    await client.send('Input.insertText', { text: '后' })
+    await expect.poll(() => partsText(page)).toBe('keep后')
+    expect(visibleText(await editor.textContent())).toBe('keep后')
   })
 
   test('active=false 的隐藏根不响应全局 Escape、不抢焦点，恢复可见后回到编辑器', async ({ page }) => {
