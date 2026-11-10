@@ -17,9 +17,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.Instant;
 import java.time.ZoneId;
-import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,26 +52,9 @@ public final class ControlProtocolValidator {
   private static final Pattern MEDIA_TYPE_PATTERN =
       Pattern.compile("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$");
   private static final Pattern IDE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
-  private static final Pattern SKILL_PACKAGE_NAME_PATTERN =
-      Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*$");
   private static final Pattern LSP_SERVER_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+$");
   private static final Pattern CONFIG_ERROR_CODE_PATTERN =
       Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
-
-  /** 单轮期望集合与状态上报的包数上限。 */
-  private static final int MAX_SKILL_PACKAGES = 512;
-
-  /** 技能包下载地址的字符上限。 */
-  private static final int MAX_SKILL_DOWNLOAD_URL_CHARS = 4096;
-
-  /** 技能包本地安装根的字符上限。 */
-  private static final int MAX_SKILL_LOCAL_PATH_CHARS = 4096;
-
-  /** 技能包安装错误的字符上限。 */
-  private static final int MAX_SKILL_ERROR_CHARS = 512;
-
-  /** 技能包名与包版本的字符上限。 */
-  private static final int MAX_SKILL_PACKAGE_NAME_CHARS = 64;
 
   private static final Set<MessageType> BOUND =
       Set.of(
@@ -94,14 +75,14 @@ public final class ControlProtocolValidator {
           MessageType.RESOURCE_UPLOAD_REQUEST,
           MessageType.RESOURCE_UPLOAD_TICKET,
           MessageType.RESOURCE_UPLOAD_COMMIT,
+          MessageType.RESOURCE_DOWNLOAD_REQUEST,
+          MessageType.RESOURCE_DOWNLOAD_TICKET,
           MessageType.TEMPORARY_RESOURCE_POLICY,
           MessageType.UPDATE,
           MessageType.UPDATE_RESULT,
           MessageType.IDE_COMMAND,
           MessageType.IDE_RESULT,
           MessageType.IDE_LEASE,
-          MessageType.SKILL_SYNC,
-          MessageType.SKILL_STATE,
           MessageType.ENVIRONMENT_CONFIG,
           MessageType.ERROR);
 
@@ -120,6 +101,8 @@ public final class ControlProtocolValidator {
           MessageType.RESOURCE_UPLOAD_REQUEST,
           MessageType.RESOURCE_UPLOAD_TICKET,
           MessageType.RESOURCE_UPLOAD_COMMIT,
+          MessageType.RESOURCE_DOWNLOAD_REQUEST,
+          MessageType.RESOURCE_DOWNLOAD_TICKET,
           MessageType.IDE_COMMAND,
           MessageType.IDE_RESULT);
 
@@ -133,8 +116,6 @@ public final class ControlProtocolValidator {
           MessageType.UPDATE,
           MessageType.UPDATE_RESULT,
           MessageType.IDE_LEASE,
-          MessageType.SKILL_SYNC,
-          MessageType.SKILL_STATE,
           MessageType.ENVIRONMENT_CONFIG);
 
   private ControlProtocolValidator() {}
@@ -225,6 +206,16 @@ public final class ControlProtocolValidator {
             envelope, Envelope.PayloadCase.RESOURCE_UPLOAD_COMMIT, "RESOURCE_UPLOAD_COMMIT");
         validateUploadCommit(envelope.getResourceUploadCommit());
       }
+      case RESOURCE_DOWNLOAD_REQUEST -> {
+        requirePayload(
+            envelope, Envelope.PayloadCase.RESOURCE_DOWNLOAD_REQUEST, "RESOURCE_DOWNLOAD_REQUEST");
+        validateDownloadRequest(envelope.getResourceDownloadRequest());
+      }
+      case RESOURCE_DOWNLOAD_TICKET -> {
+        requirePayload(
+            envelope, Envelope.PayloadCase.RESOURCE_DOWNLOAD_TICKET, "RESOURCE_DOWNLOAD_TICKET");
+        validateDownloadTicket(envelope.getResourceDownloadTicket());
+      }
       case TEMPORARY_RESOURCE_POLICY -> {
         requirePayload(
             envelope, Envelope.PayloadCase.TEMPORARY_RESOURCE_POLICY, "TEMPORARY_RESOURCE_POLICY");
@@ -249,14 +240,6 @@ public final class ControlProtocolValidator {
       case IDE_LEASE -> {
         requirePayload(envelope, Envelope.PayloadCase.IDE_LEASE, "IDE_LEASE");
         validateIdeLease(envelope.getIdeLease());
-      }
-      case SKILL_SYNC -> {
-        requirePayload(envelope, Envelope.PayloadCase.SKILL_SYNC, "SKILL_SYNC");
-        validateSkillSync(envelope.getSkillSync());
-      }
-      case SKILL_STATE -> {
-        requirePayload(envelope, Envelope.PayloadCase.SKILL_STATE, "SKILL_STATE");
-        validateSkillState(envelope.getSkillState());
       }
       case ENVIRONMENT_CONFIG -> {
         requirePayload(envelope, Envelope.PayloadCase.ENVIRONMENT_CONFIG, "ENVIRONMENT_CONFIG");
@@ -749,12 +732,65 @@ public final class ControlProtocolValidator {
           DaemonPresignedPut.MAX_HEADER_CHARS,
           true);
     }
-    requireInstant(put.hasExpiresAt(), put.getExpiresAt(), "presignedPut.expiresAt");
+    requirePositive(
+        put.hasExpiresAtEpochMs(), put.getExpiresAtEpochMs(), "presignedPut.expiresAtEpochMs");
   }
 
   private static void validateUploadCommit(ResourceUploadCommit commit) {
     requireUuid(commit.hasTransferId(), commit.getTransferId(), "uploadCommit.transferId");
     requireUuid(commit.hasUploadId(), commit.getUploadId(), "uploadCommit.uploadId");
+  }
+
+  /** 下载申请：transferId 与全局 blob id 必填；业务票据签发由服务端 download 端口完成。 */
+  private static void validateDownloadRequest(ResourceDownloadRequest request) {
+    requireUuid(request.hasTransferId(), request.getTransferId(), "downloadRequest.transferId");
+    requireUuid(request.hasBlobId(), request.getBlobId(), "downloadRequest.blobId");
+  }
+
+  /** 下载票据：READY 携带预签名 GET、大小与摘要；FAILED 只携带去敏说明。 */
+  private static void validateDownloadTicket(ResourceDownloadTicket ticket) {
+    requireUuid(ticket.hasTransferId(), ticket.getTransferId(), "downloadTicket.transferId");
+    switch (ticket.getState()) {
+      case TICKET_PENDING -> throw new ControlProtocolException(
+          "downloadTicket must not use TICKET_PENDING");
+      case TICKET_READY -> {
+        if (ticket.hasMessage()) {
+          throw new ControlProtocolException("READY download ticket must not declare a message");
+        }
+        validatePresignedGet(ticket.getPresignedGet());
+        requireInt64(
+            ticket.hasSize(),
+            ticket.getSize(),
+            "downloadTicket.size",
+            0,
+            DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
+        requirePattern(
+            ticket.hasSha256(), ticket.getSha256(), "downloadTicket.sha256", SHA256_LOWER_PATTERN);
+      }
+      case TICKET_FAILED -> {
+        if (ticket.hasPresignedGet() || ticket.hasSize() || ticket.hasSha256()) {
+          throw new ControlProtocolException("FAILED download ticket requires a message only");
+        }
+        requireText(
+            ticket.hasMessage(),
+            ticket.getMessage(),
+            "downloadTicket.message",
+            MAX_FAILURE_MESSAGE_CHARS,
+            true);
+      }
+      default -> throw new ControlProtocolException("downloadTicket.state is required");
+    }
+  }
+
+  private static void validatePresignedGet(PresignedGet get) {
+    String method = requireText(get.hasMethod(), get.getMethod(), "presignedGet.method", 16, true);
+    if (!"GET".equals(method)) {
+      throw new ControlProtocolException("presignedGet.method must be GET");
+    }
+    requireText(
+        get.hasUrl(), get.getUrl(), "presignedGet.url", DaemonPresignedPut.MAX_URL_CHARS, true);
+    requirePositive(
+        get.hasExpiresAtEpochMs(), get.getExpiresAtEpochMs(), "presignedGet.expiresAtEpochMs");
   }
 
   private static void validatePolicy(TemporaryResourcePolicy policy) {
@@ -766,102 +802,6 @@ public final class ControlProtocolValidator {
         policy.hasTemporaryResourceCleanupIntervalSeconds(),
         policy.getTemporaryResourceCleanupIntervalSeconds(),
         "temporaryResourcePolicy.temporaryResourceCleanupIntervalSeconds");
-  }
-
-  /** 期望集合：包名唯一，摘要、大小与预签名地址必须完整。 */
-  private static void validateSkillSync(SkillSync sync) {
-    requireNoUnknown(sync, "skillSync");
-    if (sync.getPackagesCount() > MAX_SKILL_PACKAGES) {
-      throw new ControlProtocolException("skillSync.packages exceeds the entry limit");
-    }
-    Set<String> names = new HashSet<>();
-    for (int index = 0; index < sync.getPackagesCount(); index++) {
-      SkillPackage skillPackage = sync.getPackages(index);
-      String path = "skillSync.packages[" + index + "]";
-      requireNoUnknown(skillPackage, path);
-      String packageName =
-          requireSkillPackageName(
-              skillPackage.hasPackageName(), skillPackage.getPackageName(), path + ".packageName");
-      if (!names.add(packageName)) {
-        throw new ControlProtocolException(
-            "skillSync contains a duplicate package: " + packageName);
-      }
-      requireSha256(skillPackage.hasSha256(), skillPackage.getSha256(), path + ".sha256");
-      if (!skillPackage.hasSizeBytes() || skillPackage.getSizeBytes() < 0) {
-        throw new ControlProtocolException(path + ".sizeBytes must not be negative");
-      }
-      requireSkillDownloadUrl(
-          skillPackage.hasDownloadUrl(), skillPackage.getDownloadUrl(), path + ".downloadUrl");
-    }
-  }
-
-  /** 状态上报：包名唯一，摘要与本地路径成对，错误有界且去敏。 */
-  private static void validateSkillState(SkillState state) {
-    requireNoUnknown(state, "skillState");
-    if (state.getPackagesCount() > MAX_SKILL_PACKAGES) {
-      throw new ControlProtocolException("skillState.packages exceeds the entry limit");
-    }
-    Set<String> names = new HashSet<>();
-    for (int index = 0; index < state.getPackagesCount(); index++) {
-      SkillPackageState entry = state.getPackages(index);
-      String path = "skillState.packages[" + index + "]";
-      requireNoUnknown(entry, path);
-      String packageName =
-          requireSkillPackageName(
-              entry.hasPackageName(), entry.getPackageName(), path + ".packageName");
-      if (!names.add(packageName)) {
-        throw new ControlProtocolException(
-            "skillState contains a duplicate package: " + packageName);
-      }
-      boolean hasSha = entry.hasInstalledSha256();
-      boolean hasPath = entry.hasLocalPath();
-      if (hasSha != hasPath) {
-        throw new ControlProtocolException(
-            path + " must declare installedSha256 and localPath together");
-      }
-      if (hasSha) {
-        requireSha256(true, entry.getInstalledSha256(), path + ".installedSha256");
-        requireSkillLocalPath(true, entry.getLocalPath(), path + ".localPath");
-      }
-      if (entry.hasError()) {
-        requireText(true, entry.getError(), path + ".error", MAX_SKILL_ERROR_CHARS, false);
-        if (entry.getError().codePoints().anyMatch(Character::isISOControl)) {
-          throw new ControlProtocolException(path + ".error must not contain control characters");
-        }
-      }
-    }
-  }
-
-  private static String requireSkillPackageName(boolean present, String value, String name) {
-    String packageName = requireText(present, value, name, MAX_SKILL_PACKAGE_NAME_CHARS, true);
-    if (!SKILL_PACKAGE_NAME_PATTERN.matcher(packageName).matches()) {
-      throw new ControlProtocolException(name + " is not a canonical skill package name");
-    }
-    return packageName;
-  }
-
-  private static void requireSha256(boolean present, String value, String name) {
-    String sha256 = requireText(present, value, name, 64, true);
-    if (!SHA256_LOWER_PATTERN.matcher(sha256).matches()) {
-      throw new ControlProtocolException(name + " must be 64 lowercase hex characters");
-    }
-  }
-
-  private static void requireSkillDownloadUrl(boolean present, String value, String name) {
-    String url = requireText(present, value, name, MAX_SKILL_DOWNLOAD_URL_CHARS, true);
-    int scheme = url.indexOf("://");
-    if (scheme <= 0
-        || !(url.startsWith("http://") || url.startsWith("https://"))
-        || url.codePoints().anyMatch(Character::isISOControl)) {
-      throw new ControlProtocolException(name + " must be an http(s) URL");
-    }
-  }
-
-  private static void requireSkillLocalPath(boolean present, String value, String name) {
-    requireText(present, value, name, MAX_SKILL_LOCAL_PATH_CHARS, false);
-    if (value.codePoints().anyMatch(Character::isISOControl)) {
-      throw new ControlProtocolException(name + " must not contain control characters");
-    }
   }
 
   public static void validateUpdate(Update update) {
@@ -1378,17 +1318,6 @@ public final class ControlProtocolValidator {
         requireText(present, value, name, ResourceRef.MAX_MEDIA_TYPE_ASCII_BYTES, true);
     if (!MEDIA_TYPE_PATTERN.matcher(mediaType).matches()) {
       throw new ControlProtocolException(name + " must be canonical lowercase type/subtype");
-    }
-  }
-
-  private static void requireInstant(boolean present, String value, String name) {
-    String text = requireText(present, value, name, 64, true);
-    try {
-      if (!Instant.parse(text).toString().equals(text)) {
-        throw new ControlProtocolException(name + " must be a canonical ISO-8601 instant");
-      }
-    } catch (DateTimeParseException error) {
-      throw new ControlProtocolException(name + " must be a canonical ISO-8601 instant", error);
     }
   }
 
