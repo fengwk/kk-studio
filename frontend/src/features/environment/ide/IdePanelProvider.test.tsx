@@ -206,7 +206,12 @@ function connect(
       })
     }
   }
-  socket.emitServer({ type: 'connected', eventNodeId: EVENT_NODE, connectionId })
+  socket.emitServer({
+    type: 'connected',
+    eventNodeId: EVENT_NODE,
+    connectionId,
+    heartbeatIntervalMillis: '20000',
+  })
   return socket
 }
 

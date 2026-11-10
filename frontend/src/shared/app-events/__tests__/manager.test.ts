@@ -19,7 +19,12 @@ const CLAIM_A = '99999999-9999-4999-8999-999999999999'
 const CLAIM_B = '99999999-9999-4999-8999-999999999998'
 
 function connectLatest(socket: ReturnType<FakeWebSocketHarness['openLatest']>, node = EVENT_NODE_A, connection = CONNECTION_A) {
-  socket.emitServer({ type: 'connected', eventNodeId: node, connectionId: connection })
+  socket.emitServer({
+    type: 'connected',
+    eventNodeId: node,
+    connectionId: connection,
+    heartbeatIntervalMillis: '20000',
+  })
 }
 
 function usage(revision = '1', browserSessionId = BROWSER_SESSION_A, claimId = CLAIM_A) {
