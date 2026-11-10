@@ -536,7 +536,6 @@ describe('IdePanelProvider recovery state machine', () => {
       state: 'OPEN',
     }, { revision: '21' }))
     let heldRevision: string | null = null
-    let socket!: FakeWebSocket
     let resolveOpen!: (value: unknown) => void
     let usageAtPost: Array<{ type?: string; views?: Array<{ claimId?: string }> }> = []
     ideService.openIdeView.mockImplementationOnce(async (
@@ -554,7 +553,7 @@ describe('IdePanelProvider recovery state machine', () => {
     })
 
     const { sockets } = renderPanel()
-    socket = connect(sockets, CONNECTION_1, (frame) => {
+    const socket = connect(sockets, CONNECTION_1, (frame) => {
       const isNewClaim = (frame.views ?? []).some((view) => view.claimId !== CLAIM_A)
       if (isNewClaim) {
         heldRevision = frame.revision ?? null
