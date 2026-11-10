@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
@@ -68,7 +70,9 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
     Lease(PluginCatalogRuntime.Lease snapshotLease, McpToolCatalog mcpCatalog) {
       this.snapshotLease = Objects.requireNonNull(snapshotLease, "snapshotLease");
       this.snapshot = snapshotLease.snapshot();
-      this.catalog = FrozenRuntimeToolCatalog.freeze(snapshot.harnessCatalog(), mcpCatalog);
+      this.catalog =
+          FrozenRuntimeToolCatalog.freeze(
+              snapshot.harnessCatalog(), snapshot.providers(), mcpCatalog);
     }
 
     @Override
@@ -108,21 +112,25 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
    *
    * <p>{@link #selectableTools()} 与 {@link #findTool(String)} 出自同一冻结索引，绝不二次读库；MCP 的全部 plannable
    * 行都进入 findTool 索引，因此被禁用/发现失败的 server 下已持久化定义仍然可在 planning 期解析，调用期可用性仍由执行边界 fail closed。
+   * 选择面按快照冻结的 contributor provider（BUILTIN/APP/PLUGIN）与 MCP provider 标注来源。
    */
   static final class FrozenRuntimeToolCatalog implements RuntimeToolCatalog {
 
     private final Map<String, ToolContribution> frozenByName;
-    private final List<ToolContribution> selectableTools;
+    private final List<SelectableTool> selectableTools;
 
     private FrozenRuntimeToolCatalog(
-        Map<String, ToolContribution> frozenByName, List<ToolContribution> selectableTools) {
+        Map<String, ToolContribution> frozenByName, List<SelectableTool> selectableTools) {
       this.frozenByName = frozenByName;
       this.selectableTools = selectableTools;
     }
 
     static FrozenRuntimeToolCatalog freeze(
-        HarnessCatalog harnessCatalog, McpToolCatalog mcpCatalog) {
+        HarnessCatalog harnessCatalog,
+        Map<ContributorId, ToolProviderDTO> providers,
+        McpToolCatalog mcpCatalog) {
       Objects.requireNonNull(harnessCatalog, "harnessCatalog");
+      Objects.requireNonNull(providers, "providers");
       Objects.requireNonNull(mcpCatalog, "mcpCatalog");
       McpToolCatalog.Snapshot mcp = mcpCatalog.readSnapshot();
       Map<String, ToolContribution> frozen = new LinkedHashMap<>();
@@ -135,13 +143,26 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
           throw new IllegalStateException("duplicate tool name across catalogs: " + name);
         }
       }
-      List<ToolContribution> selectable = new ArrayList<>(harnessCatalog.selectableTools());
+      List<SelectableTool> selectable = new ArrayList<>();
+      for (ToolContribution tool : harnessCatalog.selectableTools()) {
+        selectable.add(new SelectableTool(tool, provider(providers, tool.id().contributorId())));
+      }
       selectable.addAll(mcp.selectableTools());
       return new FrozenRuntimeToolCatalog(Map.copyOf(frozen), List.copyOf(selectable));
     }
 
+    /** 选择面工具的 provider：贡献的 contributor 必须已由快照登记，缺失即装配错误。 */
+    private static ToolProviderDTO provider(
+        Map<ContributorId, ToolProviderDTO> providers, ContributorId contributorId) {
+      ToolProviderDTO provider = providers.get(contributorId);
+      if (provider == null) {
+        throw new IllegalStateException("contributor has no provider: " + contributorId);
+      }
+      return provider;
+    }
+
     @Override
-    public List<ToolContribution> selectableTools() {
+    public List<SelectableTool> selectableTools() {
       return selectableTools;
     }
 

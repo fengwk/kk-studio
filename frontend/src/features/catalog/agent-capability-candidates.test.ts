@@ -46,7 +46,7 @@ function skillPackage(
 }
 
 function tool(name: string, description: string): ToolCatalogEntryDTO {
-  return { name, description }
+  return { name, description, provider: { kind: 'BUILTIN', id: 'builtin', name: 'Built-in' } }
 }
 
 describe('agent-capability-candidates', () => {

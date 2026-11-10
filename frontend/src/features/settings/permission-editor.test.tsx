@@ -26,7 +26,11 @@ const PERMISSION_OPTIONS: SystemSettingsSchemaOptionDTO[] = [
 ]
 
 function tool(name: string): ToolCatalogEntryDTO {
-  return { name, description: `${name} tool` }
+  return {
+    name,
+    description: `${name} tool`,
+    provider: { kind: 'BUILTIN', id: 'builtin', name: 'Built-in' },
+  }
 }
 
 function Harness({ initial }: { initial: PermissionGroupDraft[] }) {

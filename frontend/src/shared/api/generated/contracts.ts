@@ -2999,6 +2999,7 @@ export interface ToolCatalogEntryDTO {
   name: string
   description: string
   environmentSupport?: EnvironmentSupport | null
+  provider: ToolProviderDTO
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO */
@@ -3046,6 +3047,27 @@ export const TOOL_INVOCATION_STATUS_VALUES: readonly ToolInvocationStatus[] = [
   'FAILED',
   'CANCELLED',
   'UNKNOWN',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderDTO */
+export interface ToolProviderDTO {
+  kind: ToolProviderKind
+  id: string
+  name: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolProviderKind */
+export type ToolProviderKind =
+  | 'BUILTIN'
+  | 'APP'
+  | 'PLUGIN'
+  | 'MCP'
+
+export const TOOL_PROVIDER_KIND_VALUES: readonly ToolProviderKind[] = [
+  'BUILTIN',
+  'APP',
+  'PLUGIN',
+  'MCP',
 ]
 
 /** Java：fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO */

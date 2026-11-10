@@ -13,8 +13,8 @@ import java.util.Optional;
  */
 public interface RuntimeToolCatalog {
 
-  /** 返回当前全部可选择工具贡献；顺序稳定。 */
-  List<ToolContribution> selectableTools();
+  /** 返回当前全部可选择工具及其提供者；顺序稳定。 */
+  List<SelectableTool> selectableTools();
 
   /** 按模型可见 tool name 查找工具贡献。 */
   Optional<ToolContribution> findTool(String toolName);

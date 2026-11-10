@@ -17,4 +17,7 @@ public class ToolCatalogEntryDTO {
 
   /** Tool 与 Environment 的关系。 */
   private @Nullable EnvironmentSupport environmentSupport;
+
+  /** 工具提供者；目录条目必然来自某个 provider。 */
+  private ToolProviderDTO provider;
 }
