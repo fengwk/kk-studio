@@ -12,6 +12,9 @@ public class ModelLimitDTO {
    */
   private Integer context;
 
+  /** 可选的单独输入上限；声明时必须满足 {@code > 0} 且 {@code <= context}。缺省表示输入只受上下文窗口约束。 */
+  private Integer input;
+
   /** 每轮最大输出 Token 数；必须满足 {@code > 0} 且 {@code <= context}。 */
   private Integer output;
 }
