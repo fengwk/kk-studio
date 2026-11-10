@@ -16,7 +16,8 @@ import java.util.Set;
 /** Schema 与 SystemSettings record 的可编辑 leaf 契约测试。 */
 class SystemSettingsSchemaProviderTest {
 
-  private static final Set<String> CUSTOM_ATOMIC_LEAVES = Set.of("tool.permission");
+  private static final Set<String> CUSTOM_ATOMIC_LEAVES =
+      Set.of("tool.permission", "aiRuntime.compactionModel");
 
   @Test
   void schemaPathsExactlyCoverEditableRecordLeavesAndMetadataKeysAreUnique() {
@@ -80,6 +81,42 @@ class SystemSettingsSchemaProviderTest {
     assertEquals("backendNetwork.noProxyHosts", group.getFields().get(1).getPath());
     assertEquals(false, group.getFields().get(1).isNullable());
     assertEquals(4096, group.getFields().get(1).getMax());
+  }
+
+  /** 上下文压缩组：MODEL_SELECTION 模型引用可空 + 两个正整数 token 预算，全部下次调用生效。 */
+  @Test
+  void compactionGroupDescribesModelSelectionAndTwoTokenBudgets() {
+    SystemSettingsSchemaDTO.SectionDTO section =
+        new SystemSettingsSchemaProvider().get().getSections().get(0);
+    assertEquals("aiRuntime", section.getKey());
+    SystemSettingsSchemaDTO.GroupDTO group = section.getGroups().get(2);
+    assertEquals("aiRuntime.compaction", group.getKey());
+    assertEquals("settings.section.aiRuntime.compaction.title", group.getLabelKey());
+    assertEquals("settings.section.aiRuntime.compaction.description", group.getDescriptionKey());
+    assertFalse(group.isRestartRequired());
+    assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_INVOCATION, group.getApplyTiming());
+    assertEquals(3, group.getFields().size());
+
+    SystemSettingsSchemaDTO.FieldDTO model = group.getFields().get(0);
+    assertEquals("aiRuntime.compactionModel", model.getPath());
+    assertEquals("settings.field.aiRuntime.compactionModel", model.getLabelKey());
+    assertEquals(SystemSettingsSchemaDTO.FieldType.MODEL_SELECTION, model.getType());
+    assertEquals(true, model.isNullable());
+    assertEquals(null, model.getMin());
+    assertEquals(null, model.getMax());
+    assertEquals(null, model.getOptions());
+
+    SystemSettingsSchemaDTO.FieldDTO keepRecent = group.getFields().get(1);
+    assertEquals("aiRuntime.compactionKeepRecentTokens", keepRecent.getPath());
+    assertEquals(SystemSettingsSchemaDTO.FieldType.INTEGER, keepRecent.getType());
+    assertEquals(false, keepRecent.isNullable());
+    assertEquals(1, keepRecent.getMin());
+
+    SystemSettingsSchemaDTO.FieldDTO reserve = group.getFields().get(2);
+    assertEquals("aiRuntime.compactionReserveTokens", reserve.getPath());
+    assertEquals(SystemSettingsSchemaDTO.FieldType.INTEGER, reserve.getType());
+    assertEquals(false, reserve.isNullable());
+    assertEquals(1, reserve.getMin());
   }
 
   private static void collectRecordLeaves(Class<?> type, String prefix, Set<String> paths) {

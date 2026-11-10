@@ -37,7 +37,7 @@ public class SystemSettingsSchemaProvider {
     return schema;
   }
 
-  /** AI 运行时：调用重试、HTTP 错误码、压缩与 subagent 限额。 */
+  /** AI 运行时：调用重试、HTTP 错误码、上下文压缩与 subagent 限额。 */
   private static SystemSettingsSchemaDTO.SectionDTO aiRuntimeSection() {
     return section(
         "aiRuntime",
@@ -110,6 +110,7 @@ public class SystemSettingsSchemaProvider {
             599));
   }
 
+  /** 上下文压缩：模型引用、保留最近 token 与回复预留 token（PLAN 14.2 文案）。 */
   private static SystemSettingsSchemaDTO.GroupDTO compactionGroup() {
     return group(
         "aiRuntime.compaction",
@@ -118,8 +119,24 @@ public class SystemSettingsSchemaProvider {
         false,
         ApplyTiming.NEXT_INVOCATION,
         field(
+            "aiRuntime.compactionModel",
+            "settings.field.aiRuntime.compactionModel",
+            null,
+            FieldType.MODEL_SELECTION,
+            true,
+            null,
+            null),
+        field(
             "aiRuntime.compactionKeepRecentTokens",
             "settings.field.aiRuntime.compactionKeepRecentTokens",
+            null,
+            FieldType.INTEGER,
+            false,
+            1,
+            null),
+        field(
+            "aiRuntime.compactionReserveTokens",
+            "settings.field.aiRuntime.compactionReserveTokens",
             null,
             FieldType.INTEGER,
             false,

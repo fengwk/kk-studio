@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.settings;
 
+import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
@@ -75,13 +78,15 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩保留量、subagent 预算与模型 HTTP 重试状态白名单。 */
+  /** aiRuntime section：共享调用重试、上下文压缩（模型引用与预算）、subagent 预算与模型 HTTP 重试状态白名单。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
       long retryBaseDelayMillis,
       long retryMaxDelayMillis,
+      @Nullable ModelSelection compactionModel,
       int compactionKeepRecentTokens,
+      int compactionReserveTokens,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
@@ -102,6 +107,8 @@ public record SystemSettings(
       }
       SystemSettingsValidation.requirePositive(
           compactionKeepRecentTokens, "aiRuntime.compactionKeepRecentTokens");
+      SystemSettingsValidation.requirePositive(
+          compactionReserveTokens, "aiRuntime.compactionReserveTokens");
       SystemSettingsValidation.requireAtLeast(subagentMaxDepth, 1, "aiRuntime.subagentMaxDepth");
       SystemSettingsValidation.requireAtLeast(
           subagentMaxConcurrency, 1, "aiRuntime.subagentMaxConcurrency");

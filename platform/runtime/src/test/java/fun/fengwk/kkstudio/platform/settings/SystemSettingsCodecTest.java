@@ -12,6 +12,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO;
@@ -277,6 +279,99 @@ class SystemSettingsCodecTest {
     assertEquals(canonical, codec.encode(codec.decode(canonical)));
   }
 
+  /** 可空压缩模型引用：null 省略不误报缺失；显式 null 与非 null 引用（含组/变体形状）都精确往返。 */
+  @Test
+  void compactionModelRoundTripsAndOmitsNull() throws Exception {
+    SystemSettings withModel =
+        new SystemSettings(
+            SystemSettingsTestFixture.DEFAULT.tool(),
+            aiRuntimeWithCompactionModel(ModelSelection.model("m", "v"), 20_000, 16_384),
+            SystemSettingsTestFixture.DEFAULT.environment(),
+            SystemSettingsTestFixture.DEFAULT.backendNetwork(),
+            SystemSettingsTestFixture.DEFAULT.storageMedia(),
+            SystemSettingsTestFixture.DEFAULT.advanced());
+    String canonical = codec.encode(withModel);
+    assertTrue(
+        canonical.contains("\"compactionModel\":{\"modelName\":\"m\",\"variant\":\"v\"}"),
+        canonical);
+    assertEquals(withModel, codec.decode(canonical));
+    // 组引用没有 variant：canonical 省略 variant 键。
+    SystemSettings withGroup =
+        new SystemSettings(
+            SystemSettingsTestFixture.DEFAULT.tool(),
+            aiRuntimeWithCompactionModel(ModelSelection.group("g"), 20_000, 16_384),
+            SystemSettingsTestFixture.DEFAULT.environment(),
+            SystemSettingsTestFixture.DEFAULT.backendNetwork(),
+            SystemSettingsTestFixture.DEFAULT.storageMedia(),
+            SystemSettingsTestFixture.DEFAULT.advanced());
+    String groupCanonical = codec.encode(withGroup);
+    assertTrue(
+        groupCanonical.contains("\"compactionModel\":{\"modelName\":\"g\"}"), groupCanonical);
+    assertEquals(withGroup, codec.decode(groupCanonical));
+
+    // 默认（null）canonical 省略该键；显式 null 解码回同一聚合。
+    String defaultCanonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
+    assertTrue(!defaultCanonical.contains("compactionModel"), defaultCanonical);
+    ObjectNode explicitNull = (ObjectNode) mapper.readTree(defaultCanonical);
+    ((ObjectNode) explicitNull.get("aiRuntime")).set("compactionModel", mapper.nullNode());
+    assertEquals(
+        SystemSettingsTestFixture.DEFAULT, codec.decode(mapper.writeValueAsString(explicitNull)));
+  }
+
+  /** 存储边界拒绝非 canonical 的压缩模型引用：非对象、空对象与未知/缺失字段都是损坏数据。 */
+  @Test
+  void rejectsNonCanonicalCompactionModelShapes() throws Exception {
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
+    for (JsonNode invalid :
+        List.of(
+            mapper.getNodeFactory().textNode("m"),
+            mapper.getNodeFactory().numberNode(1),
+            mapper.getNodeFactory().objectNode(),
+            mapper.readTree("{\"modelName\":\"m\",\"variant\":\"v\",\"extra\":true}"),
+            mapper.readTree("{\"variant\":\"v\"}"),
+            mapper.readTree("{\"modelName\":\"\"}"),
+            mapper.readTree("{\"modelName\":\" m \",\"variant\":null}"),
+            mapper.readTree("{\"modelName\":1}"))) {
+      ObjectNode root = (ObjectNode) mapper.readTree(canonical);
+      ((ObjectNode) root.get("aiRuntime")).set("compactionModel", invalid);
+      assertThrows(
+          IllegalStateException.class,
+          () -> codec.decode(mapper.writeValueAsString(root)),
+          String.valueOf(invalid));
+    }
+  }
+
+  /** DTO 边界：缺 required token 字段给出 field 级错误；压缩模型引用沿用领域校验。 */
+  @Test
+  void fromDtoRequiresCompactionTokenFieldsAndValidatesModelSelection() {
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
+    sections.getAiRuntime().setCompactionKeepRecentTokens(null);
+    IllegalArgumentException missingKeep =
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    assertEquals("aiRuntime.compactionKeepRecentTokens is required", missingKeep.getMessage());
+    sections.getAiRuntime().setCompactionKeepRecentTokens(20_000);
+
+    sections.getAiRuntime().setCompactionReserveTokens(null);
+    IllegalArgumentException missingReserve =
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    assertEquals("aiRuntime.compactionReserveTokens is required", missingReserve.getMessage());
+    sections.getAiRuntime().setCompactionReserveTokens(0);
+    IllegalArgumentException zeroReserve =
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    assertTrue(
+        zeroReserve.getMessage().contains("aiRuntime.compactionReserveTokens"),
+        zeroReserve.getMessage());
+
+    sections.getAiRuntime().setCompactionReserveTokens(16_384);
+    // 组引用没有 variant；wire 形状与 Agent 执行选择的 HarnessModelSelectionDTO 一致。
+    HarnessModelSelectionDTO groupSelection = new HarnessModelSelectionDTO();
+    groupSelection.setModelName("g");
+    sections.getAiRuntime().setCompactionModel(groupSelection);
+    SystemSettings withGroup = codec.fromDto(sections);
+    assertEquals(ModelSelection.group("g"), withGroup.aiRuntime().compactionModel());
+    assertEquals(sections, codec.toSections(withGroup));
+  }
+
   @Test
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
@@ -443,6 +538,25 @@ class SystemSettingsCodecTest {
     ObjectNode root = (ObjectNode) mapper.readTree(canonical);
     ((ObjectNode) root.get("storageMedia")).set(field, value);
     return mapper.writeValueAsString(root);
+  }
+
+  /** 以默认 aiRuntime 为基座替换压缩模型引用与压缩预算，减少逐字段构造噪音。 */
+  private static SystemSettings.AiRuntime aiRuntimeWithCompactionModel(
+      ModelSelection compactionModel, int keepRecentTokens, int reserveTokens) {
+    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
+    return new SystemSettings.AiRuntime(
+        base.retryMaxRetries(),
+        base.retryBackoffStrategy(),
+        base.retryBaseDelayMillis(),
+        base.retryMaxDelayMillis(),
+        compactionModel,
+        keepRecentTokens,
+        reserveTokens,
+        base.subagentMaxDepth(),
+        base.subagentMaxConcurrency(),
+        base.subagentMaxTotalConcurrency(),
+        base.subagentMaxTurns(),
+        base.modelHttpRetryStatusCodes());
   }
 
   /**
