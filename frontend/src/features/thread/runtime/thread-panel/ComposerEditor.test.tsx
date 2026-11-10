@@ -633,6 +633,29 @@ describe('ComposerEditor', () => {
     expect(passthrough).not.toHaveBeenCalled()
   })
 
+  it('cut writes the slot-free text and removes the selected parts', () => {
+    // 接管剪切后浏览器不会删除选区：编辑器必须自己删除并回流草稿，否则剪切会退化成复制。
+    const onPartsChange = vi.fn()
+    render(
+      <Harness
+        initialParts={[createTextPart('ab'), createAttachmentPart('local-9', 'a.txt')]}
+        onPartsChange={onPartsChange}
+      />,
+    )
+    const editor = editorOf()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    const setData = vi.fn()
+    expect(fireEvent.cut(editor, { clipboardData: { setData } })).toBe(false)
+    expect(setData).toHaveBeenCalledWith('text/plain', 'ab[a.txt]')
+    expect(editor.querySelectorAll('.composer-pill')).toHaveLength(0)
+    expect(onPartsChange).toHaveBeenLastCalledWith([])
+  })
+
   it('patches the image tier of rendered attachment pills without rebuilding the draft', () => {
     const apiRef = createRef<ComposerEditorHandle>()
     const onPartsChange = vi.fn()

@@ -308,19 +308,33 @@ export function ComposerEditor({
 
   /**
    * 复制/剪切序列化：slot 占位不进剪贴板。只在选区真的触及占位时接管，
-   * 其余情况保留浏览器原生剪贴板与撤销行为。
+   * 其余情况保留浏览器原生剪贴板与撤销行为。返回是否接管了默认行为。
    */
-  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+  function writeSelectionToClipboard(event: ClipboardEvent<HTMLDivElement>): boolean {
     const el = editorRef.current
     if (!el || !selectionTouchesCaretSlot(el)) {
-      return
+      return false
     }
     const text = serializeSelectionText(el)
     if (text === null) {
-      return
+      return false
     }
     event.preventDefault()
     event.clipboardData?.setData('text/plain', text)
+    return true
+  }
+
+  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+    writeSelectionToClipboard(event)
+  }
+
+  /** 接管剪切时浏览器不再删除选区，需要自己删除并回流 parts。 */
+  function handleCut(event: ClipboardEvent<HTMLDivElement>) {
+    if (!writeSelectionToClipboard(event)) {
+      return
+    }
+    window.getSelection()?.deleteFromDocument()
+    syncFromDom(true)
   }
 
   useImperativeHandle(ref, () => ({
@@ -391,7 +405,7 @@ export function ComposerEditor({
       onPaste={handlePaste}
       onDrop={handleDrop}
       onCopy={handleCopy}
-      onCut={handleCopy}
+      onCut={handleCut}
       onMouseDown={() => onEditorMouseDown?.()}
     />
   )
