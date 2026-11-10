@@ -1,7 +1,8 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from '@bufbuild/protobuf'
+import { Agent } from 'undici'
 
 import {
   MessageType,
@@ -485,6 +486,48 @@ describe('presigned PUT http client', () => {
         ),
       ).rejects.toThrow(/rejected by storage: 403/)
     } finally {
+      await server.close()
+    }
+  })
+
+  it('ends the transfer with exit unknown when the PUT network cannot be released', async () => {
+    // PUT 成功但其独占 dispatcher 关闭失败：网络范围未证明释放，交付必须以 cleanupConfirmed=false 结束，
+    // 不能继续 COMMIT 让退出被确认。
+    const server = await startServer(200)
+    const failure = new Error('dispatcher close failed')
+    const spy = vi.spyOn(Agent.prototype, 'close').mockImplementation(() => Promise.reject(failure))
+    const sent: MessageType[] = []
+    let client: ResourceTransferClient
+    client = createResourceTransferClient({
+      sendControl: (envelope: Envelope) => {
+        sent.push(envelope.messageType)
+        const ticket = create(ResourceUploadTicketSchema, {
+          transferId: getTransferId(envelope),
+          state: TicketState.TICKET_PENDING,
+          uploadId: UPLOAD_ID,
+          presignedPut: create(PresignedPutSchema, {
+            method: 'PUT',
+            url: server.url,
+            expiresAt: '2030-01-01T00:00:00.000Z',
+          }),
+        })
+        queueMicrotask(() => client.onTicket(envelope.invocationId ?? '', ticket))
+        return true
+      },
+      putObject: createHttpPutObject(),
+      retryBackoffMillis: 5,
+      connectionPollMillis: 5,
+    })
+    client.onConnectionReady()
+    try {
+      await expect(client.upload(INVOCATION_ID, binary, new AbortController().signal)).rejects.toMatchObject({
+        stage: 'put',
+        category: 'cleanup-failed',
+        cleanupConfirmed: false,
+      })
+      expect(sent).toEqual([MessageType.RESOURCE_UPLOAD_REQUEST])
+    } finally {
+      spy.mockRestore()
       await server.close()
     }
   })

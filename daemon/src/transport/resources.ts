@@ -1,13 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
-import {
-  isResourceUploadError,
-  ResourceUploadError,
-  type ResourceUploadErrorCategory,
-  type ResourceUploader,
-} from '../contracts.js'
-import type { ResultContent } from '../contracts.js'
+import { ResourceUploadError, type ResourceUploader, type ResultContent } from '../contracts.js'
 import { delay } from '../delay.js'
 import { getOutboundNetwork, isOutboundCleanupFailure } from '../network.js'
 import {
@@ -245,6 +239,10 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           try {
             await this.putObject(ticket.presignedPut as PresignedPut, bytes, signal)
           } catch (error) {
+            if (isOutboundCleanupFailure(error)) {
+              // PUT 的网络范围未能证明释放：退出事实保持未知，不能用后续重试掩盖。
+              throw new ResourceUploadError('put', 'cleanup-failed', false, { cause: error })
+            }
             if (signal.aborted) {
               throw new ResourceUploadError('put', 'cancelled', true, { cause: error })
             }
@@ -316,40 +314,6 @@ function safeTicketMessage(ticket: ResourceUploadTicket): string {
   return typeof ticket.message === 'string' && ticket.message.trim() !== ''
     ? ticket.message
     : FAILURE_MESSAGE
-}
-
-/**
- * 上传边界转换：把内部失败统一为 ResourceUploadError 契约。
- *
- * <p>cleanupConfirmed 只来自明确的网络清理事实，绝不从 cause 文案推断：
- * - 网络层确认 cleanup failure（isOutboundCleanupFailure）→ false；
- * - 其余失败（存储拒绝、控制面不可用等）在完成实际释放后按 true 保守交付；
- * - 已经是契约错误的原样保留。
- */
-export function toResourceUploadBoundaryError(error: unknown): ResourceUploadError {
-  if (isResourceUploadError(error)) {
-    return error
-  }
-  if (isOutboundCleanupFailure(error)) {
-    return new ResourceUploadError('put', 'cleanup-failed', false, { cause: error })
-  }
-  const category = categorizeBoundaryFailure(error)
-  return new ResourceUploadError('put', category, true, { cause: error })
-}
-
-/** 按错误身份归类；无法识别的实现错误保守视为边界违约，不自动认定释放成功。 */
-function categorizeBoundaryFailure(error: unknown): ResourceUploadErrorCategory {
-  if (typeof error !== 'object' || error === null) {
-    return 'unknown'
-  }
-  const candidate = error as { name?: string; code?: string }
-  if (candidate.name === 'AbortError' || candidate.code === 'UND_ERR_ABORTED') {
-    return 'cancelled'
-  }
-  if (candidate.code === 'UND_ERR_CONNECT_TIMEOUT' || candidate.code === 'UND_ERR_SOCKET') {
-    return 'control-unavailable'
-  }
-  return 'unknown'
 }
 
 function transferKey(invocationId: string, transferId: string): string {

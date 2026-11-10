@@ -9,7 +9,7 @@ import type {
   ProcessSupervisor,
   ResourceUploader,
 } from './contracts.js'
-import { isResourceUploadError } from './contracts.js'
+import { isResourceUploadError, type ResourceUploadError } from './contracts.js'
 import {
   CancelledSchema,
   MessageType,
@@ -62,8 +62,6 @@ export interface InvocationRuntimeOptions {
   isUpdateHeld(): boolean
   trackProtected(promise: Promise<void>): void
   release(phase: string, action: () => void): void
-  /** 上传失败的安全诊断；默认写 stderr，测试可注入捕获。 */
-  reportUploadFailure?(phase: string, error: unknown): void
 }
 
 /**
@@ -226,13 +224,12 @@ export class InvocationRuntime {
   }
 
   /** 上传失败的安全诊断：最接近失败的边界记录一次，不重复堆栈，不含 URL/headers/令牌。 */
-  private reportUploadFailure(phase: string, error: unknown): void {
+  private reportUploadFailure(phase: string, error: ResourceUploadError): void {
     try {
       process.stderr.write(`daemon ${phase}: ${describeUploadFailure(error)}\n`)
     } catch {
       // 诊断输出失败不影响失败事实的交付。
     }
-    this.options.reportUploadFailure?.(phase, error)
   }
 
   private async execute(
@@ -276,11 +273,13 @@ export class InvocationRuntime {
       const executorFailed = !invocation.executorReturned
       // 收尾失败事实只来自明确的资源上传边界：cleanupConfirmed=false 时退出仍未知；
       // 普通失败（含存储拒绝、控制面不可用）在完成实际释放后按已确认处理。
-      const cleanupUnconfirmed = isResourceUploadError(error) && !error.cleanupConfirmed
-      if (cleanupUnconfirmed) {
-        this.reportUploadFailure('invocation upload cleanup unconfirmed', error)
-      } else if (isResourceUploadError(error)) {
-        this.reportUploadFailure('invocation upload failed', error)
+      const uploadFailure = isResourceUploadError(error) ? error : null
+      const cleanupUnconfirmed = uploadFailure !== null && !uploadFailure.cleanupConfirmed
+      if (uploadFailure !== null) {
+        this.reportUploadFailure(
+          cleanupUnconfirmed ? 'invocation upload cleanup unconfirmed' : 'invocation upload failed',
+          uploadFailure,
+        )
       }
       if (invocation.terminalClaimed) {
         if (executorFailed) {
