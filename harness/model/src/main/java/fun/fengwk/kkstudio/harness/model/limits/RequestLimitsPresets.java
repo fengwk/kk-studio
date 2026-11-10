@@ -22,11 +22,8 @@ public final class RequestLimitsPresets {
   /** Anthropic 直连：单图 BASE64 编码后 10,000,000 bytes。 */
   private static final long CLAUDE_IMAGE_SINGLE_ENCODED_BYTES = 10_000_000L;
 
-  /** Anthropic 直连：200k 窗口模型单请求 100 张。 */
-  private static final int CLAUDE_IMAGE_MAX_COUNT_200K = 100;
-
-  /** Anthropic 直连：其他模型单请求 600 张。 */
-  private static final int CLAUDE_IMAGE_MAX_COUNT_DEFAULT = 600;
+  /** Anthropic 直连：200k 窗口模型单请求 100 张（更大窗口的模型 600 张）。请求不携带窗口大小，统一取更严的 100 张。 */
+  private static final int CLAUDE_IMAGE_MAX_COUNT = 100;
 
   /** Anthropic 直连：图片边长 ≤ 8000 px。 */
   private static final int CLAUDE_IMAGE_MAX_SIDE = 8000;
@@ -59,7 +56,7 @@ public final class RequestLimitsPresets {
               null,
               CLAUDE_IMAGE_SINGLE_ENCODED_BYTES,
               null,
-              CLAUDE_IMAGE_MAX_COUNT_200K,
+              CLAUDE_IMAGE_MAX_COUNT,
               CLAUDE_IMAGE_MAX_SIDE,
               CLAUDE_IMAGE_MANY_THRESHOLD,
               CLAUDE_IMAGE_MANY_MAX_SIDE),
@@ -118,32 +115,6 @@ public final class RequestLimitsPresets {
           ? GEMINI_INLINE
           : unknown();
     };
-  }
-
-  /** Anthropic 200k 窗口模型单请求 100 张；更大窗口的其他模型 600 张。 */
-  public static RequestLimits claudeDirect(int contextWindowTokens) {
-    if (contextWindowTokens <= 0) {
-      throw new IllegalArgumentException("contextWindowTokens must be positive");
-    }
-    if (contextWindowTokens >= 200_000) {
-      return CLAUDE_DIRECT;
-    }
-    return new RequestLimits(
-        CLAUDE_BODY_MAX_BYTES,
-        new ImageRequestLimits(
-            null,
-            CLAUDE_IMAGE_SINGLE_ENCODED_BYTES,
-            null,
-            CLAUDE_IMAGE_MAX_COUNT_DEFAULT,
-            CLAUDE_IMAGE_MAX_SIDE,
-            CLAUDE_IMAGE_MANY_THRESHOLD,
-            CLAUDE_IMAGE_MANY_MAX_SIDE),
-        DocumentRequestLimits.UNKNOWN,
-        AudioRequestLimits.UNKNOWN,
-        VideoRequestLimits.UNKNOWN,
-        null,
-        CLAUDE_DIRECT.sources(),
-        CLAUDE_DIRECT.verifiedAt());
   }
 
   /** 全未知快照：代理、私有网关等非官方端点唯一合法结果。 */

@@ -105,14 +105,6 @@ class RequestLimitsTest {
   }
 
   @Test
-  void claudeDirectSwitchesImageCountAt200kWindow() {
-    assertEquals(100, RequestLimitsPresets.claudeDirect(200_000).image().maxCount());
-    assertEquals(100, RequestLimitsPresets.claudeDirect(1_000_000).image().maxCount());
-    assertEquals(600, RequestLimitsPresets.claudeDirect(128_000).image().maxCount());
-    assertThrows(IllegalArgumentException.class, () -> RequestLimitsPresets.claudeDirect(0));
-  }
-
-  @Test
   void mergeTakesStrictestKnownValuePerField() {
     RequestLimits strict =
         new RequestLimits(

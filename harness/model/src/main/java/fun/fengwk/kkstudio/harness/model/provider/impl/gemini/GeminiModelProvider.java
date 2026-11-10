@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.gemini;
 
+import fun.fengwk.kkstudio.harness.model.limits.RequestLimitsPresets;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.PreparedProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.transport.ServerSentEvent
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Google AI Gemini GenerateContent 流式模型提供商实现。 */
 final class GeminiModelProvider implements ModelProvider {
@@ -59,8 +62,19 @@ final class GeminiModelProvider implements ModelProvider {
       bridge.emitError(exception);
       return;
     }
-    // 定价观察只读取本次真正发送的编码 body；回调不得改变发送内容或二次编码。
-    handler.onRequestBody(encoded.bodyUtf8Bytes());
+    // 先计量最终 body 并按端点已知限制检查；超限不发送。计量、定价观察与 HTTP 发送共用同一份字节。
+    PreparedProviderRequest prepared =
+        PreparedProviderRequest.prepare(
+            request,
+            encoded.bodyUtf8Bytes(),
+            RequestLimitsPresets.resolve(descriptor.type(), descriptor.endpoint()));
+    Optional<ProviderException> violation = prepared.limitViolation();
+    if (violation.isPresent()) {
+      bridge.emitError(violation.get());
+      return;
+    }
+    byte[] body = prepared.body();
+    handler.onRequestBody(body);
 
     URI streamUri;
     try {
@@ -77,7 +91,7 @@ final class GeminiModelProvider implements ModelProvider {
     try {
       HttpRequest.Builder requestBuilder =
           HttpRequest.newBuilder(streamUri)
-              .POST(HttpRequest.BodyPublishers.ofByteArray(encoded.bodyUtf8Bytes()))
+              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
               .header("Content-Type", "application/json")
               .header("Accept", "text/event-stream");
       if (apiKey != null && !apiKey.isBlank()) {

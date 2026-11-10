@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderMediaValidator;
+import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -78,12 +79,19 @@ public final class AnthropicRequestEncoder {
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
   private static final int MAX_CACHE_BREAKPOINTS = 4;
-  private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
   private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
   private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
   private static final String EFFORT_BETA = "effort-2025-11-24";
 
-  public AnthropicRequestEncoder() {}
+  private final RequestBodySizeGuard bodySizeGuard;
+
+  public AnthropicRequestEncoder() {
+    this(RequestBodySizeGuard.DEFAULT);
+  }
+
+  AnthropicRequestEncoder(RequestBodySizeGuard bodySizeGuard) {
+    this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
+  }
 
   public AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
@@ -176,11 +184,7 @@ public final class AnthropicRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize Anthropic request body");
     }
 
-    if (utf8Bytes.length > MAX_REQUEST_BODY_BYTES) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes limit");
-    }
+    bodySizeGuard.enforce(utf8Bytes);
 
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
