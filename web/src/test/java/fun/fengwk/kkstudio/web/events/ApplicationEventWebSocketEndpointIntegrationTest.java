@@ -296,6 +296,10 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String connectionId = connected.path("connectionId").asText();
     assertEquals(eventNodeId, UUID.fromString(eventNodeId).toString());
     assertEquals(connectionId, UUID.fromString(connectionId).toString());
+    // 真实端到端握手必须声明服务端 heartbeat 间隔，前端失联预算依赖它。
+    assertTrue(
+        connected.path("heartbeatIntervalMillis").asLong() > 0,
+        "connected frame must declare a positive heartbeatIntervalMillis");
     return ConnectionIdentity.parse(eventNodeId, connectionId);
   }
 
