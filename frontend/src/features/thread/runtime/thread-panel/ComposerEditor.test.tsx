@@ -89,13 +89,41 @@ function textSnapshot(): string {
     .join('')
 }
 
-function placeCaretAtChild(editor: HTMLElement, childIndex: number) {
+/**
+ * 光标放到第 pillIndex 颗 pill 之后的可编辑边界（trailing caret slot 的文本节点内）。
+ * 编辑器为每个 pill 维护 DOM-only slot，因此不能直接按 childIndex 定位。
+ */
+function placeCaretAfterPill(editor: HTMLElement, pillIndex: number) {
+  const pill = editor.querySelectorAll('.composer-pill')[pillIndex]
+  const slot = pill?.nextSibling
+  const node = slot?.nodeType === Node.ELEMENT_NODE ? slot.firstChild : null
+  if (node == null || node.nodeType !== Node.TEXT_NODE) {
+    throw new Error('expected a trailing caret slot after the pill')
+  }
   const range = document.createRange()
-  range.setStart(editor, childIndex)
+  range.setStart(node, node.textContent?.length ?? 0)
   range.collapse(true)
   const selection = window.getSelection()
   selection?.removeAllRanges()
   selection?.addRange(range)
+}
+
+/** 编辑器可见文本（不含 DOM-only caret slot 的零宽占位）。 */
+function visibleText(editor: HTMLElement): string {
+  let text = ''
+  for (const node of Array.from(editor.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent ?? ''
+      continue
+    }
+    if (!(node instanceof HTMLElement)) {
+      continue
+    }
+    text += node.hasAttribute('data-caret-slot')
+      ? (node.textContent ?? '').replace(/\u200B/g, '')
+      : (node.textContent ?? '')
+  }
+  return text
 }
 
 function placeCaretAtEnd(editor: HTMLElement) {
@@ -234,7 +262,7 @@ describe('ComposerEditor', () => {
     expect(editor.querySelectorAll('.composer-pill')).toHaveLength(2)
 
     // caret 位于第一颗 pill 之后：Backspace 只移除该 occurrence。
-    placeCaretAtChild(editor, 1)
+    placeCaretAfterPill(editor, 0)
     expect(fireEvent.keyDown(editor, { key: 'Backspace' })).toBe(false)
     await waitFor(() => expect(partsSnapshot()).toHaveLength(1))
     expect(partsSnapshot()[0]).toMatchObject({ type: 'attachment', partId: second.partId })
@@ -314,7 +342,7 @@ describe('ComposerEditor', () => {
 
     // 文件路径不回流草稿、不插入文本。
     expect(onPartsChange).not.toHaveBeenCalled()
-    expect(editor.textContent).toBe('keep')
+    expect(visibleText(editor)).toBe('keep')
   })
 
   it('ignores paste without clipboard data and inserts dropped text at the caret', () => {
@@ -365,10 +393,10 @@ describe('ComposerEditor', () => {
     ).toBe(true)
     expect(onFiles).not.toHaveBeenCalled()
     expect(onPartsChange).not.toHaveBeenCalled()
-    expect(editor.textContent).toBe('locked[shot.png]')
+    expect(visibleText(editor)).toBe('locked[shot.png]')
 
     // caret 位于 pill 之后：Backspace 不删除 pill；Enter/Arrow 不下发到外层。
-    placeCaretAtChild(editor, 1)
+    placeCaretAfterPill(editor, 0)
     fireEvent.keyDown(editor, { key: 'Backspace' })
     placeCaretAtEnd(editor)
     fireEvent.keyDown(editor, { key: 'Enter' })

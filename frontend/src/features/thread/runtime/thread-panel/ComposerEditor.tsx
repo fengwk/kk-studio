@@ -10,6 +10,8 @@ import {
   type RefObject,
 } from 'react'
 import {
+  COMPOSING_ATTRIBUTE,
+  ensureCaretSlots,
   extractPartsFromEditor,
   extractPartsKeyFromEditor,
   findAdjacentPill,
@@ -18,6 +20,8 @@ import {
   normalizeEditorDom,
   placeCaretAtEnd,
   renderPartsToEditor,
+  selectionTouchesCaretSlot,
+  serializeSelectionText,
 } from '@/features/thread/composer/composer-dom'
 import {
   mergeTextParts,
@@ -92,6 +96,8 @@ export function ComposerEditor({
   const isComposingRef = useRef(false)
   // 组合期间到达的上传失败：DOM pill 回滚延后到 compositionend，避免重建组合态 DOM。
   const pendingFailedUploadIdsRef = useRef<Set<string>>(new Set())
+  // 组合期间到达的程序插入（附件选择/拖放）：同样延后到 compositionend。
+  const pendingInsertedPartsRef = useRef<ComposerPart[]>([])
 
   /** 从当前 DOM 提取 parts 并回流（输入/粘贴/拖放/pill 操作后的统一入口）。 */
   function syncFromDom(force = false): ComposerPart[] | null {
@@ -101,6 +107,7 @@ export function ComposerEditor({
     }
     onEditStart?.()
     normalizeEditorDom(el)
+    ensureCaretSlots(el)
     const next = mergeTextParts(extractPartsFromEditor(el))
     if (force || partsKey(next) !== partsKey(parts)) {
       onPartsChange(next)
@@ -124,16 +131,18 @@ export function ComposerEditor({
         removed = true
       })
     }
+    if (removed) {
+      // 失败 pill 的相邻 slot 需同步重组，避免占位残留成多余边界。
+      ensureCaretSlots(el)
+    }
     return removed
   }
 
   /** DOM 与 props 对齐（外部同步或初始渲染）；重建时保留焦点与光标。 */
   useEffect(() => {
-    if (isComposingRef.current) {
-      return
-    }
     const el = editorRef.current
-    if (!el) {
+    if (!el || isComposingRef.current) {
+      // 组合期间不重建 DOM；待同步的 parts 在 compositionend 后统一对齐。
       return
     }
     // parts 状态保持相邻 text 已合并的规范形态；比较/渲染前先规范化，
@@ -153,16 +162,28 @@ export function ComposerEditor({
 
   function handleCompositionStart() {
     isComposingRef.current = true
+    editorRef.current?.setAttribute(COMPOSING_ATTRIBUTE, 'true')
   }
 
   function handleCompositionEnd() {
     isComposingRef.current = false
-    const hadFailedUploads = pendingFailedUploadIdsRef.current.size > 0
-    if (hadFailedUploads) {
-      removePills(Array.from(pendingFailedUploadIdsRef.current))
+    editorRef.current?.removeAttribute(COMPOSING_ATTRIBUTE)
+    const el = editorRef.current
+    if (el) {
+      const pendingInserted = pendingInsertedPartsRef.current
+      pendingInsertedPartsRef.current = []
+      if (pendingInserted.length > 0) {
+        insertPillsAtCaret(el, pendingInserted)
+      }
+      const pendingFailed = pendingFailedUploadIdsRef.current
+      if (pendingFailed.size > 0) {
+        removePills(Array.from(pendingFailed))
+      }
+      pendingFailedUploadIdsRef.current.clear()
     }
-    pendingFailedUploadIdsRef.current.clear()
-    syncFromDom(hadFailedUploads)
+    // 组合结束后 DOM（用户刚提交的文本）是事实源：先把组合结果与延后的附件改动
+    // 一起回流草稿，组合期间到达的外部值由下一次受控同步收敛。
+    syncFromDom(true)
   }
 
   /**
@@ -198,6 +219,10 @@ export function ComposerEditor({
         event.stopPropagation()
         const partId = pill.getAttribute('data-part-id')
         pill.remove()
+        if (editorRef.current) {
+          // 相邻 caret slot 随 pill 消失需要重组，否则残留的占位会成为可见边界。
+          ensureCaretSlots(editorRef.current)
+        }
         if (partId) {
           const next = mergeTextParts(removePartsByIds(parts, new Set([partId])))
           if (partsKey(next) !== partsKey(parts)) {
@@ -281,11 +306,33 @@ export function ComposerEditor({
     }
   }
 
+  /**
+   * 复制/剪切序列化：slot 占位不进剪贴板。只在选区真的触及占位时接管，
+   * 其余情况保留浏览器原生剪贴板与撤销行为。
+   */
+  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+    const el = editorRef.current
+    if (!el || !selectionTouchesCaretSlot(el)) {
+      return
+    }
+    const text = serializeSelectionText(el)
+    if (text === null) {
+      return
+    }
+    event.preventDefault()
+    event.clipboardData?.setData('text/plain', text)
+  }
+
   useImperativeHandle(ref, () => ({
     syncDraft: () => syncFromDom(false),
     insertParts: (pillParts) => {
       const el = editorRef.current
       if (!el) {
+        return
+      }
+      if (isComposingRef.current) {
+        // 组合期间的程序插入延后到 compositionend：不得改动组合态 DOM。
+        pendingInsertedPartsRef.current.push(...pillParts)
         return
       }
       // 文件插入发生在当前光标处（粘贴/拖放/选择），而不是追加到末尾；
@@ -343,6 +390,8 @@ export function ComposerEditor({
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       onDrop={handleDrop}
+      onCopy={handleCopy}
+      onCut={handleCopy}
       onMouseDown={() => onEditorMouseDown?.()}
     />
   )

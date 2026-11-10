@@ -1928,9 +1928,42 @@ async function pasteFiles(editor: HTMLElement, ...files: File[]) {
   await waitFor(() => expect(document.querySelectorAll('.composer-pill').length).toBe(files.length))
 }
 
-function placeCaretInEditor(editor: HTMLElement, beforeChildIndex: number) {
+/**
+ * 光标放到第 pillIndex 颗 pill 之后的可编辑边界。
+ * 编辑器为每个 pill 维护 DOM-only caret slot，因此按 pill 语义而不是 child index 定位。
+ */
+function placeCaretAfterPill(editor: HTMLElement, pillIndex: number) {
+  const pill = editor.querySelectorAll('.composer-pill')[pillIndex]
+  const slot = pill?.nextSibling
+  const node = slot?.nodeType === Node.ELEMENT_NODE ? slot.firstChild : null
+  if (node == null || node.nodeType !== Node.TEXT_NODE) {
+    throw new Error('expected a trailing caret slot after the pill')
+  }
   const range = document.createRange()
-  range.setStart(editor, beforeChildIndex)
+  range.setStart(node, node.textContent?.length ?? 0)
+  range.collapse(true)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
+/**
+ * 光标放到第 pillIndex 颗 pill 之前的可编辑边界：紧邻的普通文本节点末尾，
+ * 或没有文本时的前导 caret slot。
+ */
+function placeCaretBeforePill(editor: HTMLElement, pillIndex: number) {
+  const pill = editor.querySelectorAll('.composer-pill')[pillIndex]
+  const previous = pill?.previousSibling
+  const node = previous?.nodeType === Node.TEXT_NODE
+    ? previous
+    : previous?.nodeType === Node.ELEMENT_NODE
+      ? previous.firstChild
+      : null
+  if (node == null || node.nodeType !== Node.TEXT_NODE) {
+    throw new Error('expected an editable boundary before the pill')
+  }
+  const range = document.createRange()
+  range.setStart(node, node.textContent?.length ?? 0)
   range.collapse(true)
   const selection = window.getSelection()
   selection?.removeAllRanges()
@@ -2167,7 +2200,7 @@ describe('ThreadComposer attachment pills', () => {
     await waitForIdleUploads()
     expect(reserveUpload).toHaveBeenCalledTimes(2)
     // 两颗 pill 各自的句柄独立释放。
-    placeCaretInEditor(editor, 1)
+    placeCaretAfterPill(editor, 0)
     fireEvent.keyDown(editor, { key: 'Backspace' })
     await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
     expect(screen.getAllByRole('listitem')).toHaveLength(1)
@@ -2180,14 +2213,14 @@ describe('ThreadComposer attachment pills', () => {
     await typeInEditor(editor, 'a')
     await pasteFiles(editor, fileOf('data.txt', 'text/plain'))
     // caret 位于 pill 之后：Backspace 移除整颗 pill。
-    placeCaretInEditor(editor, 2)
+    placeCaretAfterPill(editor, 0)
     fireEvent.keyDown(editor, { key: 'Backspace' })
     expect(partsSnapshot()).toEqual([{ type: 'text', text: 'a' }])
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
 
     // Delete：caret 位于 pill 之前时整颗删除。
     await pasteFiles(editor, fileOf('data.txt', 'text/plain'))
-    placeCaretInEditor(editor, 1)
+    placeCaretBeforePill(editor, 0)
     fireEvent.keyDown(editor, { key: 'Delete' })
     expect(partsSnapshot()).toEqual([{ type: 'text', text: 'a' }])
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
@@ -2524,7 +2557,7 @@ describe('ThreadComposer attachment pills', () => {
     const editor = screen.getByLabelText('给 AI 发送消息')
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(2)
     // caret 位于第一颗 pill 之后：Backspace 只移除该 occurrence。
-    placeCaretInEditor(editor, 1)
+    placeCaretAfterPill(editor, 0)
     fireEvent.keyDown(editor, { key: 'Backspace' })
     await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
     const remaining = partsSnapshot()
