@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
@@ -10,7 +9,6 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * 本地工具执行与远端重挂接共用的执行模板：partial 守卫、执行线程登记、终态装配与 close-once。
@@ -78,13 +76,8 @@ abstract class AbstractToolRun implements ToolGateway.Run {
   /** 释放本次 Run 独占的资源；恰好调用一次。 */
   protected abstract void release();
 
-  /**
-   * 共享终态装配：校验 call id、解析 durable effects、按大小限制外部化内容并映射为 {@link ToolGateway.Completion}。
-   *
-   * <p>effects 解析在大小限制之前、call id 校验之后执行，违反 Contributor 契约时只能声明结果未确认。
-   */
-  protected final ToolGateway.Completion completion(
-      ToolResult result, Supplier<ToolEffectBatch> effects) {
+  /** 共享终态装配：校验 call id、按大小限制外部化内容并映射为 {@link ToolGateway.Completion}。 */
+  protected final ToolGateway.Completion completion(ToolResult result) {
     if (result == null) {
       return ToolErrorClassifier.fail(
           ToolErrorClassifier.invalidResult("terminal result must not be null"));
@@ -94,14 +87,6 @@ abstract class AbstractToolRun implements ToolGateway.Run {
           ToolErrorClassifier.invalidResult(
               "terminal result toolCallId does not match the request call"));
     }
-    ToolEffectBatch batch;
-    try {
-      batch = effects.get();
-    } catch (RuntimeException invalid) {
-      return ToolErrorClassifier.fail(
-          ToolErrorClassifier.contributorContractViolation(
-              invalid, "Tool outcome returned invalid custom entries"));
-    }
     ToolResultFinalizer.Outcome finalized;
     try {
       finalized = finalizer.finalizeResult(toolName, result);
@@ -110,7 +95,7 @@ abstract class AbstractToolRun implements ToolGateway.Run {
     }
     return switch (finalized) {
       case ToolResultFinalizer.Outcome.Success success -> new ToolGateway.Succeeded(
-          new ToolSuccess(success.result(), batch));
+          new ToolSuccess(success.result()));
       case ToolResultFinalizer.Outcome.Failed failed -> ToolErrorClassifier.fail(failed.error());
       case ToolResultFinalizer.Outcome.StoreFailed storeFailed -> new ToolGateway.Unknown(
           storeFailed.error());

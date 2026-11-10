@@ -21,15 +21,4 @@ public interface HarnessRegistrar {
   default void registerTool(String localName, Tool tool, ToolVisibility visibility) {
     registerTool(localName, tool, visibility, 0);
   }
-
-  /**
-   * 注册一个自定义 Entry type 的 ownership。{@code customType} 的 ownership 键是 {@code (contributorId,
-   * customType)}： 不同 contributor 可以各自拥有同名 customType，同一 contributor 内不得重复。
-   */
-  void registerCustomEntryType(String localName, String customType, int priority);
-
-  /** 注册 priority 为 0 的 custom entry type ownership。 */
-  default void registerCustomEntryType(String localName, String customType) {
-    registerCustomEntryType(localName, customType, 0);
-  }
 }

@@ -7,7 +7,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -32,8 +31,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("agentName", "execution", "environmentName", "goal");
-  private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
+      orderedSet("agentName", "execution", "environmentName");
   private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
 
@@ -70,15 +68,6 @@ final class HistoryValueCodecs {
     } else {
       node.put("environmentName", settings.environmentName());
     }
-    // goal 是完整快照的一部分：null（用户未设置或已清除）必须显式输出。
-    if (settings.goal() == null) {
-      node.putNull("goal");
-    } else {
-      ObjectNode goal = NODES.objectNode();
-      goal.put("id", settings.goal().id().toString());
-      goal.put("text", settings.goal().text());
-      node.set("goal", goal);
-    }
     return node;
   }
 
@@ -88,30 +77,7 @@ final class HistoryValueCodecs {
     return new BranchSettings(
         requiredText(node, "agentName", context),
         ExecutionSelectionJsonCodec.decode(node.get("execution"), context + ".execution"),
-        nullableEnvironmentName(node, "environmentName", context),
-        nullableGoal(node, "goal", context));
-  }
-
-  /** 解码可空 Goal 快照：null 或精确 2 字段对象；任何其它形状确定性拒绝。 */
-  static GoalSetting nullableGoal(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value == null) {
-      throw new IllegalArgumentException(context + " must declare " + field);
-    }
-    if (value.isNull()) {
-      return null;
-    }
-    ObjectNode goal = requireObject(value, context + "." + field);
-    JsonCodecSupport.requireFields(goal, GOAL_FIELDS, context + "." + field);
-    UUID id;
-    try {
-      id =
-          Uuids.parseCanonical(
-              requiredText(goal, "id", context + "." + field), context + "." + field + ".id");
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(context + "." + field + ".id must be a UUID", error);
-    }
-    return new GoalSetting(id, requiredText(goal, "text", context + "." + field));
+        nullableEnvironmentName(node, "environmentName", context));
   }
 
   /** 解码可空 Environment 名：text 或 null；其他类型拒绝，非 null 文本走 canonical 校验。 */

@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CanonicalIdentifiers;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
@@ -63,10 +62,9 @@ import java.util.Set;
 
 /**
  * history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} / {@link
- * MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
- * CustomMessagePayload} / {@link AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link
- * CompactionPayload} / {@link TurnEndPayload} / {@link SettingsPayload}。直接对应 {@link EntryType}；其它
- * {@link EntryPayload} 实现显式拒绝。
+ * MessagePayload} / {@link ModelAttemptFailurePayload} / {@link CustomMessagePayload} / {@link
+ * AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link CompactionPayload} / {@link
+ * TurnEndPayload} / {@link SettingsPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -100,8 +98,6 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("inputModalities", "userModalities", "toolResultModalities");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
-  private static final Set<String> CUSTOM_FIELDS =
-      orderedSet("contributorId", "customType", "data");
   private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
       orderedSet("attempt", "model", "requestedAt", "error", "retryAt");
   private static final Set<String> NATIVE_COMPACTION_FIELDS =
@@ -161,7 +157,6 @@ public final class HistoryEntryPayloadJsonCodec {
       case RootPayload value -> encodeRoot(value);
       case TurnStartPayload value -> encodeTurnStart(value);
       case MessagePayload value -> encodeMessage(value);
-      case CustomEntryPayload value -> encodeCustomEntry(value);
       case ModelAttemptFailurePayload value -> encodeModelAttemptFailure(value);
       case NativeCompactionPayload value -> encodeNativeCompaction(value);
       case CustomMessagePayload value -> encodeCustomMessage(value);
@@ -203,7 +198,6 @@ public final class HistoryEntryPayloadJsonCodec {
       case ROOT -> decodeRoot(value);
       case TURN_START -> decodeTurnStart(value);
       case MESSAGE -> decodeMessage(value);
-      case CUSTOM -> decodeCustomEntry(value);
       case MODEL_ATTEMPT_FAILURE -> decodeModelAttemptFailure(value);
       case NATIVE_COMPACTION -> decodeNativeCompaction(value);
       case CUSTOM_MESSAGE -> decodeCustomMessage(value);
@@ -303,14 +297,6 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.set("toolResultMetadata", encodeToolResultMetadata(value.toolResultMetadata()));
     }
-    return node;
-  }
-
-  private static ObjectNode encodeCustomEntry(CustomEntryPayload value) {
-    ObjectNode node = NODES.objectNode();
-    node.put("contributorId", value.contributorId());
-    node.put("customType", value.customType());
-    node.set("data", JsonObjects.parseObject(value.dataJson(), "data"));
     return node;
   }
 
@@ -582,17 +568,6 @@ public final class HistoryEntryPayloadJsonCodec {
     ToolResultMetadata toolResult =
         toolResultMetadata.isNull() ? null : decodeToolResultMetadata(toolResultMetadata);
     return new MessagePayload(message, metadata, toolResult);
-  }
-
-  private static CustomEntryPayload decodeCustomEntry(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM");
-    JsonCodecSupport.requireFields(node, CUSTOM_FIELDS, "CUSTOM");
-    return new CustomEntryPayload(
-        CanonicalIdentifiers.requireCanonicalIdentifier(
-            HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
-        CanonicalIdentifiers.requireCanonicalIdentifier(
-            HistoryValueCodecs.text(node, "customType"), "customType"),
-        JsonObjects.write(HistoryValueCodecs.requireObject(node.get("data"), "CUSTOM.data")));
   }
 
   private static CustomMessagePayload decodeCustomMessage(JsonNode value) {

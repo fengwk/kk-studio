@@ -23,9 +23,8 @@ import java.util.function.Function;
 /**
  * 冻结的不可变 Contributor 目录：从一个 Contributor 集合构建，先冻结并验证全部 descriptor，再按确定性拓扑顺序收集贡献。
  *
- * <p>唯一性维度：contributor id（全局）；贡献 localName（仅 contributor 内，跨全部贡献类型）；模型可见 Tool name （全局唯一）；custom
- * entry type ownership（结构化键 {@code (contributorId, customType)}，不同 contributor 可各自拥有同名
- * customType）。允许空 contributor 列表。
+ * <p>唯一性维度：contributor id（全局）；贡献 localName（仅 contributor 内，跨全部贡献类型）；模型可见 Tool name （全局唯一）。 允许空
+ * contributor 列表。
  */
 public final class HarnessCatalog {
 
@@ -34,12 +33,8 @@ public final class HarnessCatalog {
   private final List<ToolContribution> selectableTools;
   private final Map<String, ToolContribution> toolsByName;
   private final Map<ContributionId, ToolContribution> toolsById;
-  private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
 
-  private HarnessCatalog(
-      List<ContributorDescriptor> descriptors,
-      List<ToolContribution> tools,
-      List<CustomEntryTypeContribution> customEntryTypes) {
+  private HarnessCatalog(List<ContributorDescriptor> descriptors, List<ToolContribution> tools) {
     this.descriptors = List.copyOf(descriptors);
     this.tools = List.copyOf(tools);
     List<ToolContribution> selectables = new ArrayList<>();
@@ -58,13 +53,6 @@ public final class HarnessCatalog {
     this.selectableTools = List.copyOf(selectables);
     this.toolsByName = Map.copyOf(byName);
     this.toolsById = Map.copyOf(byId);
-    Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypeIndex = new LinkedHashMap<>();
-    for (CustomEntryTypeContribution contribution : customEntryTypes) {
-      customEntryTypeIndex.put(
-          new CustomTypeKey(contribution.id().contributorId(), contribution.customType()),
-          contribution);
-    }
-    this.customEntryTypesByKey = Map.copyOf(customEntryTypeIndex);
   }
 
   /** 从 contributor 集合构建冻结 catalog；输入顺序不会影响最终顺序。 */
@@ -105,22 +93,11 @@ public final class HarnessCatalog {
     return Optional.ofNullable(toolsById.get(Objects.requireNonNull(id, "id")));
   }
 
-  /** 按结构化 ownership 键 {@code (contributorId, customType)} 查找贡献；未注册返回 empty。 */
-  public Optional<CustomEntryTypeContribution> findCustomEntryType(
-      ContributorId contributorId, String customType) {
-    Objects.requireNonNull(contributorId, "contributorId");
-    Identifiers.requireCanonical(customType, "customType");
-    return Optional.ofNullable(
-        customEntryTypesByKey.get(new CustomTypeKey(contributorId, customType)));
-  }
-
   /** 构建期收集器：先验证静态 descriptor，再实现 {@link HarnessRegistrar} 收集贡献。 */
   private static final class Collector implements HarnessRegistrar {
 
     private final List<ContributorRegistration> registrations = new ArrayList<>();
     private final List<ToolContribution> tools = new ArrayList<>();
-    private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypes =
-        new LinkedHashMap<>();
     private final Set<ContributorId> contributorIds = new HashSet<>();
     private final Set<ContributionId> contributionIds = new HashSet<>();
     private final Map<String, ContributionId> toolOwners = new HashMap<>();
@@ -151,33 +128,16 @@ public final class HarnessCatalog {
       }
     }
 
-    /**
-     * 冻结不可变 Catalog：校验 Tool 的自定义状态访问必须命中所属 Contributor 已注册的 Custom Entry Type， 计算 requires
-     * 传递依赖偏序闭包，并将各扩展点按 requires 偏序、priority 降序与 ContributionId 字典序排序冻结。
-     */
+    /** 冻结不可变 Catalog：计算 requires 传递依赖偏序闭包，并将工具按 requires 偏序、priority 降序与 ContributionId 字典序排序冻结。 */
     HarnessCatalog freeze(List<ContributorRegistration> orderedContributors) {
       List<ContributorDescriptor> descriptors =
           orderedContributors.stream().map(ContributorRegistration::descriptor).toList();
-      for (ToolContribution tool : tools) {
-        for (StateDeclaration access : tool.requirements().stateAccesses()) {
-          CustomTypeKey key = new CustomTypeKey(tool.id().contributorId(), access.customType());
-          if (!customEntryTypes.containsKey(key)) {
-            throw new IllegalArgumentException(
-                "tool " + tool.id() + " accesses unregistered custom entry type " + key);
-          }
-        }
-      }
       Map<ContributorId, Set<ContributorId>> transitiveRequirements =
           buildTransitiveRequirements(descriptors);
       return new HarnessCatalog(
           descriptors,
           sortContributions(
-              tools, ToolContribution::id, ToolContribution::priority, transitiveRequirements),
-          sortContributions(
-              new ArrayList<>(customEntryTypes.values()),
-              CustomEntryTypeContribution::id,
-              CustomEntryTypeContribution::priority,
-              transitiveRequirements));
+              tools, ToolContribution::id, ToolContribution::priority, transitiveRequirements));
     }
 
     @Override
@@ -196,19 +156,6 @@ public final class HarnessCatalog {
       }
       AgentToolDefinition definition = new AgentToolDefinition(descriptor, visibility);
       tools.add(new ToolContribution(id, definition, tool, requirements, priority));
-    }
-
-    @Override
-    public void registerCustomEntryType(String localName, String customType, int priority) {
-      ContributionId id = requireNewContributionId(localName);
-      Identifiers.requireCanonical(customType, "customType");
-      CustomTypeKey key = new CustomTypeKey(id.contributorId(), customType);
-      CustomEntryTypeContribution contribution =
-          new CustomEntryTypeContribution(id, customType, priority);
-      if (customEntryTypes.putIfAbsent(key, contribution) != null) {
-        throw new IllegalArgumentException(
-            "duplicate custom entry type " + key + " in contributor " + id.contributorId());
-      }
     }
 
     private void validateRequirements() {
@@ -372,20 +319,6 @@ public final class HarnessCatalog {
       if (closure.add(required)) {
         collectRequirements(required, directRequirements, closure);
       }
-    }
-  }
-
-  /** Custom entry type ownership 的结构化主键 {@code (contributorId, customType)}。 */
-  private record CustomTypeKey(ContributorId contributorId, String customType) {
-
-    private CustomTypeKey {
-      contributorId = Objects.requireNonNull(contributorId, "contributorId");
-      customType = Objects.requireNonNull(customType, "customType");
-    }
-
-    @Override
-    public String toString() {
-      return contributorId + ":" + customType;
     }
   }
 }

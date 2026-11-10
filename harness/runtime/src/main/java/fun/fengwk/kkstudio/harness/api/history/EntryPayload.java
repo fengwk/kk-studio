@@ -9,7 +9,6 @@ public sealed interface EntryPayload
     permits RootPayload,
         TurnStartPayload,
         MessagePayload,
-        CustomEntryPayload,
         ModelAttemptFailurePayload,
         NativeCompactionPayload,
         CustomMessagePayload,

@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -139,7 +138,7 @@ final class AcceptCommandsValidation {
     }
   }
 
-  /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */
+  /** 任何显式新 USER/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */
   static boolean resumeStoppedTarget(ThreadState thread, boolean genuineUserInput) {
     return genuineUserInput && thread.executionControl().isStopped();
   }
@@ -151,11 +150,10 @@ final class AcceptCommandsValidation {
         && !tx.joins().hasIncompleteOwnerChild(thread.id());
   }
 
-  /** 可信任务输入：USER_MESSAGE、GOAL、CUSTOM_MESSAGE；系统通知只经 NOTIFICATION Command，不是输入来源。 */
+  /** 可信任务输入：USER_MESSAGE、CUSTOM_MESSAGE；系统通知只经 NOTIFICATION Command，不是输入来源。 */
   static boolean isGenuineUserInput(List<NewThreadCommand> commands) {
     for (NewThreadCommand command : commands) {
       if (command.payload() instanceof UserMessageCommandPayload
-          || command.payload() instanceof GoalCommandPayload
           || command.payload() instanceof CustomMessageCommandPayload) {
         return true;
       }
@@ -257,8 +255,7 @@ final class AcceptCommandsValidation {
 
   private static boolean isUserLike(NewThreadCommand command) {
     return command.payload() instanceof UserMessageCommandPayload
-        || command.payload() instanceof CustomMessageCommandPayload
-        || command.payload() instanceof GoalCommandPayload;
+        || command.payload() instanceof CustomMessageCommandPayload;
   }
 
   private static DomainException invalidBatch(String targetLabel, String message) {

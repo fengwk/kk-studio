@@ -1,21 +1,15 @@
 package fun.fengwk.kkstudio.harness.codec;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 /** 一个 durable Tool binding 的严格、确定性 JSON codec。 */
@@ -74,38 +68,15 @@ public final class ToolBindingJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("contributorId", contributor.contributorId());
     node.put("localName", contributor.localName());
-    ArrayNode accesses = node.putArray("stateAccesses");
-    for (ContributorStateAccess access : contributor.stateAccesses()) {
-      ObjectNode value = accesses.addObject();
-      value.put("customType", access.customType());
-      value.put("mode", access.mode().name());
-    }
     return node;
   }
 
   private static ContributorBinding decodeContributor(JsonNode value) {
     String context = CONTEXT + ".contributor";
     ObjectNode node = InvocationJsonSupport.object(value, context);
-    InvocationJsonSupport.requireFields(
-        node, context, "contributorId", "localName", "stateAccesses");
-    ArrayNode accesses =
-        JsonCodecSupport.array(
-            InvocationJsonSupport.required(node, "stateAccesses", context),
-            context + ".stateAccesses");
-    List<ContributorStateAccess> decoded = new ArrayList<>(accesses.size());
-    for (JsonNode accessValue : accesses) {
-      String accessContext = context + ".stateAccesses[]";
-      ObjectNode accessNode = InvocationJsonSupport.object(accessValue, accessContext);
-      InvocationJsonSupport.requireFields(accessNode, accessContext, "customType", "mode");
-      decoded.add(
-          new ContributorStateAccess(
-              InvocationJsonSupport.text(accessNode, "customType", accessContext),
-              InvocationJsonSupport.requiredEnum(
-                  accessNode, "mode", ContributorStateAccessMode.class, accessContext)));
-    }
+    InvocationJsonSupport.requireFields(node, context, "contributorId", "localName");
     return new ContributorBinding(
         InvocationJsonSupport.text(node, "contributorId", context),
-        InvocationJsonSupport.text(node, "localName", context),
-        decoded);
+        InvocationJsonSupport.text(node, "localName", context));
   }
 }

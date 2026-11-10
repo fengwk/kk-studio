@@ -8,11 +8,9 @@
  * fun.fengwk.kkstudio.harness.api.tool.ContributorBinding} 冻结定义与贡献 provenance，{@link
  * fun.fengwk.kkstudio.harness.api.tool.ToolApproval} 与 {@link
  * fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt} 记录人工介入事实，{@link
- * fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch} 与 {@link
  * fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError} 是终态输出。
  *
- * <p>本包只承载不变量与纯状态转换，不含执行、调度、编排与编码：wire 编解码在 {@code fun.fengwk.kkstudio.harness.codec}，Contributor
- * 作用域视图在 {@code fun.fengwk.kkstudio.harness.api.history}，随调用传递、绝不持久化的 transient 执行请求属于端口契约，放在
- * {@code fun.fengwk.kkstudio.harness.spi}。
+ * <p>本包只承载不变量与纯状态转换，不含执行、调度、编排与编码：wire 编解码在 {@code fun.fengwk.kkstudio.harness.codec}，随调用传递、绝不持久化的
+ * transient 执行请求属于端口契约，放在 {@code fun.fengwk.kkstudio.harness.spi}。
  */
 package fun.fengwk.kkstudio.harness.api.tool;

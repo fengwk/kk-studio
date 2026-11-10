@@ -18,7 +18,6 @@ import java.util.List;
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = HarnessCommandCreateDTO.UserMessageDTO.class, name = "USER_MESSAGE"),
-  @JsonSubTypes.Type(value = HarnessCommandCreateDTO.GoalDTO.class, name = "GOAL"),
   @JsonSubTypes.Type(value = HarnessCommandCreateDTO.SetAgentDTO.class, name = "SET_AGENT"),
   @JsonSubTypes.Type(value = HarnessCommandCreateDTO.SetExecutionDTO.class, name = "SET_EXECUTION"),
   @JsonSubTypes.Type(
@@ -33,12 +32,6 @@ public sealed interface HarnessCommandCreateDTO {
   /** 非空有序结构化用户消息。 */
   @JsonTypeName("USER_MESSAGE")
   record UserMessageDTO(String idempotencyKey, List<HarnessUserMessageContentDTO> contents)
-      implements HarnessCommandCreateDTO {}
-
-  /** 目标 Goal；{@code text = null} 表示清除该 branch 的 Goal。 */
-  @JsonTypeName("GOAL")
-  record GoalDTO(
-      String idempotencyKey, @JsonInclude(JsonInclude.Include.ALWAYS) @Nullable String text)
       implements HarnessCommandCreateDTO {}
 
   /** 切换目标 Agent。 */

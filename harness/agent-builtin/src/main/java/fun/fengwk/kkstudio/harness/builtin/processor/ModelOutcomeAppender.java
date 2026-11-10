@@ -6,13 +6,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -22,9 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -185,20 +177,8 @@ public final class ModelOutcomeAppender {
       ModelResponsePlan.ToolBatch batch,
       Instant mutationNow) {
     List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
-    Map<String, ContributorStateAccessMode> seenStateAccesses = new HashMap<>();
     for (int callIndex = 0; callIndex < batch.tools().size(); callIndex++) {
       ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
-      ToolInvocationStatus status = slot.status();
-      ToolInvocationError error = slot.error();
-      if (status == ToolInvocationStatus.READY) {
-        // READY 槽位的 binding 由 planner 保证非空；contributor sibling 状态冲突仍在 Thread 边界确定性拒绝。
-        ToolInvocationError conflict =
-            siblingStateConflict(slot.binding().contributor(), seenStateAccesses);
-        if (conflict != null) {
-          status = ToolInvocationStatus.FAILED;
-          error = conflict;
-        }
-      }
       UUID toolId = tx.nextId();
       materialized.add(
           new ToolInvocation(
@@ -209,12 +189,11 @@ public final class ModelOutcomeAppender {
               callIndex,
               slot.call(),
               slot.binding(),
-              status,
+              slot.status(),
               0,
               null,
               null,
-              ToolEffectBatch.EMPTY,
-              error,
+              slot.error(),
               mutationNow,
               mutationNow));
     }
@@ -255,32 +234,5 @@ public final class ModelOutcomeAppender {
         model.streamCheckpoint().sequence(),
         model.streamCheckpoint().text(),
         model.streamCheckpoint().thinking());
-  }
-
-  /** READ 后 WRITE 与不同 key 保持并发；同 key 的 WRITE 之后出现任何 access 都在 dispatch 前确定性拒绝。 */
-  private static ToolInvocationError siblingStateConflict(
-      ContributorBinding contributor, Map<String, ContributorStateAccessMode> seen) {
-    if (contributor == null || contributor.stateAccesses().isEmpty()) {
-      return null;
-    }
-    for (ContributorStateAccess access : contributor.stateAccesses()) {
-      String key = contributor.contributorId() + ":" + access.customType();
-      if (seen.get(key) == ContributorStateAccessMode.WRITE) {
-        return new ToolInvocationError(
-            "SIBLING_STATE_CONFLICT",
-            "A previous sibling tool writes contributor state "
-                + key
-                + "; call this tool in the next model turn.");
-      }
-    }
-    for (ContributorStateAccess access : contributor.stateAccesses()) {
-      String key = contributor.contributorId() + ":" + access.customType();
-      if (access.mode() == ContributorStateAccessMode.WRITE) {
-        seen.put(key, ContributorStateAccessMode.WRITE);
-      } else {
-        seen.putIfAbsent(key, ContributorStateAccessMode.READ);
-      }
-    }
-    return null;
   }
 }

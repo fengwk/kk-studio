@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.ScopedBranchView;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
@@ -292,17 +291,7 @@ public final class ToolProcessor implements AutoCloseable {
         rootThreadId,
         rootSessionId,
         tool.assistantEntryId(),
-        branchView(tx, tool.assistantEntryId(), tool.binding().contributor().contributorId()),
         frozenMediaCapabilities(tx, thread, tool));
-  }
-
-  /** 只读该 Contributor 在当前 assistant 分支上的 custom entries 与生效 Goal：窄查询，绝不物化完整 EntryPath。 */
-  private static ScopedBranchView branchView(
-      HarnessStore.Transaction tx, UUID assistantEntryId, String contributorId) {
-    return new ScopedBranchView(
-        tx.entries().loadContributorCustom(assistantEntryId, contributorId),
-        contributorId,
-        tx.entries().loadBranchSettings(assistantEntryId).goal());
   }
 
   /** 消费者媒体能力的唯一来源是该调用 TURN_START 冻结的能力快照；绝不读取 live 模型或 Driver 私有状态。 */
