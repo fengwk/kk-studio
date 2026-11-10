@@ -30,7 +30,8 @@ for (const { timezoneId, instant, crossDay } of zones) {
           const meta = page.getByTestId(`chat-${id}`).locator('.resource-card-meta-value').last()
           await expect(meta).toHaveText(expected)
           await expect(meta).toHaveAttribute('title', expected)
-          for (const [panel, suffix] of [['sessions', '1 Threads'], ['threads', 'IDLE']]) {
+          // Harness 固定 zh-CN；时间与本地化状态分别按当前正式展示契约校验。
+          for (const [panel, suffix] of [['sessions', '1 Threads'], ['threads', '空闲']]) {
             const option = page.getByTestId(panel).getByRole('option')
               .filter({ has: page.locator('.thread-selection-item-title', { hasText: id }) })
             await expect(option.locator('.thread-selection-item-subtitle'))
