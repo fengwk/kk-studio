@@ -61,8 +61,11 @@ const RECONNECT_BACKOFF_MS = [250, 500, 1000, 2000, 5000, 10000]
 const RECONNECT_JITTER_RATIO = 0.2
 /** 服务端主动重启：立即重试。 */
 const CLOSE_CODE_RESTART = 1012
-/** 协议错误/策略违规：terminal，不无限重试。 */
-const CLOSE_CODES_TERMINAL = new Set([1002, 1008])
+/** 协议错误/策略违规：terminal，不无限重试；close code 决定停止原因。 */
+const CLOSE_CODE_STOP_CAUSE: ReadonlyMap<number, 'protocol' | 'policy'> = new Map([
+  [1002, 'protocol'],
+  [1008, 'policy'],
+])
 /** 建连到 connected 帧的总握手预算；服务端不响应时据此 fence 并重连。 */
 const HANDSHAKE_BUDGET_MS = 15_000
 /** 失联预算：connected 帧声明的 heartbeat 间隔的整数倍。 */
@@ -191,9 +194,10 @@ export class ApplicationEventConnection {
       this.socket = null
       this.socketOpen = false
       this.notifyClosed()
-      if (CLOSE_CODES_TERMINAL.has(event.code)) {
+      const stopCause = CLOSE_CODE_STOP_CAUSE.get(event.code)
+      if (stopCause != null) {
         // 协议错误/策略违规：terminal，不无限重试。
-        this.stopTerminal('policy')
+        this.stopTerminal(stopCause)
         return
       }
       if (event.code === CLOSE_CODE_RESTART) {

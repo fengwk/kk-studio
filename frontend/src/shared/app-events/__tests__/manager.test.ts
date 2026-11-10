@@ -150,6 +150,44 @@ describe('ApplicationEventManager', () => {
     ])
   })
 
+  it('after a liveness fence the manager resubscribes and the listener refetches the snapshot', () => {
+    vi.useFakeTimers()
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    connectLatest(socket, EVENT_NODE_A, CONNECTION_A)
+
+    // 订阅建立（subscribed ack）即回读权威快照：sync 是 useResourceSync 对账的入口。
+    const sync = vi.fn()
+    const onSubscribed = vi.fn<(cursor: string) => void>()
+    socket.onSendResponse = { type: 'subscribed', resource: THREAD_A, cursor: '7' }
+    manager.subscribe(THREAD_A, {
+      onSubscribed: (cursor) => {
+        onSubscribed(cursor)
+        sync()
+      },
+    })
+    expect(onSubscribed).toHaveBeenCalledWith('7')
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    // 失联 fence：最后一条合法帧之后连续 3 个 heartbeat 周期（3 × 20s）无帧，旧连接被 fence；
+    // 首次退避 250ms（jitter 已固定为 0）后建立新连接。
+    vi.advanceTimersByTime(60_000)
+    expect(manager.getConnectionState().reason).toMatchObject({ cause: 'liveness-timeout' })
+    expect(harness.sockets).toHaveLength(1)
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(2)
+
+    // 新连接：Manager 立即重发订阅；重订阅 ack 携带新游标并再次回读快照，恢复数据而不是重放副作用。
+    const reconnected = harness.openLatest()
+    connectLatest(reconnected, EVENT_NODE_B, CONNECTION_B)
+    expect(reconnected.sentMessages()).toEqual([
+      { type: 'subscribe', resource: THREAD_A },
+    ])
+    reconnected.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '9' })
+    expect(onSubscribed).toHaveBeenNthCalledWith(2, '9')
+    expect(sync).toHaveBeenCalledTimes(2)
+  })
+
   it('publishes a fresh connection identity after every reconnect and clears it on close', () => {
     vi.useFakeTimers()
     const { manager, harness } = setup()

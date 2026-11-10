@@ -210,15 +210,18 @@ describe('ApplicationEventConnection', () => {
 
   it('treats close codes 1002/1008 as terminal: no reconnect, lifecycle listeners unbound', () => {
     vi.useFakeTimers()
-    for (const code of [1002, 1008]) {
+    for (const [code, cause] of [
+      [1002, 'protocol'],
+      [1008, 'policy'],
+    ] as const) {
       const { connection, harness } = openConnection()
       connection.connect()
       readyLatest(harness)
 
       harness.latest?.closeWith(code)
       expect(connection.getStatus()).toBe('stopped')
-      // policy 终止必须显式说明不能自动恢复，UI 不显示持续重连。
-      expect(connection.getState().reason).toEqual({ kind: 'stopped', cause: 'policy' })
+      // 终止原因随 close code 区分（1002 协议错误、1008 策略违规），UI 不显示持续重连。
+      expect(connection.getState().reason).toEqual({ kind: 'stopped', cause })
 
       // 不无限重试。
       vi.advanceTimersByTime(60_000)
