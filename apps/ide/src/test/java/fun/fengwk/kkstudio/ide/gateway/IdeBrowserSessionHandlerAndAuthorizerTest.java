@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -22,8 +23,10 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** 意图：bootstrap 与数据面只接受权威快照中仍匹配的 cookie；handler 只看 cookie 与快照，不维护第二份授权真相。 */
@@ -81,6 +84,26 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
   }
 
   @Test
+  void accessRequiresPositiveEpochAndDefensivelyCopiesWorkspaces() {
+    Set<String> workspaces = new HashSet<>();
+    workspaces.add("/workspace");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new IdeDataViewAuthorizer.IdeDataViewAccess(IDENTITY, VIEW, 0L, workspaces),
+        "数据面授权不得接受非正 bindingEpoch");
+
+    IdeDataViewAuthorizer.IdeDataViewAccess access =
+        new IdeDataViewAuthorizer.IdeDataViewAccess(IDENTITY, VIEW, 1L, workspaces);
+    workspaces.add("/other");
+
+    assertEquals(Set.of("/workspace"), access.authorizedWorkspaces());
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> access.authorizedWorkspaces().add("/other"),
+        "授权 workspace 集合不得被调用方原地修改");
+  }
+
+  @Test
   void bootstrapSuccessAndFailure() throws IOException {
     Fixture fixture = fixture();
     HttpServletRequest request = mock(HttpServletRequest.class);
@@ -122,6 +145,36 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     handler.handleBootstrap(ENV, VIEW, request, response);
 
     verify(response).sendError(HttpServletResponse.SC_GONE);
+  }
+
+  @Test
+  void bootstrapRejectsTicketOutsideUrlScopeOrReplacedInstance() throws IOException {
+    Fixture otherEnvironment = fixture();
+    HttpServletRequest otherEnvironmentRequest = mock(HttpServletRequest.class);
+    when(otherEnvironmentRequest.getParameter("token")).thenReturn("valid-ticket");
+    HttpServletResponse otherEnvironmentResponse = mock(HttpServletResponse.class);
+    otherEnvironment.handler.handleBootstrap(
+        EnvironmentId.parse("99999999-9999-4999-8999-999999999999"),
+        VIEW,
+        otherEnvironmentRequest,
+        otherEnvironmentResponse);
+    verify(otherEnvironmentResponse).sendError(HttpServletResponse.SC_GONE);
+
+    Fixture otherView = fixture();
+    HttpServletRequest otherViewRequest = mock(HttpServletRequest.class);
+    when(otherViewRequest.getParameter("token")).thenReturn("valid-ticket");
+    HttpServletResponse otherViewResponse = mock(HttpServletResponse.class);
+    otherView.handler.handleBootstrap(ENV, UUID.randomUUID(), otherViewRequest, otherViewResponse);
+    verify(otherViewResponse).sendError(HttpServletResponse.SC_GONE);
+
+    Fixture replaced = fixture();
+    when(replaced.transport.connectionIdentity(ENV))
+        .thenReturn(Optional.of(new DaemonConnectionIdentity(ENV, "daemon-2")));
+    HttpServletRequest replacedRequest = mock(HttpServletRequest.class);
+    when(replacedRequest.getParameter("token")).thenReturn("valid-ticket");
+    HttpServletResponse replacedResponse = mock(HttpServletResponse.class);
+    replaced.handler.handleBootstrap(ENV, VIEW, replacedRequest, replacedResponse);
+    verify(replacedResponse).sendError(HttpServletResponse.SC_GONE);
   }
 
   @Test
@@ -188,6 +241,68 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     HttpServletResponse disconnected = mock(HttpServletResponse.class);
     fixture.handler.handleSession(ENV, VIEW, request, disconnected);
     verify(disconnected).setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  void sessionProbeRejectsUnknownCookieAndStaleOrReplacedBinding() {
+    Fixture fixture = fixture();
+
+    HttpServletRequest unknownCookie = mock(HttpServletRequest.class);
+    when(unknownCookie.getCookies())
+        .thenReturn(
+            new Cookie[] {
+              new Cookie("other", "1"),
+              new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, "unknown")
+            });
+    HttpServletResponse unknownCookieResponse = mock(HttpServletResponse.class);
+    fixture.handler.handleSession(ENV, VIEW, unknownCookie, unknownCookieResponse);
+    verify(unknownCookieResponse).setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+
+    fixture.snapshots.accept(
+        IDENTITY,
+        2L,
+        List.of(
+            new IdeViewSnapshotStore.View(
+                VIEW,
+                BROWSER_SESSION,
+                EVENT_NODE,
+                CONNECTION,
+                CLAIM,
+                1L,
+                "/dir",
+                "/workspace",
+                IdeViewState.CLOSING)));
+    HttpServletRequest staleSnapshot = mock(HttpServletRequest.class);
+    when(staleSnapshot.getCookies())
+        .thenReturn(
+            new Cookie[] {new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, fixture.token)});
+    HttpServletResponse staleSnapshotResponse = mock(HttpServletResponse.class);
+    fixture.handler.handleSession(ENV, VIEW, staleSnapshot, staleSnapshotResponse);
+    verify(staleSnapshotResponse).setStatus(HttpServletResponse.SC_CONFLICT);
+
+    fixture.snapshots.accept(
+        IDENTITY,
+        3L,
+        List.of(
+            new IdeViewSnapshotStore.View(
+                VIEW,
+                BROWSER_SESSION,
+                EVENT_NODE,
+                CONNECTION,
+                CLAIM,
+                1L,
+                "/dir",
+                "/workspace",
+                IdeViewState.OPEN)));
+    when(fixture.transport.connectionIdentity(ENV))
+        .thenReturn(Optional.of(new DaemonConnectionIdentity(ENV, "daemon-2")));
+    HttpServletRequest replaced = mock(HttpServletRequest.class);
+    when(replaced.getCookies())
+        .thenReturn(
+            new Cookie[] {new Cookie(IdeGatewayConstants.SESSION_COOKIE_NAME, fixture.token)});
+    HttpServletResponse replacedResponse = mock(HttpServletResponse.class);
+    fixture.handler.handleSession(ENV, VIEW, replaced, replacedResponse);
+    verify(replacedResponse).setStatus(HttpServletResponse.SC_CONFLICT);
   }
 
   private static Fixture fixture() {

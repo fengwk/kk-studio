@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,16 @@ class IdeBrowserSessionRegistryTest {
 
   private IdeBrowserSessionRegistry registry(Clock clock, Duration sessionTtl) {
     return new IdeBrowserSessionRegistry(new SecureRandom(), clock, sessionTtl);
+  }
+
+  @Test
+  void sessionRequiresPositiveBindingEpoch() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new IdeBrowserSessionRegistry.Session(
+                IDENTITY, UUID.randomUUID().toString(), 0L, "/workspace"),
+        "cookie 会话不得接受非正 bindingEpoch");
   }
 
   @Test
