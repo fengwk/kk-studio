@@ -154,9 +154,9 @@ export class ResourceUploadError extends Error {
     stage: ResourceUploadStage,
     category: ResourceUploadErrorCategory,
     cleanupConfirmed: boolean,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; message?: string },
   ) {
-    super(`resource upload failed during ${stage} (${category})`, options)
+    super(options?.message ?? `resource upload failed during ${stage} (${category})`, options)
     this.name = 'ResourceUploadError'
     this.stage = stage
     this.category = category

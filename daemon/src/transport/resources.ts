@@ -226,7 +226,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
             uploaded ? 'commit' : 'request',
             'ticket-failed',
             true,
-            { cause: new Error(safeTicketMessage(ticket)) },
+            { message: safeTicketMessage(ticket) },
           )
         }
         // PENDING

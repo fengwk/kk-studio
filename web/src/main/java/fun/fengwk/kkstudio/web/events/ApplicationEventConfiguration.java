@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.events;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
@@ -78,7 +80,8 @@ public class ApplicationEventConfiguration {
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       EnvironmentChangeNotifications environmentChangeNotifications,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     HarnessNotificationBinding threadVersions = harnessNotifications.threadVersionsNotification();
     HarnessNotificationBinding executionTree = harnessNotifications.executionTreeNotification();
@@ -122,8 +125,14 @@ public class ApplicationEventConfiguration {
             // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
-                systemSettingsChangeHandler::onNotification,
-                systemSettingsChangeHandler::onResync),
+                payload -> {
+                  systemSettingsChangeHandler.onNotification(payload);
+                  daemonServerProvider.ifAvailable(EnvironmentDaemonServer::resyncSettings);
+                },
+                () -> {
+                  systemSettingsChangeHandler.onResync();
+                  daemonServerProvider.ifAvailable(EnvironmentDaemonServer::resyncSettings);
+                }),
             // 6. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 executionTree.channel(), executionTree.onNotification(), executionTree.onResync()),

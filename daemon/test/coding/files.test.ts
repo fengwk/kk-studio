@@ -139,7 +139,7 @@ describe('fs.read', () => {
     expect(text).toContain('2|文')
   })
 
-  it('目录清单按分页与 '/' 标记目录', async () => {
+  it("目录清单按分页与 '/' 标记目录", async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'b.txt'), 'x')
     await mkdir(join(dir, 'sub'))
