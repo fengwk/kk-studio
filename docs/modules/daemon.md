@@ -85,7 +85,7 @@ Agent 的系统提示按其配置顺序列出技能名称与描述。技能内�
 - Linux/macOS：POSIX 监管器（[`posix-supervisor.ts`](../../daemon/src/native/posix-supervisor.ts)）使用 `setsid` 建立独立 session 与进程组。退出或终止时先发送 SIGTERM 并在宽限期后发送 SIGKILL，向系统确认所有后代进程收敛；
 - Windows：监管器（[`process-supervisor-windows.ts`](../../daemon/src/native/process-supervisor-windows.ts)）使用 Windows Job Object，配置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，通过 Job 活动进程计数为 0 确认范围完全结束。
 
-`process.exec` 将 stdin 写端立即关闭，stdout 与 stderr 合并捕获。Bash 命令统一通过 `bash -lc <command>` 启动；Windows 推荐配置 Git Bash 绝对路径以避免裸名命中 WSL 转发器。
+`process.exec` 将 stdin 写端立即关闭，stdout 与 stderr 合并捕获。Bash 命令通过 `bash -lc` 启动，并在命令前以位置参数恢复显式 workdir，避免登录 profile 改变工作目录；workdir 不拼接进命令文本。Windows 推荐配置 Git Bash 绝对路径以避免裸名命中 WSL 转发器。
 
 ### 文件与检索
 
@@ -95,7 +95,7 @@ Agent 的系统提示按其配置顺序列出技能名称与描述。技能内�
 - `fs.edit.preview` 使用 `diff@9.0.0` 的 `diffArrays` 计算所有变更行、4 行上下文与 EOF 缺换行标记，不设独立的计算超时或 `maxEditLength`；在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与带行号的 diff，返回 `{path, diff, sha256}`；完整 review 连同结果序列化后超过 1 MiB 时，在预览或提交前拒绝，不截断变更。
 - `fs.edit` 在文件锁内执行时，若 INVOKE 携带内部元数据 `expectedFile`（`{path, sha256}`），核对其与当前磁盘文件的绝对路径和 SHA-256；若文件在审查后已被变动，直接拒绝写入，防止授权陈旧变更；执行成功后在结果 `details.editReview` 携带 `{path, diff, sha256}`，作为唯一权威 canonical 持久化 diff，供自动放行/YOLO 模式展示真实变更。
 
-检索（[`search.ts`](../../daemon/src/coding/search.ts)）调用 `@vscode/ripgrep` 随包提供的 rg：`fs.find` 解析 NUL 分隔的 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。默认超时 15 秒（可由 `timeout_seconds` 覆盖）；超时、取消或达到结果上限时终止 rg，等待进程和 stdio 关闭后返回。超时与取消保留已收到的 partial 匹配并标记 `search.incomplete`；达到结果上限时给出明确提示。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告，其他进程错误作为运行失败，均不伪报“无匹配”。
+检索（[`search.ts`](../../daemon/src/coding/search.ts)）调用 `@vscode/ripgrep` 随包提供的 rg：`fs.find` 解析 NUL 分隔的 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。默认超时 15 秒（可由 `timeout_seconds` 覆盖）；超时、取消或达到结果上限时终止 rg，等待进程和 stdio 关闭后返回。超时与取消保留已收到的 partial 匹配并标记 `search.incomplete`；grep 的 limit 按匹配数计算，多行匹配输出其完整展开行，截断提示说明匹配数。结果经统一输出保护转存。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告，其他进程错误作为运行失败，均不伪报“无匹配”。
 
 检索包含隐藏文件，不跟随目录中的符号链接，排除 `.git`；支持分层 `.gitignore` 和 `.git/info/exclude`（含 linked worktree 的共享 exclude），不读取 `.ignore`、全局 Git ignore 或宿主的 ripgrep 配置。glob 相对检索根解释，不能重新包含被忽略的文件；显式指定被忽略的目录时仍检索该目录。目录检索静默跳过前 8 KiB 探针判定的二进制文件，直接指定二进制文件则报错；UTF-16 BOM 文本仍可检索。正则使用 ripgrep 的 Rust regex 引擎，`\w` 等简写字符类默认按 ASCII 匹配，不启用 PCRE2。
 

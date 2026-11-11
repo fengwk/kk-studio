@@ -221,6 +221,7 @@ export function createSearchCapabilities(
           limit,
           'No matches found',
           output,
+          true,
         )
       }
 
@@ -247,6 +248,7 @@ export function createSearchCapabilities(
             limit,
             'No matches found',
             output,
+            true,
           )
         }
         const outcome = await grepFiles(
@@ -258,7 +260,7 @@ export function createSearchCapabilities(
           context.signal,
           null,
         )
-        return emitSearchResult(call, context, outcome, limit, 'No matches found', output)
+        return emitSearchResult(call, context, outcome, limit, 'No matches found', output, true)
       }
       if (kind !== 'directory') {
         throw new ToolInputRejectedError('path must be a regular file or directory')
@@ -280,6 +282,7 @@ export function createSearchCapabilities(
           limit,
           'No matches found',
           output,
+          true,
         )
       }
 
@@ -315,6 +318,7 @@ export function createSearchCapabilities(
             limit,
             'No matches found',
             output,
+            true,
           )
         }
         if (matched.size === 0) {
@@ -325,6 +329,7 @@ export function createSearchCapabilities(
             limit,
             'No matches found',
             output,
+            true,
           )
         }
         includeSet = matched
@@ -348,6 +353,7 @@ export function createSearchCapabilities(
         limit,
         'No matches found',
         output,
+        true,
       )
     } catch (error) {
       return searchFailure(call.invocationId, error, context.signal)
@@ -931,6 +937,7 @@ async function emitSearchResult(
   limit: number,
   emptyText: string,
   output: OutputState,
+  countExpandedLines = false,
 ): Promise<CapabilityResult> {
   const { lines, limitReached, skipped, stopReason } = outcome
   if (stopReason === null && lines.length === 0) {
@@ -947,7 +954,7 @@ async function emitSearchResult(
   const spool = new OutputSpool(store, call.invocationId)
   output.spoolClosed = false
   try {
-    const displayCount = Math.min(limit, lines.length)
+    const displayCount = countExpandedLines ? lines.length : Math.min(limit, lines.length)
     for (let index = 0; index < displayCount; index++) {
       if (index > 0) {
         await spool.write(utf8('\n'))
@@ -957,7 +964,9 @@ async function emitSearchResult(
     if (limitReached) {
       const prefix = displayCount > 0 ? '\n\n' : ''
       await spool.write(
-        utf8(`${prefix}[${limit} results limit reached. Refine the pattern or raise limit.]`),
+        utf8(
+          `${prefix}[${limit} ${countExpandedLines ? 'matches' : 'results'} limit reached. Refine the pattern or raise limit.]`,
+        ),
       )
     }
     if (skipped.length > 0) {

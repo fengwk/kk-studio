@@ -114,7 +114,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
       startAttempted = true
       managed = await context.processes.start({
         executable: bashExecutable,
-        args: ['-lc', command],
+        args: ['-lc', `cd -- "$1" || exit 1; shift; ${command}`, 'bash', workdir],
         cwd: workdir,
         signal: context.signal,
       })

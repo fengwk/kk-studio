@@ -12,12 +12,16 @@ import {
   readTextWindow,
 } from '../../src/coding/text.js'
 
-async function readWindow(content: string | Uint8Array, columnOffset: number | null = null): Promise<string> {
+async function readWindow(
+  content: string | Uint8Array,
+  columnOffset: number | null = null,
+  limit = 2000,
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'kk-text-window-'))
   try {
     const file = join(dir, 'text')
     await writeFile(file, content)
-    return await readTextWindow(file, { charset: 'UTF-8', bomLength: 0, utf16: false }, 1, 2000, columnOffset, '/p', null, () => {})
+    return await readTextWindow(file, { charset: 'UTF-8', bomLength: 0, utf16: false }, 1, limit, columnOffset, '/p', null, () => {})
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -29,6 +33,12 @@ describe('readTextWindow', () => {
     expect(text).toBe(
       ['path: /p', 'ends_with_newline: yes', 'range: 1:1-3:1', '', '1|a', '2|b', '3|c'].join('\n'),
     )
+  })
+
+  it('窗口恰好到达 EOF 时仍报告文件末尾换行状态', async () => {
+    const text = await readWindow('a\nb\n', null, 2)
+    expect(text).toContain('ends_with_newline: yes')
+    expect(text).not.toContain('truncated: yes')
   })
 
   it('column_offset 只作用于起始行', async () => {
@@ -58,6 +68,51 @@ describe('readTextWindow', () => {
     const text = await readWindow('a'.repeat(60005))
     expect(text).toContain('truncation_reason: character_limit')
     expect(text).toContain('next: 1:60001')
+  })
+
+  it('填满行窗口后有界读取并忽略窗口外的非法编码', async () => {
+    const bytes = Buffer.concat([
+      Buffer.from(Array.from({ length: 2500 }, (_, index) => `line ${index + 1}\n`).join('')),
+      Buffer.from([0xff]),
+      Buffer.alloc(100_000, 0x61),
+    ])
+    let bytesRead = 0
+    const reader = {
+      async read(buffer: Buffer, offset: number, length: number, position: number) {
+        const count = Math.min(length, Math.max(0, bytes.length - position))
+        bytes.copy(buffer, offset, position, position + count)
+        bytesRead += count
+        return { bytesRead: count }
+      },
+      async close() {},
+    }
+    const text = await readTextWindow(
+      '/virtual',
+      { charset: 'UTF-8', bomLength: 0, utf16: false },
+      1,
+      200,
+      null,
+      '/p',
+      null,
+      () => {},
+      reader,
+    )
+    expect(text).toContain('truncation_reason: line_limit')
+    expect(text).not.toContain('ends_with_newline:')
+    expect(text).toContain('  1|line 1')
+    expect(text).toContain('200|line 200')
+    expect(bytesRead).toBeLessThanOrEqual(8192)
+  })
+
+  it('窗口边界后的首个字节即使是非法编码也不导致读取失败', async () => {
+    const bytes = Buffer.concat([
+      Buffer.from(Array.from({ length: 200 }, (_, index) => `line ${index + 1}\n`).join('')),
+      Buffer.from([0xff]),
+      Buffer.from('tail'),
+    ])
+    const text = await readWindow(bytes, null, 200)
+    expect(text).toContain('truncation_reason: line_limit')
+    expect(text).not.toContain('ends_with_newline:')
   })
 
   it('代理项编码按 malformed 拒绝', async () => {

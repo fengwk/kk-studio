@@ -303,6 +303,23 @@ describe('fs.grep', () => {
     expect(textOf(result)).toBe(`${displayed(file)}:1:a\n${displayed(file)}:2:b`)
   })
 
+  it('limit 按 multiline 匹配数计并保留匹配覆盖的全部行', async () => {
+    const dir = await tempDir()
+    const file = join(dir, 'long.txt')
+    const lines = Array.from({ length: 150 }, () => 'x')
+    await writeFile(file, `${lines.join('\n')}\n`)
+    const result = await callCapability(
+      grep,
+      'fs.grep',
+      { pattern: 'x(?:\\nx){149}', path: file, multiline: true, limit: 100 },
+      makeContext(dir),
+    )
+    const outputLines = textOf(result).split('\n')
+    expect(outputLines).toHaveLength(150)
+    expect(outputLines[0]).toBe(`${displayed(file)}:1:x`)
+    expect(outputLines[149]).toBe(`${displayed(file)}:150:x`)
+  })
+
   it('multiline 下 ^ 仍按行锚定', async () => {
     const dir = await tempDir()
     const file = join(dir, 'm.txt')
@@ -332,17 +349,22 @@ describe('fs.grep', () => {
     expect(textOf(result)).toBe(`${displayed(file)}:2:line`)
   })
 
-  it('limit 达到时明确标注结果不完整', async () => {
+  it('limit 按匹配数截断并说明仍有更多匹配', async () => {
     const dir = await tempDir()
     const file = join(dir, 'l.txt')
     await writeFile(file, 'x\nx\nx\n')
     const result = await callCapability(
       grep,
       'fs.grep',
-      { pattern: 'x', path: file, literal: true, limit: 1 },
+      { pattern: 'x', path: file, literal: true, limit: 2 },
       makeContext(dir),
     )
-    expect(textOf(result)).toContain('1 results limit reached')
+    expect(textOf(result).split('\n').slice(0, 2)).toEqual([
+      `${displayed(file)}:1:x`,
+      `${displayed(file)}:2:x`,
+    ])
+    expect(textOf(result)).toContain('2 matches limit reached')
+    expect(textOf(result)).not.toContain(`${displayed(file)}:3:x`)
   })
 
   it('目录扫描中二进制文件被静默跳过', async () => {
@@ -633,7 +655,7 @@ describe('rg 进程生命周期与失败语义', () => {
     const pid = await waitForFakePid(fake.pidFile)
     const result = await resultPromise
     expect(textOf(result).split('\n').filter((line) => line.startsWith(displayed(file)))).toHaveLength(2)
-    expect(textOf(result)).toContain('2 results limit reached')
+    expect(textOf(result)).toContain('2 matches limit reached')
     expectProcessGone(pid)
   })
 
