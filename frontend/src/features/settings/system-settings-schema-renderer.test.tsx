@@ -91,6 +91,24 @@ describe('system settings schema renderer', () => {
     expect(screen.getByText('权限规则')).toBeInTheDocument()
   })
 
+  it('shows a server field validation error on the matching field', () => {
+    const schema = makeSettingsSchema()
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    const { container } = renderRenderer(
+      <SystemSettingsSchemaRenderer
+        schema={{ sections: [renderSection(schema, 'environment')] }}
+        draft={draft}
+        fieldErrors={{ 'environment.heartbeatTimeoutMillis': 'minimum is 30000 ms' }}
+        onChange={() => {}}
+      />,
+    )
+    const field = container.querySelector<HTMLInputElement>(
+      '[data-settings-field-path="environment.heartbeatTimeoutMillis"] input',
+    )!
+    expect(field).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('minimum is 30000 ms')
+  })
+
   it('renders a single section pane when given only that section', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
@@ -109,7 +127,6 @@ describe('system settings schema renderer', () => {
       'aiRuntime.modelHttpRetryStatusCodes',
       'aiRuntime.compactionModel',
       'aiRuntime.compactionKeepRecentTokens',
-      'aiRuntime.compactionReserveTokens',
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
@@ -128,67 +145,6 @@ describe('system settings schema renderer', () => {
     )
     const sectionElement = container.querySelector<HTMLElement>('[data-settings-section="aiRuntime"]')!
     expect(within(sectionElement).queryByText('共享调用重试、压缩回退与子代理预算。')).toBeNull()
-  })
-
-  it('falls back to a restart badge when a group is restart-required without explicit applyTiming', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'tool')
-    // 抹掉 gateway 的显式 timing 并标 restart，模拟「只在卡片上回退重启徽标」。
-    section.groups[1]!.applyTiming = null
-    section.groups[1]!.restartRequired = true
-    const { container } = renderRenderer(
-      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
-    )
-    const cards = container.querySelectorAll('.settings-card')
-    expect(cards).toHaveLength(2)
-    // permission 不是 restart：无 restart 徽标；gateway 走 fallback 出现 restart 徽标。
-    expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
-    expect(within(cards[1] as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
-    expect(screen.queryByRole('note')).toBeNull()
-  })
-
-  it('lets an explicit group applyTiming win over restartRequired', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'tool')
-    // permission 组虽然 restartRequired=true，但显式 NEXT_INVOCATION 必须优先于 restart 徽标。
-    section.groups[0]!.restartRequired = true
-    const { container } = renderRenderer(
-      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
-    )
-    const cards = container.querySelectorAll('.settings-card')
-    expect(within(cards[0] as HTMLElement).getByText('下次调用生效')).toBeInTheDocument()
-    expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
-  })
-
-  it('renders the next-HTTP-request badge for the backend network proxy group', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'backendNetwork')
-    const { container } = renderRenderer(
-      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
-    )
-    const cards = container.querySelectorAll('.settings-card')
-    expect(cards).toHaveLength(1)
-    expect(within(cards[0] as HTMLElement).getByText('新发起请求生效')).toBeInTheDocument()
-    expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
-  })
-
-  it('puts a restart badge on every restart-required card and never on the section header', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'advanced')
-    const { container } = renderRenderer(
-      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
-    )
-    expect(screen.queryByRole('note')).toBeNull()
-    const cards = container.querySelectorAll('.settings-card')
-    expect(cards.length).toBeGreaterThan(0)
-    for (const card of cards) {
-      expect(within(card as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
-    }
-    expect(screen.getAllByText('重启后生效')).toHaveLength(cards.length)
   })
 
   it('renders hints as already-translated text without double translation', () => {
@@ -215,14 +171,11 @@ describe('system settings schema renderer', () => {
       key: 'advanced',
       labelKey: 'settings.tabs.advanced',
       descriptionKey: 'settings.section.advanced.description',
-      restartRequired: false,
       groups: [
         {
           key: 'advanced.synthetic',
           labelKey: 'settings.section.advanced.resource.title',
           descriptionKey: 'settings.section.advanced.resource.description',
-          restartRequired: false,
-          applyTiming: null,
           fields: [
             {
               path: 'advanced.syntheticFlag',
@@ -275,23 +228,6 @@ describe('system settings schema renderer', () => {
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(
       /settings schema field paths do not match the editable draft/,
     )
-  })
-
-  it('fail-closes on non-boolean restartRequired on section or group', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    ;(schema.sections[0] as { restartRequired: unknown }).restartRequired = 'yes'
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema section/)
-    ;(schema.sections[0] as { restartRequired: unknown }).restartRequired = true
-    ;(schema.sections[0]!.groups[0] as { restartRequired: unknown }).restartRequired = 1
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema group/)
-  })
-
-  it('fail-closes on an unknown applyTiming value', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    ;(schema.sections[0]!.groups[0] as { applyTiming: unknown }).applyTiming = 'LATER'
-    expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema group/)
   })
 
   it('fail-closes on non-finite or inverted min/max bounds', () => {

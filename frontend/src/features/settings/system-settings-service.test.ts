@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { request } from '@/shared/api/client'
 import { createSystemSettingsService } from '@/features/settings/system-settings-service'
-import {
-  DEFAULT_MAX_RESOURCE_BYTES,
-  makeSettingsDto,
-} from '@/test-support/settings-test-fixtures'
+import { makeSettingsDto } from '@/test-support/settings-test-fixtures'
 
 vi.mock('@/shared/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/api/client')>()
@@ -27,7 +24,7 @@ describe('systemSettingsService', () => {
     await expect(service.get()).resolves.toBe(dto)
     expect(apiRequest).toHaveBeenCalledWith('GET /api/platform/settings', {})
     // Long / Integer / version wire 形态在契约层原样保留。
-    expect(dto.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
+    expect(dto.tool.maxOutputMib).toBe(16)
     expect(dto.aiRuntime.retryMaxRetries).toBe(3)
     expect(dto.version).toBe('0')
   })

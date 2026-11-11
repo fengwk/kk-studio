@@ -59,6 +59,13 @@ public class DomainException extends RuntimeException {
         DomainErrorCode.VALIDATION, resource, null, message, cause, null, null, null);
   }
 
+  /** 请求校验失败并携带字段错误。 */
+  public static DomainException validationFields(
+      String resource, String message, Map<String, Object> errors) {
+    return new DomainException(
+        DomainErrorCode.VALIDATION, resource, null, message, null, null, null, errors);
+  }
+
   /** 请求校验失败并携带结构化 reason（如 IDE_CLOSE_CANCELLED）。 */
   public static DomainException validationReason(String reason, String message) {
     validateReason(reason);

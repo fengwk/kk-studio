@@ -22,6 +22,7 @@ export interface PermissionGroupDraft {
 
 export interface SystemSettingsToolDraft {
   permission: PermissionGroupDraft[]
+  maxOutputMib: DraftNumericField
   modelGatewayBusyRetryMillis: DraftNumericField
   toolGatewayOverloadRetryMillis: DraftNumericField
 }
@@ -39,7 +40,6 @@ export interface SystemSettingsAiRuntimeDraft {
   retryMaxDelayMillis: DraftNumericField
   compactionModel: ModelSelectionDraft
   compactionKeepRecentTokens: DraftNumericField
-  compactionReserveTokens: DraftNumericField
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
@@ -49,7 +49,6 @@ export interface SystemSettingsAiRuntimeDraft {
 }
 
 export interface SystemSettingsEnvironmentDraft {
-  maxResourceBytes: DraftNumericField
   heartbeatTimeoutMillis: DraftNumericField
 }
 
@@ -71,7 +70,6 @@ export interface SystemSettingsStorageMediaDraft {
 }
 
 export interface SystemSettingsAdvancedDraft {
-  resourceMaxBytes: DraftNumericField
   processorLeaseDurationMillis: DraftNumericField
   processorHeartbeatIntervalMillis: DraftNumericField
   threadResolveFailureDelayMillis: DraftNumericField
@@ -125,12 +123,12 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
   return {
     tool: {
       permission,
+      maxOutputMib: String(dto.tool.maxOutputMib),
       modelGatewayBusyRetryMillis: dto.tool.modelGatewayBusyRetryMillis,
       toolGatewayOverloadRetryMillis: dto.tool.toolGatewayOverloadRetryMillis,
     },
     aiRuntime: aiRuntimeToDraft(dto.aiRuntime),
     environment: {
-      maxResourceBytes: dto.environment.maxResourceBytes,
       heartbeatTimeoutMillis: dto.environment.heartbeatTimeoutMillis,
     },
     backendNetwork: {
@@ -150,7 +148,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
         dto.storageMedia.temporaryResourceCleanupIntervalSeconds,
     },
     advanced: {
-      resourceMaxBytes: dto.advanced.resourceMaxBytes,
       processorLeaseDurationMillis: dto.advanced.processorLeaseDurationMillis,
       processorHeartbeatIntervalMillis: dto.advanced.processorHeartbeatIntervalMillis,
       threadResolveFailureDelayMillis: dto.advanced.threadResolveFailureDelayMillis,
@@ -181,7 +178,6 @@ function aiRuntimeToDraft(
       variant: dto.compactionModel?.variant ?? '',
     },
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
-    compactionReserveTokens: String(dto.compactionReserveTokens),
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
@@ -236,6 +232,7 @@ export function assembleSettingsUpdate(
   return {
     tool: {
       permission,
+      maxOutputMib: requiredInt(draft.tool.maxOutputMib),
       modelGatewayBusyRetryMillis: requiredLong(
         draft.tool.modelGatewayBusyRetryMillis,
       ),
@@ -251,7 +248,6 @@ export function assembleSettingsUpdate(
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
       compactionModel: assembleModelSelection(draft.aiRuntime.compactionModel),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
-      compactionReserveTokens: requiredInt(draft.aiRuntime.compactionReserveTokens),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: requiredInt(
@@ -263,7 +259,6 @@ export function assembleSettingsUpdate(
       ),
     },
     environment: {
-      maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
       heartbeatTimeoutMillis: requiredLong(draft.environment.heartbeatTimeoutMillis),
     },
     backendNetwork: {
@@ -290,7 +285,6 @@ export function assembleSettingsUpdate(
       ),
     },
     advanced: {
-      resourceMaxBytes: requiredLong(draft.advanced.resourceMaxBytes),
       processorLeaseDurationMillis: requiredLong(
         draft.advanced.processorLeaseDurationMillis,
       ),

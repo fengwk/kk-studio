@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.settings;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.FieldType;
 
 import java.util.List;
@@ -43,7 +42,6 @@ public class SystemSettingsSchemaProvider {
         "aiRuntime",
         "settings.tabs.aiRuntime",
         "settings.section.aiRuntime.description",
-        false,
         retryGroup(),
         httpErrorsGroup(),
         compactionGroup(),
@@ -55,8 +53,6 @@ public class SystemSettingsSchemaProvider {
         "aiRuntime.retry",
         "settings.section.aiRuntime.retry.title",
         "settings.section.aiRuntime.retry.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "aiRuntime.retryMaxRetries",
             "settings.field.aiRuntime.retryMaxRetries",
@@ -98,8 +94,6 @@ public class SystemSettingsSchemaProvider {
         "aiRuntime.httpErrors",
         "settings.section.aiRuntime.httpErrors.title",
         "settings.section.aiRuntime.httpErrors.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "aiRuntime.modelHttpRetryStatusCodes",
             "settings.field.aiRuntime.modelHttpRetryStatusCodes",
@@ -116,8 +110,6 @@ public class SystemSettingsSchemaProvider {
         "aiRuntime.compaction",
         "settings.section.aiRuntime.compaction.title",
         "settings.section.aiRuntime.compaction.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "aiRuntime.compactionModel",
             "settings.field.aiRuntime.compactionModel",
@@ -141,8 +133,6 @@ public class SystemSettingsSchemaProvider {
         "aiRuntime.subagent",
         "settings.section.aiRuntime.subagent.title",
         "settings.section.aiRuntime.subagent.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "aiRuntime.subagentMaxDepth",
             "settings.field.aiRuntime.subagentMaxDepth",
@@ -183,7 +173,6 @@ public class SystemSettingsSchemaProvider {
         "tool",
         "settings.tabs.toolsPermissions",
         "settings.section.tool.description",
-        false,
         permissionGroup(),
         gatewayGroup());
   }
@@ -193,8 +182,6 @@ public class SystemSettingsSchemaProvider {
         "tool.permission",
         "settings.section.tool.permission.title",
         "settings.section.tool.permission.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "tool.permission",
             "settings.section.tool.permission.title",
@@ -213,8 +200,6 @@ public class SystemSettingsSchemaProvider {
         "tool.gateway",
         "settings.section.tool.gateway.title",
         "settings.section.tool.gateway.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "tool.maxOutputMib",
             "settings.field.tool.maxOutputMib",
@@ -247,7 +232,6 @@ public class SystemSettingsSchemaProvider {
         "environment",
         "settings.tabs.environment",
         "settings.section.environment.description",
-        false,
         runtimeGroup());
   }
 
@@ -256,15 +240,13 @@ public class SystemSettingsSchemaProvider {
         "environment.runtime",
         "settings.section.environment.runtime.title",
         "settings.section.environment.runtime.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "environment.heartbeatTimeoutMillis",
             "settings.field.environment.heartbeatTimeoutMillis",
             null,
             FieldType.LONG,
             false,
-            1,
+            30_000,
             null));
   }
 
@@ -274,7 +256,6 @@ public class SystemSettingsSchemaProvider {
         "backendNetwork",
         "settings.tabs.backendNetwork",
         "settings.section.backendNetwork.description",
-        false,
         proxyGroup());
   }
 
@@ -283,8 +264,6 @@ public class SystemSettingsSchemaProvider {
         "backendNetwork.proxy",
         "settings.section.backendNetwork.proxy.title",
         "settings.section.backendNetwork.proxy.description",
-        false,
-        ApplyTiming.NEXT_HTTP_REQUEST,
         field(
             "backendNetwork.proxyUrl",
             "settings.field.backendNetwork.proxyUrl",
@@ -309,7 +288,6 @@ public class SystemSettingsSchemaProvider {
         "storageMedia",
         "settings.tabs.storageMedia",
         "settings.section.storageMedia.description",
-        true,
         uploadGroup(),
         canvasMediaGroup(),
         temporaryResourceGroup());
@@ -320,8 +298,6 @@ public class SystemSettingsSchemaProvider {
         "storageMedia.upload",
         "settings.section.storageMedia.upload.title",
         "settings.section.storageMedia.upload.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "storageMedia.uploadExpiresSeconds",
             "settings.field.storageMedia.uploadExpiresSeconds",
@@ -353,8 +329,6 @@ public class SystemSettingsSchemaProvider {
         "storageMedia.canvasMedia",
         "settings.section.storageMedia.canvasMedia.title",
         "settings.section.storageMedia.canvasMedia.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "storageMedia.canvasMediaProcessTimeoutMillis",
             "settings.field.storageMedia.canvasMediaProcessTimeoutMillis",
@@ -397,8 +371,6 @@ public class SystemSettingsSchemaProvider {
         "storageMedia.temporaryResource",
         "settings.section.storageMedia.temporaryResource.title",
         "settings.section.storageMedia.temporaryResource.description",
-        false,
-        ApplyTiming.NEXT_INVOCATION,
         field(
             "storageMedia.temporaryResourceTtlSeconds",
             "settings.field.storageMedia.temporaryResourceTtlSeconds",
@@ -423,28 +395,9 @@ public class SystemSettingsSchemaProvider {
         "advanced",
         "settings.tabs.advanced",
         "settings.section.advanced.description",
-        true,
-        advancedResourceGroup(),
         advancedProcessorGroup(),
         advancedApplicationEventGroup(),
         advancedWorkNotificationGroup());
-  }
-
-  private static SystemSettingsSchemaDTO.GroupDTO advancedResourceGroup() {
-    return group(
-        "advanced.resource",
-        "settings.section.advanced.resource.title",
-        "settings.section.advanced.resource.description",
-        true,
-        null,
-        field(
-            "advanced.resourceMaxBytes",
-            "settings.field.advanced.resourceMaxBytes",
-            null,
-            FieldType.LONG,
-            false,
-            1,
-            null));
   }
 
   private static SystemSettingsSchemaDTO.GroupDTO advancedProcessorGroup() {
@@ -452,8 +405,6 @@ public class SystemSettingsSchemaProvider {
         "advanced.processor",
         "settings.section.advanced.processor.title",
         "settings.section.advanced.processor.description",
-        true,
-        null,
         field(
             "advanced.processorLeaseDurationMillis",
             "settings.field.advanced.processorLeaseDurationMillis",
@@ -509,8 +460,6 @@ public class SystemSettingsSchemaProvider {
         "advanced.applicationEvent",
         "settings.section.advanced.applicationEvent.title",
         "settings.section.advanced.applicationEvent.description",
-        true,
-        null,
         field(
             "advanced.applicationEventQueueCapacity",
             "settings.field.advanced.applicationEventQueueCapacity",
@@ -550,8 +499,6 @@ public class SystemSettingsSchemaProvider {
         "advanced.workNotification",
         "settings.section.advanced.workNotification.title",
         "settings.section.advanced.workNotification.description",
-        true,
-        null,
         field(
             "advanced.postgresqlWorkNotificationPollMillis",
             "settings.field.advanced.postgresqlWorkNotificationPollMillis",
@@ -574,13 +521,11 @@ public class SystemSettingsSchemaProvider {
       String key,
       String labelKey,
       String descriptionKey,
-      boolean restartRequired,
       SystemSettingsSchemaDTO.GroupDTO... groups) {
     SystemSettingsSchemaDTO.SectionDTO section = new SystemSettingsSchemaDTO.SectionDTO();
     section.setKey(key);
     section.setLabelKey(labelKey);
     section.setDescriptionKey(descriptionKey);
-    section.setRestartRequired(restartRequired);
     section.setGroups(List.of(groups));
     return section;
   }
@@ -589,15 +534,11 @@ public class SystemSettingsSchemaProvider {
       String key,
       String labelKey,
       String descriptionKey,
-      boolean restartRequired,
-      ApplyTiming applyTiming,
       SystemSettingsSchemaDTO.FieldDTO... fields) {
     SystemSettingsSchemaDTO.GroupDTO group = new SystemSettingsSchemaDTO.GroupDTO();
     group.setKey(key);
     group.setLabelKey(labelKey);
     group.setDescriptionKey(descriptionKey);
-    group.setRestartRequired(restartRequired);
-    group.setApplyTiming(applyTiming);
     group.setFields(List.of(fields));
     return group;
   }

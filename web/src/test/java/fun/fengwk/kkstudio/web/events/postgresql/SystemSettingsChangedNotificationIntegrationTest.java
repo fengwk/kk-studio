@@ -143,7 +143,6 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
             ai.retryMaxDelayMillis(),
             ai.compactionModel(),
             ai.compactionKeepRecentTokens(),
-            ai.compactionReserveTokens(),
             ai.subagentMaxDepth(),
             ai.subagentMaxConcurrency(),
             ai.subagentMaxTotalConcurrency(),
