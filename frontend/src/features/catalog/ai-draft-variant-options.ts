@@ -1,7 +1,4 @@
 import type { VariantDraft } from '@/features/catalog/ai-console-types'
-import { variantOptionsFromModel } from '@/shared/lib/model-variant-options'
-
-export { variantOptionsFromModel }
 
 export function trimValue(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''

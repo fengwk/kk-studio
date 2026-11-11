@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import type { ModelGroupDraft } from '@/features/catalog/ai-console-types'
 import type { SingleModelDTO, ModelDTO } from '@/shared/api/generated/contracts'
-import { variantOptionsFromModel } from '@/features/catalog/ai-draft-variant-options'
+import { variantOptionsFromModel } from '@/shared/lib/model-variant-options'
 import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
 import { newGroupMemberDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'

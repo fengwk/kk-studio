@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import type { CapabilityOption } from '@/features/catalog/agent-capability-candidates'
-import { translate, useI18n } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import './capability-picker.css'
 
 export function ToolSelectionPanel({
@@ -15,7 +15,7 @@ export function ToolSelectionPanel({
   emptyText: string
   onToggle: (value: string) => void
 }) {
-  return <CapabilitySelectionPanel type="tool" options={options} selected={selected} emptyText={emptyText} onToggle={onToggle} />
+  return <CapabilitySelectionPanel options={options} selected={selected} emptyText={emptyText} onToggle={onToggle} />
 }
 
 export function SkillSelectionPanel({
@@ -34,7 +34,6 @@ export function SkillSelectionPanel({
   onToggle: (value: string) => void
 }) {
   return <CapabilitySelectionPanel
-    type="skill"
     options={options}
     selected={selected}
     emptyText={emptyText}
@@ -45,7 +44,6 @@ export function SkillSelectionPanel({
 }
 
 function CapabilitySelectionPanel({
-  type,
   options,
   selected,
   emptyText,
@@ -53,7 +51,6 @@ function CapabilitySelectionPanel({
   errorText,
   onToggle,
 }: {
-  type: 'tool' | 'skill'
   options: CapabilityOption[]
   selected: string[]
   emptyText: string
@@ -76,7 +73,7 @@ function CapabilitySelectionPanel({
     items.push(option)
     groups.set(group, items)
   }
-  const searchId = `capability-search-${type}`
+  const searchId = useId()
 
   return (
     <div className="capability-selection-panel">
@@ -110,7 +107,7 @@ function CapabilitySelectionPanel({
                     <span className="capability-option-body">
                       <span className="capability-option-heading">
                         <code className="capability-name">{option.name}</code>
-                        {option.missing ? <span className="capability-option-status">{translate('ai.catalog.form.unavailable')}</span> : null}
+                        {option.missing ? <span className="capability-option-status">{t('ai.catalog.form.unavailable')}</span> : null}
                       </span>
                       {option.description ? <span className="capability-option-description" title={option.description}>{option.description}</span> : null}
                     </span>
