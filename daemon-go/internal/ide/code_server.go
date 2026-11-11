@@ -157,26 +157,27 @@ func ResolveCodeServerLaunch(distributionDir string) (CodeServerLaunch, error) {
 }
 
 type codeServerManager struct {
-	cfg          config.DaemonConfig
-	paths        IDEPaths
-	processes    native.Supervisor
-	bridge       BridgeCredentials
-	client       *http.Client
-	mu           sync.Mutex
-	session      *CodeServerSession
-	process      native.ManagedProcess
-	processExit  chan struct{}
-	starting     chan struct{}
-	startErr     error
-	startCancel  context.CancelFunc
-	stopping     chan struct{}
-	stopErr      error
-	closed       bool
-	intentional  bool
-	ipcDirectory string
-	generation   uint64
-	listeners    []func(uint64)
-	diagnostics  diagnosticTail
+	cfg                        config.DaemonConfig
+	paths                      IDEPaths
+	processes                  native.Supervisor
+	bridge                     BridgeCredentials
+	client                     *http.Client
+	mu                         sync.Mutex
+	session                    *CodeServerSession
+	process                    native.ManagedProcess
+	processExit                chan struct{}
+	processExitedDuringStartup bool
+	starting                   chan struct{}
+	startErr                   error
+	startCancel                context.CancelFunc
+	stopping                   chan struct{}
+	stopErr                    error
+	closed                     bool
+	intentional                bool
+	ipcDirectory               string
+	generation                 uint64
+	listeners                  []func(uint64)
+	diagnostics                diagnosticTail
 }
 
 // NewCodeServerManager creates a lazy, restartable manager backed by the native supervisor.
@@ -248,6 +249,9 @@ func (m *codeServerManager) EnsureStarted(ctx context.Context) (*CodeServerSessi
 func (m *codeServerManager) runStart(ctx context.Context) {
 	session, err := m.start(ctx)
 	m.mu.Lock()
+	if err == nil && m.processExitedDuringStartup {
+		err = NewError("code-server exited during startup", "UNAVAILABLE")
+	}
 	if err == nil {
 		m.session = session
 	}
@@ -341,6 +345,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 	m.mu.Lock()
 	m.process = process
 	m.processExit = processExit
+	m.processExitedDuringStartup = false
 	m.generation++
 	generation := m.generation
 	m.intentional = false
@@ -442,12 +447,18 @@ func (m *codeServerManager) watchExit(process native.ManagedProcess, generation 
 		m.processExit = nil
 	}
 	m.session = nil
+	if m.starting != nil {
+		m.processExitedDuringStartup = true
+	}
 	listeners := append([]func(uint64){}, m.listeners...)
 	shouldNotify := err == nil && !intentional && !m.intentional && m.starting == nil && !m.closed
 	m.mu.Unlock()
 	if shouldNotify {
 		for _, listener := range listeners {
-			listener(generation)
+			func() {
+				defer func() { _ = recover() }()
+				listener(generation)
+			}()
 		}
 	}
 }
@@ -716,8 +727,6 @@ func (d *diagnosticTail) push(value string) {
 	d.value.Reset()
 	d.value.WriteString(current)
 }
-func (d *diagnosticTail) valueString() string { return d.value.String() }
-
 func allocateLoopbackPort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
