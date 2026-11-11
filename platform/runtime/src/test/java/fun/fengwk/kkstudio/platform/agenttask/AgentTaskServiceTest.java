@@ -421,6 +421,7 @@ class AgentTaskServiceTest {
         parentHead,
         cont,
         false,
+        true,
         new SpawnRequest.Budget(5, 3, 2, 10),
         HASH);
   }

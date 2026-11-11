@@ -35,11 +35,11 @@ func TestBuildEnvironmentConfigPreservesBaseAndServerOrder(t *testing.T) {
 	if got.ConfigVersion != 17 || got.StudioURL != "https://studio.example" || got.GatewayURL != "wss://studio.example/ws/daemon" || got.ProxyURL == nil || *got.ProxyURL != "http://proxy.example:8080" {
 		t.Fatalf("configuration normalization failed: %+v", got)
 	}
-	if len(got.LSPOrder) != 2 || got.LSPOrder[0] != "typescript" || got.LSPOrder[1] != "go" {
-		t.Fatalf("LSP declaration order lost: %v", got.LSPOrder)
+	if len(got.LSP) != 2 || got.LSP[0].ID != "typescript" || got.LSP[1].ID != "go" {
+		t.Fatalf("LSP declaration order lost: %+v", got.LSP)
 	}
 	input.Lsp.Servers[0].Command[0] = "mutated"
-	if got.LSP["typescript"].Command[0] != "typescript-language-server" {
+	if got.LSP[0].Command[0] != "typescript-language-server" {
 		t.Fatal("candidate retained mutable input slices")
 	}
 }

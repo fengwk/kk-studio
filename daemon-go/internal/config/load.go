@@ -80,13 +80,22 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if err := jsonv2.Unmarshal(env.DaemonConfig, &raw); err != nil || raw == nil || hasUnknown(raw, "studioUrl", "bashExecutable", "lsp", "proxyUrl") {
 		return DaemonConfig{}, errors.New("config: daemonConfig is invalid")
 	}
+	var lspOrder []string
 	if lspRaw, ok := raw["lsp"]; ok {
 		var lspObject map[string]json.RawMessage
 		if jsonv2.Unmarshal(lspRaw, &lspObject) != nil || lspObject == nil || hasUnknown(lspObject, "servers") {
 			return DaemonConfig{}, errors.New("config: lsp is invalid")
 		}
+		serversRaw, ok := lspObject["servers"]
+		if !ok {
+			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
+		}
 		var servers map[string]json.RawMessage
-		if jsonv2.Unmarshal(lspObject["servers"], &servers) != nil || servers == nil {
+		if jsonv2.Unmarshal(serversRaw, &servers) != nil || servers == nil {
+			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
+		}
+		lspOrder, err = orderedJSONKeys(serversRaw)
+		if err != nil {
 			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
 		}
 		for _, serverRaw := range servers {
@@ -114,9 +123,10 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if len(wire.LSP.Servers) == 0 {
 		return DaemonConfig{}, errors.New("config: lsp must contain at least one server")
 	}
-	lsp := make(map[string]LSPServerConfig, len(wire.LSP.Servers))
-	for id, s := range wire.LSP.Servers {
-		if id == "" || !regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(id) || !validStringList(s.Command, true) || !validStringList(s.Extensions, true) || !validStringList(s.RootMarkers, false) || !validStringList(s.FirstMatchMarkers, false) {
+	lsp := make([]LSPServerConfig, 0, len(wire.LSP.Servers))
+	for _, id := range lspOrder {
+		s := wire.LSP.Servers[id]
+		if id == "" || !lspServerID.MatchString(id) || !validStringList(s.Command, true) || !validStringList(s.Extensions, true) || !validStringList(s.RootMarkers, false) || !validStringList(s.FirstMatchMarkers, false) {
 			return DaemonConfig{}, errors.New("config: lsp server is invalid")
 		}
 		for _, ext := range s.Extensions {
@@ -129,7 +139,7 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 				return DaemonConfig{}, errors.New("config: lsp marker is invalid")
 			}
 		}
-		lsp[id] = LSPServerConfig(s)
+		lsp = append(lsp, LSPServerConfig{ID: id, Command: s.Command, Extensions: s.Extensions, RootMarkers: s.RootMarkers, FirstMatchMarkers: s.FirstMatchMarkers})
 	}
 	dataDir := filepath.Dir(path)
 	bash := wire.BashExecutable
@@ -208,6 +218,39 @@ func hasUnknown(m map[string]json.RawMessage, allowed ...string) bool {
 	}
 	return false
 }
+
+func orderedJSONKeys(data []byte) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New("expected JSON object")
+	}
+	keys := make([]string, 0)
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return nil, errors.New("invalid JSON object key")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	token, err = decoder.Token()
+	if err != nil || token != json.Delim('}') {
+		return nil, errors.New("incomplete JSON object")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, errors.New("trailing JSON data")
+	}
+	return keys, nil
+}
+
 func executablePath() string {
 	p, err := os.Executable()
 	if err != nil {

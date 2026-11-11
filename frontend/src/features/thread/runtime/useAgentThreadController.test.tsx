@@ -187,6 +187,7 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     status: 'READY',
     attempt: 1,
     toolCallId: 'call-1',
+    queuedBehindToolCallId: null,
     toolName: 'demo',
     rendererKey: 'demo',
     environmentId: null,

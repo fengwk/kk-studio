@@ -37,6 +37,7 @@ public record AgentTaskRequest(
     UUID expectedParentHeadEntryId,
     SpawnRequest.Continuation continuation,
     boolean yoloEnabled,
+    boolean async,
     SpawnRequest.Budget budget,
     String requestHash) {
 

@@ -21,13 +21,16 @@ func writeConfigFixture(t *testing.T, document string) string {
 
 // RUN-T-159 validates the canonical envelope and derives data/token/gateway locations.
 func TestLoadCanonicalConfiguration(t *testing.T) {
-	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"4","daemonConfig":{"studioUrl":"https://studio.example/","bashExecutable":null,"lsp":{"servers":{"ts":{"command":["tsls"],"extensions":[".ts"],"rootMarkers":["package.json"],"firstMatchMarkers":[]}}},"proxyUrl":null}}`)
+	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"4","daemonConfig":{"studioUrl":"https://studio.example/","bashExecutable":null,"lsp":{"servers":{"ts":{"command":["tsls"],"extensions":[".ts"],"rootMarkers":["package.json"],"firstMatchMarkers":[]},"go":{"command":["gopls","serve"],"extensions":[".go"],"rootMarkers":[],"firstMatchMarkers":[]}}},"proxyUrl":null}}`)
 	got, err := LoadDaemonConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.DataDir != filepath.Dir(path) || got.TokenPath != filepath.Join(filepath.Dir(path), "daemon.token") || got.GatewayURL != "wss://studio.example/ws/daemon" {
 		t.Fatalf("unexpected paths/URL: %#v", got)
+	}
+	if len(got.LSP) != 2 || got.LSP[0].ID != "ts" || got.LSP[1].ID != "go" {
+		t.Fatalf("LSP JSON declaration order was not preserved: %+v", got.LSP)
 	}
 }
 

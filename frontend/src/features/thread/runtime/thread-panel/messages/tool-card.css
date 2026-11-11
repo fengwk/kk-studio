@@ -197,6 +197,53 @@
   outline-offset: 2px;
 }
 
+.thread-tool-approval-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.thread-tool-approval-field {
+  min-width: 0;
+}
+
+.thread-tool-approval-field dt {
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.thread-tool-approval-field dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.thread-tool-approval-field pre {
+  max-width: 100%;
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thread-tool-approval-unreadable {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-tool-approval-field details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
 .thread-tool-contents {
   display: flex;
   flex-direction: column;

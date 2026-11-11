@@ -47,13 +47,16 @@ func BuildEnvironmentConfig(base DaemonConfig, version int64, input *protocol.Da
 	if input.Lsp == nil || len(input.Lsp.Servers) == 0 || len(input.Lsp.ProtoReflect().GetUnknown()) != 0 {
 		return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp"}
 	}
-	lsp := make(map[string]LSPServerConfig, len(input.Lsp.Servers))
-	order := make([]string, 0, len(input.Lsp.Servers))
+	lsp := make([]LSPServerConfig, 0, len(input.Lsp.Servers))
+	seen := make(map[string]struct{}, len(input.Lsp.Servers))
 	for _, server := range input.Lsp.Servers {
-		if server == nil || len(server.ProtoReflect().GetUnknown()) != 0 || !lspServerID.MatchString(server.GetId()) || lsp[server.GetId()].Command != nil {
+		if server == nil || len(server.ProtoReflect().GetUnknown()) != 0 || !lspServerID.MatchString(server.GetId()) {
 			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
 		}
-		candidate := LSPServerConfig{Command: cloneStrings(server.Command), Extensions: cloneStrings(server.Extensions), RootMarkers: cloneStrings(server.RootMarkers), FirstMatchMarkers: cloneStrings(server.FirstMatchMarkers)}
+		if _, exists := seen[server.GetId()]; exists {
+			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
+		}
+		candidate := LSPServerConfig{ID: server.Id, Command: cloneStrings(server.Command), Extensions: cloneStrings(server.Extensions), RootMarkers: cloneStrings(server.RootMarkers), FirstMatchMarkers: cloneStrings(server.FirstMatchMarkers)}
 		if !validStringList(candidate.Command, true) || !validStringList(candidate.Extensions, true) || !validStringList(candidate.RootMarkers, false) || !validStringList(candidate.FirstMatchMarkers, false) {
 			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id}
 		}
@@ -67,8 +70,8 @@ func BuildEnvironmentConfig(base DaemonConfig, version int64, input *protocol.Da
 				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".markers"}
 			}
 		}
-		lsp[server.Id] = candidate
-		order = append(order, server.Id)
+		seen[server.GetId()] = struct{}{}
+		lsp = append(lsp, candidate)
 	}
 	base.ConfigVersion = version
 	base.StudioURL = studio
@@ -76,7 +79,6 @@ func BuildEnvironmentConfig(base DaemonConfig, version int64, input *protocol.Da
 	base.BashExecutable = &bash
 	base.BashExecutableSetting = cloneString(bashSetting)
 	base.LSP = lsp
-	base.LSPOrder = order
 	base.ProxyURL = proxy
 	return base, nil
 }

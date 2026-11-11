@@ -10,6 +10,7 @@ export interface CapabilityOption {
   name: string
   description: string | null
   offline?: boolean
+  group?: string
   /** 已配置但不在当前候选中（仍展示，可取消勾选）。 */
   missing?: boolean
 }
@@ -43,6 +44,7 @@ export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOpt
       value: name,
       name,
       description: tool.description?.trim() || null,
+      group: tool.provider.kind,
     })
   }
   return options
@@ -100,6 +102,7 @@ export function buildSkillCandidates(
         value: key,
         name: `${packageName} / ${name}`,
         description: skill.description?.trim() || null,
+        group: packageName,
       })
     }
   }
