@@ -21,7 +21,7 @@ const maxReviewBytes = 1 << 20
 
 var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
-func editFile(ctx context.Context, call runtime.CapabilityCall, preview bool) (runtime.CapabilityResult, error) {
+func editFile(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, preview bool) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -132,6 +132,9 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, preview bool) (r
 	}
 	if err = atomicWrite(path, encoded, info.Mode().Perm()); err != nil {
 		return errorResult(call.InvocationID, err), nil
+	}
+	if capability.FileChanged != nil {
+		capability.FileChanged(path)
 	}
 	completed.Details = mustJSON(map[string]any{"editReview": review})
 	return completed, nil

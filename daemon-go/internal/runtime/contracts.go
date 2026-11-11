@@ -31,7 +31,7 @@ const (
 	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
 )
 
-// ExpectedFile identifies a user-approved file snapshot for fs.edit.
+// ExpectedFile identifies a user-approved file snapshot for a write or edit.
 type ExpectedFile struct {
 	Path   string
 	SHA256 string
@@ -73,6 +73,7 @@ type CapabilityContext struct {
 	Processes            native.Supervisor
 	Resources            ResourceUploader
 	Progress             Progress
+	FileChanged          func(string)
 	ConfirmExecutionExit func()
 }
 

@@ -18,22 +18,21 @@ import (
 )
 
 type arguments struct {
-	OldString      string `json:"old_string"`
-	NewString      string `json:"new_string"`
-	ReplaceAll     bool   `json:"replace_all"`
-	Command        string `json:"command"`
-	Workdir        string `json:"workdir"`
-	Path           string `json:"path"`
-	Content        string `json:"content"`
-	Preview        bool   `json:"preview"`
-	Pattern        string `json:"pattern"`
-	Glob           string `json:"glob"`
-	Limit          int    `json:"limit"`
-	Offset         int    `json:"offset"`
-	ColumnOffset   int    `json:"column_offset"`
-	Literal        bool   `json:"literal"`
-	IgnoreCase     bool   `json:"ignore_case"`
-	ImageInputTier string `json:"image_input_tier"`
+	OldString    string `json:"old_string"`
+	NewString    string `json:"new_string"`
+	ReplaceAll   bool   `json:"replace_all"`
+	Command      string `json:"command"`
+	Workdir      string `json:"workdir"`
+	Path         string `json:"path"`
+	Content      string `json:"content"`
+	Preview      bool   `json:"preview"`
+	Pattern      string `json:"pattern"`
+	Glob         string `json:"glob"`
+	Limit        int    `json:"limit"`
+	Offset       int    `json:"offset"`
+	ColumnOffset int    `json:"column_offset"`
+	Literal      bool   `json:"literal"`
+	IgnoreCase   bool   `json:"ignore_case"`
 }
 
 // Provider supplies the filesystem and in-process search capability handlers.
@@ -102,16 +101,18 @@ func trimMiB(text string) string {
 	return text
 }
 
-func parseImageTier(value string) (imagescaler.Tier, error) {
+func parseImageTier(value runtime.ImageInputTier) (imagescaler.Tier, error) {
 	switch value {
-	case "", "P720":
+	case runtime.ImageInputTierP720:
 		return imagescaler.P720, nil
-	case "P1080":
+	case runtime.ImageInputTierP1080:
 		return imagescaler.P1080, nil
-	case "ORIGINAL":
+	case runtime.ImageInputTierOriginal:
 		return imagescaler.Original, nil
+	case "":
+		return 0, errors.New("image input tier is required for fs.read")
 	default:
-		return 0, fmt.Errorf("unknown image input tier %q", value)
+		return 0, fmt.Errorf("invalid image input tier %q", value)
 	}
 }
 
@@ -129,7 +130,7 @@ func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 	return args, nil
 }
 
-func readCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+func readCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -200,7 +201,7 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.
 		return errorResult(call.InvocationID, closeErr), nil
 	}
 	if imageType != "" {
-		tier, err := parseImageTier(args.ImageInputTier)
+		tier, err := parseImageTier(call.ImageInputTier)
 		if err != nil {
 			return errorResult(call.InvocationID, err), nil
 		}
@@ -227,7 +228,7 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.
 	return textResult(call.InvocationID, fmt.Sprintf("path: %s\nrange: %d:%d-%d:%d\n\n%s", args.Path, window.StartLine, 1, window.EndLine, 1, window.Body)), nil
 }
 
-func writeCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+func writeCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err == nil && args.Content == "" { // Empty content is a valid file; distinguish absent from present.
 		var raw map[string]json.RawMessage
@@ -250,6 +251,9 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
+	if capability.FileChanged != nil {
+		capability.FileChanged(review.Path)
+	}
 	action := "Overwrote "
 	if review.NewFile {
 		action = "Created "
@@ -259,12 +263,12 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime
 	return result, nil
 }
 
-func editCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	return editFile(ctx, call, false)
+func editCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return editFile(ctx, call, capability, false)
 }
 
-func editPreviewCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	return editFile(ctx, call, true)
+func editPreviewCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return editFile(ctx, call, capability, true)
 }
 
 func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {

@@ -99,7 +99,7 @@ func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	if err := os.WriteFile(path, encoded.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	call := runtime.CapabilityCall{InvocationID: "image", Arguments: mustJSON(map[string]any{"path": path, "image_input_tier": "ORIGINAL"}), MaxOutputBytes: int64(encoded.Len())}
+	call := runtime.CapabilityCall{InvocationID: "image", Arguments: mustJSON(map[string]any{"path": path}), MaxOutputBytes: int64(encoded.Len()), ImageInputTier: runtime.ImageInputTierOriginal}
 	result, err := Provider{}.Capabilities()["fs.read"](context.Background(), call, runtime.CapabilityContext{})
 	if err != nil {
 		t.Fatal(err)
@@ -120,5 +120,10 @@ func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	}
 	if details.Image.OriginalWidth != 2 || details.Image.OriginalHeight != 3 || details.Image.DisplayWidth != 2 || details.Image.DisplayHeight != 3 {
 		t.Fatalf("details=%s", result.Details)
+	}
+	call.ImageInputTier = ""
+	missingTier, err := Provider{}.Capabilities()["fs.read"](context.Background(), call, runtime.CapabilityContext{})
+	if err != nil || !missingTier.Error || missingTier.Contents[0].Text != "image input tier is required for fs.read" {
+		t.Fatalf("missing tier result=%#v err=%v", missingTier, err)
 	}
 }
