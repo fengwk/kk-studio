@@ -127,6 +127,9 @@ func boolText(v bool) string {
 }
 
 func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("ripgrep parity comparison requires rg")
+	}
 	root := t.TempDir()
 	for _, n := range []string{"a-c", "a/b", "a/bb", "a/x.go", "b/x.go", "x.java", "deep/x.java"} {
 		put(t, root, n, "func main() {}\n")
@@ -178,6 +181,9 @@ func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 }
 
 func TestGrepMatchesRipgrep(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("ripgrep parity comparison requires rg")
+	}
 	root := t.TempDir()
 	put(t, root, "b.txt", "FunC main\nfunc main\r\nnot here\n")
 	put(t, root, "a.txt", "func main\n")

@@ -10,6 +10,9 @@ import (
 
 // This test records deliberate RE2/Rust differences rather than disguising them as parity.
 func TestRegexGoRE2RustDifferences(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("ripgrep parity comparison requires rg")
+	}
 	root := t.TempDir()
 	put(t, root, "unicode.txt", "é\nÉ\nfoo\n")
 	got, err := Grep(root, ".", false, false, "", 10)

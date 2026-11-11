@@ -24,10 +24,10 @@ func TestWriteReviewAndExpectedFile(t *testing.T) {
 	if preview.SHA256 == "" || !strings.Contains(preview.Diff, "- 2|old") || !strings.Contains(preview.Diff, "+ 2|new") {
 		t.Fatalf("unexpected review: %#v", preview)
 	}
-	if _, err := Write(path, "first\nnew\nlast\n", &ExpectedFile{Path: path, SHA256: preview.SHA256}); err != nil {
+	if _, err := Write(path, "first\nnew\nlast\n", &ExpectedFile{Path: preview.Path, SHA256: preview.SHA256}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(path, "stale\n", &ExpectedFile{Path: path, SHA256: preview.SHA256}); err == nil || err.Error() != staleWriteReviewMessage {
+	if _, err := Write(path, "stale\n", &ExpectedFile{Path: preview.Path, SHA256: preview.SHA256}); err == nil || err.Error() != staleWriteReviewMessage {
 		t.Fatalf("expected stale review refusal, got %v", err)
 	}
 }
