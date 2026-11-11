@@ -4,4 +4,7 @@ go 1.27.0
 
 toolchain go1.27.4
 
-require google.golang.org/protobuf v1.36.12
+require (
+	github.com/coder/websocket v1.8.15
+	google.golang.org/protobuf v1.36.12
+)

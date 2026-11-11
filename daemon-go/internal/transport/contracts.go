@@ -8,7 +8,7 @@ import (
 // ViewRequest is the parsed identity and request metadata for an IDE data-channel route.
 type ViewRequest struct {
 	ViewID       string
-	BindingEpoch string
+	BindingEpoch int64
 	Mode         string
 	Method       string
 	Path         string
