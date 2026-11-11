@@ -15,20 +15,35 @@ import (
 )
 
 type fakeDownloader struct {
-	data  []byte
-	calls int
-	err   error
-}
-type ticketDownloader struct{ fakeDownloader }
-
-func (f *ticketDownloader) TicketSHA256(context.Context, string) (string, error) {
-	digest := sha256.Sum256(f.data)
-	return hex.EncodeToString(digest[:]), nil
+	data           []byte
+	ticket         DownloadTicket
+	requests       int
+	downloads      int
+	requestErr     error
+	downloadErr    error
+	beforeDownload func(DownloadTicket)
 }
 
-func (f *fakeDownloader) Download(context.Context, string) ([]byte, error) {
-	f.calls++
-	return f.data, f.err
+func (f *fakeDownloader) RequestTicket(context.Context, string) (DownloadTicket, error) {
+	f.requests++
+	if f.requestErr != nil {
+		return DownloadTicket{}, f.requestErr
+	}
+	if f.ticket.Size == 0 {
+		digest := sha256.Sum256(f.data)
+		f.ticket = DownloadTicket{Size: int64(len(f.data)), SHA256: hex.EncodeToString(digest[:]), Opaque: "ticket-token"}
+	}
+	return f.ticket, nil
+}
+func (f *fakeDownloader) Download(_ context.Context, ticket DownloadTicket) ([]byte, error) {
+	f.downloads++
+	if ticket.Opaque != f.ticket.Opaque {
+		return nil, errors.New("ticket was not passed unchanged")
+	}
+	if f.beforeDownload != nil {
+		f.beforeDownload(ticket)
+	}
+	return f.data, f.downloadErr
 }
 func zipBytes(t *testing.T, files map[string]string) []byte {
 	t.Helper()
@@ -39,21 +54,30 @@ func zipBytes(t *testing.T, files map[string]string) []byte {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _ = io.WriteString(x, content)
+		if _, err := io.WriteString(x, content); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return b.Bytes()
 }
+func installInput() json.RawMessage {
+	return json.RawMessage(`{"transferId":"123e4567-e89b-42d3-a456-426614174000","package":"pkg","version":"1.2","skill":"demo"}`)
+}
+func expectedTarget(root string, archive []byte) string {
+	digest := sha256.Sum256(archive)
+	return filepath.Join(root, "skills", "pkg", "1.2", hex.EncodeToString(digest[:])[:12])
+}
 
-// RUN-T-228 verifies that a ticket downloader's archive is extracted and published only with its skill marker.
-func TestInstallerPublishesVerifiedSkill(t *testing.T) {
+// RUN-T-228 verifies ticket-bound extraction and publication under the content-addressed path.
+func TestInstallerPublishesContentAddressedSkill(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill", "demo/readme.txt": "content"})
 	d := &fakeDownloader{data: archive}
-	i := Installer{DataDir: t.TempDir(), Downloader: d}
-	input := json.RawMessage(`{"transferId":"123e4567-e89b-42d3-a456-426614174000","package":"pkg","version":"1.2","skill":"demo"}`)
-	result, _, err := i.Install(context.Background(), input)
+	root := t.TempDir()
+	i := Installer{DataDir: root, Downloader: d}
+	result, _, err := i.Install(context.Background(), installInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,55 +87,95 @@ func TestInstallerPublishesVerifiedSkill(t *testing.T) {
 	if err := json.Unmarshal(result, &got); err != nil {
 		t.Fatal(err)
 	}
+	want := filepath.Join(expectedTarget(root, archive), "demo")
+	if got.SkillDir != want {
+		t.Fatalf("skill_dir=%q, want %q", got.SkillDir, want)
+	}
 	if _, err := os.Stat(filepath.Join(got.SkillDir, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = i.Install(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
+	if d.requests != 1 || d.downloads != 1 {
+		t.Fatalf("requests/downloads=%d/%d", d.requests, d.downloads)
 	}
 }
 
-// RUN-T-233 rejects archive traversal and leaves no installed package behind.
+// RUN-T-229 checks that an existing digest target requests metadata but skips archive transfer.
+func TestInstallerReusesExistingContentAddress(t *testing.T) {
+	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
+	d := &fakeDownloader{data: archive}
+	i := Installer{DataDir: t.TempDir(), Downloader: d}
+	for n := 0; n < 2; n++ {
+		if _, _, err := i.Install(context.Background(), installInput()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d.requests != 2 || d.downloads != 1 {
+		t.Fatalf("requests/downloads=%d/%d, want 2/1", d.requests, d.downloads)
+	}
+}
+
+// RUN-T-233 rejects archive traversal and leaves the content-addressed target unpublished.
 func TestInstallerRejectsTraversal(t *testing.T) {
-	d := &fakeDownloader{data: zipBytes(t, map[string]string{"../escaped": "x", "demo/SKILL.md": "ok"})}
+	archive := zipBytes(t, map[string]string{"../escaped": "x", "demo/SKILL.md": "ok"})
+	d := &fakeDownloader{data: archive}
 	root := t.TempDir()
 	i := Installer{DataDir: root, Downloader: d}
-	input := json.RawMessage(`{"transferId":"123e4567-e89b-42d3-a456-426614174000","package":"pkg","version":"1","skill":"demo"}`)
-	if _, _, err := i.Install(context.Background(), input); err == nil {
+	if _, _, err := i.Install(context.Background(), installInput()); err == nil {
 		t.Fatal("expected unsafe archive rejection")
 	}
-	if _, err := os.Stat(filepath.Join(root, "skills", "pkg", "1")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("install unexpectedly published: %v", err)
+	if _, err := os.Stat(expectedTarget(root, archive)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target unexpectedly published: %v", err)
 	}
 }
 
-// RUN-T-229 ensures identical verified archive bytes reuse the existing version directory.
-func TestInstallerReusesMatchingDigest(t *testing.T) {
+// RUN-T-231 rejects bytes that do not match the ticket's SHA-256 before publishing anything.
+func TestInstallerRejectsTicketDigestMismatch(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
-	d := &ticketDownloader{fakeDownloader: fakeDownloader{data: archive}}
-	i := Installer{DataDir: t.TempDir(), Downloader: d}
-	input := json.RawMessage(`{"transferId":"123e4567-e89b-42d3-a456-426614174000","package":"pkg","version":"1","skill":"demo"}`)
-	_, _, err := i.Install(context.Background(), input)
+	d := &fakeDownloader{data: archive, ticket: DownloadTicket{Size: int64(len(archive)), SHA256: "0000000000000000000000000000000000000000000000000000000000000000", Opaque: "ticket-token"}}
+	root := t.TempDir()
+	i := Installer{DataDir: root, Downloader: d}
+	if _, _, err := i.Install(context.Background(), installInput()); err == nil {
+		t.Fatal("expected ticket digest mismatch")
+	}
+	if _, err := os.Stat(expectedTarget(root, archive)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target unexpectedly published: %v", err)
+	}
+}
+
+// RUN-T-236 reuses a concurrently published valid target when the staging rename loses the race.
+func TestInstallerReusesTargetCreatedDuringDownload(t *testing.T) {
+	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "ticket contents"})
+	root := t.TempDir()
+	target := expectedTarget(root, archive)
+	d := &fakeDownloader{data: archive}
+	d.beforeDownload = func(ticket DownloadTicket) {
+		dir := filepath.Join(target, "demo")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("racer"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, installDigestFile), []byte(ticket.SHA256), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	i := Installer{DataDir: root, Downloader: d}
+	result, _, err := i.Install(context.Background(), installInput())
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(filepath.Join(i.DataDir, "skills", "pkg", "1", "demo", "SKILL.md"))
+	var got struct {
+		SkillDir string `json:"skill_dir"`
+	}
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(got.SkillDir, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = i.Install(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(filepath.Join(i.DataDir, "skills", "pkg", "1", "demo", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) {
-		t.Fatal("reused installation changed")
-	}
-	if d.calls != 1 {
-		t.Fatalf("downloads=%d, want the matching-ticket reuse to skip archive transfer", d.calls)
+	if string(body) != "racer" {
+		t.Fatalf("race winner was overwritten: %q", body)
 	}
 }

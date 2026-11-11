@@ -2,14 +2,17 @@ package skill
 
 import "context"
 
-// ResourceDownloader fetches the ticketed resource and verifies its declared size and digest.
-// Transport implements this capability; skill consumes it for archive installation.
-type ResourceDownloader interface {
-	Download(context.Context, string) ([]byte, error)
+// DownloadTicket is the transport-validated metadata needed to retrieve one resource.
+// Opaque carries transport-specific ticket data and must be returned unchanged to Download.
+type DownloadTicket struct {
+	Size   int64
+	SHA256 string
+	Opaque any
 }
 
-// ResourceDigestProvider exposes the verified ticket digest before archive transfer so an
-// already-installed matching package can be reused without downloading its bytes again.
-type ResourceDigestProvider interface {
-	TicketSHA256(context.Context, string) (string, error)
+// ResourceDownloader separates ticket acquisition from archive transfer so the installer
+// can reuse a content-addressed installation without downloading the resource bytes.
+type ResourceDownloader interface {
+	RequestTicket(context.Context, string) (DownloadTicket, error)
+	Download(context.Context, DownloadTicket) ([]byte, error)
 }
