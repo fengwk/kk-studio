@@ -30,7 +30,8 @@ class ToolExecutionGatewayVfsReadOnlyTest {
 
   private static final String ROOT_SESSION = "11111111-2222-3333-4444-555555555555";
   private static final String SKILL_PATH = "vfs:/skills/dev-tools/review/SKILL.md";
-  private static final String RESOURCE_PATH = "vfs:/resources/0f8fad5b-d9cb-469f-a165-70867728950e";
+  private static final String RESOURCE_PATH =
+      "resource://files/0f8fad5b-d9cb-469f-a165-70867728950e";
 
   @Test
   void writeToSkillsIsDeniedBeforePermissionEvaluation() {

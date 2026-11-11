@@ -248,7 +248,7 @@ class S3StorageDeadlineIntegrationTest {
         deadline,
         stream ->
             TextReadWindow.format(
-                stream, null, null, null, "vfs:/resources/" + blobId, "unsupported", deadline));
+                stream, null, null, null, "resource://files/" + blobId, "unsupported", deadline));
   }
 
   private static boolean awaitTrue(AtomicBoolean flag, long timeoutMillis) {

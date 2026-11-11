@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformSkillContentReader;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
@@ -25,7 +24,7 @@ public class VfsConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public VfsGateway vfsGateway(
+  public PlatformVfsGateway vfsGateway(
       PlatformSkillContentReader skillReader,
       PlatformResourceContentReader resourceReader,
       SessionFileStore sessionFileStore,

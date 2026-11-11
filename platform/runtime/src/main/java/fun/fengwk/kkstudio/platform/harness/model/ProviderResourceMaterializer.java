@@ -464,7 +464,7 @@ public final class ProviderResourceMaterializer {
    * 外部化文本的模型声明：稳定 Session 资源 URI、名字、总量、不完整预览，以及用 read 分页读取完整输出的指引。
    *
    * <p>URI 由 {@link SessionResourceUri#format} 从 blobId 派生，只暴露规范 {@code
-   * vfs:/resources/<blobId>}，绝不包含 S3 object key、上传 id 或任何宿主路径；URI 只是标识，实际读取仍走原有 Session Blob 鉴权。
+   * resource://files/<blobId>}，绝不包含 S3 object key、上传 id 或任何宿主路径；URI 只是标识，实际读取仍走原有 Session Blob 鉴权。
    */
   private static String formatExternalizedText(ProviderResourceBlock resource) {
     String preview = resource.preview() == null ? "" : resource.preview();

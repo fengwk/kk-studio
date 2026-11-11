@@ -114,7 +114,7 @@ class PlatformVfsGatewayTest {
             + "/ instead.",
         text(write));
 
-    String resourcePath = "vfs:/resources/" + BLOB_ID;
+    String resourcePath = "resource://files/" + BLOB_ID;
     ToolResult edit =
         gateway.edit(
             request(
@@ -217,7 +217,7 @@ class PlatformVfsGatewayTest {
 
     ToolResult result =
         gateway.read(
-            request(FS_READ, "read", "{\"path\":\"vfs:/resources/" + BLOB_ID + "\"}"),
+            request(FS_READ, "read", "{\"path\":\"resource://files/" + BLOB_ID + "\"}"),
             partial -> {});
     assertFalse(result.error());
     assertEquals("resource text", text(result));

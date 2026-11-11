@@ -384,7 +384,9 @@ class ResourceRefTest {
         () -> new ResourceRef(uri.toUpperCase(), "text/plain", null, 1L, sha256("a")));
   }
 
-  /** vfs Session 资源引用：必须精确 {@code vfs:/resources/<canonical-uuid>} 且携带非空 size/sha，并回环解析出 blobId。 */
+  /**
+   * vfs Session 资源引用：必须精确 {@code resource://files/<canonical-uuid>} 且携带非空 size/sha，并回环解析出 blobId。
+   */
   @Test
   void acceptsCanonicalSessionResourceUrisAndRoundTripsBlobId() {
     UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -396,7 +398,7 @@ class ResourceRefTest {
             3L,
             sha256("abc"));
     assertEquals(blobId, ref.sessionBlobId());
-    assertEquals(blobId, ResourceRef.sessionBlobId("vfs:/resources/" + blobId));
+    assertEquals(blobId, ResourceRef.sessionBlobId("resource://files/" + blobId));
     // vfs 引用不是上传引用，两者不互相混淆。
     assertNull(ref.blobUploadId());
     assertNull(ResourceRef.sessionBlobId("https://example.com/abc"));
@@ -407,14 +409,14 @@ class ResourceRefTest {
   @Test
   void sessionBlobIdRejectsNonCanonicalForms() {
     UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
-    assertNull(ResourceRef.sessionBlobId("vfs:/resources/" + blobId.toString().toUpperCase()));
-    assertNull(ResourceRef.sessionBlobId("vfs:/resources/not-a-uuid"));
+    assertNull(ResourceRef.sessionBlobId("resource://files/" + blobId.toString().toUpperCase()));
+    assertNull(ResourceRef.sessionBlobId("resource://files/not-a-uuid"));
     assertNull(ResourceRef.sessionBlobId(blobId.toString()));
-    assertNull(ResourceRef.sessionBlobId("vfs:/resources/"));
-    assertNull(ResourceRef.sessionBlobId("vfs:/resources/" + blobId + "/x"));
-    assertNull(ResourceRef.sessionBlobId("vfs:/resources/" + blobId + "?a=b"));
+    assertNull(ResourceRef.sessionBlobId("resource://files/"));
+    assertNull(ResourceRef.sessionBlobId("resource://files/" + blobId + "/x"));
+    assertNull(ResourceRef.sessionBlobId("resource://files/" + blobId + "?a=b"));
     assertNull(ResourceRef.sessionBlobId("vfs://resources/" + blobId));
-    assertNull(ResourceRef.sessionBlobId("x-vfs:/resources/" + blobId));
+    assertNull(ResourceRef.sessionBlobId("x-resource://files/" + blobId));
     assertNull(ResourceRef.sessionBlobId("kks:/resources/" + blobId));
   }
 
@@ -441,7 +443,7 @@ class ResourceRefTest {
         IllegalArgumentException.class,
         () ->
             new ResourceRef(
-                "vfs:/resources/" + blobId.toString().toUpperCase(),
+                "resource://files/" + blobId.toString().toUpperCase(),
                 "image/png",
                 null,
                 1L,

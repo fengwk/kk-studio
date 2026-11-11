@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.vfs;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.resource.ResourceUri;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -84,6 +85,14 @@ public final class VfsPath {
   public static VfsPath parse(String uri) {
     if (uri == null || uri.isBlank()) {
       throw new IllegalArgumentException("path must not be blank");
+    }
+    if (uri.startsWith("resource://")) {
+      ResourceUri.Parsed resource = ResourceUri.parse(uri);
+      if (resource.namespace() != ResourceUri.Namespace.FILES) {
+        throw new IllegalArgumentException("resource://skills reads are not available yet");
+      }
+      return new VfsPath(
+          Kind.RESOURCE, uri, uri, null, null, null, resource.fileId(), null, null, null, false);
     }
     if (uri.contains("\\")) {
       throw new IllegalArgumentException("path must not contain backslashes: " + uri);

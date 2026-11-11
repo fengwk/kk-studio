@@ -81,35 +81,39 @@ class FileToolTest {
                 null));
   }
 
-  /** 五个工具各自把同样的请求转发到对应的 VFS 操作，并原样返回结果。 */
+  /** read resource URI 时由平台资源网关执行，不要求 Environment。 */
   @Test
-  void vfsPathsDispatchToTheMatchingGatewayOperation() throws Exception {
-    assertDispatch(FileTool.Operation.READ, EnvironmentCapabilityIds.FS_READ, "read");
-    assertDispatch(FileTool.Operation.WRITE, EnvironmentCapabilityIds.FS_WRITE, "write");
-    assertDispatch(FileTool.Operation.EDIT, EnvironmentCapabilityIds.FS_EDIT, "edit");
-    assertDispatch(FileTool.Operation.GREP, EnvironmentCapabilityIds.FS_GREP, "grep");
-    assertDispatch(FileTool.Operation.FIND, EnvironmentCapabilityIds.FS_FIND, "find");
-  }
-
-  private static void assertDispatch(
-      FileTool.Operation operation, EnvironmentCapabilityId capabilityId, String toolName)
-      throws Exception {
+  void resourceReadDispatchesToPlatform() throws Exception {
     VfsGateway gateway = mock(VfsGateway.class);
     ToolResult expected =
-        new ToolResult("c1", List.of(new TextResultContent("vfs result")), false, "{}");
+        new ToolResult("c1", List.of(new TextResultContent("resource")), false, "{}");
     FileTool tool =
         new FileTool(
-            toolName, operation, toolName + ".md", capabilityId, ToolSideEffect.READ_ONLY, gateway);
-    ToolExecutionRequest request = request(tool, argumentsFor(operation), null);
-    switch (operation) {
-      case READ -> when(gateway.read(same(request), any())).thenReturn(expected);
-      case WRITE -> when(gateway.write(same(request), any())).thenReturn(expected);
-      case EDIT -> when(gateway.edit(same(request), any())).thenReturn(expected);
-      case FIND -> when(gateway.find(same(request), any())).thenReturn(expected);
-      case GREP -> when(gateway.grep(same(request), any())).thenReturn(expected);
-    }
+            "read",
+            FileTool.Operation.READ,
+            "read.md",
+            EnvironmentCapabilityIds.FS_READ,
+            ToolSideEffect.READ_ONLY,
+            gateway);
+    ToolExecutionRequest request =
+        request(tool, "{\"path\":\"resource://files/11111111-2222-3333-4444-555555555555\"}", null);
+    when(gateway.read(same(request), any())).thenReturn(expected);
 
     assertSame(expected, tool.execute(request, partial -> {}).result());
+  }
+
+  /** Resource URI 不允许通过 write/edit/find/grep 访问。 */
+  @Test
+  void resourceUrisAreReadOnly() throws Exception {
+    FileTool tool = fileTool(FileTool.Operation.WRITE, EnvironmentCapabilityIds.FS_WRITE);
+    ToolExecutionRequest request =
+        request(
+            tool,
+            "{\"path\":\"resource://files/11111111-2222-3333-4444-555555555555\",\"content\":\"x\"}",
+            null);
+    ToolResult result = tool.execute(request, partial -> {}).result();
+    assertTrue(result.error());
+    assertTrue(((TextResultContent) result.contents().get(0)).text().contains("read-only"));
   }
 
   /** 绝对路径在绑定环境上执行同名 capability，不触碰 VFS。 */
@@ -154,9 +158,8 @@ class FileToolTest {
     ToolResult result = tool.execute(request, partial -> {}).result();
     assertTrue(result.error());
     String message = ((TextResultContent) result.contents().get(0)).text();
-    assertTrue(message.contains("No Environment is bound"), message);
+    assertTrue(message.contains("needs an Environment"), message);
     assertTrue(message.contains("The tool was not executed."), message);
-    assertTrue(message.contains("vfs:/sessions/" + ROOT_SESSION_ID + "/"), message);
     verify(gateway, never()).write(any(), any());
     verify(environment, never()).execute(any(), any(), any());
   }
@@ -191,18 +194,6 @@ class FileToolTest {
     ToolExecutionRequest request = request(tool, "{\"path\":\"/srv/a.txt\"}", null);
     assertThrows(NullPointerException.class, () -> tool.execute(null, partial -> {}));
     assertThrows(NullPointerException.class, () -> tool.execute(request, null));
-  }
-
-  /** 与 capability schema 一致的最小合法参数。 */
-  private static String argumentsFor(FileTool.Operation operation) {
-    String path = "vfs:/sessions/" + ROOT_SESSION_ID + "/notes.txt";
-    return switch (operation) {
-      case READ -> "{\"path\":\"" + path + "\"}";
-      case WRITE -> "{\"path\":\"" + path + "\",\"content\":\"x\"}";
-      case EDIT -> "{\"path\":\"" + path + "\",\"old_string\":\"a\",\"new_string\":\"b\"}";
-      case FIND -> "{\"path\":\"vfs:/sessions/" + ROOT_SESSION_ID + "\",\"pattern\":\"**/*.txt\"}";
-      case GREP -> "{\"path\":\"vfs:/sessions/" + ROOT_SESSION_ID + "\",\"pattern\":\"needle\"}";
-    };
   }
 
   private static FileTool fileTool(

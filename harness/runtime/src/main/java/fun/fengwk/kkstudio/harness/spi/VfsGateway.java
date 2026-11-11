@@ -17,7 +17,7 @@ import java.util.function.Consumer;
  * <p>语义与同名 Environment capability 一致：参数 schema、超时、分页窗口与执行事实的表述保持同一套约定，区别只在于数据来自平台侧存储。 阻塞方法在取消、Stop
  * 或租约丢失时表现为对该线程的 interrupt，实现必须抛出 {@link InterruptedException}。
  */
-public interface VfsGateway {
+public interface VfsGateway extends ResourceReadGateway {
 
   /** {@code read}：读取文件、目录列表或受支持的媒体资源。 */
   ToolResult read(ToolExecutionRequest request, Consumer<ToolResult> progress)

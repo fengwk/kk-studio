@@ -46,7 +46,7 @@ class VfsPathTest {
 
   @Test
   void parsesResourceAndSkillPaths() {
-    VfsPath resource = VfsPath.parse("vfs:/resources/" + BLOB_ID);
+    VfsPath resource = VfsPath.parse("resource://files/" + BLOB_ID);
     assertEquals(Kind.RESOURCE, resource.kind());
     assertEquals(UUID.fromString(BLOB_ID), resource.blobId());
     assertTrue(resource.isUnderResourcesRoot());
@@ -112,7 +112,8 @@ class VfsPathTest {
         IllegalArgumentException.class,
         () -> VfsPath.parse("vfs:/sessions/" + hexSessionId.toUpperCase()));
     assertThrows(IllegalArgumentException.class, () -> VfsPath.parse("vfs:/unknown/x"));
-    assertThrows(IllegalArgumentException.class, () -> VfsPath.parse("vfs:/resources/not-a-uuid"));
+    assertThrows(
+        IllegalArgumentException.class, () -> VfsPath.parse("resource://files/not-a-uuid"));
     // C0（含 TAB）、DEL 与 C1 不可见控制字符一律在解析期拒绝，避免显示与写入不一致。
     assertThrows(
         IllegalArgumentException.class,

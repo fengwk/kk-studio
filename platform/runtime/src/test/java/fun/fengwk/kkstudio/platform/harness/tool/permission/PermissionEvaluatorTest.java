@@ -198,7 +198,7 @@ class PermissionEvaluatorTest {
             .action());
     assertEquals(
         PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"vfs:/resources/abc\"}", settings).action());
+        evaluateRaw(WRITE, "{\"path\":\"resource://files/abc\"}", settings).action());
     assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings).action());
   }
 

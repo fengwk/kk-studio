@@ -14,7 +14,7 @@ Usage:
 - To continue, call `read` again with that next position (`offset` is its line, and `column_offset` is its column when it is not 1).
 - Use `read` on directories instead of `bash ls`. Directories keep their own listing format, also paged by `offset`/`limit`.
 - `path` is an absolute path on the target Environment's file system, or one of exactly two complete `vfs:` URI forms:
-  - `vfs:/resources/<blobId>`: a session resource, for example an externalized tool output. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window, and `grep` accepts local paths only and does not resolve `vfs:` URIs. A supported media resource (image, audio, video, or PDF) may be returned to you as the actual media content when the current model and provider protocol allow it; when it cannot be delivered, the call fails with an explicit error instead of returning a path or a description.
+  - `resource://files/<blobId>`: a session resource, for example an externalized tool output. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window, and `grep` accepts local paths only and does not resolve `vfs:` URIs. A supported media resource (image, audio, video, or PDF) may be returned to you as the actual media content when the current model and provider protocol allow it; when it cannot be delivered, the call fails with an explicit error instead of returning a path or a description.
   - `vfs:/skills/<package>/<skill>/<relativePath>`: a published skill file.
 - Local paths must be absolute. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
 
@@ -23,7 +23,7 @@ Examples:
 - `read({ path: "/srv/project/services/api/src/example.ts", offset: 120, limit: 40 })`
 - `read({ path: "/srv/project/src/bundle.js", offset: 1, column_offset: 60001 })`
 - `read({ path: "vfs:/skills/review/checklist/SKILL.md" })`
-- `read({ path: "vfs:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f", offset: 1, limit: 2000 })`
+- `read({ path: "resource://files/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f", offset: 1, limit: 2000 })`
 - `read({ path: "/var/log/app.log", offset: 120, limit: 40 })`
 - `read({ path: "/srv/project" })`
 - `read({ path: "C:/src/project/src/" })`

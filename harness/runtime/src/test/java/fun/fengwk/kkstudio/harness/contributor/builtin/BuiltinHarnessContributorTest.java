@@ -315,7 +315,7 @@ class BuiltinHarnessContributorTest {
     assertFalse(descriptor.description().contains("workdir"));
     if ("read".equals(toolName)) {
       // read 的模型提示词必须声明两种 vfs: 只读形态，避免模型猜测不存在的路径。
-      assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
+      assertTrue(descriptor.description().contains("resource://files/<uuid>"));
       assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
     }
 

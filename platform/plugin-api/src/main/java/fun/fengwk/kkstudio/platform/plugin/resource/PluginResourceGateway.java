@@ -34,7 +34,7 @@ public interface PluginResourceGateway {
    * 某个环境变量或线程局部状态。
    *
    * @param sessionId 本次调用所属会话；实现据此鉴权
-   * @param resourceUri {@code vfs:/resources/<blobId>} 形式的会话 Resource URI
+   * @param resourceUri {@code resource://files/<uuid>} 形式的会话 Resource URI
    * @throws PluginResourceUnavailableException 会话缺失、当前 Session 无权访问、Resource 已删除或无法签发下载
    */
   URI resolveSessionResource(UUID sessionId, String resourceUri);

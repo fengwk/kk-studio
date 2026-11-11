@@ -23,7 +23,7 @@ import java.util.UUID;
 /**
  * 媒体输入解析与生成结果暂存。
  *
- * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code vfs:/resources/<blobId>}」。公开 URL 原样交给
+ * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code resource://files/<blobId>}」。公开 URL 原样交给
  * Provider；{@code vfs:} 资源必须经 {@link PluginResourceGateway} 解析成受控短期 HTTPS 地址，因此 Plugin 自己从不读取
  * Resource 字节，也不会把 Session 凭据或本地路径交给第三方。
  *
@@ -34,7 +34,7 @@ import java.util.UUID;
  */
 public final class MiniMaxMavisResourceAccess {
 
-  private static final String SESSION_RESOURCE_SCHEME = "vfs:";
+  private static final String SESSION_RESOURCE_SCHEME = "resource:";
 
   /** 单次调用最多暂存的媒体数量；超出的响应视为对静态 Tool 契约的违背。 */
   private static final int MAX_STAGED_MEDIA = 8;

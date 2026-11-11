@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
@@ -31,12 +31,10 @@ import java.util.function.Consumer;
 /**
  * 逐调用路由的文件工具：{@code read}、{@code write}、{@code edit}、{@code grep}、{@code find}。
  *
- * <p>工具层面不固定执行位置，声明 {@link ToolRequirements#routed()}：每次调用的 {@code path} 以 {@code vfs:} 开头时走
- * Platform VFS（{@link VfsGateway}，不绑定、不等待 Environment），否则走分支绑定的 {@link BoundEnvironment} 上同名
- * capability。
+ * <p>工具层面不固定执行位置，声明 {@link ToolRequirements#routed()}：{@code read} 的 {@code resource://} 路径由
+ * Platform 读取，其他路径交给绑定的 {@link BoundEnvironment}。
  *
- * <p>无 Environment 绑定时传入非 {@code vfs:} 路径是派发前的确定性拒绝：返回「未执行」，并提示改用 {@code vfs:} 路径。错误文案统一由 builtin
- * 层补足纠正指引：环境执行失败的文案若尚未带执行事实，则声明结果不确定，绝不声称未执行。
+ * <p>无 Environment 时本地路径返回明确的 needs an Environment 错误。错误文案统一由 builtin 层补足纠正指引。
  */
 public final class FileTool implements Tool {
 
@@ -54,7 +52,7 @@ public final class FileTool implements Tool {
 
   private final String name;
   private final Operation operation;
-  private final VfsGateway vfsGateway;
+  private final ResourceReadGateway resourceReadGateway;
   private final EnvironmentCapabilityDescriptor capability;
   private final ToolDescriptor descriptor;
 
@@ -64,10 +62,10 @@ public final class FileTool implements Tool {
       String promptResource,
       EnvironmentCapabilityId capabilityId,
       ToolSideEffect sideEffect,
-      VfsGateway vfsGateway) {
+      ResourceReadGateway resourceReadGateway) {
     this.name = Objects.requireNonNull(name, "name");
     this.operation = Objects.requireNonNull(operation, "operation");
-    this.vfsGateway = Objects.requireNonNull(vfsGateway, "vfsGateway");
+    this.resourceReadGateway = Objects.requireNonNull(resourceReadGateway, "resourceReadGateway");
     this.capability = EnvironmentCapabilityCatalog.require(capabilityId);
     this.descriptor =
         new ToolDescriptor(
@@ -112,8 +110,12 @@ public final class FileTool implements Tool {
     JsonNode arguments = ToolArguments.parse(request.call().argumentsJson());
     String path = ToolArguments.text(arguments, "path");
 
-    if (path != null && path.startsWith("vfs:")) {
-      return new ToolOutcome(vfs(request, progress));
+    if (path != null && path.startsWith("resource://")) {
+      if (operation != Operation.READ) {
+        return new ToolOutcome(
+            ToolResult.error(request.call().id(), "resource URIs are read-only"));
+      }
+      return new ToolOutcome(resourceReadGateway.read(request, progress));
     }
 
     Optional<BoundEnvironment> environment = environment(request);
@@ -123,44 +125,23 @@ public final class FileTool implements Tool {
     return new ToolOutcome(withGuidance(environment.get().execute(capability, request, progress)));
   }
 
-  private ToolResult vfs(ToolExecutionRequest request, Consumer<ToolResult> progress)
-      throws InterruptedException {
-    return switch (operation) {
-      case READ -> vfsGateway.read(request, progress);
-      case WRITE -> vfsGateway.write(request, progress);
-      case EDIT -> vfsGateway.edit(request, progress);
-      case FIND -> vfsGateway.find(request, progress);
-      case GREP -> vfsGateway.grep(request, progress);
-    };
-  }
-
   private static Optional<BoundEnvironment> environment(ToolExecutionRequest request) {
     ToolExecutionContext context = request.context();
     return context == null ? Optional.empty() : context.environment();
   }
 
-  /** 无环境时非 {@code vfs:} 路径不派发：明确未执行，并给出两条可执行路径。 */
+  /** 无环境时本地路径不派发，返回可理解的明确错误。 */
   private ToolResult noEnvironment(ToolExecutionRequest request) {
-    String sessionHint = sessionHint(request);
     return new ToolResult(
         request.call().id(),
         List.of(
             new TextResultContent(
                 ToolErrorGuidance.message(
-                    "No Environment is bound in the execution context",
+                    "This operation needs an Environment",
                     ExecutionFact.NOT_EXECUTED,
-                    "Use a vfs:/sessions/"
-                        + sessionHint
-                        + "/ path, or select an Environment for the branch and call "
-                        + name
-                        + " again"))),
+                    "Select an Environment for the branch and call " + name + " again"))),
         true,
         "{}");
-  }
-
-  private static String sessionHint(ToolExecutionRequest request) {
-    ToolExecutionContext context = request.context();
-    return context == null ? "<sessionId>" : context.rootSessionId().toString();
   }
 
   /** 只包装终止错误结果：保留原 toolCallId/details，替换为三段式纠正文案。 */
