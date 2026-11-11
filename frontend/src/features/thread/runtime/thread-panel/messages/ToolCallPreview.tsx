@@ -3,6 +3,8 @@ import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messa
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import './tool-card.css'
 
+const BASH_LEADING_FIELDS = ['command', 'workdir', 'timeout_seconds']
+
 /**
  * 共享 mutation 审查组件：对话记录与审批卡片使用同一份数据。
  *
@@ -39,10 +41,12 @@ export function ToolCallPreview({
     } catch {
       return <div className="thread-tool-approval-unreadable">{t('ai.interaction.unreadableArguments')}</div>
     }
-    const entries = toolName?.trim().toLowerCase() === 'bash'
-      ? ['command', 'workdir', 'timeout_seconds', 'timeout_ms', 'timeout']
-        .filter((key) => key in fields).map((key) => [key, fields[key]] as const)
-      : Object.entries(fields)
+    // 审批前用户必须看到将要执行的全部参数；bash 只把最关键的字段排在前面。
+    const leading = toolName?.trim().toLowerCase() === 'bash' ? BASH_LEADING_FIELDS : []
+    const entries = [
+      ...leading.filter((key) => key in fields).map((key) => [key, fields[key]] as const),
+      ...Object.entries(fields).filter(([key]) => !leading.includes(key)),
+    ]
     if (entries.length === 0) return null
     return (
       <dl className="thread-tool-approval-fields">
@@ -51,7 +55,7 @@ export function ToolCallPreview({
           const long = text.length > 320
           return (
             <div className="thread-tool-approval-field" key={key}>
-              <dt>{key.startsWith('timeout') ? 'timeout' : key}</dt>
+              <dt>{key}</dt>
               <dd>{long ? (
                 <details>
                   <summary>{text.slice(0, 160)}…</summary>
