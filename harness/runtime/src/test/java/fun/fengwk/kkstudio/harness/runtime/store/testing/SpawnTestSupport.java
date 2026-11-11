@@ -161,7 +161,9 @@ public final class SpawnTestSupport {
       SpawnRequest.Continuation continuation,
       boolean yoloEnabled,
       Ticket ticket) {
-    boolean notify = ticket.delivery() == JoinDelivery.NOTIFY_PARENT;
+    boolean subagent =
+        ticket.delivery() == JoinDelivery.NOTIFY_PARENT
+            || ticket.delivery() == JoinDelivery.SETTLE_TOOL_RESULT;
     BranchSettings agentSettings =
         new BranchSettings(ticket.agent(), settings.execution(), settings.environmentName());
     return new SpawnRequest(
@@ -170,13 +172,13 @@ public final class SpawnTestSupport {
         agentSettings,
         commands,
         ticket.parentThreadId(),
-        notify ? ticket.parentHeadEntryId() : null,
+        subagent ? ticket.parentHeadEntryId() : null,
         continuation,
         yoloEnabled,
         ThreadConstraints.NONE,
         ticket.delivery() == JoinDelivery.SETTLE_OWNER_TURN
             ? SpawnTrigger.RUNTIME
-            : notify ? SpawnTrigger.MODEL_TOOL : SpawnTrigger.CONTROLLER,
+            : subagent ? SpawnTrigger.MODEL_TOOL : SpawnTrigger.CONTROLLER,
         ticket.delivery(),
         new SpawnRequest.Budget(
             ticket.maxTurns(),

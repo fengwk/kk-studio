@@ -8,6 +8,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
@@ -30,9 +32,8 @@ import java.util.function.Consumer;
 /**
  * 以普通 durable Harness Thread 运行隔离 Subagent 的内部 {@code task} 工具适配器。
  *
- * <p>本工具只有「持久接受」一个阶段：把 arguments 归一化为 {@link SubagentTaskRequest} 交给 {@link
- * SubagentRunner}，接受成功后立即用一次 tool_result 回执英文自然语言接受正文（首行 {@code Task accepted. thread_id:
- * <uuid>.}，并说明异步完成/失败/取消、独立工作/让出与继续方式），然后结束。执行不等待子任务终态，子执行结清后由运行时把结果作为父 Thread 的一条独立消息交付。
+ * <p>本工具以内部 {@code async=false} 委派任务，并等待 Join 冻结结果后才返回对应
+ * tool_result。等待发生在独立工具执行线程中，不占用事务或调度线程；并发批次仍由父 Thread 的 Work 状态机统一结算。
  *
  * <p>参数被拒或 Runner 抛异常都收敛为错误结果，绝不抛出。
  */
@@ -100,15 +101,25 @@ public final class TaskTool implements Tool {
                   TASK_CONTINUATION_NEXT_ACTION)));
     }
     try {
-      SubagentTaskAcceptance acceptance = runner.accept(taskRequest);
-      return new ToolOutcome(accepted(callId, taskRequest.subagentType(), acceptance));
+      SubagentTaskResult taskResult =
+          runner.run(
+              taskRequest,
+              false,
+              acceptance ->
+                  progress.accept(running(callId, taskRequest.subagentType(), acceptance)));
+      return new ToolOutcome(result(callId, taskRequest.subagentType(), taskResult));
     } catch (RuntimeException failure) {
-      // 接受是原子持久操作：提交结果不确定时绝不能声称「未创建」。
+      String detail = message(failure);
+      if (detail.contains("subagent concurrency quota exceeded")
+          || detail.contains("parent join quota exceeded")) {
+        detail = "not started: the subagent concurrency limit is reached; retry in a later batch";
+        return new ToolOutcome(error(callId, detail));
+      }
       return new ToolOutcome(
           error(
               callId,
               ToolErrorGuidance.message(
-                  message(failure), ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
+                  detail, ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
     }
   }
 
@@ -173,19 +184,68 @@ public final class TaskTool implements Tool {
     return text.strip();
   }
 
-  private ToolResult accepted(
+  private ToolResult running(
       String callId, String subagentType, SubagentTaskAcceptance acceptance) {
-    String text = SubagentTaskMessages.accepted(acceptance.childThreadId(), acceptance.replaced());
+    return statusResult(callId, subagentType, acceptance, "running", "Subagent is running.", false);
+  }
+
+  private ToolResult result(String callId, String subagentType, SubagentTaskResult taskResult) {
+    ThreadJoinReceipt receipt = taskResult.receipt();
+    if (receipt == null) {
+      throw new IllegalArgumentException("synchronous task result has no Join receipt");
+    }
+    boolean error = receipt.outcome() != ThreadJoinOutcome.COMPLETED;
+    String status =
+        switch (receipt.outcome()) {
+          case COMPLETED -> "completed";
+          case ERROR -> "failed";
+          case CANCELLED -> "cancelled";
+        };
+    String text =
+        switch (receipt.outcome()) {
+          case COMPLETED -> receipt.report();
+          case ERROR -> failureText("Subagent failed", receipt);
+          case CANCELLED -> failureText("Subagent cancelled", receipt);
+        };
+    if (!error && (text == null || text.isBlank())) {
+      status = "failed";
+      error = true;
+      text = "Subagent ended without a final answer.";
+    }
+    return statusResult(callId, subagentType, taskResult.acceptance(), status, text, error);
+  }
+
+  private ToolResult statusResult(
+      String callId,
+      String subagentType,
+      SubagentTaskAcceptance acceptance,
+      String status,
+      String text,
+      boolean error) {
     ObjectNode details = objectMapper.createObjectNode();
-    details.put("kind", "task.accepted");
-    // details 与即时回执表达同一份事实：thread_id / status 与 text 一致，其余是 UI 需要的会话与幂等元数据。
+    details.put("kind", "task.result");
     details.put("thread_id", acceptance.childThreadId().toString());
-    details.put("status", "accepted");
+    details.put("status", status);
     details.put("session_id", acceptance.childSessionId().toString());
     details.put("subagent_type", subagentType);
     details.put("replayed", acceptance.replayed());
-    details.put("replaced", acceptance.replaced());
-    return new ToolResult(callId, List.of(new TextResultContent(text)), false, details.toString());
+    return new ToolResult(
+        callId,
+        List.of(new TextResultContent(text == null ? "" : text)),
+        error,
+        details.toString());
+  }
+
+  private static String failureText(String prefix, ThreadJoinReceipt receipt) {
+    StringBuilder text = new StringBuilder(prefix).append(": ");
+    text.append(
+        receipt.error() == null || receipt.error().isBlank()
+            ? "no reason provided"
+            : receipt.error());
+    if (receipt.partialResult() != null && !receipt.partialResult().isBlank()) {
+      text.append("\nPartial result:\n").append(receipt.partialResult());
+    }
+    return text.toString();
   }
 
   private static ToolResult error(String callId, String message) {

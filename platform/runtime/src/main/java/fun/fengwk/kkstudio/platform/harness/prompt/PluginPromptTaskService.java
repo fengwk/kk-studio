@@ -101,6 +101,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
             null,
             null,
             false,
+            true,
             new SpawnRequest.Budget(null, 1, 1, Integer.MAX_VALUE),
             command.requestHash()));
     return taskId;

@@ -92,7 +92,7 @@ describe('ToolMessageBlock shell', () => {
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
   })
 
-  it('waits statically for the frozen environment and task success only means accepted', () => {
+  it('waits statically for the frozen environment and uses invocation state without a task receipt', () => {
     const { container, rerender } = render(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'bash', invocationStatus: 'READY',
       requiredEnvironmentId: 'environment-frozen', requiredEnvironmentName: 'archlinux',
@@ -103,8 +103,7 @@ describe('ToolMessageBlock shell', () => {
     rerender(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'task', invocationStatus: 'SUCCEEDED',
     })} />)
-    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 委派已受理')
-    expect(screen.queryByText('· 委派已受理')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 成功')
     expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
   })
 
@@ -1123,6 +1122,35 @@ describe('ToolMessageBlock per-tool bodies', () => {
     await user.click(expandButton()!)
     expect(screen.getByText('first task prompt')).toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-preview')).not.toContainElement(link)
+  })
+
+  it('shows synchronous task completion, report, and child navigation', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={message({
+            phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'SUCCEEDED',
+            arguments: JSON.stringify({ subagent_type: 'coder', prompt: 'finish the work' }),
+          })}
+          result={message({
+            phase: 'result', toolName: 'task', rendererKey: 'task',
+            details: {
+              kind: 'task.result', status: 'completed',
+              thread_id: '00000000-0000-0000-0000-000000000002',
+            },
+            contents: [text('subagent report')],
+          })}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 已完成')
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    await user.click(expandButton()!)
+    expect(screen.getByText('subagent report')).toBeInTheDocument()
   })
 
   it('shows streaming task arguments once and retains collapse across completed arguments', async () => {

@@ -194,7 +194,7 @@ class SpawnRequestTest {
 
   @Test
   void enforcesDeliveryParentAndHeadConsistency() {
-    // RECEIPT_ONLY 只能无父；NOTIFY_PARENT 与 SETTLE_OWNER_TURN 必须有父。
+    // RECEIPT_ONLY 只能无父；两种子任务交付与 SETTLE_OWNER_TURN 都必须有父。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -238,7 +238,7 @@ class SpawnRequestTest {
                 List.of(command(42, "notify-without-parent")),
                 HASH));
 
-    // 只有 NOTIFY_PARENT 携带父 head。
+    // 两种子任务交付都必须携带父 head；owner 结算与 root receipt 不携带。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -253,6 +253,33 @@ class SpawnRequestTest {
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(43, "notify-without-head")),
                 HASH));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            request(
+                SESSION,
+                null,
+                PARENT,
+                null,
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                JoinDelivery.SETTLE_TOOL_RESULT,
+                SpawnRequest.Budget.unlimited(),
+                List.of(command(46, "sync-without-head")),
+                HASH));
+    SpawnRequest synchronous =
+        request(
+            SESSION,
+            null,
+            PARENT,
+            HEAD,
+            false,
+            SpawnTrigger.MODEL_TOOL,
+            JoinDelivery.SETTLE_TOOL_RESULT,
+            SpawnRequest.Budget.unlimited(),
+            List.of(command(47, "sync-with-head")),
+            HASH);
+    assertEquals(HEAD, synchronous.expectedParentHeadEntryId());
     assertThrows(
         IllegalArgumentException.class,
         () ->

@@ -648,7 +648,7 @@ create table harness_thread_join (
     constraint fk_harness_thread_join_superseded_by foreign key (superseded_by_invocation_id)
         references harness_thread_join (invocation_id),
     constraint ck_harness_thread_join_delivery_kind check (
-        delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
+        delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'SETTLE_TOOL_RESULT', 'RECEIPT_ONLY')
     ),
     constraint ck_harness_thread_join_request_hash check (
         request_hash ~ '^[0-9a-f]{64}$'
