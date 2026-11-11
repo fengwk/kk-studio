@@ -441,7 +441,7 @@ class DatabaseProviderResolutionServiceTest {
     try {
       return new ProviderReplayState(
           format,
-          new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, GENERATION_ID, "model"),
+          new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, "model"),
           JsonMapper.builder()
               .build()
               .readTree("{\"output\":[{\"type\":\"opaque-" + format.name() + "\"}]}"));

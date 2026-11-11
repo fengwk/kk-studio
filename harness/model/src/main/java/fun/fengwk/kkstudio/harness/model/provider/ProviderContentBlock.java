@@ -8,6 +8,8 @@ public sealed interface ProviderContentBlock
         ProviderAudioBlock,
         ProviderVideoBlock,
         ProviderThinkingBlock,
+        ProviderRedactedThinkingBlock,
+        ProviderOpaqueBlock,
         ProviderJsonBlock,
         ProviderToolCallBlock,
         ProviderToolResultBlock,

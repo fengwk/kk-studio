@@ -1361,8 +1361,7 @@ class ProviderResourceMaterializerTest {
     try {
       return new ProviderReplayState(
           format,
-          new ProviderReplayAffinity(
-              ProviderType.OPENAI, "test-provider", new UUID(0L, 9L), "test-model"),
+          new ProviderReplayAffinity(ProviderType.OPENAI, "test-provider", "test-model"),
           JsonMapper.builder().build().readTree(payload));
     } catch (JacksonException error) {
       throw new IllegalStateException(error);

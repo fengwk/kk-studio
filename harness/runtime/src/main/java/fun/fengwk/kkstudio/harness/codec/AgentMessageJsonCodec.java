@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
@@ -27,6 +29,10 @@ import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -45,9 +51,10 @@ import java.util.UUID;
  * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
  * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。encode 端同样严格校验 raw JSON 字段。
  *
- * <p>durable 内容类型恰为 6 类：text / thinking / json / tool_call / tool_result / resource（resource 是唯一
- * durable 媒体引用：blobId/name/totalBytes/totalLines/preview）。瞬时 Provider 投影类型 Image / Audio / Video（携带
- * attempt-only source）在 encode 与 decode 两端都确定性拒绝，绝不进入持久化 JSON。
+ * <p>durable 内容类型包含 text / thinking / redacted_thinking / json / tool_call / tool_result /
+ * resource（resource 是唯一 durable 媒体引用：blobId/name/totalBytes/totalLines/preview）。Assistant block
+ * 可携带其 Provider 身份与原生字段。瞬时 Provider 投影类型 Image / Audio / Video（携带 attempt-only source）在 encode 与
+ * decode 两端都确定性拒绝，绝不进入持久化 JSON。
  *
  * <p>String API 与 node API 都用于组合 codec（如 Entry payload / Thread command payload codec）。
  */
@@ -59,7 +66,16 @@ public final class AgentMessageJsonCodec {
 
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
   private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
+  private static final Set<String> TEXT_NATIVE_FIELDS =
+      orderedSet("type", "text", "providerBlockData");
   private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
+  private static final Set<String> THINKING_NATIVE_FIELDS =
+      orderedSet("type", "text", "providerBlockData");
+  private static final Set<String> REDACTED_THINKING_FIELDS = orderedSet("type", "data");
+  private static final Set<String> REDACTED_THINKING_NATIVE_FIELDS =
+      orderedSet("type", "data", "providerBlockData");
+  private static final Set<String> NATIVE_BLOCK_FIELDS =
+      orderedSet("type", "blockType", "providerBlockData");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
       orderedSet(
@@ -70,6 +86,16 @@ public final class AgentMessageJsonCodec {
           "argumentsJson",
           "historyAction",
           "environmentName");
+  private static final Set<String> TOOL_CALL_NATIVE_FIELDS =
+      orderedSet(
+          "type",
+          "toolCallId",
+          "toolName",
+          "rendererKey",
+          "argumentsJson",
+          "historyAction",
+          "environmentName",
+          "providerBlockData");
   private static final Set<String> TOOL_RESULT_FIELDS =
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
@@ -157,6 +183,7 @@ public final class AgentMessageJsonCodec {
       case TextMessageContent value -> {
         node.put("type", "text");
         node.put("text", value.text());
+        putProviderBlockData(node, value.providerBlockData());
       }
       case ImageMessageContent value -> throw new IllegalArgumentException(
           "image content is transient (provider projection only) and must never be persisted");
@@ -164,9 +191,20 @@ public final class AgentMessageJsonCodec {
           "audio content is transient (provider projection only) and must never be persisted");
       case VideoMessageContent value -> throw new IllegalArgumentException(
           "video content is transient (provider projection only) and must never be persisted");
+      case NativeAssistantBlockContent value -> {
+        node.put("type", "provider_native");
+        node.put("blockType", value.blockType());
+        putProviderBlockData(node, value.providerBlockData());
+      }
       case ThinkingMessageContent value -> {
         node.put("type", "thinking");
         node.put("text", value.text());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case RedactedThinkingMessageContent value -> {
+        node.put("type", "redacted_thinking");
+        node.put("data", value.data());
+        putProviderBlockData(node, value.providerBlockData());
       }
       case JsonMessageContent value -> {
         // Encode 端也必须严格校验 raw JSON value。
@@ -183,6 +221,7 @@ public final class AgentMessageJsonCodec {
         node.put("argumentsJson", value.argumentsJson());
         putNullableText(node, "historyAction", value.historyAction());
         putNullableText(node, "environmentName", value.environmentName());
+        putProviderBlockData(node, value.providerBlockData());
       }
       case ToolResultMessageContent value -> {
         validateStrictJsonObject(value.detailsJson(), "content.detailsJson");
@@ -226,13 +265,25 @@ public final class AgentMessageJsonCodec {
     String type = typeNode.stringValue();
     return switch (type) {
       case "text" -> {
-        requireFields(node, TEXT_FIELDS, "content");
+        requireContentFields(node, TEXT_FIELDS, TEXT_NATIVE_FIELDS);
         // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
-        yield new TextMessageContent(requiredTextAllowEmpty(node, "text", "content"));
+        yield new TextMessageContent(
+            requiredTextAllowEmpty(node, "text", "content"), decodeProviderBlockData(node));
       }
       case "thinking" -> {
-        requireFields(node, THINKING_FIELDS, "content");
-        yield new ThinkingMessageContent(requiredTextAllowEmpty(node, "text", "content"));
+        requireContentFields(node, THINKING_FIELDS, THINKING_NATIVE_FIELDS);
+        yield new ThinkingMessageContent(
+            requiredTextAllowEmpty(node, "text", "content"), decodeProviderBlockData(node));
+      }
+      case "redacted_thinking" -> {
+        requireContentFields(node, REDACTED_THINKING_FIELDS, REDACTED_THINKING_NATIVE_FIELDS);
+        yield new RedactedThinkingMessageContent(
+            requiredTextAllowEmpty(node, "data", "content"), decodeProviderBlockData(node));
+      }
+      case "provider_native" -> {
+        requireFields(node, NATIVE_BLOCK_FIELDS, "content");
+        yield new NativeAssistantBlockContent(
+            requiredText(node, "blockType", "content"), decodeProviderBlockData(node));
       }
       case "json" -> {
         requireFields(node, JSON_FIELDS, "content");
@@ -240,14 +291,15 @@ public final class AgentMessageJsonCodec {
         yield new JsonMessageContent(rawJson);
       }
       case "tool_call" -> {
-        requireFields(node, TOOL_CALL_FIELDS, "content");
+        requireContentFields(node, TOOL_CALL_FIELDS, TOOL_CALL_NATIVE_FIELDS);
         yield new ToolCallMessageContent(
             requiredText(node, "toolCallId", "content"),
             requiredText(node, "toolName", "content"),
             requiredText(node, "rendererKey", "content"),
             requiredStrictJsonObjectString(node, "argumentsJson", "content"),
             nullableText(node, "historyAction", "content"),
-            nullableText(node, "environmentName", "content"));
+            nullableText(node, "environmentName", "content"),
+            decodeProviderBlockData(node));
       }
       case "tool_result" -> {
         requireFields(node, TOOL_RESULT_FIELDS, "content");
@@ -285,6 +337,51 @@ public final class AgentMessageJsonCodec {
               + type
               + " (attachment and media content are transient and cannot be persisted)");
     };
+  }
+
+  private static void putProviderBlockData(ObjectNode node, ProviderBlockData data) {
+    if (data == null) {
+      return;
+    }
+    ObjectNode providerData = node.putObject("providerBlockData");
+    providerData.put("protocol", data.protocol().wireValue());
+    ObjectNode affinity = providerData.putObject("affinity");
+    affinity.put("providerType", data.affinity().providerType().wireValue());
+    affinity.put("providerName", data.affinity().providerName());
+    affinity.put("modelId", data.affinity().modelId());
+    providerData.set("nativeFields", data.nativeFields());
+  }
+
+  private static ProviderBlockData decodeProviderBlockData(ObjectNode node) {
+    if (!node.has("providerBlockData")) {
+      return null;
+    }
+    ObjectNode data = requireObject(node.get("providerBlockData"), "content.providerBlockData");
+    requireFields(
+        data, orderedSet("protocol", "affinity", "nativeFields"), "content.providerBlockData");
+    ProviderReplayFormat protocol = ProviderReplayFormat.fromWireValue(text(data, "protocol"));
+    ObjectNode affinity = requireObject(data.get("affinity"), "content.providerBlockData.affinity");
+    requireFields(
+        affinity,
+        orderedSet("providerType", "providerName", "modelId"),
+        "content.providerBlockData.affinity");
+    ProviderType providerType;
+    try {
+      providerType = ProviderType.fromWireValue(text(affinity, "providerType"));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unsupported provider type", error);
+    }
+    ProviderReplayAffinity providerAffinity =
+        new ProviderReplayAffinity(
+            providerType,
+            requiredText(affinity, "providerName", "content.providerBlockData.affinity"),
+            requiredText(affinity, "modelId", "content.providerBlockData.affinity"));
+    return new ProviderBlockData(protocol, providerAffinity, data.get("nativeFields"));
+  }
+
+  private static void requireContentFields(
+      ObjectNode node, Set<String> fields, Set<String> fieldsWithNativeData) {
+    requireFields(node, node.has("providerBlockData") ? fieldsWithNativeData : fields, "content");
   }
 
   // ---------- 原始 JSON 严格校验（编码与解码共享） ----------

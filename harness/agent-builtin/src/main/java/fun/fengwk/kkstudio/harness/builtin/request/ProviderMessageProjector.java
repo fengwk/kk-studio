@@ -4,6 +4,8 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
@@ -13,6 +15,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -224,7 +228,8 @@ public final class ProviderMessageProjector {
 
   private static ProviderToolCallBlock toolCallBlock(ToolCallMessageContent call) {
     return new ProviderToolCallBlock(
-        new ProviderToolCall(call.toolCallId(), call.toolName(), call.argumentsJson()));
+        new ProviderToolCall(call.toolCallId(), call.toolName(), call.argumentsJson()),
+        call.providerBlockData());
   }
 
   /** 动态围栏：反引号数取 {@code max(3, 内容中最长反引号连续段 + 1)}，不带语言标识，因此逐字 payload 中的反引号与空白都不会被 误读。 */
@@ -254,12 +259,18 @@ public final class ProviderMessageProjector {
 
   private ProviderContentBlock projectContent(AgentMessageContent content) {
     if (content instanceof TextMessageContent value) {
-      return new ProviderTextBlock(value.text());
+      return new ProviderTextBlock(value.text(), value.providerBlockData());
     }
     // durable history 绝不携带 Image/Audio/Video 瞬时内容（AgentMessageJsonCodec 拒绝）；媒体只在
     // Provider attempt 物化（ProviderResourceMaterializer）时由 resource 块投影为 media 块。
     if (content instanceof ThinkingMessageContent value) {
-      return new ProviderThinkingBlock(value.text());
+      return new ProviderThinkingBlock(value.text(), value.providerBlockData());
+    }
+    if (content instanceof RedactedThinkingMessageContent value) {
+      return new ProviderRedactedThinkingBlock(value.data(), value.providerBlockData());
+    }
+    if (content instanceof NativeAssistantBlockContent value) {
+      return new ProviderOpaqueBlock(value.blockType(), value.providerBlockData());
     }
     if (content instanceof JsonMessageContent value) {
       return new ProviderJsonBlock(value.json());

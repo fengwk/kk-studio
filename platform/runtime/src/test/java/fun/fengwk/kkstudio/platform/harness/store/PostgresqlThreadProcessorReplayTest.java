@@ -169,10 +169,7 @@ class PostgresqlThreadProcessorReplayTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
             new ProviderReplayAffinity(
-                request.providerType(),
-                request.model().providerName(),
-                request.providerConnectionGenerationId(),
-                request.model().modelId()),
+                request.providerType(), request.model().providerName(), request.model().modelId()),
             JsonNodeFactory.instance
                 .objectNode()
                 .put("role", "assistant")

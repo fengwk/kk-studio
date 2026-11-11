@@ -1444,8 +1444,7 @@ class EntryPathTest {
   private static ProviderReplayState sampleReplayState() {
     return new ProviderReplayState(
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 9L), "claude-3-5-sonnet"),
+        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 

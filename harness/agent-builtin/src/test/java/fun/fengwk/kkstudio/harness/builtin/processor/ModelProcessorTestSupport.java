@@ -1015,8 +1015,7 @@ abstract class ModelProcessorTestSupport {
   static ProviderReplayState sampleReplayState() {
     return new ProviderReplayState(
         ProviderReplayFormat.OPENAI_RESPONSES,
-        new ProviderReplayAffinity(
-            ProviderType.OPENAI_RESPONSES, "provider-a", UUID.randomUUID(), "model-a"),
+        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "provider-a", "model-a"),
         JsonNodeFactory.instance.objectNode().put("token", 42));
   }
 

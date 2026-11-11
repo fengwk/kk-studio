@@ -881,8 +881,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     functionCall.put("thoughtSignature", "gemini-function-call-signature");
     return new ProviderReplayState(
         ProviderReplayFormat.GEMINI_CONTENT,
-        new ProviderReplayAffinity(
-            ProviderType.GOOGLE, "google", new UUID(0L, 88L), "gemini-3.8-flash"),
+        new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
         payload);
   }
 }

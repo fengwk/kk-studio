@@ -1462,8 +1462,7 @@ class ModelExecutionStreamFlushTest {
   private static ProviderReplayState sampleReplayState() {
     return new ProviderReplayState(
         ProviderReplayFormat.OPENAI_RESPONSES,
-        new ProviderReplayAffinity(
-            ProviderType.OPENAI_RESPONSES, "minimax", new UUID(0L, 63L), "minimax-m2"),
+        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "minimax", "minimax-m2"),
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 

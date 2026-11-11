@@ -122,11 +122,7 @@ class ProviderReplayStateCarrierSerializationTest {
     payload.putArray("stop_sequences").add("human:");
     return new ProviderReplayState(
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC,
-            "anthropic",
-            UUID.fromString("11111111-2222-3333-4444-555555555555"),
-            "claude-3-5-sonnet"),
+        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
         payload);
   }
 }

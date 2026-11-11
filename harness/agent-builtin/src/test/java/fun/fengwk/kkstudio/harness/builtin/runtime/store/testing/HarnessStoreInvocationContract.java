@@ -208,8 +208,7 @@ public abstract class HarnessStoreInvocationContract {
     functionCall.put("thoughtSignature", "gemini-function-call-signature");
     return new ProviderReplayState(
         ProviderReplayFormat.GEMINI_CONTENT,
-        new ProviderReplayAffinity(
-            ProviderType.GOOGLE, "google", UUID.randomUUID(), "gemini-3.8-flash"),
+        new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
         payload);
   }
 

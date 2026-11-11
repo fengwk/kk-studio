@@ -23,6 +23,22 @@ public record AgentMessage(AgentMessageRole role, List<AgentMessageContent> cont
         && (contents.size() != 1 || !(contents.get(0) instanceof ToolResultMessageContent))) {
       throw new IllegalArgumentException("tool messages must contain exactly one tool result");
     }
+    if (role != AgentMessageRole.ASSISTANT
+        && contents.stream().anyMatch(AgentMessage::hasProviderBlockData)) {
+      throw new IllegalArgumentException(
+          "provider block data is only allowed on assistant messages");
+    }
+  }
+
+  private static boolean hasProviderBlockData(AgentMessageContent content) {
+    return switch (content) {
+      case TextMessageContent value -> value.providerBlockData() != null;
+      case ThinkingMessageContent value -> value.providerBlockData() != null;
+      case RedactedThinkingMessageContent value -> value.providerBlockData() != null;
+      case NativeAssistantBlockContent value -> value.providerBlockData() != null;
+      case ToolCallMessageContent value -> value.providerBlockData() != null;
+      default -> false;
+    };
   }
 
   public static AgentMessage user(String text) {

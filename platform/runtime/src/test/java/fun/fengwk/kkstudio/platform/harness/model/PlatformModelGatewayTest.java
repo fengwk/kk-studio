@@ -424,8 +424,7 @@ class PlatformModelGatewayTest {
     var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
     return new ProviderReplayState(
         ProviderReplayFormat.GEMINI_CONTENT,
-        new ProviderReplayAffinity(
-            ProviderType.GOOGLE, "google", CONNECTION_GENERATION_ID, "gemini-3.8-flash"),
+        new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
         payload);
   }
 

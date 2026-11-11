@@ -47,7 +47,6 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -144,8 +143,7 @@ class AssistantHistoryFallbackWireTest {
     ProviderReplayState replay =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-synthetic"),
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-synthetic"),
             NODES.objectNode().put("k", "v"));
 
     AgentMessage assistant =

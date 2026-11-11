@@ -225,8 +225,7 @@ class HarnessRuntimeForkTest {
     ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", TestIds.id(700), "claude"),
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude"),
             JsonNodeFactory.instance.objectNode().put("k", "v"));
     UUID sessionId = TestIds.id(930);
     UUID threadId = TestIds.id(931);
