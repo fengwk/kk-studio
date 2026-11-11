@@ -137,13 +137,7 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 		defaultBash := "bash"
 		bash = &defaultBash
 	}
-	gateway := strings.TrimSuffix(studio, "/")
-	if strings.HasPrefix(gateway, "https:") {
-		gateway = "wss:" + strings.TrimPrefix(gateway, "https:")
-	} else {
-		gateway = "ws:" + strings.TrimPrefix(gateway, "http:")
-	}
-	gateway += "/ws/daemon"
+	gateway := gatewayURL(studio)
 	return DaemonConfig{EnvironmentID: env.EnvironmentID, ConfigVersion: int64(version), ConfigPath: path, DataDir: dataDir, TokenPath: filepath.Join(dataDir, "daemon.token"), StudioURL: studio, GatewayURL: gateway, BashExecutable: bash, BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath())}, nil
 }
 

@@ -12,6 +12,7 @@ type DaemonConfig struct {
 	BashExecutable        *string
 	BashExecutableSetting *string
 	LSP                   map[string]LSPServerConfig
+	LSPOrder              []string
 	ProxyURL              *string
 	DistributionDir       string
 }

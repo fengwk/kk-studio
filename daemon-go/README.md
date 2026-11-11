@@ -36,7 +36,7 @@ The runtime partition implements CLI parsing, `--help`, `--version`, read-only `
 | Package | Responsibility and boundary |
 |---|---|
 | `cmd/kk-studio-daemon` | Executable entry point and CLI dispatch only. |
-| `internal/config` | Configuration boundary and daemon release version. |
+| `internal/config` | Startup configuration checks, environment snapshot validation, and daemon release version. |
 | `internal/protocol` | Generated protobuf messages; schema is `control.proto`, never edit generated Go directly. |
 | `internal/transport` | Network control channel, IDE data routing, and resource clients; implements runtime connection/resource ports and consumes IDE's view resolver. |
 | `internal/runtime` | Session/capability orchestration and contracts consumed by feature packages and implemented by transport. |
