@@ -60,11 +60,13 @@ describe('ThreadDisclosure', () => {
       })} />,
     )
     const header = container.querySelector('.thread-disclosure-header')
+    const main = header?.querySelector('.thread-disclosure-header-main')
     const text = header?.querySelector('.thread-disclosure-header-text.is-clamped')
     const actions = header?.querySelector('.thread-disclosure-actions')
 
-    expect(header).toHaveClass('thread-disclosure-header')
-    expect(header?.firstElementChild).toBe(text)
+    expect(header?.firstElementChild).toBe(main)
+    // 首行留白在外层首行盒，clamp 节点只包文本。
+    expect(main?.firstElementChild).toBe(text)
     expect(actions).toHaveClass('thread-disclosure-actions')
     expect(actions?.parentElement).toBe(header)
     expect(header?.querySelector('.thread-disclosure-toggle')).not.toBeNull()

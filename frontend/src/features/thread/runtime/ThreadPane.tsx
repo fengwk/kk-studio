@@ -31,8 +31,6 @@ export interface ThreadPaneLabels {
 
 /** 只读 Thread 视图的可选交互：仅根面板的 Debug 预检需要。 */
 export interface ThreadPaneActivityInput {
-  working: boolean
-  workingLabel?: string
   actionError?: string | null
   onDismissActionError?: () => void
   /** EXIT_PENDING + RUNNABLE 时把“停止并处理”接到现有 Stop 流程；只读视图可不提供。 */

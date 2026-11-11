@@ -50,6 +50,11 @@ describe('thread disclosure style contracts', () => {
     const clamped = rule(/\.thread-disclosure-header-text\.is-clamped\s*\{[^}]*\}/)
     expect(clamped).toContain('-webkit-box-orient: vertical')
     expect(clamped).toContain('overflow: hidden')
+    // 28px 首行盒 = 20px 行高 + 上下 4px，留白在外层，不能加到 clamp 节点上多露一行。
+    const main = rule(/\.thread-disclosure-header-main\s*\{[^}]*\}/)
+    expect(main).toContain('padding: 4px 0')
+    expect(main).toContain('line-height: 20px')
+    expect(clamped).not.toContain('padding')
 
     const preview = rule(/\.thread-disclosure-preview,[\s\S]*?\.thread-disclosure-body\s*\{[^}]*\}/)
     expect(preview).toContain('border-top: 1px solid var(--border)')

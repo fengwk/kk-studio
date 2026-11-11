@@ -149,14 +149,17 @@ export function ThreadDisclosure({
       title={label}
     >
       <div className="thread-disclosure-header">
-        <div
-          ref={headerRef}
-          className={`thread-disclosure-header-text${expanded ? '' : ' is-clamped'}`}
-          style={expanded
-            ? undefined
-            : { WebkitLineClamp: HEADER_COLLAPSED_LINES } as CSSProperties}
-        >
-          {header}
+        {/* 外层是 28px 首行盒（上下留白）；内层只负责文本截断，留白不进入 clamp 节点。 */}
+        <div className="thread-disclosure-header-main">
+          <div
+            ref={headerRef}
+            className={`thread-disclosure-header-text${expanded ? '' : ' is-clamped'}`}
+            style={expanded
+              ? undefined
+              : { WebkitLineClamp: HEADER_COLLAPSED_LINES } as CSSProperties}
+          >
+            {header}
+          </div>
         </div>
         {actions != null ? <div className="thread-disclosure-actions">{actions}</div> : null}
         {canToggle ? (

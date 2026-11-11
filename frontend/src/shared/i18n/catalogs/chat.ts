@@ -1155,10 +1155,6 @@ export const chatCatalog = {
     'en-US': 'There is not yet evidence that this execution has exited',
     'zh-CN': '尚未取得该执行已退出的证据',
   },
-  'ai.runtime.thread.stopExitUnconfirmed': {
-    'en-US': 'There is not yet evidence that this execution has exited',
-    'zh-CN': '尚未取得该执行已退出的证据',
-  },
   'ai.runtime.unconfirmedExecutions.title': {
     'en-US': 'Unconfirmed executions',
     'zh-CN': '未确认退出执行',

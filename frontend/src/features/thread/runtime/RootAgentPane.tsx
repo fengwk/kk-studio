@@ -183,7 +183,6 @@ export function RootAgentPane({
         projection={pane.controller}
         environments={environments}
         activity={{
-          working: pane.controller.working || pane.composer.pending,
           actionError: pane.error,
           onDismissActionError,
           onStop: () => { void pane.controller.stopThread() },
