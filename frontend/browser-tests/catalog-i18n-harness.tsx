@@ -108,7 +108,6 @@ agentService.getSkillPackage = async (name: string) => {
   }
   return detail
 }
-agentService.listSkillPackageEnvironments = async () => []
 agentService.listSkillPackageFiles = async () => [
   { path: 'dev/SKILL.md', size: '2048' },
   { path: 'dev/scripts/run.sh', size: '64' },

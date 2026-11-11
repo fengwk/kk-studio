@@ -53,8 +53,8 @@ import java.util.stream.Stream;
 /**
  * Platform 技能包 Web REST API 的 HTTP 契约测试。
  *
- * <p>验证 {@code /api/platform/skill-packages} 下的列表、详情、Git 创建/编辑/检查/发布、归档下载、各环境同步状态与环境重新同步：创建发布当时解析出的
- * branch HEAD；检查只更新观察值；发布只接受该 version 展示过的 exact commit；陈旧卡片、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。
+ * <p>验证 {@code /api/platform/skill-packages} 下的列表、详情、Git 创建/编辑/检查/发布与归档下载：创建发布当时解析出的 branch
+ * HEAD；检查只更新观察值；发布只接受该 version 展示过的 exact commit；陈旧卡片、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。
  */
 @AutoConfigureMockMvc
 @Import(WebStorageS3TestConfiguration.class)
@@ -177,12 +177,6 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.filename").value(name + "-" + secondCommit + ".zip"))
         .andExpect(jsonPath("$.sha256").isNotEmpty())
         .andExpect(jsonPath("$.download.url").isNotEmpty());
-
-    // 环境同步状态按环境投影，新建包尚未安装。
-    mockMvc
-        .perform(get("/api/platform/skill-packages/{name}/environments", name))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$").isArray());
 
     // 陈旧卡片的删除必须冲突，命中当前 version 才删除。
     mockMvc
@@ -347,17 +341,6 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.skills[0].name").value("dev"))
         .andExpect(jsonPath("$.version").value("0"));
-  }
-
-  /** 测试意图：不存在环境的重新同步请求返回 404，而不是静默成功。 */
-  @Test
-  void resyncUnknownEnvironmentIsNotFound() throws Exception {
-    mockMvc
-        .perform(
-            post(
-                "/api/platform/environments/{environmentId}/resync-skills",
-                "00000000-0000-0000-0000-000000000001"))
-        .andExpect(status().isNotFound());
   }
 
   /** 测试意图：暂存归档是独立资源——id 在路径上以 UUID 解析，未知暂存 404、非 UUID 路径 400。 */

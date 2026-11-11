@@ -23,7 +23,6 @@ import { NameRenamePanel } from '@/features/thread/runtime/thread-panel/NameRena
 import { BranchGoalPanel } from '@/features/thread/runtime/thread-panel/BranchGoalPanel'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { useRootThreadControl } from '@/features/thread/runtime/useRootThreadControl'
-import { SkillEnvironmentHint } from '@/features/thread/runtime/SkillEnvironmentHint'
 import { type AgentPaneCapabilities, type AgentPaneDefaults, type BranchRequestInput, type PaneReport } from '@/features/thread/runtime/root-thread/types'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
@@ -166,17 +165,6 @@ export function RootAgentPane({
       environmentSwitchNotice,
     },
   }
-  // 技能可用性只由执行根生效的 Agent 与环境决定：未选择环境时技能走 vfs 路径，不需要提示；
-  // Debug 主视图接管 pane 时控制面整体隐藏，提示一并不展示。
-  const skillHint = debugActive ? null : (
-    <SkillEnvironmentHint
-      agentName={pane.activeDraft?.agentName ?? null}
-      environmentName={pane.activeDraft?.environmentName ?? null}
-      agents={agents}
-      environments={environments}
-    />
-  )
-
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
       <ThreadPane
@@ -200,16 +188,13 @@ export function RootAgentPane({
         controls={boundThreadId == null
           ? null
           : (
-            <>
-              {skillHint}
-              <RootThreadControlArea
+            <RootThreadControlArea
                 rootThreadId={boundThreadId}
                 composer={composer}
                 messages={pane.controller.timeline.messages}
                 queuedMessages={pane.controller.timeline.queuedMessages}
                 hidden={debugActive}
               />
-            </>
           )}
         views={{
           mainView: pane.boundViews.mainView,
@@ -237,16 +222,13 @@ export function RootAgentPane({
         }}
         mainView={pane.boundViews.mainView}
         controls={(
-          <>
-            {skillHint}
-            <RootThreadControlArea
+          <RootThreadControlArea
               rootThreadId={null}
               composer={composer}
               messages={pane.draftTimeline.messages}
               queuedMessages={[]}
               hidden={debugActive}
             />
-          </>
         )}
         activity={{
           working: false,

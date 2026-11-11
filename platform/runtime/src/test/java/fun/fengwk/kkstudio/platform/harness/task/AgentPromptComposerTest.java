@@ -73,7 +73,7 @@ class AgentPromptComposerTest {
     assertFalse(rendered.contains("[environment]"), rendered);
   }
 
-  /** 无环境但有技能与子 Agent：技能路径保持 vfs:/skills，委派说明与清单出现。 */
+  /** 技能只按配置顺序提供名称与描述，委派说明与清单出现。 */
   @Test
   void rendersSkillsAndSubagentsWithoutEnvironment() {
     AgentPromptInput input =
@@ -85,7 +85,9 @@ class AgentPromptComposerTest {
             List.of(new SubagentBinding("explorer", "Read-only repository exploration.")));
 
     String rendered = assertGolden("skills-subagents.golden", input);
-    assertTrue(rendered.contains("<path>vfs:/skills/agent-tools/dev/SKILL.md</path>"), rendered);
+    assertTrue(rendered.contains("<name>dev</name>"), rendered);
+    assertTrue(rendered.contains("<description>Development conventions.</description>"), rendered);
+    assertFalse(rendered.contains("<path>"), rendered);
     assertTrue(rendered.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), rendered);
   }
 
@@ -190,7 +192,7 @@ class AgentPromptComposerTest {
   }
 
   private static SkillPromptEntry skill(String name, String description) {
-    return new SkillPromptEntry(name, description, "vfs:/skills/agent-tools/" + name + "/SKILL.md");
+    return new SkillPromptEntry(name, description);
   }
 
   private String assertGolden(String name, AgentPromptInput input) {

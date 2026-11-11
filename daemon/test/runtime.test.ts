@@ -45,9 +45,6 @@ import {
   ResourceContentSchema,
   ResourceUploadTicketSchema,
   SettingsSchema,
-  SkillPackageSchema,
-  SkillPackageStateSchema,
-  SkillSyncSchema,
   TemporaryResourcePolicySchema,
   TextContentSchema,
   UpdatePhase,
@@ -56,7 +53,6 @@ import {
   UpdateResultSchema,
   type Content,
   type Envelope,
-  type SkillPackage,
 } from '../src/generated/control_pb.js'
 import { Runtime } from '../src/runtime.js'
 import type { TemporaryResourceSweeper, UpdatePort, UpdateProgressReporter } from '../src/runtime-ports.js'
@@ -2831,8 +2827,8 @@ describe('runtime connection management', () => {
       await waitFor(() => setup.runtime.getState() === 'READY')
       expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
       expect(
-        setup.runtime.sendSkillState([create(SkillPackageStateSchema, { packageName: 'demo' })]),
-      ).toBe(true)
+        setup.runtime.getJournal().find('inv-goaway')?.state,
+      ).toBe('RUNNING')
       expect(sent(setup.transport).some((envelope) => envelope.invocationId === 'ide-goaway')).toBe(false)
 
       agentGate.resolve()
@@ -2970,55 +2966,6 @@ describe('runtime protocol version and scope', () => {
     await handshake(setup)
     setup.transport.receive(serverMessage('CANCEL', { environmentId: OTHER_ENV, invocationId: 'inv-scope' }))
     await waitFor(() => lastErrorMessage(setup.transport)?.includes('does not match daemon') === true)
-    setup.runtime.close()
-  })
-
-  /** SKILL_STATE 是在线状态帧：只有 READY 且已绑定时才有明确的接收环境。 */
-  it('sends SKILL_STATE only while a READY bound connection exists', async () => {
-    const setup = buildRuntime()
-    const packages = [create(SkillPackageStateSchema, { packageName: 'demo' })]
-    expect(setup.runtime.sendSkillState(packages)).toBe(false)
-    await handshake(setup)
-    expect(setup.runtime.sendSkillState(packages)).toBe(true)
-    const state = setup.transport.sent.filter((envelope) => envelope.messageType === MessageType.SKILL_STATE).at(-1)
-    expect(state?.environmentId).toBe(ENV)
-    expect(state?.payload.case === 'skillState' ? state.payload.value.packages[0]?.packageName : undefined).toBe('demo')
-
-    setup.transport.disconnect()
-    await waitFor(() => setup.runtime.getState() === 'DISCONNECTED')
-    expect(setup.runtime.sendSkillState(packages)).toBe(false)
-    setup.runtime.close()
-  })
-
-  it('routes SKILL_SYNC to the reconciler only on a READY bound connection', async () => {
-    const setup = buildRuntime()
-    const desired: SkillPackage[][] = []
-    setup.runtime.setSkillReconciler({
-      onDesiredSet(packages) {
-        desired.push(packages)
-      },
-    })
-    const syncEnvelope = (packages: SkillPackage[]): Envelope =>
-      create(EnvelopeSchema, {
-        messageType: MessageType.SKILL_SYNC,
-        environmentId: ENV,
-        payload: { case: 'skillSync', value: create(SkillSyncSchema, { packages }) },
-      })
-
-    setup.runtime.start()
-    await waitFor(() => setup.transport.connection !== null)
-    setup.transport.receive(syncEnvelope([]))
-    await waitFor(
-      () => lastErrorMessage(setup.transport)?.includes('SKILL_SYNC requires a READY bound connection') === true,
-    )
-
-    setup.transport.receive(serverMessage('SETTINGS', {}))
-    setup.transport.receive(serverMessage('ENVIRONMENT_CONFIG', { environmentId: ENV, payload: { version: 0 } }))
-    await waitFor(() => setup.runtime.getState() === 'READY')
-    const pkg = create(SkillPackageSchema, { packageName: 'demo', sha256: 'a'.repeat(64) })
-    setup.transport.receive(syncEnvelope([pkg]))
-    await waitFor(() => desired.length === 1)
-    expect(desired[0]).toEqual([pkg])
     setup.runtime.close()
   })
 })

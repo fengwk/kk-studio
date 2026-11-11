@@ -16,8 +16,6 @@ import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -59,11 +57,8 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
         .andExpect(jsonPath("$.tools[1].name").value("bash"))
         .andExpect(jsonPath("$.tools[1].state").value("FILTERED"))
         .andExpect(jsonPath("$.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
-        .andExpect(jsonPath("$.skills[0].delivery").value("PLATFORM"))
-        .andExpect(jsonPath("$.skills[0].headCommit").value(nullValue()))
         .andExpect(jsonPath("$.subagents[0].name").value("coder"))
         .andExpect(jsonPath("$.subagents[0].tools[0]").value("read"))
-        .andExpect(jsonPath("$.subagents[0].skills[0].packageName").value("pkg"))
         .andExpect(jsonPath("$.subagents[0].subagents[0]").value("nested"))
         .andExpect(jsonPath("$.subagents[0].configuration.tools[0]").value("read"))
         .andExpect(jsonPath("$.tools[0].inputSchema.type").value("object"))
@@ -184,27 +179,11 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
     filtered.setState(LiveTurnPlan.ToolState.FILTERED);
     filtered.setFilterReason(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);
 
-    HarnessModelRequestDebugDTO.SkillDTO skill = new HarnessModelRequestDebugDTO.SkillDTO();
-    skill.setPackageName("test-package");
-    skill.setName("dev");
-    skill.setDescription("dev description");
-    skill.setPath("vfs:/skills/test-package/dev/SKILL.md");
-    skill.setDelivery(SkillPromptResolution.Delivery.PLATFORM);
-    skill.setPackageVersion("0123456789abcdef0123456789abcdef01234567");
-    skill.setHeadCommit(null);
-    skill.setArtifactSha256("a".repeat(64));
-    skill.setInstalledSha256(null);
-    skill.setPromptXml("  <skill>");
-
     HarnessModelRequestDebugDTO.SubagentDTO subagent =
         new HarnessModelRequestDebugDTO.SubagentDTO();
     subagent.setName("coder");
     subagent.setDescription("Codes solutions.");
     subagent.setTools(List.of("read"));
-    SkillRefDTO skillReference = new SkillRefDTO();
-    skillReference.setPackageName("pkg");
-    skillReference.setName("sk");
-    subagent.setSkills(List.of(skillReference));
     subagent.setSubagents(List.of("nested"));
     subagent.setConfiguration(JsonValues.readTree("{\"tools\":[\"read\"]}"));
 
@@ -224,7 +203,6 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
     debug.setEnvironmentName(null);
     debug.setSystemInstruction("system instruction");
     debug.setTools(List.of(sent, filtered));
-    debug.setSkills(List.of(skill));
     debug.setSubagents(List.of(subagent));
     debug.setCacheControl(cacheControl);
     debug.setPlanningError(null);

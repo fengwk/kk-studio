@@ -407,7 +407,7 @@ System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environmen
 
 `session_dir` 固定使用执行根所在会话，`thread_dir` 在同一会话下使用当前 Thread；子 Agent 不会因为自身运行在独立会话而得到不同的 VFS 根。执行根会话由 Builtin Driver 在调用 `TurnResolver` 前从根 Thread 行解析并作为显式参数传入，preview 与 debug 规划复用同一入口。
 
-当执行根未选择 Environment 时，`[skills]` 使用 `vfs:/skills/<package>/<skill>/SKILL.md`。当已选择 Environment 时，只有同步投影证明该 Package 的当前工件摘要已精确安装，技能才进入 prompt 并使用 Daemon 本地稳定路径；未安装、摘要不一致或安装失败时该技能不写入 system prompt，结构化交付事实仍保留给界面解释。
+`[skills]` 按 Agent 配置顺序列出技能名称与描述，不包含文件路径、交付方式、摘要或 Environment 安装状态。
 
 ## 严格 JSON 契约
 

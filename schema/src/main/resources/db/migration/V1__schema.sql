@@ -176,7 +176,6 @@ create table environment_connection (
     lease_token     uuid           not null,
     status          varchar(32)    not null,
     ready_metadata  jsonb,
-    skill_state     jsonb          not null default '[]'::jsonb,
     recent_events   jsonb          not null default '[]'::jsonb,
     last_seen_at    timestamptz(3) not null,
     lease_until     timestamptz(3) not null,
@@ -187,9 +186,6 @@ create table environment_connection (
     ),
     constraint ck_environment_connection_ready_metadata check (
         ready_metadata is null or jsonb_typeof(ready_metadata) = 'object'
-    ),
-    constraint ck_environment_connection_skill_state check (
-        jsonb_typeof(skill_state) = 'array'
     ),
     constraint ck_environment_connection_recent_events check (
         jsonb_typeof(recent_events) = 'array'
@@ -205,8 +201,7 @@ comment on column environment_connection.owner_node_id is '当前持有该连接
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
 comment on column environment_connection.ready_metadata is '最近一次被接受的 READY 宿主 metadata（daemonVersion + hostInfo JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
-comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
-comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
+comment on column environment_connection.recent_events is '最近 200 条连接运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据或签名地址';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
 comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
 

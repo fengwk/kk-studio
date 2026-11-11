@@ -43,13 +43,11 @@ import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -125,7 +123,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
     }
   }
 
-  /** 测试意图：状态、事件与 Skill 投影成功时通知，心跳和 0 行围栏静默。 */
+  /** 测试意图：状态与事件成功时通知，心跳和 0 行围栏静默。 */
   @Test
   void fencedConnectionWritesNotifyOnlyWhenTheyWrite() throws Exception {
     try (EnvironmentChannelListener listener = listen()) {
@@ -139,7 +137,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
           new EnvironmentEvent(
               Instant.now(),
               EnvironmentEvent.LEVEL_INFO,
-              EnvironmentEvent.TYPE_SKILL_SYNC_STARTED,
+              EnvironmentEvent.TYPE_READY,
               "notify fencing test");
 
       assertFalse(
@@ -159,7 +157,6 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertTrue(afterHeartbeat.lastSeenAt().isAfter(beforeHeartbeat.lastSeenAt()));
       assertEquals(beforeHeartbeat.status(), afterHeartbeat.status());
       assertEquals(beforeHeartbeat.readyMetadata(), afterHeartbeat.readyMetadata());
-      assertEquals(beforeHeartbeat.skillState(), afterHeartbeat.skillState());
       assertEquals(beforeHeartbeat.recentEvents(), afterHeartbeat.recentEvents());
       listener.assertSilent();
 
@@ -167,17 +164,6 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       listener.assertSilent();
       assertTrue(environmentRegistry.recordEvent(DEV, token, skillEvent));
       listener.assertNotification(DEV.toString());
-
-      assertFalse(
-          environmentRegistry.replaceSkillState(DEV, UUID.randomUUID(), List.of(), skillEvent));
-      listener.assertSilent();
-      List<EnvironmentSkillState> installed =
-          List.of(
-              EnvironmentSkillState.installed(
-                  "dev", "0123456789abcdef".repeat(4), "/home/dev/skills/dev"));
-      assertTrue(environmentRegistry.replaceSkillState(DEV, token, installed, skillEvent));
-      listener.assertNotification(DEV.toString());
-      assertEquals(installed, environmentRegistry.find(DEV).orElseThrow().skillState());
 
       assertFalse(environmentRegistry.runtimeStatusChanged(DEV, UUID.randomUUID()));
       listener.assertSilent();
@@ -220,7 +206,6 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertFalse(environmentRegistry.runtimeStatusChanged(DEV, reconnected));
       assertFalse(environmentRegistry.disconnect(DEV, reconnected, LEASE_DURATION));
       assertFalse(environmentRegistry.recordEvent(DEV, reconnected, skillEvent));
-      assertFalse(environmentRegistry.replaceSkillState(DEV, reconnected, List.of(), skillEvent));
       listener.assertSilent();
     }
   }

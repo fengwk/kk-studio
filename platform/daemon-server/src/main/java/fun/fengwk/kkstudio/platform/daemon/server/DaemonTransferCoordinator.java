@@ -186,9 +186,7 @@ final class DaemonTransferCoordinator {
         if (put.headers() != null) {
           putBuilder.putAllHeaders(put.headers());
         }
-        if (put.expiresAt() != null) {
-          putBuilder.setExpiresAt(put.expiresAt().toString());
-        }
+        putBuilder.setExpiresAtEpochMs(put.expiresAtEpochMs());
         builder.setPresignedPut(putBuilder.build());
       }
       case DaemonResourceTicketService.Ticket.Ready ready -> {

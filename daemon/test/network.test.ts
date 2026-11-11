@@ -289,7 +289,7 @@ describe('outbound network integration', () => {
     cleanups.push(proxy.close, origin.close)
     await withNetwork(null, async (_network, runtime) => {
       const put = createHttpPutObject()
-      const ticket = { method: 'PUT', url: origin.url, headers: {}, expiresAt: '2030-01-01T00:00:00.000Z' }
+      const ticket = { method: 'PUT', url: origin.url, headers: {}, expiresAtEpochMs: 1893456000000n }
       const upload = () => put(ticket, new Uint8Array([1]), new AbortController().signal)
       await upload()
       expect(proxy.requests).toHaveLength(0)
@@ -386,7 +386,7 @@ describe('outbound network integration', () => {
             method: 'PUT',
             url: `http://127.0.0.1:${port}/signed?X-Amz-Signature=SECRETQUERY`,
             headers: { 'content-type': 'application/octet-stream' },
-            expiresAt: '2030-01-01T00:00:00.000Z',
+            expiresAtEpochMs: 1893456000000n,
           },
           new Uint8Array([1, 2, 3]),
           new AbortController().signal,

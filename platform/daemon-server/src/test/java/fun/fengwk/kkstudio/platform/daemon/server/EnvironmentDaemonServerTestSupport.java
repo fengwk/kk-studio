@@ -1045,7 +1045,8 @@ final class EnvironmentDaemonServerTestSupport {
             new DaemonPresignedPut(
                 "PUT",
                 "https://storage.invalid/uploads/" + uploadId,
-                Map.of("If-None-Match", "*")));
+                Map.of("If-None-Match", "*"),
+                Long.MAX_VALUE));
       }
       return new Ticket.Ready(request.transferId());
     }

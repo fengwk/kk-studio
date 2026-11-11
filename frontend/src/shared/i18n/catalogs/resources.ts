@@ -1384,34 +1384,6 @@ export const resourcesCatalog = {
     'en-US': 'Loading agent references...',
     'zh-CN': '正在读取 Agent 引用...',
   },
-  'ai.skillPackages.environmentSync': {
-    'en-US': 'Environment Sync',
-    'zh-CN': '环境同步',
-  },
-  'ai.skillPackages.environmentSyncFailed': {
-    'en-US': 'Sync failed on {{names}}',
-    'zh-CN': '以下环境同步失败：{{names}}',
-  },
-  'ai.skillPackages.noEnvironments': {
-    'en-US': 'No registered environments',
-    'zh-CN': '暂无已注册环境',
-  },
-  'ai.skillPackages.sync.SYNCED': {
-    'en-US': 'In sync',
-    'zh-CN': '已同步',
-  },
-  'ai.skillPackages.sync.FAILED': {
-    'en-US': 'Sync failed',
-    'zh-CN': '同步失败',
-  },
-  'ai.skillPackages.sync.PENDING': {
-    'en-US': 'Pending',
-    'zh-CN': '待同步',
-  },
-  'ai.skillPackages.resync': {
-    'en-US': 'Resync',
-    'zh-CN': '重新同步',
-  },
   'ai.skillPackages.downloadArchive': {
     'en-US': 'Download Archive',
     'zh-CN': '下载归档',

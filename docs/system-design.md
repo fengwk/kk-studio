@@ -31,7 +31,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L1 共享 | [`common`](../common/pom.xml) | 值契约：领域错误、严格 JSON、URI 编码、资源引用、结果内容、输入 Schema、Work 状态 |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
-| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理来自所属卡片；在线更新调用官方安装器 |
+| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP 与 IDE 服务；代理来自所属卡片；在线更新调用官方安装器 |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
@@ -298,7 +298,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 `EnvironmentDaemonServer` 同时实现 `DaemonSessions`、`EnvironmentTunnels` 与 harness 的
 `EnvironmentCapabilityTransport`，由组合根装配进 harness；平台环境管理经它的开放接口与租约持久化端口工作。会话以
 `(environment_id, owner_node_id, lease_token)` 围栏推进状态：READY、HEARTBEAT 与断开只接受当前租约，心跳只续租
-不发布通知，状态、宿主信息、技能投影与运维事件的围栏写与 `environment_changed` 在同一事务提交。
+不发布通知，状态、宿主信息与运维事件的围栏写与 `environment_changed` 在同一事务提交。
 
 ### 插件 SPI
 
@@ -360,12 +360,7 @@ vfs:/
   工作区。上传渠道沿用预签名上传，服务端读取原始压缩包后走同一个构建器。
 - 预览与发布：构建结果作为暂存上传保留给用户预览；发布在短事务内校验乐观锁与 Agent 引用、切换当前版本并释放旧
   归档；取消或超期的暂存对象由存储清理回收。配置导入导出只包含 Git 渠道的包，上传的包可在详情页下载归档备份。
-- 同步：平台的技能对账按环境串行执行，期望集合是全部当前归档的摘要与预签名下载地址，经控制消息下发；连接就绪、
-  发布或删除、通知重建与手动重新同步都会触发，同一环境运行期间的新触发合并为结束后再跑一次。平台不轮询，也不在
-  组装 Prompt 时等待安装。
-- Daemon 回报 `{packageName, installedSha256, localPath, error}`，平台把它写回该连接的 `skill_state` 投影。
-- Prompt 路径：执行根未选择 Environment 时使用 `vfs:` 路径；已选择 Environment 且 Daemon 安装摘要与当前
-  artifact 一致时给出本地绝对路径，否则该 Skill 不进入 system prompt。
+- Agent 的系统提示按技能配置顺序列出名称与描述。技能内容通过 Platform 按需读取，不推送到 Environment。
 
 ## 产品纵向切片
 
@@ -408,11 +403,10 @@ WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 
 环境身份由不可变 name 与内部 UUID 共同表达：name 创建后不变，UUID 用于连接、Work、安装目录与服务定位。
 `environment` 行保存 `note` 与完整 `daemon_config`（`studioUrl`、`bashExecutable`、`lsp`、`proxyUrl`），
 `version` 既是 CAS 版本也是配置快照版本；每次显式保存都推进版本并发布 `environment_changed`。
-`environment_connection` 同时承载路由租约、连接状态、`ready_metadata`（Daemon 版本与宿主信息）、技能投影与
-运维事件窗口；`cluster_node` 记录节点身份与存活。READY、HEARTBEAT 与断开都以
-`(environment_id, owner_node_id, lease_token)` 为围栏，心跳只续租，只有状态、宿主信息、技能状态与运维事件真正
-变化时才发布 `environment_changed`。READY 会清空 `skill_state`，随后由技能对账全量重建；自然到期没有数据库写
-事件，由读取时按截止点判定。
+`environment_connection` 同时承载路由租约、连接状态、`ready_metadata`（Daemon 版本与宿主信息）与运维事件窗口；
+`cluster_node` 记录节点身份与存活。READY、HEARTBEAT 与断开都以
+`(environment_id, owner_node_id, lease_token)` 为围栏，心跳只续租，状态、宿主信息与运维事件真正变化时才发布
+`environment_changed`。自然到期没有数据库写事件，由读取时按截止点判定。
 
 配置与连接状态是两个事实：READY 只说明当前进程已应用过某份配置并完成注册。owner 在初始控制流、READY 后核对、
 `environment_changed` 通知与心跳对账时读取权威版本，向 Daemon 下发完整 `ENVIRONMENT_CONFIG` 快照；Daemon 应用
@@ -426,12 +420,12 @@ WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 
 
 ### 控制面与主机能力
 
-Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf（控制协议 v3）
+Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf（控制协议 v4）
 Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
 `CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
 （`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
 `UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`ENVIRONMENT_CONFIG`、
-`RUNTIME_STATUS`、`ERROR`，以及技能对账的 `SKILL_SYNC` 与 `SKILL_STATE`。
+`RUNTIME_STATUS`、`ERROR`。
 
 能力目录由 harness 定义、Daemon 实现：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、`PROCESS_EXEC`、
 `FS_GREP`、`FS_FIND`、三个 LSP 能力。每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
@@ -442,14 +436,9 @@ Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED
 大文本落在 Daemon 本地并回传有界 tail，Agent 分页读取；资源上传由平台分配预签名 PUT，Daemon 直连 S3 上传后提交，
 重试只重放同一 transfer。
 
-### 技能安装
+### Agent 技能
 
-Daemon 逐个处理期望集合内的包：摘要与本地标记一致就跳过；否则边下载边计算摘要（超过声明大小立即中止），校验后解压
-到暂存目录（校验条目数、解压总量、路径与条目类型），写入摘要标记文件，再用两次改名替换正式目录，最后删除 ZIP 与
-备份。不在集合中的包只在带标记时删除。对账单飞执行，运行期间到达的新集合合并为下一轮，同一包的操作串行。
-
-替换期间读取不会看到解压一半的内容，但两次改名之间正式路径会短暂不存在；Windows 上文件被占用时替换失败，旧版本
-保留并把失败状态上报平台。
+Agent 的系统提示按配置顺序列出所选技能的名称与描述。技能内容由 Platform 按需读取，不依赖 Environment 的安装状态或推送同步。
 
 ### IDE 服务
 
@@ -477,7 +466,7 @@ Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_
 Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量，也不查询操作系统代理；只支持无认证的
 `http://host:port`，没有隐式直连回退或自动系统代理探测。
 
-- 卡片代理的生效范围是该 Daemon 的出站请求（S3、技能下载、更新安装器下载）与控制 WS/WSS。控制连接与普通请求
+- 卡片代理的生效范围是该 Daemon 的出站请求（S3 与更新安装器下载）及控制 WS/WSS。控制连接与普通请求
   使用同一策略；代理不可达会使执行端失联，恢复方式是恢复网络后接收修正，或修正卡片后重新安装。
 - Bash、LSP、code-server 与 IDE 终端保留宿主真实环境，不注入卡片代理；code-server/bridge 的 loopback 使用
   专用直连通道。
@@ -502,7 +491,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
 
 - 接受阶段校验 owner 与目标，物化附件，冻结本回合设置。Session 拥有 append-only Entry Tree，Thread 保存 head、
   命令 cursor、控制状态与单调 version，命令邮箱与 Work 在同一事务登记。
-- system prompt 由平台在回合解析时组装：Agent 正文、当前环境、可用技能与 task/subagent 说明按实际注入的工具与
+- system prompt 由平台在回合解析时组装：Agent 正文、当前环境、已配置技能的名称与描述及 task/subagent 说明按实际注入的工具与
   目录快照生成，模板由 `PromptRenderer` 以严格 section 渲染；未注入的内容不出现，日期等易变信息不进入固定文案。
 - 流式输出在当前 execution 内有界聚合并推送有损 delta；checkpoint、重试与终态在短事务中复验 attempt 与 Work
   所有权，提交后才发布 realtime 事件。

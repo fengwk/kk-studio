@@ -8,7 +8,7 @@ import java.util.Set;
  * Environment {@code recent_events} 中的单条运维事件投影。
  *
  * <p>事件只记录结构化、去敏的运行事实：{@code message} 必须是程序构造的固定或严格受限文本，绝不承载 Daemon stdout、凭据、 带 userinfo 的 Git URL
- * 或签名地址。连接生命周期事件由 {@link EnvironmentRegistry} 的围栏 SQL 原子追加，Skill 同步事件由 Skill 同步编排器在同一围栏下写入。
+ * 或签名地址。连接生命周期事件由 {@link EnvironmentRegistry} 的围栏 SQL 原子追加。
  */
 public record EnvironmentEvent(Instant time, String level, String type, String message) {
 
@@ -19,10 +19,6 @@ public record EnvironmentEvent(Instant time, String level, String type, String m
   public static final String TYPE_CONNECTING = "CONNECTING";
   public static final String TYPE_READY = "READY";
   public static final String TYPE_DISCONNECTED = "DISCONNECTED";
-  public static final String TYPE_SKILL_SYNC_STARTED = "SKILL_SYNC_STARTED";
-  public static final String TYPE_SKILL_SYNC_SUCCEEDED = "SKILL_SYNC_SUCCEEDED";
-  public static final String TYPE_SKILL_SYNC_FAILED = "SKILL_SYNC_FAILED";
-  public static final String TYPE_SKILL_STATE_UPDATED = "SKILL_STATE_UPDATED";
   public static final String TYPE_UPDATE_FAILED = "UPDATE_FAILED";
 
   /** 事件说明的字符上限。 */
@@ -30,15 +26,7 @@ public record EnvironmentEvent(Instant time, String level, String type, String m
 
   private static final Set<String> LEVELS = Set.of(LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR);
   private static final Set<String> TYPES =
-      Set.of(
-          TYPE_CONNECTING,
-          TYPE_READY,
-          TYPE_DISCONNECTED,
-          TYPE_SKILL_SYNC_STARTED,
-          TYPE_SKILL_SYNC_SUCCEEDED,
-          TYPE_SKILL_SYNC_FAILED,
-          TYPE_SKILL_STATE_UPDATED,
-          TYPE_UPDATE_FAILED);
+      Set.of(TYPE_CONNECTING, TYPE_READY, TYPE_DISCONNECTED, TYPE_UPDATE_FAILED);
 
   public EnvironmentEvent {
     time = Objects.requireNonNull(time, "time");

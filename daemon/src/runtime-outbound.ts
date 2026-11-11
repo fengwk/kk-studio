@@ -6,7 +6,6 @@ import type {
   IdeResult,
   Progress,
   RuntimeSnapshot,
-  SkillPackageState,
   UpdateResult,
 } from './generated/control_pb.js'
 import {
@@ -18,7 +17,6 @@ import {
   ReadySchema,
   RecoverNotFoundSchema,
   RuntimeStatusSchema,
-  SkillStateSchema,
   StartedSchema,
 } from './generated/control_pb.js'
 import type { TerminalMessage } from './journal.js'
@@ -173,24 +171,6 @@ export class OutboundControl {
         environmentId: this.boundEnvironmentId,
         invocationId,
         payload: { case: 'recoverNotFound', value: create(RecoverNotFoundSchema, {}) },
-      }),
-    )
-  }
-
-  sendSkillState(packages: SkillPackageState[]): boolean {
-    if (!this.canSend) {
-      return false
-    }
-    return this.send(
-      create(EnvelopeSchema, {
-        messageType: MessageType.SKILL_STATE,
-        environmentId: this.boundEnvironmentId ?? undefined,
-        payload: {
-          case: 'skillState',
-          value: create(SkillStateSchema, {
-            packages,
-          }),
-        },
       }),
     )
   }

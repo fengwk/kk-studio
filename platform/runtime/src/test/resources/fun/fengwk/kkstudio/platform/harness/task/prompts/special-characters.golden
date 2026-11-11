@@ -29,7 +29,6 @@ Paths inside a skill file are relative to the directory containing its SKILL.md.
   <skill>
     <name>a&amp;b</name>
     <description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>
-    <path>vfs:/skills/agent-tools/a&amp;b/SKILL.md</path>
   </skill>
 </available_skills>
 

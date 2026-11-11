@@ -1189,7 +1189,7 @@ describe('runtime resource upload control plane', () => {
             presignedPut: create(PresignedPutSchema, {
               method: 'PUT',
               url: 'https://s3.example.com/x',
-              expiresAt: '2030-01-01T00:00:00.000Z',
+              expiresAtEpochMs: 1893456000000n,
             }),
           }),
         },

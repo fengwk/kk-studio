@@ -26,8 +26,6 @@ import { processCapability } from './coding/process.js'
 import { createLspFacade, type LspFacade } from './coding/lsp.js'
 import type { PreparedEnvironmentConfig } from './environment-config.js'
 import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.js'
-import { SkillPackageInstaller } from './skill/installer.js'
-import { createSkillReconciler } from './skill/reconcile.js'
 import { createIdeService } from './ide/service.js'
 import { handleUpdate } from './installer.js'
 
@@ -173,11 +171,6 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
         },
       },
     })
-    const skillInstaller = SkillPackageInstaller.open(config)
-    const skillReconciler = createSkillReconciler(skillInstaller, (states) => {
-      runtime?.sendSkillState(states)
-    })
-    runtime.setSkillReconciler(skillReconciler)
 
     process.once('SIGINT', onDaemonSignal)
     process.once('SIGTERM', onDaemonSignal)

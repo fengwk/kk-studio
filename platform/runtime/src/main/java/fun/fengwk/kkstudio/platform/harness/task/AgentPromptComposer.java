@@ -76,9 +76,7 @@ public final class AgentPromptComposer {
   /** 渲染单个 Skill 在 {@code <available_skills>} 段中的精确 XML 片段（含段内缩进，不含尾部换行）。 */
   public static String skillFragment(SkillPromptEntry skill) {
     Objects.requireNonNull(skill, "skill");
-    return render(
-        "skill.md",
-        Map.of("name", skill.name(), "description", skill.description(), "path", skill.path()));
+    return render("skill.md", Map.of("name", skill.name(), "description", skill.description()));
   }
 
   private static Map<String, Object> harnessValues(

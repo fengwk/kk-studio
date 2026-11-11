@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
+import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 
 import java.util.List;
 import java.util.Set;
@@ -21,8 +21,8 @@ import java.util.UUID;
 /**
  * {@link LiveTurnPlan} 型不变量的契约测试。
  *
- * <p>这些不变量就是「预览不可能与真实请求漂移」与「Debug 只回显稳定 code」的形式化表达：候选顺序必须是「SENT 在前、FILTERED 在后」，状态与过滤原因必须一致，LOCAL
- * 交付必须建立在精确安装之上，拒绝必须自带稳定 code。任何违反都在构造期立即失败， 绝不留下半合法的计划。
+ * <p>这些不变量就是「预览不可能与真实请求漂移」与「Debug 只回显稳定 code」的形式化表达：候选顺序必须是「SENT 在前、FILTERED
+ * 在后」，状态与过滤原因必须一致，拒绝必须自带稳定 code。任何违反都在构造期立即失败，绝不留下半合法的计划。
  */
 class LiveTurnPlanTest {
 
@@ -81,23 +81,16 @@ class LiveTurnPlanTest {
         () -> new LiveTurnPlan.Planned(spec(), 0, List.of(), List.of()));
   }
 
-  /** 测试意图：LOCAL 交付只能建立在「已安装工件摘要与 artifactSha256 完全一致」之上，其余组合立即失败。 */
+  /** 测试意图：Skill 目录事实只包含 Agent 配置的名称、描述与 Package 版本。 */
   @Test
-  void localDeliveryRequiresTheExactInstalledSha256() {
-    String shaA = "a".repeat(64);
-    String shaB = "b".repeat(64);
-    assertEquals(
-        SkillPromptResolution.Delivery.LOCAL,
-        skill(SkillPromptResolution.Delivery.LOCAL, shaA, shaA).delivery());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> skill(SkillPromptResolution.Delivery.LOCAL, shaA, shaB));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> skill(SkillPromptResolution.Delivery.LOCAL, shaA, null));
-    assertEquals(
-        SkillPromptResolution.Delivery.PLATFORM,
-        skill(SkillPromptResolution.Delivery.PLATFORM, shaA, null).delivery());
+  void plannedSkillContainsOnlyCatalogPromptFacts() {
+    LiveTurnPlan.PlannedSkill skill = skill();
+    assertEquals("pkg", skill.packageName());
+    assertEquals("dev", skill.name());
+    assertEquals("description", skill.description());
+    assertEquals("v1", skill.packageVersion());
+    assertEquals("observed-head", skill.headCommit());
+    assertEquals(new SkillPromptEntry("dev", "description"), skill.promptEntry());
   }
 
   /** 测试意图：拒绝必须自带稳定 error code，缺失时立即失败，绝不产生无 code 的降级投影。 */
@@ -135,17 +128,7 @@ class LiveTurnPlanTest {
         filterReason);
   }
 
-  private static LiveTurnPlan.PlannedSkill skill(
-      SkillPromptResolution.Delivery delivery, String artifactSha256, String installedSha256) {
-    return new LiveTurnPlan.PlannedSkill(
-        "pkg",
-        "dev",
-        "description",
-        "path",
-        delivery,
-        "0123456789abcdef0123456789abcdef01234567",
-        "observed-head",
-        artifactSha256,
-        installedSha256);
+  private static LiveTurnPlan.PlannedSkill skill() {
+    return new LiveTurnPlan.PlannedSkill("pkg", "dev", "description", "v1", "observed-head");
   }
 }

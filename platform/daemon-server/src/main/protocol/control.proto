@@ -37,8 +37,8 @@ enum MessageType {
   IDE_RESULT = 22;
   IDE_LEASE = 23;
   ERROR = 24;
-  SKILL_SYNC = 25;
-  SKILL_STATE = 26;
+  RESOURCE_DOWNLOAD_REQUEST = 25;
+  RESOURCE_DOWNLOAD_TICKET = 26;
   ENVIRONMENT_CONFIG = 27;
 }
 
@@ -125,8 +125,8 @@ message Envelope {
     IdeResult ide_result = 25;
     IdeLease ide_lease = 26;
     Error error = 27;
-    SkillSync skill_sync = 28;
-    SkillState skill_state = 29;
+    ResourceDownloadRequest resource_download_request = 28;
+    ResourceDownloadTicket resource_download_ticket = 29;
     EnvironmentConfig environment_config = 30;
   }
 }
@@ -324,7 +324,28 @@ message PresignedPut {
   optional string method = 1;
   optional string url = 2;
   map<string, string> headers = 3;
-  optional string expires_at = 4;
+  optional int64 expires_at_epoch_ms = 4;
+}
+
+message PresignedGet {
+  optional string method = 1;
+  optional string url = 2;
+  optional int64 expires_at_epoch_ms = 3;
+}
+
+// Daemon 凭 invocationId 与 transferId 申请资源下载；允许的归档由服务端 invocation 冻结记录决定。
+message ResourceDownloadRequest {
+  optional string transfer_id = 1;
+}
+
+// 服务端签发的下载票据：READY 携带预签名 GET 事实；FAILED 只携带去敏说明。
+message ResourceDownloadTicket {
+  optional string transfer_id = 1;
+  TicketState state = 2;
+  PresignedGet presigned_get = 3;
+  optional int64 size = 4;
+  optional string sha256 = 5;
+  optional string message = 6;
 }
 
 message ResourceUploadCommit {
@@ -335,30 +356,6 @@ message ResourceUploadCommit {
 message TemporaryResourcePolicy {
   optional int64 temporary_resource_ttl_seconds = 1;
   optional int64 temporary_resource_cleanup_interval_seconds = 2;
-}
-
-// Studio 下发给连接的完整技能期望集合；Daemon 据此对账本地安装。
-message SkillSync {
-  repeated SkillPackage packages = 1;
-}
-
-message SkillPackage {
-  optional string package_name = 1;
-  optional string sha256 = 2;
-  optional int64 size_bytes = 3;
-  optional string download_url = 4;
-}
-
-// Daemon 回报本轮对账后的全部技能包状态。
-message SkillState {
-  repeated SkillPackageState packages = 1;
-}
-
-message SkillPackageState {
-  optional string package_name = 1;
-  optional string installed_sha256 = 2;
-  optional string local_path = 3;
-  optional string error = 4;
 }
 
 message Update {

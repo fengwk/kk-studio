@@ -9,7 +9,6 @@ import {
 } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
 import type {
   ThreadModelRequestDebugData,
-  ThreadModelRequestDebugSkill,
   ThreadModelRequestDebugTool,
 } from '@/features/thread/runtime/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
@@ -47,12 +46,6 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         packageName: 'dev-tools',
         name: 'dev',
         description: 'dev workflow',
-        path: '/opt/skills/dev-tools/dev/SKILL.md',
-        delivery: 'LOCAL',
-        packageVersion: '1111111111111111111111111111111111111111',
-        headCommit: '1111111111111111111111111111111111111111',
-        artifactSha256: 'mock-sha256',
-        installedSha256: '1111111111111111111111111111111111111111',
         promptXml: '<skill name="dev">Run dev workflows</skill>',
       },
     ],
@@ -143,7 +136,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     // 技能区域
     expect(screen.getByText(/技能 1/)).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
-    expect(screen.getByText('· 本地')).toBeInTheDocument()
+    expect(screen.queryByText('· 本地')).not.toBeInTheDocument()
 
     // 元数据与缓存
     expect(screen.getByText('子代理：')).toBeInTheDocument()
@@ -152,7 +145,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText(/短期 · SHORT/)).toBeInTheDocument()
   })
 
-  it('switches dynamically to en-US and verifies real english localization across all labels and badges', async () => {
+  it('switches dynamically to en-US and verifies real english localization across labels and badges', async () => {
     setLocale('en-US')
     const user = userEvent.setup()
     render(<DebugViewHarness />)
@@ -167,7 +160,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByTitle('Routed per call · ROUTED')).toBeInTheDocument()
     expect(screen.getByTitle('Environment required · REQUIRED')).toBeInTheDocument()
     expect(screen.getByText('SKILLS 1')).toBeInTheDocument()
-    expect(screen.getByText('· local')).toBeInTheDocument()
+    expect(screen.queryByText('· local')).not.toBeInTheDocument()
     expect(screen.getByText('Subagents:')).toBeInTheDocument()
     expect(screen.getByText('Cache:')).toBeInTheDocument()
     expect(screen.getByText(/Short · SHORT/)).toBeInTheDocument()
@@ -216,7 +209,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
   })
 
-  it('opens skill inspector on skill chip click and shows package, commits, XML (zh-CN)', async () => {
+  it('opens skill inspector with descriptive metadata but no delivery or installation details (zh-CN)', async () => {
     const user = userEvent.setup()
     render(<DebugViewHarness />)
 
@@ -227,10 +220,11 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByRole('heading', { level: 3, name: 'dev' })).toBeInTheDocument()
     expect(screen.getByText('技能名称')).toBeInTheDocument()
     expect(screen.getByText('包名')).toBeInTheDocument()
-    expect(screen.getByText('交付方式')).toBeInTheDocument()
-    expect(screen.getByText('本地')).toBeInTheDocument()
+    expect(screen.getByText('描述')).toBeInTheDocument()
+    expect(screen.queryByText('交付方式')).not.toBeInTheDocument()
+    expect(screen.queryByText('路径')).not.toBeInTheDocument()
     expect(screen.getByText('dev-tools')).toBeInTheDocument()
-    expect(screen.getByText('/opt/skills/dev-tools/dev/SKILL.md')).toBeInTheDocument()
+    expect(screen.queryByText(/SKILL\.md/)).not.toBeInTheDocument()
     expect(screen.getByText('<skill name="dev">Run dev workflows</skill>')).toBeInTheDocument()
 
     // 键盘 Escape 关闭
@@ -599,12 +593,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               packageName: 'platform-pkg',
               name: 'hidden-skill',
               description: 'not installed',
-              path: 'vfs:/skills/platform-pkg/hidden-skill/SKILL.md',
-              delivery: 'PLATFORM',
-              packageVersion: '222',
-              headCommit: '222',
-              artifactSha256: 'sha-222',
-              installedSha256: null,
               promptXml: null,
             },
           }}
@@ -615,137 +603,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
       expect(screen.getAllByText('hidden-skill').length).toBeGreaterThan(0)
       expect(screen.queryByText('提示词 XML：')).not.toBeInTheDocument()
-    })
-
-    it('handles PLATFORM skill delivery, routed environment support, and container fallback focus in inspector', () => {
-      render(
-        <ThreadDebugInspector
-          selection={{
-            type: 'skill',
-            skill: {
-              packageName: 'platform-pkg',
-              name: 'platform-skill',
-              description: 'platform skill',
-              path: '/platform/path',
-              delivery: 'PLATFORM',
-              packageVersion: '222',
-              headCommit: '222',
-              artifactSha256: 'sha-222',
-              installedSha256: '222',
-              promptXml: '<platform />',
-            },
-          }}
-          debug={sampleDebug()}
-          onClose={() => {}}
-          autoFocusCloseButton={true}
-        />,
-      )
-
-      expect(screen.getByText('平台')).toBeInTheDocument()
-
-      // 验证 tool 的环境支持按生成契约显示
-      render(
-        <ThreadDebugInspector
-          selection={{
-            type: 'tool',
-            tool: {
-              name: 'env_tool',
-              description: 'needs env',
-              inputSchema: {},
-              environmentSupport: 'ROUTED',
-              provenance: 'builtin',
-              state: 'SENT',
-              filterReason: null,
-            },
-          }}
-          debug={sampleDebug()}
-          onClose={() => {}}
-        />,
-      )
-      expect(screen.getByText('按调用路由 · ROUTED')).toBeInTheDocument()
-    })
-
-    it('preserves raw unknown delivery without lowercase conversion', () => {
-      render(
-        <DebugViewHarness
-          debug={sampleDebug({
-            skills: [
-              {
-                packageName: 'pkg',
-                name: 'custom-skill',
-                description: 'custom',
-                path: '/path',
-                delivery: 'CUSTOM_CARRIER' as unknown as ThreadModelRequestDebugSkill['delivery'],
-                packageVersion: '111',
-                headCommit: null,
-                artifactSha256: 'sha-111',
-                installedSha256: null,
-                promptXml: '<skill />',
-              },
-            ],
-          })}
-        />,
-      )
-      expect(screen.getByText('· CUSTOM_CARRIER')).toBeInTheDocument()
-    })
-
-    it('covers platform and custom delivery in skill inspector and custom filter reason in tool inspector', async () => {
-      const user = userEvent.setup()
-      render(
-        <DebugViewHarness
-          debug={sampleDebug({
-            tools: [
-              {
-                name: 'filtered-tool',
-                description: 'Custom filtered tool',
-                inputSchema: {},
-                environmentSupport: 'UNKNOWN_ENV' as unknown as 'NONE',
-                provenance: 'custom:tool',
-                state: 'FILTERED',
-                filterReason: 'RATE_LIMIT_EXCEEDED',
-              },
-            ],
-            skills: [
-              {
-                packageName: 'pkg-p',
-                name: 'platform-skill',
-                description: 'platform delivery skill',
-                path: '/p',
-                delivery: 'PLATFORM',
-                packageVersion: '222',
-                headCommit: null,
-                artifactSha256: 'sha-222',
-                installedSha256: null,
-                promptXml: '<skill />',
-              },
-              {
-                packageName: 'pkg-c',
-                name: 'custom-carrier-skill',
-                description: 'custom carrier skill',
-                path: '/c',
-                delivery: 'S3_BUCKET' as unknown as 'LOCAL',
-                packageVersion: '333',
-                headCommit: null,
-                artifactSha256: 'sha-333',
-                installedSha256: null,
-                promptXml: '<skill />',
-              },
-            ],
-          })}
-        />,
-      )
-
-      await user.click(screen.getByRole('button', { name: '已过滤工具 filtered-tool' }))
-      expect(screen.getByText('· RATE_LIMIT_EXCEEDED')).toBeInTheDocument()
-      expect(screen.getAllByText('UNKNOWN_ENV').length).toBeGreaterThanOrEqual(1)
-      await user.keyboard('{Escape}')
-
-      await user.click(screen.getByRole('button', { name: '技能 platform-skill' }))
-      expect(screen.getByText('平台')).toBeInTheDocument()
-      await user.keyboard('{Escape}')
-
-      await user.click(screen.getByRole('button', { name: '技能 custom-carrier-skill' }))
-      expect(screen.getByText('S3_BUCKET')).toBeInTheDocument()
     })
 
     it('renders historical provider request preview with metadata and no authentication credentials', () => {

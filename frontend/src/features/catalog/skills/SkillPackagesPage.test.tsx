@@ -4,13 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/features/environment/environment-service'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { setLocale } from '@/shared/i18n'
-import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {
-  EnvironmentDTO,
-  SkillEnvironmentSyncDTO,
   SkillPackageDetailDTO,
   SkillPackageFileDTO,
   SkillPackageSummaryDTO,
@@ -21,20 +17,14 @@ vi.mock('@/shared/api/agent-service', () => ({
     listSkillPackages: vi.fn(),
     getSkillPackage: vi.fn(),
     listSkillPackageFiles: vi.fn(),
-    listSkillPackageEnvironments: vi.fn(),
     createSkillPackage: vi.fn(),
     editSkillPackage: vi.fn(),
     checkSkillPackage: vi.fn(),
     publishSkillPackage: vi.fn(),
     deleteSkillPackage: vi.fn(),
     getSkillPackageArchiveUrl: vi.fn(),
-    resyncEnvironmentSkills: vi.fn(),
     listAgents: vi.fn(),
   },
-}))
-
-vi.mock('@/features/environment/environment-service', () => ({
-  environmentService: { listEnvironments: vi.fn() },
 }))
 
 vi.mock('@/app/ai-console/AiNavigation', () => ({
@@ -85,40 +75,6 @@ function uploadDetail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPack
   return detail({ source: 'UPLOAD', git: null, headCheckedAt: null, ...overrides })
 }
 
-function environment(id: string, name: string, ready: boolean): EnvironmentDTO {
-  return {
-    id,
-    name,
-    daemonConfig: testDaemonConfig(),
-    registrationToken: null,
-    status: ready ? 'READY' : 'OFFLINE',
-    ready,
-    statusExpiresAt: null,
-    lastSeenAt: null,
-    operatingSystem: null,
-    timeZone: null,
-    userName: null,
-    homeDirectory: null,
-    note: null,
-    daemonVersion: null,
-    capabilities: [],
-    version: '1',
-    createdAt: 0,
-    updatedAt: 0,
-  }
-}
-
-function environmentSync(overrides: Partial<SkillEnvironmentSyncDTO> = {}): SkillEnvironmentSyncDTO {
-  return {
-    environmentId: 'env-nas',
-    installedSha256: 'a'.repeat(64),
-    localPath: '/skills/core-tools',
-    error: null,
-    upToDate: true,
-    ...overrides,
-  }
-}
-
 function archiveFiles(): SkillPackageFileDTO[] {
   return [
     { path: 'dev/SKILL.md', size: '2048' },
@@ -140,7 +96,6 @@ describe('SkillPackagesPage', () => {
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([summary()])
     vi.mocked(agentService.getSkillPackage).mockResolvedValue(detail())
     vi.mocked(agentService.listSkillPackageFiles).mockResolvedValue(archiveFiles())
-    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([environmentSync()])
     vi.mocked(agentService.checkSkillPackage).mockResolvedValue(detail())
     vi.mocked(agentService.publishSkillPackage).mockResolvedValue(detail({ version: '3' }))
     vi.mocked(agentService.editSkillPackage).mockResolvedValue(detail({ version: '4' }))
@@ -158,12 +113,7 @@ describe('SkillPackagesPage', () => {
         sizeBytes: '2048',
       },
     })
-    vi.mocked(agentService.resyncEnvironmentSkills).mockResolvedValue(undefined)
     vi.mocked(agentService.listAgents).mockResolvedValue([])
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment('env-nas', 'NAS', true),
-      environment('env-offline', '离线机器', false),
-    ])
   })
 
   afterEach(() => {
@@ -298,20 +248,6 @@ describe('SkillPackagesPage', () => {
     expect(uploadedCard.querySelectorAll('button.btn-primary')[0]).toHaveTextContent('详情')
   })
 
-  it('warns about sync failures only for online environments', async () => {
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([summary()])
-    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([
-      environmentSync({ environmentId: 'env-nas', error: 'install failed', upToDate: false }),
-      environmentSync({ environmentId: 'env-offline', error: 'install failed', upToDate: false }),
-    ])
-
-    renderPage()
-
-    await waitFor(() =>
-      expect(within(card('core-tools')).getByText('以下环境同步失败：NAS')).toBeInTheDocument())
-    expect(within(card('core-tools')).queryByText(/离线机器/)).not.toBeInTheDocument()
-  })
-
   it('edits Git packages from the detail dialog with a read-only repository', async () => {
     const user = userEvent.setup()
     renderPage()
@@ -399,25 +335,9 @@ describe('SkillPackagesPage', () => {
     expect(card('core-tools')).toBeInTheDocument()
   })
 
-  it('shows the real archive tree, per-environment sync state and download from the detail dialog', async () => {
+  it('shows the real archive tree and download from the detail dialog', async () => {
     const user = userEvent.setup()
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([
-      environmentSync(),
-      environmentSync({
-        environmentId: 'env-offline',
-        installedSha256: null,
-        localPath: null,
-        upToDate: false,
-      }),
-      environmentSync({
-        environmentId: 'env-nas',
-        installedSha256: null,
-        localPath: null,
-        error: 'download failed',
-        upToDate: false,
-      }),
-    ])
     renderPage()
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
@@ -430,22 +350,13 @@ describe('SkillPackagesPage', () => {
     expect(within(modal).getAllByText('SKILL.md')).toHaveLength(2)
     expect(within(modal).getByText('共 3 个文件')).toBeInTheDocument()
 
-    expect(within(modal).getByText('已同步')).toBeInTheDocument()
-    expect(within(modal).getByText('待同步')).toBeInTheDocument()
-    expect(within(modal).getAllByText('同步失败')).not.toHaveLength(0)
-    expect(within(modal).getByText('download failed')).toBeInTheDocument()
-    expect(within(modal).getByText('离线机器')).toBeInTheDocument()
+    expect(within(modal).queryByText('环境同步')).not.toBeInTheDocument()
 
     await user.click(within(modal).getByRole('button', { name: '下载归档' }))
     await waitFor(() => {
       expect(agentService.getSkillPackageArchiveUrl).toHaveBeenCalledWith('core-tools')
     })
     expect(clickSpy).toHaveBeenCalled()
-
-    await user.click(within(modal).getByRole('button', { name: /重新同步 NAS/ }))
-    await waitFor(() => {
-      expect(agentService.resyncEnvironmentSkills).toHaveBeenCalledWith('env-nas')
-    })
     clickSpy.mockRestore()
   })
 

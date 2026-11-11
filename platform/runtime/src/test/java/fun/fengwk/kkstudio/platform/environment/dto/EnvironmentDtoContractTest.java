@@ -88,11 +88,11 @@ class EnvironmentDtoContractTest {
 
     EnvironmentEventDTO event = new EnvironmentEventDTO();
     event.setLevel(EnvironmentEventLevel.WARN);
-    event.setType(EnvironmentEventType.SKILL_SYNC_FAILED);
+    event.setType(EnvironmentEventType.DISCONNECTED);
     event.setOccurredAt(Instant.EPOCH);
     JsonNode eventJson = MAPPER.readTree(MAPPER.writeValueAsString(event));
     assertEquals("WARN", eventJson.get("level").stringValue());
-    assertEquals("SKILL_SYNC_FAILED", eventJson.get("type").stringValue());
+    assertEquals("DISCONNECTED", eventJson.get("type").stringValue());
     assertTrue(eventJson.has("occurredAt"));
     assertTrue(!eventJson.has("time"));
 

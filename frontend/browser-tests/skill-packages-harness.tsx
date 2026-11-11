@@ -6,12 +6,8 @@ import { setLocale } from '@/shared/i18n'
 import { ApiError } from '@/shared/api/client'
 import { agentService } from '@/shared/api/agent-service'
 import { storageService } from '@/shared/api/storage-service'
-import { environmentService } from '@/features/environment/environment-service'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
-import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {
-  EnvironmentDTO,
-  SkillEnvironmentSyncDTO,
   SkillManifestEntryDTO,
   SkillPackageDetailDTO,
   SkillPackageFileDTO,
@@ -30,7 +26,6 @@ const SEEDED_AT = 1784505600000
 interface FakePackage {
   detail: SkillPackageDetailDTO
   files: SkillPackageFileDTO[]
-  environments: SkillEnvironmentSyncDTO[]
 }
 
 const DEV_SKILLS: SkillManifestEntryDTO[] = [
@@ -92,7 +87,6 @@ const packages = new Map<string, FakePackage>([
         { path: 'dev/SKILL.md', size: '2048' },
         { path: 'dev/scripts/run.sh', size: '64' },
       ],
-      environments: [],
     },
   ],
   [
@@ -107,7 +101,6 @@ const packages = new Map<string, FakePackage>([
         version: '2',
       }),
       files: [{ path: 'opencli/SKILL.md', size: '1024' }],
-      environments: [],
     },
   ],
   [
@@ -115,7 +108,6 @@ const packages = new Map<string, FakePackage>([
     {
       detail: gitDetail('agent-used', { description: 'Referenced by an agent' }),
       files: [{ path: 'dev/SKILL.md', size: '2048' }],
-      environments: [],
     },
   ],
   [
@@ -138,61 +130,9 @@ const packages = new Map<string, FakePackage>([
         { path: 'dev/SKILL.md', size: '2048' },
         { path: 'dropped/SKILL.md', size: '640' },
       ],
-      environments: [
-        {
-          environmentId: 'env-nas',
-          installedSha256: 'a'.repeat(64),
-          localPath: '/opt/skills/upload-pack',
-          error: null,
-          upToDate: true,
-        },
-        {
-          environmentId: 'env-nas-2',
-          installedSha256: null,
-          localPath: null,
-          error: 'archive download timed out',
-          upToDate: false,
-        },
-        {
-          environmentId: 'env-lab',
-          installedSha256: 'b'.repeat(64),
-          localPath: '/srv/skills/upload-pack',
-          error: null,
-          upToDate: false,
-        },
-      ],
     },
   ],
 ])
-
-function environment(id: string, name: string, ready: boolean): EnvironmentDTO {
-  return {
-    id,
-    name,
-    daemonConfig: testDaemonConfig(),
-    registrationToken: null,
-    status: ready ? 'READY' : 'OFFLINE',
-    ready,
-    statusExpiresAt: null,
-    lastSeenAt: null,
-    operatingSystem: null,
-    timeZone: null,
-    userName: null,
-    homeDirectory: null,
-    note: null,
-    daemonVersion: null,
-    capabilities: [],
-    version: '1',
-    createdAt: 0,
-    updatedAt: 0,
-  }
-}
-
-environmentService.listEnvironments = async () => [
-  environment('env-nas', 'NAS', true),
-  environment('env-nas-2', 'NAS 备份', true),
-  environment('env-lab', '实验室', false),
-]
 
 /** 每个响应都拷一份，组件不会反向修改假后端状态。 */
 function clone<T>(value: T): T {
@@ -222,9 +162,6 @@ agentService.getSkillPackage = async (name: string) => {
 
 agentService.listSkillPackageFiles = async (name: string) => clone(requirePackage(name).files)
 
-agentService.listSkillPackageEnvironments = async (name: string) =>
-  clone(requirePackage(name).environments)
-
 agentService.createSkillPackage = async (payload: SkillPackageCreateDTO) => {
   await delay(120)
   if (packages.has(payload.packageName)) {
@@ -249,7 +186,6 @@ agentService.createSkillPackage = async (payload: SkillPackageCreateDTO) => {
       { path: 'bash/SKILL.md', size: '512' },
       { path: 'dev/SKILL.md', size: '2048' },
     ]),
-    environments: [],
   })
   return clone(detail)
 }
@@ -385,29 +321,6 @@ agentService.publishSkillPackageStaging = async (
   packages.set(pending.packageName, {
     detail,
     files: clone(PREVIEW_FILES),
-    environments: [
-      {
-        environmentId: 'env-nas',
-        installedSha256: 'c'.repeat(64),
-        localPath: '/opt/skills/browser',
-        error: null,
-        upToDate: true,
-      },
-      {
-        environmentId: 'env-nas-2',
-        installedSha256: null,
-        localPath: null,
-        error: 'archive download timed out',
-        upToDate: false,
-      },
-      {
-        environmentId: 'env-lab',
-        installedSha256: 'd'.repeat(64),
-        localPath: '/srv/skills/browser',
-        error: null,
-        upToDate: false,
-      },
-    ],
   })
   staged.delete(stagingId)
   return clone(detail)
@@ -434,8 +347,6 @@ agentService.getSkillPackageArchiveUrl = async (name: string) => {
     },
   }
 }
-
-agentService.resyncEnvironmentSkills = async () => undefined
 
 agentService.listAgents = async () => [
   {

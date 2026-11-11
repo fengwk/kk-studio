@@ -1,4 +1,4 @@
-/* 技能包页面：归档目录树、上传预览、环境同步与上传阶段状态。
+/* 技能包页面：归档目录树、上传预览与上传阶段状态。
    只消费 :root 设计 token；弹窗触区由 overlays.css 的 modal-touch-target 统一提供。 */
 
 .skill-detail-section {
@@ -239,37 +239,4 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-}
-
-.skill-environment-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.skill-environment-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  min-width: 0;
-}
-
-.skill-environment-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.skill-environment-head strong {
-  font-size: var(--font-size-sm);
-  overflow-wrap: anywhere;
 }

@@ -32,14 +32,10 @@ import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptInput;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -63,8 +59,6 @@ public final class DatabaseAgentTurnContextResolver {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final SkillPackageRepository skillPackageRepository;
-  private final SkillPromptPathResolver skillPromptPathResolver;
-  private final StorageBlobManager blobManager;
   private final AgentPromptComposer promptComposer;
   private final SchemaJsonCodec schemaCodec;
 
@@ -75,8 +69,6 @@ public final class DatabaseAgentTurnContextResolver {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       SkillPackageRepository skillPackageRepository,
-      SkillPromptPathResolver skillPromptPathResolver,
-      StorageBlobManager blobManager,
       AgentPromptComposer promptComposer) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
@@ -86,9 +78,6 @@ public final class DatabaseAgentTurnContextResolver {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
-    this.skillPromptPathResolver =
-        Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
-    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.schemaCodec = new SchemaJsonCodec();
   }
@@ -112,7 +101,7 @@ public final class DatabaseAgentTurnContextResolver {
     CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
     EnvironmentId environmentId = currentEnvironment.environmentId();
-    List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(environmentId, agentConfig.getSkills());
+    List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
 
     try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
@@ -283,11 +272,9 @@ public final class DatabaseAgentTurnContextResolver {
    * <p>通过 {@link SkillPackageRepository#getPackage(String)} 读取 Platform 权威事实，按 (packageName, name)
    * 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    *
-   * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装工件摘要与
-   * Package 的当前工件摘要完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedSha256。
+   * <p>技能系统提示只包含名称与描述，不依赖 Environment 的安装状态。
    */
-  private List<LiveTurnPlan.PlannedSkill> resolveSkills(
-      EnvironmentId environmentId, List<SkillRefDTO> skillRefs) {
+  private List<LiveTurnPlan.PlannedSkill> resolveSkills(List<SkillRefDTO> skillRefs) {
     if (skillRefs == null || skillRefs.isEmpty()) {
       return List.of();
     }
@@ -312,42 +299,22 @@ public final class DatabaseAgentTurnContextResolver {
                 + "/"
                 + ref.getName());
       }
-      StorageBlob blob = blobManager.getBlob(pkg.artifactBlobId());
-      if (blob == null) {
-        throw rejection("skill package artifact blob not found: " + ref.getPackageName());
-      }
-      String artifactSha256 = blob.getSha256();
-      SkillPromptResolution resolution =
-          skillPromptPathResolver.resolveDetails(
-              environmentId, ref.getPackageName(), ref.getName(), artifactSha256);
       String headCommit = pkg.gitSource() == null ? null : pkg.gitSource().headCommit();
       skills.add(
           new LiveTurnPlan.PlannedSkill(
               pkg.packageName(),
               entry.name(),
               entry.description(),
-              resolution.path(),
-              resolution.delivery(),
               pkg.packageVersion(),
-              headCommit,
-              artifactSha256,
-              resolution.installedSha256()));
+              headCommit));
     }
     return List.copyOf(skills);
   }
 
-  /**
-   * 只有「未选环境」与「已选环境且精确安装」两种事实进入 Prompt：未选环境使用 platform URI；已选环境使用 Daemon 本地稳定路径。
-   *
-   * <p>已选环境但未安装、摘要不一致或安装失败时，技能不进入 system prompt；结构化 Skill 事实仍保留在 {@link AgentTurnContext} 中，
-   * 供对话界面解释未注入原因。该提示不由 Prompt 组装负责。
-   */
+  /** 技能按 Agent 配置顺序进入系统提示，不依赖 Environment 安装状态。 */
   private static List<SkillPromptEntry> promptSkills(
       EnvironmentId environmentId, List<LiveTurnPlan.PlannedSkill> skills) {
-    return skills.stream()
-        .filter(skill -> skill.promptVisible(environmentId != null))
-        .map(LiveTurnPlan.PlannedSkill::promptEntry)
-        .toList();
+    return skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList();
   }
 
   /**

@@ -24,8 +24,7 @@ import java.util.UUID;
  * JdbcClient 仓库。
  *
  * <p>读路径不取锁；写路径要求调用方已开启事务，并以 {@link #lockPackage(String)} 取行锁后按 {@code version} 做 CAS。未开启事务的写在执行任何
- * SQL 之前直接拒绝。成功写在同一事务 Connection 上发送 {@code skill_package_changed}（payload 是 package
- * 名，只用于唤醒环境侧做权威回读）： PostgreSQL 只在提交时投递，CAS 影响 0 行或回滚都静默。
+ * SQL 之前直接拒绝。
  *
  * <p>{@code manifest} jsonb 列只由应用严格验证：编码为 {@code {"skills":[{name, description}]}} 且按 name
  * 升序，解码拒绝未知与缺失字段、被外部改写过的行无法伪装成合法清单。
@@ -146,7 +145,6 @@ public class SkillPackageRepository {
     if (gitSource != null && !insertGitSource(skillPackage.packageName(), gitSource)) {
       throw new IllegalStateException("insert skill package git source failed");
     }
-    notifyChanged(skillPackage.packageName());
     return true;
   }
 
@@ -182,7 +180,6 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
-    notifyChanged(published.packageName());
     return true;
   }
 
@@ -206,7 +203,6 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
-    notifyChanged(packageName);
     return true;
   }
 
@@ -232,7 +228,6 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
-    notifyChanged(packageName);
     return true;
   }
 
@@ -254,7 +249,6 @@ public class SkillPackageRepository {
     if (updated != 1) {
       return false;
     }
-    notifyChanged(packageName);
     return true;
   }
 
@@ -272,7 +266,6 @@ public class SkillPackageRepository {
     if (deleted != 1) {
       return false;
     }
-    notifyChanged(packageName);
     return true;
   }
 
@@ -308,18 +301,9 @@ public class SkillPackageRepository {
         .orElse(null);
   }
 
-  private void notifyChanged(String packageName) {
-    // pg_notify 返回 void：只需在当前事务 Connection 上执行，结果行无需读取。
-    jdbcClient
-        .sql("select pg_notify('skill_package_changed', :packageName)")
-        .param("packageName", packageName)
-        .query(rs -> {});
-  }
-
   private static void requireTransaction() {
     if (!TransactionSynchronizationManager.isActualTransactionActive()) {
-      throw new IllegalStateException(
-          "Skill package change notification requires an active transaction");
+      throw new IllegalStateException("Skill package write requires an active transaction");
     }
   }
 

@@ -39,7 +39,7 @@ function ticketFor(transferId: string, spec: TicketSpec): ResourceUploadTicket {
         presignedPut: create(PresignedPutSchema, {
           method: 'PUT',
           url: 'https://s3.example.com/bucket/key',
-          expiresAt: '2030-01-01T00:00:00.000Z',
+          expiresAtEpochMs: 1893456000000n,
         }),
       })
     case 'READY':
@@ -458,7 +458,7 @@ describe('presigned PUT http client', () => {
         create(PresignedPutSchema, {
           method: 'PUT',
           url: server.url,
-          expiresAt: '2030-01-01T00:00:00.000Z',
+          expiresAtEpochMs: 1893456000000n,
         }),
         new Uint8Array([1, 2, 3]),
         new AbortController().signal,
@@ -479,7 +479,7 @@ describe('presigned PUT http client', () => {
           create(PresignedPutSchema, {
             method: 'PUT',
             url: server.url,
-            expiresAt: '2030-01-01T00:00:00.000Z',
+            expiresAtEpochMs: 1893456000000n,
           }),
           new Uint8Array([1]),
           new AbortController().signal,

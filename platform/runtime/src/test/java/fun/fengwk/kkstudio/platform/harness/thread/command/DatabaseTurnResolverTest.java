@@ -130,10 +130,7 @@ import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
@@ -531,10 +528,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec skillSpec =
         skillsFixture.resolved(skillsFixture.path(unboundSettings("default")));
     assertTrue(skillSpec.systemInstruction().contains("<available_skills>"));
-    assertTrue(
-        skillSpec
-            .systemInstruction()
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
+    assertFalse(skillSpec.systemInstruction().contains("<path>"));
     assertEquals(
         List.of("read"),
         skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
@@ -693,7 +687,7 @@ class DatabaseTurnResolverTest {
             .message());
   }
 
-  /** 测试意图：即使 Daemon 离线，全局目录 Skill 仍能完成结构化规划并保留交付事实；选定 Environment 无法确认精确安装时不得进入 prompt。 */
+  /** 测试意图：技能提示只依赖 Agent 配置和全局目录，不受 Daemon 在线或安装状态影响。 */
   @Test
   void skillFactsRemainPlannedFromGlobalCatalogWhenDaemonIsOfflineButPromptOmitsThem() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
@@ -704,7 +698,8 @@ class DatabaseTurnResolverTest {
     EntryPath path = fixture.path(settings("default"));
     LiveTurnPlan.Planned planned = fixture.planned(path);
     assertEquals("dev", planned.skills().getFirst().name());
-    assertFalse(planned.spec().systemInstruction().contains("<available_skills>"));
+    assertTrue(planned.spec().systemInstruction().contains("<available_skills>"));
+    assertTrue(planned.spec().systemInstruction().contains("<name>dev</name>"));
     assertFalse(instructionText(planned.spec()).contains("<os>linux</os>"));
   }
 
@@ -747,13 +742,9 @@ class DatabaseTurnResolverTest {
   @Test
   void routesByExactEnvironmentIdAndNeverFallsBack() {
     // 两个独立不可变 name；branch 只认 settings 中那一个 name，绝不回看更旧 settings 或 fallback。
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of("bash"), List.of("dev-b"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
-    fixture.readyEnvironmentWithSkillState(
-        ENV_B,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     BranchSettings settings =
         new BranchSettings(
             "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), ENV_B_NAME);
@@ -767,8 +758,7 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(ToolBinding::environmentId).toList();
     assertEquals(ENV_B, boundRoutes.get(0));
     assertEquals(ENV_B, boundRoutes.get(1));
-    assertTrue(
-        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev-b/SKILL.md</path>"));
+    assertFalse(requestSpec.systemInstruction().contains("<path>"));
   }
 
   @Test
@@ -831,30 +821,21 @@ class DatabaseTurnResolverTest {
 
   @Test
   void derivesReadToolFromLatestAgentSkills() {
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
-    fixture.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
         List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertTrue(
-        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev/SKILL.md</path>"));
+    assertFalse(requestSpec.systemInstruction().contains("<path>"));
   }
 
   @Test
   void bindsSkillsExactlyFromSelectedEnvironment() {
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
-    fixture.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
@@ -865,8 +846,7 @@ class DatabaseTurnResolverTest {
         EnvironmentSupport.ROUTED, requestSpec.toolBindings().getFirst().environmentSupport());
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
     assertEquals(ENV_A_NAME, requestSpec.toolBindings().getFirst().environmentName());
-    assertTrue(
-        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev/SKILL.md</path>"));
+    assertFalse(requestSpec.systemInstruction().contains("<path>"));
 
     // 全局目录缺少该 Package：不静默丢弃，typed 拒绝；缺失形态统一为同一条不含目录内部细节的消息。
     fixture = new Fixture(List.of(), List.of("dev"), List.of());
@@ -874,14 +854,6 @@ class DatabaseTurnResolverTest {
     fixture.missingGlobalSkills();
     assertEquals(
         "agent skill not found in the global catalog: test-package/dev",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    // 工件 Blob 记录缺失：typed 拒绝规划。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of());
-    fixture.readyEnvironment(ENV_A, List.of());
-    fixture.missingArtifactBlob();
-    assertEquals(
-        "skill package artifact blob not found: test-package",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
@@ -1063,12 +1035,8 @@ class DatabaseTurnResolverTest {
 
   @Test
   void projectsSemanticMessagesInRootToHeadOrderIgnoringBoundariesAndErrors() {
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
-    fixture.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     BranchSettings settings = settings("default");
 
     EntryPath path = multiTurnPath(settings);
@@ -1088,7 +1056,7 @@ class DatabaseTurnResolverTest {
     assertTrue(skillsAt > environmentAt, instruction);
     assertTrue(instruction.contains("</current_environment>\n\n[skills]"), instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
-    assertTrue(instruction.contains("<path>" + localPath + "/dev/SKILL.md</path>"), instruction);
+    assertFalse(instruction.contains("<path>"), instruction);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(3, messages.size());
@@ -1300,70 +1268,26 @@ class DatabaseTurnResolverTest {
 
   @Test
   void escapesXmlInAvailableSkillsSection() {
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("a&b<c>"), List.of());
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(skillName("a&b<c>", "d&e")));
-    fixture.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     String system = instructionText(requestSpec);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
-    assertTrue(system.contains("<path>" + localPath + "/a&amp;b&lt;c&gt;/SKILL.md</path>"), system);
+    assertFalse(system.contains("<path>"), system);
   }
 
-  /**
-   * 测试意图：选定 Environment 时只有精确安装当前工件摘要才把 Skill 注入 prompt 并使用 Daemon 本地稳定路径；未安装、摘要不一致或同步失败都必须 不列出该
-   * Skill。未选 Environment 的 platform URI 路径由其它用例覆盖。
-   */
+  /** 测试意图：技能按 Agent 配置顺序进入提示，且不依赖 Environment 安装状态。 */
   @Test
-  void usesLocalStableSkillPathOnlyForExactlyInstalledArtifact() {
-    String otherSha = "b".repeat(64);
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
-
-    Fixture installed = new Fixture(List.of(), List.of("dev"), List.of());
-    installed.readyEnvironment(ENV_A, List.of("dev"));
-    installed.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
-
-    assertTrue(
-        instructionText(installed.resolved(installed.path(settings("default"))))
-            .contains("<path>" + localPath + "/dev/SKILL.md</path>"));
-
-    Fixture mismatched = new Fixture(List.of(), List.of("dev"), List.of());
-    mismatched.readyEnvironment(ENV_A, List.of("dev"));
-    mismatched.readyEnvironmentWithSkillState(
-        ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherSha, localPath)));
-    String mismatchedInstruction =
-        instructionText(mismatched.resolved(mismatched.path(settings("default"))));
-    assertFalse(mismatchedInstruction.contains("<available_skills>"), mismatchedInstruction);
-    assertFalse(
-        mismatchedInstruction.contains("vfs:/skills/test-package/dev/SKILL.md"),
-        mismatchedInstruction);
-
-    Fixture failed = new Fixture(List.of(), List.of("dev"), List.of());
-    failed.readyEnvironment(ENV_A, List.of("dev"));
-    failed.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(
-            EnvironmentSkillState.failed(
-                "test-package",
-                EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath),
-                "skill package sync failed: COMMIT_NOT_FOUND")));
-    String failedInstruction = instructionText(failed.resolved(failed.path(settings("default"))));
-    assertFalse(failedInstruction.contains("<available_skills>"), failedInstruction);
-    assertFalse(
-        failedInstruction.contains("vfs:/skills/test-package/dev/SKILL.md"), failedInstruction);
-
-    Fixture neverSynced = new Fixture(List.of(), List.of("dev"), List.of());
-    neverSynced.readyEnvironment(ENV_A, List.of("dev"));
-    String neverSyncedInstruction =
-        instructionText(neverSynced.resolved(neverSynced.path(settings("default"))));
-    assertFalse(neverSyncedInstruction.contains("<available_skills>"), neverSyncedInstruction);
+  void skillPromptDoesNotDependOnEnvironmentInstallation() {
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    String instruction = instructionText(fixture.resolved(fixture.path(settings("default"))));
+    assertTrue(instruction.contains("<name>dev</name>"), instruction);
+    assertTrue(instruction.contains("<description>dev description</description>"), instruction);
+    assertFalse(instruction.contains("<path>"), instruction);
   }
 
   /**
@@ -1456,15 +1380,10 @@ class DatabaseTurnResolverTest {
     assertEquals("builtin:read", optionalTool.provenance());
   }
 
-  /**
-   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装工件摘要」分开投影——未选 Environment 是 PLATFORM/URI，精确安装是 LOCAL/本地路径；
-   * 已选但摘要不一致或同步失败仍暴露事实，却不进入 system prompt。headCommit 来自 Package 自身；进入 prompt 的 XML 与事实同源。
-   */
+  /** 测试意图：技能提示结构仅投影配置顺序中的名称与描述，不暴露归档、安装路径或交付状态。 */
   @Test
-  void previewPlanProjectsSkillDeliveryCommitsAndPromptVisibility() {
-    String otherSha = "b".repeat(64);
+  void previewPlanProjectsCatalogSkillPromptFacts() {
     String observedHead = "abcdef0123456789abcdef0123456789abcdef01";
-    String localPath = "/home/dev/.kkstudio/skills/test-package";
 
     Fixture platformOnly = new Fixture(List.of(), List.of("dev"), List.of());
     platformOnly.observedHeadCommit(observedHead);
@@ -1475,53 +1394,19 @@ class DatabaseTurnResolverTest {
     assertEquals("test-package", platformSkill.packageName());
     assertEquals("dev", platformSkill.name());
     assertEquals("dev description", platformSkill.description());
-    assertEquals(SkillPromptResolution.Delivery.PLATFORM, platformSkill.delivery());
-    assertEquals("vfs:/skills/test-package/dev/SKILL.md", platformSkill.path());
     assertEquals(CURRENT_COMMIT, platformSkill.packageVersion());
     assertEquals(observedHead, platformSkill.headCommit());
-    assertEquals(ARTIFACT_SHA256, platformSkill.artifactSha256());
-    assertNull(platformSkill.installedSha256());
     String platformXml = AgentPromptComposer.skillFragment(platformSkill.promptEntry());
-    assertTrue(
-        platformXml.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), platformXml);
+    assertFalse(platformXml.contains("<path>"), platformXml);
     assertTrue(platformPlan.spec().systemInstruction().contains(platformXml));
 
     Fixture alreadyInstalled = new Fixture(List.of(), List.of("dev"), List.of());
     alreadyInstalled.readyEnvironment(ENV_A, List.of("dev"));
-    alreadyInstalled.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     LiveTurnPlan.Planned localPlan =
         alreadyInstalled.planned(alreadyInstalled.path(settings("default")));
     LiveTurnPlan.PlannedSkill localSkill = localPlan.skills().getFirst();
-    assertEquals(SkillPromptResolution.Delivery.LOCAL, localSkill.delivery());
-    assertEquals(localPath + "/dev/SKILL.md", localSkill.path());
     assertEquals(CURRENT_COMMIT, localSkill.packageVersion());
-    assertEquals(ARTIFACT_SHA256, localSkill.artifactSha256());
-    assertEquals(ARTIFACT_SHA256, localSkill.installedSha256());
-    assertTrue(
-        localPlan
-            .spec()
-            .systemInstruction()
-            .contains("<path>" + localPath + "/dev/SKILL.md</path>"));
-
-    // 同步失败保留更早一次成功安装的事实：如实暴露 installedSha256，但交付方式仍是 PLATFORM。
-    Fixture failedSync = new Fixture(List.of(), List.of("dev"), List.of());
-    failedSync.readyEnvironment(ENV_A, List.of("dev"));
-    failedSync.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(
-            EnvironmentSkillState.failed(
-                "test-package",
-                EnvironmentSkillState.installed("test-package", otherSha, localPath),
-                "skill package sync failed: COMMIT_NOT_FOUND")));
-    LiveTurnPlan.Planned failedPlan = failedSync.planned(failedSync.path(settings("default")));
-    LiveTurnPlan.PlannedSkill failedSkill = failedPlan.skills().getFirst();
-    assertEquals(SkillPromptResolution.Delivery.PLATFORM, failedSkill.delivery());
-    assertEquals(otherSha, failedSkill.installedSha256());
-    assertEquals(ARTIFACT_SHA256, failedSkill.artifactSha256());
-    assertEquals("vfs:/skills/test-package/dev/SKILL.md", failedSkill.path());
-    assertFalse(failedPlan.spec().systemInstruction().contains("<available_skills>"));
+    assertEquals(platformSkill.promptEntry(), localSkill.promptEntry());
   }
 
   /**
@@ -3003,8 +2888,6 @@ class DatabaseTurnResolverTest {
     private final ModelRuntimeConfigParser modelConfigParser = mock(ModelRuntimeConfigParser.class);
     private final ModelGroupConfigCodec groupConfigCodec = mock(ModelGroupConfigCodec.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
-    private final SkillPromptPathResolver skillPromptPathResolver =
-        new SkillPromptPathResolver(environmentRegistry);
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final SkillPackageRepository skillPackageRepository =
         mock(SkillPackageRepository.class);
@@ -3255,8 +3138,6 @@ class DatabaseTurnResolverTest {
               environmentRegistry,
               environmentRepository,
               skillPackageRepository,
-              skillPromptPathResolver,
-              blobManager,
               new AgentPromptComposer(() -> subagentConfig));
 
       resolver =
@@ -3511,7 +3392,6 @@ class DatabaseTurnResolverTest {
               LiveEnvironmentStatus.CONNECTING,
               null,
               List.of(),
-              List.of(),
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
@@ -3539,7 +3419,6 @@ class DatabaseTurnResolverTest {
                       "/home/dev",
                       "/tmp/kk-studio",
                       "amd64")),
-              List.of(),
               List.of(),
               NOW,
               NOW.plusSeconds(60));
@@ -3573,31 +3452,6 @@ class DatabaseTurnResolverTest {
         EnvironmentId environmentId, List<SkillName> skills, DaemonHostInfo environmentInfo) {
       publishGlobalSkills(skills);
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW);
-    }
-
-    /** 覆盖该 Environment 路由行的 Skill 同步投影：用于验证「精确安装」与「回退 platform URI」两条路径。 */
-    private void readyEnvironmentWithSkillState(
-        EnvironmentId environmentId, List<EnvironmentSkillState> skillState) {
-      EnvironmentConnection env =
-          new EnvironmentConnection(
-              environmentId,
-              UUID.randomUUID(),
-              UUID.randomUUID(),
-              LiveEnvironmentStatus.READY,
-              new DaemonReadyMetadata(
-                  "1.0.9",
-                  new DaemonHostInfo(
-                      DaemonOperatingSystem.LINUX,
-                      "UTC",
-                      "dev-user",
-                      "/home/dev",
-                      "/tmp/kk-studio",
-                      "amd64")),
-              skillState,
-              List.of(),
-              NOW,
-              NOW.plusSeconds(60));
-      when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
     }
 
     private void readyEnvironmentWithSkills(EnvironmentId environmentId, List<SkillName> skills) {
@@ -3640,7 +3494,6 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
               new DaemonReadyMetadata("1.0.9", environmentInfo),
-              List.of(),
               List.of(),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));

@@ -458,30 +458,6 @@ export const chatCatalog = {
     'en-US': 'The switch also applies to running subagents',
     'zh-CN': '切换对正在运行的子 Agent 同样生效',
   },
-  'ai.runtime.skillAvailability.title': {
-    'en-US': 'Skills unavailable in the current environment',
-    'zh-CN': '以下技能在当前环境不可用',
-  },
-  'ai.runtime.skillAvailability.description': {
-    'en-US': 'They are not installed at the current version, so they stay out of the system prompt. Switch environments or finish the install to clear this.',
-    'zh-CN': '它们没有安装为当前版本，因此不会进入 system prompt；切换环境或完成安装后提示自动消失。',
-  },
-  'ai.runtime.skillAvailability.skillLabel': {
-    'en-US': '{{package}} / {{skill}}',
-    'zh-CN': '{{package}} / {{skill}}',
-  },
-  'ai.runtime.skillAvailability.reason.NOT_INSTALLED': {
-    'en-US': 'Not installed',
-    'zh-CN': '未安装',
-  },
-  'ai.runtime.skillAvailability.reason.VERSION_MISMATCH': {
-    'en-US': 'Version mismatch',
-    'zh-CN': '版本不一致',
-  },
-  'ai.runtime.skillAvailability.reason.INSTALL_FAILED': {
-    'en-US': 'Install failed',
-    'zh-CN': '安装失败',
-  },
   'ai.runtime.composer.model': {
     'en-US': 'Model',
     'zh-CN': 'Model',
@@ -1615,14 +1591,6 @@ export const chatCatalog = {
     'en-US': 'Skill',
     'zh-CN': '技能',
   },
-  'ai.runtime.debug.delivery.local': {
-    'en-US': 'local',
-    'zh-CN': '本地',
-  },
-  'ai.runtime.debug.delivery.platform': {
-    'en-US': 'platform',
-    'zh-CN': '平台',
-  },
   'ai.runtime.debug.subagentsLabel': {
     'en-US': 'Subagents:',
     'zh-CN': '子代理：',
@@ -1738,30 +1706,6 @@ export const chatCatalog = {
   'ai.runtime.debug.inspector.package': {
     'en-US': 'Package',
     'zh-CN': '包名',
-  },
-  'ai.runtime.debug.inspector.delivery': {
-    'en-US': 'Delivery',
-    'zh-CN': '交付方式',
-  },
-  'ai.runtime.debug.inspector.path': {
-    'en-US': 'Path',
-    'zh-CN': '路径',
-  },
-  'ai.runtime.debug.inspector.packageVersion': {
-    'en-US': 'Package Version',
-    'zh-CN': '包版本',
-  },
-  'ai.runtime.debug.inspector.headCommit': {
-    'en-US': 'HEAD Commit',
-    'zh-CN': 'HEAD 提交',
-  },
-  'ai.runtime.debug.inspector.artifactSha256': {
-    'en-US': 'Artifact SHA-256',
-    'zh-CN': '工件 SHA-256',
-  },
-  'ai.runtime.debug.inspector.daemonInstalledSha256': {
-    'en-US': 'Daemon Installed SHA-256',
-    'zh-CN': 'Daemon 安装 SHA-256',
   },
   'ai.runtime.debug.inspector.promptXml': {
     'en-US': 'Prompt XML:',

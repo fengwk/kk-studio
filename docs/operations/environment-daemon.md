@@ -255,7 +255,7 @@ Studio 保存的完整卡片配置：
 | `GET /api/platform/environments/{id}/uninstall-script?operatingSystem=...` | 返回只定位本卡片的卸载脚本，不含配置或凭据 |
 | `POST /api/platform/environments/{id}/rotate-token` | `{expectedVersion}`；返回一次新 token，不改变配置 |
 | `GET /api/platform/environments/{id}/runtime` | 返回当前 owner 的运行快照；CONNECTING 期间也可读取已上报的配置错误 |
-| `GET /api/platform/environments/{id}/events` | 最近 200 条以内的连接与技能同步事件 |
+| `GET /api/platform/environments/{id}/events` | 最近 200 条以内的连接与运行事件 |
 
 脚本响应均禁止缓存，并阻止浏览器按附件内容嗅探。code 是 256 bit 安全随机值，服务端只保存
 SHA-256 摘要与数据库时间下的 5 分钟有效期。每个环境最多保留一张待兑换 code，新签发立即替换旧
@@ -363,7 +363,7 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 代理是**卡片级**配置：`daemonConfig.proxyUrl` 只作用于该 Daemon 自身的请求，不共享给 Backend，
 也不共享给同用户的其它卡片。
 
-- Daemon 的 S3 上传、技能下载、在线更新下载与控制 WS/WSS 都使用当前已应用的卡片代理；
+- Daemon 的 S3 上传、在线更新下载与控制 WS/WSS 都使用当前已应用的卡片代理；
   `null` 表示明确直连，即使宿主存在 `HTTP_PROXY`、`NODE_USE_ENV_PROXY` 或全局 dispatcher 也不
   改变。
 - 代理地址仅接受无认证的 `http://host:port`；不支持 SOCKS、代理认证、TLS 到代理、绕过列表或自动
@@ -396,7 +396,7 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 **注册是否成功必须在 Studio 的 Environment 页面确认 `READY`**。Daemon 在收到并应用当前完整卡片
 配置后才发送 READY；SETTINGS 只绑定 scope 与平台资源预算。若当前进程尚无可应用配置、或候选校验
 失败，连接保持 CONNECTING，Daemon 仍可通过同一连接上报配置错误并等待修正；未 READY 时不接受能力
-调用、SkillSync 或 IDE 命令。
+调用或 IDE 命令。
 
 连接状态与配置状态是两件事，页面分开显示：
 
@@ -407,9 +407,6 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 | 当前配置错误的 `version` = 卡片 `version` | 应用失败，显示字段与规则 |
 | 离线且无当前快照 | 待连接 |
 | 当前 `appliedVersion` 小于卡片 `version` | 待应用 |
-
-READY 后 Platform 会异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用。已选择
-环境时，未安装当前版本的技能不会进入 system prompt。
 
 ## 管理身份与冲突处理
 

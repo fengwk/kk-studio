@@ -28,26 +28,23 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   lib/                            # 程序发行目录（main.js 与冻结运行时）
   ide/                            # code-server 数据与恢复目录
   tmp/workspaces/<uuid>/          # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
-  skills/<package>/               # 已安装技能包
-  skills/.staging-<uuid>/         # 技能安装暂存
-  skills/.old-<uuid>/             # 技能替换备份
   .work/                          # 安装操作独占暂存
   last-operation.json             # 最近一次安装/更新诊断（≤4 KiB，无秘密）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。安装器不保留历史程序、备份或按操作累积的更新日志，唯一持久诊断是固定字段的 `last-operation.json`。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。安装器不保留历史程序、备份或按操作累积的更新日志，唯一持久诊断是固定字段的 `last-operation.json`。
 
 ## 能力装配与运行时调度
 
-装配阶段冻结 10 项原子能力（9 项模型工具与 1 项内部能力）；IDE 与技能对账是受管服务：
+装配阶段冻结 10 项原子能力（9 项模型工具与 1 项内部能力）；IDE 服务由 Daemon 受管：
 - 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
+- 受管服务：受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 只做装配与调用编排，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，控制会话（环境绑定、SETTINGS/ENVIRONMENT_CONFIG/READY 握手、心跳与入站信封分发）在 [`runtime-session.ts`](../../daemon/src/runtime-session.ts)，环境绑定的出站信封构造在 [`runtime-outbound.ts`](../../daemon/src/runtime-outbound.ts)，卡片配置热应用在 [`environment-config.ts`](../../daemon/src/environment-config.ts)，journal 去重/回放、执行、超时与退出确认在 [`runtime-invocations.ts`](../../daemon/src/runtime-invocations.ts)，受管更新准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，运行状态快照在 [`runtime-status.ts`](../../daemon/src/runtime-status.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)，停机收敛与失败聚合在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。服务端通过 `POST /control` 请求建立双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
-- 握手流程：连接准入携带卡片 UUID、进程 UUID 与协议版本 2，认证通过后取得租约。连接建立后服务端首先在控制流发送 Protobuf `SETTINGS`（只含环境标识与 `resource_budgets`），Daemon 绑定 scope 后接收 `ENVIRONMENT_CONFIG` 完整快照；**应用成功才发送 `READY`**。READY 公告实例、宿主信息与运行状态。应用设置不使用 HTTP/2 原生 SETTINGS 帧表达。
-- 配置错误与重连：SETTINGS scope 绑定后，CONNECTING 会话仍可收发配置、心跳、运行状态与协议错误，但不得执行能力调用、SkillSync 或 IDE 命令。候选校验失败时，已有可用快照继续运行并上报新版本错误；当前进程尚无可用配置时保持 CONNECTING，等待服务端修正。连接断开时按重连策略重试（1 秒至 30 秒）；收到 NO_ERROR `GOAWAY` 时先摘除并关闭旧代际、清理该代际的在线状态，再立即重连；重连后重新进行 SETTINGS / ENVIRONMENT_CONFIG / READY 协商，不改变进程内已有执行事实。
+- 握手流程：连接准入携带卡片 UUID、进程 UUID 与协议版本 4，认证通过后取得租约。连接建立后服务端首先在控制流发送 Protobuf `SETTINGS`（只含环境标识与 `resource_budgets`），Daemon 绑定 scope 后接收 `ENVIRONMENT_CONFIG` 完整快照；**应用成功才发送 `READY`**。READY 公告实例、宿主信息与运行状态。应用设置不使用 HTTP/2 原生 SETTINGS 帧表达。
+- 配置错误与重连：SETTINGS scope 绑定后，CONNECTING 会话仍可收发配置、心跳、运行状态与协议错误，但不得执行能力调用或 IDE 命令。候选校验失败时，已有可用快照继续运行并上报新版本错误；当前进程尚无可用配置时保持 CONNECTING，等待服务端修正。连接断开时按重连策略重试（1 秒至 30 秒）；收到 NO_ERROR `GOAWAY` 时先摘除并关闭旧代际、清理该代际的在线状态，再立即重连；重连后重新进行 SETTINGS / ENVIRONMENT_CONFIG / READY 协商，不改变进程内已有执行事实。
 - 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update, configuration}`：`configuration` 为 `{appliedVersion?, proxyUrl?, error?}`，`appliedVersion` 缺失表示当前进程尚无可用配置，存在时 `proxyUrl` 缺失表示该版本明确直连，`error` 为 `{version, code, field?}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
 - 任务调用与幂等恢复：`INVOKE` 经 Protobuf 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。重连后服务端发送 `RECOVER` 查询在途调用，未命中记录时回复 `RECOVER_NOT_FOUND`，命中时重放最新状态。
@@ -74,7 +71,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 默认文本捕获预算为 1 GiB，达到预算后停止捕获文件并继续排空与统计，结果中显式标记截断。
 - 定时清扫（默认 30 分钟一次）只回收超过保留期（默认 3 天）且未持用租约的 workspace，清扫不跟随符号链接、不越出受控根目录。
 
-技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过当前卡片代理（`proxyUrl=null` 时显式直连）从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后通过重命名替换 `skills/<package>`。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
+Agent 的系统提示按其配置顺序列出技能名称与描述。技能内容不随 Environment 连接推送或同步。
 
 ## 编码能力与原生监管
 
