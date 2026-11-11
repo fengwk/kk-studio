@@ -205,7 +205,7 @@ YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代�
 Thread `BranchSettings` 的带外重写。
 
 Run 的业务上下文只有一条 Markdown 任务消息：接受时由 Project 自己的模板渲染 Issue 事实、阶段说明
-与可交接目标，以 `CUSTOM_MESSAGE` 随输入回合交给模型。Project 不写任何 branch custom state，也不在
+与可交接目标，以 `CUSTOM_MESSAGE` 随输入回合交给模型。Project 不在
 收尾时回写 Harness 状态，因此压缩可能摘要任务消息，但交接规则始终随工具说明每轮发送。
 `issue_transition` 只依据真实调用 Thread 解析 Project 自己的稳定绑定与活动 Run，在业务锁内校验
 Run/Issue/阶段/版本与调用 Thread 身份，并要求本次调用的 assistant 入口落在该 Thread 当前历史路径上，

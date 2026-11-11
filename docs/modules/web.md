@@ -120,7 +120,7 @@ Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入�
 
 Harness 命令、target 与消息内容都是 sealed union：每个 variant 只携带自己的字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
 `NEW_FORKED_SESSION` 携带 `sourceThreadId`），未知 variant/字段由严格 HTTP mapper 拒绝，续写面仍校验精确 cursor。
-产品命令批为 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
+产品命令批为 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE；
 `CUSTOM_MESSAGE` 与 `NOTIFICATION` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
 Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
@@ -139,7 +139,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 `POST /api/harness/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
-仅含 `USER_MESSAGE` / `GOAL` 的 `cancelledInputs`）。
+仅含 `USER_MESSAGE` 的 `cancelledInputs`）。
 `POST /api/harness/threads/{threadId}/executions/{executionId}/abandon` 接受 `{"expectedVersion":"<bigint>"}`，显式放弃一个具体执行代次并返回最新 Snapshot；
 它与 Snapshot 使用相同的认证与资源读取边界，子 Thread 也可放弃，首次放弃要求 `STOPPED` 与精确 version，重复放弃或已确认真实退出是安全 replay。
 

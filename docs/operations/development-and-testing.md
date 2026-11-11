@@ -438,7 +438,7 @@ L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.pre
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
 `distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
-但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受、阶段交接与 Goal 进度验收，
+但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受与阶段交接，
 这些需在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。

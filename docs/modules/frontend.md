@@ -233,16 +233,16 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `AgentPane` 持有根投影，各子代理查看层由 `ConnectedThreadView` 读取自己的投影。
 `ThreadView` 与命令控制 Hook 只消费必填投影；命令批直接从该投影构建。
 
-命令批在发送前冻结幂等键、payload 与顺序；设置 / Goal 批次还冻结 cursor。
+命令批在发送前冻结幂等键、payload 与顺序；设置批次还冻结 cursor。
 `pending-request-store` 保存这些未决请求：容器创建按 owner/pane 隔离，既有 Thread 按 threadId 隔离，
 与 IndexedDB 离线草稿分开保存。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
 恢复与清理核对 request identity，避免常规路径覆盖其他 Pane 的记录；先读后写并非跨标签页原子操作。
 放弃只清理本地记录，不撤销服务端可能已经接受的请求。
-单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置 / Goal 批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
+单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
 
 Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
 `stoppedThreads` 保留逐 Thread 取消事实，根 Composer 与目标编辑区只恢复该根的
-人工 `USER_MESSAGE` / `GOAL`，子代理不建立人工草稿；
+人工 `USER_MESSAGE`，子代理不建立人工草稿；
 `CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
 IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 snapshot 共用幂等恢复通道。
 恢复 generation 拒绝跨标签页的陈旧覆盖写，失败明确提示并支持手动重试。
@@ -330,8 +330,6 @@ RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `ar
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
 `/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。
-`/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
-[Harness Runtime](harness-runtime.md#内置工具)。
 
 ### 思考、系统通知与压缩卡片
 

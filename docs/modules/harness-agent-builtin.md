@@ -103,7 +103,7 @@ groupExecution?
 | `fun.fengwk.kkstudio.harness.builtin.request` | Provider 消息投影与解析结果契约校验，都是纯函数 |
 | `fun.fengwk.kkstudio.harness.builtin.port.store` | Builtin 模型状态存储端口及跨层契约：Invocation、状态、请求规格与 codec、失败审计、checkpoint、模型组快照与物化校验；存储视图只投影调用方事务，不开启新事务 |
 
-本模块只依赖 Runtime 的公开 API：`ClaimLostSignal`、准入票据与执行骨架提供 Driver 所需的公共能力，其内部登记结构保持私有。包名分离使越界使用无法通过编译。`fun.fengwk.kkstudio.harness.contributor.builtin` 下的 Runtime 内置 Contributor、`goal` / `input` / `subagent` / `environment` 工具属于 Kernel，不在本模块。
+本模块只依赖 Runtime 的公开 API：`ClaimLostSignal`、准入票据与执行骨架提供 Driver 所需的公共能力，其内部登记结构保持私有。包名分离使越界使用无法通过编译。Runtime 的 Contributor 与内置工具位于 `fun.fengwk.kkstudio.harness.contributor.builtin`，不在本模块。
 
 ## 源码与测试
 
