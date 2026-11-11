@@ -147,7 +147,6 @@ func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, 
 	}
 	return formatSymbols(result, limit)
 }
-
 func trackingCallbacks(callbacks []func()) (func(), func()) {
 	if len(callbacks) == 0 {
 		return nil, nil
@@ -213,28 +212,50 @@ func formatLocations(raw json.RawMessage) ([]string, error) {
 		values = []json.RawMessage{raw}
 	}
 	out := make([]string, 0, len(values))
-	for _, v := range values {
+	for _, value := range values {
 		var item map[string]json.RawMessage
-		if json.Unmarshal(v, &item) != nil {
+		if json.Unmarshal(value, &item) != nil {
 			continue
 		}
-		uri := readString(item["uri"])
+		uriData, hasTarget := item["targetUri"]
 		rangeData := item["range"]
-		if uri == "" {
-			uri = readString(item["targetUri"])
+		if hasTarget {
+			uriData = item["targetUri"]
 			rangeData = item["targetSelectionRange"]
-			if len(rangeData) == 0 {
+			if len(rangeData) == 0 || string(rangeData) == "null" {
 				rangeData = item["targetRange"]
 			}
+		} else if _, ok := item["uri"]; !ok {
+			continue
 		}
-		var r struct{ Start struct{ Line, Character int } }
-		_ = json.Unmarshal(rangeData, &r)
-		out = append(out, locationPath(uri)+fmt.Sprintf(":%d:%d", r.Start.Line+1, r.Start.Character))
+		location := "unknown"
+		if uri, ok := item["uri"]; ok && !hasTarget {
+			location = locationText(readString(uri), rangeData)
+		} else {
+			location = locationText(readString(uriData), rangeData)
+		}
+		out = append(out, location)
 	}
 	if len(out) == 0 {
 		return []string{"No results found"}, nil
 	}
 	return out, nil
+}
+func locationText(uri string, rangeData json.RawMessage) string {
+	if uri == "" {
+		return "unknown"
+	}
+	location := locationPath(uri)
+	var position struct {
+		Start *struct {
+			Line      int `json:"line"`
+			Character int `json:"character"`
+		} `json:"start"`
+	}
+	if len(rangeData) == 0 || json.Unmarshal(rangeData, &position) != nil || position.Start == nil {
+		return location
+	}
+	return fmt.Sprintf("%s:%d:%d", location, position.Start.Line+1, position.Start.Character)
 }
 func readString(raw json.RawMessage) string { var s string; _ = json.Unmarshal(raw, &s); return s }
 func locationPath(value string) string {
@@ -248,41 +269,41 @@ func locationPath(value string) string {
 	return value
 }
 func formatSymbols(raw json.RawMessage, limit int) ([]string, error) {
-	if limit == 0 {
+	if limit <= 0 || len(raw) == 0 || string(raw) == "null" {
 		return []string{"No symbols found"}, nil
 	}
-	if len(raw) == 0 || string(raw) == "null" {
-		return []string{"No symbols found"}, nil
-	}
-	var values []map[string]json.RawMessage
+	var values []json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil, err
 	}
 	kinds := []string{"File", "Module", "Namespace", "Package", "Class", "Method", "Property", "Field", "Constructor", "Enum", "Interface", "Function", "Variable", "Constant", "String", "Number", "Boolean", "Array", "Object", "Key", "Null", "EnumMember", "Struct", "Event", "Operator", "TypeParameter"}
 	out := make([]string, 0, len(values))
-	for _, v := range values {
-		var name string
-		_ = json.Unmarshal(v["name"], &name)
-		var kind string
-		if json.Unmarshal(v["kind"], &kind) != nil {
-			var n int
-			if json.Unmarshal(v["kind"], &n) == nil && n >= 1 && n <= len(kinds) {
-				kind = kinds[n-1]
+	for _, value := range values {
+		var item map[string]json.RawMessage
+		if json.Unmarshal(value, &item) != nil || item == nil {
+			continue
+		}
+		name := readString(item["name"])
+		if name == "" {
+			name = "unknown"
+		}
+		kind := readString(item["kind"])
+		if kind == "" {
+			var number int
+			if json.Unmarshal(item["kind"], &number) == nil && number >= 1 && number <= len(kinds) {
+				kind = kinds[number-1]
 			} else {
 				kind = "unknown"
 			}
 		}
-		uri := readString(v["uri"])
-		if uri == "" {
-			var loc map[string]json.RawMessage
-			_ = json.Unmarshal(v["location"], &loc)
-			uri = readString(loc["uri"])
-		}
+		var location map[string]json.RawMessage
+		_ = json.Unmarshal(item["location"], &location)
+		uri := readString(location["uri"])
 		if uri == "" {
 			uri = "unknown"
 		}
 		out = append(out, fmt.Sprintf("%s (%s) - %s", name, kind, uri))
-		if limit >= 0 && len(out) >= limit {
+		if len(out) == limit {
 			break
 		}
 	}

@@ -190,7 +190,21 @@ func NewDiscoveryFromServers(servers []ServerConfig, options ResolverOptions) (*
 	}
 	return &Discovery{servers: copyServers, resolver: NewExecutableResolver(options), executable: map[string]resolution{}}, nil
 }
-func (d *Discovery) Servers() []ServerConfig { return append([]ServerConfig(nil), d.servers...) }
+func cloneServer(server ServerConfig) ServerConfig {
+	server.Command = append([]string(nil), server.Command...)
+	server.Extensions = append([]string(nil), server.Extensions...)
+	server.RootMarkers = append([]string(nil), server.RootMarkers...)
+	server.FirstMatchMarkers = append([]string(nil), server.FirstMatchMarkers...)
+	return server
+}
+
+func (d *Discovery) Servers() []ServerConfig {
+	servers := make([]ServerConfig, len(d.servers))
+	for i, server := range d.servers {
+		servers[i] = cloneServer(server)
+	}
+	return servers
+}
 func (d *Discovery) Server(path string) (ServerConfig, bool) {
 	name := filepath.Base(path)
 	dot := strings.LastIndexByte(name, '.')
@@ -201,7 +215,7 @@ func (d *Discovery) Server(path string) (ServerConfig, bool) {
 	for _, s := range d.servers {
 		for _, candidate := range s.Extensions {
 			if ext == candidate {
-				return s, true
+				return cloneServer(s), true
 			}
 		}
 	}

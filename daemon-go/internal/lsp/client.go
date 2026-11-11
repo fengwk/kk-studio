@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -75,6 +74,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 		result, e := process.Wait(context.Background())
 		if e != nil {
 			c.exitErr <- e
+			c.closed.Store(true)
 			return
 		}
 		c.exited <- result
@@ -100,7 +100,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 
 func isJDTLS(command []string) bool {
 	for _, part := range command {
-		base := strings.ToLower(filepath.Base(part))
+		base := strings.ToLower(filepath.Base(strings.ReplaceAll(part, `\`, "/")))
 		for _, ext := range []string{".exe", ".cmd", ".bat"} {
 			base = strings.TrimSuffix(base, ext)
 		}
@@ -111,14 +111,16 @@ func isJDTLS(command []string) bool {
 	return false
 }
 func (c *Client) handleRequest(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
-	var params []map[string]any
-	if req.Params != nil {
-		_ = json.Unmarshal(*req.Params, &params)
-	}
 	var result any
 	switch req.Method {
 	case "workspace/configuration":
-		result = make([]map[string]any, len(params))
+		var params struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if req.Params != nil {
+			_ = json.Unmarshal(*req.Params, &params)
+		}
+		result = make([]map[string]any, len(params.Items))
 	case "workspace/workspaceFolders":
 		uri := pathURI(c.root)
 		result = []map[string]any{{"uri": uri, "name": "workspace"}}
@@ -145,7 +147,7 @@ func (c *Client) Initialize(ctx context.Context, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = 180 * time.Second
 	}
-	params := map[string]any{"processId": os.Getpid(), "rootUri": pathURI(c.root), "rootPath": c.root, "workspaceFolders": []map[string]string{{"uri": pathURI(c.root), "name": "workspace"}}, "capabilities": map[string]any{"general": map[string]any{"positionEncodings": []string{"utf-16", "utf-8"}}, "workspace": map[string]any{"workspaceFolders": true, "configuration": false, "applyEdit": false}, "textDocument": map[string]any{"synchronization": map[string]any{"willSave": false, "willSaveWaitUntil": false, "didSave": true}, "definition": map[string]any{"linkSupport": true}}}}
+	params := map[string]any{"processId": c.process.PID(), "rootUri": pathURI(c.root), "rootPath": c.root, "workspaceFolders": []map[string]string{{"uri": pathURI(c.root), "name": "workspace"}}, "capabilities": map[string]any{"general": map[string]any{"positionEncodings": []string{"utf-16", "utf-8"}}, "workspace": map[string]any{"workspaceFolders": true, "configuration": false, "applyEdit": false}, "textDocument": map[string]any{"synchronization": map[string]any{"willSave": false, "willSaveWaitUntil": false, "didSave": true}, "definition": map[string]any{"linkSupport": true}}}}
 	if c.jdtls {
 		params["initializationOptions"] = map[string]any{"extendedClientCapabilities": map[string]bool{"classFileContentsSupport": true}}
 	}
@@ -219,6 +221,9 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 	case <-c.exited:
 		return c.exitError()
+	case err := <-c.exitErr:
+		c.exitErr <- err
+		return &LspError{Message: "LSP client stopped", Cause: err}
 	}
 }
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
@@ -245,6 +250,8 @@ func (c *Client) IsAlive() bool {
 	}
 	select {
 	case <-c.exited:
+		return false
+	case <-c.exitErr:
 		return false
 	default:
 		return true

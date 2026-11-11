@@ -98,8 +98,10 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 	for {
 		p.mu.Lock()
 		if p.closing {
+			done := p.closeDone
 			p.mu.Unlock()
-			if onExit != nil {
+			<-done
+			if onExit != nil && p.closeErr == nil {
 				onExit()
 			}
 			return nil, &LspError{Message: "LSP service is closed"}
@@ -108,6 +110,9 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 			p.mu.Unlock()
 			select {
 			case <-ctx.Done():
+				if onExit != nil {
+					onExit()
+				}
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
 				}
@@ -183,7 +188,12 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 				return nil, b.err
 			}
 			if p.closing {
+				done := p.closeDone
 				p.mu.Unlock()
+				<-done
+				if onExit != nil && p.closeErr == nil {
+					onExit()
+				}
 				return nil, &LspError{Message: "LSP service is closed"}
 			}
 			entry := p.entries[key]
@@ -217,9 +227,11 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 			}
 		} else {
 			b.retryable = true
-			var be *LspBootstrapError
-			if errors.As(err, &be) {
-				be.Converged = true
+			var bootstrap *LspBootstrapError
+			if errors.As(err, &bootstrap) {
+				bootstrap.Converged = true
+			} else {
+				err = &LspBootstrapError{Message: err.Error(), Converged: true, Cause: err}
 			}
 		}
 	}
