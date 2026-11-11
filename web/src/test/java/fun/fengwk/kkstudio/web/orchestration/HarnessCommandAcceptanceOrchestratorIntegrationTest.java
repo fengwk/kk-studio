@@ -24,12 +24,20 @@ import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
@@ -62,6 +70,9 @@ import java.util.UUID;
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
 class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTestSupport {
+
+  private static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS =
+      new HistoryEntryPayloadJsonCodec();
 
   @Autowired private ChatService chatService;
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
@@ -256,6 +267,57 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
   }
 
+  /** Fork 把历史中的资源引用复制到新 Session，并使新 Session 成为独立持有者。 */
+  @Test
+  void forkedSessionRetainsCopiedResourceHistory() {
+    UUID chatId = createChat("fork-resource");
+    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
+    String uploadId =
+        storage.completeUpload("resource.txt", "forked resource".getBytes(StandardCharsets.UTF_8));
+    UUID sourceSessionId = UUID.randomUUID();
+    UUID sourceThreadId = UUID.randomUUID();
+    AcceptedCommands source =
+        acceptanceService.accept(
+            owner,
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewRootSession(
+                    sourceSessionId, sourceThreadId, settings(), false),
+                List.of(
+                    new NewThreadCommand(
+                        new UserMessageCommandPayload(
+                            new AgentMessage(
+                                AgentMessageRole.USER,
+                                List.of(new AttachmentMessageContent(UUID.fromString(uploadId))))),
+                        UUID.randomUUID()))));
+    UUID blobId =
+        jdbc.queryForObject(
+            "select blob_id from session_blob_ref where session_id = ?",
+            UUID.class,
+            sourceSessionId);
+    UUID cutEntryId =
+        appendResourceTurn(sourceSessionId, sourceThreadId, source.rootEntry().id(), blobId);
+    UUID forkSessionId = UUID.randomUUID();
+    UUID forkThreadId = UUID.randomUUID();
+
+    acceptanceService.accept(
+        owner,
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewForkedSession(
+                sourceThreadId, cutEntryId, forkSessionId, forkThreadId, false),
+            List.of(
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER, List.of(new TextMessageContent("fork")))),
+                    UUID.randomUUID()))));
+
+    assertEquals(1, count("session_blob_ref", "session_id", sourceSessionId));
+    assertEquals(1, count("session_blob_ref", "session_id", forkSessionId));
+    assertEquals(
+        2L,
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
+  }
+
   @Test
   void acceptanceRejectsCrossOwnerSessionAndReplay() {
     UUID chat1Id = createChat("chat-owner-1");
@@ -359,6 +421,48 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         "default-assistant",
         BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
         null);
+  }
+
+  private UUID appendResourceTurn(UUID sessionId, UUID threadId, UUID rootEntryId, UUID blobId) {
+    UUID turnStartId =
+        insertEntry(
+            sessionId,
+            rootEntryId,
+            new TurnStartPayload(TurnStartReason.INPUT, settings(), threadId));
+    UUID messageId =
+        insertEntry(
+            sessionId,
+            turnStartId,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(ResourceMessageContent.media(blobId, "resource.txt", null))),
+                null,
+                null));
+    UUID turnEndId =
+        insertEntry(
+            sessionId,
+            messageId,
+            new TurnEndPayload(
+                turnStartId, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null));
+    jdbc.update(
+        "update harness_thread set head_entry_id = ?, updated_at = now() where id = ?",
+        turnEndId,
+        threadId);
+    return turnEndId;
+  }
+
+  private UUID insertEntry(UUID sessionId, UUID parentEntryId, EntryPayload payload) {
+    UUID entryId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, ?, ?::jsonb, now())",
+        entryId,
+        sessionId,
+        parentEntryId,
+        payload.type().name(),
+        ENTRY_PAYLOADS.encode(payload));
+    return entryId;
   }
 
   private int count(String table, String column, UUID value) {
