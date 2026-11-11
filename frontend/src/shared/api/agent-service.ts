@@ -17,7 +17,6 @@ import type {
   ProviderDTO,
   ProviderUpdateDTO,
   SkillArchiveDownloadDTO,
-  SkillEnvironmentSyncDTO,
   SkillPackageCheckDTO,
   SkillPackageDetailDTO,
   SkillPackageEditDTO,
@@ -131,9 +130,6 @@ export function createAgentService(catalogRequest: CatalogRequester = request) {
     getSkillPackageArchiveUrl: (name: string): Promise<SkillArchiveDownloadDTO> =>
       request('POST /api/platform/skill-packages/{name}/archive-url', { path: { name } }),
 
-    listSkillPackageEnvironments: (name: string): Promise<SkillEnvironmentSyncDTO[]> =>
-      request('GET /api/platform/skill-packages/{name}/environments', { path: { name } }),
-
     listSkillPackageFiles: (name: string): Promise<SkillPackageFileDTO[]> =>
       request('GET /api/platform/skill-packages/{name}/files', { path: { name } }),
 
@@ -187,11 +183,6 @@ export function createAgentService(catalogRequest: CatalogRequester = request) {
     cancelSkillPackageStaging: (stagingId: string): Promise<void> =>
       request('DELETE /api/platform/skill-package-stagings/{stagingId}', {
         path: { stagingId },
-      }),
-
-    resyncEnvironmentSkills: (environmentId: string): Promise<void> =>
-      request('POST /api/platform/environments/{environmentId}/resync-skills', {
-        path: { environmentId },
       }),
 
   }

@@ -309,12 +309,6 @@ export interface ThreadModelRequestDebugSkill {
   packageName: string
   name: string
   description: string
-  path: string
-  delivery: string
-  packageVersion: string
-  headCommit: string | null
-  artifactSha256: string
-  installedSha256: string | null
   promptXml: string | null
 }
 

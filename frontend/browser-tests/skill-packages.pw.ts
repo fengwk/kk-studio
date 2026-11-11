@@ -95,7 +95,7 @@ test.describe('Skill Packages real browser verification', () => {
     await page.screenshot({ path: `${SHOTS}/skill-packages-published-desktop-1280.png`, fullPage: true })
   })
 
-  test('shows the real archive tree, environment sync states and archive download', async ({ page }) => {
+  test('shows the real archive tree and downloadable archive', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/browser-tests/skill-packages-harness.html')
 
@@ -108,12 +108,6 @@ test.describe('Skill Packages real browser verification', () => {
     await expect(detail.locator('.skill-tree-name', { hasText: 'dropped' }).first()).toBeVisible()
     await expect(detail).toContainText('共 2 个文件')
 
-    // 各环境同步状态：已同步、同步失败、待同步。
-    await expect(detail.getByText('NAS', { exact: true })).toBeVisible()
-    await expect(detail.getByText('已同步')).toBeVisible()
-    await expect(detail.getByText('同步失败')).toBeVisible()
-    await expect(detail.getByText('archive download timed out')).toBeVisible()
-    await expect(detail.getByText('待同步')).toBeVisible()
     await page.screenshot({ path: `${SHOTS}/skill-packages-detail-desktop-1280.png`, fullPage: true })
 
     await detail.getByRole('button', { name: '下载归档' }).click()
@@ -121,8 +115,6 @@ test.describe('Skill Packages real browser verification', () => {
       .poll(async () => page.evaluate(() => Number((window as unknown as Record<string, unknown>).__skillArchiveRequests ?? 0)))
       .toBe(1)
 
-    await detail.getByRole('button', { name: '重新同步 NAS 备份' }).click()
-    await expect(detail.getByText('archive download timed out')).toBeVisible()
   })
 
   test('rejects deleting a package that is still referenced by an agent', async ({ page }) => {

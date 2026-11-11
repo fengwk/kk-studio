@@ -219,8 +219,8 @@ describe('browser port contract (KK_BROWSER_PORT)', () => {
 })
 
 describe('vite browser build contract', () => {
-  // 验证所有 HTML 输入（包括补充消息队列、会话文件面板、技能包与技能可用性提示）统一被收集为 MPA 入口
-  it('registers all 37 HTML harnesses including custom-message-queue-harness.html', () => {
+  // 验证所有 HTML 输入统一被收集为 MPA 入口
+  it('registers all remaining HTML harnesses including custom-message-queue-harness.html', () => {
     const effective = loadViteBrowserConfig(undefined)
     const inputs = effective.inputs
     const keys = Object.keys(inputs)
@@ -234,13 +234,10 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('model-browser-harness')
     expect(keys).toContain('settings-catalog-harness')
     expect(keys).toContain('session-files-harness')
-    expect(inputs['skill-hint-harness']).toBe(
-      path.resolve(__dirname, 'browser-tests/skill-hint-harness.html'),
-    )
     expect(inputs['custom-message-queue-harness']).toBe(
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )
-    expect(keys.length).toBe(37)
+    expect(keys.length).toBe(36)
   })
 
   // 验证静态构建目标与 MPA 模式

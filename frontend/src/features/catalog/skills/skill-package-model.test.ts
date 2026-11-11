@@ -9,7 +9,6 @@ import {
   buildPreviewTree,
   deriveCheckStatus,
   displayPackageVersion,
-  environmentSyncStatus,
   formatCommit,
   isDescriptionWithinLimit,
   isSupportedSkillArchive,
@@ -137,36 +136,6 @@ describe('skill package model', () => {
     expect(isSupportedSkillArchive('skills.zip')).toBe(true)
     expect(isSupportedSkillArchive('skills.tar.gz')).toBe(true)
     expect(isSupportedSkillArchive('skills.tar')).toBe(false)
-  })
-
-  it('maps environment sync projections to failure, synced and pending', () => {
-    expect(
-      environmentSyncStatus({
-        environmentId: 'env-1',
-        installedSha256: 'sha',
-        localPath: '/skills',
-        error: null,
-        upToDate: true,
-      }),
-    ).toBe('SYNCED')
-    expect(
-      environmentSyncStatus({
-        environmentId: 'env-1',
-        installedSha256: null,
-        localPath: null,
-        error: null,
-        upToDate: false,
-      }),
-    ).toBe('PENDING')
-    expect(
-      environmentSyncStatus({
-        environmentId: 'env-1',
-        installedSha256: null,
-        localPath: null,
-        error: 'install failed',
-        upToDate: false,
-      }),
-    ).toBe('FAILED')
   })
 
   it('prefers the backend errors.detail over the transport message', () => {

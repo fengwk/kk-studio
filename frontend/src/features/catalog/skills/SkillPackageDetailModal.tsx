@@ -2,40 +2,24 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Trash2 } from 'lucide-react'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/features/environment/environment-service'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
 import { formatBackendDate } from '@/shared/lib/date-format'
 import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
-import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
+import { useI18n } from '@/shared/i18n'
+import { Badge } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   buildFileTree,
   displayPackageVersion,
-  environmentSyncStatus,
   formatCommit,
   isGitPackage,
   skillPackageQueryKeys,
   triggerDownload,
-  type EnvironmentSyncStatus,
 } from './skill-package-model'
 import { SkillPackageTree } from './SkillPackageTree'
 import './skill-packages.css'
-
-const SYNC_LABEL_KEYS: Record<EnvironmentSyncStatus, TranslationKey> = {
-  SYNCED: 'ai.skillPackages.sync.SYNCED',
-  FAILED: 'ai.skillPackages.sync.FAILED',
-  PENDING: 'ai.skillPackages.sync.PENDING',
-}
-
-const SYNC_TONES: Record<EnvironmentSyncStatus, BadgeTone> = {
-  SYNCED: 'success',
-  FAILED: 'danger',
-  PENDING: 'warning',
-}
 
 export function SkillPackageDetailModal({
   packageName,
@@ -62,22 +46,6 @@ export function SkillPackageDetailModal({
     queryFn: () => agentService.listSkillPackageFiles(packageName),
     staleTime: 30_000,
   })
-  const environmentsQuery = useQuery({
-    queryKey: skillPackageQueryKeys.environments(packageName),
-    queryFn: () => agentService.listSkillPackageEnvironments(packageName),
-    staleTime: 15_000,
-  })
-  const environmentListQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
-  })
-
-  const resyncMutation = useMutation({
-    mutationFn: (environmentId: string) => agentService.resyncEnvironmentSkills(environmentId),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.environments(packageName) }),
-  })
-
   const downloadMutation = useMutation({
     mutationFn: () => agentService.getSkillPackageArchiveUrl(packageName),
     onSuccess: (archive) => triggerDownload(archive.download.url, archive.filename),
@@ -93,14 +61,10 @@ export function SkillPackageDetailModal({
   })
 
   const detail = detailQuery.data
-  const environments = environmentsQuery.data ?? []
-  const environmentNames = new Map(
-    (environmentListQuery.data ?? []).map((environment) => [environment.id, environment.name]),
-  )
   const tree = detail && filesQuery.data
     ? buildFileTree(packageName, filesQuery.data)
     : null
-  const loadError = detailQuery.error ?? filesQuery.error ?? environmentsQuery.error
+  const loadError = detailQuery.error ?? filesQuery.error
 
   return (
     <Dialog
@@ -237,58 +201,6 @@ export function SkillPackageDetailModal({
               ) : null}
             </section>
 
-            <section className="skill-detail-section">
-              <div className="skill-section-heading">
-                <h3>{t('ai.skillPackages.environmentSync')}</h3>
-              </div>
-              {environments.length === 0 ? (
-                <p className="inline-hint">{t('ai.skillPackages.noEnvironments')}</p>
-              ) : (
-                <ul className="skill-environment-list">
-                  {environments.map((environment) => {
-                    const status = environmentSyncStatus(environment)
-                    const name = environmentNames.get(environment.environmentId) ?? environment.environmentId
-                    return (
-                      <li key={environment.environmentId} className="skill-environment-item">
-                        <div className="skill-environment-head">
-                          <strong>{name}</strong>
-                          <Badge tone={SYNC_TONES[status]}>{t(SYNC_LABEL_KEYS[status])}</Badge>
-                          {status !== 'SYNCED' ? (
-                            <Button
-                              variant="inline"
-                              size="compact"
-                              aria-label={`${t('ai.skillPackages.resync')} ${name}`}
-                              loading={
-                                resyncMutation.isPending
-                                && resyncMutation.variables === environment.environmentId
-                              }
-                              onClick={() => resyncMutation.mutate(environment.environmentId)}
-                            >
-                              {t('ai.skillPackages.resync')}
-                            </Button>
-                          ) : null}
-                        </div>
-                        {environment.installedSha256 ? (
-                          <span className="inline-hint is-mono" title={environment.installedSha256}>
-                            {formatCommit(environment.installedSha256)}
-                          </span>
-                        ) : null}
-                        {environment.error ? (
-                          <span className="field-error" role="alert">
-                            {environment.error}
-                          </span>
-                        ) : null}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {resyncMutation.error ? (
-                <p className="field-error" role="alert">
-                  {errorDetail(resyncMutation.error)}
-                </p>
-              ) : null}
-            </section>
           </>
         )}
       </div>

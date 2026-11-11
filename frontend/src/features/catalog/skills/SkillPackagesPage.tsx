@@ -3,9 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { ArrowUpCircle, Package, RefreshCw } from 'lucide-react'
 import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/features/environment/environment-service'
 import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
@@ -19,7 +17,6 @@ import { SkillPackageEditModal } from './SkillPackageEditModal'
 import {
   deriveCheckStatus,
   displayPackageVersion,
-  environmentSyncStatus,
   formatCommit,
   isGitPackage,
   skillPackageQueryKeys,
@@ -68,7 +65,7 @@ export function SkillPackagesPage() {
     )
   }, [packagesQuery.data, search])
 
-  // 列表摘要不含检查观察值与环境安装状态：按包名读取详情与环境投影，供卡片呈现状态。
+  // 列表摘要不含检查观察值：按包名读取详情，供卡片呈现状态。
   const detailQueries = useQueries({
     queries: filteredPackages.map((pkg) => ({
       queryKey: skillPackageQueryKeys.detail(pkg.packageName),
@@ -76,18 +73,6 @@ export function SkillPackagesPage() {
       staleTime: 30_000,
     })),
   })
-  const environmentQueries = useQueries({
-    queries: filteredPackages.map((pkg) => ({
-      queryKey: skillPackageQueryKeys.environments(pkg.packageName),
-      queryFn: () => agentService.listSkillPackageEnvironments(pkg.packageName),
-      staleTime: 15_000,
-    })),
-  })
-  const environmentListQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
-  })
-
   const detailsByName = useMemo(() => {
     const map = new Map<string, SkillPackageDetailDTO>()
     filteredPackages.forEach((pkg, index) => {
@@ -98,27 +83,6 @@ export function SkillPackagesPage() {
     })
     return map
   }, [filteredPackages, detailQueries])
-
-  const failedEnvironmentsByName = useMemo(() => {
-    const onlineEnvironments = new Map(
-      (environmentListQuery.data ?? []).map((environment) => [environment.id, environment]),
-    )
-    const map = new Map<string, string[]>()
-    filteredPackages.forEach((pkg, index) => {
-      const sync = environmentQueries[index]?.data ?? []
-      const failed = sync
-        .filter((environment) => environmentSyncStatus(environment) === 'FAILED')
-        .filter((environment) => onlineEnvironments.get(environment.environmentId)?.ready === true)
-        .map(
-          (environment) =>
-            onlineEnvironments.get(environment.environmentId)?.name ?? environment.environmentId,
-        )
-      if (failed.length > 0) {
-        map.set(pkg.packageName, failed)
-      }
-    })
-    return map
-  }, [environmentListQuery.data, environmentQueries, filteredPackages])
 
   const invalidatePackages = () => {
     void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.list })
@@ -163,7 +127,6 @@ export function SkillPackagesPage() {
         const gitPackage = isGitPackage(pkg)
         const checkStatus = detail && gitPackage ? deriveCheckStatus(detail) : null
         const hasUpdate = Boolean(detail?.updateAvailable && detail.headCommit)
-        const failedEnvironments = failedEnvironmentsByName.get(pkg.packageName) ?? []
         const checking = checkMutation.isPending
           && checkMutation.variables?.name === pkg.packageName
         const updating = publishMutation.isPending
@@ -202,19 +165,6 @@ export function SkillPackagesPage() {
             value: (
               <span className="inline-hint danger" role="alert">
                 {detail.headCheckError}
-              </span>
-            ),
-            wrap: true,
-          })
-        }
-        if (failedEnvironments.length > 0) {
-          rows.push({
-            label: t('ai.skillPackages.environmentSync'),
-            value: (
-              <span className="inline-hint danger" role="alert">
-                {t('ai.skillPackages.environmentSyncFailed', {
-                  names: failedEnvironments.join(', '),
-                })}
               </span>
             ),
             wrap: true,

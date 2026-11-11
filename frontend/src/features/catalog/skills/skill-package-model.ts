@@ -1,5 +1,4 @@
 import type {
-  SkillEnvironmentSyncDTO,
   SkillManifestEntryDTO,
   SkillPackageDetailDTO,
   SkillPackageFileDTO,
@@ -12,8 +11,6 @@ export const skillPackageQueryKeys = {
   list: queryKeys.skills.packages,
   detail: (packageName: string) => [...queryKeys.skills.packages, 'detail', packageName] as const,
   files: (packageName: string) => [...queryKeys.skills.packages, 'files', packageName] as const,
-  environments: (packageName: string) =>
-    [...queryKeys.skills.packages, 'environments', packageName] as const,
   agentSkillReferences: ['agents', 'skill-references'] as const,
 }
 
@@ -88,19 +85,6 @@ export function isDescriptionWithinLimit(value: string): boolean {
 export function isSupportedSkillArchive(filename: string): boolean {
   const lower = filename.toLowerCase()
   return lower.endsWith('.zip') || lower.endsWith('.tar.gz')
-}
-
-/** 环境同步状态：错误优先，其次按已安装摘要是否等于当前归档判断。 */
-export type EnvironmentSyncStatus = 'SYNCED' | 'FAILED' | 'PENDING'
-
-export function environmentSyncStatus(environment: SkillEnvironmentSyncDTO): EnvironmentSyncStatus {
-  if (environment.error) {
-    return 'FAILED'
-  }
-  if (environment.upToDate) {
-    return 'SYNCED'
-  }
-  return 'PENDING'
 }
 
 export interface SkillTreeNode {

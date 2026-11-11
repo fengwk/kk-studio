@@ -60,19 +60,6 @@ function formatEnvSupport(
   }
 }
 
-function formatDelivery(
-  delivery: string,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  if (delivery === 'LOCAL') {
-    return t('ai.runtime.debug.delivery.local')
-  }
-  if (delivery === 'PLATFORM') {
-    return t('ai.runtime.debug.delivery.platform')
-  }
-  return delivery
-}
-
 export function ThreadDebugInspector({
   selection,
   debug,
@@ -186,17 +173,7 @@ export function ThreadDebugInspector({
           <KeyValue>
             <KeyValueRow label={t('ai.runtime.debug.inspector.skillName')}><Mono>{selection.skill.name}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.package')}><Mono>{selection.skill.packageName}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.delivery')}>
-                <Badge tone="success">
-                  {formatDelivery(selection.skill.delivery, t)}
-                </Badge>
-              </KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.path')}><Mono>{selection.skill.path}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.skill.description}</KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.packageVersion')}><Mono>{selection.skill.packageVersion}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.headCommit')}><Mono>{selection.skill.headCommit || '—'}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.artifactSha256')}><Mono>{selection.skill.artifactSha256}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledSha256')}><Mono>{selection.skill.installedSha256 || '—'}</Mono></KeyValueRow>
           </KeyValue>
           {selection.skill.promptXml !== null && (
             <div className="thread-debug-payload-section">

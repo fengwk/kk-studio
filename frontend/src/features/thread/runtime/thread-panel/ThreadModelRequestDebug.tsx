@@ -39,19 +39,6 @@ function envBadgeTitle(
   }
 }
 
-function formatDelivery(
-  delivery: string,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  if (delivery === 'LOCAL') {
-    return t('ai.runtime.debug.delivery.local')
-  }
-  if (delivery === 'PLATFORM') {
-    return t('ai.runtime.debug.delivery.platform')
-  }
-  return delivery
-}
-
 function formatCacheRetention(
   retention: string,
   t: ReturnType<typeof useI18n>['t'],
@@ -211,10 +198,7 @@ export function ThreadModelRequestDebug({
                 aria-label={`${t('ai.runtime.debug.skillAriaPrefix')} ${skill.name}`}
                 onClick={() => onSelectInspector({ type: 'skill', skill })}
               >
-                <Mono>{skill.name}</Mono>{' '}
-                <span className="thread-debug-chip-badge">
-                  · {formatDelivery(skill.delivery, t)}
-                </span>
+                <Mono>{skill.name}</Mono>
               </Button>
             ))}
           </div>

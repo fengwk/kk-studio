@@ -118,8 +118,8 @@ describe('EnvironmentManagementModal', () => {
       {
         occurredAt: 1784509500000,
         level: 'WARN',
-        type: 'SKILL_SYNC_FAILED',
-        message: 'Failed to synchronize skill package',
+        type: 'UPDATE_FAILED',
+        message: 'Daemon update failed',
       },
     ]
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue(mockEvents)
@@ -127,9 +127,9 @@ describe('EnvironmentManagementModal', () => {
     renderModal(testEnvironment())
 
     expect(await screen.findByText('Host connected successfully')).toBeInTheDocument()
-    expect(screen.getByText('Failed to synchronize skill package')).toBeInTheDocument()
+    expect(screen.getByText('Daemon update failed')).toBeInTheDocument()
     expect(screen.getByText('READY')).toBeInTheDocument()
-    expect(screen.getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
+    expect(screen.getByText('UPDATE_FAILED')).toBeInTheDocument()
 
     // 检查 WARN 级别是否具有视觉区分样式类
     const warnLevel = screen.getByText('WARN')

@@ -800,20 +800,12 @@ export type EnvironmentEventType =
   | 'CONNECTING'
   | 'READY'
   | 'DISCONNECTED'
-  | 'SKILL_SYNC_STARTED'
-  | 'SKILL_SYNC_SUCCEEDED'
-  | 'SKILL_SYNC_FAILED'
-  | 'SKILL_STATE_UPDATED'
   | 'UPDATE_FAILED'
 
 export const ENVIRONMENT_EVENT_TYPE_VALUES: readonly EnvironmentEventType[] = [
   'CONNECTING',
   'READY',
   'DISCONNECTED',
-  'SKILL_SYNC_STARTED',
-  'SKILL_SYNC_SUCCEEDED',
-  'SKILL_SYNC_FAILED',
-  'SKILL_STATE_UPDATED',
   'UPDATE_FAILED',
 ]
 
@@ -1314,13 +1306,7 @@ export interface HarnessModelRequestDebugSkillDTO {
   packageName: string
   name: string
   description: string
-  path: string
-  delivery: SkillPromptResolutionDelivery
-  packageVersion: string
-  headCommit: string | null
-  artifactSha256: string
-  installedSha256: string | null
-  promptXml: string | null
+  promptXml: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.SubagentDTO */
@@ -2570,15 +2556,6 @@ export interface SkillArchiveDownloadDTO {
   download: StoragePresignedUrlDTO
 }
 
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillEnvironmentSyncDTO */
-export interface SkillEnvironmentSyncDTO {
-  environmentId: string
-  installedSha256: string | null
-  localPath: string | null
-  error: string | null
-  upToDate: boolean
-}
-
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillGitSourceDTO */
 export interface SkillGitSourceDTO {
   repositoryUrl: string
@@ -2699,16 +2676,6 @@ export interface SkillPackageSummaryDTO {
   createdAt: number
   updatedAt: number
 }
-
-/** Java：fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution.Delivery */
-export type SkillPromptResolutionDelivery =
-  | 'LOCAL'
-  | 'PLATFORM'
-
-export const SKILL_PROMPT_RESOLUTION_DELIVERY_VALUES: readonly SkillPromptResolutionDelivery[] = [
-  'LOCAL',
-  'PLATFORM',
-]
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO */
 export interface SkillRefDTO {
@@ -3314,10 +3281,6 @@ export interface ApiRoutes {
     path: { name: string }
     response: SkillPackageDetailDTO
   }
-  'GET /api/platform/skill-packages/{name}/environments': {
-    path: { name: string }
-    response: SkillEnvironmentSyncDTO[]
-  }
   'GET /api/platform/skill-packages/{name}/files': {
     path: { name: string }
     response: SkillPackageFileDTO[]
@@ -3465,10 +3428,6 @@ export interface ApiRoutes {
     path: { environmentId: string }
     body: EnvironmentInstallCodeRequestDTO
     response: EnvironmentInstallCodeDTO
-  }
-  'POST /api/platform/environments/{environmentId}/resync-skills': {
-    path: { environmentId: string }
-    response: void
   }
   'POST /api/platform/environments/{environmentId}/rotate-token': {
     path: { environmentId: string }
