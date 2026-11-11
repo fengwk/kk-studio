@@ -2491,7 +2491,7 @@ describe('AgentPane orchestration', () => {
     })
     const pending = renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
-    expect(screen.getByText('执行仍在进行，因此尚未确认退出。停止会话后才能选择是否放弃等待。'))
+    expect(screen.getByText('尚未取得这些执行已退出的证据。停止会话后才能选择是否放弃等待。'))
       .toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^放弃等待/ })).not.toBeInTheDocument()
 
@@ -2666,8 +2666,8 @@ describe('AgentPane orchestration', () => {
   it('renders four-state thread status and gives priority to active execution facts', async () => {
     // 测试意图：验证 Thread status 四态及执行事实优先级：
     // 1. WAITING 状态展示“等待异步结果”，无生成动画；
-    // 2. RUNNING 状态且无 active model/tool 时展示“运行中”，绝不直接显示生成，无生成动画；
-    // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool，优先展示真实“执行中”，且带生成动画；
+    // 2. RUNNING 状态且无 active model/tool 时展示“准备下一步”，无生成动画；
+    // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool，分别展示真实阶段和动画；
     // 4. EXIT_PENDING 在 RUNNABLE/STOPPED 下均静态展示原因，不等同 RUNNING/IDLE。
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -2687,21 +2687,20 @@ describe('AgentPane orchestration', () => {
     })
     unmount()
 
-    // 场景 2：RUNNING 且无 active model/tool，展示“运行中”，绝不直接显示生成，无动画
+    // 场景 2：RUNNING 且无 active model/tool，展示“准备下一步”，无动画
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'RUNNABLE' })),
     )
     const runningPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('运行中')
-      expect(working).not.toHaveTextContent('生成')
+      expect(working).toHaveTextContent('准备下一步')
       expect(working).toHaveAttribute('data-animated', 'false')
       expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
     })
     runningPane.unmount()
 
-    // 场景 3：STOPPED 独立控制不可遮蔽在途执行，在途真实执行优先展示“执行中”，且带生成动画
+    // 场景 3：STOPPED 独立控制不可遮蔽正在运行的工具，准确展示工具阶段并动画
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
         threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
@@ -2717,30 +2716,30 @@ describe('AgentPane orchestration', () => {
     const stoppedPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('执行中')
+      expect(working).toHaveTextContent('正在执行工具')
       expect(working).not.toHaveTextContent('已停止')
-      expect(working).not.toHaveTextContent('退出尚未确认')
+      expect(working).not.toHaveTextContent('尚未取得该执行已退出的证据')
       expect(working).toHaveAttribute('data-animated', 'true')
       expect(working?.querySelector('.thread-working-dot')).not.toHaveClass('is-static')
     })
     stoppedPane.unmount()
 
-    // 场景 4：STOPPED + EXIT_PENDING 且没有真实 RUNNING model/tool，静态提示退出尚未确认
+    // 场景 4：STOPPED + EXIT_PENDING 且没有真实 RUNNING model/tool，静态提示尚无退出证据
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' })),
     )
     const unconfirmedPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('已请求停止，退出尚未确认')
-      expect(working).not.toHaveTextContent('执行中')
-      expect(working).not.toHaveTextContent('运行中')
+      expect(working).toHaveTextContent('尚未取得该执行已退出的证据')
+      expect(working).not.toHaveTextContent('正在执行工具')
+      expect(working).not.toHaveTextContent('准备下一步')
       expect(working).toHaveAttribute('data-animated', 'false')
       expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
     })
     unconfirmedPane.unmount()
 
-    // 场景 4b：STOPPED+EXIT_PENDING 下残留 READY 不展示排队，仍是静态退出未确认
+    // 场景 4b：STOPPED+EXIT_PENDING 下残留 READY 不展示排队，仍是静态等待退出证据
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
         threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }),
@@ -2750,7 +2749,7 @@ describe('AgentPane orchestration', () => {
     const residualPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('已请求停止，退出尚未确认')
+      expect(working).toHaveTextContent('尚未取得该执行已退出的证据')
       expect(working).not.toHaveTextContent('排队')
       expect(working).not.toHaveTextContent('审批')
       expect(working).toHaveAttribute('data-animated', 'false')
@@ -2758,15 +2757,15 @@ describe('AgentPane orchestration', () => {
     })
     residualPane.unmount()
 
-    // 场景 4c：RUNNABLE + EXIT_PENDING 展示等待退出确认，而不是普通运行中
+    // 场景 4c：RUNNABLE + EXIT_PENDING 展示尚无退出证据，而不是下一步待调度
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'RUNNABLE' })),
     )
     const runnableExitPending = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('等待执行退出确认')
-      expect(working).not.toHaveTextContent('运行中')
+      expect(working).toHaveTextContent('尚未取得该执行已退出的证据')
+      expect(working).not.toHaveTextContent('准备下一步')
       expect(working).toHaveAttribute('data-animated', 'false')
       expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
     })
@@ -2796,8 +2795,8 @@ describe('AgentPane orchestration', () => {
     const modelPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
-      expect(working).toHaveTextContent('执行中')
-      expect(working).not.toHaveTextContent('退出尚未确认')
+      expect(working).toHaveTextContent('正在生成')
+      expect(working).not.toHaveTextContent('已退出的证据')
       expect(working).toHaveAttribute('data-animated', 'true')
       expect(working?.querySelector('.thread-working-dot')).not.toHaveClass('is-static')
     })
@@ -4625,7 +4624,7 @@ describe('AgentPane root control mounting', () => {
   }
 
   it.each([
-    ['READY', false, '排队中'],
+    ['READY', false, '准备下一步'],
     ['READY', true, '等待环境 archlinux 上线'],
     ['WAITING_APPROVAL', false, '等待审批'],
     ['WAITING_INPUT', false, '等待输入'],
@@ -4656,7 +4655,7 @@ describe('AgentPane root control mounting', () => {
       ] },
     ))
     renderPane({ kind: 'CHAT', id: CHAT_ID })
-    await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent('执行中'))
+    await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent('正在执行工具'))
     expect(document.querySelector('.thread-working')).toHaveAttribute('data-animated', 'true')
   })
 

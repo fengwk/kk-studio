@@ -1131,17 +1131,33 @@ export const chatCatalog = {
     'en-US': 'Idle',
     'zh-CN': '空闲',
   },
+  'ai.runtime.thread.phase.generating': {
+    'en-US': 'Generating',
+    'zh-CN': '正在生成',
+  },
+  'ai.runtime.thread.phase.executingTool': {
+    'en-US': 'Executing tool',
+    'zh-CN': '正在执行工具',
+  },
+  'ai.runtime.thread.phase.materializing': {
+    'en-US': 'Preparing result',
+    'zh-CN': '正在整理结果',
+  },
+  'ai.runtime.thread.phase.nextStep': {
+    'en-US': 'Preparing next step',
+    'zh-CN': '准备下一步',
+  },
   'ai.runtime.thread.executionControl.STOPPED': {
     'en-US': 'Stopped',
     'zh-CN': '已停止',
   },
   'ai.runtime.thread.exitPending': {
-    'en-US': 'Waiting for execution exit confirmation',
-    'zh-CN': '等待执行退出确认',
+    'en-US': 'There is not yet evidence that this execution has exited',
+    'zh-CN': '尚未取得该执行已退出的证据',
   },
   'ai.runtime.thread.stopExitUnconfirmed': {
-    'en-US': 'Stop requested; exit not yet confirmed',
-    'zh-CN': '已请求停止，退出尚未确认',
+    'en-US': 'There is not yet evidence that this execution has exited',
+    'zh-CN': '尚未取得该执行已退出的证据',
   },
   'ai.runtime.unconfirmedExecutions.title': {
     'en-US': 'Unconfirmed executions',
@@ -1152,8 +1168,8 @@ export const chatCatalog = {
     'zh-CN': '这些执行尚未确认退出。放弃等待只停止等待确认，不会终止本地或远端执行。',
   },
   'ai.runtime.unconfirmedExecutions.hintRunnable': {
-    'en-US': 'Executions are still active, so exit is not confirmed. Stop the Thread before deciding whether to abandon waiting.',
-    'zh-CN': '执行仍在进行，因此尚未确认退出。停止会话后才能选择是否放弃等待。',
+    'en-US': 'There is not yet evidence that these executions have exited. Stop the Thread before deciding whether to abandon waiting.',
+    'zh-CN': '尚未取得这些执行已退出的证据。停止会话后才能选择是否放弃等待。',
   },
   'ai.runtime.unconfirmedExecutions.stopAndHandle': {
     'en-US': 'Stop and handle',
