@@ -11,9 +11,10 @@ import java.util.regex.Pattern;
  * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
  * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId} 判定。
  *
- * <p>{@code delivery} 决定结算后的交付方式，额度直接由 delivery 为 {@link JoinDelivery#NOTIFY_PARENT} 决定；{@code
- * supersededByInvocationId} 是同一父/子对上后续续接 join 的 invocation identity：同一父子对至多有一个有效未完成 join，先前 join
- * 被新续接原子 supersede 后保留原 invocation identity 与排队 prompt，但不占用活跃额度、不产生重复交付。已匹配结果不可变，也绝不被 supersede。
+ * <p>{@code delivery} 决定结算后的交付方式；子任务额度由 delivery 为 {@link JoinDelivery#NOTIFY_PARENT} 或 {@link
+ * JoinDelivery#SETTLE_TOOL_RESULT} 决定；{@code supersededByInvocationId} 是同一父/子对上后续续接 join 的
+ * invocation identity：同一父子对至多有一个有效未完成 join，先前 join 被新续接原子 supersede 后保留原 invocation identity 与排队
+ * prompt，但不占用活跃额度、不产生重复交付。已匹配结果不可变，也绝不被 supersede。
  */
 public record ThreadJoin(
     UUID invocationId,

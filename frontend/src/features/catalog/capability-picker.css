@@ -1,4 +1,44 @@
 /* Catalog 能力选择器与选项状态。 */
+.capability-picker {
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.capability-selection-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capability-search-label {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.capability-search {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--fg);
+}
+
+.capability-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.capability-group-heading {
+  margin: 4px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
 .capability-picker.is-error {
   border: 1px solid var(--danger);
   border-radius: var(--radius-md);

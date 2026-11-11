@@ -169,6 +169,33 @@ class HarnessRuntimeStopToolTest {
   }
 
   @Test
+  void stoppingParentPersistsRunningTaskToolAsCancelled() {
+    HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
+        seedModelFreeToolBaseline(store, 1, "task");
+    UUID invocationId = baseline.toolIds().getFirst();
+    approveTool(store, invocationId);
+    markRunningTool(store, invocationId);
+
+    StopResult stopped =
+        runtime.stop(
+            new StopCommand(
+                baseline.threadId(),
+                TestIds.id(1),
+                runtime.getThreadSnapshot(baseline.threadId()).thread().version()));
+    EntryPath path =
+        store.transaction(
+            tx ->
+                tx.entries()
+                    .loadPath(tx.threads().lock(baseline.threadId()).orElseThrow().headEntryId()));
+    MessagePayload result = (MessagePayload) path.entries().get(4).payload();
+    ToolResultMetadata metadata = result.toolResultMetadata();
+
+    assertStopped(stopped);
+    assertEquals(ToolResultStatus.CANCELLED, metadata.status());
+    assertEquals(CANCELLED_WORDING, resultTextOf(path.entries().get(4)));
+  }
+
+  @Test
   void approvalAndStopDoNotRequireModelInvocation() {
     // 合法 Assistant 工具批次没有 Model 父行：审批与 Stop 都以 Thread/TurnStart/Assistant 归属完成。
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedModelFreeToolBaseline(store);

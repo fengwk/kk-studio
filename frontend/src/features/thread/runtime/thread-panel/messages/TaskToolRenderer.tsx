@@ -4,8 +4,7 @@ import { parseTaskArguments, parseTaskReceipt } from '@/features/thread/runtime/
 import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensions/types'
 
 /**
- * task renderer：调用正文只展示 prompt，受理收据由宿主 Header 的「查看执行」承载。
- * 受理只说明子线程已创建，绝不显示「已受理/后台执行」之类的完成暗示，也不展示子任务报告。
+ * task renderer：调用正文只展示 prompt；受理与运行状态由宿主 Header 展示，终态正文显示子任务报告或错误。
  */
 export function TaskToolRenderer({ message }: ToolRendererProps) {
   if (message.phase === 'call') {
@@ -35,11 +34,11 @@ function TaskToolCall({ message }: { message: ToolRendererMessage }) {
 function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   const isError = message.status === 'error' || Boolean(message.errorMessage)
   const receipt = isError ? null : parseTaskReceipt(message.details)
-  if (receipt != null) {
-    // 导航入口在宿主 Header；正文不再重复链接或自然语言收据。
+  if (receipt?.status === 'accepted' || receipt?.status === 'running') {
+    // 导航入口与运行状态在宿主 Header 展示，不重复渲染进度回执正文。
     return null
   }
-  // 终态文本不是合法的受理收据，或者调用失败：完整展示原始结果（不吞错误，不假造报告）。
+  // 同步终态报告与失败文本都是模型结果正文，完整展示且不推断报告内容。
   return (
     <div className="task-tool-renderer">
       <ToolContentView contents={message.contents} />

@@ -94,6 +94,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     status: 'RUNNING',
     attempt: 1,
     toolCallId: 'call-1',
+    queuedBehindToolCallId: null,
     toolName: 'bash',
     rendererKey: 'bash',
     environmentId: null,

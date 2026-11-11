@@ -155,7 +155,7 @@ public final class ThreadLifecycleCoordinator {
       ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, now);
       switch (current.delivery()) {
         case NOTIFY_PARENT -> notifyMatches.add(current);
-        case SETTLE_OWNER_TURN -> {
+        case SETTLE_OWNER_TURN, SETTLE_TOOL_RESULT -> {
           tx.joins().update(current);
           settleMatches.add(current);
         }
@@ -166,7 +166,7 @@ public final class ThreadLifecycleCoordinator {
       deliverMatchedJoins(tx, notifyMatches, now);
     }
     if (!settleMatches.isEmpty()) {
-      wakeOwners(tx, settleMatches);
+      wakeSettleParents(tx, settleMatches);
     }
   }
 
@@ -308,10 +308,11 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 对一批刚冻结的 SETTLE_OWNER_TURN Join 唤醒父 Thread Work：结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列；父
-   * Thread 的开放 Turn owner 在随后的处理中按 join 消费已冻结结果。STOPPED owner 只推进一次 version，不请求 Work、不自动恢复执行。
+   * 对一批刚冻结的结算型 Join 唤醒父 Thread Work：结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列。Owner-turn 由开放 Turn
+   * 消费冻结结果；同步 task 由等待中的工具执行线程重读 Join。STOPPED 父只推进一次 version，不请求 Work、不自动恢复执行。
    */
-  private static void wakeOwners(HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
+  private static void wakeSettleParents(
+      HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
     Set<UUID> parents = new LinkedHashSet<>();
     for (ThreadJoin join : settleMatches) {
       if (join.parentThreadId() != null) {

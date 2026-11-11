@@ -155,6 +155,10 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   details?: Record<string, unknown>
   status?: DialogueStatus
   errorMessage?: string
+  /** 同批同文件最近前序调用的 toolCallId（API 静态排序投影）。 */
+  queuedBehindToolCallId?: string | null
+  /** 当前视图中前序调用仍未结束时为 true。 */
+  queuedBehindToolCallUnfinished?: boolean
   /** 持久结果到达之前的瞬态有序内容；只有 text/json（runtime 禁止 partial 携带 Resource）。 */
   partialContents?: ToolContent[]
   partialErrorText?: string

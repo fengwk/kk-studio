@@ -25,7 +25,7 @@ public interface JoinStore {
   /** 读取子 Thread 上尚未冻结结果且未被 supersede 的 Join。 */
   List<ThreadJoin> loadIncomplete(UUID childThreadId);
 
-  /** 统计父 Thread 下未完成的 NOTIFY_PARENT 直接子 Join 数量。 */
+  /** 统计父 Thread 下未完成的异步通知或同步工具结果子 Join 数量。 */
   int countIncompleteChildren(UUID parentThreadId);
 
   /** 判断父 Thread 是否存在未完成的 SETTLE_OWNER_TURN 子 Join。 */

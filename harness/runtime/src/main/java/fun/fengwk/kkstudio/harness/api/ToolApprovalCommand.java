@@ -23,7 +23,7 @@ public record ToolApprovalCommand(
     decision = Objects.requireNonNull(decision, "decision");
     Objects.requireNonNull(decisionId, "decisionId");
     actor = requireCanonical(actor, "actor", 128);
-    reason = nullableCanonical(reason, "reason", 1024);
+    reason = reason == null || reason.isBlank() ? null : nullableCanonical(reason, "reason", 1024);
   }
 
   private static String requireCanonical(String value, String field, int maxLength) {

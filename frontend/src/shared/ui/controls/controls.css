@@ -685,6 +685,13 @@
 }
 
 /* 统一的 ? 帮助提示：图标按钮可键盘聚焦，展开文本保持在同一布局流中。 */
+.model-selection-variant-label {
+  display: block;
+  margin-top: 8px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
 .field-label-row {
   display: flex;
   align-items: center;

@@ -136,7 +136,7 @@ public class InteractionQueryService {
         consumedId = manual.invocationId();
         ResolvedRoot resolved = context.resolveManual(manual);
         if (resolved != null) {
-          items.add(toManualDto(manual, resolved));
+          items.add(toManualDto(manual, resolved, context));
         }
       } else {
         environmentQueue.poll();
@@ -264,7 +264,8 @@ public class InteractionQueryService {
     return UuidOrder.COMPARATOR.compare(leftId, rightId);
   }
 
-  private static InteractionDTO toManualDto(PendingInteraction interaction, ResolvedRoot resolved) {
+  private static InteractionDTO toManualDto(
+      PendingInteraction interaction, ResolvedRoot resolved, QueryContext context) {
     if (interaction.status() == ToolInvocationStatus.WAITING_APPROVAL) {
       return new InteractionDTO.Approval(
           interaction.invocationId().toString(),
@@ -276,6 +277,7 @@ public class InteractionQueryService {
           interaction.toolName(),
           interaction.argumentsJson(),
           JsonValues.readTree(interaction.approvalJson()),
+          context.queuedSameFileCount(interaction),
           interaction.createdAt());
     }
     return new InteractionDTO.Input(
@@ -311,6 +313,7 @@ public class InteractionQueryService {
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
     private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
+    private final Map<UUID, Integer> queuedSameFileCountByInvocation = new HashMap<>();
     private final Map<EnvironmentId, Optional<Instant>> readyLeaseById = new HashMap<>();
 
     private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
@@ -320,6 +323,15 @@ public class InteractionQueryService {
 
     HarnessRuntime runtime() {
       return runtime;
+    }
+
+    /** 当前 edit/write 审批之后仍未结束的同批同文件修改数。 */
+    int queuedSameFileCount(PendingInteraction interaction) {
+      if (!"edit".equals(interaction.toolName()) && !"write".equals(interaction.toolName())) {
+        return 0;
+      }
+      return queuedSameFileCountByInvocation.computeIfAbsent(
+          interaction.invocationId(), runtime::countQueuedSameFileMutationsAfter);
     }
 
     /** 人工等待：沿来源不可变祖先链解析真实根、可选根过滤与产品 owner；根无产品归属时返回 null。 */

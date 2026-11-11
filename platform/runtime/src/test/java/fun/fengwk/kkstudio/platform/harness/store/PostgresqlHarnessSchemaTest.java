@@ -649,9 +649,8 @@ class PostgresqlHarnessSchemaTest {
       String receiptJson) {
     jdbc.update(
         "insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding,"
-            + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
-            + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
-            + " '{\"customEntries\":[]}'::jsonb, null,"
+            + " status, attempt, approval, result, error, created_at, updated_at, input_receipt)"
+            + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb, null,"
             + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
         id,
         threadId,
@@ -1290,6 +1289,21 @@ class PostgresqlHarnessSchemaTest {
             "select delivery from harness_thread_join where invocation_id = ?",
             String.class,
             pendingInvocation));
+
+    UUID synchronousInvocation = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'SETTLE_TOOL_RESULT')",
+        synchronousInvocation,
+        hash,
+        parentThreadId,
+        childThreadId);
+    assertEquals(
+        "SETTLE_TOOL_RESULT",
+        jdbc.queryForObject(
+            "select delivery from harness_thread_join where invocation_id = ?",
+            String.class,
+            synchronousInvocation));
 
     // 1. 未知 delivery → ck_harness_thread_join_delivery_kind
     DataIntegrityViolationException exDelivery =
