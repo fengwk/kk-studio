@@ -14,6 +14,9 @@ import (
 )
 
 type arguments struct {
+	OldString    string `json:"old_string"`
+	NewString    string `json:"new_string"`
+	ReplaceAll   bool   `json:"replace_all"`
 	Command      string `json:"command"`
 	Workdir      string `json:"workdir"`
 	Path         string `json:"path"`
@@ -36,6 +39,8 @@ func (Provider) Capabilities() map[string]runtime.CapabilityExecutor {
 		"fs.read":          readCapability,
 		"fs.write":         writeCapability,
 		"fs.write.preview": previewWriteCapability,
+		"fs.edit":          editCapability,
+		"fs.edit.preview":  editPreviewCapability,
 		"fs.find":          findCapability,
 		"fs.grep":          grepCapability,
 		"process.exec":     processCapability,
@@ -137,9 +142,21 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	result := textResult(call.InvocationID, "Wrote "+args.Path+" successfully.")
+	action := "Overwrote "
+	if review.NewFile {
+		action = "Created "
+	}
+	result := textResult(call.InvocationID, action+review.Path+" successfully.")
 	result.Details = mustJSON(map[string]any{"writeReview": review})
 	return result, nil
+}
+
+func editCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return editFile(ctx, call, false)
+}
+
+func editPreviewCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return editFile(ctx, call, true)
 }
 
 func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {

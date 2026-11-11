@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -46,6 +45,19 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	}
 	unlock := lockPath(resolved)
 	defer unlock()
+	linkInfo, linkErr := os.Lstat(resolved)
+	if linkErr == nil && linkInfo.Mode()&os.ModeSymlink != 0 {
+		return WriteReview{}, fmt.Errorf("path is a symbolic link: %s", resolved)
+	}
+	if linkErr != nil && !errors.Is(linkErr, os.ErrNotExist) {
+		return WriteReview{}, linkErr
+	}
+	if linkErr == nil && !linkInfo.Mode().IsRegular() {
+		if linkInfo.IsDir() {
+			return WriteReview{}, fmt.Errorf("path is a directory: %s", resolved)
+		}
+		return WriteReview{}, fmt.Errorf("path is not a regular file: %s", resolved)
+	}
 	current, err := os.ReadFile(resolved)
 	if errors.Is(err, os.ErrNotExist) {
 		if isSymlink(resolved) {
@@ -68,7 +80,11 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 		return WriteReview{}, err
 	}
 	hash := sha256.Sum256(current)
-	return WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: numberedDiff(decoded, content)}, nil
+	diff, err := numberedDiff(normalizeEOL(decoded), normalizeEOL(content))
+	if err != nil {
+		return WriteReview{}, err
+	}
+	return WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: diff}, nil
 }
 
 // Write creates or atomically replaces a regular text file. expected, when present,
@@ -115,7 +131,11 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 			return WriteReview{}, decodeErr
 		}
 		hash := sha256.Sum256(original)
-		review = WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: numberedDiff(decoded, content)}
+		diff, diffErr := numberedDiff(normalizeEOL(decoded), normalizeEOL(content))
+		if diffErr != nil {
+			return WriteReview{}, diffErr
+		}
+		review = WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: diff}
 	} else {
 		review = WriteReview{Path: resolved, NewFile: true, Content: content}
 	}
@@ -253,37 +273,6 @@ func encodeFileText(text, charset string, bom int) ([]byte, error) {
 	}
 	prefix := map[string][]byte{"UTF-8": {0xef, 0xbb, 0xbf}, "UTF-16LE": {0xff, 0xfe}, "UTF-16BE": {0xfe, 0xff}}[charset]
 	return append(prefix, out...), nil
-}
-
-func numberedDiff(oldText, newText string) string {
-	oldLines := strings.Split(strings.TrimSuffix(oldText, "\n"), "\n")
-	newLines := strings.Split(strings.TrimSuffix(newText, "\n"), "\n")
-	prefix := 0
-	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
-		prefix++
-	}
-	suffix := 0
-	for suffix < len(oldLines)-prefix && suffix < len(newLines)-prefix && oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
-		suffix++
-	}
-	start := max(0, prefix-4)
-	endOld := min(len(oldLines), len(oldLines)-suffix+4)
-	endNew := min(len(newLines), len(newLines)-suffix+4)
-	var b strings.Builder
-	for i := start; i < prefix; i++ {
-		fmt.Fprintf(&b, "  %d|%s\n", i+1, oldLines[i])
-	}
-	for i := prefix; i < len(oldLines)-suffix; i++ {
-		fmt.Fprintf(&b, "- %d|%s\n", i+1, oldLines[i])
-	}
-	for i := prefix; i < len(newLines)-suffix; i++ {
-		fmt.Fprintf(&b, "+ %d|%s\n", i+1, newLines[i])
-	}
-	for i := len(oldLines) - suffix; i < endOld; i++ {
-		fmt.Fprintf(&b, "  %d|%s\n", i+1, oldLines[i])
-	}
-	_ = endNew
-	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
