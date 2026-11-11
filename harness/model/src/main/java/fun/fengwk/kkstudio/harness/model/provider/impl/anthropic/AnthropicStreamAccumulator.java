@@ -7,16 +7,23 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
@@ -165,6 +172,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     StringBuilder combinedText = new StringBuilder();
     StringBuilder combinedThinking = new StringBuilder();
     List<ProviderToolCall> toolCalls = new ArrayList<>();
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
 
     // CONTINUE（pause_turn / compaction）同样是「下一请求必须原生回放上游字段」的终止态
@@ -179,6 +187,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       switch (block.type) {
         case "text" -> {
           combinedText.append(block.textBuffer);
+          responseBlocks.add(
+              new ProviderTextBlock(
+                  block.textBuffer.toString(), blockData(block.rawBlock, Set.of("text"))));
           if (canReplay) {
             // start 对象是 replay 基座：只覆盖 normalized 文本，citations 等官方附加字段原样保留
             ObjectNode obj = block.rawBlock.deepCopy();
@@ -191,6 +202,11 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
         }
         case "thinking" -> {
           combinedThinking.append(block.thinkingBuffer);
+          ObjectNode thinkingFields = block.rawBlock.deepCopy();
+          thinkingFields.put("signature", block.signature);
+          responseBlocks.add(
+              new ProviderThinkingBlock(
+                  block.thinkingBuffer.toString(), blockData(thinkingFields, Set.of("thinking"))));
           if (block.signature == null || block.signature.isBlank()) {
             canReplay = false;
           } else if (canReplay) {
@@ -201,6 +217,11 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           }
         }
         case "redacted_thinking" -> {
+          if (block.redactedData != null) {
+            responseBlocks.add(
+                new ProviderRedactedThinkingBlock(
+                    block.redactedData, blockData(block.rawBlock, Set.of("data"))));
+          }
           if (block.redactedData == null || block.redactedData.isBlank()) {
             canReplay = false;
           } else if (canReplay) {
@@ -226,6 +247,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               // 终态补齐 {}
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, "{}");
               toolCalls.add(call);
+              responseBlocks.add(
+                  new ProviderToolCallBlock(
+                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
               if (canReplay) {
                 ObjectNode obj = block.rawBlock.deepCopy();
                 obj.putObject("input");
@@ -251,6 +275,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             if (parsedArgs != null) {
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, argsStr);
               toolCalls.add(call);
+              responseBlocks.add(
+                  new ProviderToolCallBlock(
+                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
               if (canReplay) {
                 ObjectNode obj = block.rawBlock.deepCopy();
                 obj.set("input", parsedArgs);
@@ -274,6 +301,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           }
         }
         default -> {
+          responseBlocks.add(
+              new ProviderOpaqueBlock(block.type, blockData(block.rawBlock, Set.of())));
           ObjectNode obj = block.rawBlock.deepCopy();
           if (block.nativeInputBuffer != null) {
             JsonNode parsedInput =
@@ -382,15 +411,15 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
     ProviderResponse response =
         new ProviderResponse(
-            combinedText.toString(),
-            combinedThinking.toString(),
-            Collections.unmodifiableList(toolCalls),
+            responseBlocks,
             stopReason,
             usage,
             messageId,
             serviceTier,
             rawUsageJson,
-            Collections.unmodifiableList(toolCallDiagnostics));
+            Collections.unmodifiableList(toolCallDiagnostics),
+            null,
+            null);
 
     ProviderReplayState replayState = null;
     if (canReplay) {
@@ -405,6 +434,18 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     }
 
     return new ProviderCompletion(response, replayState);
+  }
+
+  private ProviderBlockData blockData(ObjectNode rawBlock, Set<String> normalizedFields) {
+    ObjectNode nativeFields = rawBlock.deepCopy();
+    nativeFields.remove("type");
+    for (String field : normalizedFields) {
+      nativeFields.remove(field);
+    }
+    return new ProviderBlockData(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        descriptor.affinity(request.model().modelId()),
+        nativeFields);
   }
 
   private void handleMessageStart(JsonNode root) {

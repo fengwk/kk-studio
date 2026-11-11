@@ -16,9 +16,15 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -171,13 +177,50 @@ class ProviderResponseJsonCodecTest {
                 "{\"total\":1,\"total\":2}"));
   }
 
+  /** Provider block 的顺序与协议原生字段随 invocation response codec 无损往返。 */
+  @Test
+  void roundTripsOrderedBlocksAndProviderNativeFields() {
+    ProviderBlockData blockData =
+        ProviderBlockData.fromJson(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "claude", "claude-4"),
+            "{\"signature\":\"thinking-signature\"}");
+    ProviderResponse response =
+        new ProviderResponse(
+            List.of(
+                new ProviderThinkingBlock("analysis", blockData), new ProviderTextBlock("answer")),
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1, 2, 0, 0, Map.of(), 0L, 3L),
+            null,
+            null,
+            "{}",
+            List.of(),
+            null,
+            null);
+
+    ProviderResponse decoded = codec.decode(codec.encode(response));
+
+    assertEquals(response, decoded);
+    ProviderThinkingBlock decodedThinking = (ProviderThinkingBlock) decoded.blocks().get(0);
+    assertEquals(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES, decodedThinking.providerBlockData().protocol());
+    assertEquals(
+        "thinking-signature",
+        decodedThinking.providerBlockData().nativeFields().path("signature").asString(""));
+    assertEquals("answer", ((ProviderTextBlock) decoded.blocks().get(1)).text());
+  }
+
   /** 每个 response 对象层都独立拒绝未知、缺失以及类型错误的字段。 */
   @Test
   void rejectsUnknownMissingAndWrongTypedFieldsAtEveryObjectLayer() {
     assertStrictLayer(
         root -> root.put("extra", true),
-        root -> root.remove("text"),
-        root -> root.set("toolCalls", NODES.objectNode()));
+        root -> root.remove("blocks"),
+        root -> root.set("blocks", NODES.objectNode()));
+    assertStrictLayer(
+        root -> block(root, 1).put("extra", true),
+        root -> block(root, 1).remove("text"),
+        root -> block(root, 1).put("text", 1));
     assertStrictLayer(
         root -> toolCall(root).put("extra", true),
         root -> toolCall(root).remove("name"),
@@ -236,13 +279,13 @@ class ProviderResponseJsonCodecTest {
     assertRejected(root -> root.remove("serviceTier"));
     assertRejected(root -> root.put("requestId", 1));
     assertRejected(root -> root.put("serviceTier", false));
-    assertRejected(root -> root.putNull("text"));
+    assertRejected(root -> block(root, 1).putNull("text"));
     assertRejected(root -> root.putNull("rawUsageJson"));
     assertRejected(root -> root.put("rawUsageJson", "not-json"));
     assertRejected(root -> root.put("rawUsageJson", "\"scalar\""));
     assertRejected(root -> root.put("rawUsageJson", " "));
 
-    assertRejected(root -> ((ArrayNode) root.path("toolCalls")).set(0, NODES.numberNode(1)));
+    assertRejected(root -> ((ArrayNode) root.path("blocks")).set(2, NODES.numberNode(1)));
     assertRejected(root -> toolCall(root).put("argumentsJson", "[]"));
     assertRejected(root -> toolCall(root).put("argumentsJson", "{"));
     assertRejected(root -> toolCall(root).put("argumentsJson", " "));
@@ -305,8 +348,12 @@ class ProviderResponseJsonCodecTest {
     }
   }
 
+  private static ObjectNode block(ObjectNode root, int index) {
+    return (ObjectNode) root.path("blocks").path(index);
+  }
+
   private static ObjectNode toolCall(ObjectNode root) {
-    return (ObjectNode) root.path("toolCalls").path(0);
+    return (ObjectNode) block(root, 2).path("toolCall");
   }
 
   private static ObjectNode usage(ObjectNode root) {

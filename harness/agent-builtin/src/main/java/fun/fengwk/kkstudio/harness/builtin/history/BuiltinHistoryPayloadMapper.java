@@ -10,14 +10,22 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
 
@@ -46,24 +54,19 @@ public final class BuiltinHistoryPayloadMapper {
     Objects.requireNonNull(response, "response");
     Objects.requireNonNull(bindings, "bindings");
     List<AgentMessageContent> contents = new ArrayList<>();
-    if (!response.thinking().isEmpty()) {
-      contents.add(new ThinkingMessageContent(response.thinking()));
-    }
-    if (!response.text().isEmpty()) {
-      contents.add(new TextMessageContent(response.text()));
-    }
-    int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
     Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
     for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
       diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
     }
-    int toolCallIndex = 0;
-    for (int i = 0; i < totalOutcomes; i++) {
-      ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(i);
-      if (diagnostic != null) {
-        contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
-      } else {
-        ProviderToolCall call = response.toolCalls().get(toolCallIndex++);
+    int outcomeIndex = 0;
+    for (ProviderContentBlock block : response.blocks()) {
+      if (block instanceof ProviderToolCallBlock callBlock) {
+        while (diagnosticByIndex.containsKey(outcomeIndex)) {
+          contents.add(
+              new JsonMessageContent(
+                  diagnosticCodec.encode(diagnosticByIndex.get(outcomeIndex++))));
+        }
+        ProviderToolCall call = callBlock.toolCall();
         ToolBinding binding = boundedBinding(call.name(), bindings);
         contents.add(
             new ToolCallMessageContent(
@@ -74,8 +77,31 @@ public final class BuiltinHistoryPayloadMapper {
                     : binding.descriptor().rendererKey(),
                 call.argumentsJson(),
                 call.historyAction(),
-                binding == null ? null : binding.environmentName()));
+                binding == null ? null : binding.environmentName(),
+                callBlock.providerBlockData()));
+        outcomeIndex++;
+      } else if (block instanceof ProviderTextBlock textBlock) {
+        contents.add(new TextMessageContent(textBlock.text(), textBlock.providerBlockData()));
+      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        contents.add(
+            new ThinkingMessageContent(
+                thinkingBlock.thinking(), thinkingBlock.providerBlockData()));
+      } else if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+        contents.add(
+            new RedactedThinkingMessageContent(
+                redactedBlock.data(), redactedBlock.providerBlockData()));
+      } else if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+        contents.add(
+            new NativeAssistantBlockContent(
+                opaqueBlock.blockType(), opaqueBlock.providerBlockData()));
+      } else {
+        throw new IllegalArgumentException(
+            "unsupported provider response block: " + block.getClass());
       }
+    }
+    while (diagnosticByIndex.containsKey(outcomeIndex)) {
+      contents.add(
+          new JsonMessageContent(diagnosticCodec.encode(diagnosticByIndex.get(outcomeIndex++))));
     }
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent(""));

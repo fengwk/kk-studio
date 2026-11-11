@@ -9,7 +9,12 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.util.Objects;
 
-/** 一个 assistant block 的 Provider 身份与该 block 独有的原生字段。 */
+/**
+ * 一个 assistant block 的 Provider 身份与该 block 独有的原生字段。
+ *
+ * <p>语义内容使用强类型 block 表达；{@code nativeFields} 保持 JSON object，是因为协议允许开放字段和未知 union/item，且回放必须原样保留这些
+ * Provider 扩展。将它们建模为强类型 DTO 会要求镜像四套可扩展 Provider schema，并在未知字段出现时丢失事实。协议与 Provider 身份仍使用强类型字段。
+ */
 public record ProviderBlockData(
     ProviderReplayFormat protocol, ProviderReplayAffinity affinity, JsonNode nativeFields) {
 

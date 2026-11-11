@@ -19,23 +19,33 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为 {@code text}、{@code thinking}、{@code
- * toolCalls}、 {@code stopReason}、{@code usage}、{@code requestId}、{@code serviceTier}、{@code
- * rawUsageJson}、{@code toolCallDiagnostics} 与 {@code decodeDurationMillis}（Harness
- * 观测计时，可空但字段必须存在：{@code null} 显式表达“无可信流计时”，缺失即拒绝）；每个嵌套层都要求精确字段集合，并以 {@link
- * IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
+ * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为有序 {@code blocks}、{@code stopReason}、{@code
+ * usage}、{@code requestId}、{@code serviceTier}、{@code rawUsageJson}、{@code toolCallDiagnostics} 与
+ * {@code decodeDurationMillis}（Harness 观测计时，可空但字段必须存在：{@code null}
+ * 显式表达“无可信流计时”，缺失即拒绝）；每个嵌套层都要求精确字段集合，并以 {@link IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
  *
  * <p>{@code rawUsageJson} 原样保留。
  */
@@ -47,9 +57,7 @@ public final class ProviderResponseJsonCodec {
 
   private static final Set<String> RESPONSE_FIELDS =
       orderedSet(
-          "text",
-          "thinking",
-          "toolCalls",
+          "blocks",
           "stopReason",
           "usage",
           "requestId",
@@ -86,11 +94,9 @@ public final class ProviderResponseJsonCodec {
   public JsonNode encodeNode(ProviderResponse response) {
     Objects.requireNonNull(response, "response");
     ObjectNode node = NODES.objectNode();
-    node.put("text", response.text());
-    node.put("thinking", response.thinking());
-    ArrayNode toolCalls = node.putArray("toolCalls");
-    for (ProviderToolCall toolCall : response.toolCalls()) {
-      toolCalls.add(encodeToolCall(toolCall));
+    ArrayNode blocks = node.putArray("blocks");
+    for (ProviderContentBlock block : response.blocks()) {
+      blocks.add(encodeBlock(block));
     }
     node.put("stopReason", response.stopReason().name());
     node.set("usage", encodeUsage(response.usage()));
@@ -136,12 +142,10 @@ public final class ProviderResponseJsonCodec {
     Objects.requireNonNull(value, "value");
     ObjectNode node = object(value, "response");
     requireFields(node, RESPONSE_FIELDS, RESPONSE_OPTIONAL_FIELDS, "response");
-    String text = text(node, "text");
-    String thinking = text(node, "thinking");
-    ArrayNode toolCalls = array(node.get("toolCalls"), "toolCalls");
-    List<ProviderToolCall> toolCallList = new ArrayList<>(toolCalls.size());
-    for (JsonNode item : toolCalls) {
-      toolCallList.add(decodeToolCall(item));
+    ArrayNode encodedBlocks = array(node.get("blocks"), "blocks");
+    List<ProviderContentBlock> blocks = new ArrayList<>(encodedBlocks.size());
+    for (JsonNode item : encodedBlocks) {
+      blocks.add(decodeBlock(item));
     }
     GenerationStopReason stopReason;
     try {
@@ -161,9 +165,7 @@ public final class ProviderResponseJsonCodec {
     Long decodeDurationMillis = nullableNonNegativeLong(node, "decodeDurationMillis");
     RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
     return new ProviderResponse(
-        text,
-        thinking,
-        toolCallList,
+        blocks,
         stopReason,
         usage,
         requestId,
@@ -221,6 +223,107 @@ public final class ProviderResponseJsonCodec {
     String partialArguments = text(node, "partialArguments");
     String message = text(node, "message");
     return new ProviderToolCallDiagnostic((int) callIndex, id, name, partialArguments, message);
+  }
+
+  private ObjectNode encodeBlock(ProviderContentBlock block) {
+    ObjectNode node = NODES.objectNode();
+    if (block instanceof ProviderTextBlock value) {
+      node.put("type", "text");
+      node.put("text", value.text());
+      encodeBlockData(node, value.providerBlockData());
+    } else if (block instanceof ProviderThinkingBlock value) {
+      node.put("type", "thinking");
+      node.put("thinking", value.thinking());
+      encodeBlockData(node, value.providerBlockData());
+    } else if (block instanceof ProviderRedactedThinkingBlock value) {
+      node.put("type", "redacted_thinking");
+      node.put("data", value.data());
+      encodeBlockData(node, value.providerBlockData());
+    } else if (block instanceof ProviderToolCallBlock value) {
+      node.put("type", "tool_call");
+      node.set("toolCall", encodeToolCall(value.toolCall()));
+      encodeBlockData(node, value.providerBlockData());
+    } else if (block instanceof ProviderOpaqueBlock value) {
+      node.put("type", "provider_native");
+      node.put("blockType", value.blockType());
+      encodeBlockData(node, value.providerBlockData());
+    } else {
+      throw new IllegalArgumentException(
+          "unsupported provider response block: " + block.getClass());
+    }
+    return node;
+  }
+
+  private ProviderContentBlock decodeBlock(JsonNode value) {
+    ObjectNode node = object(value, "block");
+    String type = text(node, "type");
+    ProviderBlockData blockData = decodeBlockData(node);
+    switch (type) {
+      case "text" -> {
+        requireBlockFields(node, orderedSet("type", "text"), "text block");
+        return new ProviderTextBlock(text(node, "text"), blockData);
+      }
+      case "thinking" -> {
+        requireBlockFields(node, orderedSet("type", "thinking"), "thinking block");
+        return new ProviderThinkingBlock(text(node, "thinking"), blockData);
+      }
+      case "redacted_thinking" -> {
+        requireBlockFields(node, orderedSet("type", "data"), "redacted thinking block");
+        return new ProviderRedactedThinkingBlock(text(node, "data"), blockData);
+      }
+      case "tool_call" -> {
+        requireBlockFields(node, orderedSet("type", "toolCall"), "tool call block");
+        return new ProviderToolCallBlock(decodeToolCall(node.get("toolCall")), blockData);
+      }
+      case "provider_native" -> {
+        requireBlockFields(node, orderedSet("type", "blockType"), "native block");
+        if (blockData == null) {
+          throw new IllegalArgumentException("native block requires providerBlockData");
+        }
+        return new ProviderOpaqueBlock(text(node, "blockType"), blockData);
+      }
+      default -> throw new IllegalArgumentException(
+          "unknown provider response block type: " + type);
+    }
+  }
+
+  private void encodeBlockData(ObjectNode node, ProviderBlockData data) {
+    if (data == null) {
+      return;
+    }
+    ObjectNode encoded = node.putObject("providerBlockData");
+    encoded.put("protocol", data.protocol().wireValue());
+    ObjectNode affinity = encoded.putObject("affinity");
+    affinity.put("providerType", data.affinity().providerType().wireValue());
+    affinity.put("providerName", data.affinity().providerName());
+    affinity.put("modelId", data.affinity().modelId());
+    encoded.set("nativeFields", data.nativeFields());
+  }
+
+  private ProviderBlockData decodeBlockData(ObjectNode node) {
+    JsonNode value = node.get("providerBlockData");
+    if (value == null) {
+      return null;
+    }
+    ObjectNode encoded = object(value, "providerBlockData");
+    requireFields(
+        encoded, orderedSet("protocol", "affinity", "nativeFields"), Set.of(), "providerBlockData");
+    ObjectNode affinityNode = object(encoded.get("affinity"), "providerBlockData.affinity");
+    requireFields(
+        affinityNode, orderedSet("providerType", "providerName", "modelId"), Set.of(), "affinity");
+    return new ProviderBlockData(
+        ProviderReplayFormat.fromWireValue(text(encoded, "protocol")),
+        new ProviderReplayAffinity(
+            ProviderType.fromWireValue(text(affinityNode, "providerType")),
+            text(affinityNode, "providerName"),
+            text(affinityNode, "modelId")),
+        encoded.get("nativeFields"));
+  }
+
+  private void requireBlockFields(ObjectNode node, Set<String> fields, String label) {
+    Set<String> optional = new LinkedHashSet<>(fields);
+    optional.add("providerBlockData");
+    requireFields(node, fields, optional, label);
   }
 
   private ObjectNode encodeToolCall(ProviderToolCall call) {

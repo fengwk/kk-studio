@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -221,7 +222,13 @@ class AnthropicOpaqueReplayTest {
         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
-    JsonNode content = accumulator.finish().replayState().payload().path("content");
+    ProviderCompletion completion = accumulator.finish();
+    JsonNode content = completion.replayState().payload().path("content");
+    assertEquals(1, completion.response().blocks().size());
+    ProviderOpaqueBlock block = (ProviderOpaqueBlock) completion.response().blocks().get(0);
+    assertEquals("web_search_tool_result", block.blockType());
+    assertEquals(
+        "srv_1", block.providerBlockData().nativeFields().path("tool_use_id").asString(""));
     assertEquals(1, content.size());
     assertEquals("web_search_tool_result", content.get(0).path("type").asString(""));
     assertEquals("srv_1", content.get(0).path("tool_use_id").asString(""));

@@ -215,6 +215,13 @@ class AnthropicThinkingTest {
     assertEquals(
         "Analyzing geography: Berlin is the capital of Germany.", completion.response().thinking());
     assertEquals("The capital of Germany is Berlin.", completion.response().text());
+    assertEquals(2, completion.response().blocks().size());
+    ProviderThinkingBlock thinkingBlock =
+        assertInstanceOf(ProviderThinkingBlock.class, completion.response().blocks().get(0));
+    assertEquals(
+        "sig_berlin_valid_token",
+        thinkingBlock.providerBlockData().nativeFields().path("signature").asString(""));
+    assertInstanceOf(ProviderTextBlock.class, completion.response().blocks().get(1));
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
     ProviderReplayState replayState = completion.replayState();
