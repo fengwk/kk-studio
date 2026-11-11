@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -54,21 +53,18 @@ class SystemSettingsSchemaProviderTest {
   }
 
   @Test
-  void backendNetworkDescribesOnlyBackendProxyWithNextHttpRequestTimingAndTextBounds() {
+  void backendNetworkDescribesOnlyBackendProxyWithTextBounds() {
     // 精确 schema 契约阻止运行期开关、模块覆盖或 nullable/长度边界漂移。
     SystemSettingsSchemaDTO.SectionDTO section =
         new SystemSettingsSchemaProvider().get().getSections().get(3);
     assertEquals("backendNetwork", section.getKey());
     assertEquals("settings.tabs.backendNetwork", section.getLabelKey());
     assertEquals("settings.section.backendNetwork.description", section.getDescriptionKey());
-    assertFalse(section.isRestartRequired());
     assertEquals(1, section.getGroups().size());
     SystemSettingsSchemaDTO.GroupDTO group = section.getGroups().get(0);
     assertEquals("backendNetwork.proxy", group.getKey());
     assertEquals("settings.section.backendNetwork.proxy.title", group.getLabelKey());
     assertEquals("settings.section.backendNetwork.proxy.description", group.getDescriptionKey());
-    assertFalse(group.isRestartRequired());
-    assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_HTTP_REQUEST, group.getApplyTiming());
     assertEquals(2, group.getFields().size());
     for (SystemSettingsSchemaDTO.FieldDTO field : group.getFields()) {
       assertEquals(SystemSettingsSchemaDTO.FieldType.TEXT, field.getType());
@@ -83,7 +79,7 @@ class SystemSettingsSchemaProviderTest {
     assertEquals(4096, group.getFields().get(1).getMax());
   }
 
-  /** 上下文压缩组：MODEL_SELECTION 模型引用可空 + 两个正整数 token 预算，全部下次调用生效。 */
+  /** 上下文压缩组只暴露模型引用与保留最近 token 预算。 */
   @Test
   void compactionGroupDescribesModelSelectionAndTwoTokenBudgets() {
     SystemSettingsSchemaDTO.SectionDTO section =
@@ -93,9 +89,7 @@ class SystemSettingsSchemaProviderTest {
     assertEquals("aiRuntime.compaction", group.getKey());
     assertEquals("settings.section.aiRuntime.compaction.title", group.getLabelKey());
     assertEquals("settings.section.aiRuntime.compaction.description", group.getDescriptionKey());
-    assertFalse(group.isRestartRequired());
-    assertEquals(SystemSettingsSchemaDTO.ApplyTiming.NEXT_INVOCATION, group.getApplyTiming());
-    assertEquals(3, group.getFields().size());
+    assertEquals(2, group.getFields().size());
     for (SystemSettingsSchemaDTO.FieldDTO field : group.getFields()) {
       assertEquals("settings.field." + field.getPath(), field.getLabelKey());
       assertEquals(field.getLabelKey() + ".hint", field.getHintKey());
@@ -115,12 +109,6 @@ class SystemSettingsSchemaProviderTest {
     assertEquals(SystemSettingsSchemaDTO.FieldType.INTEGER, keepRecent.getType());
     assertEquals(false, keepRecent.isNullable());
     assertEquals(1, keepRecent.getMin());
-
-    SystemSettingsSchemaDTO.FieldDTO reserve = group.getFields().get(2);
-    assertEquals("aiRuntime.compactionReserveTokens", reserve.getPath());
-    assertEquals(SystemSettingsSchemaDTO.FieldType.INTEGER, reserve.getType());
-    assertEquals(false, reserve.isNullable());
-    assertEquals(1, reserve.getMin());
   }
 
   private static void collectRecordLeaves(Class<?> type, String prefix, Set<String> paths) {

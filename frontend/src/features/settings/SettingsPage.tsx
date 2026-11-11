@@ -68,6 +68,7 @@ export function SettingsPage({
       <div className="screen-body">
         <div className="settings-body">
           <h1 className="settings-title">{t('settings.title')}</h1>
+          <p className="settings-subtitle">{t('settings.subtitle')}</p>
 
           <Tabs
             tabs={tabItems}
@@ -133,6 +134,7 @@ function ServerTabPane({
       <SystemSettingsSchemaRenderer
         schema={{ sections: [section] }}
         draft={editor.draft}
+        fieldErrors={editor.fieldErrors}
         onChange={editor.updateDraft}
       />
     </div>

@@ -308,7 +308,7 @@ READY 后核对、`environment_changed` 通知与心跳对账都读取数据库�
 ```text
 RESOURCE_UPLOAD_REQUEST
   -> invocation 必须仍活动且属于当前 READY Environment
-  -> 严格解码元数据，并在任何存储副作用前校验当前 settings 的 maxResourceBytes
+  -> 严格解码元数据，并在任何存储副作用前校验当前工具输出大小上限
   -> 首次请求在核心锁外调用 ticketService.reserve，把结果固化为该 transfer 的票据事实
 
 RESOURCE_UPLOAD_COMMIT

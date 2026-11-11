@@ -18,17 +18,17 @@ const STALE_DELAY = '2504'
 function createSettingsWorld(backendNetwork) {
   let version = 7n
   const state = {
-    tool: { permission: { bash: [{ pattern: '*', action: 'ASK' }] } },
+    tool: { permission: { bash: [{ pattern: '*', action: 'ASK' }] }, maxOutputMib: 16 },
     aiRuntime: {
       retryMaxRetries: 3,
       retryBackoffStrategy: 'EXPONENTIAL',
       retryBaseDelayMillis: ORIGINAL_DELAY,
       retryMaxDelayMillis: '60000',
     },
-    environment: { maxResourceBytes: '16777216', heartbeatTimeoutMillis: '60000' },
+    environment: { heartbeatTimeoutMillis: '60000' },
     backendNetwork,
     storageMedia: { maxBytes: '1000000' },
-    advanced: { resourceMaxBytes: '16777216' },
+    advanced: {},
   }
   const world = {
     // 并发写入者替身：PUT 到达时若命中则由场景注入响应（用于异常路径）。

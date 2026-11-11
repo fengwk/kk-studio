@@ -225,7 +225,7 @@ public record SystemSettings(
           processorHeartbeatIntervalMillis, "advanced.processorHeartbeatIntervalMillis");
       if (processorHeartbeatIntervalMillis > processorLeaseDurationMillis / 2) {
         throw new IllegalArgumentException(
-            "advanced.processorHeartbeatIntervalMillis must not exceed half"
+            "advanced.processorHeartbeatIntervalMillis must not exceed half of"
                 + " processorLeaseDurationMillis");
       }
       SystemSettingsValidation.requirePositiveMillis(

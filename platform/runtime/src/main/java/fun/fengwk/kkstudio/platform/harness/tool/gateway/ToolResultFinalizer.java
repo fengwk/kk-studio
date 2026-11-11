@@ -30,8 +30,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.function.IntSupplier;
+import java.util.regex.Pattern;
 
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。

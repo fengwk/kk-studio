@@ -5,11 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
-import {
-  DEFAULT_MAX_RESOURCE_BYTES,
-  makeSettingsDto,
-  makeSettingsSchema,
-} from '@/test-support/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { SystemSettingsDTO, SystemSettingsUpdateDTO } from '@/shared/api/generated/contracts'
@@ -93,7 +89,7 @@ async function serverTab(name: string) {
 }
 
 describe('system settings server editor', () => {
-  // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、新请求生效提示、保存与清空不丢其他段。
+  // 完整 CAS mock 验证全局代理保存和清空不丢失其他设置。
   it('edits and clears the global proxy while preserving every other section', async () => {
     const initial = makeSettingsDto()
     const backend = createBackend(initial)
@@ -105,7 +101,6 @@ describe('system settings server editor', () => {
     const panel = screen.getByRole('tabpanel')
     expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
-    expect(within(panel).getByText('新发起请求生效')).toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
       'Backend 发起外部请求时使用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后 Backend 新发起的 HTTP 请求使用该代理，正在执行的请求不受影响。',
     )
@@ -145,7 +140,6 @@ describe('system settings server editor', () => {
       backendNetwork: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
       expectedVersion: '1',
     })
-    expect(screen.getByText('新发起请求生效')).toBeInTheDocument()
     expect(screen.getByLabelText('代理地址')).toHaveValue('')
   })
 
@@ -166,12 +160,13 @@ describe('system settings server editor', () => {
     expect(screen.getByLabelText('保留最近 token')).toHaveValue('20000')
   })
 
-  it('labels permission and gateway as next-invocation timing', async () => {
+  it('explains settings take effect immediately and omits timing badges', async () => {
     mocks.get.mockResolvedValue(makeSettingsDto())
     renderSettings()
 
+    expect(screen.getByText('设置保存后立即生效，进行中的调用沿用开始时的值。')).toBeInTheDocument()
     await userEvent.click(await serverTab('工具与权限'))
-    expect(await screen.findAllByText('下次调用生效')).toHaveLength(2)
+    expect(screen.queryByText('下次调用生效')).not.toBeInTheDocument()
     expect(screen.queryByText('重启后生效')).not.toBeInTheDocument()
   })
 
@@ -353,14 +348,14 @@ describe('system settings server editor', () => {
     renderSettings()
 
     await userEvent.click(await serverTab('环境'))
-    const field = await screen.findByLabelText('最大资源字节数')
+    const field = await screen.findByLabelText('心跳超时（毫秒）')
     await userEvent.clear(field)
     await userEvent.type(field, '99999999')
     expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '重置' }))
     expect(screen.getByText('已是最新')).toBeInTheDocument()
-    expect(field).toHaveValue(DEFAULT_MAX_RESOURCE_BYTES)
+    expect(field).toHaveValue('60000')
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
@@ -370,7 +365,7 @@ describe('system settings server editor', () => {
     renderSettings()
 
     await userEvent.click(await serverTab('环境'))
-    const field = await screen.findByLabelText('最大资源字节数')
+    const field = await screen.findByLabelText('心跳超时（毫秒）')
     await userEvent.clear(field)
 
     await userEvent.click(screen.getByRole('button', { name: '保存' }))

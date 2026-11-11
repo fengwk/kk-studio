@@ -28,7 +28,8 @@ public final class StorageUploadToolResourceStager implements ToolResourceStager
   @Override
   public ResourceRef stage(String mediaType, String name, byte[] content) {
     StorageUploadService.StagedUpload upload =
-        uploadService.stage(name, mediaType, new ByteArrayInputStream(content), maxBytes.getAsInt());
+        uploadService.stage(
+            name, mediaType, new ByteArrayInputStream(content), maxBytes.getAsInt());
     return new ResourceRef(
         ResourceRef.blobUploadUri(upload.uploadId()),
         upload.mediaType(),
