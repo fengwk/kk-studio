@@ -19,6 +19,7 @@ const PACKAGE = (version) => JSON.stringify({ name: 'daemon', version })
 const IDE_EXTENSION_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-ide-bridge', version })
 const FRONTEND_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-frontend', version })
 const CONFIG = (version) => `/** 构建版本。 */\nexport const DAEMON_VERSION = '${version}'\n`
+const GO_CONFIG = (version) => `package config\n\nconst DaemonVersion = "${version}"\n`
 const inputs = (
   version,
   {
@@ -34,12 +35,20 @@ const inputs = (
   ideExtensionPackageJson: IDE_EXTENSION_PACKAGE(ideExtensionPackageVersion),
   frontendPackageJson: FRONTEND_PACKAGE(frontendPackageVersion),
   configTs: CONFIG(runtimeVersion),
+  goConfig: GO_CONFIG(version),
 })
 
 test('test intent: aligned internal sources pass without a tag and the tag must carry a v prefix', () => {
   const result = checkAlignment(inputs('1.2.3'))
   assert.deepEqual(result, { expected: '1.2.3', mismatches: [] })
   assert.deepEqual(checkAlignment({ ...inputs('1.2.3'), tag: 'v1.2.3' }), { expected: '1.2.3', mismatches: [] })
+})
+
+test('test intent: a Go daemon constant left at the previous version fails the gate', () => {
+  const result = checkAlignment({ ...inputs('1.2.3'), goConfig: GO_CONFIG('1.2.2') })
+  assert.deepEqual(result.mismatches, [
+    'daemon-go/internal/config/version.go DaemonVersion is "1.2.2", expected "1.2.3"',
+  ])
 })
 
 test('test intent: a runtime constant left at the previous version fails the gate', () => {
@@ -90,6 +99,7 @@ test('test intent: unreadable or ambiguous versions and invalid tags fail instea
   assert.throws(() => checkAlignment({ ...inputs('1'), ideExtensionPackageJson: '{}' }), /daemon IDE extension package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), frontendPackageJson: '{}' }), /frontend package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), configTs: 'const DAEMON_VERSION = "1"\n' }), /exactly one literal/)
+  assert.throws(() => checkAlignment({ ...inputs('1'), goConfig: 'const DaemonVersion = version\n' }), /exactly one literal/)
   assert.throws(
     () => checkAlignment({ ...inputs('1'), configTs: `${CONFIG('1')}${CONFIG('1')}` }),
     /exactly one literal/,
@@ -116,7 +126,7 @@ test('test intent: the CLI checks only internal versions when RELEASE_TAG is abs
   assert.equal(result.status, 0, result.stderr)
   assert.equal(
     result.stdout,
-    `repository version ${version} is aligned across pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json, frontend/package.json and daemon/src/config.ts\n`,
+    `repository version ${version} is aligned across pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json, frontend/package.json, daemon/src/config.ts and daemon-go/internal/config/version.go\n`,
   )
 })
 
