@@ -17,10 +17,10 @@ import java.io.IOException;
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
 
-  /** v3 冻结 OPEN 的 expected 条件与 IDE 快照修订/排序，失败回执只能在状态已改变时携带快照。 */
+  /** v4 冻结 OPEN 的 expected 条件与 IDE 快照修订/排序，失败回执只能在状态已改变时携带快照。 */
   @Test
-  void validatesIdeV3BindingAndSnapshotContract() {
-    assertEquals(3, ControlProtocolCodec.PROTOCOL_VERSION);
+  void validatesIdeV4BindingAndSnapshotContract() {
+    assertEquals(4, ControlProtocolCodec.PROTOCOL_VERSION);
     Envelope command =
         ControlProtocolCodec.decodeBinary(
             ControlProtocolFixtures.goldenUnchecked("ide-command.bin"));
@@ -754,6 +754,28 @@ class ControlProtocolCodecTest {
             .build();
     assertArrayEquals(
         ControlProtocolFixtures.golden("update.bin"), ControlProtocolCodec.encodeBinary(update));
+  }
+
+  /** 下载申请只提供 transferId，且 invocationId 必须来自 Envelope scope。 */
+  @Test
+  void validatesDownloadRequestScopeAndTransferId() throws IOException {
+    Envelope request =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.golden("download-request.bin"));
+    assertEquals(
+        "66666666-6666-4666-8666-666666666666",
+        request.getResourceDownloadRequest().getTransferId());
+
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.encodeBinary(request.toBuilder().clearInvocationId().build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                request.toBuilder()
+                    .setResourceDownloadRequest(
+                        request.getResourceDownloadRequest().toBuilder().clearTransferId())
+                    .build()));
   }
 
   /** 共享 golden 解码后重新编码必须逐字节相同，裸消息和帧路径都要覆盖。 */

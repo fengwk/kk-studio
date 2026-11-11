@@ -900,7 +900,7 @@ describe('control binary codec', () => {
   })
 
   it('validates DOWNLOAD requests and tickets', () => {
-    // 请求：transferId 与 blob id 必填。
+    // 请求必须携带 transferId，但不能自行选择归档。
     expect(() =>
       encodeBinary(
         create(EnvelopeSchema, {
@@ -909,9 +909,7 @@ describe('control binary codec', () => {
           invocationId: INVOCATION_ID,
           payload: {
             case: 'resourceDownloadRequest',
-            value: create(ResourceDownloadRequestSchema, {
-              blobId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-            }),
+            value: create(ResourceDownloadRequestSchema, {}),
           },
         }),
       ),
@@ -922,7 +920,6 @@ describe('control binary codec', () => {
         create(EnvelopeSchema, {
           messageType: MessageType.RESOURCE_DOWNLOAD_REQUEST,
           environmentId: ENVIRONMENT_ID,
-          invocationId: INVOCATION_ID,
           payload: {
             case: 'resourceDownloadRequest',
             value: create(ResourceDownloadRequestSchema, {
@@ -931,7 +928,7 @@ describe('control binary codec', () => {
           },
         }),
       ),
-    ).toThrow(/downloadRequest\.blobId/)
+    ).toThrow(/invocationId/)
 
     // READY 票据不允许携带 message。
     expect(() =>

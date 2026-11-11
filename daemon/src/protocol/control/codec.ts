@@ -660,11 +660,10 @@ function validateUploadCommit(commit: { transferId?: string; uploadId?: string }
   requireUuid(commit.uploadId, 'uploadCommit.uploadId')
 }
 
-/** 下载申请：transferId 与全局 blob id 必填；业务票据签发由服务端 download 端口完成。 */
+/** 下载申请只提供 transferId；归档由 invocation 对应的服务端冻结记录决定。 */
 function validateDownloadRequest(request: ResourceDownloadRequest): void {
   assertNoUnknown(request, 'downloadRequest')
   requireUuid(request.transferId, 'downloadRequest.transferId')
-  requireUuid(request.blobId, 'downloadRequest.blobId')
 }
 
 /** 下载票据：READY 携带预签名 GET、大小与摘要；FAILED 只携带去敏说明。 */

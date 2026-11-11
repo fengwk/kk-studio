@@ -349,14 +349,11 @@ export function uploadTicketEnvelope() {
   })
 }
 
-const BLOB = '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d'
-
 export function downloadRequestEnvelope() {
   return envelope(MessageType.RESOURCE_DOWNLOAD_REQUEST, {
     case: 'resourceDownloadRequest',
     value: create(ResourceDownloadRequestSchema, {
       transferId: TRANSFER,
-      blobId: BLOB,
     }),
   })
 }

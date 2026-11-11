@@ -333,10 +333,9 @@ message PresignedGet {
   optional int64 expires_at_epoch_ms = 3;
 }
 
-// Daemon 凭 invocationId 与 transferId 申请一次资源下载。
+// Daemon 凭 invocationId 与 transferId 申请资源下载；允许的归档由服务端 invocation 冻结记录决定。
 message ResourceDownloadRequest {
   optional string transfer_id = 1;
-  optional string blob_id = 2;
 }
 
 // 服务端签发的下载票据：READY 携带预签名 GET 事实；FAILED 只携带去敏说明。
