@@ -58,8 +58,8 @@ describe('agent-capability-candidates', () => {
     ]
 
     expect(buildToolCandidates(tools)).toEqual([
-      { value: 'bash', name: 'bash', description: 'shell' },
-      { value: 'read', name: 'read', description: 'files' },
+      { value: 'bash', name: 'bash', description: 'shell', group: 'BUILTIN' },
+      { value: 'read', name: 'read', description: 'files', group: 'BUILTIN' },
     ])
     expect(buildToolCandidates(tools).map((item) => item.name)).toEqual(['bash', 'read'])
     expect(buildToolCandidates(tools)[0]).not.toHaveProperty('source')
@@ -101,16 +101,19 @@ describe('agent-capability-candidates', () => {
         value: 'core-tools:dev',
         name: 'core-tools / dev',
         description: 'dev skill',
+        group: 'core-tools',
       },
       {
         value: 'core-tools:ops',
         name: 'core-tools / ops',
         description: 'ops skill',
+        group: 'core-tools',
       },
       {
         value: 'extra-tools:web',
         name: 'extra-tools / web',
         description: 'web skill',
+        group: 'extra-tools',
       },
     ])
   })
@@ -137,6 +140,7 @@ describe('agent-capability-candidates', () => {
         value: 'core-tools:dev',
         name: 'core-tools / dev',
         description: 'dev skill',
+        group: 'core-tools',
       },
       {
         value: 'missing-pkg:missing-skill',
