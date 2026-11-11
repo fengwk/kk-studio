@@ -5,7 +5,7 @@ import static org.mockito.Mockito.mock;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.util.List;
@@ -20,10 +20,10 @@ public final class BuiltinFileToolsTestSupport {
   private BuiltinFileToolsTestSupport() {}
 
   public static List<Tool> fileTools() {
-    return fileTools(mock(VfsGateway.class));
+    return fileTools(mock(ResourceReadGateway.class));
   }
 
-  public static List<Tool> fileTools(VfsGateway vfsGateway) {
+  public static List<Tool> fileTools(ResourceReadGateway resourceReadGateway) {
     return List.of(
         new FileTool(
             "read",
@@ -31,34 +31,34 @@ public final class BuiltinFileToolsTestSupport {
             "read.md",
             EnvironmentCapabilityIds.FS_READ,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "write",
             FileTool.Operation.WRITE,
             "write.md",
             EnvironmentCapabilityIds.FS_WRITE,
             ToolSideEffect.IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "edit",
             FileTool.Operation.EDIT,
             "edit.md",
             EnvironmentCapabilityIds.FS_EDIT,
             ToolSideEffect.NON_IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "grep",
             FileTool.Operation.GREP,
             "grep.md",
             EnvironmentCapabilityIds.FS_GREP,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "find",
             FileTool.Operation.FIND,
             "find.md",
             EnvironmentCapabilityIds.FS_FIND,
             ToolSideEffect.READ_ONLY,
-            vfsGateway));
+            resourceReadGateway));
   }
 }

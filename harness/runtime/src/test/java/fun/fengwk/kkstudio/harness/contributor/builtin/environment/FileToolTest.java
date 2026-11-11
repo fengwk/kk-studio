@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -40,8 +40,8 @@ import java.util.UUID;
 /**
  * {@link FileTool} 的逐调用路由契约。
  *
- * <p>验证三类执行位置：{@code vfs:} 路径只走 {@link VfsGateway}、绝对路径只走绑定的 {@link BoundEnvironment}、无环境且非 {@code
- * vfs:} 路径在派发前返回「未执行」并提示可写的会话目录。
+ * <p>验证三类执行位置：{@code resource://} 路径只走 {@link ResourceReadGateway}、绝对路径只走绑定的 {@link
+ * BoundEnvironment}、无环境时本地路径在派发前返回「未执行」。
  */
 class FileToolTest {
 
@@ -84,7 +84,7 @@ class FileToolTest {
   /** read resource URI 时由平台资源网关执行，不要求 Environment。 */
   @Test
   void resourceReadDispatchesToPlatform() throws Exception {
-    VfsGateway gateway = mock(VfsGateway.class);
+    ResourceReadGateway gateway = mock(ResourceReadGateway.class);
     ToolResult expected =
         new ToolResult("c1", List.of(new TextResultContent("resource")), false, "{}");
     FileTool tool =
@@ -119,7 +119,7 @@ class FileToolTest {
   /** 绝对路径在绑定环境上执行同名 capability，不触碰 VFS。 */
   @Test
   void absolutePathsExecuteOnTheBoundEnvironmentOnly() throws Exception {
-    VfsGateway gateway = mock(VfsGateway.class);
+    ResourceReadGateway gateway = mock(ResourceReadGateway.class);
     BoundEnvironment environment = mock(BoundEnvironment.class);
     ToolResult expected =
         new ToolResult("c1", List.of(new TextResultContent("env result")), false, "{}");
@@ -142,7 +142,7 @@ class FileToolTest {
   /** 无环境时非 vfs: 路径不派发：声明未执行，并给出 vfs:/sessions/<rootSessionId>/ 与选择环境两条路径。 */
   @Test
   void absolutePathsWithoutEnvironmentAreNotExecuted() throws Exception {
-    VfsGateway gateway = mock(VfsGateway.class);
+    ResourceReadGateway gateway = mock(ResourceReadGateway.class);
     BoundEnvironment environment = mock(BoundEnvironment.class);
     FileTool tool =
         new FileTool(
@@ -167,7 +167,7 @@ class FileToolTest {
   /** 环境执行失败的文案若未带执行事实，则补足「结果无法确认」；已带事实的文案不重复包装。 */
   @Test
   void environmentErrorsWithoutGuidanceAreWrappedAsUncertain() throws Exception {
-    VfsGateway gateway = mock(VfsGateway.class);
+    ResourceReadGateway gateway = mock(ResourceReadGateway.class);
     BoundEnvironment environment = mock(BoundEnvironment.class);
     FileTool tool =
         new FileTool(
@@ -204,7 +204,7 @@ class FileToolTest {
         operation.name().toLowerCase() + ".md",
         capabilityId,
         ToolSideEffect.READ_ONLY,
-        mock(VfsGateway.class));
+        mock(ResourceReadGateway.class));
   }
 
   private static ToolExecutionRequest request(

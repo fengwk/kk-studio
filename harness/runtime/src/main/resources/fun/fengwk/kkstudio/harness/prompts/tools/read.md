@@ -13,16 +13,15 @@ Usage:
 - When the result is truncated, the numbered body contains only exact file content (never synthetic truncation markers). The header reports whether the line count (`line_limit`) or the 60000 code point budget (`character_limit`) stopped the read, plus `next`, the first position that was not returned. A `[TRUNCATED: ...]` line after the body repeats that position; it contains no call instructions.
 - To continue, call `read` again with that next position (`offset` is its line, and `column_offset` is its column when it is not 1).
 - Use `read` on directories instead of `bash ls`. Directories keep their own listing format, also paged by `offset`/`limit`.
-- `path` is an absolute path on the target Environment's file system, or one of exactly two complete `vfs:` URI forms:
-  - `resource://files/<blobId>`: a session resource, for example an externalized tool output. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window, and `grep` accepts local paths only and does not resolve `vfs:` URIs. A supported media resource (image, audio, video, or PDF) may be returned to you as the actual media content when the current model and provider protocol allow it; when it cannot be delivered, the call fails with an explicit error instead of returning a path or a description.
-  - `vfs:/skills/<package>/<skill>/<relativePath>`: a published skill file.
-- Local paths must be absolute. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
+- `path` is an absolute path on the selected Environment's file system, or a `resource://` URI:
+  - `resource://files/<uuid>`: a shared resource. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window. A supported media resource (image, audio, video, or PDF) may be returned as actual media content when the current model and provider protocol allow it; otherwise the call fails explicitly.
+  - `resource://skills/<package>/<version>/<skill>/<relativePath>`: a published skill resource. Skill-resource reading is not available yet.
+- Local paths require an Environment. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
 
 Examples:
 - `read({ path: "/srv/project/packages/web/src/example.ts" })`
 - `read({ path: "/srv/project/services/api/src/example.ts", offset: 120, limit: 40 })`
 - `read({ path: "/srv/project/src/bundle.js", offset: 1, column_offset: 60001 })`
-- `read({ path: "vfs:/skills/review/checklist/SKILL.md" })`
 - `read({ path: "resource://files/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f", offset: 1, limit: 2000 })`
 - `read({ path: "/var/log/app.log", offset: 120, limit: 40 })`
 - `read({ path: "/srv/project" })`

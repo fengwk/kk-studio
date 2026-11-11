@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -418,7 +418,7 @@ class BuiltinHarnessContributorTest {
 
   /** 五个真实 FileTool：名字、顺序与 capability 绑定必须与 Contributor 冻结的清单一致。 */
   private static List<Tool> stubFileTools() {
-    VfsGateway vfsGateway = mock(VfsGateway.class);
+    ResourceReadGateway vfsGateway = mock(ResourceReadGateway.class);
     return List.of(
         new FileTool(
             "read",

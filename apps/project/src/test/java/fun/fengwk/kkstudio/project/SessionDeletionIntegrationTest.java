@@ -42,7 +42,6 @@ import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
@@ -84,7 +83,6 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   @Autowired private IssueAgentThreadRepository issueAgentThreadRepository;
   @Autowired private List<SessionOwnership> ownerships;
   @Autowired private SessionBlobRefManager refManager;
-  @Autowired private SessionFileRepository sessionFileRepository;
 
   private HarnessStore store;
   private SessionDeletionOrchestrator orchestrator;
@@ -98,8 +96,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     when(runtimes.getIfAvailable())
         .thenReturn(
             new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT));
-    orchestrator =
-        new SessionDeletionOrchestrator(ownerships, runtimes, refManager, sessionFileRepository);
+    orchestrator = new SessionDeletionOrchestrator(ownerships, runtimes, refManager);
     transactions = new TransactionTemplate(transactionManager);
   }
 

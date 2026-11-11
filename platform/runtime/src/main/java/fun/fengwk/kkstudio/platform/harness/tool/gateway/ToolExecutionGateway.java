@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import fun.fengwk.kkstudio.common.json.ToolArguments;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
@@ -25,15 +24,11 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluation
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.platform.vfs.VfsEditRejectedException;
-import fun.fengwk.kkstudio.platform.vfs.VfsEditReviewSource;
-import fun.fengwk.kkstudio.platform.vfs.VfsWriteGuard;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -71,7 +66,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       "Call the tool again; the next turn uses its current definition";
 
   private final RuntimeToolCatalogSource toolCatalogSource;
-  private final VfsEditReviewSource vfsEditReviewSource;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ToolResultFinalizer finalizer;
@@ -84,7 +78,6 @@ public final class ToolExecutionGateway implements ToolGateway {
   public ToolExecutionGateway(
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentCapabilityTransport capabilityTransport,
-      VfsEditReviewSource vfsEditReviewSource,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ToolResourceStager resourceStager,
@@ -93,7 +86,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       Clock clock,
       ConcurrencyAdmission admission) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
-    this.vfsEditReviewSource = Objects.requireNonNull(vfsEditReviewSource, "vfsEditReviewSource");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
@@ -142,31 +134,12 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
-  /** 写 {@code vfs:/skills}、{@code vfs:/resources} 的确定性拒绝：在任何审批、权限评估与环境绑定之前返回，声明未执行。 */
-  private static ToolInvocationError readOnlyRejection(
-      ToolInvocationRequest request, UUID rootSessionId) {
-    return VfsWriteGuard.rejection(
-            request.binding().descriptor().name(), request.call().argumentsJson(), rootSessionId)
-        .map(message -> new ToolInvocationError(ToolErrorClassifier.VFS_READ_ONLY_KIND, message))
-        .orElse(null);
-  }
-
   /** 编辑身份：环境 edit 能力工具或逐调用路由的 edit 文件工具。 */
   private static boolean isEditTool(Tool tool) {
     if (tool instanceof EnvironmentCapabilityTool environmentTool) {
       return EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id());
     }
     return tool instanceof FileTool fileTool && fileTool.operation() == FileTool.Operation.EDIT;
-  }
-
-  /** 参数中的 path 是否为 vfs: 坐标：只做前缀判断，不解析命名空间。 */
-  private static boolean isVfsPath(String argumentsJson) {
-    try {
-      String path = ToolArguments.text(ToolArguments.parse(argumentsJson), "path");
-      return path != null && path.startsWith("vfs:");
-    } catch (RuntimeException invalid) {
-      return false;
-    }
   }
 
   /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
@@ -178,11 +151,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       ResolvedContribution resolved = requireContribution(lease, request.binding());
       if (resolved.error() != null) {
         return new ToolGateway.Deny(resolved.error());
-      }
-      // 只读命名空间的写入在权限评估与审批之前确定性拒绝：既不弹审批，也不消耗权限策略，YOLO 同样不能绕过。
-      ToolInvocationError readOnlyRejection = readOnlyRejection(request, scope.rootSessionId());
-      if (readOnlyRejection != null) {
-        return new ToolGateway.Deny(readOnlyRejection);
       }
       ToolSettings settings = toolSettingsProvider.get();
       PermissionEvaluator.Evaluation evaluation =
@@ -197,10 +165,6 @@ public final class ToolExecutionGateway implements ToolGateway {
         case ASK -> {
           String reason = "Permission rules require approval";
           if (isEditTool(resolved.contribution().tool())) {
-            // vfs: 编辑从当前会话读取；环境路径由 Daemon 预览。两者均不得进入无审查审批。
-            if (isVfsPath(request.call().argumentsJson())) {
-              yield vfsEditReview(request, scope, reason);
-            }
             yield EditReviewPreflight.prepare(capabilityTransport, request, reason);
           }
           yield new ToolGateway.Ask(reason);
@@ -209,27 +173,6 @@ public final class ToolExecutionGateway implements ToolGateway {
             new ToolInvocationError(
                 ToolErrorClassifier.PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
       };
-    }
-  }
-
-  /** vfs: 编辑的审批必须携带真实会话文件审查；预览失败是确定性拒绝而非允许盲批。 */
-  private PreflightResult vfsEditReview(
-      ToolInvocationRequest request, ExecutionScope scope, String reason) {
-    try {
-      return new ToolGateway.Ask(
-          reason,
-          vfsEditReviewSource.prepare(request, scope.rootSessionId(), scope.rootThreadId()));
-    } catch (VfsEditRejectedException rejected) {
-      return new ToolGateway.Deny(
-          new ToolInvocationError(EditReviewPreflight.FAILED_KIND, rejected.getMessage()));
-    } catch (RuntimeException failure) {
-      return new ToolGateway.Deny(
-          new ToolInvocationError(
-              EditReviewPreflight.FAILED_KIND,
-              ToolErrorGuidance.message(
-                  "Edit preview failed: " + failure.getClass().getSimpleName(),
-                  ExecutionFact.NOT_EXECUTED,
-                  "Retry the edit; if it keeps failing, ask the user")));
     }
   }
 
@@ -254,14 +197,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolContribution contribution = resolved.contribution();
       Tool tool = contribution.tool();
       ToolBinding binding = execution.request().binding();
-      // YOLO 跳过 preflight 时直接从 admit 进入执行：只读命名的写入拒绝必须在这里同样生效。
-      ToolInvocationError readOnlyRejection =
-          readOnlyRejection(execution.request(), execution.scope().rootSessionId());
-      if (readOnlyRejection != null) {
-        return reject(catalogLease, lease, readOnlyRejection);
-      }
-
-      // 编辑的审批必须携带真实文件审查：环境编辑来自 Daemon，vfs: 编辑来自会话文件存储。
+      // 编辑的审批必须携带 Environment 返回的真实文件审查。
       if (isEditTool(tool) && execution.approval().required() && execution.expectedFile() == null) {
         return reject(
             catalogLease,
@@ -272,33 +208,6 @@ public final class ToolExecutionGateway implements ToolGateway {
                     "Required edit approval must include a valid edit review",
                     ExecutionFact.NOT_EXECUTED,
                     EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
-      }
-
-      // 审批后、执行前校验预览时的 vfs: 文件快照未变化：用户批准的是特定 diff，不是「任意编辑」。
-      if (execution.approval().required()
-          && execution.expectedFile() != null
-          && isVfsPath(execution.request().call().argumentsJson())) {
-        try {
-          vfsEditReviewSource.verifySnapshot(
-              execution.scope().rootSessionId(),
-              execution.scope().rootThreadId(),
-              execution.expectedFile());
-        } catch (VfsEditRejectedException rejected) {
-          return reject(
-              catalogLease,
-              lease,
-              new ToolInvocationError(EditReviewPreflight.FAILED_KIND, rejected.getMessage()));
-        } catch (RuntimeException failure) {
-          return reject(
-              catalogLease,
-              lease,
-              new ToolInvocationError(
-                  EditReviewPreflight.FAILED_KIND,
-                  ToolErrorGuidance.message(
-                      "Edit review verification failed: " + failure.getClass().getSimpleName(),
-                      ExecutionFact.NOT_EXECUTED,
-                      "Retry the edit; if it keeps failing, ask the user")));
-        }
       }
 
       BoundEnvironment boundEnvironment =
