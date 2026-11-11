@@ -13,9 +13,7 @@ import {
   applyStopReceipt,
   loadThreadDraft,
   restoreThreadDraftParts,
-  restoreThreadGoalText,
   saveThreadDraftParts,
-  saveThreadGoalText,
   type ThreadDraftRecord,
 } from '@/features/thread/runtime/thread-draft-store'
 import type {
@@ -26,8 +24,8 @@ import type {
 /**
  * 绑定 Thread 草稿记录（thread-draft-store）的行为契约。
  *
- * 这里覆盖的是「刷新恢复 / 多标签并发 / Stop 回执重放」下用户可见的事实：草稿与 Goal 文本的
- * 持久化边界、失败回填的判定、以及 (threadId, stopRequestId) 的原子幂等合并。
+ * 这里覆盖的是「刷新恢复 / 多标签并发 / Stop 回执重放」下用户可见的事实：草稿持久化边界、
+ * 失败回填的判定、以及 (threadId, stopRequestId) 的原子幂等合并。
  * 全部用例使用 test-setup 注入的 Mock IndexedDB（每个用例都是全新 factory，因此连接与写链都是空的）。
  */
 
@@ -72,15 +70,6 @@ function cancelledUserResource(sequence: number, name: string): HarnessCancelled
   }
 }
 
-function cancelledGoal(sequence: number, text: string): HarnessCancelledInputDTO {
-  return {
-    sequence: String(sequence),
-    idempotencyKey: `idempotency-${sequence}`,
-    type: 'GOAL',
-    payload: { text },
-  }
-}
-
 function stopReceipt(
   forThreadId: string,
   stopRequestId: string,
@@ -115,7 +104,7 @@ function occurrences(haystack: string, needle: string): number {
 }
 
 describe('thread draft store', () => {
-  it('persists parts and goal text across a save/load round-trip and drops attachment parts', async () => {
+  it('persists parts across a save/load round-trip and drops attachment parts', async () => {
     // 测试意图：草稿记录是刷新恢复的唯一事实源；attachment part 依赖页面内上传注册表，落盘时被过滤。
     expect(await loadThreadDraft(threadId)).toBeNull()
 
@@ -127,39 +116,7 @@ describe('thread draft store', () => {
     const record = await readRecord(threadId)
     expect(record.parts).toEqual([text, resource])
     expect(record.parts.some((part) => part.type === 'attachment')).toBe(false)
-    expect(record.goalText).toBeNull()
     expect(record.appliedStopRequestIds).toEqual([])
-
-    await saveThreadGoalText(threadId, 'goal text', [])
-    const withGoal = await readRecord(threadId)
-    expect(withGoal.goalText).toBe('goal text')
-    expect(withGoal.parts).toEqual([text, resource])
-  })
-
-  it('keeps parts, goal text and applied receipt ids independent across saves', async () => {
-    // 测试意图：三者同属一条记录但语义独立；任一次保存都不得清掉另外两个字段。
-    await saveThreadDraftParts(threadId, [createTextPart('draft')], [])
-    await saveThreadGoalText(threadId, 'goal', [])
-    const merged = await applyStopReceipt(
-      stopReceipt(threadId, 'stop-1', [cancelledGoal(1, 'receipt goal')]),
-    )
-    // 合并完成后本 UI 观察到这次回执的 generation，后续写入携带它。
-    const observed = merged.appliedStopRequestIds
-
-    // 保存 Goal 文本不影响 composer 草稿与已合并回执身份。
-    expect(await saveThreadGoalText(threadId, 'edited goal', observed)).toEqual({ status: 'SAVED' })
-    const afterGoalSave = await readRecord(threadId)
-    expect(afterGoalSave.goalText).toBe('edited goal')
-    expect(partsToText(afterGoalSave.parts)).toBe('draft')
-    expect(afterGoalSave.appliedStopRequestIds).toEqual(['stop-1'])
-
-    // 保存 composer 草稿不影响 Goal 文本与已合并回执身份。
-    expect(await saveThreadDraftParts(threadId, [createTextPart('edited draft')], observed))
-      .toEqual({ status: 'SAVED' })
-    const afterPartsSave = await readRecord(threadId)
-    expect(partsToText(afterPartsSave.parts)).toBe('edited draft')
-    expect(afterPartsSave.goalText).toBe('edited goal')
-    expect(afterPartsSave.appliedStopRequestIds).toEqual(['stop-1'])
   })
 
   it('restores failed message parts only into an empty draft, idempotently', async () => {
@@ -187,36 +144,21 @@ describe('thread draft store', () => {
     expect(partsToText(record.parts)).toBe('failed message')
   })
 
-  it('restores failed goal text only into an empty goal editor, idempotently', async () => {
-    // 测试意图：Goal 编辑区回填语义与 composer 草稿一致：空可写、不同不覆盖、相同幂等。
-    expect(await restoreThreadGoalText(threadId, 'failed goal')).toBe(true)
-    expect((await readRecord(threadId)).goalText).toBe('failed goal')
-
-    expect(await restoreThreadGoalText(threadId, 'typed later')).toBe(false)
-    expect((await readRecord(threadId)).goalText).toBe('failed goal')
-
-    expect(await restoreThreadGoalText(threadId, 'failed goal')).toBe(true)
-    expect((await readRecord(threadId)).goalText).toBe('failed goal')
-  })
-
-  it('merges a stop receipt into the existing draft and goal editor', async () => {
-    // 测试意图：回执一旦应用，取消的 USER_MESSAGE 前置于草稿、GOAL 进入 Goal 编辑区，并记录回执身份。
+  it('merges a stop receipt into the existing draft', async () => {
+    // 测试意图：回执一旦应用，取消的 USER_MESSAGE 前置于草稿，并记录回执身份。
     await saveThreadDraftParts(threadId, [createTextPart('draft')], [])
     const merged = await applyStopReceipt(
       stopReceipt(threadId, 'stop-1', [
         cancelledUserMessage(1, 'cancelled message'),
-        cancelledGoal(2, 'cancelled goal'),
       ]),
     )
 
     expect(merged.parts).toEqual([
       expect.objectContaining({ type: 'text', text: 'cancelled message\n\ndraft' }),
     ])
-    expect(merged.goalText).toBe('cancelled goal')
 
     const record = await readRecord(threadId)
     expect(partsToText(record.parts)).toBe('cancelled message\n\ndraft')
-    expect(record.goalText).toBe('cancelled goal')
     expect(record.appliedStopRequestIds).toEqual(['stop-1'])
   })
 
@@ -268,7 +210,6 @@ describe('thread draft store', () => {
 
     const parent = await readRecord(parentThreadId)
     expect(partsToText(parent.parts)).toBe('parent draft')
-    expect(parent.goalText).toBeNull()
     expect(parent.appliedStopRequestIds).toEqual([])
 
     const child = await readRecord(childThreadId)
@@ -366,29 +307,6 @@ describe('thread draft store', () => {
     const record = await readRecord(threadId)
     expect(record.appliedStopRequestIds).toEqual(['stop-cross-tab'])
     expect(partsToText(record.parts)).toBe('cancelled\n\nold draft')
-  })
-
-  it('protects the goal editor text from the same stale overwrite', async () => {
-    // 测试意图：Goal 编辑区的陈旧覆盖写同样不得把已恢复的 Goal 文本与回执身份拆开。
-    const otherTab = await importTwoTabStore()
-    expect(await otherTab.saveThreadGoalText(threadId, 'old goal', [])).toEqual({ status: 'SAVED' })
-
-    const merged = await applyStopReceipt(
-      stopReceipt(threadId, 'stop-cross-tab-goal', [cancelledGoal(1, 'cancelled goal')]),
-    )
-    expect(merged.goalText).toBe('cancelled goal\n\nold goal')
-
-    const outcome = await otherTab.saveThreadGoalText(threadId, 'stale goal', [])
-    expect(outcome.status).toBe('STALE')
-    if (outcome.status !== 'STALE') {
-      throw new Error('expected a stale save outcome')
-    }
-    expect(outcome.record.appliedStopRequestIds).toEqual(['stop-cross-tab-goal'])
-    expect(outcome.record.goalText).toBe('cancelled goal\n\nold goal')
-
-    const record = await readRecord(threadId)
-    expect(record.appliedStopRequestIds).toEqual(['stop-cross-tab-goal'])
-    expect(record.goalText).toBe('cancelled goal\n\nold goal')
   })
 
   it('serializes concurrent receipt merges for the same thread', async () => {

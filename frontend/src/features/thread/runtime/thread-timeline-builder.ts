@@ -39,9 +39,6 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
-/** 仍在 mailbox 中排队的人类输入类型；NOTIFICATION / CUSTOM_MESSAGE 是系统事实与编排产物。 */
-const HUMAN_INPUT_COMMAND_TYPES = new Set(['USER_MESSAGE', 'GOAL'])
-
 /**
  * 压缩回合的挂起状态：FULL / TURN_PREFIX 的完整成功才产生卡片。
  * HISTORY 只是中间 partial，失败/取消/未关闭回合同样不产生卡片。
@@ -136,11 +133,8 @@ export function buildThreadTimeline(
       continue
     }
     // 可编辑队列与上下键历史只承载人类输入 USER_MESSAGE：NOTIFICATION（系统结果事实）、
-    // CUSTOM_MESSAGE（编排产物）、GOAL（在 Goal 编辑区按专用语义编辑）与配置命令都不进入。
+    // CUSTOM_MESSAGE（编排产物）与配置命令都不进入。
     if (command.type !== 'USER_MESSAGE') {
-      if (HUMAN_INPUT_COMMAND_TYPES.has(command.type)) {
-        hasPendingInputs = true
-      }
       continue
     }
     const queuedMessage = extractQueuedMessage(command.payload)

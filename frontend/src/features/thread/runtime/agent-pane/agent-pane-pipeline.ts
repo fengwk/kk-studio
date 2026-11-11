@@ -25,7 +25,7 @@ import {
 import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 /**
- * 只有容器创建（NEW_SESSION / NEW_THREAD）需要产品 owner；既有 Thread 的发送、Goal、
+ * 只有容器创建（NEW_SESSION / NEW_THREAD）需要产品 owner；既有 Thread 的发送、
  * 设置、预览一律走 {@link buildThreadCommandBatchRequest} 的无 owner 契约。
  */
 export interface AcceptanceBuildInput {
@@ -36,16 +36,6 @@ export interface AcceptanceBuildInput {
   /** Resolved payload parts used to build the durable USER_MESSAGE request. */
   parts: ComposerPart[]
   /** Browser-local draft identity restored after a definite failure or explicit abandon. */
-  localParts?: ComposerPart[]
-  createId?: () => string
-}
-
-export interface GoalAcceptanceBuildInput {
-  owner: AgentRuntimeOwnerDTO
-  target: PaneTarget
-  draft: BranchDraft
-  base: BranchDraft
-  goalText: string | null
   localParts?: ComposerPart[]
   createId?: () => string
 }
@@ -79,7 +69,6 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
       settings: copyExecutionSettings(draft.execution.settings),
     },
     environmentName: draft.environmentName,
-    goal: null,
   }
 }
 
@@ -139,46 +128,8 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
   }
 }
 
-export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): FrozenCommandBatchRequest {
-  const createId = input.createId ?? createIdempotencyKey
-  const text = normalizeGoalText(input.goalText)
-  const goalCommand: HarnessCommandCreateDTO = {
-    type: 'GOAL',
-    idempotencyKey: createId(),
-    text,
-  }
-  const commands =
-    input.target.kind === 'NEW_SESSION_DRAFT'
-      ? [goalCommand]
-      : [
-          ...buildBranchDiffCommands(input.base, input.draft, createId),
-          goalCommand,
-        ]
-  const target = buildCreationTarget(input.target, input.draft)
-  const request: HarnessCommandBatchDTO = {
-    owner: { ...input.owner },
-    target,
-    commands,
-  }
-  const composerParts = trimMessageParts(input.localParts ?? [])
-  return {
-    owner: { ...input.owner },
-    target: input.target,
-    request,
-    branchDraft: copyBranchDraft(input.draft),
-    composerParts,
-    identity: JSON.stringify({
-      owner: input.owner,
-      target: input.target,
-      commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
-      branchDraft: input.draft,
-      goalText: text,
-    }),
-  }
-}
-
 /**
- * 单条纯 USER_MESSAGE 批次不依赖 Thread cursor：服务端按当前邮箱尾部入队。任何 SET_*、GOAL 或
+ * 单条纯 USER_MESSAGE 批次不依赖 Thread cursor：服务端按当前邮箱尾部入队。任何 SET_* 或
  * 多条命令的批次仍需要精确 cursor。
  */
 export function isCursorFreeThreadBatch(commands: HarnessCommandCreateDTO[]): boolean {
@@ -187,7 +138,7 @@ export function isCursorFreeThreadBatch(commands: HarnessCommandCreateDTO[]): bo
 
 /**
  * 既有 Thread 的通用写请求：服务端从 path 解析 Session，客户端只提交命令与依赖当前视图时的
- * 精确 CAS 游标。纯消息不冻结 cursor；设置 / Goal 批次必须来自 freshly 读取的权威 snapshot。
+ * 精确 CAS 游标。纯消息不冻结 cursor；设置批次必须来自 freshly 读取的权威 snapshot。
  */
 export function buildThreadCommandBatchRequest(
   thread: HarnessThreadDTO,
@@ -203,22 +154,6 @@ export function buildThreadCommandBatchRequest(
   }
 }
 
-/** Goal 文本的 canonical 校验：非空、无首尾空白、≤2000 code points；null 表示清除。 */
-export function normalizeGoalText(text: string | null): string | null {
-  if (text === null) {
-    return null
-  }
-  if (typeof text !== 'string' || text.trim().length === 0) {
-    throw new Error('Goal text must not be empty')
-  }
-  if (text !== text.trim()) {
-    throw new Error('Goal text must not contain surrounding whitespace')
-  }
-  if (Array.from(text).length > 2000) {
-    throw new Error('Goal text must be <= 2000 code points')
-  }
-  return text
-}
 
 function buildCreationTarget(target: PaneTarget, draft: BranchDraft) {
   if (target.kind === 'NEW_SESSION_DRAFT') {

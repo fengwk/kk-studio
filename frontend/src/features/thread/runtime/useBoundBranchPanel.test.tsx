@@ -87,7 +87,6 @@ function branchSettings(
     agentName: 'assistant',
     execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
-    goal: null,
     ...overrides,
   }
 }
@@ -1158,7 +1157,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
-    // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE/GOAL 终止输入。
+    // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE 终止输入。
     expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_EXECUTION'])
     expect(request.expectedHeadEntryId).toBe('e-assistant')
     expect(request.expectedNextCommandSequence).toBe('1')

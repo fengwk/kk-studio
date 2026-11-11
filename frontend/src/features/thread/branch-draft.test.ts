@@ -180,7 +180,7 @@ describe('BranchDraft materialization failures', () => {
     ])
     expect(projected.execution).toEqual(createBuiltinExecution('group', null))
     expect(branchDraftFromBranchSettings({
-      agentName: 'root', execution: createBuiltinExecution('group', null), environmentName: null, goal: null,
+      agentName: 'root', execution: createBuiltinExecution('group', null), environmentName: null,
     }, false).execution).toEqual(createBuiltinExecution('group', null))
   })
 
@@ -221,7 +221,6 @@ describe('BranchDraft conversion and diff semantics', () => {
       agentName: 'assistant',
       execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
-      goal: null,
     }
   }
 

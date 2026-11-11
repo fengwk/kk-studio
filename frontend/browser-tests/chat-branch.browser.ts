@@ -20,7 +20,7 @@ const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
 const rootPayload = { settings: {
   agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' },
-  environmentName: null, goal: null,
+  environmentName: null,
 } }
 
 function chat() {
@@ -119,7 +119,6 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       environmentName: null,
-      goal: null,
     },
     createdAt: 1790812800,
     updatedAt: 1790812800,
@@ -985,7 +984,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
 }
 
 /**
- * busy Thread 的设置选择走真实浏览器路径：立即提交纯 SET 批次（无 USER_MESSAGE/GOAL），
+  * busy Thread 的设置选择走真实浏览器路径：立即提交纯 SET 批次（无 USER_MESSAGE），
  * 并以「待生效」chip 展示。
  */
 test('busy thread settings selection submits a standalone SET batch and shows the pending chip', async ({
@@ -1006,7 +1005,7 @@ test('busy thread settings selection submits a standalone SET batch and shows th
     expectedHeadEntryId: string
     commands: Array<Record<string, unknown>>
   }
-  // 纯设置批次：固定顺序的 SET_EXECUTION，且没有伪造末尾 USER_MESSAGE/GOAL。
+  // 纯设置批次：固定顺序的 SET_EXECUTION，且没有伪造末尾 USER_MESSAGE。
   expect(batch.commands.map((command) => command.type)).toEqual(['SET_EXECUTION'])
   expect(batch.expectedHeadEntryId).toBe('entry-3')
 

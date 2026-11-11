@@ -40,7 +40,6 @@ function rootThread(environmentName: string | null) {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
       environmentName,
-      goal: null,
     },
     createdAt: 1790812800000,
     updatedAt: 1790812800000,

@@ -49,7 +49,7 @@ export type ThreadEventKind =
   | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
-  | 'CUSTOM'
+  | 'UNKNOWN_ENTRY'
   | 'CUSTOM_MESSAGE'
   | 'COMPACTION'
   | 'TURN_END'
@@ -557,18 +557,6 @@ function projectEntryRecord(
         summary: translate('ai.runtime.event.abortedText'),
         details: withTime(base.details, entry.createdAt),
       }
-    case 'CUSTOM': {
-      const customType = getString(payload.customType)
-      const contributorId = getString(payload.contributorId)
-      return {
-        ...base,
-        kind: 'CUSTOM',
-        status: 'completed',
-        title: 'CUSTOM',
-        summary: summarizeField(customType || contributorId, translate('ai.runtime.event.emptyText')),
-        details: withTime(base.details, entry.createdAt),
-      }
-    }
     case 'CUSTOM_MESSAGE':
       return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
     case 'NOTIFICATION': {
@@ -638,10 +626,10 @@ function projectEntryRecord(
       return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
     }
     default:
-      // 未知 Entry 类型：审计视图不丢信息，归入 CUSTOM 并以原类型标签展示。
+      // 未知 Entry 类型：审计视图不丢信息，并以原类型标签展示。
       return {
         ...base,
-        kind: 'CUSTOM',
+        kind: 'UNKNOWN_ENTRY',
         status: 'completed',
         title: translate('ai.runtime.event.unknownType', { type: entry.entryType }),
         summary: translate('ai.runtime.event.emptyText'),

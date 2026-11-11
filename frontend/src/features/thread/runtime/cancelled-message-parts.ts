@@ -10,7 +10,6 @@ import { isRecord } from '@/shared/lib/value'
 /**
  * Stop 回执里可恢复的人工输入回填：
  * - USER_MESSAGE 回到 composer 草稿；
- * - GOAL 回到 Goal 编辑区文本。
  * CUSTOM_MESSAGE / NOTIFICATION 不会出现在 cancelledInputs 中，也就不会进入草稿。
  */
 
@@ -25,16 +24,6 @@ export function cancelledInputMessageParts(input: HarnessCancelledInputDTO): Com
     return [createTextPart(typeof payload === 'string' ? payload : stableText(payload))]
   }
   return payloadMessageToParts(payload.message)
-}
-
-/** 回执中的一条 GOAL 变成 Goal 编辑区文本；其它类型或空文本返回 null。 */
-export function cancelledInputGoalText(input: HarnessCancelledInputDTO): string | null {
-  if (input.type !== 'GOAL') {
-    return null
-  }
-  const payload = input.payload
-  const text = isRecord(payload) ? payload.text : null
-  return typeof text === 'string' && text.length > 0 ? text : null
 }
 
 /**
@@ -63,31 +52,6 @@ export function prependCancelledMessages(
     prefix.push(createTextPart('\n\n'))
   }
   return mergeTextParts([...prefix, ...currentDraft])
-}
-
-/**
- * 把 Stop 取消的 GOAL 合并回 Goal 编辑区：多个目标用空行连接并整体前置于已有文本。
- * 已包含相同目标文本时保持引用不变，避免刷新或重复交付造成重复回填。
- */
-export function mergeCancelledGoalTexts(
-  cancelled: readonly HarnessCancelledInputDTO[],
-  currentGoalText: string | null,
-): string | null {
-  const restored = cancelled
-    .map(cancelledInputGoalText)
-    .filter((text): text is string => text != null && text.trim().length > 0)
-  if (restored.length === 0) {
-    return currentGoalText
-  }
-  const block = restored.join('\n\n')
-  const current = currentGoalText ?? ''
-  if (current.trim().length === 0) {
-    return block
-  }
-  if (current.includes(block)) {
-    return currentGoalText
-  }
-  return `${block}\n\n${current}`
 }
 
 export function payloadMessageToParts(message: unknown): ComposerPart[] {

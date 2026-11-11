@@ -538,11 +538,11 @@ describe('thread timeline edge branches', () => {
     expect(parseApproval('[1]')).toBeNull()
   })
 
-  it('projects empty USER/CUSTOM/TOOL entries and unknown non-message entries', () => {
-    // 防御性 fallback：无内容的 USER/CUSTOM 消息投影为 empty_message 事件；
+  it('projects empty USER/CUSTOM_MESSAGE/TOOL entries and unknown non-message entries', () => {
+    // 防御性 fallback：无内容的 USER/CUSTOM_MESSAGE 消息投影为 empty_message 事件；
     // TOOL role 没有 tool_result 时同样投影 empty_message；未知 entryType
-    // （此处 'CUSTOM' 与 'SOMETHING_ELSE'）投影为 unknown_entry，而不是静默丢弃。
-    const unknownEntry = entry('unknown-other', 'CUSTOM', { arbitrary: true })
+    // （此处两个未知名称）投影为 unknown_entry，而不是静默丢弃。
+    const unknownEntry = entry('unknown-other', 'NOTIFICATION', { arbitrary: true })
     Reflect.set(unknownEntry, 'entryType', 'SOMETHING_ELSE')
     const timeline = buildThreadTimeline(
       [
@@ -553,7 +553,7 @@ describe('thread timeline edge branches', () => {
         entry('empty-tool', 'MESSAGE', {
           message: { role: 'TOOL', contents: [{ type: 'unexpected', text: 'x' }] },
         }),
-        entry('unknown-type', 'CUSTOM', { arbitrary: true }),
+        entry('unknown-type', 'UNKNOWN_TYPE' as EntryType, { arbitrary: true }),
         unknownEntry,
       ],
       [],
@@ -567,7 +567,7 @@ describe('thread timeline edge branches', () => {
       ['entry', 'unknown_entry'],
     ])
     // 两个 unknown Entry 的 title 展示各自的 entryType（含未知枚举原文）。
-    expect(timeline.messages[3]).toMatchObject({ title: '未识别 Entry：CUSTOM' })
+    expect(timeline.messages[3]).toMatchObject({ title: '未识别 Entry：UNKNOWN_TYPE' })
     expect(timeline.messages[4]).toMatchObject({ title: '未识别 Entry：SOMETHING_ELSE' })
     expect(timeline.messages[0]).toMatchObject({
       title: '此消息没有可展示内容。',

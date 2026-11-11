@@ -99,7 +99,6 @@ function createThreadSnapshot() {
           agentName: 'architect',
           execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
           environmentName: null,
-          goal: null,
         },
         createdAt: 1789862400,
         updatedAt: 1789862400,
@@ -110,13 +109,12 @@ function createThreadSnapshot() {
           threadId: VALID_THREAD_ID,
           parentEntryId: null,
           entryType: 'ROOT',
-          // 真实 message codec：ROOT 只带一份完整 branch settings 快照（含 goal: null）。
+          // 真实 message codec：ROOT 只带一份完整 branch settings 快照。
           payload: {
             settings: {
               agentName: 'architect',
               execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
               environmentName: null,
-              goal: null,
             },
           },
           createdAt: 1789862400,
@@ -143,12 +141,11 @@ function createThreadSnapshot() {
 }
 
 test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
-  test('end-to-end browser flow: the Issue dock hosts an owner-free bound Thread with message, Goal and Stop', async ({
+  test('end-to-end browser flow: the Issue dock hosts an owner-free bound Thread with message and Stop', async ({
     page,
   }) => {
     // 测试意图：真实浏览器中 Issue 只是组织容器。打开 Agent 线程后，消息走 per-thread
-    // 命令批次、Stop 走 per-thread Stop、
-    // Goal 面板可用；三者请求体都不带产品 owner/target，且绝不触发 Issue 动作接口。
+    // 命令批次和 Stop 都走 per-thread 接口，且绝不触发 Issue 动作接口。
     const commandBatches: Array<Record<string, unknown>> = []
     const stopRequests: Array<Record<string, unknown>> = []
     const issueActivities: unknown[] = []
@@ -328,29 +325,10 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     expect(dock.getByRole('button', { name: '预览请求' })).toHaveCount(0)
     await page.screenshot({ path: resolve(reportsDir, 'project-agent-owner-free.png') })
 
-    // 7. Goal：Goal 面板可用，设置目标走 owner-free 命令批次
-    await composer.click()
-    await composer.fill('/goal')
-    const palette = dock.locator('.thread-command-palette')
-    await expect(palette).toBeVisible()
-    await palette.locator('button', { hasText: 'goal' }).click()
-    const goalPanel = dock.getByRole('region', { name: '目标' })
-    await expect(goalPanel).toBeVisible()
-    await goalPanel.getByRole('textbox', { name: '设置新目标', exact: true }).fill('交付可回滚的迁移方案')
-    await goalPanel.getByRole('button', { name: '设置目标' }).click()
-
-    await expect.poll(() => commandBatches.length).toBe(2)
-    const goalBatch = commandBatches[1]!
-    expect(goalBatch).not.toHaveProperty('owner')
-    expect(goalBatch).not.toHaveProperty('target')
-    expect(goalBatch.commands).toEqual([
-      expect.objectContaining({ type: 'GOAL', text: '交付可回滚的迁移方案' }),
-    ])
-
-    // 8. Stop：走 per-thread Stop，并把未消费输入退回可见草稿
+    // 7. Stop：走 per-thread Stop，并把未消费输入退回可见草稿
     await composer.click()
     await composer.fill('/stop')
-    await palette.locator('button', { hasText: 'stop' }).click()
+    await dock.locator('.thread-command-palette').locator('button', { hasText: 'stop' }).click()
 
     await expect.poll(() => stopRequests.length).toBe(1)
     expect(Object.keys(stopRequests[0] ?? {}).sort()).toEqual(['expectedVersion', 'stopRequestId'])
@@ -361,7 +339,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(composer).not.toContainText('"contents"')
     await page.screenshot({ path: resolve(reportsDir, 'project-agent-stop-restores-draft.png') })
 
-    // 9. 关闭 Agent 视图
+    // 8. 关闭 Agent 视图
     const closeBtn = dock.getByLabel('关闭 Agent 视图')
     await closeBtn.click()
     await expect(dock).toHaveCount(0)

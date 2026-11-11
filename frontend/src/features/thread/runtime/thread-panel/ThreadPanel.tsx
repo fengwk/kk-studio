@@ -60,7 +60,6 @@ export interface ThreadPanelComposerInput {
   onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  onSubmitGoal?: (goalText: string, localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
   /** 命令面板可见性变化轻量通知。 */

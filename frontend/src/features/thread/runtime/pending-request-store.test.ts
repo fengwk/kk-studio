@@ -52,7 +52,6 @@ describe('pending-request-store', () => {
         agentName: 'assistant',
         execution: createBuiltinExecution('MiniMax', 'default'),
         environmentName: null,
-        goal: null,
       },
       yoloEnabled: false,
     },
@@ -101,11 +100,9 @@ describe('pending-request-store', () => {
       environmentName: null,
       yoloEnabled: false,
     },
-    kind: 'MESSAGE',
     localDraft: [
       { partId: 'part-2', type: 'text', text: 'bound message content' },
     ],
-    goalText: null,
     unknownOutcome: true,
   }
 

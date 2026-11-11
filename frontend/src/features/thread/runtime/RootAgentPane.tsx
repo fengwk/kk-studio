@@ -20,7 +20,6 @@ import {
 } from '@/features/thread/runtime/thread-panel/entry-branch-context'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { NameRenamePanel } from '@/features/thread/runtime/thread-panel/NameRenamePanel'
-import { BranchGoalPanel } from '@/features/thread/runtime/thread-panel/BranchGoalPanel'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { useRootThreadControl } from '@/features/thread/runtime/useRootThreadControl'
 import { SkillEnvironmentHint } from '@/features/thread/runtime/SkillEnvironmentHint'
@@ -402,21 +401,6 @@ export function RootAgentPane({
     }
     if (pane.interaction === 'shortcuts') {
       return <ThreadShortcutsPanel onClose={pane.closeInteraction} />
-    }
-    if (pane.interaction === 'goal') {
-      return (
-        <BranchGoalPanel
-          goal={pane.boundGoal}
-          progress={pane.boundGoalProgress}
-          busy={pane.pending}
-          readOnly={Boolean(capabilities?.readOnly)}
-          draftText={pane.goalDraft ?? undefined}
-          onDraftTextChange={pane.setGoalDraft}
-          onSubmitGoal={(goalText) => pane.submitGoal(goalText)}
-          onClearGoal={() => pane.clearGoal()}
-          onClose={pane.closeInteraction}
-        />
-      )
     }
     if (pane.interaction === 'history') {
       if (capabilities?.allowBranching === false) {

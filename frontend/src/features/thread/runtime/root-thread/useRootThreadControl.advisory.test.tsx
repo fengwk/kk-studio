@@ -25,7 +25,6 @@ function makeThread(threadId: string): HarnessThreadDTO {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'test-model', variant: 'default' } },
       environmentName: null,
-      goal: null,
     },
     createdAt: 1000,
     updatedAt: 1000,

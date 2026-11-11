@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildAcceptanceRequest } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
-import { buildGoalBatchPlan, buildMessageBatchPlan } from '@/features/thread/command-batch-plan'
+import { buildMessageBatchPlan } from '@/features/thread/command-batch-plan'
 import { createTextPart } from '@/features/thread/composer/composer-parts'
 import { harnessService } from '@/shared/api/harness-service'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
@@ -25,7 +25,7 @@ const thread: HarnessThreadDTO = {
   version: '1',
   status: 'IDLE',
   executionControl: 'RUNNABLE',
-  branchSettings: { agentName: 'coder', execution: draft.execution, environmentName: null, goal: null },
+  branchSettings: { agentName: 'coder', execution: draft.execution, environmentName: null },
   createdAt: 0,
   updatedAt: 0,
 }
@@ -93,26 +93,6 @@ describe('owner-free HTTP wire', () => {
     expect(body).not.toHaveProperty('expectedNextCommandSequence')
     expect(data).not.toContain('"owner"')
     expect(data).not.toContain('"target"')
-  })
-
-  it('serializes an existing thread goal batch on the same owner-free endpoint', async () => {
-    // 测试意图：Goal 与普通消息共用无 owner 契约，且序列化后确实带有 GOAL 命令。
-    const plan = buildGoalBatchPlan({
-      thread,
-      effectiveBase: draft,
-      draft,
-      goalText: 'ship it',
-      createCommandId: () => 'cmd-1',
-    })
-    await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
-    const { url, data } = wireAt(0)
-    expect(url).toBe('/api/harness/threads/thread-1/command-batches')
-    const body = JSON.parse(data) as {
-      commands: Array<{ type: string }>
-    } & Record<string, unknown>
-    expect(body.commands.some((command) => command.type === 'GOAL')).toBe(true)
-    expect(body).not.toHaveProperty('owner')
-    expect(body).not.toHaveProperty('target')
   })
 
   it('fails closed for bound-thread acceptance and passes opaque container owners unchanged', async () => {

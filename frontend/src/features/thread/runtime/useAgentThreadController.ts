@@ -17,10 +17,7 @@ import {
   sameBatchRequestIdentity,
   type BoundPendingMessage,
 } from '@/features/thread/runtime/pending-request-store'
-import {
-  isDefiniteAcceptanceFailure,
-  normalizeGoalText,
-} from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
+import { isDefiniteAcceptanceFailure } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
 import {
   createStopRequestId,
   type CommandBatchPlan,
@@ -87,7 +84,6 @@ export function useAgentThreadController(
   projection: ThreadProjection,
   initialParts: ComposerPart[] = [],
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
-  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
 ) {
   const { t } = useI18n()
   const threadId = projection.threadId
@@ -144,7 +140,6 @@ export function useAgentThreadController(
   const {
     draftRef,
     setDraft,
-    setGoalDraft,
     clearSubmittedParts,
     restorePendingDraft,
     applyStopReceipts,
@@ -346,9 +341,7 @@ export function useAgentThreadController(
       threadId,
       request: plan.request,
       targetDraft: plan.targetDraft,
-      kind: 'MESSAGE',
       localDraft,
-      goalText: null,
       unknownOutcome: false,
     }
     try {
@@ -360,58 +353,6 @@ export function useAgentThreadController(
     pendingMessageRef.current = boundPending
     setPendingMessage(boundPending)
     clearSubmittedParts()
-
-    return executePendingMessage(boundPending)
-  }
-
-  /**
-   * 既有 Thread 的 Goal 写入：与普通消息共用同一 thread command batch 与未决重试通道，
-   * 但提交后清空 Goal 编辑区，未知结果或 Stop 回执则把目标文本恢复到该编辑区。
-   */
-  function submitGoal(rawGoalText: string | null): Promise<void> {
-    if (isCurrentBindingInFlight()) {
-      return Promise.resolve()
-    }
-    if (!bound || buildGoalBatch == null) {
-      setActionError(t('ai.runtime.action.threadNotLoaded'))
-      return Promise.resolve()
-    }
-    let goalText: string | null
-    try {
-      goalText = normalizeGoalText(rawGoalText)
-    } catch (error) {
-      setActionError(errorMessage(error))
-      return Promise.resolve()
-    }
-    const plan = buildGoalBatch(goalText)
-    if (plan == null) {
-      return Promise.resolve()
-    }
-    if (pendingMessageRef.current?.unknownOutcome) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return Promise.resolve()
-    }
-    setActionError(null)
-    setConflict(null)
-
-    const boundPending: BoundPendingMessage = {
-      threadId,
-      request: plan.request,
-      targetDraft: plan.targetDraft,
-      kind: 'GOAL',
-      localDraft: [],
-      goalText,
-      unknownOutcome: false,
-    }
-    try {
-      saveBoundPendingMessage(threadId, boundPending)
-    } catch {
-      setActionError(t('ai.runtime.action.storageFailed'))
-      return Promise.resolve()
-    }
-    pendingMessageRef.current = boundPending
-    setPendingMessage(boundPending)
-    setGoalDraft(null)
 
     return executePendingMessage(boundPending)
   }
@@ -484,11 +425,6 @@ export function useAgentThreadController(
     return false
   }
 
-  function goalCommandKey(pending: BoundPendingMessage): string | null {
-    const goalCommand = pending.request.commands.find((command) => command.type === 'GOAL')
-    return goalCommand?.idempotencyKey ?? null
-  }
-
   function stopThread(): Promise<void> {
     if (!thread || !requireBoundThread('ai.runtime.action.stopFailed')) {
       return Promise.resolve()
@@ -545,8 +481,6 @@ export function useAgentThreadController(
         // Stop 成功（或服务器重放了完全相同的先前 Stop）：完整受影响集合的持久回执
         // 按 (threadId, stopRequestId) 原子幂等合并；子 Thread 草稿只写它自己的记录。
         const receipts = result.stoppedThreads ?? []
-        const cancelledKeys = new Set(receipts.flatMap((receipt) =>
-          (receipt.cancelledInputs ?? []).map((input) => input.idempotencyKey)))
         // Stop 已成功：即便回执合并失败也只报「草稿未恢复」，绝不把它当成 Stop 失败。
         await applyStopReceipts(receipts, operationThreadId, operationEpoch)
         // await 期间宿主可能已强制重绑：A 的 late completion 只能清理 A 自己的 sidecar，
@@ -561,11 +495,6 @@ export function useAgentThreadController(
           clearBoundPendingMessage(operationThreadId, cleared.request)
           pendingMessageRef.current = null
           setPendingMessage(null)
-          // 未确认落地且未被本次回执取消的 Goal 目标文本不能丢：写回该 Thread 的编辑区记录。
-          const clearedKey = goalCommandKey(cleared)
-          if (cleared.kind === 'GOAL' && (clearedKey == null || !cancelledKeys.has(clearedKey))) {
-            await restorePendingDraft(operationThreadId, operationEpoch, cleared)
-          }
         }
         await Promise.all([
           queryClient.invalidateQueries({
@@ -634,7 +563,6 @@ export function useAgentThreadController(
     messagesLoading: snapshotQuery.isLoading,
     messagesError: snapshotQuery.error,
     draft: draftRecord.draft,
-    goalDraft: draftRecord.goalDraft,
     draftRestoreError: draftRecord.draftRestoreError,
     retryDraftRestore: draftRecord.retryDraftRestore,
     queuedCommands,
@@ -647,9 +575,7 @@ export function useAgentThreadController(
     conflict,
     dismissConflict: () => setConflict(null),
     setDraft,
-    setGoalDraft,
     submitMessage,
-    submitGoal,
     stopThread,
     compactThread,
     compactPending: compactMutation.isPending,

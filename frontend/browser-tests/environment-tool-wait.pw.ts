@@ -45,7 +45,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
             executionControl: 'RUNNABLE',
             branchSettings: { agentName: 'assistant',
               execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
-              environmentName: null, goal: null },
+              environmentName: null },
             createdAt: now, updatedAt: now,
           },
           entries: [{

@@ -48,7 +48,7 @@ function boundController(): BoundThreadPanelController {
       parentThreadId: null, rootThreadId: 'thread', yoloEnabled: false,
       nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE', branchSettings: {
-        agentName: 'agent', execution: createBuiltinExecution(DEBUG.model.modelName, DEBUG.model.variant), environmentName: null, goal: null,
+        agentName: 'agent', execution: createBuiltinExecution(DEBUG.model.modelName, DEBUG.model.variant), environmentName: null,
       }, createdAt: 1790504400, updatedAt: 1790504400,
     },
     activeAssistantOutput: {

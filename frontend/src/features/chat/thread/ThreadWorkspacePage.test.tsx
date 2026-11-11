@@ -88,7 +88,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       agentName: 'assistant',
       execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
-      goal: null,
     },
     createdAt: 1785232800000,
     updatedAt: 1785232800000,

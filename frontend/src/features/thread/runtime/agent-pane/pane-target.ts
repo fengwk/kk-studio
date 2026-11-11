@@ -14,7 +14,6 @@ import type {
 import type {
   HarnessBranchSettingsDTO,
   HarnessExecutionSelectionDTO,
-  HarnessGoalSettingDTO,
 } from '@/shared/api/generated/contracts'
 
 export type PaneTarget =
@@ -55,35 +54,20 @@ function isExecutionSelection(value: unknown): value is HarnessExecutionSelectio
   return keys.length === 2 && keys.every((key) => key === 'driver' || key === 'settings')
 }
 
-function isGoalSetting(value: unknown): value is HarnessGoalSettingDTO {
-  return isRecord(value)
-    && hasExactKeys(value, ['id', 'text'])
-    && nonBlank(value.id)
-    && nonBlank(value.text)
-}
-
-function isCanonicalGoalText(text: unknown): text is string {
-  if (typeof text !== 'string') return false
-  if (text.trim().length === 0) return false
-  if (text !== text.trim()) return false
-  return Array.from(text).length <= 2000
-}
-
 function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
   if (!isRecord(value)) {
     return false
   }
   const keys = Object.keys(value)
   if (
-    keys.length !== 4
-    || !keys.every((key) => key === 'agentName' || key === 'execution' || key === 'environmentName' || key === 'goal')
+    keys.length !== 3
+    || !keys.every((key) => key === 'agentName' || key === 'execution' || key === 'environmentName')
   ) {
     return false
   }
   return nonBlank(value.agentName)
     && isExecutionSelection(value.execution)
     && isEnvironmentName(value.environmentName)
-    && (value.goal === null || isGoalSetting(value.goal))
 }
 
 function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
@@ -166,9 +150,6 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
         && Array.isArray(value.contents)
         && value.contents.length > 0
         && value.contents.every(isCommandContent)
-    case 'GOAL':
-      return hasExactKeys(value, ['type', 'idempotencyKey', 'text'])
-        && (value.text === null || isCanonicalGoalText(value.text))
     case 'SET_AGENT':
       return hasExactKeys(value, ['type', 'idempotencyKey', 'agentName'])
         && nonBlank(value.agentName)

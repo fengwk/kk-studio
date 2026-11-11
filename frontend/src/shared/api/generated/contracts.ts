@@ -717,7 +717,6 @@ export type EntryType =
   | 'ROOT'
   | 'TURN_START'
   | 'MESSAGE'
-  | 'CUSTOM'
   | 'MODEL_ATTEMPT_FAILURE'
   | 'NATIVE_COMPACTION'
   | 'CUSTOM_MESSAGE'
@@ -733,7 +732,6 @@ export const ENTRY_TYPE_VALUES: readonly EntryType[] = [
   'ROOT',
   'TURN_START',
   'MESSAGE',
-  'CUSTOM',
   'MODEL_ATTEMPT_FAILURE',
   'NATIVE_COMPACTION',
   'CUSTOM_MESSAGE',
@@ -1099,7 +1097,6 @@ export interface HarnessBranchSettingsDTO {
   agentName: string
   execution: HarnessExecutionSelectionDTO
   environmentName: string | null
-  goal: HarnessGoalSettingDTO | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCancelledInputDTO */
@@ -1122,13 +1119,6 @@ export interface HarnessCommandCreateUserMessageDTO {
   type: 'USER_MESSAGE'
   idempotencyKey: string
   contents: HarnessUserMessageContentDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.GoalDTO */
-export interface HarnessCommandCreateGoalDTO {
-  type: 'GOAL'
-  idempotencyKey: string
-  text?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetAgentDTO */
@@ -1155,7 +1145,6 @@ export interface HarnessCommandCreateSetEnvironmentDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO */
 export type HarnessCommandCreateDTO =
   | HarnessCommandCreateUserMessageDTO
-  | HarnessCommandCreateGoalDTO
   | HarnessCommandCreateSetAgentDTO
   | HarnessCommandCreateSetExecutionDTO
   | HarnessCommandCreateSetEnvironmentDTO
@@ -1234,12 +1223,6 @@ export interface HarnessGenerationFailureDTO {
   errorMessage: string
   failedAt: number
   retryAt: number
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessGoalSettingDTO */
-export interface HarnessGoalSettingDTO {
-  id: string
-  text: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessImageInputTier */
@@ -2954,7 +2937,6 @@ export const THREAD_COMMAND_STATE_VALUES: readonly ThreadCommandState[] = [
 export type ThreadCommandType =
   | 'USER_MESSAGE'
   | 'CUSTOM_MESSAGE'
-  | 'GOAL'
   | 'SET_AGENT'
   | 'SET_EXECUTION'
   | 'SET_ENVIRONMENT'
@@ -2963,7 +2945,6 @@ export type ThreadCommandType =
 export const THREAD_COMMAND_TYPE_VALUES: readonly ThreadCommandType[] = [
   'USER_MESSAGE',
   'CUSTOM_MESSAGE',
-  'GOAL',
   'SET_AGENT',
   'SET_EXECUTION',
   'SET_ENVIRONMENT',

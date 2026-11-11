@@ -54,25 +54,6 @@ import './thread-composer.css'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 
-function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; objective: string | null } {
-  let text = ''
-  for (const part of parts) {
-    if (part.type === 'text') {
-      text += part.text
-    }
-  }
-  const match = text.match(/^\/goal(?:\s+(.*))?$/s)
-  if (!match) {
-    return { isGoalCommand: false, objective: null }
-  }
-  const rawArg = match[1] ?? ''
-  const trimmed = rawArg.trim()
-  return {
-    isGoalCommand: true,
-    objective: trimmed.length > 0 ? trimmed : null,
-  }
-}
-
 export interface ThreadComposerHandle {
   focus: () => void
 }
@@ -91,7 +72,6 @@ export interface ThreadComposerProps {
    *   PendingAcceptance——恢复比对只命中本地 id 草稿。
    */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  onSubmitGoal?: (goalText: string, localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
   historicalUserMessages?: readonly string[]
@@ -130,7 +110,6 @@ export function ThreadComposer({
   onPartsChange,
   onHistoryPartsChange = onPartsChange,
   onSubmit,
-  onSubmitGoal,
   onCommand,
   commands = THREAD_COMMANDS,
   historicalUserMessages = EMPTY_USER_MESSAGES,
@@ -245,10 +224,7 @@ export function ThreadComposer({
     [changeDraft, parts, updateImageTier],
   )
 
-  const goalCommandInfo = extractGoalCommand(parts)
-  const isGoalCommand = goalCommandInfo.isGoalCommand
-  const isGoalWithObjective = isGoalCommand && goalCommandInfo.objective != null
-  const slashQuery = isGoalWithObjective ? null : slashQueryOf(parts)
+  const slashQuery = slashQueryOf(parts)
   const slashMode = slashQuery != null
 
   const [activeIndex, setActiveIndex] = useState(0)
@@ -311,8 +287,8 @@ export function ThreadComposer({
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
-    () => !disabled && !slashMode && (isGoalCommand || canSubmitParts(parts, uploads)),
-    [disabled, isGoalCommand, parts, slashMode, uploads],
+    () => !disabled && !slashMode && canSubmitParts(parts, uploads),
+    [disabled, parts, slashMode, uploads],
   )
 
   useImperativeHandle(ref, () => ({
@@ -431,41 +407,6 @@ export function ThreadComposer({
     if (!canSend) {
       return
     }
-    const goalInfo = extractGoalCommand(parts)
-    if (goalInfo.isGoalCommand && goalInfo.objective != null) {
-      const goalCommand = commands.find((cmd) => cmd.id === 'goal')
-      if (!goalCommand || goalCommand.disabled) {
-        showToast(goalCommand?.disabledReason || t('ai.runtime.goal.notAllowed'))
-        return
-      }
-      if (Array.from(goalInfo.objective).length > 2000) {
-        showToast(t('ai.runtime.goal.errorTooLong'))
-        return
-      }
-      setPlusMenuOpen(false)
-      const localDraft = trimMessageParts(parts)
-      commit(localDraft)
-      const remainingParts = parts.filter((part) => part.type !== 'text')
-      try {
-        if (onSubmitGoal) {
-          onSubmitGoal(goalInfo.objective, localDraft)
-        }
-        changeDraft(remainingParts)
-      } catch {
-        // preserve draft on sync error
-      }
-      return
-    }
-    if (goalInfo.isGoalCommand && goalInfo.objective == null) {
-      const goalCommand = commands.find((cmd) => cmd.id === 'goal')
-      if (!goalCommand || goalCommand.disabled) {
-        showToast(goalCommand?.disabledReason || t('ai.runtime.goal.notAllowed'))
-        return
-      }
-      setPlusMenuOpen(false)
-      onCommand(goalCommand)
-      return
-    }
     setPlusMenuOpen(false)
     // 草稿始终引用客户端 localId；提交 payload 在序列化前解析为服务端 upload
     // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
@@ -480,15 +421,10 @@ export function ThreadComposer({
     if (command.disabled) {
       return
     }
-    const consumeSlashCommand = !plusMenuOpen && slashMode && command.id !== 'goal'
+    const consumeSlashCommand = !plusMenuOpen && slashMode
     setPlusMenuOpen(false)
     if (consumeSlashCommand) {
       changeDraft(parts.filter((part) => part.type !== 'text'))
-    }
-    if (command.id === 'goal') {
-      focusComposer()
-      onCommand(command)
-      return
     }
     if (command.id === 'upload') {
       fileInputRef.current?.click()

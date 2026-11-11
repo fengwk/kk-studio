@@ -163,11 +163,9 @@ describe('buildThreadEventTimeline', () => {
           agentName: 'JIJI',
           model: { modelName: 'glm-5.3-flash', variant: 'high' },
           environmentName: null,
-          goal: null,
         },
         ownerThreadId: 't1',
       }),
-      entry('custom-1', 'CUSTOM', { contributorId: 'c1', customType: 'note', data: {} }),
       entry('unknown-1', 'UNKNOWN_TYPE' as EntryType, {}),
     ]
 
@@ -184,7 +182,6 @@ describe('buildThreadEventTimeline', () => {
       'entry:compact-1',
       'entry:end-1',
       'entry:settings-1',
-      'entry:custom-1',
       'entry:unknown-1',
     ])
     // 每个 durable Entry 恰好一条记录。
@@ -200,8 +197,7 @@ describe('buildThreadEventTimeline', () => {
       'COMPACTION',
       'TURN_END',
       'SETTINGS',
-      'CUSTOM',
-      'CUSTOM',
+      'UNKNOWN_ENTRY',
     ])
     expect(events.map((event) => event.status)).toEqual([
       'completed',
@@ -211,7 +207,6 @@ describe('buildThreadEventTimeline', () => {
       'failed',
       'failed',
       'stopped',
-      'completed',
       'completed',
       'completed',
       'completed',
@@ -235,7 +230,6 @@ describe('buildThreadEventTimeline', () => {
       'COMPACTION',
       'TURN_END',
       'SETTINGS',
-      'CUSTOM',
       '未知条目：UNKNOWN_TYPE',
     ])
     expect(events[2]!.summary).toBe(JSON.stringify(messagePayload('USER', [{ type: 'text', text: 'hi' }])))
@@ -908,48 +902,23 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(events[1]!.summary)).toEqual(messagePayload('USER', [{ type: 'text', text: long }]))
   })
 
-  it('projects CUSTOM entries with contributorId and customType cleanly', () => {
-    // 意图：验证 CUSTOM entry 消费 contributorId / customType，投影 CUSTOM 事件且 rawJson 保真。
-    const entries = [
-      entry('custom-full', 'CUSTOM', {
-        contributorId: 'goal-contributor',
-        customType: 'goal-status',
-        data: {},
-      }),
-    ]
-
-    const events = build(entries)
-    expect(events).toHaveLength(1)
-
-    // 标准 Contributor CUSTOM Entry 正常投影
-    expect(events[0]!.kind).toBe('CUSTOM')
-    expect(events[0]!.title).toBe('CUSTOM')
-    expect(events[0]!.rawJson).toContain('goal-contributor')
-    expect(events[0]!.rawJson).toContain('goal-status')
-    expect(JSON.parse(events[0]!.rawJson!)).toEqual({
-      contributorId: 'goal-contributor',
-      customType: 'goal-status',
-      data: {},
-    })
-  })
-
-  it('projects tool invocation with custom rendererKey correctly', () => {
+  it('projects tool invocation with the tool renderer key', () => {
     // 意图：验证统一 ToolInvocation 正常被 timeline/event 系统投影。
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
     ]
     const invocation = toolInvocation({
-      id: 'inv-custom',
-      toolName: 'create_goal',
+      id: 'inv-tool',
+      toolName: 'health_check',
       rendererKey: 'tool',
       status: 'RUNNING',
     })
 
     const events = build(entries, { toolInvocations: [invocation] })
-    const activeTool = events.find((e) => e.id === 'active:tool:inv-custom')
+    const activeTool = events.find((e) => e.id === 'active:tool:inv-tool')
     expect(activeTool).toBeDefined()
     expect(activeTool?.title).toBe('ACTIVE_TOOL_INVOCATION')
-    expect(activeTool?.summary).toBe('create_goal · 运行中')
+    expect(activeTool?.summary).toBe('health_check · 运行中')
   })
 
   it('projects active tool invocation with full raw payload and structured details for arguments, approval, result, error, and realtime stream', () => {
@@ -1204,7 +1173,6 @@ describe('buildThreadEventTimeline', () => {
         agentName: 'architect',
         model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
-        goal: null,
       },
       ownerThreadId: 't-root',
     })
@@ -1226,7 +1194,6 @@ describe('buildThreadEventTimeline', () => {
         agentName: 'architect',
         model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
-        goal: null,
       },
       ownerThreadId: 't-root',
     })
@@ -1235,7 +1202,6 @@ describe('buildThreadEventTimeline', () => {
         agentName: 'architect',
         model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
-        goal: null,
       },
       ownerThreadId: 't-root',
     })

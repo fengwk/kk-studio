@@ -90,7 +90,6 @@ function threadDto(
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
       environmentName: 'dev-node',
-      goal: null,
     },
     createdAt: 1790812800,
     updatedAt: 1790812800,

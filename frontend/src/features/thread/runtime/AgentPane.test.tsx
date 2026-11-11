@@ -377,7 +377,6 @@ function thread(
       agentName: 'assistant',
       execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
-      goal: null,
     },
     createdAt: 0,
     updatedAt: 0,
@@ -510,7 +509,6 @@ function pendingNewSessionAcceptanceFor(
           agentName: 'assistant',
           execution: createBuiltinExecution('MiniMax', 'default'),
           environmentName: null,
-          goal: null,
         },
         yoloEnabled: false,
       },
@@ -3581,36 +3579,6 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       expect(result.current.composer.settings).toBeDefined()
     })
 
-    it('submits a message and a Goal batch without an owner through the thread command batch contract', async () => {
-      // 测试意图：无 owner 的既有 Thread 仍能发送消息与 Goal；两者都走同一 per-thread
-      // 命令批次，请求体只有 CAS 游标与命令，绝不伪造 owner/target，也不触碰创建入口。
-      const { result } = renderOwnerlessController()
-      await waitFor(() => expect(result.current.composer.disabled).toBe(false))
-
-      await act(async () => {
-        result.current.composer.onSubmit(
-          [createTextPart('owner-free message')],
-          [createTextPart('owner-free message')],
-        )
-      })
-      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
-      const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
-      expect(threadId).toBe(THREAD_ID)
-      expect(request).not.toHaveProperty('owner')
-      expect(request).not.toHaveProperty('target')
-      expect(request).not.toHaveProperty('expectedHeadEntryId')
-      expect(request).not.toHaveProperty('expectedNextCommandSequence')
-      expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
-      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
-
-      act(() => result.current.submitGoal('owner-free goal'))
-      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
-      const goalRequest = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]![1]
-      expect(goalRequest.commands).toEqual([
-        expect.objectContaining({ type: 'GOAL', text: 'owner-free goal' }),
-      ])
-    })
-
     it('keeps container navigation owner-scoped while thread writes are owner-free', async () => {
       // 测试意图：owner 只描述容器（Session / Thread 列表与创建）；既有 Thread 的
       // Agent 切换与重命名无需 owner，而 Session/Thread 导航必须拒绝无 owner 面板。
@@ -3677,8 +3645,8 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       expect(result.current.target.kind).toBe('BOUND_THREAD')
     })
 
-    it('allows owner-free Goal and YOLO on a bound thread while container creation stays owner-scoped', async () => {
-      // 测试意图：本地界面命令（debug / shortcuts / goal / yolo）在无 owner 的既有 Thread
+    it('allows owner-free local commands and YOLO on a bound thread while container creation stays owner-scoped', async () => {
+      // 测试意图：本地界面命令（debug / shortcuts / yolo）在无 owner 的既有 Thread
       // 上仍然可用，因为它们是 owner-free 的执行控制；只有创建新容器（new）需要 owner。
       const { result } = renderOwnerlessController()
       await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
@@ -3694,18 +3662,6 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         result.current.composer.onCommand(testCommand('shortcuts'))
       })
       expect(result.current.interaction).toBe('shortcuts')
-
-      // Goal 面板 owner-free 打开
-      act(() => {
-        result.current.closeInteraction()
-      })
-      act(() => {
-        result.current.composer.onCommand(testCommand('goal'))
-      })
-      expect(result.current.interaction).toBe('goal')
-      act(() => {
-        result.current.closeInteraction()
-      })
 
       // YOLO 是 owner-free 的 per-thread 策略面，直接提交目标策略
       act(() => {
@@ -3959,9 +3915,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
             environmentName: null,
             yoloEnabled: false,
           },
-          kind: 'MESSAGE',
           localDraft: [{ type: 'text', partId: 'p-reload', text: 'reload test message' }],
-          goalText: null,
           // 既有 Thread 的单条纯消息冻结请求：只有命令，不带 CAS 游标，也没有 owner/target。
           request: {
             commands: [
@@ -5113,49 +5067,6 @@ describe('AgentPane root control mounting', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
-  })
-
-  it('accepts a branch goal from a NEW_THREAD_DRAFT through the same atomic batch', async () => {
-    // 草稿目标上的 Goal 与首条消息共用同一验收通道（frozen request + 绑定新根）。
-    const user = userEvent.setup()
-    bindPaneTarget({
-      kind: 'NEW_THREAD_DRAFT',
-      sessionId: 'session-1',
-      startEntryId: 'entry-1',
-      threadName: 'branch-1',
-    })
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
-      entryId: 'entry-1',
-      sessionId: 'session-1',
-      parentEntryId: null,
-      entryType: 'ROOT',
-      payload: {},
-      createdAt: 0,
-      usageCost: null,
-    }]))
-    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
-      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新分支根' })),
-    )
-    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
-      threadId === NEW_ROOT_ID
-        ? snapshot(threadFixture(NEW_ROOT_ID, { name: '新分支根' }))
-        : snapshot())
-
-    renderPane({ kind: 'CHAT', id: CHAT_ID })
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-    await user.click(composer)
-    await user.keyboard('/goal{Enter}')
-
-    const input = await screen.findByPlaceholderText('输入 thread 目标...')
-    await user.type(input, '先把契约梳理清楚')
-    await user.click(screen.getByRole('button', { name: '设置目标' }))
-
-    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(request.target.type).toBe('NEW_THREAD')
-    expect(JSON.stringify(request.commands)).toContain('先把契约梳理清楚')
-    // 验收后绑定新根：身份展示在 workspace 顶栏，面板侧以目标完成绑定为证据。
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(NEW_ROOT_ID, expect.anything()))
   })
 
   it('keeps the tree-wide Stop available and on the root when the tree query fails', async () => {
