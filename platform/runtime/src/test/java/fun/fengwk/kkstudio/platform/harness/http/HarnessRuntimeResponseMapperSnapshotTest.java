@@ -13,6 +13,7 @@ import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMa
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -282,7 +283,9 @@ class HarnessRuntimeResponseMapperSnapshotTest {
                 fileMutationInvocation(0, "call-1", "edit", "{\"path\":\"/a/b\"}"),
                 fileMutationInvocation(1, "call-2", "edit", "{\"path\":\"/other\"}"),
                 fileMutationInvocation(2, "call-3", "edit", "{\"path\":\"/a/x/../b\"}"),
-                fileMutationInvocation(3, "call-4", "write", "{\"path\":\"/a/b\"}")));
+                fileMutationInvocation(3, "call-4", "write", "{\"path\":\"/a/b\"}"),
+                fileMutationInvocation(4, "call-5", "edit", "{\"path\":\"/a/b\"}")));
+    when(snapshot.toolSiblings().get(4).assistantEntryId()).thenReturn(id(9));
 
     HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, Map.of());
 
@@ -290,6 +293,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertNull(dto.getToolInvocations().get(1).getQueuedBehindToolCallId());
     assertEquals("call-1", dto.getToolInvocations().get(2).getQueuedBehindToolCallId());
     assertEquals("call-3", dto.getToolInvocations().get(3).getQueuedBehindToolCallId());
+    assertNull(dto.getToolInvocations().get(4).getQueuedBehindToolCallId());
   }
 
   @Test

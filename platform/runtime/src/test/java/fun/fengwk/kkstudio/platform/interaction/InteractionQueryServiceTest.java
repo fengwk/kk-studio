@@ -20,7 +20,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
@@ -31,19 +30,10 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
@@ -51,12 +41,9 @@ import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /** 待处理交互统一查询用例 {@link InteractionQueryService} 的单元测试。 */
@@ -282,8 +269,6 @@ class InteractionQueryServiceTest {
   void approvalProjectsUnfinishedSameFileSuccessorsOnly() {
     UUID sessionId = id(60);
     UUID threadId = id(61);
-    UUID assistantId = id(62);
-    UUID environmentId = id(63);
     Instant createdAt = Instant.parse("2026-03-01T10:00:00Z");
     PendingInteraction row =
         new PendingInteraction(
@@ -299,60 +284,7 @@ class InteractionQueryServiceTest {
     stubRoot(threadId);
     stubOwner(threadId, sessionId, "CHAT", id(65), "chat");
 
-    ThreadState snapshotThread = mock(ThreadState.class);
-    when(snapshotThread.sessionId()).thenReturn(sessionId);
-    when(snapshotThread.name()).thenReturn("thread");
-    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    when(snapshot.thread()).thenReturn(snapshotThread);
-    List<ToolInvocation> siblings =
-        List.of(
-            mutationInvocation(
-                id(64),
-                threadId,
-                assistantId,
-                0,
-                "call-1",
-                "/a/./b",
-                environmentId,
-                ToolInvocationStatus.WAITING_APPROVAL),
-            mutationInvocation(
-                id(66),
-                threadId,
-                assistantId,
-                1,
-                "call-2",
-                "/a/x/../b",
-                environmentId,
-                ToolInvocationStatus.READY),
-            mutationInvocation(
-                id(67),
-                threadId,
-                assistantId,
-                2,
-                "call-3",
-                "/a/b",
-                environmentId,
-                ToolInvocationStatus.SUCCEEDED),
-            mutationInvocation(
-                id(68),
-                threadId,
-                assistantId,
-                3,
-                "call-4",
-                "/a/b",
-                id(69),
-                ToolInvocationStatus.READY),
-            mutationInvocation(
-                id(70),
-                threadId,
-                id(71),
-                4,
-                "call-5",
-                "/a/b",
-                environmentId,
-                ToolInvocationStatus.READY));
-    when(snapshot.toolSiblings()).thenReturn(siblings);
-    when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+    when(runtime.countQueuedSameFileMutationsAfter(id(64))).thenReturn(1);
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row), false));
     stubCountPage(List.of(row), false);
@@ -361,44 +293,38 @@ class InteractionQueryServiceTest {
         approval(service.listInteractions(null, null, 10).getItems().getFirst());
 
     assertEquals(1, approval.queuedSameFileCount());
+    verify(runtime).countQueuedSameFileMutationsAfter(id(64));
+    verify(runtime, never()).getThreadSnapshot(threadId);
   }
 
-  private static ToolInvocation mutationInvocation(
-      UUID invocationId,
-      UUID threadId,
-      UUID assistantId,
-      int callIndex,
-      String toolCallId,
-      String path,
-      UUID environmentId,
-      ToolInvocationStatus status) {
-    ToolInvocation invocation = mock(ToolInvocation.class);
-    when(invocation.id()).thenReturn(invocationId);
-    when(invocation.threadId()).thenReturn(threadId);
-    when(invocation.assistantEntryId()).thenReturn(assistantId);
-    when(invocation.callIndex()).thenReturn(callIndex);
-    when(invocation.status()).thenReturn(status);
-    when(invocation.call())
-        .thenReturn(new ToolCall(toolCallId, "edit", "{\"path\":\"" + path + "\"}"));
-    when(invocation.binding()).thenReturn(mutationBinding(environmentId));
-    return invocation;
-  }
+  /** 非文件修改审批无需读取 Thread 快照或查询同文件排队项。 */
+  @Test
+  void nonFileMutationApprovalSkipsQueueCountQuery() {
+    UUID sessionId = id(80);
+    UUID threadId = id(81);
+    PendingInteraction row =
+        new PendingInteraction(
+            id(82),
+            threadId,
+            sessionId,
+            ToolInvocationStatus.WAITING_APPROVAL,
+            "call",
+            "deploy_service",
+            "{}",
+            "{}",
+            Instant.parse("2026-03-01T10:00:00Z"));
+    stubRoot(threadId);
+    stubOwner(threadId, sessionId, "CHAT", id(83), "chat");
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
 
-  private static ToolBinding mutationBinding(UUID environmentId) {
-    return new ToolBinding(
-        new AgentToolDefinition(
-            new ToolDescriptor(
-                "edit",
-                "edit file",
-                "edit",
-                new InputSchema("path", Map.of(), Set.of(), true),
-                ToolSideEffect.READ_ONLY,
-                Duration.ofSeconds(30)),
-            ToolVisibility.SELECTABLE),
-        new ContributorBinding("builtin", "edit"),
-        EnvironmentSupport.REQUIRED,
-        EnvironmentId.of(environmentId),
-        "env");
+    InteractionDTO.Approval dto =
+        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+
+    assertEquals(0, dto.queuedSameFileCount());
+    verify(runtime, never()).countQueuedSameFileMutationsAfter(any());
+    verify(runtime, never()).getThreadSnapshot(threadId);
   }
 
   /**

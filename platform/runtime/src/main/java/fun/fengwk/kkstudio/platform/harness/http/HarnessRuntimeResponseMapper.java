@@ -54,9 +54,11 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -202,26 +204,37 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  private record ToolFileMutationGroup(UUID assistantEntryId, ToolFileMutationOrder.Key fileKey) {}
+
   private static List<ToolInvocationDTO> toToolInvocationDtos(List<ToolInvocation> invocations) {
-    List<ToolInvocationDTO> dtos = new ArrayList<>(invocations.size());
+    Map<ToolFileMutationGroup, TreeMap<Integer, ToolInvocation>> grouped = new HashMap<>();
+    List<ToolFileMutationOrder.Key> fileKeys = new ArrayList<>(invocations.size());
     for (ToolInvocation invocation : invocations) {
+      ToolFileMutationOrder.Key key = ToolFileMutationOrder.key(invocation).orElse(null);
+      fileKeys.add(key);
+      if (key != null) {
+        grouped
+            .computeIfAbsent(
+                new ToolFileMutationGroup(invocation.assistantEntryId(), key),
+                unused -> new TreeMap<>())
+            .put(invocation.callIndex(), invocation);
+      }
+    }
+
+    List<ToolInvocationDTO> dtos = new ArrayList<>(invocations.size());
+    for (int index = 0; index < invocations.size(); index++) {
+      ToolInvocation invocation = invocations.get(index);
       ToolInvocationDTO dto = toToolInvocationDto(invocation);
-      ToolFileMutationOrder.key(invocation)
-          .ifPresent(
-              key -> {
-                ToolInvocation previous = null;
-                for (ToolInvocation candidate : invocations) {
-                  if (candidate.assistantEntryId().equals(invocation.assistantEntryId())
-                      && candidate.callIndex() < invocation.callIndex()
-                      && ToolFileMutationOrder.key(candidate).filter(key::equals).isPresent()
-                      && (previous == null || candidate.callIndex() > previous.callIndex())) {
-                    previous = candidate;
-                  }
-                }
-                if (previous != null) {
-                  dto.setQueuedBehindToolCallId(previous.call().id());
-                }
-              });
+      ToolFileMutationOrder.Key key = fileKeys.get(index);
+      if (key != null) {
+        Map.Entry<Integer, ToolInvocation> previous =
+            grouped
+                .get(new ToolFileMutationGroup(invocation.assistantEntryId(), key))
+                .lowerEntry(invocation.callIndex());
+        if (previous != null) {
+          dto.setQueuedBehindToolCallId(previous.getValue().call().id());
+        }
+      }
       dtos.add(dto);
     }
     return List.copyOf(dtos);
