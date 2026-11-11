@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
@@ -92,7 +91,7 @@ class HistoryPayloadMapperTest {
                 binding(),
                 new ToolBinding(
                     definition("grep"),
-                    new ContributorBinding("core", "grep", List.of()),
+                    new ContributorBinding("core", "grep"),
                     EnvironmentSupport.NONE,
                     null,
                     null)));
@@ -239,7 +238,7 @@ class HistoryPayloadMapperTest {
             List.of(
                 new ToolBinding(
                     definition("grep"),
-                    new ContributorBinding("core", "grep", List.of()),
+                    new ContributorBinding("core", "grep"),
                     EnvironmentSupport.NONE,
                     null,
                     null)));
@@ -269,7 +268,7 @@ class HistoryPayloadMapperTest {
     ToolBinding environmentBinding =
         new ToolBinding(
             definition("fs_read"),
-            new ContributorBinding("core", "fs.read", List.of()),
+            new ContributorBinding("core", "fs.read"),
             EnvironmentSupport.REQUIRED,
             new EnvironmentId(id(1)),
             "dev");
@@ -570,7 +569,6 @@ class HistoryPayloadMapperTest {
             0,
             null,
             new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"),
-            ToolEffectBatch.EMPTY,
             null,
             NOW,
             NOW,
@@ -642,7 +640,7 @@ class HistoryPayloadMapperTest {
   private static ToolBinding binding() {
     return new ToolBinding(
         definition("bash"),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

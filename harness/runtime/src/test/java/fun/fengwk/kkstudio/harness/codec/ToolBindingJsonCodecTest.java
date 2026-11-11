@@ -115,7 +115,7 @@ class ToolBindingJsonCodecTest {
         "{\"definition\":"
             + definitionCodec.encode(requiredWithGoalContributor.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[]}"
+            + "{\"contributorId\":\"goal\",\"localName\":\"create\"}"
             + ",\"environmentSupport\":\"REQUIRED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
@@ -227,7 +227,7 @@ class ToolBindingJsonCodecTest {
                 valid.replace("{\"contributorId\":\"core\",\"localName\":\"bash\"}", "null")));
   }
 
-  /** Contributor 对象内部字段校验：必须是 contributorId/localName/stateAccesses。 */
+  /** Contributor 对象内部字段校验：必须是 contributorId/localName，且拒绝未知字段。 */
   @Test
   void rejectsInvalidContributorFields() {
     ToolBinding host = binding(EnvironmentSupport.NONE);
@@ -246,14 +246,14 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentName\":null"
                     + "}"));
 
-    // 缺少 stateAccesses
+    // 缺少必要字段
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
                     + definition
-                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\"}"
+                    + ",\"contributor\":{\"contributorId\":\"goal\"}"
                     + ",\"environmentSupport\":\"NONE\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":null"

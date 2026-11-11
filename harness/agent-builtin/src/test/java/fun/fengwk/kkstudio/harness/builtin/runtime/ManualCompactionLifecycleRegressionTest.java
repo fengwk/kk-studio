@@ -432,8 +432,7 @@ class ManualCompactionLifecycleRegressionTest {
           4096L,
           CONTEXT_WINDOW,
           MAX_OUTPUT_TOKENS,
-          new BranchSettings(
-              "compaction", HarnessRuntimeTestSupport.executionSelection(), null, null));
+          new BranchSettings("compaction", HarnessRuntimeTestSupport.executionSelection(), null));
     }
   }
 }

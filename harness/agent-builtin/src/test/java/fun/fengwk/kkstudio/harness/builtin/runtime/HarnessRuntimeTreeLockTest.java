@@ -598,7 +598,7 @@ class HarnessRuntimeTreeLockTest {
                 100_000,
                 16_384,
                 new BranchSettings(
-                    "compaction", HarnessRuntimeTestSupport.executionSelection(), null, null));
+                    "compaction", HarnessRuntimeTestSupport.executionSelection(), null));
           }
           return new TurnResolver.Resolved(
               HarnessRuntimeTestSupport.modelRequest(), 100_000, 16_384);

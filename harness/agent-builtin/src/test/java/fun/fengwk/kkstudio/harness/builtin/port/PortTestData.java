@@ -64,7 +64,7 @@ public final class PortTestData {
   private static ToolBinding toolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

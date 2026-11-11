@@ -51,7 +51,7 @@ final class InvocationTestData {
   static ToolBinding host(String name) {
     return new ToolBinding(
         definition(name),
-        new ContributorBinding("core", name, List.of()),
+        new ContributorBinding("core", name),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -64,7 +64,7 @@ final class InvocationTestData {
   static ToolBinding environment(String name, EnvironmentId environment) {
     return new ToolBinding(
         definition(name),
-        new ContributorBinding("base", name, List.of()),
+        new ContributorBinding("base", name),
         EnvironmentSupport.REQUIRED,
         environment,
         "dev");

@@ -285,6 +285,6 @@ class HarnessRuntimeStopToolTest {
   }
 
   private static int resultEntryIndex(int callIndex) {
-    return callIndex < 4 ? 4 + callIndex : 5 + callIndex;
+    return 4 + callIndex;
   }
 }

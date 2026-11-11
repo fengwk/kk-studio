@@ -262,7 +262,7 @@ class ToolHistoryActionsTest {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "fs.read", List.of()),
+            new ContributorBinding("core", "fs.read"),
             EnvironmentSupport.NONE,
             null,
             null));

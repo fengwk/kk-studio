@@ -14,14 +14,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -130,46 +126,6 @@ class ToolOutcomeAppenderTest {
                 tx ->
                     ToolOutcomeAppender.append(
                         tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW)));
-  }
-
-  /** SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；head 仍是 ToolResult Entry。 */
-  @Test
-  void appendsCustomEffectsBeforeToolResultInOrder() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
-    var chain =
-        seedToolChain(
-            store,
-            List.of("call-1"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.READY));
-    UUID toolId = chain.toolInvocationIds().getFirst();
-    succeedToolWith(
-        store,
-        toolId,
-        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"),
-        new ToolEffectBatch(
-            List.of(
-                new CustomEntryPayload("goal", "type-a", "{\"a\":1}"),
-                new CustomEntryPayload("goal", "type-b", "{\"b\":2}"))));
-    ToolInvocation invocation = tool(store, toolId);
-    var before = path(store, chain.turn().threadId());
-
-    ToolOutcomeAppender.Applied applied =
-        store.transaction(
-            tx ->
-                ToolOutcomeAppender.append(
-                    tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW));
-
-    // head 是 ToolResult Entry；其父链依次是 effect-b、effect-a、assistant。
-    Entry result = entry(store, applied.headEntryId());
-    assertInstanceOf(MessagePayload.class, result.payload());
-    Entry effectB = entry(store, result.parentEntryId());
-    assertInstanceOf(CustomEntryPayload.class, effectB.payload());
-    assertEquals("type-b", ((CustomEntryPayload) effectB.payload()).customType());
-    Entry effectA = entry(store, effectB.parentEntryId());
-    assertInstanceOf(CustomEntryPayload.class, effectA.payload());
-    assertEquals("type-a", ((CustomEntryPayload) effectA.payload()).customType());
-    assertEquals(chain.assistantEntryId(), effectA.parentEntryId());
   }
 
   /** 空结果稳定落为空 TextMessageContent，head ToolResult 仍被持久化。 */

@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProces
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.declarativeBinding;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.hostBindingWithSchema;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.model;
@@ -47,8 +46,6 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -308,90 +305,6 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         "{\"offset\":10}",
         new ToolInvocationRequest(invocation.call(), invocation.binding()).call().argumentsJson());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocation.id())));
-  }
-
-  @Test
-  void contributorSiblingStateAccessRejectsOnlyCallsAfterAWriteToTheSameKey() {
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
-        ToolInvocationStatus.READY);
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        ToolInvocationStatus.READY);
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
-        ToolInvocationStatus.FAILED);
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        ToolInvocationStatus.FAILED);
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        "goal",
-        new ContributorStateAccess("other", ContributorStateAccessMode.WRITE),
-        ToolInvocationStatus.READY);
-    assertSiblingStateAccesses(
-        "goal",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        "memory",
-        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
-        ToolInvocationStatus.READY);
-  }
-
-  private void assertSiblingStateAccesses(
-      String firstContributor,
-      ContributorStateAccess firstAccess,
-      String secondContributor,
-      ContributorStateAccess secondAccess,
-      ToolInvocationStatus expectedSecondStatus) {
-    Fixture fixture = fixture();
-    var baseline = seedOpenInputTurn(fixture.store, tooledRequest(List.of("bash")).toolBindings());
-    ToolBinding first =
-        declarativeBinding("first_tool", firstContributor, "first", List.of(firstAccess));
-    ToolBinding second =
-        declarativeBinding("second_tool", secondContributor, "second", List.of(secondAccess));
-    UUID modelId =
-        seedModelInvocation(
-            fixture.store,
-            baseline.threadId(),
-            baseline.turnStartEntryId(),
-            baseline.userEntryId(),
-            ModelInvocationStatus.SUCCEEDED,
-            requestWithBindings(List.of(first, second)),
-            successResponse(
-                List.of(
-                    new ProviderToolCall("call-1", "first_tool", "{}"),
-                    new ProviderToolCall("call-2", "second_tool", "{}"))),
-            null);
-    requestThreadWork(fixture.store, baseline.threadId());
-
-    // 一个 claim：materialize 全部槽位并按 sibling 约束拒绝后续 WRITE 后读取同一 key 的调用。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-
-    UUID assistantId = model(fixture.store, modelId).resultEntryId();
-    List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistantId);
-    assertEquals(ToolInvocationStatus.READY, tools.get(0).status());
-    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(0).id())));
-    assertEquals(expectedSecondStatus, tools.get(1).status());
-    if (expectedSecondStatus == ToolInvocationStatus.FAILED) {
-      assertEquals("SIBLING_STATE_CONFLICT", tools.get(1).error().kind());
-      assertTrue(tools.get(1).effects().isEmpty());
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(1).id())));
-    } else {
-      assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(1).id())));
-    }
   }
 
   @Test

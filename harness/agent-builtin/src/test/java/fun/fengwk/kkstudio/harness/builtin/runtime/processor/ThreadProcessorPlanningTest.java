@@ -29,7 +29,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
@@ -200,8 +199,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   }
 
   /**
-   * 测试意图：INPUT 全快照有序消费 setup 前缀、USER、CUSTOM、GOAL（每条恰好一次，包含消息之后的 settings）；无 queued 消息时仍启动
-   * CONTINUATION。
+   * 测试意图：INPUT 全快照有序消费 setup 前缀、USER、CUSTOM（每条恰好一次，包含消息之后的 settings）；无 queued 消息时仍启动 CONTINUATION。
    */
   @Test
   void continuationDueConsumesOrderedPrefixExactlyOnceAndKeepsPlainContinuation() {
@@ -262,17 +260,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ((TurnStartPayload)
                 path(customFixture.store, customBaseline.threadId()).entries().get(5).payload())
             .reason());
-
-    Fixture goalFixture = fixture();
-    var goalBaseline = seedClosedTurn(goalFixture.store, true);
-    UUID goalCommand =
-        seedCommand(goalFixture.store, goalBaseline.threadId(), new GoalCommandPayload("ship it"));
-    requestThreadWork(goalFixture.store, goalBaseline.threadId());
-    goalFixture.resolver.autoConsistent = true;
-    assertEquals(ThreadProcessResult.COMPLETED, goalFixture.nextClaim(goalBaseline.threadId()));
-    assertEquals(
-        ThreadCommandState.APPLIED,
-        command(goalFixture.store, goalBaseline.threadId(), goalCommand).state());
 
     Fixture plain = fixture();
     var plainBaseline = seedClosedTurn(plain.store, true);

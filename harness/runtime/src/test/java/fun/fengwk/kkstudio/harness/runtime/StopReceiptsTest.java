@@ -50,9 +50,8 @@ class StopReceiptsTest {
     List<CancelledThreadInput> inputs =
         StopReceipts.cancelledInputs(List.of(user, custom, notification, setting));
 
-    assertEquals(List.of(1L, 2L), inputs.stream().map(CancelledThreadInput::sequence).toList());
+    assertEquals(List.of(1L), inputs.stream().map(CancelledThreadInput::sequence).toList());
     assertTrue(inputs.get(0).payload() instanceof UserMessageCommandPayload);
-    assertTrue(inputs.get(1).payload() instanceof CustomMessageCommandPayload);
   }
 
   @Test
@@ -68,9 +67,9 @@ class StopReceiptsTest {
     assertEquals(stopped.id(), receipt.threadId());
     assertEquals(id(22L), receipt.stopRequestId());
     assertEquals(id(23L), receipt.stoppedTurnEndEntryId());
-    assertEquals(3, receipt.cancelledCommandCount());
+    assertEquals(2, receipt.cancelledCommandCount());
     assertEquals(
-        List.of(1L, 2L),
+        List.of(1L),
         receipt.cancelledInputs().stream().map(CancelledThreadInput::sequence).toList());
   }
 

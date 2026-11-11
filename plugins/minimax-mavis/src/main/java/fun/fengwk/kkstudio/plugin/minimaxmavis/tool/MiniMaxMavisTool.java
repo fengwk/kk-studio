@@ -228,7 +228,7 @@ public final class MiniMaxMavisTool implements Tool {
       return failed(toolCallId, CODE_CALL_FAILED, "MiniMax Mavis call could not be scheduled");
     }
     try {
-      return ToolOutcome.withoutEffects(invoke(arguments, toolCallId));
+      return new ToolOutcome(invoke(arguments, toolCallId));
     } catch (PluginCredentialUnavailableException error) {
       interruptIfRequested();
       return failed(toolCallId, codeFor(error.reason()), credentialDetail(error.reason()));
@@ -343,7 +343,7 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   private static ToolOutcome failed(String toolCallId, String code, String detail) {
-    return ToolOutcome.withoutEffects(errorResult(toolCallId, code, detail));
+    return new ToolOutcome(errorResult(toolCallId, code, detail));
   }
 
   private static String codeFor(PluginCredentialUnavailableReason reason) {

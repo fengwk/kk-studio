@@ -164,7 +164,7 @@ class ResolvedRequestValidatorTest {
   private static ToolBinding environmentTool(EnvironmentId environment) {
     return new ToolBinding(
         toolDefinition("test.fs"),
-        new ContributorBinding("base", "fs", List.of()),
+        new ContributorBinding("base", "fs"),
         EnvironmentSupport.REQUIRED,
         environment,
         "dev");
