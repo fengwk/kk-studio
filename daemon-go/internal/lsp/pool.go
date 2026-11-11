@@ -69,16 +69,29 @@ func poolKey(root string, server ServerConfig) string {
 	return string(b)
 }
 func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
+	return p.LeaseWithExit(ctx, path, nil)
+}
+
+func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*Lease, error) {
 	server, err := p.discovery.RequireServer(path)
 	if err != nil {
+		if onExit != nil {
+			onExit()
+		}
 		return nil, err
 	}
 	executable, err := p.discovery.RequireExecutable(server)
 	if err != nil {
+		if onExit != nil {
+			onExit()
+		}
 		return nil, err
 	}
 	root, err := p.discovery.WorkspaceRoot(server, path)
 	if err != nil {
+		if onExit != nil {
+			onExit()
+		}
 		return nil, err
 	}
 	key := poolKey(root, server)
@@ -86,6 +99,9 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 		p.mu.Lock()
 		if p.closing {
 			p.mu.Unlock()
+			if onExit != nil {
+				onExit()
+			}
 			return nil, &LspError{Message: "LSP service is closed"}
 		}
 		if old, ok := p.retiring[key]; ok {
@@ -98,6 +114,9 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 				return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 			case <-old.done:
 				if old.err != nil {
+					if onExit != nil {
+						onExit()
+					}
 					return nil, old.err
 				}
 				continue
@@ -132,6 +151,21 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 				b.cancel()
 			}
 			p.mu.Unlock()
+			if onExit != nil {
+				go func() {
+					<-b.done
+					p.mu.Lock()
+					converged := b.err == nil && !p.closing || b.retryable
+					var bootstrap *LspBootstrapError
+					if errors.As(b.err, &bootstrap) && bootstrap.Converged {
+						converged = true
+					}
+					p.mu.Unlock()
+					if converged {
+						onExit()
+					}
+				}()
+			}
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
 			}
@@ -140,7 +174,12 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 			p.mu.Lock()
 			b.waiters--
 			if b.err != nil {
+				var bootstrap *LspBootstrapError
+				converged := (errors.As(b.err, &bootstrap) && bootstrap.Converged) || b.retryable
 				p.mu.Unlock()
+				if onExit != nil && converged {
+					onExit()
+				}
 				return nil, b.err
 			}
 			if p.closing {

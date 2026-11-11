@@ -35,7 +35,7 @@ type ResolverOptions struct {
 type ExecutableResolver struct{ options ResolverOptions }
 
 func NewExecutableResolver(options ResolverOptions) *ExecutableResolver {
-	if options.Windows == false && runtime.GOOS == "windows" {
+	if !options.Windows && runtime.GOOS == "windows" {
 		options.Windows = true
 	}
 	if options.Path == "" && !options.PathSet {

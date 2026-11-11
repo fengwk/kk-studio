@@ -121,7 +121,7 @@ func documentPosition(document string, line, character int, encoding string) (ma
 	}
 	return map[string]int{"line": line - 1, "character": offset}, nil
 }
-func (c *Client) Definition(ctx context.Context, path string, line, character int) ([]string, error) {
+func (c *Client) Definition(ctx context.Context, path string, line, character int, tracking ...func()) ([]string, error) {
 	if !c.Supports("textDocument/definition") {
 		return nil, &LspError{Message: fmt.Sprintf("LSP server '%s' does not advertise go-to-definition support.", c.server.ID)}
 	}
@@ -130,32 +130,46 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 		return nil, err
 	}
 	var result json.RawMessage
-	if err = c.Call(ctx, "textDocument/definition", map[string]any{"textDocument": map[string]string{"uri": pathURI(path)}, "position": pos}, &result); err != nil {
+	onSent, onFinished := trackingCallbacks(tracking)
+	if err = c.call(ctx, "textDocument/definition", map[string]any{"textDocument": map[string]string{"uri": pathURI(path)}, "position": pos}, &result, onSent, onFinished); err != nil {
 		return nil, err
 	}
 	return formatLocations(result)
 }
-func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int) ([]string, error) {
+func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, tracking ...func()) ([]string, error) {
 	if !c.Supports("workspace/symbol") {
 		return nil, &LspError{Message: fmt.Sprintf("LSP server '%s' does not advertise workspace symbol support.", c.server.ID)}
 	}
 	var result json.RawMessage
-	if err := c.Call(ctx, "workspace/symbol", map[string]string{"query": query}, &result); err != nil {
+	onSent, onFinished := trackingCallbacks(tracking)
+	if err := c.call(ctx, "workspace/symbol", map[string]string{"query": query}, &result, onSent, onFinished); err != nil {
 		return nil, err
 	}
 	return formatSymbols(result, limit)
 }
 
+func trackingCallbacks(callbacks []func()) (func(), func()) {
+	if len(callbacks) == 0 {
+		return nil, nil
+	}
+	var finished func()
+	if len(callbacks) > 1 {
+		finished = callbacks[1]
+	}
+	return callbacks[0], finished
+}
+
 var jdtURI = regexp.MustCompile(`jdt://\S+`)
 
-func (c *Client) JavaDecompile(ctx context.Context, target string) (string, error) {
+func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...func()) (string, error) {
+	onSent, onFinished := trackingCallbacks(tracking)
 	var result string
 	var err error
 	if match := jdtURI.FindString(target); match != "" {
 		if !c.jdtls {
 			return "", &LspError{Message: "lsp_java_decompile is only supported by jdtls."}
 		}
-		err = c.Call(ctx, "java/classFileContents", map[string]string{"uri": match}, &result)
+		err = c.call(ctx, "java/classFileContents", map[string]string{"uri": match}, &result, onSent, onFinished)
 	} else {
 		localPath := strings.TrimSpace(target)
 		if strings.HasPrefix(localPath, "file:") {
@@ -175,7 +189,7 @@ func (c *Client) JavaDecompile(ctx context.Context, target string) (string, erro
 		if e != nil || !info.Mode().IsRegular() {
 			return "", &LspError{Message: "target is not a readable class file: " + localPath}
 		}
-		err = c.Call(ctx, "workspace/executeCommand", map[string]any{"command": "java.decompile", "arguments": []string{pathURI(localPath)}}, &result)
+		err = c.call(ctx, "workspace/executeCommand", map[string]any{"command": "java.decompile", "arguments": []string{pathURI(localPath)}}, &result, onSent, onFinished)
 	}
 	if err != nil {
 		return "", err

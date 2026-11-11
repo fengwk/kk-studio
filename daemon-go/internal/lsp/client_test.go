@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,33 +17,36 @@ import (
 )
 
 type fakeSupervisor struct {
-	process *fakeProcess
-	starts  int
+	process     *fakeProcess
+	starts      int
+	blockMethod string
 }
 
 func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
 	s.starts++
-	s.process = newFakeProcess()
+	s.process = newFakeProcess(s.blockMethod)
 	return s.process, nil
 }
 func (*fakeSupervisor) Close(context.Context) error { return nil }
 
 type fakeProcess struct {
-	stdinR  *io.PipeReader
-	stdinW  *io.PipeWriter
-	stdoutR *io.PipeReader
-	stdoutW *io.PipeWriter
-	stderrR *io.PipeReader
-	stderrW *io.PipeWriter
-	done    chan native.ProcessExit
-	once    sync.Once
+	blockMethod string
+	cancelled   chan struct{}
+	stdinR      *io.PipeReader
+	stdinW      *io.PipeWriter
+	stdoutR     *io.PipeReader
+	stdoutW     *io.PipeWriter
+	stderrR     *io.PipeReader
+	stderrW     *io.PipeWriter
+	done        chan native.ProcessExit
+	once        sync.Once
 }
 
-func newFakeProcess() *fakeProcess {
+func newFakeProcess(blockMethod string) *fakeProcess {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
-	p := &fakeProcess{stdinR: inR, stdinW: inW, stdoutR: outR, stdoutW: outW, stderrR: errR, stderrW: errW, done: make(chan native.ProcessExit, 1)}
+	p := &fakeProcess{blockMethod: blockMethod, cancelled: make(chan struct{}, 1), stdinR: inR, stdinW: inW, stdoutR: outR, stdoutW: outW, stderrR: errR, stderrW: errW, done: make(chan native.ProcessExit, 1)}
 	go p.serve()
 	return p
 }
@@ -81,7 +85,14 @@ func (p *fakeProcess) serve() {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 		}
-		if json.Unmarshal(raw, &req) != nil || len(req.ID) == 0 {
+		if json.Unmarshal(raw, &req) != nil {
+			continue
+		}
+		if req.Method == "$/cancelRequest" {
+			p.cancelled <- struct{}{}
+			continue
+		}
+		if req.Method == p.blockMethod || len(req.ID) == 0 {
 			continue
 		}
 		var result any
@@ -97,8 +108,7 @@ func (p *fakeProcess) serve() {
 		default:
 			result = nil
 		}
-		encodedID := json.RawMessage(req.ID)
-		response := map[string]any{"jsonrpc": "2.0", "id": encodedID, "result": result}
+		response := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": result}
 		if err := codec.WriteObject(p.stdoutW, response); err != nil {
 			return
 		}
@@ -142,6 +152,34 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = client.Stop(100 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// LSP-T-084 verifies timeout returns promptly and sends a cancellation notification.
+func TestClient_RequestTimeoutSendsCancel(t *testing.T) {
+	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Initialize(context.Background(), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	sent, finished := false, false
+	err = client.call(ctx, "slow/request", map[string]any{}, nil, func() { sent = true }, func() { finished = true })
+	var timeout *LspTimeoutError
+	if !errors.As(err, &timeout) || !sent || finished {
+		t.Fatalf("call err=%v sent=%v finished=%v", err, sent, finished)
+	}
+	select {
+	case <-supervisor.process.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive $/cancelRequest")
+	}
+	if err := client.Stop(100 * time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 }

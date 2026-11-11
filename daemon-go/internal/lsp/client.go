@@ -171,18 +171,38 @@ func (c *Client) Initialize(ctx context.Context, timeout time.Duration) error {
 
 // Call sends one request and redacts server-provided error details.
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
+	return c.call(ctx, method, params, result, nil, nil)
+}
+
+func (c *Client) call(ctx context.Context, method string, params, result any, onSent, onFinished func()) error {
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+		}
+		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+	}
 	if c.closed.Load() {
 		return &LspError{Message: "LSP client stopped"}
 	}
 	id := c.requestID.Add(1)
 	started := time.Now()
 	deadline, hasDeadline := ctx.Deadline()
+	if onSent != nil {
+		onSent()
+	}
 	done := make(chan error, 1)
 	go func() { done <- c.conn.Call(ctx, method, params, result, jsonrpc2.PickID(jsonrpc2.ID{Num: id})) }()
 	select {
 	case err := <-done:
 		if err != nil {
+			var rpcErr *jsonrpc2.Error
+			if onFinished != nil && errors.As(err, &rpcErr) {
+				onFinished()
+			}
 			return &LspError{Message: "LSP request failed (" + method + ")", Cause: err}
+		}
+		if onFinished != nil {
+			onFinished()
 		}
 		return nil
 	case <-ctx.Done():

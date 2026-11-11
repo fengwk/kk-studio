@@ -253,25 +253,25 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 	var output string
 	switch kind {
 	case "definition":
-		output, err = service.GotoDefinition(requestCtx, realPath, line, character)
+		output, err = service.GotoDefinition(requestCtx, realPath, line, character, confirm)
 	case "symbols":
-		output, err = service.WorkspaceSymbols(requestCtx, realPath, query, limit)
+		output, err = service.WorkspaceSymbols(requestCtx, realPath, query, limit, confirm)
 	case "decompile":
-		output, err = service.JavaDecompile(requestCtx, realPath, target)
+		output, err = service.JavaDecompile(requestCtx, realPath, target, confirm)
 	}
 	if err != nil {
 		var timeout *LspTimeoutError
 		var lspErr *LspError
 		if errors.As(err, &timeout) {
-			return fail("Operation timed out"), nil
+			return capabilityFailure(call.InvocationID, "Operation timed out"), nil
 		}
 		if errors.Is(err, context.Canceled) {
-			return fail("Operation cancelled"), nil
+			return capabilityFailure(call.InvocationID, "Operation cancelled"), nil
 		}
 		if errors.As(err, &lspErr) {
-			return fail(lspErr.Error()), nil
+			return capabilityFailure(call.InvocationID, lspErr.Error()), nil
 		}
-		return fail("The capability failed while running and the underlying error is not repeated to avoid leaking details"), nil
+		return capabilityFailure(call.InvocationID, "The capability failed while running and the underlying error is not repeated to avoid leaking details"), nil
 	}
 	confirm()
 	return runtime.CapabilityResult{CallID: call.InvocationID, Contents: []runtime.ResultContent{{Type: "text", Text: output}}}, nil
@@ -285,6 +285,10 @@ func (f *Facade) workspaceSymbols(ctx context.Context, c runtime.CapabilityCall,
 func (f *Facade) javaDecompile(ctx context.Context, c runtime.CapabilityCall, x runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	return f.execute(ctx, c, x, "decompile")
 }
+func capabilityFailure(callID, message string) runtime.CapabilityResult {
+	return runtime.CapabilityResult{CallID: callID, Error: true, Contents: []runtime.ResultContent{{Type: "text", Text: message}}}
+}
+
 func onceConfirm(fn func()) func() {
 	var once sync.Once
 	return func() {
