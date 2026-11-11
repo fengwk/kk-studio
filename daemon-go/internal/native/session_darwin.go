@@ -26,6 +26,9 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 	members := make([]sessionMember, 0)
 	for _, proc := range procs {
 		pid := int(proc.Proc.P_pid)
+		if pid <= 0 {
+			continue
+		}
 		got, err := unix.Getsid(pid)
 		if errors.Is(err, syscall.ESRCH) {
 			continue
