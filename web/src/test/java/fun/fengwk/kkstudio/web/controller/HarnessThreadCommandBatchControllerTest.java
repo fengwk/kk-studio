@@ -298,7 +298,7 @@ class HarnessThreadCommandBatchControllerTest {
   }
 
   /**
-   * 测试意图：自由输入/Goal/设置等人工写入只允许指向执行根；子 Thread 在映射通过后、进入 acceptance 之前以 409 拒绝，避免把根级输入落到观察树内部。内部
+   * 测试意图：自由输入/设置等人工写入只允许指向执行根；子 Thread 在映射通过后、进入 acceptance 之前以 409 拒绝，避免把根级输入落到观察树内部。内部
    * task/resume 不走本 HTTP 边界。
    */
   @Test

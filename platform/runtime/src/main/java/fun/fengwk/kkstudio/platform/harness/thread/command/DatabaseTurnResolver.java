@@ -143,8 +143,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 显式 settings 的只读 live 规划：与正式入口共用同一个 planner，只把 draft 的 Agent/Model/Environment/Goal 快照换成调用方 给出的
-   * {@link BranchSettings}；EntryPath 本身不承载、也不被写入任何 draft。
+   * 显式 settings 的只读 live 规划：与正式入口共用同一个 planner，只把 draft 的 Agent/Model/Environment 快照换成调用方给出的 {@link
+   * BranchSettings}；EntryPath 本身不承载、也不被写入任何 draft。
    *
    * <p>供 Debug 预览以 UI 当前草稿选择现算，绝不改变 Thread 的持久事实：不落 Entry、不动 cursor、不做 CAS、不发布 Package、也不触发 Daemon
    * sync。

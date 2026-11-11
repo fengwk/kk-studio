@@ -8,8 +8,8 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 /**
- * history 的严格 canonical JSON object 工具：{@link CustomEntryPayload} / {@link CustomMessagePayload}
- * 构造时用它校验 dataJson / detailsJson，history codec 编解码时用它搬运同一份自由 JSON 子树。
+ * history 的严格 canonical JSON object 工具：{@link CustomMessagePayload} 构造时用它校验 detailsJson； history
+ * codec 编解码时用它搬运同一份自由 JSON 子树。
  *
  * <p>canonical 意味着：可解析、单一 JSON object、无 trailing token、无 duplicate field，且用共享严格 mapper 重新
  * 序列化后与输入逐字节相同（输入已经是 canonical 形态）。{@code maxChars} 提供 bounded 上限。

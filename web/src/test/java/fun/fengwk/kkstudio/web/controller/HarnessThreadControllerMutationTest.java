@@ -310,7 +310,7 @@ class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSup
   }
 
   /**
-   * 测试意图：自由输入/Goal/设置/YOLO/Stop/压缩/重命名等人工控制只允许指向执行根；子 Thread 一律 409 且不产生 Runtime
+   * 测试意图：自由输入/设置/YOLO/Stop/压缩/重命名等人工控制只允许指向执行根；子 Thread 一律 409 且不产生 Runtime
    * 变更，根目标照常放行。审批与问卷回答写回子调用是合法例外，不经本判定。
    */
   @Test
