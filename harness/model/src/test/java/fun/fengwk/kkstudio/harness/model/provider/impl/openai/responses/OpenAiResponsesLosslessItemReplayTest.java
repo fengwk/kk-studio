@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -106,8 +107,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   }
 
   /** 喂入「created + 终态 output」两帧，复现真实 stateless replay 的捕获阶段。 */
-  private ProviderReplayState accumulateTerminalItems(String... terminalItemJsons)
-      throws Exception {
+  private ProviderCompletion accumulateTerminalItems(String... terminalItemJsons) throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
             request(List.of(userMessage())), createDescriptor(), e -> {});
@@ -124,7 +124,7 @@ class OpenAiResponsesLosslessItemReplayTest {
                 + "\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"output\":"
                 + output
                 + "}}"));
-    return accumulator.replayState();
+    return accumulator.finish();
   }
 
   /**
@@ -157,8 +157,14 @@ class OpenAiResponsesLosslessItemReplayTest {
    */
   @Test
   void terminalMessageItemReplaysLosslesslyAndKeepsDurableText() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(MESSAGE_ITEM);
+    ProviderCompletion completion = accumulateTerminalItems(MESSAGE_ITEM);
+    ProviderReplayState replayState = completion.replayState();
     assertNotNull(replayState);
+    assertEquals(1, completion.response().blocks().size());
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    assertEquals(
+        "msg_1",
+        textBlock.providerBlockData().nativeFields().path("itemFields").path("id").asString(""));
     JsonNode expectedItem = MAPPER.readTree(MESSAGE_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
 
@@ -178,8 +184,20 @@ class OpenAiResponsesLosslessItemReplayTest {
   /** 测试意图：终态 reasoning 的 id/status/密文/摘要/未来成员整体保留，且 durable 思考仍与摘要严格一致。 */
   @Test
   void terminalReasoningItemReplaysLosslesslyAndKeepsDurableThinking() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(REASONING_ITEM);
+    ProviderCompletion completion = accumulateTerminalItems(REASONING_ITEM);
+    ProviderReplayState replayState = completion.replayState();
     assertNotNull(replayState);
+    assertEquals(
+        "check the weather",
+        ((ProviderThinkingBlock) completion.response().blocks().get(0)).thinking());
+    assertEquals(
+        "enc_lossless",
+        ((ProviderThinkingBlock) completion.response().blocks().get(0))
+            .providerBlockData()
+            .nativeFields()
+            .path("itemFields")
+            .path("encrypted_content")
+            .asString(""));
     JsonNode expectedItem = MAPPER.readTree(REASONING_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
 
@@ -200,8 +218,21 @@ class OpenAiResponsesLosslessItemReplayTest {
   /** 测试意图：终态 function_call 的 id/status/未来成员整体保留，durable 工具调用语义仍被严格比对。 */
   @Test
   void terminalFunctionCallItemReplaysLosslesslyAndKeepsDurableToolCall() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(FUNCTION_CALL_ITEM);
+    ProviderCompletion completion = accumulateTerminalItems(FUNCTION_CALL_ITEM);
+    ProviderReplayState replayState = completion.replayState();
     assertNotNull(replayState);
+    ProviderToolCallBlock toolCallBlock =
+        (ProviderToolCallBlock) completion.response().blocks().get(0);
+    assertEquals("call_1", toolCallBlock.toolCall().id());
+    assertEquals(
+        Boolean.TRUE,
+        toolCallBlock
+            .providerBlockData()
+            .nativeFields()
+            .path("itemFields")
+            .path("future_member")
+            .path("nested")
+            .asBoolean());
     JsonNode expectedItem = MAPPER.readTree(FUNCTION_CALL_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
 
