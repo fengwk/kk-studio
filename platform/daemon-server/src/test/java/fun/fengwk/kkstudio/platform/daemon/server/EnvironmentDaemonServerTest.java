@@ -57,7 +57,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityU
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
-import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
@@ -3842,52 +3841,6 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilityUnavailableException.class,
         () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
     assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
-  }
-
-  /** SKILL_SYNC 全量快照覆盖未就绪、更新中、BUSY、CLOSED 与成功发送路径。 */
-  @Test
-  void sendSkillSyncCoversReadinessUpdatingBusyAndClosedOutcomes() {
-    DaemonSkillPackage pkg =
-        new DaemonSkillPackage("pkg-a", "a".repeat(64), 1L, "https://storage.invalid/a");
-
-    Fixture missing = new Fixture();
-    assertThrows(
-        EnvironmentCapabilityUnavailableException.class,
-        () -> missing.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
-
-    Fixture notReady = new Fixture();
-    notReady.openSession("skill-sync-not-ready");
-    assertThrows(
-        EnvironmentCapabilityUnavailableException.class,
-        () -> notReady.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
-
-    Fixture ready = new Fixture();
-    FakeControlChannel readyChannel = ready.connectReady("skill-sync-ready");
-    ready.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg));
-    assertEquals(1, readyChannel.countOf(MessageType.SKILL_SYNC));
-    assertEquals(
-        "pkg-a", readyChannel.lastEnvelope().getSkillSync().getPackages(0).getPackageName());
-
-    Fixture updating = new Fixture();
-    updating.connectReady("skill-sync-updating");
-    updating.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString());
-    assertThrows(
-        EnvironmentCapabilityBusyException.class,
-        () -> updating.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
-
-    Fixture busy = new Fixture();
-    FakeControlChannel busyChannel = busy.connectReady("skill-sync-busy");
-    busyChannel.busyNextOffer = true;
-    assertThrows(
-        EnvironmentCapabilityBusyException.class,
-        () -> busy.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
-
-    Fixture closed = new Fixture();
-    FakeControlChannel closedChannel = closed.connectReady("skill-sync-closed");
-    closedChannel.close();
-    assertThrows(
-        EnvironmentCapabilityUnavailableException.class,
-        () -> closed.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
   }
 
   /** 计数器只反映当前在途调用，终态后归零。 */

@@ -218,7 +218,6 @@ class EnvironmentServiceTest {
                     "/tmp/kk-studio",
                     "amd64")),
             List.of(),
-            List.of(),
             NOW,
             NOW.plusSeconds(60));
 
@@ -315,7 +314,6 @@ class EnvironmentServiceTest {
                     "/home/dev",
                     "/tmp/kk-studio",
                     "amd64")),
-            List.of(),
             List.of(),
             NOW,
             NOW.plusSeconds(60));
@@ -555,8 +553,8 @@ class EnvironmentServiceTest {
             new EnvironmentEvent(
                 NOW,
                 EnvironmentEvent.LEVEL_WARN,
-                EnvironmentEvent.TYPE_SKILL_SYNC_FAILED,
-                "skill package sync failed: dev"),
+                EnvironmentEvent.TYPE_DISCONNECTED,
+                "daemon connection lost"),
             new EnvironmentEvent(
                 NOW.plusSeconds(1),
                 EnvironmentEvent.LEVEL_INFO,
@@ -577,7 +575,7 @@ class EnvironmentServiceTest {
     // 历史事件仍按时间正序完整保留，供管理 Events 展示。
     List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
     assertEquals(2, events.size());
-    assertEquals(EnvironmentEventType.SKILL_SYNC_FAILED, events.get(0).getType());
+    assertEquals(EnvironmentEventType.DISCONNECTED, events.get(0).getType());
     assertEquals(EnvironmentEventLevel.WARN, events.get(0).getLevel());
     assertEquals(EnvironmentEventType.READY, events.get(1).getType());
   }
@@ -1136,7 +1134,6 @@ class EnvironmentServiceTest {
                 "/home/dev",
                 "/tmp/kk-studio",
                 "amd64")),
-        List.of(),
         events,
         NOW,
         NOW.plusSeconds(60));
@@ -1158,7 +1155,6 @@ class EnvironmentServiceTest {
                 "/home/dev",
                 "/tmp/kk-studio",
                 "amd64")),
-        List.of(),
         List.of(),
         lastSeenAt,
         leaseUntil);

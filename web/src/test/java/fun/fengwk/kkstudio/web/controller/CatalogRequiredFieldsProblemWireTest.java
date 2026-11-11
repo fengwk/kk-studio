@@ -30,7 +30,7 @@ class CatalogRequiredFieldsProblemWireTest {
     SkillCatalogService skills = mock(SkillCatalogService.class);
     MockMvc mvc =
         MockMvcBuilders.standaloneSetup(
-                new McpServerController(mcp), new SkillCatalogController(skills, null, null))
+                new McpServerController(mcp), new SkillCatalogController(skills))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(

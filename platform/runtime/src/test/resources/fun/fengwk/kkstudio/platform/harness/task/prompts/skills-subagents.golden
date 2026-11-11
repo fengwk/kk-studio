@@ -25,7 +25,6 @@ Paths inside a skill file are relative to the directory containing its SKILL.md.
   <skill>
     <name>dev</name>
     <description>Development conventions.</description>
-    <path>vfs:/skills/agent-tools/dev/SKILL.md</path>
   </skill>
 </available_skills>
 

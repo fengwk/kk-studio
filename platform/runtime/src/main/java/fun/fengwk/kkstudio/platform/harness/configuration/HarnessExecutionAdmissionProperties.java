@@ -14,11 +14,9 @@ public class HarnessExecutionAdmissionProperties {
 
   private static final int DEFAULT_MODEL = 16;
   private static final int DEFAULT_TOOL = 64;
-  private static final int DEFAULT_SKILL_SYNC = 8;
 
   private int model = DEFAULT_MODEL;
   private int tool = DEFAULT_TOOL;
-  private int skillSync = DEFAULT_SKILL_SYNC;
 
   public int getModel() {
     return requirePositive(model, "model");
@@ -34,15 +32,6 @@ public class HarnessExecutionAdmissionProperties {
 
   public void setTool(int tool) {
     this.tool = requirePositive(tool, "tool");
-  }
-
-  /** Environment Skill Package 同步的最大并发：单 Environment 串行、多个 Environment 并行。 */
-  public int getSkillSync() {
-    return requirePositive(skillSync, "skill-sync");
-  }
-
-  public void setSkillSync(int skillSync) {
-    this.skillSync = requirePositive(skillSync, "skill-sync");
   }
 
   private static int requirePositive(int value, String name) {

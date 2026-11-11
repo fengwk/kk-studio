@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
@@ -77,7 +76,6 @@ public class ApplicationEventConfiguration {
       CanvasVersionNotifications canvasVersionNotifications,
       ProjectChangeNotifications projectChangeNotifications,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
-      EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
       EnvironmentChangeNotifications environmentChangeNotifications,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot) {
@@ -126,13 +124,7 @@ public class ApplicationEventConfiguration {
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 6. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
-            // 建连/重连时全量对账，通知丢失不改变 durable truth
-            new PostgresqlNotificationHandler(
-                EnvironmentSkillSyncOrchestrator.CHANNEL,
-                environmentSkillSyncOrchestrator::onPackageChanged,
-                environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
-            // 7. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            // 6. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 executionTree.channel(), executionTree.onNotification(), executionTree.onResync()),
             // 8. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id

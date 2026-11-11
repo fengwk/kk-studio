@@ -7,7 +7,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -30,7 +29,6 @@ public final class SkillCatalogTestFixtures {
         mock(StorageUploadService.class),
         mock(StorageBlobContentService.class),
         mock(StorageBlobManager.class),
-        mock(StorageBlobRepository.class),
-        mock(EnvironmentRegistry.class));
+        mock(StorageBlobRepository.class));
   }
 }

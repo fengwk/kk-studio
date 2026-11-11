@@ -125,7 +125,10 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
     return new Ticket.Pending(
         uploadId,
         new DaemonPresignedPut(
-            presigned.getMethod().name(), presigned.getUrl(), headers, presigned.getExpiresAt().toEpochMilli()));
+            presigned.getMethod().name(),
+            presigned.getUrl(),
+            headers,
+            presigned.getExpiresAt().toEpochMilli()));
   }
 
   private static UUID parseUploadId(String id) {

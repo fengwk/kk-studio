@@ -352,7 +352,6 @@ class EnvironmentUpdateServiceTest {
                 windows ? "C:\\Temp" : "/tmp/kk-studio",
                 architecture)),
         List.of(),
-        List.of(),
         NOW,
         NOW.plusSeconds(600));
   }

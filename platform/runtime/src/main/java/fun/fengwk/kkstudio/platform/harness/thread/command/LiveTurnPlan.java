@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 
 import java.util.List;
@@ -118,52 +117,31 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
   }
 
   /**
-   * 一个 Agent 配置 Skill 的交付事实。
+   * 一个 Agent 配置 Skill 的目录事实。
    *
    * @param packageName Skill 所属 Package 名
    * @param name Package 内的 Skill 名
    * @param description manifest 中的 Skill 描述
-   * @param path 实际 Prompt 使用的稳定 path
-   * @param delivery 交付方式；LOCAL 只在精确安装 artifactSha256 时成立
    * @param packageVersion Package 当前发布版本或 Git commit SHA
    * @param headCommit Package 最近检查到的 branch HEAD；从未成功检查时为 null
-   * @param artifactSha256 Package 当前工件包的 SHA-256
-   * @param installedSha256 当前 Environment 已安装的工件包 SHA-256；无 Environment 或未安装时为 null
    */
   record PlannedSkill(
       String packageName,
       String name,
       String description,
-      String path,
-      SkillPromptResolution.Delivery delivery,
       String packageVersion,
-      String headCommit,
-      String artifactSha256,
-      String installedSha256) {
+      String headCommit) {
 
     public PlannedSkill {
       packageName = Objects.requireNonNull(packageName, "packageName");
       name = Objects.requireNonNull(name, "name");
       description = Objects.requireNonNull(description, "description");
-      path = Objects.requireNonNull(path, "path");
-      delivery = Objects.requireNonNull(delivery, "delivery");
       packageVersion = Objects.requireNonNull(packageVersion, "packageVersion");
-      artifactSha256 = Objects.requireNonNull(artifactSha256, "artifactSha256");
-      if (delivery == SkillPromptResolution.Delivery.LOCAL
-          && !artifactSha256.equals(installedSha256)) {
-        throw new IllegalArgumentException(
-            "LOCAL skill delivery requires the exact installed artifact SHA-256");
-      }
     }
 
-    /** 仅当该 Skill 实际进入 system prompt 时返回 true。 */
-    public boolean promptVisible(boolean environmentSelected) {
-      return !environmentSelected || delivery == SkillPromptResolution.Delivery.LOCAL;
-    }
-
-    /** 仅供 Prompt 渲染的三元组：与交付事实同源，因此 Prompt XML 与结构化投影不可能漂移。 */
+    /** 仅供 Prompt 渲染的名称与描述。 */
     public SkillPromptEntry promptEntry() {
-      return new SkillPromptEntry(name, description, path);
+      return new SkillPromptEntry(name, description);
     }
   }
 }

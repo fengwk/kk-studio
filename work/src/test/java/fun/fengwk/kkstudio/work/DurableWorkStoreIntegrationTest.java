@@ -392,7 +392,7 @@ class DurableWorkStoreIntegrationTest {
   private static void seedConnection(UUID environmentId, UUID owner, String status) {
     jdbc.sql(
             "insert into environment_connection (environment_id, owner_node_id, lease_token,"
-                + " status, ready_metadata, skill_state, recent_events, last_seen_at, lease_until)"
+                + " status, ready_metadata, recent_events, last_seen_at, lease_until)"
                 + " values (?, ?, ?, ?, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,"
                 + " statement_timestamp(), statement_timestamp() + interval '30 minutes')"
                 + " on conflict (environment_id) do update set owner_node_id = excluded.owner_node_id,"

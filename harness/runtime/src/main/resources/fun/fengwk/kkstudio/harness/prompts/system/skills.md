@@ -1,7 +1,5 @@
 [skills]
-The following skills provide specialized instructions for specific tasks.
-Use the `read` tool to load a skill's file when the task matches its description.
-Paths inside a skill file are relative to the directory containing its SKILL.md.
+The following skills are configured for this agent, in configuration order. Their names and descriptions indicate the tasks they cover.
 
 <available_skills>
 {{{skills}}}

@@ -9,7 +9,6 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.SkillEnvironmentSyncDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillGitSourceDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillManifestEntryDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
@@ -27,9 +26,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
@@ -96,7 +92,6 @@ public class SkillCatalogService {
   private final StorageBlobContentService blobContentService;
   private final StorageBlobManager blobManager;
   private final StorageBlobRepository blobRepository;
-  private final EnvironmentRegistry environmentRegistry;
 
   public SkillCatalogService(
       SkillPackageRepository skillPackageRepository,
@@ -107,8 +102,7 @@ public class SkillCatalogService {
       StorageUploadService uploadService,
       StorageBlobContentService blobContentService,
       StorageBlobManager blobManager,
-      StorageBlobRepository blobRepository,
-      EnvironmentRegistry environmentRegistry) {
+      StorageBlobRepository blobRepository) {
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
@@ -119,7 +113,6 @@ public class SkillCatalogService {
     this.blobContentService = Objects.requireNonNull(blobContentService, "blobContentService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
-    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
   }
 
   /** 全部 Package 摘要，按 {@code packageName} 升序。 */
@@ -132,15 +125,6 @@ public class SkillCatalogService {
   /** 单个 Package 详情；不存在时 404。 */
   public SkillPackageDetailDTO getPackage(String packageName) {
     return toDetail(requirePackage(packageName));
-  }
-
-  /** 全部环境对该 Package 的安装摘要投影。 */
-  public List<SkillEnvironmentSyncDTO> listEnvironmentSync(String packageName) {
-    SkillPackage skillPackage = requirePackage(packageName);
-    StorageBlob artifact = requireArtifact(skillPackage);
-    return environmentRegistry.list().stream()
-        .map(connection -> toEnvironmentSync(connection, skillPackage, artifact))
-        .toList();
   }
 
   /** 当前版本归档的预签名下载信息。 */
@@ -1074,23 +1058,6 @@ public class SkillCatalogService {
 
   private static SkillPackageSource sourceOf(SkillPackage skillPackage) {
     return skillPackage.isGit() ? SkillPackageSource.GIT : SkillPackageSource.UPLOAD;
-  }
-
-  private static SkillEnvironmentSyncDTO toEnvironmentSync(
-      EnvironmentConnection connection, SkillPackage skillPackage, StorageBlob artifact) {
-    SkillEnvironmentSyncDTO dto = new SkillEnvironmentSyncDTO();
-    dto.setEnvironmentId(connection.environmentId().value().toString());
-    EnvironmentSkillState state = connection.skillStateOf(skillPackage.packageName()).orElse(null);
-    if (state != null) {
-      dto.setInstalledSha256(state.installedSha256());
-      dto.setLocalPath(state.localPath());
-      dto.setError(state.error());
-    }
-    dto.setUpToDate(
-        state != null
-            && state.installedSha256() != null
-            && state.installedSha256().equals(artifact.getSha256()));
-    return dto;
   }
 
   private static SkillManifestEntryDTO toDto(SkillManifestEntry entry) {

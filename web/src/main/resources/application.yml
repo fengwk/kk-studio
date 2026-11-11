@@ -98,7 +98,6 @@ kk-studio:
       # 进程级执行容量；不进入 SystemSettings/DTO/frontend。
       model: ${KK_STUDIO_MODEL_MAX_CONCURRENCY:16}
       tool: ${KK_STUDIO_TOOL_MAX_CONCURRENCY:64}
-      skill-sync: ${KK_STUDIO_SKILL_SYNC_MAX_CONCURRENCY:8}
   canvas:
     function:
       runtime:

@@ -69,9 +69,9 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
         .sql(
             """
             insert into environment_connection
-                (environment_id, owner_node_id, lease_token, status, ready_metadata, skill_state,
+                (environment_id, owner_node_id, lease_token, status, ready_metadata,
                  recent_events, last_seen_at, lease_until)
-            values (?, ?, ?, ?, ?::jsonb, '[]'::jsonb, '[]'::jsonb, ?, ?)
+            values (?, ?, ?, ?, ?::jsonb, '[]'::jsonb, ?, ?)
             on conflict (environment_id) do update
             set owner_node_id = excluded.owner_node_id,
                 lease_token = excluded.lease_token,
@@ -184,9 +184,9 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
         .sql(
             """
             insert into environment_connection
-                (environment_id, owner_node_id, lease_token, status, ready_metadata, skill_state,
+                (environment_id, owner_node_id, lease_token, status, ready_metadata,
                  recent_events, last_seen_at, lease_until)
-            values (?, ?, ?, 'READY', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
+            values (?, ?, ?, 'READY', '{}'::jsonb, '[]'::jsonb,
                 statement_timestamp(), statement_timestamp() + interval '1 hour')
             """)
         .params(ENV.value(), NODE_B, UUID.randomUUID())

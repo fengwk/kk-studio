@@ -8,7 +8,6 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason;
 
@@ -95,7 +94,7 @@ public class HarnessModelRequestDebugDTO {
     private FilterReason filterReason;
   }
 
-  /** 单个 Skill 的交付事实与实际 Prompt 片段。 */
+  /** 单个 Skill 的配置事实与实际 Prompt 片段。 */
   @Data
   public static class SkillDTO {
 
@@ -108,12 +107,6 @@ public class HarnessModelRequestDebugDTO {
     /** manifest 中的 Skill 描述。 */
     private String description;
 
-    /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code vfs:/skills/...}）。 */
-    private String path;
-
-    /** 交付方式：{@code LOCAL}（Daemon 已安装该工件摘要）或 {@code PLATFORM}（读取 Platform cache）。 */
-    private SkillPromptResolution.Delivery delivery;
-
     /** Package 当前发布版本或 Git commit SHA。 */
     private String packageVersion;
 
@@ -121,16 +114,8 @@ public class HarnessModelRequestDebugDTO {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private @Nullable String headCommit;
 
-    /** Package 当前工件包的 SHA-256。 */
-    private String artifactSha256;
-
-    /** 当前 Environment 已安装的工件包 SHA-256；无 Environment 或未安装该 Package 时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String installedSha256;
-
-    /** 实际进入 systemInstruction 的 Skill XML 片段；该 Skill 未进入 Prompt 时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String promptXml;
+    /** 实际进入 systemInstruction 的 Skill XML 片段。 */
+    private String promptXml;
   }
 
   /**

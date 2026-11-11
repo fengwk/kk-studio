@@ -151,23 +151,16 @@ class EnvironmentControllerTest {
     connecting.setLevel(EnvironmentEventLevel.INFO);
     connecting.setType(EnvironmentEventType.CONNECTING);
     connecting.setMessage("daemon connection accepted");
-    EnvironmentEventDTO failed = new EnvironmentEventDTO();
-    failed.setOccurredAt(Instant.parse("2026-09-21T06:05:00Z"));
-    failed.setLevel(EnvironmentEventLevel.ERROR);
-    failed.setType(EnvironmentEventType.SKILL_SYNC_FAILED);
-    failed.setMessage("skill package sync failed: COMMIT_NOT_FOUND");
     when(environmentService.listEvents(eq(EnvironmentId.of(ENV_ID))))
-        .thenReturn(List.of(connecting, failed));
+        .thenReturn(List.of(connecting));
 
     mockMvc
         .perform(get("/api/platform/environments/" + ENV_ID + "/events"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$.length()").value(1))
         .andExpect(jsonPath("$[0].type").value("CONNECTING"))
         .andExpect(jsonPath("$[0].level").value("INFO"))
-        .andExpect(jsonPath("$[0].occurredAt").exists())
-        .andExpect(jsonPath("$[1].type").value("SKILL_SYNC_FAILED"))
-        .andExpect(jsonPath("$[1].level").value("ERROR"));
+        .andExpect(jsonPath("$[0].occurredAt").exists());
   }
 
   /** 意图：未知 Environment 的事件查询与详情查询一样映射为 404 资源不存在。 */

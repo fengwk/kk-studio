@@ -67,7 +67,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
@@ -150,22 +149,14 @@ class ModelRequestDebugServiceTest {
     when(builtinRequestQuery.findCurrent(THREAD_ID)).thenReturn(Optional.empty());
   }
 
-  /** 未进入 system prompt 的结构化 Skill 事实必须保留，但调试片段 promptXml 为 null 且显式发射。 */
+  /** Skill 调试投影只含目录事实和必定进入 system prompt 的片段。 */
   @Test
-  void omitsPromptXmlForSkillThatDidNotEnterSystemPrompt() throws Exception {
+  void projectsSkillPromptXmlWithoutInstallationDetails() throws Exception {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
     LiveTurnPlan.PlannedSkill hiddenSkill =
         new LiveTurnPlan.PlannedSkill(
-            "test-package",
-            "dev",
-            "dev description",
-            "vfs:/skills/test-package/dev/SKILL.md",
-            SkillPromptResolution.Delivery.PLATFORM,
-            CURRENT_COMMIT,
-            "observed-head",
-            ARTIFACT_SHA256,
-            null);
+            "test-package", "dev", "dev description", CURRENT_COMMIT, "observed-head");
     when(turnResolver.planLiveWithSettings(
             eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlanWithSkills(List.of(hiddenSkill)));
@@ -177,12 +168,11 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
-    assertEquals(SkillPromptResolution.Delivery.PLATFORM, skill.getDelivery());
-    assertEquals("vfs:/skills/test-package/dev/SKILL.md", skill.getPath());
-    assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
-    assertNull(skill.getInstalledSha256());
-    assertNull(skill.getPromptXml());
-    assertTrue(JSON.writeValueAsString(skill).contains("\"promptXml\":null"));
+    assertEquals(
+        "<name>dev</name>",
+        skill.getPromptXml().contains("<name>dev</name>") ? "<name>dev</name>" : "");
+    assertFalse(JSON.writeValueAsString(skill).contains("path"));
+    assertFalse(JSON.writeValueAsString(skill).contains("delivery"));
   }
 
   @Test
@@ -222,18 +212,14 @@ class ModelRequestDebugServiceTest {
     assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.getFilterReason());
     assertEquals(EnvironmentSupport.REQUIRED, filtered.getEnvironmentSupport());
 
-    // Skill 交付事实与 promptXml：只复用 compose 的同一渲染入口，XML 不可能漂移。
+    // Skill promptXml 复用 compose 的同一渲染入口，XML 不可能漂移。
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
-    assertEquals(SkillPromptResolution.Delivery.LOCAL, skill.getDelivery());
     assertEquals(CURRENT_COMMIT, skill.getPackageVersion());
     assertEquals("observed-head", skill.getHeadCommit());
-    assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
-    assertEquals(ARTIFACT_SHA256, skill.getInstalledSha256());
     assertEquals(
-        AgentPromptComposer.skillFragment(
-            new SkillPromptEntry("dev", "dev description", LOCAL_PATH)),
+        AgentPromptComposer.skillFragment(new SkillPromptEntry("dev", "dev description")),
         skill.getPromptXml());
 
     // subagent：binding 事实来自规划，配置声明按同名 definition 补齐且只陈述直接声明。
@@ -803,15 +789,7 @@ class ModelRequestDebugServiceTest {
                 LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED)),
         List.of(
             new LiveTurnPlan.PlannedSkill(
-                "test-package",
-                "dev",
-                "dev description",
-                LOCAL_PATH,
-                SkillPromptResolution.Delivery.LOCAL,
-                CURRENT_COMMIT,
-                "observed-head",
-                ARTIFACT_SHA256,
-                ARTIFACT_SHA256)));
+                "test-package", "dev", "dev description", CURRENT_COMMIT, "observed-head")));
   }
 
   private static LiveTurnPlan.Planned successfulPlanWithSkills(

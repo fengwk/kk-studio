@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * {@code environment_connection.skill_state} 与 {@code recent_events} 两个 JSONB 数组的严格 codec。
+ * {@code environment_connection.recent_events} JSONB 数组的严格 codec。
  *
  * <p>两列只由本进程写入，因此解码对未知字段、重复键、尾随内容、错误类型与非法取值一律 fail-closed：损坏的持久化投影绝不静默降级成 「没有安装事实」。
  */
@@ -24,38 +24,7 @@ public final class EnvironmentStateCodec {
 
   private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
-  private static final Set<String> SKILL_STATE_FIELDS =
-      Set.of("packageName", "installedSha256", "localPath", "error");
   private static final Set<String> EVENT_FIELDS = Set.of("time", "level", "type", "message");
-
-  public String encodeSkillState(List<EnvironmentSkillState> states) {
-    Objects.requireNonNull(states, "states");
-    ArrayNode root = MAPPER.createArrayNode();
-    for (EnvironmentSkillState state : states) {
-      Objects.requireNonNull(state, "states[]");
-      ObjectNode node = root.addObject();
-      node.put("packageName", state.packageName());
-      putNullable(node, "installedSha256", state.installedSha256());
-      putNullable(node, "localPath", state.localPath());
-      putNullable(node, "error", state.error());
-    }
-    return write(root, "skill_state");
-  }
-
-  public List<EnvironmentSkillState> decodeSkillState(String json) {
-    ArrayNode root = readArray(json, "skill_state");
-    List<EnvironmentSkillState> states = new ArrayList<>(root.size());
-    for (JsonNode element : root) {
-      ObjectNode node = requireObject(element, "skill_state", SKILL_STATE_FIELDS);
-      states.add(
-          new EnvironmentSkillState(
-              text(node, "packageName", true),
-              text(node, "installedSha256", false),
-              text(node, "localPath", false),
-              text(node, "error", false)));
-    }
-    return List.copyOf(states);
-  }
 
   /** 编码单条事件，供围栏 SQL 以 {@code ?::jsonb} 原子追加。 */
   public String encodeEvent(EnvironmentEvent event) {
@@ -96,12 +65,6 @@ public final class EnvironmentStateCodec {
       return Instant.parse(value.textValue());
     } catch (DateTimeParseException error) {
       throw new IllegalStateException("recent_events.time must be an ISO-8601 instant", error);
-    }
-  }
-
-  private static void putNullable(ObjectNode node, String field, String value) {
-    if (value != null) {
-      node.put(field, value);
     }
   }
 

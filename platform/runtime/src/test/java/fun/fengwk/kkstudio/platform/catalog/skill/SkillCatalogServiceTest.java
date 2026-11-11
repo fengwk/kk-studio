@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
@@ -39,10 +38,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -78,7 +73,6 @@ class SkillCatalogServiceTest {
   private StorageBlobContentService contentService;
   private StorageBlobManager blobManager;
   private StorageBlobRepository blobRepository;
-  private EnvironmentRegistry environmentRegistry;
   private SkillCatalogService service;
 
   @BeforeEach
@@ -91,7 +85,6 @@ class SkillCatalogServiceTest {
     contentService = mock(StorageBlobContentService.class);
     blobManager = mock(StorageBlobManager.class);
     blobRepository = mock(StorageBlobRepository.class);
-    environmentRegistry = mock(EnvironmentRegistry.class);
     doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
         .when(writes)
         .execute(any());
@@ -106,8 +99,7 @@ class SkillCatalogServiceTest {
             uploadService,
             contentService,
             blobManager,
-            blobRepository,
-            environmentRegistry);
+            blobRepository);
   }
 
   @Test
@@ -555,25 +547,6 @@ class SkillCatalogServiceTest {
     verify(uploadService).delete(stagingUploadId);
   }
 
-  @Test
-  void listEnvironmentSyncProjectsInstalledDigest() {
-    SkillPackage current = uploadPackageWith(UUID.randomUUID(), ARTIFACT_SHA);
-    when(packageRepository.getPackage(PACKAGE)).thenReturn(current);
-    when(blobManager.getBlob(current.artifactBlobId()))
-        .thenReturn(blob(current.artifactBlobId(), ARTIFACT_SHA, 10));
-    EnvironmentConnection installed =
-        connection(ARTIFACT_SHA, "/home/dev/.kk-studio/skills/" + PACKAGE);
-    EnvironmentConnection stale = connection("c".repeat(64), "/tmp/" + PACKAGE);
-    when(environmentRegistry.list()).thenReturn(List.of(installed, stale));
-
-    var states = service.listEnvironmentSync(PACKAGE);
-
-    assertEquals(2, states.size());
-    assertTrue(states.get(0).isUpToDate());
-    assertFalse(states.get(1).isUpToDate());
-    assertEquals(ARTIFACT_SHA, states.get(0).getInstalledSha256());
-  }
-
   private static SkillPackageCreateDTO createDTO(String token) {
     SkillPackageCreateDTO dto = new SkillPackageCreateDTO();
     dto.setPackageName(PACKAGE);
@@ -701,19 +674,6 @@ class SkillCatalogServiceTest {
   private static StorageUploadService.StagedUpload staged(UUID uploadId, UUID blobId) {
     return new StorageUploadService.StagedUpload(
         uploadId, blobId, PACKAGE + ".zip", "application/zip", 10, ARTIFACT_SHA);
-  }
-
-  private static EnvironmentConnection connection(String installedSha256, String localPath) {
-    return new EnvironmentConnection(
-        EnvironmentId.of(UUID.randomUUID()),
-        UUID.randomUUID(),
-        UUID.randomUUID(),
-        LiveEnvironmentStatus.CONNECTING,
-        null,
-        List.of(EnvironmentSkillState.installed(PACKAGE, installedSha256, localPath)),
-        List.of(),
-        Instant.parse("2024-01-01T00:00:00Z"),
-        Instant.parse("2024-01-01T00:05:00Z"));
   }
 
   private static SkillArchiveBuilder.Result archive(String... skills) {
