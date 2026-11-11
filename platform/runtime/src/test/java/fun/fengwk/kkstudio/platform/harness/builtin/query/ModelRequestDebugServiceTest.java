@@ -216,8 +216,6 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
-    assertEquals(CURRENT_COMMIT, skill.getPackageVersion());
-    assertEquals("observed-head", skill.getHeadCommit());
     assertEquals(
         AgentPromptComposer.skillFragment(new SkillPromptEntry("dev", "dev description")),
         skill.getPromptXml());

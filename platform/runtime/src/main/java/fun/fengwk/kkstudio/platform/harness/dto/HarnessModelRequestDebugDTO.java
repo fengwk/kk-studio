@@ -48,7 +48,7 @@ public class HarnessModelRequestDebugDTO {
   /** 全部候选 Tool：最终发出的定义在前，被过滤的候选在后。 */
   private List<ToolDTO> tools;
 
-  /** 本次请求的 Skill 交付事实，按 Agent 配置顺序。 */
+  /** 本次请求的 Skill 元数据，按 Agent 配置顺序。 */
   private List<SkillDTO> skills;
 
   /** 本次请求的 subagent allowlist。 */
@@ -106,13 +106,6 @@ public class HarnessModelRequestDebugDTO {
 
     /** manifest 中的 Skill 描述。 */
     private String description;
-
-    /** Package 当前发布版本或 Git commit SHA。 */
-    private String packageVersion;
-
-    /** Package 最近检查到的 branch HEAD；从未成功检查时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String headCommit;
 
     /** 实际进入 systemInstruction 的 Skill XML 片段。 */
     private String promptXml;

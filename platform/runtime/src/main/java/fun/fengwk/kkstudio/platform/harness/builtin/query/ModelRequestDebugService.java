@@ -162,8 +162,6 @@ public final class ModelRequestDebugService {
     dto.setPackageName(skill.packageName());
     dto.setName(skill.name());
     dto.setDescription(skill.description());
-    dto.setPackageVersion(skill.packageVersion());
-    dto.setHeadCommit(skill.headCommit());
     dto.setPromptXml(AgentPromptComposer.skillFragment(skill.promptEntry()));
     return dto;
   }
