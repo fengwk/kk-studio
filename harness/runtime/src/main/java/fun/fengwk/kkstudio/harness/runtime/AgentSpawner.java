@@ -82,7 +82,7 @@ public final class AgentSpawner {
             request.settings(),
             parentId,
             request.yoloEnabled(),
-            request.trigger(),
+            request.kind(),
             request.constraints(),
             request.commands());
     ThreadState existing = tx.threads().find(request.threadId()).orElse(null);
@@ -109,7 +109,7 @@ public final class AgentSpawner {
             rootThreadId,
             request.settings(),
             request.yoloEnabled(),
-            request.trigger(),
+            request.kind(),
             effective,
             creationRequestHash,
             request.commands(),

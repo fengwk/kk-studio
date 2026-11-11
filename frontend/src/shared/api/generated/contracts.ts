@@ -1508,6 +1508,7 @@ export interface HarnessThreadStreamCatchupDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO */
 export interface HarnessThreadSummaryDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   createdAt: number
@@ -1521,6 +1522,7 @@ export interface HarnessThreadSummaryDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO */
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   agentName: string
@@ -2935,6 +2937,22 @@ export const THREAD_EXECUTION_CONTROL_VALUES: readonly ThreadExecutionControl[] 
   'STOPPED',
 ]
 
+/** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadKind */
+export type ThreadKind =
+  | 'USER'
+  | 'SUBAGENT'
+  | 'COMPACTION'
+  | 'CONTROLLER_TASK'
+  | 'PLUGIN_TASK'
+
+export const THREAD_KIND_VALUES: readonly ThreadKind[] = [
+  'USER',
+  'SUBAGENT',
+  'COMPACTION',
+  'CONTROLLER_TASK',
+  'PLUGIN_TASK',
+]
+
 /** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus */
 export type ThreadRuntimeStatus =
   | 'RUNNING'
@@ -3202,6 +3220,10 @@ export interface ApiRoutes {
   'GET /api/harness/threads/{threadId}/compaction-availability': {
     path: { threadId: string }
     response: HarnessManualCompactionDTO
+  }
+  'GET /api/harness/threads/{threadId}/subagents': {
+    path: { threadId: string }
+    response: HarnessThreadTreeNodeDTO[]
   }
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }

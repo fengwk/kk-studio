@@ -17,10 +17,10 @@ import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -50,7 +50,7 @@ class StopRecordsTest {
           "main",
           id(1L),
           false,
-          SpawnTrigger.USER,
+          ThreadKind.USER,
           ThreadConstraints.NONE,
           ThreadExecutionControl.RUNNABLE,
           0,

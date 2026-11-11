@@ -542,6 +542,7 @@ describe('ThreadWorkspacePage', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       {
         threadId: rootId,
+        kind: 'USER',
         parentThreadId: null,
         name: 'Root Agent',
         agentName: 'assistant',
@@ -555,6 +556,7 @@ describe('ThreadWorkspacePage', () => {
       },
       {
         threadId: CHILD_THREAD_ID,
+        kind: 'SUBAGENT',
         parentThreadId: rootId,
         name: 'Waiting Parent',
         agentName: 'coder',
@@ -568,6 +570,7 @@ describe('ThreadWorkspacePage', () => {
       },
       {
         threadId: OTHER_CHILD_THREAD_ID,
+        kind: 'SUBAGENT',
         parentThreadId: rootId,
         name: 'Idle Child',
         agentName: 'reviewer',

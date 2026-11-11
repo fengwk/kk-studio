@@ -53,9 +53,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -371,7 +371,7 @@ class HarnessRuntimeForkTest {
                       "child",
                       parentThreadId,
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,

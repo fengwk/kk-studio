@@ -40,9 +40,9 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -184,7 +184,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                       "root-A",
                       threadA,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
@@ -203,7 +203,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                       "child-B",
                       threadA,
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       1L,
@@ -222,7 +222,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                       "child-C",
                       threadA,
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       1L,

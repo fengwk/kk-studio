@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -391,8 +391,8 @@ public class InteractionQueryService {
         return Optional.of(owner);
       }
       ThreadSnapshot root = rootSnapshot(rootThreadId);
-      SpawnTrigger trigger = root.thread().spawnTrigger();
-      if (trigger == SpawnTrigger.CONTROLLER || trigger == SpawnTrigger.PLUGIN) {
+      ThreadKind trigger = root.thread().kind();
+      if (trigger == ThreadKind.CONTROLLER_TASK || trigger == ThreadKind.PLUGIN_TASK) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setKind("AGENT_TASK");
         owner.setId(rootThreadId.toString());

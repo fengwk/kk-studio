@@ -318,6 +318,19 @@ public final class HarnessRuntime {
         });
   }
 
+  /** 按父 Thread 查询其直接 SUBAGENT 子线程，按 UUID 确定顺序返回。 */
+  public List<ThreadState> listSubagentsByParent(UUID parentThreadId) {
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    return store.transaction(
+        tx -> {
+          if (tx.threads().find(parentThreadId).isEmpty()) {
+            throw DomainException.notFound(
+                "thread", "thread " + parentThreadId + " does not exist");
+          }
+          return tx.threads().listSubagents(parentThreadId);
+        });
+  }
+
   /**
    * 读取 Session 当前投影；不存在抛 not-found {@link DomainException}。
    *
@@ -829,7 +842,7 @@ public final class HarnessRuntime {
           if (tx.sessions().find(sessionId).isEmpty()) {
             throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
-          return tx.threads().listBySession(sessionId);
+          return tx.threads().listUserBySession(sessionId);
         });
   }
 

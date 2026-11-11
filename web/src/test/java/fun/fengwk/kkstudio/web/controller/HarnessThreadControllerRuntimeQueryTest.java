@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
@@ -55,8 +56,9 @@ class HarnessThreadControllerRuntimeQueryTest extends HarnessThreadControllerTes
     mockMvc
         .perform(get("/api/harness/threads/" + idText(1) + "/tree"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$.length()").value(1))
         .andExpect(jsonPath("$[0].threadId").value(idText(2)))
+        .andExpect(jsonPath("$[0].kind").value("USER"))
         .andExpect(jsonPath("$[0].parentThreadId").hasJsonPath())
         .andExpect(jsonPath("$[0].parentThreadId").value(nullValue()))
         .andExpect(jsonPath("$[0].outcome").hasJsonPath())
@@ -66,15 +68,31 @@ class HarnessThreadControllerRuntimeQueryTest extends HarnessThreadControllerTes
         .andExpect(jsonPath("$[0].turnCount").value(0))
         .andExpect(jsonPath("$[0].toolCallCount").value(0))
         .andExpect(jsonPath("$[0].entries").doesNotExist())
-        .andExpect(jsonPath("$[0].queuedCommands").doesNotExist())
-        .andExpect(jsonPath("$[1].parentThreadId").value(idText(2)))
-        .andExpect(jsonPath("$[1].status").value("IDLE"))
-        .andExpect(jsonPath("$[1].executionControl").value("RUNNABLE"))
-        .andExpect(jsonPath("$[1].processing").doesNotExist());
+        .andExpect(jsonPath("$[0].queuedCommands").doesNotExist());
 
     verify(runtime).getThreadTree(id(1));
     verify(runtime, never()).getThreadSnapshot(any());
     verifyNoInteractions(modelRequestDebugService, interactionService);
+  }
+
+  /** 独立 subagents 查询仅返回直接 SUBAGENT 子线程，不把它们混入普通树。 */
+  @Test
+  void subagentsQueryReturnsDirectSubagentNodes() throws Exception {
+    ThreadTreeNode root = treeNode(HarnessRuntimeTestFixtures.idleSnapshot(id(2)).thread());
+    ThreadTreeNode child = treeNode(HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)).thread());
+    when(runtime.listSubagentsByParent(id(2))).thenReturn(List.of(child.thread()));
+    when(runtime.getThreadTree(id(2))).thenReturn(List.of(root, child));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(2) + "/subagents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].threadId").value(idText(1)))
+        .andExpect(jsonPath("$[0].parentThreadId").value(idText(2)))
+        .andExpect(jsonPath("$[0].kind").value("SUBAGENT"));
+
+    verify(runtime).listSubagentsByParent(id(2));
+    verify(runtime).getThreadTree(id(2));
   }
 
   /** 非 canonical UUID 在进入 Runtime 前拒绝；未知节点沿用快照的 404 语义。 */
@@ -117,5 +135,15 @@ class HarnessThreadControllerRuntimeQueryTest extends HarnessThreadControllerTes
         .perform(get("/api/harness/threads/" + idText(999) + "/compaction-availability"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.detail").value("thread " + idText(999) + " does not exist"));
+  }
+
+  private static ThreadTreeNode treeNode(ThreadState thread) {
+    return new ThreadTreeNode(
+        thread,
+        new BranchSettings(
+            "demo-agent", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null),
+        ThreadRuntimeStatus.IDLE,
+        null,
+        new EntryPathMetrics(0, 0));
   }
 }

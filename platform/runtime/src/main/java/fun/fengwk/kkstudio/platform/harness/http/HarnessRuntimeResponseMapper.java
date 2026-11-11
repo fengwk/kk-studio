@@ -85,6 +85,7 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(node, "node");
     HarnessThreadTreeNodeDTO dto = new HarnessThreadTreeNodeDTO();
     dto.setThreadId(node.thread().id().toString());
+    dto.setKind(node.thread().kind());
     dto.setParentThreadId(
         node.thread().parentThreadId() == null ? null : node.thread().parentThreadId().toString());
     dto.setName(node.thread().name());

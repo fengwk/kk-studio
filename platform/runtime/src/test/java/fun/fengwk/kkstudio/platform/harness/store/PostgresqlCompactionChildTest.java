@@ -65,10 +65,10 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -560,7 +560,7 @@ class PostgresqlCompactionChildTest {
           ThreadJoin join = tx.joins().find(joinInvocationId).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
-          assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
+          assertEquals(ThreadKind.COMPACTION, childThread.kind());
           assertEquals(false, childThread.constraints().allowAutoCompaction());
           assertEquals(
               compaction.outputBudget().intValue(), childThread.constraints().maxOutputTokens());
@@ -1055,7 +1055,7 @@ class PostgresqlCompactionChildTest {
               null,
               false,
               ThreadConstraints.NONE,
-              SpawnTrigger.CONTROLLER,
+              ThreadKind.CONTROLLER_TASK,
               JoinDelivery.NOTIFY_PARENT,
               SpawnRequest.Budget.unlimited(),
               outerJoinId,
@@ -1733,7 +1733,7 @@ class PostgresqlCompactionChildTest {
                       "main",
                       threadId,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,

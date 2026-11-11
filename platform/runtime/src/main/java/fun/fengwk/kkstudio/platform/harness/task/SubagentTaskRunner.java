@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
@@ -224,7 +224,7 @@ public class SubagentTaskRunner implements SubagentRunner {
                   0,
                   new CustomMessageCommandPayload(AgentMessage.user(request.prompt())))),
           AcceptancePreflight.IDENTITY,
-          SpawnTrigger.MODEL_TOOL,
+          ThreadKind.SUBAGENT,
           parent.threadId(),
           parent.headEntryId(),
           null,
@@ -249,7 +249,7 @@ public class SubagentTaskRunner implements SubagentRunner {
         settings,
         List.copyOf(commands),
         AcceptancePreflight.IDENTITY,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         parent.threadId(),
         parent.headEntryId(),
         new SpawnRequest.Continuation(

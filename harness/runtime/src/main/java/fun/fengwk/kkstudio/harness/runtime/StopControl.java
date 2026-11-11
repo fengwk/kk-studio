@@ -743,7 +743,7 @@ final class StopControl {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
-            thread.spawnTrigger(),
+            thread.kind(),
             thread.constraints(),
             ThreadExecutionControl.STOPPED,
             inputThroughSequence,

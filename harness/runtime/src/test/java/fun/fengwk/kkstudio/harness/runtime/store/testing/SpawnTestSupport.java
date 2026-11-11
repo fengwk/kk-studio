@@ -9,8 +9,8 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 
@@ -175,8 +175,8 @@ public final class SpawnTestSupport {
         yoloEnabled,
         ThreadConstraints.NONE,
         ticket.delivery() == JoinDelivery.SETTLE_OWNER_TURN
-            ? SpawnTrigger.RUNTIME
-            : notify ? SpawnTrigger.MODEL_TOOL : SpawnTrigger.CONTROLLER,
+            ? ThreadKind.COMPACTION
+            : notify ? ThreadKind.SUBAGENT : ThreadKind.CONTROLLER_TASK,
         ticket.delivery(),
         new SpawnRequest.Budget(
             ticket.maxTurns(),

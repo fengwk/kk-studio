@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
@@ -96,7 +96,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
             settings,
             List.of(command),
             preflight(systemText, ordered),
-            SpawnTrigger.PLUGIN,
+            ThreadKind.PLUGIN_TASK,
             null,
             null,
             null,

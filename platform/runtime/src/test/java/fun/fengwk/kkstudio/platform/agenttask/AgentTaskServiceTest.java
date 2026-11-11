@@ -32,10 +32,10 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
@@ -84,7 +84,7 @@ class AgentTaskServiceTest {
         ArgumentCaptor.forClass(AcceptancePreflight.class);
     verify(runtime).spawn(spawn.capture(), preflight.capture());
     SpawnRequest spawned = spawn.getValue();
-    assertEquals(SpawnTrigger.CONTROLLER, spawned.trigger());
+    assertEquals(ThreadKind.CONTROLLER_TASK, spawned.kind());
     assertEquals(JoinDelivery.RECEIPT_ONLY, spawned.delivery());
     assertNull(spawned.parentThreadId());
     assertNull(spawned.expectedParentHeadEntryId());
@@ -416,7 +416,7 @@ class AgentTaskServiceTest {
         SETTINGS,
         List.of(command),
         AcceptancePreflight.IDENTITY,
-        SpawnTrigger.CONTROLLER,
+        ThreadKind.CONTROLLER_TASK,
         parentId,
         parentHead,
         cont,
@@ -446,7 +446,7 @@ class AgentTaskServiceTest {
         "task",
         threadId,
         false,
-        SpawnTrigger.CONTROLLER,
+        ThreadKind.CONTROLLER_TASK,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

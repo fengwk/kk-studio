@@ -18,8 +18,8 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -286,7 +286,7 @@ final class HarnessRuntimeResponseMapperTestSupport {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             ThreadConstraints.NONE,
             thread.executionControl(),
             thread.inputThroughSequence(),

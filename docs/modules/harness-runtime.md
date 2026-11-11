@@ -68,7 +68,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 ## Thread
 
-[`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadState.java) 只保存 Thread 自己拥有的事实：创建后不可变的身份（Session、父 Thread、执行根 `rootThreadId`、创建请求哈希、创建时间），可变的 head、名称、执行控制、输入水位、命令序号与 `version`。
+[`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadState.java) 只保存 Thread 自己拥有的事实：创建后不可变的身份（Session、父 Thread、执行根 `rootThreadId`、[`ThreadKind`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadKind.java)、创建请求哈希、创建时间），可变的 head、名称、执行控制、输入水位、命令序号与 `version`。`kind` 在创建时确定并持久化为非空封闭枚举：`USER` 表示用户创建的普通 Thread，`SUBAGENT` 表示模型委派的子代理，`COMPACTION` 表示压缩子 Thread，`CONTROLLER_TASK` 表示控制器任务，`PLUGIN_TASK` 表示插件任务；它不从父关系、执行名或当前状态推断，也不会在生命周期中变化。
 
 - `version` 是结构与控制状态的 CAS 游标，不是快照内容版本：任何非精确重放的变更让它严格 +1，精确重放原样接受；Model 的流式 checkpoint 在同一 version 内推进。名称与 YOLO 由控制面直接更新，同值 no-op，不产生 Command、Entry 或 Work。
 - `rootThreadId` 是执行根：根指向自身，子代理继承父 Thread 的执行根。`yolo_enabled` 开关只属于执行根，子代理恒为 false，其有效值取自执行根。根开关只修改根行，不递归修改子行或子行版本；Chat/Project 开关仅初始化新根。权限判定读取执行根的开关。YOLO 影响尚未完成权限决定的调用，不自动批准 `WAITING_APPROVAL`，不回答问卷，也不回滚已派发工具。
@@ -96,7 +96,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 命令状态由标记字段派生：无标记为 `QUEUED`，有 `appliedEntryId` 为 `APPLIED`，成对的 `stopRequestId` / `cancelledAt` 为 `CANCELLED`。Session 显示名在创建时从首批末尾 user-like 消息派生（前 40 个码点，无文本时回退 `session-` 加 UUID 前缀），ROOT Thread 固定为 `main`，分支名由调用方给出；手工名称经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/Names.java) 折叠空白，超过 256 个码点报错，绝不截断。
 
-`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread（同 Session 的其它执行根不在其中），返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。
+`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。Session 普通 Thread 列表与执行树根只包含 `USER`；`getThreadTree` 持执行根的 tree 锁读取同根 `USER` Thread，返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。独立的 subagents 查询按父 Thread 列出直接 `SUBAGENT` 子线程；调用方需递归查询每个子代理，不能从完整执行树或父关系猜测线程类型。
 
 ## ToolInvocation
 
@@ -435,7 +435,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `api.realtime` | 有损实时投影的公开契约：sealed `RealtimeEvent`（Model delta / Model checkpoint / Tool partial）及其 wire 种类 `RealtimeEventType`、oversize payload 的跨节点上限 `RealtimePayloadLimits` 与不可用错误 `RealtimePayloadUnavailableException`；wire 编解码在 `codec`，通知信封、缓冲与恢复在平台实现，本包不持有 durable state |
 | `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现在 `runtime.retry`，部署配置以 JDK `Supplier` / `Function` 现读 |
 | `api.session` | Session 聚合、sealed 消息内容家族与 `AssistantMessageMetadata`；`SystemReminder` 用精确定界符构造与判别运行时注入的 USER 上下文提醒；wire codec 在 `codec` |
-| `api.thread` | Thread 级公开值：`ThreadState`、`ThreadSnapshot`、`ThreadExecutionControl`、`ThreadRuntimeStatus`、`ThreadExecutionFacts` 与记录 live 分类的 `ThreadLiveState`、创建时冻结的 `ThreadConstraints` / `SpawnTrigger`，以及停止 / 执行根开关 / 手动压缩的控制请求形状；不引用 Store、Driver 或 `runtime` 内部类型 |
+| `api.thread` | Thread 级公开值：`ThreadState`、`ThreadSnapshot`、`ThreadExecutionControl`、`ThreadRuntimeStatus`、`ThreadExecutionFacts` 与记录 live 分类的 `ThreadLiveState`、创建时冻结的 `ThreadKind` / `ThreadConstraints`，以及停止 / 执行根开关 / 手动压缩的控制请求形状；不引用 Store、Driver 或 `runtime` 内部类型 |
 | `api.tool` | Tool invocation 的公开值：`ToolInvocation` 与 `ToolInvocationStatus`、`ToolBinding` / `ContributorBinding` 及 `ToolBindingIdentifiers`、审批与输入回执、`ToolInvocationError`；只含不变量与纯状态转换，执行、调度在 `runtime`，wire 编解码在 `codec` |
 | `codec` | api 值类型的严格确定性 JSON wire codec 与由此派生的 request hash：`AgentMessageJsonCodec` 定义消息与 durable 内容记录的形态，`ThreadCommandPayloadJsonCodec` 在其上定义 typed command payload 并用 canonical 信封计算 hash，`RealtimeEventJsonCodec` 定义 `api.realtime` 投影事件的 live overlay 形态；`HistoryEntryPayloadJsonCodec` 按 `EntryType` 定义 Entry payload 的 durable 形态（子树委派包私有 `HistoryValueCodecs` 与 `AgentMessageJsonCodec`），`HistoryPayloadMapper` 只做终态 ToolInvocation / history normalization 到 payload 的纯映射；Tool 持久化列与 Daemon 预览共用的 `ToolBindingJsonCodec` / `ToolApprovalJsonCodec` / `ToolEditReviewJsonCodec` 共享 `InvocationJsonSupport` 的严格 JSON 原语，Builtin 的 `ModelRequestSpec` 列 codec 在 harness/agent-builtin；不含状态机、持久化与 mailbox 归约 |
 | `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）、spawn、执行树锁与 Session 删除 / fork 复制；守卫锁序，执行状态流转委托 `spi.driver` 契约与 `runtime.processor`；门面同时只读转发 `runtime.processor` / `runtime.compaction` 的规划事实（candidate 路径、压缩 turn 冻结元数据） |

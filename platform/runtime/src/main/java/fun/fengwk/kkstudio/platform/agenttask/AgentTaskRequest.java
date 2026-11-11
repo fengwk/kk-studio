@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 
 import java.util.List;
@@ -22,7 +22,7 @@ import java.util.UUID;
  * 的任务（子代理）通知父 Thread 并计入并发额度，必须给出父 head 作为准入 cursor；无父任务只冻结回执供调用方观察。
  *
  * @param preflight 同事务内的命令物化端口，只对全新 batch 调用
- * @param trigger 创建来源，不能是 {@link SpawnTrigger#USER}（用户会话经命令接受创建）
+ * @param kind 创建来源，不能是 {@link ThreadKind#USER}（用户会话经命令接受创建）
  * @param yoloEnabled 新执行根的初始 YOLO 开关；子代理与续用恒为 false
  */
 public record AgentTaskRequest(
@@ -32,7 +32,7 @@ public record AgentTaskRequest(
     BranchSettings settings,
     List<NewThreadCommand> commands,
     AcceptancePreflight preflight,
-    SpawnTrigger trigger,
+    ThreadKind kind,
     UUID parentThreadId,
     UUID expectedParentHeadEntryId,
     SpawnRequest.Continuation continuation,
@@ -46,7 +46,7 @@ public record AgentTaskRequest(
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(commands, "commands");
     Objects.requireNonNull(preflight, "preflight");
-    Objects.requireNonNull(trigger, "trigger");
+    Objects.requireNonNull(kind, "kind");
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(requestHash, "requestHash");
   }

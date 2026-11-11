@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -76,7 +76,7 @@ public class IssueThreadExecution {
                 task.settings(),
                 task.commands(),
                 AcceptancePreflight.IDENTITY,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 null,
                 null,
                 task.continuation(),
