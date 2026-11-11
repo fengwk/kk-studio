@@ -14,7 +14,7 @@ afterEach(() => {
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
 }
-const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","extra":{"flag":false}}'
+const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","timeout":3000}'
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',
   argumentsJson: args, approval: { required: true, reason: 'Permission rules require approval' } }
 
@@ -27,18 +27,21 @@ it('显示同文件后续审批数量并本地化单复数文案', () => {
     .toBeInTheDocument()
 })
 
-it('默认权限原因本地化；完整 arguments/workdir 一次，额外真实原因完整保留', () => {
-  const { container, rerender } = render(<ApprovalCard {...props} />, { wrapper })
+it('审批参数逐字段可读；command 保留换行且拒绝原因有双语标签', () => {
+  const { rerender } = render(<ApprovalCard {...props} />, { wrapper })
   expect(screen.getByText('权限规则要求审批')).toBeInTheDocument()
-  expect(container.querySelectorAll('pre')).toHaveLength(1)
-  expect(container.querySelector('pre')).toHaveClass('ui-code', 'interaction-raw-pre')
-  expect(container.querySelector('pre')?.textContent).toBe(args)
-  expect(container.textContent?.split('/srv/完整目录')).toHaveLength(2)
+  expect(screen.getByText('command')).toBeInTheDocument()
+  expect(document.querySelector('pre.is-command')?.textContent).toBe('pwd\nls -la')
+  expect(screen.getByText('/srv/完整目录')).toBeInTheDocument()
+  expect(screen.getByText('timeout')).toBeInTheDocument()
+  expect(screen.getByText('3000')).toBeInTheDocument()
+  expect(screen.queryByText(args)).not.toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: '拒绝原因（可选）' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('btn-primary', 'danger')
   expect(screen.getByRole('button', { name: '允许' })).toHaveClass('btn-primary')
-  const reason = '此目录含部署凭据，需人工核对后才可执行。'.repeat(30)
-  rerender(<ApprovalCard {...props} approval={{ required: true, reason }} />)
-  expect(screen.getByText(reason)).toBeInTheDocument()
+  setLocale('en-US')
+  rerender(<ApprovalCard {...props} />)
+  expect(screen.getByRole('textbox', { name: 'Reason for denial (optional)' })).toBeInTheDocument()
 })
 
 it('拒绝在途禁用；失败精确复用 decisionId，写回原始来源身份', async () => {
@@ -57,13 +60,32 @@ it('拒绝在途禁用；失败精确复用 decisionId，写回原始来源身�
   })
 })
 
+it('输入拒绝原因后按 Enter 提交该原因；空白原因交由后端默认处理', async () => {
+  const decide = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({} as never)
+  const { rerender } = render(<ApprovalCard {...props} />, { wrapper })
+  const input = screen.getByRole('textbox', { name: '拒绝原因（可选）' })
+  fireEvent.change(input, { target: { value: '不应执行此命令' } })
+  fireEvent.keyDown(input, { key: 'Enter' })
+  await waitFor(() => expect(decide).toHaveBeenLastCalledWith('source-child', 'original-invocation', {
+    decision: 'DENY', decisionId: expect.any(String), reason: '不应执行此命令',
+  }))
+
+  decide.mockClear()
+  rerender(<ApprovalCard {...props} />)
+  fireEvent.change(input, { target: { value: '   ' } })
+  fireEvent.click(screen.getByRole('button', { name: '拒绝' }))
+  await waitFor(() => expect(decide).toHaveBeenLastCalledWith('source-child', 'original-invocation', {
+    decision: 'DENY', decisionId: expect.any(String), reason: null,
+  }))
+})
+
 it('409 围栏不可重试且保留参数和拒绝按钮的 danger 语义', async () => {
   vi.spyOn(harnessService, 'decideApproval').mockRejectedValue(new ApiError('stale version', 409))
   render(<ApprovalCard {...props} />, { wrapper })
   fireEvent.click(screen.getByRole('button', { name: '允许' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled())
   await waitFor(() => expect(document.querySelector('.is-non-recoverable')).toBeInTheDocument())
-  expect(document.querySelector('pre')?.textContent).toBe(args)
+  expect(document.querySelector('pre.is-command')?.textContent).toBe('pwd\nls -la')
 })
 
 it('普通 Error 文本中的 409 不构成结构化冲突', async () => {
@@ -85,7 +107,7 @@ it.each(['ALLOWED', 'DENIED'])('已决 %s 没有写入口', (decision) => {
 it('畸形审批 JSON 不隐藏完整调用参数，未知失败也能重试', async () => {
   vi.spyOn(harnessService, 'decideApproval').mockRejectedValue('transport error')
   render(<ApprovalCard {...props} approval="invalid" />, { wrapper })
-  expect(document.querySelector('pre')?.textContent).toBe(args)
+  expect(document.querySelector('pre.is-command')?.textContent).toBe('pwd\nls -la')
   fireEvent.click(screen.getByRole('button', { name: '允许' }))
   await waitFor(() => expect(document.querySelector('.interaction-error-banner')).toBeInTheDocument())
   expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()

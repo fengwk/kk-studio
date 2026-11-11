@@ -2108,6 +2108,22 @@ export const chatCatalog = {
     'en-US': 'Reason',
     'zh-CN': '审批原因',
   },
+  'ai.interaction.denyReason': {
+    'en-US': 'Reason for denial (optional)',
+    'zh-CN': '拒绝原因（可选）',
+  },
+  'ai.interaction.denyReasonOptional': {
+    'en-US': 'Enter a reason, if you want',
+    'zh-CN': '可填写拒绝原因',
+  },
+  'ai.interaction.session': {
+    'en-US': 'Session',
+    'zh-CN': '会话',
+  },
+  'ai.interaction.unreadableArguments': {
+    'en-US': 'Tool parameters could not be read.',
+    'zh-CN': '无法读取工具参数。',
+  },
   'ai.interaction.environmentWaitingCount': {
     'en-US': '{{count}} tool calls waiting for {{environmentName}}',
     'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
