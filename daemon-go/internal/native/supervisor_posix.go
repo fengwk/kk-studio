@@ -61,6 +61,16 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, errors.New("the process supervisor is closed")
 	}
 	s.mu.Unlock()
+	var baselinePIDs []int
+	baselineKnown := false
+	if runtime.GOOS == "linux" {
+		if baseline, err := directChildren(os.Getpid(), nil); err == nil {
+			baselineKnown = true
+			for _, child := range baseline {
+				baselinePIDs = append(baselinePIDs, child.PID)
+			}
+		}
+	}
 	dir, err := createStateDir()
 	if err != nil {
 		return nil, err
@@ -129,7 +139,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, fmt.Errorf("cannot start process scope helper: %w", err)
 	}
 	_ = ownerReader.Close()
-	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, done: make(chan struct{})}
+	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, done: make(chan struct{})}
 	go func() { p.waitErr = cmd.Wait(); close(p.done) }()
 	if err := p.awaitScope(ctx); err != nil {
 		failure := p.cleanupFailedStart(err)
@@ -188,20 +198,22 @@ func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int)
 }
 
 type posixProcess struct {
-	supervisor *PosixSupervisor
-	cmd        *exec.Cmd
-	pid        int
-	sid        int
-	stateDir   string
-	owner      *os.File
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
-	stderr     io.ReadCloser
-	done       chan struct{}
-	waitErr    error
-	mu         sync.Mutex
-	settled    bool
-	termErr    error
+	supervisor    *PosixSupervisor
+	cmd           *exec.Cmd
+	pid           int
+	sid           int
+	stateDir      string
+	owner         *os.File
+	stdin         io.WriteCloser
+	stdout        io.ReadCloser
+	stderr        io.ReadCloser
+	baselinePIDs  []int
+	baselineKnown bool
+	done          chan struct{}
+	waitErr       error
+	mu            sync.Mutex
+	settled       bool
+	termErr       error
 }
 
 func (p *posixProcess) PID() int              { return p.pid }
@@ -239,6 +251,19 @@ func (p *posixProcess) Wait(ctx context.Context) (ProcessExit, error) {
 	return exit, nil
 }
 
+func (p *posixProcess) convergeAdoptedChildren(ctx context.Context, grace time.Duration) error {
+	if runtime.GOOS != "linux" || !p.baselineKnown {
+		return nil
+	}
+	excluded := append([]int(nil), p.baselinePIDs...)
+	p.supervisor.mu.Lock()
+	for pid := range p.supervisor.processes {
+		excluded = append(excluded, pid)
+	}
+	p.supervisor.mu.Unlock()
+	return convergeAdoptedChildren(ctx, os.Getpid(), grace, excluded)
+}
+
 func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -261,6 +286,10 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 		p.termErr = &ProcessScopeNotConvergedError{Cause: ctx.Err()}
 		return p.termErr
 	case <-p.done:
+	}
+	if err := p.convergeAdoptedChildren(ctx, grace); err != nil {
+		p.termErr = &ProcessScopeNotConvergedError{Cause: err}
+		return p.termErr
 	}
 	p.settled = true
 	if err := removeStateDir(p.stateDir); err != nil {
@@ -325,6 +354,9 @@ func (p *posixProcess) cleanupFailedStart(cause error) error {
 	case <-p.done:
 	case <-ctx.Done():
 		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, ctx.Err())}
+	}
+	if err := p.convergeAdoptedChildren(ctx, 0); err != nil {
+		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
 	}
 	_ = removeStateDir(p.stateDir)
 	return cause
@@ -565,6 +597,11 @@ func helperMain(args []string) int {
 		return 1
 	}
 	if err := convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid()); err != nil {
+		publishQuietly(args[0], cleanupFile, "false")
+		publishQuietly(args[0], errorFile, "helper-posix-failure")
+		return 1
+	}
+	if err := convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil); err != nil {
 		publishQuietly(args[0], cleanupFile, "false")
 		publishQuietly(args[0], errorFile, "helper-posix-failure")
 		return 1
