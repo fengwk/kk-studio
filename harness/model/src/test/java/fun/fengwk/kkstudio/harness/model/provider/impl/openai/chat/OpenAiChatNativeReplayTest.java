@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -154,6 +155,17 @@ class OpenAiChatNativeReplayTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("Hello world", completion.response().text());
+    assertEquals(2, completion.response().blocks().size());
+    ProviderOpaqueBlock messageFields = (ProviderOpaqueBlock) completion.response().blocks().get(1);
+    assertEquals("openai_chat_message", messageFields.blockType());
+    assertEquals(
+        "t-1",
+        messageFields
+            .providerBlockData()
+            .nativeFields()
+            .path("vendor_future_field")
+            .path("trace_id")
+            .asString(""));
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
     JsonNode payload = completion.replayState().payload();

@@ -10,16 +10,22 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
@@ -652,17 +658,57 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             reasoningTokens,
             totalTokens);
 
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
+    ObjectNode reasoningFields = NODES.objectNode();
+    if (reasoningDetailsNode != null && !reasoningDetailsNode.isNull()) {
+      reasoningFields.set("reasoning_details", reasoningDetailsNode.deepCopy());
+    }
+    if (!reasoningContentBuilder.isEmpty() || !reasoningFields.isEmpty()) {
+      responseBlocks.add(
+          new ProviderThinkingBlock(
+              reasoningContentBuilder.toString(), blockData(reasoningFields, canReplay)));
+    }
+    if (!contentBuilder.isEmpty()) {
+      responseBlocks.add(
+          new ProviderTextBlock(
+              contentBuilder.toString(), blockData(NODES.objectNode(), canReplay)));
+    }
+    if (!refusalBuilder.isEmpty()) {
+      ObjectNode refusalFields = NODES.objectNode();
+      refusalFields.put("refusal", true);
+      responseBlocks.add(
+          new ProviderTextBlock(refusalBuilder.toString(), blockData(refusalFields, canReplay)));
+    }
+    for (ProviderToolCall call : toolCalls) {
+      responseBlocks.add(
+          new ProviderToolCallBlock(call, blockData(toolCallFields(call), canReplay)));
+    }
+    if (contentBuilder.isEmpty() && refusalBuilder.isEmpty() && toolCalls.isEmpty()) {
+      responseBlocks.add(new ProviderTextBlock("", blockData(NODES.objectNode(), canReplay)));
+    }
+    if (canReplay) {
+      ObjectNode messageFields = nativeAssistantMessage.deepCopy();
+      for (String field : KNOWN_ASSISTANT_FIELDS) {
+        messageFields.remove(field);
+      }
+      messageFields.remove("annotations");
+      if (!messageFields.isEmpty()) {
+        responseBlocks.add(
+            new ProviderOpaqueBlock("openai_chat_message", blockData(messageFields, true)));
+      }
+    }
+
     ProviderResponse response =
         new ProviderResponse(
-            contentBuilder.toString() + refusalBuilder,
-            reasoningContentBuilder.toString(),
-            Collections.unmodifiableList(toolCalls),
+            responseBlocks,
             stopReason,
             usage,
             messageId,
             serviceTier,
             rawUsageJson,
-            Collections.unmodifiableList(diagnostics));
+            Collections.unmodifiableList(diagnostics),
+            null,
+            null);
 
     ProviderReplayState replayState = null;
     if (canReplay) {
@@ -749,6 +795,43 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     }
 
     return new ProviderCompletion(response, replayState);
+  }
+
+  private ProviderBlockData blockData(ObjectNode nativeFields, boolean replayable) {
+    if (!replayable) {
+      return null;
+    }
+    return new ProviderBlockData(
+        ProviderReplayFormat.OPENAI_CHAT,
+        descriptor.affinity(request.model().modelId()),
+        nativeFields);
+  }
+
+  private ObjectNode toolCallFields(ProviderToolCall call) {
+    for (ToolCallBuilder builder : toolCallBuilders.values()) {
+      if (!call.id().equals(builder.id())) {
+        continue;
+      }
+      JsonNode nativeCall = nativeToolCall(builder.wireIndex());
+      if (nativeCall == null || !nativeCall.isObject()) {
+        return NODES.objectNode();
+      }
+      ObjectNode fields = (ObjectNode) nativeCall.deepCopy();
+      fields.remove("index");
+      fields.remove("id");
+      fields.remove("type");
+      JsonNode functionValue = fields.remove("function");
+      if (functionValue != null && functionValue.isObject()) {
+        ObjectNode function = (ObjectNode) functionValue.deepCopy();
+        function.remove("name");
+        function.remove("arguments");
+        if (!function.isEmpty()) {
+          fields.set("function", function);
+        }
+      }
+      return fields;
+    }
+    return NODES.objectNode();
   }
 
   private static final class ToolCallBuilder {
