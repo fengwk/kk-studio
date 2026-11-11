@@ -51,8 +51,12 @@ func TestCanonicalDirectory(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if got, err := CanonicalDirectory(link); err != nil || got != dir {
-		t.Fatalf("CanonicalDirectory(%q) = %q, %v", link, got, err)
+	want, err := CanonicalDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := CanonicalDirectory(link); err != nil || got != want {
+		t.Fatalf("CanonicalDirectory(%q) = %q, want %q, err %v", link, got, want, err)
 	}
 	if _, err := CanonicalDirectory("relative"); err == nil {
 		t.Fatal("relative path accepted")
@@ -134,6 +138,18 @@ func TestHostHome(t *testing.T) {
 
 // IDE-T-139
 func TestListingLimits(t *testing.T) {
+	var names []string
+	truncated := false
+	for i := 1000; i >= 0; i-- {
+		names, truncated = insertDirectoryName(names, fmt.Sprintf("%04d", i))
+	}
+	last := ""
+	if len(names) > 0 {
+		last = names[len(names)-1]
+	}
+	if len(names) != 1000 || !truncated || last != "0999" {
+		t.Fatalf("name count limit: last=%q count=%d truncated=%v", last, len(names), truncated)
+	}
 	root, err := os.MkdirTemp(os.TempDir(), "i")
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +161,7 @@ func TestListingLimits(t *testing.T) {
 		}
 	}
 	listing, err := ListDirectories(root)
-	if err != nil || len(listing.Children) != 1000 || !listing.Truncated {
+	if err != nil || len(listing.Children) == 0 || len(listing.Children) > 1000 || !listing.Truncated {
 		t.Fatalf("entry limit: children=%d truncated=%v err=%v", len(listing.Children), listing.Truncated, err)
 	}
 	root = t.TempDir()
@@ -226,7 +242,7 @@ func TestRecoveryFilesystemFailure(t *testing.T) {
 	if err := os.WriteFile(recovery, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/work", CreatedAt: "now", Documents: []RecoveryDocument{}}
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{}}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err == nil || err.Error() != "recovery directory is unavailable" {
 		t.Fatalf("write failure = %v", err)
 	}
@@ -248,7 +264,7 @@ func TestDanglingRecoveryEntry(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "missing"), filepath.Join(dir, "dangling.json")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/work", CreatedAt: "now", Documents: []RecoveryDocument{}}
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{}}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err == nil || !strings.HasPrefix(err.Error(), "recovery quota could not be measured:") {
 		t.Fatalf("dangling entry error = %v", err)
 	}
@@ -257,7 +273,7 @@ func TestDanglingRecoveryEntry(t *testing.T) {
 // IDE-T-145
 func TestRecoveryAggregateQuota(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
-	first := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/work", CreatedAt: "now", Documents: []RecoveryDocument{}}
+	first := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{}}
 	second := first
 	second.ViewID = "123e4567-e89b-12d3-a456-426614174001"
 	bytes, err := WriteRecoveryBackup(cfg, first, 4096)
@@ -296,7 +312,7 @@ func TestCorruptRecoveryVariants(t *testing.T) {
 // IDE-T-149
 func TestRecoveryWriteAndReadLimits(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
-	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/work", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "/work/file", Text: "unsaved"}}}
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "file"), Text: "unsaved"}}}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +343,7 @@ func TestRecoveryWriteAndReadLimits(t *testing.T) {
 // IDE-T-151
 func TestPrivateRecoveryBudget(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
-	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/work", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "/work/file", Text: "unsaved"}}}
+	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "file"), Text: "unsaved"}}}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)
 	}
@@ -350,8 +366,8 @@ func TestRecoveryRoundTrip(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	backup := RecoveryBackup{
 		ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1",
-		Directory: "/work", CreatedAt: "2025-01-01T00:00:00Z", Complete: true,
-		Documents: []RecoveryDocument{{Path: "/work/a.go", Text: "unsaved"}},
+		Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "2025-01-01T00:00:00Z", Complete: true,
+		Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "a.go"), Text: "unsaved"}},
 	}
 	if _, err := WriteRecoveryBackup(cfg, backup, 1024); err != nil {
 		t.Fatal(err)

@@ -137,18 +137,9 @@ func ListDirectories(input string) (DirectoryListing, error) {
 			listing.Truncated = true
 			continue
 		}
-		index := sort.SearchStrings(names, name)
-		if index >= 1000 {
-			listing.Truncated = true
-			continue
-		}
-		names = append(names, "")
-		copy(names[index+1:], names[index:])
-		names[index] = name
-		if len(names) > 1000 {
-			names = names[:1000]
-			listing.Truncated = true
-		}
+		var truncated bool
+		names, truncated = insertDirectoryName(names, name)
+		listing.Truncated = listing.Truncated || truncated
 	}
 	encoded, _ := json.Marshal(listing)
 	budget := len(encoded)
@@ -163,6 +154,20 @@ func ListDirectories(input string) (DirectoryListing, error) {
 		listing.Children = append(listing.Children, entry)
 	}
 	return listing, nil
+}
+
+func insertDirectoryName(names []string, name string) ([]string, bool) {
+	index := sort.SearchStrings(names, name)
+	if index >= 1000 {
+		return names, true
+	}
+	names = append(names, "")
+	copy(names[index+1:], names[index:])
+	names[index] = name
+	if len(names) > 1000 {
+		return names[:1000], true
+	}
+	return names, false
 }
 
 // WorkspaceFileContent returns the single-folder workspace JSON written for a view.
