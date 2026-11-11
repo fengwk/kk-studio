@@ -316,6 +316,94 @@ describe('ToolMessageBlock shell', () => {
   })
 })
 
+describe.each(['bash', 'mcp__server__tool'])('ToolMessageBlock empty regions: %s', (toolName) => {
+  it.each([
+    ['preparing', { phase: 'call', status: 'streaming' }],
+    ['queued', { phase: 'call', invocationStatus: 'READY' }],
+    ['running', { phase: 'call', status: 'streaming', invocationStatus: 'RUNNING' }],
+    ['succeeded', { phase: 'result', invocationStatus: 'SUCCEEDED' }],
+  ] as const)('omits empty preview and body while %s', (_state, overrides) => {
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName, rendererKey: toolName, ...overrides,
+    })} />)
+
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
+    expect(container.querySelector('.thread-tool-pre')).toBeNull()
+  })
+
+  it('adds the preview only when partial output arrives and removes it for an empty final result', () => {
+    const call = message({
+      phase: 'call', status: 'streaming', invocationStatus: 'RUNNING',
+      toolName, rendererKey: toolName,
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={call} />)
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+
+    const output = 'first\n\nlast\n'
+    rerender(<ToolMessageBlock message={{ ...call, partialContents: [text(output)] }} />)
+    expect(container.querySelector('.thread-disclosure-preview')).not.toBeNull()
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe('first\n\nlast')
+
+    rerender(<ToolMessageBlock
+      message={{ ...call, partialContents: [text(output)] }}
+      result={message({ toolName, rendererKey: toolName, contents: [text('')] })}
+    />)
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
+    expect(container.querySelector('.thread-tool-pre')).toBeNull()
+  })
+
+  it('does not keep an empty preview after the user has expanded the output', async () => {
+    const result = message({
+      toolName, rendererKey: toolName,
+      contents: [text(Array.from({ length: 12 }, (_, index) => `line-${index}`).join('\n'))],
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={result} />)
+    await userEvent.click(expandButton()!)
+    expect(collapseButton()).toBeInTheDocument()
+
+    rerender(<ToolMessageBlock message={{ ...result, contents: [text('')] }} />)
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
+    expect(container.querySelector('.thread-tool-pre')).toBeNull()
+  })
+})
+
+describe('ToolMessageBlock nonempty content', () => {
+  it('does not keep an empty body after expanded read output is cleared', async () => {
+    const result = message({ contents: [text('result text')] })
+    const { container, rerender } = render(<ToolMessageBlock message={result} />)
+    await userEvent.click(expandButton()!)
+    expect(container.querySelector('.thread-disclosure-body')).toHaveTextContent('result text')
+
+    rerender(<ToolMessageBlock message={{ ...result, contents: [text('')] }} />)
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
+    expect(container.querySelector('.thread-tool-pre')).toBeNull()
+  })
+
+  it.each([false, 0, null])('keeps JSON %s visible', (value) => {
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'bash', rendererKey: 'bash', contents: [json(value)],
+    })} />)
+    expect(container.querySelector('.thread-disclosure-preview')).not.toBeNull()
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(String(value))
+  })
+
+  it('omits empty text items without changing resources or real output whitespace', async () => {
+    const output = '  first\n\nlast\n'
+    const { container } = render(<ToolMessageBlock message={message({
+      contents: [text(''), resource({ name: 'output.bin' }), text(output), text('')],
+    })} />)
+    await userEvent.click(expandButton()!)
+
+    expect(container.querySelectorAll('.thread-tool-output')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(output)
+    expect(container.querySelector('.thread-tool-resource')).toHaveTextContent('output.bin')
+  })
+})
+
 describe('ToolMessageBlock failures', () => {
   it('keeps the failure block visible while collapsed, truncates it to three lines, and never repeats it in the body', async () => {
     const user = userEvent.setup()

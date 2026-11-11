@@ -107,10 +107,11 @@ export function ToolMessageBlock({
     && joinTextContents(view.contents.filter((content) => content.type === 'text')).trim() === errorTrimmed
   // 失败原文被错误块完整承载时，不再在正文中重复同一段文本；bash 的失败说明
   // 通常在输出末尾，由尾部窗口直接显示，因此只在可见输出不含错误时补错误块。
-  const contents = errorTrimmed !== '' && !isBash
+  const contents = (errorTrimmed !== '' && !isBash
     ? view.contents.filter((content) =>
       !(content.type === 'text' && (errorIsOutput || content.text.trim() === errorTrimmed)))
-    : view.contents
+    : view.contents)
+    .filter((content) => content.type !== 'text' || content.text !== '')
   const split = splitContents(contents)
   const text = showTextPreview ? joinTextContents(split.text) : ''
   // bash 的失败原文常常就是整份输出：收起和展开都只显示一次输出，而非重复错误块。
@@ -177,8 +178,9 @@ export function ToolMessageBlock({
           ) : null}
         </DisclosureHint>
       )
-      if (textWindow.text === '' && quota.preview !== 0) {
-        // 空文本不渲染空 pre，但仍保留隐藏行提示（字符上限截断时）。
+      if (textWindow.text === '' && quota.preview !== 0
+        && (textWindow.hiddenLines > 0 || textWindow.truncated)) {
+        // 只有实际隐藏的内容才保留提示，空输出不创建 preview 区域。
         mainPreview.push(textHint)
       } else if (textWindow.text !== '') {
         mainPreview.push(<span key="text-preview" className="thread-tool-text-preview">{textHint}</span>)
