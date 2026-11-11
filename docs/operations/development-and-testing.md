@@ -547,8 +547,8 @@ system 很短，两组都保留其固定的 ephemeral 标记。
 [real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 的 `idSuffix`：
 `google_gemini`、`openai_responses`、`minimax_anthropic`（默认）、`deepseek_chat`。非法取值在 case
 开始前直接失败，不自动 fallback、不改 provider identity，实际选择写入 case artifact。该选项只让这两个
-内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*`、
-`real.reasoning_levels.*`、`real.tool.*` 仍按各自 provider 运行）。
+内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*` 与
+`real.reasoning_levels.*` 仍按各自 provider 运行）。
 
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、

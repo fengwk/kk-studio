@@ -270,7 +270,7 @@ registerCase({
   id: 'chat.attachment_inline_image',
   level: 'L1',
   requires: ['canvas-storage'],
-  title: '本地 Blob 图片内联且现有 Thread 使用最新 Agent 工具',
+  title: '本地 Blob 图片在模型请求中内联',
   docs: '本地 OpenAI Responses mock：第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
