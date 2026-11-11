@@ -278,7 +278,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     return new ThreadProcessor(
         store,
         builtinRegistry(store, resolver),
-        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
+        new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   private static HarnessStore latchingTreeLockStore(

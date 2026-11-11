@@ -232,8 +232,8 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
                         resyncs.incrementAndGet();
                         changeHandler.onResync();
                       })),
-              LOOP_POLL_INTERVAL,
-              LOOP_RECONNECT_BACKOFF);
+              () -> LOOP_POLL_INTERVAL,
+              () -> LOOP_RECONNECT_BACKOFF);
     }
 
     private void start() {

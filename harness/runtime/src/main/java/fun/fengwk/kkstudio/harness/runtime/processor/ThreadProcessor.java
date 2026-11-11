@@ -166,6 +166,7 @@ public final class ThreadProcessor {
       throw new IllegalArgumentException(
           "ThreadProcessor requires a THREAD work claim, got " + claim.target());
     }
+    Duration resolveFailureDelay = config.resolveFailureDelayProvider().get();
     UUID threadId = claim.target().id();
     UUID token = claim.leaseToken();
     if (!claimOwned(claim)) {
@@ -185,7 +186,7 @@ public final class ThreadProcessor {
           "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
           threadId,
           transientFailure);
-      return rescheduleIfOwned(claim, config.resolveFailureDelay())
+      return rescheduleIfOwned(claim, resolveFailureDelay)
           ? ThreadProcessResult.RESCHEDULED
           : ThreadProcessResult.LOST_OWNERSHIP;
     } finally {

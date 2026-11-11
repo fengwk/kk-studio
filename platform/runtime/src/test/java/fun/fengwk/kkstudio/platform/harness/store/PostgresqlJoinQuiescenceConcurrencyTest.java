@@ -307,7 +307,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     return new ThreadProcessor(
         targetStore,
         builtinRegistry(targetStore, resolver),
-        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
+        new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   private void insertSucceededModel(

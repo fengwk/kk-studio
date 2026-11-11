@@ -101,7 +101,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
             recording,
             new DriverRegistry(
                 List.of(HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
-            new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, () -> COMPACTION_CONFIG));
+            new ThreadProcessorConfig(() -> RESOLVE_FAILURE_DELAY, () -> COMPACTION_CONFIG));
 
     assertEquals(
         ThreadProcessResult.COMPLETED,

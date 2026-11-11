@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.spi.work.ClaimedExecutionSupport;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -80,6 +81,10 @@ public final class ToolProcessor implements AutoCloseable {
   private final Executor heartbeatWorker;
   private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final ClaimedExecutionSupport<ToolExecution> executions;
+  private final ThreadLocal<ProcessorDelaySnapshot> currentDelays = new ThreadLocal<>();
+
+  private record ProcessorDelaySnapshot(
+      ProcessorLeaseConfig leaseConfig, Duration preflightFailure, Duration admitFailure) {}
 
   public ToolProcessor(
       HarnessStore store,
@@ -103,8 +108,7 @@ public final class ToolProcessor implements AutoCloseable {
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer =
         Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
-    this.executions =
-        new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL, config.leaseConfig());
+    this.executions = new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL);
   }
 
   /**
@@ -116,6 +120,36 @@ public final class ToolProcessor implements AutoCloseable {
    * @return 启动为 STARTED，重排为 RESCHEDULED，已收敛为 TERMINATED，失权或重复投递为 LOST_OWNERSHIP
    */
   public ProcessResult process(ClaimedWork claim) {
+    ProcessorDelaySnapshot previous = currentDelays.get();
+    currentDelays.set(
+        new ProcessorDelaySnapshot(
+            config.leaseConfigProvider().get(),
+            config.preflightFailureDelayProvider().get(),
+            config.admitFailureDelayProvider().get()));
+    try {
+      return processClaimedWork(claim);
+    } finally {
+      if (previous == null) {
+        currentDelays.remove();
+      } else {
+        currentDelays.set(previous);
+      }
+    }
+  }
+
+  private Duration preflightFailureDelay() {
+    ProcessorDelaySnapshot snapshot = currentDelays.get();
+    return snapshot == null
+        ? config.preflightFailureDelayProvider().get()
+        : snapshot.preflightFailure();
+  }
+
+  private Duration admitFailureDelay() {
+    ProcessorDelaySnapshot snapshot = currentDelays.get();
+    return snapshot == null ? config.admitFailureDelayProvider().get() : snapshot.admitFailure();
+  }
+
+  private ProcessResult processClaimedWork(ClaimedWork claim) {
     ClaimAdmissionGuard.Ticket<ToolExecution> ticket = executions.admit(claim);
     if (ticket == null) {
       return ProcessResult.LOST_OWNERSHIP;
@@ -123,7 +157,9 @@ public final class ToolProcessor implements AutoCloseable {
     try (ticket) {
       Prepare prepare;
       try {
-        prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
+        prepare =
+            store.transaction(
+                tx -> prepareLocked(tx, claim, tx.now(), currentDelays.get().leaseConfig()));
       } catch (ExecutionScopeReadFailure failure) {
         // 事务已完整回滚：工具未执行、也没有任何外部副作用，按 admission 失败路径有界重排。
         return rescheduleScopeReadFailure(claim, failure);
@@ -192,7 +228,11 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /** 按锁序 Thread -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
-  private Prepare prepareLocked(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
+  private Prepare prepareLocked(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      Instant now,
+      ProcessorLeaseConfig leaseConfig) {
     UUID invocationId = claim.target().id();
     ToolInvocation peek = tx.tools().find(invocationId).orElse(null);
     if (peek == null) {
@@ -212,9 +252,9 @@ public final class ToolProcessor implements AutoCloseable {
           "tool invocation " + tool.id() + " changed its thread during preparation");
     }
     return switch (tool.status()) {
-      case READY -> prepareReady(tx, claim, thread, tool);
+      case READY -> prepareReady(tx, claim, thread, tool, leaseConfig);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
-      case RUNNING -> prepareRunning(tx, claim, thread, tool, now);
+      case RUNNING -> prepareRunning(tx, claim, thread, tool, now, leaseConfig);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };
   }
@@ -228,7 +268,11 @@ public final class ToolProcessor implements AutoCloseable {
    * preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
   private Prepare prepareReady(
-      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, ToolInvocation tool) {
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      ToolInvocation tool,
+      ProcessorLeaseConfig leaseConfig) {
     Optional<Work> claimed = tx.work().lockClaimed(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
@@ -237,7 +281,7 @@ public final class ToolProcessor implements AutoCloseable {
       return new Prepare.Input(thread.id());
     }
     // admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    executions.ensureLeaseMargin(tx, claim);
+    executions.ensureLeaseMargin(tx, claim, leaseConfig);
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     // 执行上下文事实只在锁内读取一次：Thread/会话/执行根取自已锁定行，assistant 分支与媒体能力取该调用的冻结依据。
@@ -338,7 +382,8 @@ public final class ToolProcessor implements AutoCloseable {
       ClaimedWork claim,
       ThreadState thread,
       ToolInvocation tool,
-      Instant now) {
+      Instant now,
+      ProcessorLeaseConfig leaseConfig) {
     if (tool.binding().environmentId() != null) {
       List<ExecutionExitFact> remotes = tx.exits().loadRemote(tool.id(), tool.attempt());
       if (remotes.size() == 1) {
@@ -349,7 +394,7 @@ public final class ToolProcessor implements AutoCloseable {
           if (claimed.isEmpty()) {
             return new Prepare.Lost();
           }
-          executions.ensureLeaseMargin(tx, claim);
+          executions.ensureLeaseMargin(tx, claim, leaseConfig);
           ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
           // 挂接只连接既有远端执行，不复用 admission 资源、也不使用执行上下文事实：这里不读取分支 / TURN_START / 执行根。
           return new Prepare.Reattach(thread.id(), tool.attempt(), request, remoteFact);
@@ -546,10 +591,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   private ProcessResult bouncePreflight(ClaimedWork claim, Prepare.Preflight preflight) {
     return reschedule(
-            claim,
-            preflight.scope().threadId(),
-            preflight.attempt(),
-            config.preflightFailureDelay())
+            claim, preflight.scope().threadId(), preflight.attempt(), preflightFailureDelay())
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
@@ -579,7 +621,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (execution != null) {
       if (executions.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
         // Allow 意图提交后 close / cancel 获胜：不 admit，保持 READY 并重排。
-        return rescheduleResult(claim, dispatched, config.admitFailureDelay());
+        return rescheduleResult(claim, dispatched, admitFailureDelay());
       }
       return admitAndRun(claim, dispatched, execution, ticket);
     }
@@ -722,7 +764,7 @@ public final class ToolProcessor implements AutoCloseable {
         "tool execution scope read failed for invocation {}: {}",
         claim.target().id(),
         ProcessorExceptions.describe(failure.getCause()));
-    return reschedule(claim, failure.threadId(), failure.attempt(), config.admitFailureDelay())
+    return reschedule(claim, failure.threadId(), failure.attempt(), admitFailureDelay())
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
@@ -744,7 +786,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
-          ? rescheduleResult(claim, dispatched, config.admitFailureDelay())
+          ? rescheduleResult(claim, dispatched, admitFailureDelay())
           : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
@@ -753,7 +795,7 @@ public final class ToolProcessor implements AutoCloseable {
           || !execution.startHeartbeat()
           || execution.abandoned()
           || ticket.isSuperseded()) {
-        return rescheduleResult(claim, dispatched, config.admitFailureDelay());
+        return rescheduleResult(claim, dispatched, admitFailureDelay());
       }
       ProcessResult outcome = admitAndRun(claim, dispatched, execution, ticket);
       if (outcome == ProcessResult.STARTED) {
@@ -790,12 +832,12 @@ public final class ToolProcessor implements AutoCloseable {
           "tool admission failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
-      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
+      return rescheduleResult(claim, dispatched, admitFailureDelay());
     }
     if (admission == null) {
       // 契约违反：admission 结果未知但无副作用，按 admitFailureDelay 重排。
       log.warn("tool admission returned null for invocation {}", invocationId);
-      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
+      return rescheduleResult(claim, dispatched, admitFailureDelay());
     }
     return switch (admission) {
       case ToolGateway.Admitted admitted -> {
@@ -806,7 +848,7 @@ public final class ToolProcessor implements AutoCloseable {
           } catch (RuntimeException failure) {
             log.warn("cannot release tool run resources for {}", invocationId, failure);
           }
-          yield rescheduleResult(claim, dispatched, config.admitFailureDelay());
+          yield rescheduleResult(claim, dispatched, admitFailureDelay());
         }
         yield execution.start(admitted.run());
       }
@@ -834,7 +876,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
-          ? rescheduleReattachResult(claim, reattach, config.admitFailureDelay())
+          ? rescheduleReattachResult(claim, reattach, admitFailureDelay())
           : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
@@ -843,7 +885,7 @@ public final class ToolProcessor implements AutoCloseable {
           || !execution.startHeartbeat()
           || execution.abandoned()
           || ticket.isSuperseded()) {
-        return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+        return rescheduleReattachResult(claim, reattach, admitFailureDelay());
       }
       ProcessResult outcome = reattachAndRun(claim, reattach, execution, ticket);
       if (outcome == ProcessResult.STARTED) {
@@ -880,13 +922,13 @@ public final class ToolProcessor implements AutoCloseable {
           "tool reattach unavailable for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(unavailable));
-      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+      return rescheduleReattachResult(claim, reattach, admitFailureDelay());
     } catch (RuntimeException failure) {
       log.warn(
           "tool reattach failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
-      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+      return rescheduleReattachResult(claim, reattach, admitFailureDelay());
     }
     if (execution.abandoned() || ticket.isSuperseded()) {
       try {
@@ -894,7 +936,7 @@ public final class ToolProcessor implements AutoCloseable {
       } catch (RuntimeException failure) {
         log.warn("cannot release tool run resources for {}", invocationId, failure);
       }
-      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+      return rescheduleReattachResult(claim, reattach, admitFailureDelay());
     }
     return execution.startReattach(run, reattach.remoteFact());
   }
@@ -927,6 +969,17 @@ public final class ToolProcessor implements AutoCloseable {
         : ProcessResult.LOST_OWNERSHIP;
   }
 
+  private ToolProcessorConfig executionConfig() {
+    ProcessorDelaySnapshot snapshot =
+        Objects.requireNonNull(currentDelays.get(), "processor settings snapshot");
+    return new ToolProcessorConfig(
+        () -> snapshot.leaseConfig(),
+        config.retryPolicyProvider(),
+        config.preflightFailureDelayProvider(),
+        config.admitFailureDelayProvider(),
+        config.reattachWindow());
+  }
+
   private ToolExecution newExecution(
       ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
     return new ToolExecution(
@@ -936,7 +989,7 @@ public final class ToolProcessor implements AutoCloseable {
         threadId,
         attempt,
         request,
-        config,
+        executionConfig(),
         clock,
         scheduler,
         heartbeatWorker,

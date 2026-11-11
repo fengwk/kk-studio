@@ -2491,6 +2491,22 @@ class EnvironmentDaemonServerTest {
     assertThrows(NullPointerException.class, () -> fixture.server.open(admitted, null, null));
   }
 
+  /** 测试意图：在线 Daemon 在系统设置更新后收到新的 SETTINGS。 */
+  @Test
+  void systemSettingsChangeResendsSettingsToConnectedDaemon() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-live-settings");
+    fixture.updateSettings(300L, 30L);
+
+    fixture.server.resyncSettings();
+
+    assertEquals(2L, channel.countOf(MessageType.SETTINGS));
+    assertEquals(
+        300L,
+        channel.lastEnvelope().getSettings().getResourceBudgets().getTemporaryResourceTtlSeconds());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
   /** 测试意图：会话设置每次判定现读，心跳超时变更立即生效。 */
   @Test
   void settingsAreReadOnEveryDecision() {

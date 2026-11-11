@@ -1361,7 +1361,7 @@ public final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               targetStore,
               registry,
-              new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, configProvider));
+              new ThreadProcessorConfig(() -> RESOLVE_FAILURE_DELAY, configProvider));
     }
 
     /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */
