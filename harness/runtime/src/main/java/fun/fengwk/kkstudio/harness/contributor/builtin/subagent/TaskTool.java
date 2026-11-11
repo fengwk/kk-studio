@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHistoryRenderers;
+import fun.fengwk.kkstudio.harness.runtime.SpawnQuotaExceededException;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
@@ -40,6 +41,10 @@ import java.util.function.Consumer;
 public final class TaskTool implements Tool {
 
   public static final String NAME = "task";
+
+  /** 并发额度满：没有创建子执行，模型可在之后的批次重试。 */
+  private static final String QUOTA_EXCEEDED =
+      "not started: the subagent concurrency limit is reached; retry in a later batch";
 
   /** task 失败的统一下一步：明确列继续既有子线程所需的 thread_id/subagent_type/prompt，不构成重试倾向建议。 */
   private static final String TASK_CONTINUATION_NEXT_ACTION =
@@ -109,17 +114,14 @@ public final class TaskTool implements Tool {
                   progress.accept(running(callId, taskRequest.subagentType(), acceptance)));
       return new ToolOutcome(result(callId, taskRequest.subagentType(), taskResult));
     } catch (RuntimeException failure) {
-      String detail = message(failure);
-      if (detail.contains("subagent concurrency quota exceeded")
-          || detail.contains("parent join quota exceeded")) {
-        detail = "not started: the subagent concurrency limit is reached; retry in a later batch";
-        return new ToolOutcome(error(callId, detail));
+      if (quotaExceeded(failure)) {
+        return new ToolOutcome(error(callId, QUOTA_EXCEEDED));
       }
       return new ToolOutcome(
           error(
               callId,
               ToolErrorGuidance.message(
-                  detail, ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
+                  message(failure), ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
     }
   }
 
@@ -256,6 +258,16 @@ public final class TaskTool implements Tool {
   private static String message(Throwable error) {
     String detail = error.getMessage();
     return detail == null || detail.isBlank() ? error.getClass().getSimpleName() : detail;
+  }
+
+  /** 额度满时没有创建任何子执行，可以明确告知模型稍后重试；准入异常可能被调用链包装，因此沿 cause 链判断。 */
+  private static boolean quotaExceeded(Throwable failure) {
+    for (Throwable current = failure; current != null; current = current.getCause()) {
+      if (current instanceof SpawnQuotaExceededException) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static TaskRejectedException reject(String message) {

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.runtime.SpawnQuotaExceededException;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -32,7 +33,6 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -195,12 +195,14 @@ class TaskToolTest {
     assertTrue(text(result).contains("without a final answer"));
   }
 
+  /** 额度满由类型判定（可被调用链包装），不依赖异常文本。 */
   @Test
   void concurrencyLimitReturnsExplicitNotStartedError() {
     TaskTool tool =
         new TaskTool(
             (request, async, accepted) -> {
-              throw new RejectedExecutionException("subagent concurrency quota exceeded");
+              throw new IllegalStateException(
+                  "admission failed", new SpawnQuotaExceededException("any wording"));
             });
 
     ToolResult result = execute(tool);

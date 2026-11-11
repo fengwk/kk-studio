@@ -58,7 +58,7 @@ final class SpawnTickets {
                 - replacedQuotaJoins(tx, childId, parentId)
                 + 1;
         if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
-          throw new IllegalArgumentException("parent join quota exceeded");
+          throw new SpawnQuotaExceededException("parent join quota exceeded");
         }
       }
     }
@@ -72,7 +72,7 @@ final class SpawnTickets {
       int projectedGlobal =
           tx.joins().countIncompleteSubagent() - replacedQuotaJoins(tx, childId, parentId) + 1;
       if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
-        throw new IllegalArgumentException("subagent concurrency quota exceeded");
+        throw new SpawnQuotaExceededException("subagent concurrency quota exceeded");
       }
     }
   }
