@@ -33,7 +33,6 @@ class HarnessCatalogTest {
     assertTrue(catalog.descriptors().isEmpty());
     assertTrue(catalog.tools().isEmpty());
     assertTrue(catalog.selectableTools().isEmpty());
-    assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "state").isEmpty());
     assertTrue(catalog.findTool("bash").isEmpty());
     assertTrue(catalog.findTool(new ContributionId(new ContributorId("core"), "bash")).isEmpty());
   }
@@ -132,15 +131,11 @@ class HarnessCatalogTest {
                     HarnessContributor.of(second, r -> {}))));
   }
 
-  /** 验证注册统一 Tool 与 Custom Entry，及其多维索引查询。 */
+  /** 验证注册统一 Tool 及其多维索引查询。 */
   @Test
   void registersAndIndexesAllContributionTypes() {
     Tool plainTool = dummyTool("plain_tool", ToolRequirements.none());
-    Tool stateTool =
-        dummyTool(
-            "state_tool",
-            new ToolRequirements(
-                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.READ))));
+    Tool internalTool = dummyTool("internal_tool", ToolRequirements.none());
     Tool envTool = dummyTool("env_tool", ToolRequirements.environment());
 
     ContributorDescriptor desc =
@@ -150,9 +145,8 @@ class HarnessCatalogTest {
         HarnessContributor.of(
             desc,
             reg -> {
-              reg.registerCustomEntryType("state-entry", "state", 10);
               reg.registerTool("plain", plainTool, ToolVisibility.SELECTABLE, 5);
-              reg.registerTool("state", stateTool, ToolVisibility.INTERNAL, 3);
+              reg.registerTool("internal", internalTool, ToolVisibility.INTERNAL, 3);
               reg.registerTool("env", envTool, ToolVisibility.SELECTABLE, 1);
             });
 
@@ -166,16 +160,15 @@ class HarnessCatalogTest {
     assertEquals(2, catalog.selectableTools().size());
 
     ContributionId plainId = new ContributionId(new ContributorId("core"), "plain");
-    ContributionId stateId = new ContributionId(new ContributorId("core"), "state");
+    ContributionId internalId = new ContributionId(new ContributorId("core"), "internal");
     ContributionId envId = new ContributionId(new ContributorId("core"), "env");
 
     ToolContribution plainContrib = catalog.findTool(plainId).orElseThrow();
     assertEquals(plainTool, plainContrib.tool());
     assertEquals(ToolRequirements.none(), plainContrib.requirements());
 
-    ToolContribution stateContrib = catalog.findTool(stateId).orElseThrow();
-    assertEquals(stateTool, stateContrib.tool());
-    assertEquals(1, stateContrib.requirements().stateAccesses().size());
+    ToolContribution internalContrib = catalog.findTool(internalId).orElseThrow();
+    assertEquals(internalTool, internalContrib.tool());
 
     ToolContribution envContrib = catalog.findTool(envId).orElseThrow();
     assertEquals(envTool, envContrib.tool());
@@ -183,14 +176,8 @@ class HarnessCatalogTest {
 
     // 验证按模型可见 name 查询
     assertSame(plainContrib, catalog.findTool("plain_tool").orElseThrow());
-    assertSame(stateContrib, catalog.findTool("state_tool").orElseThrow());
+    assertSame(internalContrib, catalog.findTool("internal_tool").orElseThrow());
     assertSame(envContrib, catalog.findTool("env_tool").orElseThrow());
-
-    // 验证 custom entry types
-    assertEquals(
-        new ContributionId(new ContributorId("core"), "state-entry"),
-        catalog.findCustomEntryType(new ContributorId("core"), "state").orElseThrow().id());
-    assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "other").isEmpty());
   }
 
   /** 验证 tools 排序：requires 偏序优先，然后 priority 降序，然后 ContributionId 字典序。 */
@@ -287,40 +274,6 @@ class HarnessCatalogTest {
                     ToolVisibility.SELECTABLE));
 
     assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(c1, c2)));
-  }
-
-  /** 验证同一 contributor 内重复注册 customType 抛出异常。 */
-  @Test
-  void rejectsDuplicateCustomEntryTypeInSameContributor() {
-    ContributorDescriptor desc =
-        new ContributorDescriptor(new ContributorId("core"), "Core", "1.0", Set.of());
-    HarnessContributor contrib =
-        HarnessContributor.of(
-            desc,
-            reg -> {
-              reg.registerCustomEntryType("s1", "state");
-              reg.registerCustomEntryType("s2", "state");
-            });
-
-    assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(contrib)));
-  }
-
-  /** 验证 Tool 声明访问本 contributor 未注册的 customType 时拒绝。 */
-  @Test
-  void rejectsToolAccessingUnregisteredState() {
-    ContributorDescriptor desc =
-        new ContributorDescriptor(new ContributorId("core"), "Core", "1.0", Set.of());
-    Tool tool =
-        dummyTool(
-            "state_tool",
-            new ToolRequirements(
-                EnvironmentSupport.NONE,
-                List.of(new StateDeclaration("unregistered-state", StateMode.READ))));
-
-    HarnessContributor contrib =
-        HarnessContributor.of(desc, reg -> reg.registerTool("t", tool, ToolVisibility.SELECTABLE));
-
-    assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(contrib)));
   }
 
   /** 验证在 contribute 范围外调用 registrar 抛出 IllegalStateException。 */

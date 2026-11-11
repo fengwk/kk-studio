@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
@@ -38,7 +37,6 @@ import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -93,10 +91,7 @@ class HarnessRuntimeStopToolTest {
     markRunningTool(store, ids.get(3));
     approveTool(store, ids.get(4));
     markRunningTool(store, ids.get(4));
-    ToolEffectBatch effects =
-        new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", "{\"status\":\"active\"}")));
-    succeedTool(store, ids.get(4), effects);
+    succeedTool(store, ids.get(4));
     cancelTool(store, ids.get(5));
     approveTool(store, ids.get(6));
     markRunningTool(store, ids.get(6));
@@ -114,10 +109,7 @@ class HarnessRuntimeStopToolTest {
     ThreadState stored =
         store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
-    assertEquals(13, path.entries().size());
-    assertEquals(
-        new CustomEntryPayload("goal", "state", "{\"status\":\"active\"}"),
-        path.entries().get(8).payload());
+    assertEquals(12, path.entries().size());
     for (int callIndex = 0; callIndex < ids.size(); callIndex++) {
       Entry entry = path.entries().get(resultEntryIndex(callIndex));
       assertTrue(entry.payload() instanceof MessagePayload);

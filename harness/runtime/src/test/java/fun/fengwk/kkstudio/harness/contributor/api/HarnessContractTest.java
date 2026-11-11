@@ -96,90 +96,40 @@ class HarnessContractTest {
         () -> new ContributorDescriptor(CID, "Name", "1.0", Set.of(CID)));
   }
 
-  /** 验证 StateDeclaration 校验 canonical customType 与模式非空。 */
-  @Test
-  void stateDeclarationValidates() {
-    StateDeclaration decl = new StateDeclaration("goal-state", StateMode.WRITE);
-    assertEquals("goal-state", decl.customType());
-    assertEquals(StateMode.WRITE, decl.mode());
-
-    assertThrows(NullPointerException.class, () -> new StateDeclaration(null, StateMode.READ));
-    assertThrows(NullPointerException.class, () -> new StateDeclaration("state", null));
-    assertThrows(
-        IllegalArgumentException.class, () -> new StateDeclaration("State", StateMode.READ));
-    assertThrows(
-        IllegalArgumentException.class, () -> new StateDeclaration("goal_state", StateMode.READ));
-  }
-
   /**
-   * 验证 ToolRequirements 的环境关系声明、状态访问集合校验与非法组合 fail closed。
+   * 验证 ToolRequirements 的环境关系声明。
    *
    * <p>环境关系只有执行位置语义：{@code NONE} 工具不参与环境绑定，{@code ROUTED} 文件工具按每次调用的参数决定位置，{@code REQUIRED}
    * 工具只能在绑定环境执行。
    */
   @Test
-  void toolRequirementsValidatesAndEnforcesUniqueness() {
+  void toolRequirementsDeclareEnvironmentSupport() {
     ToolRequirements none = ToolRequirements.none();
     assertEquals(EnvironmentSupport.NONE, none.environmentSupport());
-    assertTrue(none.stateAccesses().isEmpty());
 
     ToolRequirements routed = ToolRequirements.routed();
     assertEquals(EnvironmentSupport.ROUTED, routed.environmentSupport());
-    assertTrue(routed.stateAccesses().isEmpty());
 
     ToolRequirements env = ToolRequirements.environment();
     assertEquals(EnvironmentSupport.REQUIRED, env.environmentSupport());
-    assertTrue(env.stateAccesses().isEmpty());
 
-    StateDeclaration read = new StateDeclaration("state.read", StateMode.READ);
-    StateDeclaration write = new StateDeclaration("state.write", StateMode.WRITE);
-    ToolRequirements custom = new ToolRequirements(EnvironmentSupport.NONE, List.of(read, write));
-    assertEquals(EnvironmentSupport.NONE, custom.environmentSupport());
-    assertEquals(List.of(read, write), custom.stateAccesses());
-
-    // 拒绝重复 customType
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolRequirements(
-                EnvironmentSupport.NONE,
-                List.of(
-                    new StateDeclaration("state", StateMode.READ),
-                    new StateDeclaration("state", StateMode.WRITE))));
-
-    // 拒绝 null
-    assertThrows(
-        NullPointerException.class, () -> new ToolRequirements((EnvironmentSupport) null, null));
-    assertThrows(
-        NullPointerException.class, () -> new ToolRequirements(EnvironmentSupport.NONE, null));
+    assertThrows(NullPointerException.class, () -> new ToolRequirements(null));
   }
 
-  /** 验证 ToolOutcome 成功携带 effects、error 拒绝 effects、以及 withoutEffects 工厂。 */
+  /** 验证 ToolOutcome 只携带模型可见结果，error 结果同样合法。 */
   @Test
-  void toolOutcomeValidatesErrorAndEffects() {
+  void toolOutcomeCarriesResultOnly() {
     ToolResult successResult =
         new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}");
     ToolResult errorResult = ToolResult.error("call-1", "failed");
-    AppendCustomEntry entry = new AppendCustomEntry("state", "{}");
 
-    ToolOutcome outcomeWithEffects = new ToolOutcome(successResult, List.of(entry));
-    assertEquals(successResult, outcomeWithEffects.result());
-    assertEquals(List.of(entry), outcomeWithEffects.customEntries());
+    ToolOutcome outcome = new ToolOutcome(successResult);
+    assertEquals(successResult, outcome.result());
 
-    ToolOutcome outcomeWithoutEffects = ToolOutcome.withoutEffects(successResult);
-    assertTrue(outcomeWithoutEffects.customEntries().isEmpty());
-
-    // error 结果不允许携带 custom entries effects
-    assertThrows(
-        IllegalArgumentException.class, () -> new ToolOutcome(errorResult, List.of(entry)));
-
-    // error 结果在无 effects 时合法
-    ToolOutcome validError = ToolOutcome.withoutEffects(errorResult);
+    ToolOutcome validError = new ToolOutcome(errorResult);
     assertTrue(validError.result().error());
-    assertTrue(validError.customEntries().isEmpty());
 
-    assertThrows(NullPointerException.class, () -> new ToolOutcome(null, List.of()));
-    assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
+    assertThrows(NullPointerException.class, () -> new ToolOutcome(null));
   }
 
   /** 验证 ToolExecutionContext 的会话/执行根/assistant 入口/冻结能力快照与完整非空校验。 */
@@ -192,7 +142,6 @@ class HarnessContractTest {
     UUID rootSessionId = UUID.randomUUID();
     UUID assistantEntryId = UUID.randomUUID();
     Instant now = Instant.now();
-    BranchView view = new DummyBranchView();
     TurnMediaCapabilities capabilities = TurnMediaCapabilities.NONE;
     BoundEnvironment env = new DummyBoundEnvironment();
 
@@ -206,7 +155,6 @@ class HarnessContractTest {
             assistantEntryId,
             now,
             capabilities,
-            view,
             Optional.of(env));
     assertEquals(invocationId, ctxWithEnv.invocationId());
     assertEquals(threadId, ctxWithEnv.threadId());
@@ -216,7 +164,6 @@ class HarnessContractTest {
     assertEquals(assistantEntryId, ctxWithEnv.assistantEntryId());
     assertEquals(now, ctxWithEnv.executedAt());
     assertEquals(capabilities, ctxWithEnv.mediaCapabilities());
-    assertEquals(view, ctxWithEnv.branch());
     assertTrue(ctxWithEnv.environment().isPresent());
     assertEquals(env, ctxWithEnv.environment().get());
 
@@ -230,7 +177,6 @@ class HarnessContractTest {
             assistantEntryId,
             now,
             capabilities,
-            view,
             Optional.empty());
     assertFalse(ctxWithoutEnv.environment().isPresent());
 
@@ -247,7 +193,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -261,7 +206,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -275,7 +219,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -289,7 +232,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -303,7 +245,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -317,7 +258,6 @@ class HarnessContractTest {
                 null,
                 now,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -331,7 +271,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 null,
                 capabilities,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -345,7 +284,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 null,
-                view,
                 Optional.empty()));
     assertThrows(
         NullPointerException.class,
@@ -358,7 +296,6 @@ class HarnessContractTest {
                 rootSessionId,
                 assistantEntryId,
                 now,
-                capabilities,
                 null,
                 Optional.empty()));
     assertThrows(
@@ -373,7 +310,6 @@ class HarnessContractTest {
                 assistantEntryId,
                 now,
                 capabilities,
-                view,
                 (Optional<BoundEnvironment>) null));
   }
 
@@ -514,25 +450,8 @@ class HarnessContractTest {
   }
 
   private static ToolOutcome dummyOutcome() {
-    return ToolOutcome.withoutEffects(
+    return new ToolOutcome(
         new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"));
-  }
-
-  private static final class DummyBranchView implements BranchView {
-    @Override
-    public List<CustomStateSnapshot> customEntries(String customType) {
-      return List.of();
-    }
-
-    @Override
-    public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<GoalSnapshot> goal() {
-      return Optional.empty();
-    }
   }
 
   private static final class DummyBoundEnvironment implements BoundEnvironment {

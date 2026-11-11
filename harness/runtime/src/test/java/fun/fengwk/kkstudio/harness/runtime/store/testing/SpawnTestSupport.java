@@ -163,8 +163,7 @@ public final class SpawnTestSupport {
       Ticket ticket) {
     boolean notify = ticket.delivery() == JoinDelivery.NOTIFY_PARENT;
     BranchSettings agentSettings =
-        new BranchSettings(
-            ticket.agent(), settings.execution(), settings.environmentName(), settings.goal());
+        new BranchSettings(ticket.agent(), settings.execution(), settings.environmentName());
     return new SpawnRequest(
         threadId,
         sessionId,

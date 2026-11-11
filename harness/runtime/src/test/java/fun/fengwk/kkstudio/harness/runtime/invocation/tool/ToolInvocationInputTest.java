@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
@@ -71,7 +70,6 @@ class ToolInvocationInputTest {
         attempt,
         approval,
         result,
-        ToolEffectBatch.EMPTY,
         error,
         CREATED,
         CREATED,
@@ -82,7 +80,7 @@ class ToolInvocationInputTest {
   private static ToolBinding askUserBinding() {
     return new ToolBinding(
         new AgentToolDefinition(descriptor("ask_user"), ToolVisibility.SELECTABLE),
-        new ContributorBinding("builtin", "ask-user", List.of()),
+        new ContributorBinding("builtin", "ask-user"),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -266,7 +264,6 @@ class ToolInvocationInputTest {
                     1,
                     ToolApproval.notRequired(),
                     null,
-                    ToolEffectBatch.EMPTY,
                     null,
                     T2,
                     T2)));

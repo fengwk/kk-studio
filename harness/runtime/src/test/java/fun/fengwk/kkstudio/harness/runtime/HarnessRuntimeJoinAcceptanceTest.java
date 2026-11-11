@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
@@ -569,22 +568,8 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   @Test
-  void goalAndCustomMessageInputRecognition() {
-    // 测试意图：验证 typed GOAL 命令与非 SystemReminder 的 CUSTOM_MESSAGE 正确被识别为真实验户输入，
-    // 并支持从 Goal 正文派生初始会话名称。
-    NewThreadCommand goalCmd =
-        new NewThreadCommand(
-            new GoalCommandPayload("custom goal objective text"), TestIds.id(120), HASH);
-    AcceptedCommands goalAccepted =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewRootSession(
-                    TestIds.id(121), TestIds.id(122), settings(), false),
-                List.of(goalCmd)),
-            AcceptancePreflight.IDENTITY);
-    assertEquals("custom goal objective text", goalAccepted.session().name());
-
-    // 非 SystemReminder 的 CUSTOM_MESSAGE
+  void customMessageInputRecognition() {
+    // 测试意图：非 SystemReminder 的 CUSTOM_MESSAGE 被识别为真实验户输入。
     NewThreadCommand customMsgCmd =
         new NewThreadCommand(
             new CustomMessageCommandPayload(AgentMessage.user("normal custom")),
@@ -602,10 +587,9 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   @Test
   void stoppedParentResumesOnTrustedTaskInput() {
-    // 测试意图：STOPPED 父线程接纳可信任务输入（USER / GOAL / CUSTOM_MESSAGE）时在同一事务内恢复 RUNNABLE；恢复只作用于
+    // 测试意图：STOPPED 父线程接纳可信任务输入（USER / CUSTOM_MESSAGE）时在同一事务内恢复 RUNNABLE；恢复只作用于
     // 目标线程，随 Stop 一起暂停的后代保持 STOPPED。每个子用例使用全新 store/runtime，避免全局 subagent 额度跨用例累积。
     assertStoppedParentResumeOutcome(3000, List.of(userMessagePayload("resume")), true);
-    assertStoppedParentResumeOutcome(3010, List.of(new GoalCommandPayload("resume goal")), true);
     assertStoppedParentResumeOutcome(
         3020, List.of(new CustomMessageCommandPayload(AgentMessage.user("plain custom"))), true);
     // 所有 CUSTOM 都是可信输入；系统通知只经 NOTIFICATION Command。

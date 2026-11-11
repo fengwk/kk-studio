@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
@@ -212,44 +211,6 @@ class HistoryEntryPayloadTest {
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 null,
                 CustomMessagePayload.CORE_DETAILS_JSON));
-  }
-
-  @Test
-  void customEntryPayloadValidatesIdentifiersAndCanonicalDataJson() {
-    CustomEntryPayload valid =
-        new CustomEntryPayload("com.example.goal", "goal", "{\"state\":\"open\"}");
-    assertEquals("com.example.goal", valid.contributorId());
-    assertEquals("goal", valid.customType());
-    assertEquals("{\"state\":\"open\"}", valid.dataJson());
-    assertEquals(EntryType.CUSTOM, valid.type());
-
-    assertThrows(NullPointerException.class, () -> new CustomEntryPayload(null, "goal", "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("Goal", "goal", "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "Goal", "{}"));
-    assertThrows(NullPointerException.class, () -> new CustomEntryPayload("goal", "goal", null));
-    // dataJson 必须是 bounded canonical JSON object：非 JSON / 非 object / 非 canonical / 超长都拒绝。
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "[]"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "\"x\""));
-    assertThrows(IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "{"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CustomEntryPayload("goal", "goal", "{\"a\":1} {\"b\":2}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CustomEntryPayload("goal", "goal", "{\"a\":1,\"a\":2}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "{\"a\": 1}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CustomEntryPayload(
-                "goal",
-                "goal",
-                "{\"a\":\"" + "x".repeat(CustomEntryPayload.MAX_DATA_JSON_CHARS) + "\"}"));
   }
 
   @Test
@@ -496,7 +457,7 @@ class HistoryEntryPayloadTest {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
+            new ContributorBinding("core", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
@@ -91,8 +90,8 @@ class ExecutionExitResumeTest {
   }
 
   @Test
-  void stoppedThreadRejectsTrustedCustomAndGoalWhileItsExecutionIsUnconfirmed() {
-    // 测试意图：CUSTOM 与 GOAL 都是可信 user-like 输入，STOPPED + unconfirmed 时同样拒绝恢复且零写入。
+  void stoppedThreadRejectsTrustedCustomWhileItsExecutionIsUnconfirmed() {
+    // 测试意图：CUSTOM 是可信 user-like 输入，STOPPED + unconfirmed 时同样拒绝恢复且零写入。
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntime runtime =
         HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
@@ -108,13 +107,6 @@ class ExecutionExitResumeTest {
             stopped.headEntryId(),
             stopped.nextCommandSequence(),
             userCustomMessageCommand(TestIds.id(10), "custom steer")));
-    assertExitUnconfirmed(
-        runtime,
-        threadCommand(
-            baseline.threadId(),
-            stopped.headEntryId(),
-            stopped.nextCommandSequence(),
-            new NewThreadCommand(new GoalCommandPayload("finish"), TestIds.id(11))));
 
     assertTrue(
         store.<Boolean>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).isEmpty()));
@@ -125,11 +117,9 @@ class ExecutionExitResumeTest {
 
   @Test
   void exactReplayOfAcceptedTrustedInputTakesPrecedenceOverExitCheckAndKeepsStopped() {
-    // 测试意图：已接收的 CUSTOM/GOAL 原样重放先于恢复准入，replayed=true 且不改变 STOPPED/version。
+    // 测试意图：已接收的 CUSTOM 原样重放先于恢复准入，replayed=true 且不改变 STOPPED/version。
     assertReplayKeepsStopped(
         userCustomMessageCommand(TestIds.id(20), "custom steer"), TestIds.id(21));
-    assertReplayKeepsStopped(
-        new NewThreadCommand(new GoalCommandPayload("finish"), TestIds.id(22)), TestIds.id(23));
   }
 
   private static void assertReplayKeepsStopped(

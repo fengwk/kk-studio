@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -38,7 +37,7 @@ final class ToolInvocationTestData {
   static ToolBinding host(String name) {
     return new ToolBinding(
         definition(name),
-        new ContributorBinding("core", name, List.of()),
+        new ContributorBinding("core", name),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -47,7 +46,7 @@ final class ToolInvocationTestData {
   static ToolBinding environment(String name) {
     return new ToolBinding(
         definition(name),
-        new ContributorBinding("base", name, List.of()),
+        new ContributorBinding("base", name),
         EnvironmentSupport.REQUIRED,
         ENV_ID,
         "dev");

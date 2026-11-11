@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
@@ -17,7 +16,6 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
@@ -26,8 +24,6 @@ import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 
 /** 有序 command harvest 归并：YOLO 不经过 mailbox，reducer 只归并 branch settings。 */
 class CommandHarvestReducerTest {
@@ -40,15 +36,9 @@ class CommandHarvestReducerTest {
               "builtin", "{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"),
           null);
 
-  /** 测试用确定性 goal id 分配器：每次调用产生新 id，因此断言到的 id 序列同时证明「每条 typed GOAL 设置恰分配一个新 id」。 */
-  private static Supplier<UUID> goalIds() {
-    AtomicLong sequence = new AtomicLong();
-    return () -> id(1_000L + sequence.incrementAndGet());
-  }
-
   private static BranchSettings reduce(
       UUID threadId, BranchSettings base, List<ThreadCommand> commands) {
-    return new CommandHarvestReducer().reduce(threadId, base, commands, goalIds());
+    return new CommandHarvestReducer().reduce(threadId, base, commands);
   }
 
   @Test
@@ -218,67 +208,5 @@ class CommandHarvestReducerTest {
 
   private static AgentMessage message(AgentMessageRole role, String text) {
     return new AgentMessage(role, List.of(new TextMessageContent(text)));
-  }
-
-  /**
-   * 测试意图：typed GOAL 命令把新目标 id + 正文写入 TURN_START settings 快照，且与同批 SET_* 互不干扰；它不产生任何设置提醒
-   * carrier，模型可见载体是同 turn 的冻结 USER 消息。
-   */
-  @Test
-  void goalCommandWritesSnapshotWithoutTouchingOtherSettings() {
-    BranchSettings result =
-        reduce(
-            id(7L),
-            BASE,
-            List.of(
-                queued(id(1L), 1L, new GoalCommandPayload("ship it")),
-                queued(id(2L), 2L, new SetAgentCommandPayload("agent-a"))));
-
-    assertEquals(new GoalSetting(id(1_001L), "ship it"), result.goal());
-    assertEquals("agent-a", result.agentName());
-    assertEquals(BASE.execution(), result.execution());
-    assertNull(result.environmentName());
-  }
-
-  /** 测试意图：相同文本的再次设置仍是新目标（新 id，先前报告因此失效），清除把 Goal 置回 null；两者都只改 settings。 */
-  @Test
-  void repeatedGoalTextGetsFreshIdAndClearDropsGoal() {
-    BranchSettings first =
-        reduce(id(7L), BASE, List.of(queued(id(1L), 1L, new GoalCommandPayload("same"))));
-    BranchSettings second =
-        reduce(
-            id(7L),
-            first,
-            List.of(
-                queued(id(1L), 2L, new GoalCommandPayload("same")),
-                queued(id(2L), 3L, new GoalCommandPayload(null))));
-
-    assertEquals(new GoalSetting(id(1_001L), "same"), first.goal());
-    assertNull(second.goal());
-    // Goal 的创改不得影响 agent / execution / environment。
-    assertEquals(first.agentName(), second.agentName());
-    assertEquals(first.execution(), second.execution());
-    assertEquals(first.environmentName(), second.environmentName());
-  }
-
-  /** 测试意图：不涉及 GOAL 的命令批次不消耗 goal id，排除「空批也分配 id」这类破坏「设置即新目标」语义的实现。 */
-  @Test
-  void nonGoalCommandsDoNotAllocateGoalIds() {
-    AtomicLong allocations = new AtomicLong();
-    BranchSettings result =
-        new CommandHarvestReducer()
-            .reduce(
-                id(7L),
-                BASE,
-                List.of(
-                    queued(id(1L), 1L, new SetAgentCommandPayload("agent-a")),
-                    queued(id(2L), 2L, new UserMessageCommandPayload(user("hello")))),
-                () -> {
-                  allocations.incrementAndGet();
-                  return id(9_000L);
-                });
-
-    assertEquals("agent-a", result.agentName());
-    assertEquals(0L, allocations.get());
   }
 }

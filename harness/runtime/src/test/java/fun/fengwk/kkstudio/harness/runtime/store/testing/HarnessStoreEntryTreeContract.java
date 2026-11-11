@@ -29,13 +29,11 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
@@ -1106,179 +1104,6 @@ public abstract class HarnessStoreEntryTreeContract {
         NullPointerException.class, () -> store.transaction(tx -> tx.entries().findRoot(null)));
   }
 
-  /** 测试意图：loadContributorCustomEntriesOnPath 覆盖同一路径多个匹配时，严格保持 root-to-head 顺序，且返回不可变列表。 */
-  @Test
-  void loadContributorCustomEntriesOnPathReturnsEntriesInRootToHeadOrder() {
-    Baseline baseline = seedThreadBaseline(store);
-    UUID custom1 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            new CustomEntryPayload("test.contributor", "type.a", "{\"step\":1}"));
-    UUID intermediateCustom =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            custom1,
-            new CustomEntryPayload("other.contributor", "type.x", "{\"skip\":true}"));
-    UUID custom2 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            intermediateCustom,
-            new CustomEntryPayload("test.contributor", "type.b", "{\"step\":2}"));
-
-    store.transaction(
-        tx -> {
-          List<Entry> entries = tx.entries().loadContributorCustom(custom2, "test.contributor");
-          assertEquals(2, entries.size());
-          assertEquals(List.of(custom1, custom2), entries.stream().map(Entry::id).toList());
-          assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
-          return null;
-        });
-  }
-
-  /** 测试意图：loadContributorCustomEntriesOnPath 排除其他 contributor，并排除 sibling 分支上的 custom entry。 */
-  @Test
-  void loadContributorCustomEntriesOnPathExcludesOtherContributorsAndSiblings() {
-    Baseline baseline = seedThreadBaseline(store);
-    UUID sharedAlpha =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            new CustomEntryPayload("contributor.alpha", "state", "{\"common\":true}"));
-    UUID sharedBeta =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            sharedAlpha,
-            new CustomEntryPayload("contributor.beta", "state", "{\"other\":true}"));
-    UUID branch1Alpha =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            sharedBeta,
-            new CustomEntryPayload("contributor.alpha", "state", "{\"branch\":1}"));
-    UUID branch2Alpha =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            sharedBeta,
-            new CustomEntryPayload("contributor.alpha", "state", "{\"branch\":2}"));
-
-    store.transaction(
-        tx -> {
-          List<Entry> branch1AlphaEntries =
-              tx.entries().loadContributorCustom(branch1Alpha, "contributor.alpha");
-          assertEquals(
-              List.of(sharedAlpha, branch1Alpha),
-              branch1AlphaEntries.stream().map(Entry::id).toList());
-
-          List<Entry> branch2AlphaEntries =
-              tx.entries().loadContributorCustom(branch2Alpha, "contributor.alpha");
-          assertEquals(
-              List.of(sharedAlpha, branch2Alpha),
-              branch2AlphaEntries.stream().map(Entry::id).toList());
-
-          List<Entry> branch1BetaEntries =
-              tx.entries().loadContributorCustom(branch1Alpha, "contributor.beta");
-          assertEquals(List.of(sharedBeta), branch1BetaEntries.stream().map(Entry::id).toList());
-          return null;
-        });
-  }
-
-  /** 测试意图：当路径上无匹配 custom entry 时返回空列表，包括 head 为 ROOT 或无任何匹配 contributor 的场景。 */
-  @Test
-  void loadContributorCustomEntriesOnPathReturnsEmptyWhenNoMatches() {
-    Baseline baseline = seedThreadBaseline(store);
-    store.transaction(
-        tx -> {
-          List<Entry> onRoot =
-              tx.entries().loadContributorCustom(baseline.rootEntryId(), "any.contributor");
-          assertTrue(onRoot.isEmpty());
-          assertThrows(UnsupportedOperationException.class, () -> onRoot.add(null));
-          return null;
-        });
-
-    UUID otherCustom =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            new CustomEntryPayload("other.contributor", "state", "{\"ok\":true}"));
-
-    store.transaction(
-        tx -> {
-          List<Entry> onOther =
-              tx.entries().loadContributorCustom(otherCustom, "target.contributor");
-          assertTrue(onOther.isEmpty());
-          return null;
-        });
-  }
-
-  /** 测试意图：unknown head 必须 fail closed，抛出 IllegalArgumentException。 */
-  @Test
-  void loadContributorCustomEntriesOnPathRejectsUnknownHead() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> tx.entries().loadContributorCustom(TestIds.id(99999), "any.contributor")));
-  }
-
-  /** 测试意图：loadContributorCustomEntriesOnPath 拒绝 null headEntryId 与 null contributorId。 */
-  @Test
-  void loadContributorCustomEntriesOnPathRejectsNullArguments() {
-    Baseline baseline = seedThreadBaseline(store);
-    assertThrows(
-        NullPointerException.class,
-        () -> store.transaction(tx -> tx.entries().loadContributorCustom(null, "any.contributor")));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            store.transaction(
-                tx -> tx.entries().loadContributorCustom(baseline.rootEntryId(), null)));
-  }
-
-  /** 测试意图：head 本身为不匹配的 CUSTOM Entry 时只作为 sentinel 参与路径完整性验证，绝不泄漏至结果中。 */
-  @Test
-  void loadContributorCustomEntriesOnPathNonMatchingHeadActsOnlyAsSentinel() {
-    Baseline baseline = seedThreadBaseline(store);
-    UUID targetCustom =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            new CustomEntryPayload("target.contributor", "type", "{\"ok\":true}"));
-    UUID otherHeadCustom =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            targetCustom,
-            new CustomEntryPayload("other.contributor", "type", "{\"other\":true}"));
-
-    store.transaction(
-        tx -> {
-          // 查询 target.contributor：应只包含 targetCustom，不泄漏 head (otherHeadCustom)
-          List<Entry> targetEntries =
-              tx.entries().loadContributorCustom(otherHeadCustom, "target.contributor");
-          assertEquals(List.of(targetCustom), targetEntries.stream().map(Entry::id).toList());
-
-          // 查询第三方 contributor：两者的 entry 均不应泄漏，返回空
-          List<Entry> thirdEntries =
-              tx.entries().loadContributorCustom(otherHeadCustom, "third.contributor");
-          assertTrue(thirdEntries.isEmpty());
-
-          // 查询 other.contributor：此时 head 本身是匹配的，应正确包含 head
-          List<Entry> otherEntries =
-              tx.entries().loadContributorCustom(otherHeadCustom, "other.contributor");
-          assertEquals(List.of(otherHeadCustom), otherEntries.stream().map(Entry::id).toList());
-          return null;
-        });
-  }
-
   /**
    * 测试意图：loadBranchSettings 以 ROOT settings 为基础，被路径上最近的非 COMPACTION TURN_START settings 覆盖，并与
    * EntryPath.baseSettings() 完全一致。
@@ -1286,30 +1111,20 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadBranchSettingsFollowsRootAndLatestTurnStartOnPath() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID firstGoal = TestIds.id(41L);
-    UUID secondGoal = TestIds.id(42L);
     BranchSettings root =
         store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId()));
     assertEquals(branchSettings(), root);
 
     UUID firstTurnEnd =
-        insertClosedInputTurn(
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            T1,
-            goalSettings(firstGoal, "first goal"));
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T1, branchSettings());
     UUID secondTurnEnd =
-        insertClosedInputTurn(
-            baseline.sessionId(), firstTurnEnd, T2, goalSettings(secondGoal, "second goal"));
+        insertClosedInputTurn(baseline.sessionId(), firstTurnEnd, T2, branchSettings());
 
     store.transaction(
         tx -> {
           // 中间节点也命中最近的 TURN_START settings。
-          assertEquals(
-              goalSettings(firstGoal, "first goal"), tx.entries().loadBranchSettings(firstTurnEnd));
-          assertEquals(
-              goalSettings(secondGoal, "second goal"),
-              tx.entries().loadBranchSettings(secondTurnEnd));
+          assertEquals(branchSettings(), tx.entries().loadBranchSettings(firstTurnEnd));
+          assertEquals(branchSettings(), tx.entries().loadBranchSettings(secondTurnEnd));
           return null;
         });
   }
@@ -1318,16 +1133,14 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadBranchSettingsSkipsCompactionTurnStart() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID goal = TestIds.id(43L);
     UUID inputTurnEnd =
-        insertClosedInputTurn(
-            baseline.sessionId(), baseline.rootEntryId(), T1, goalSettings(goal, "user goal"));
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T1, branchSettings());
 
     UUID compactionTurnStart =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              BranchSettings compactionSettings = goalSettings(TestIds.id(44L), "compaction goal");
+              BranchSettings compactionSettings = branchSettings();
               tx.entries()
                   .insert(
                       new Entry(
@@ -1353,9 +1166,7 @@ public abstract class HarnessStoreEntryTreeContract {
 
     store.transaction(
         tx -> {
-          assertEquals(
-              goalSettings(goal, "user goal"),
-              tx.entries().loadBranchSettings(compactionTurnStart));
+          assertEquals(branchSettings(), tx.entries().loadBranchSettings(compactionTurnStart));
           return null;
         });
   }
@@ -1364,21 +1175,17 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadBranchSettingsIsScopedToTheHeadBranch() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID goalA = TestIds.id(45L);
-    UUID goalB = TestIds.id(46L);
     UUID branchAEnd =
         insertClosedInputTurn(
-            baseline.sessionId(), baseline.rootEntryId(), T1, goalSettings(goalA, "branch A goal"));
+            baseline.sessionId(), baseline.rootEntryId(), T1, agentSettings("agent-a"));
     UUID branchBEnd =
         insertClosedInputTurn(
-            baseline.sessionId(), baseline.rootEntryId(), T2, goalSettings(goalB, "branch B goal"));
+            baseline.sessionId(), baseline.rootEntryId(), T2, agentSettings("agent-b"));
 
     store.transaction(
         tx -> {
-          assertEquals(
-              goalSettings(goalA, "branch A goal"), tx.entries().loadBranchSettings(branchAEnd));
-          assertEquals(
-              goalSettings(goalB, "branch B goal"), tx.entries().loadBranchSettings(branchBEnd));
+          assertEquals(agentSettings("agent-a"), tx.entries().loadBranchSettings(branchAEnd));
+          assertEquals(agentSettings("agent-b"), tx.entries().loadBranchSettings(branchBEnd));
           return null;
         });
   }
@@ -1400,7 +1207,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           baseline.rootEntryId(),
                           new TurnStartPayload(
                               TurnStartReason.INPUT,
-                              goalSettings(goal, "open turn goal"),
+                              agentSettings("open-turn"),
                               StoreTestSupport.OWNER_THREAD_ID),
                           T1));
               return id;
@@ -1408,8 +1215,7 @@ public abstract class HarnessStoreEntryTreeContract {
 
     store.transaction(
         tx -> {
-          assertEquals(
-              goalSettings(goal, "open turn goal"), tx.entries().loadBranchSettings(openTurnStart));
+          assertEquals(agentSettings("open-turn"), tx.entries().loadBranchSettings(openTurnStart));
           return null;
         });
   }
@@ -1502,8 +1308,8 @@ public abstract class HarnessStoreEntryTreeContract {
         });
   }
 
-  /** 带用户 Goal 的 branch settings 快照。 */
-  private static BranchSettings goalSettings(UUID goalId, String text) {
-    return branchSettings().withGoal(new GoalSetting(goalId, text));
+  /** 带指定 agent 名的 branch settings 快照，用于区分 sibling fork 的 settings。 */
+  private static BranchSettings agentSettings(String agentName) {
+    return branchSettings().withAgentName(agentName);
   }
 }

@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -443,12 +442,6 @@ public final class HarnessRuntimeTestSupport {
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
   static ToolInvocation succeedTool(InMemoryHarnessStore store, UUID toolId) {
-    return succeedTool(store, toolId, ToolEffectBatch.EMPTY);
-  }
-
-  /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED，并原子携带真实 result 与 branch effects。 */
-  static ToolInvocation succeedTool(
-      InMemoryHarnessStore store, UUID toolId, ToolEffectBatch effects) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
@@ -456,7 +449,6 @@ public final class HarnessRuntimeTestSupport {
               tool.succeed(
                   new ToolResult(
                       tool.call().id(), List.of(new TextResultContent("real result")), false, "{}"),
-                  effects,
                   T3);
           tx.tools().update(List.of(updated));
           return updated;
@@ -912,7 +904,7 @@ public final class HarnessRuntimeTestSupport {
   static ToolBinding hostBinding() {
     return new ToolBinding(
         toolDefinition("bash"),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

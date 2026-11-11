@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -54,7 +53,7 @@ class ToolInvocationRequestTest {
     ToolBinding binding =
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "read", List.of()),
+            new ContributorBinding("core", "read"),
             EnvironmentSupport.NONE,
             null,
             null);
