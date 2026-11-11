@@ -135,9 +135,6 @@ export function handlePaneCommand(ctx: PaneCommandContext, command: ThreadComman
     case 'rename-thread':
       ctx.openRenameForTarget('thread')
       return
-    case 'goal':
-      setInteraction('goal')
-      return
     case 'compact':
     case 'stop':
       ctx.runControllerCommand(command)

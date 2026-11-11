@@ -1213,7 +1213,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("builtin", "ask-user", List.of()),
+        new ContributorBinding("builtin", "ask-user"),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -1230,7 +1230,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

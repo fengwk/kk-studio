@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
@@ -220,7 +219,6 @@ class EnvironmentCapabilityToolTest {
         new ToolResult("call-2", List.of(new TextResultContent("ok")), false, "{}");
     Consumer<ToolResult> progress = partial -> {};
 
-    BranchView branchView = mock(BranchView.class);
     ToolExecutionContext context =
         new ToolExecutionContext(
             UUID.randomUUID(),
@@ -231,7 +229,6 @@ class EnvironmentCapabilityToolTest {
             UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
-            branchView,
             Optional.of(boundEnv));
 
     ToolExecutionRequest request =
@@ -245,7 +242,6 @@ class EnvironmentCapabilityToolTest {
 
     ToolOutcome outcome = tool.execute(request, progress);
     assertEquals(expected, outcome.result());
-    assertTrue(outcome.customEntries().isEmpty());
     verify(boundEnv).execute(FS_READ, request, progress);
   }
 

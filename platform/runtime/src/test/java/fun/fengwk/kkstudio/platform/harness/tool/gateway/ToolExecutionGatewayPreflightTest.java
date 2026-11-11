@@ -58,8 +58,7 @@ import java.util.Set;
 /** {@link ToolExecutionGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。 */
 class ToolExecutionGatewayPreflightTest {
 
-  private static final ToolGateway.ExecutionScope SCOPE =
-      ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW);
+  private static final ToolGateway.ExecutionScope SCOPE = ToolGatewayTestSupport.scope();
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
   private static final ToolDescriptor PREFLIGHT_DESCRIPTOR = preflightDescriptor();
@@ -151,7 +150,7 @@ class ToolExecutionGatewayPreflightTest {
                     new ToolCall("unknown", "missing", "{}"),
                     new ToolBinding(
                         new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE),
-                        new ContributorBinding("test", "missing", List.of()),
+                        new ContributorBinding("test", "missing"),
                         EnvironmentSupport.NONE,
                         null,
                         null)),
@@ -173,7 +172,7 @@ class ToolExecutionGatewayPreflightTest {
                     new ToolCall("mismatch", "demo", "{}"),
                     new ToolBinding(
                         hostDefinition(mismatched),
-                        new ContributorBinding("test", "host-tool", List.of()),
+                        new ContributorBinding("test", "host-tool"),
                         EnvironmentSupport.NONE,
                         null,
                         null)),
@@ -202,7 +201,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
-                new ContributorBinding("test", "host-tool", List.of()),
+                new ContributorBinding("test", "host-tool"),
                 EnvironmentSupport.NONE,
                 null,
                 null));
@@ -347,8 +346,7 @@ class ToolExecutionGatewayPreflightTest {
                 "{\"path\":\"/repo/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
             new ToolBinding(
                 edit.definition(),
-                new ContributorBinding(
-                    edit.id().contributorId().value(), edit.id().localName(), List.of()),
+                new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),
                 EnvironmentSupport.ROUTED,
                 environmentId,
                 "test-env"));
@@ -427,7 +425,7 @@ class ToolExecutionGatewayPreflightTest {
             settings);
     ContributorBinding contributor =
         new ContributorBinding(
-            contribution.id().contributorId().value(), contribution.id().localName(), List.of());
+            contribution.id().contributorId().value(), contribution.id().localName());
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
@@ -460,7 +458,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
-                new ContributorBinding("test", "host-tool", List.of()),
+                new ContributorBinding("test", "host-tool"),
                 EnvironmentSupport.NONE,
                 null,
                 null));
@@ -516,9 +514,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolBinding(
                 contribution.definition(),
                 new ContributorBinding(
-                    contribution.id().contributorId().value(),
-                    contribution.id().localName(),
-                    List.of()),
+                    contribution.id().contributorId().value(), contribution.id().localName()),
                 EnvironmentSupport.NONE,
                 null,
                 null));

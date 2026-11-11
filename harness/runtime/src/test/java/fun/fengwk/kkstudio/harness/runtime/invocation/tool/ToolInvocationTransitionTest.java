@@ -13,10 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -214,78 +212,6 @@ class ToolInvocationTransitionTest {
     assertEquals(result(), next.result());
     assertEquals(allowed(), next.approval());
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).succeed(result(), T1));
-  }
-
-  @Test
-  void successPersistsEffectsAtomicallyAndKeepsThemTerminalImmutable() {
-    ToolEffectBatch effects =
-        new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}")));
-    ToolInvocation succeeded = running(1, allowed()).succeed(result(), effects, T1);
-    assertEquals(effects, succeeded.effects());
-
-    ToolEffectBatch changed =
-        new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"other\"}")));
-    ToolInvocation rewritten =
-        new ToolInvocation(
-            succeeded.id(),
-            succeeded.threadId(),
-            succeeded.turnStartEntryId(),
-            succeeded.assistantEntryId(),
-            succeeded.callIndex(),
-            succeeded.call(),
-            succeeded.binding(),
-            succeeded.status(),
-            succeeded.attempt(),
-            succeeded.approval(),
-            succeeded.result(),
-            changed,
-            succeeded.error(),
-            succeeded.createdAt(),
-            T2);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(succeeded, rewritten));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                id(2L),
-                id(4L),
-                id(5L),
-                id(1L),
-                0,
-                call("bash", "{}"),
-                host("bash"),
-                ToolInvocationStatus.FAILED,
-                0,
-                null,
-                null,
-                effects,
-                error(),
-                CREATED,
-                CREATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                id(3L),
-                id(4L),
-                id(5L),
-                id(1L),
-                0,
-                call("bash", "{}"),
-                host("bash"),
-                ToolInvocationStatus.RUNNING,
-                1,
-                allowed(),
-                null,
-                effects,
-                null,
-                CREATED,
-                CREATED));
   }
 
   @Test

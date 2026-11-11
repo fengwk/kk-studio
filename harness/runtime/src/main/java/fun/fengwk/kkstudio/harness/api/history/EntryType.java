@@ -8,8 +8,6 @@ public enum EntryType {
   TURN_START,
   /** 对话消息；具体结构由 payload 子类型决定。 */
   MESSAGE,
-  /** 业务插件追加的透明 branch state 节点：不参与 turn grammar，默认不投影给 provider。 */
-  CUSTOM,
   /** Model retry failure audit node：透明、不属于对话语义，也不关闭 Turn。 */
   MODEL_ATTEMPT_FAILURE,
   /** Immutable Driver-reported native compaction audit; not a Builtin summary. */

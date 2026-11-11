@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
@@ -19,7 +18,6 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
-import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 
 import java.time.Instant;
@@ -36,7 +34,7 @@ import java.util.function.Supplier;
  * Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
  * <p>INPUT 收获快照内<b>全部</b> queued Command，消费到冻结 cutoff 为止；SET_* 按 sequence 归约成该轮配置， USER_MESSAGE /
- * CUSTOM_MESSAGE / GOAL 追加对应消息，NOTIFICATION 追加为系统通知 Entry。cutoff 之后到达的输入留到下一轮。
+ * CUSTOM_MESSAGE 追加对应消息，NOTIFICATION 追加为系统通知 Entry。cutoff 之后到达的输入留到下一轮。
  * 只要快照含至少一条消息或通知就允许规划；纯设置不单独触发。CONTINUATION 只消费设置，保留消息与通知留待下一轮 INPUT；COMPACTION 消费零
  * Command。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
@@ -87,8 +85,7 @@ final class TurnPlanBuilder {
       throw new IllegalArgumentException(
           "INPUT plan requires at least one queued message or notification");
     }
-    var settings =
-        harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands, idAllocator);
+    var settings = harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands);
     if (childThread) {
       // 子线程没有环境选择；本次 turn 仅冻结规划时执行根的环境，历史调用不随之后的切换改变。
       settings = settings.withEnvironmentName(rootEnvironmentName);
@@ -134,22 +131,6 @@ final class TurnPlanBuilder {
                     sessionId,
                     parentId,
                     new MessagePayload(value.message(), null, null),
-                    now));
-            parentId = entryId;
-          }
-          case GoalCommandPayload value -> {
-            UUID entryId = idAllocator.get();
-            candidateEntries.add(
-                new Entry(
-                    entryId,
-                    sessionId,
-                    parentId,
-                    new MessagePayload(
-                        value.text() == null
-                            ? GoalMessages.inputCleared()
-                            : GoalMessages.inputSet(value.text()),
-                        null,
-                        null),
                     now));
             parentId = entryId;
           }

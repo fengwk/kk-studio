@@ -19,13 +19,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -136,10 +138,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
       String json = (String) stored.get("payload");
       EntryPayload payload = customPayloads.get(entryId);
       if (payload == null) {
-        payload =
-            "{}".equals(json)
-                ? new CustomEntryPayload("test", "test", "{}")
-                : entryCodec.decode(EntryType.valueOf((String) stored.get("entry_type")), json);
+        payload = entryCodec.decode(EntryType.valueOf((String) stored.get("entry_type")), json);
       }
       when(entry.payload()).thenReturn(payload);
       entries.add(entry);
@@ -1080,15 +1079,20 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   private UUID insertDelegatedChildThread(UUID parentThreadId) {
     UUID sessionId = UUID.randomUUID();
     UUID rootEntryId = UUID.randomUUID();
+    String rootPayload =
+        entryCodec.encode(
+            new RootPayload(
+                new BranchSettings("assistant", new ExecutionSelection("builtin", "{}"), null)));
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
         sessionId,
         "delegated-" + sessionId);
     jdbc.update(
         "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
-            + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)",
+            + " values (?, ?, 'ROOT', ?::jsonb, current_timestamp)",
         rootEntryId,
-        sessionId);
+        sessionId,
+        rootPayload);
     UUID childThreadId = UUID.randomUUID();
     jdbc.update(
         "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"

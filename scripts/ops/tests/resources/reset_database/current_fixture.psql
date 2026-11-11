@@ -23,7 +23,7 @@ insert into agent (name, description, system_prompt, execution,
     config, created_at, updated_at, version) values
     ('bound-agent', 'probe agent description', 'probe system prompt',
      '{"driver":"builtin","settings":{"modelName":"probe-model","variant":"probe-variant"}}',
-     '{"tools": ["read", "lsp_goto_definition", "probe_mcp_tool", "update_goal"], "skills": [], "subagents": ["probe-child"]}'::jsonb,
+     '{"tools": ["read", "lsp_goto_definition", "probe_mcp_tool"], "skills": [], "subagents": ["probe-child"]}'::jsonb,
      '2024-01-07 00:00:00.005+00', '2024-01-08 00:00:00.006+00', 4),
     ('unbound-agent', null, null, '{"driver":"builtin","settings":{"modelName":"probe-model","variant":null}}',
      '{"tools": [], "skills": [], "subagents": []}'::jsonb,

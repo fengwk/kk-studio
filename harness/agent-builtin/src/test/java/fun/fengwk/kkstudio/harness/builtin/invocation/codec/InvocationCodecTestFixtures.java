@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.harness.builtin.invocation.codec;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -59,17 +57,7 @@ public final class InvocationCodecTestFixtures {
   }
 
   static ToolBinding binding(EnvironmentSupport environmentSupport) {
-    return binding(environmentSupport, false);
-  }
-
-  static ToolBinding binding(EnvironmentSupport environmentSupport, boolean withStateAccesses) {
-    ContributorBinding contributor =
-        withStateAccesses
-            ? new ContributorBinding(
-                "goal",
-                "create",
-                List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
-            : new ContributorBinding("core", "bash", List.of());
+    ContributorBinding contributor = new ContributorBinding("core", "bash");
     boolean hasEnv = environmentSupport == EnvironmentSupport.REQUIRED;
     return new ToolBinding(
         definition(hasEnv ? "fs" : "bash"),

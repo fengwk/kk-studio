@@ -412,7 +412,6 @@ class PostgresqlHarnessSchemaTest {
             "harness_tool_invocation.approval",
             "harness_tool_invocation.binding",
             "harness_tool_invocation.call",
-            "harness_tool_invocation.effects",
             "harness_tool_invocation.error",
             "harness_tool_invocation.input_receipt",
             "harness_tool_invocation.result"),

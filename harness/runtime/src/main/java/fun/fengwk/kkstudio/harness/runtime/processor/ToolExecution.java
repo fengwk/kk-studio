@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -563,7 +562,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
           false);
       return;
     }
-    safeTerminal(() -> commitSuccess(result, success.effects()));
+    safeTerminal(() -> commitSuccess(result));
   }
 
   /**
@@ -697,7 +696,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
    * RUNNING -&gt; SUCCEEDED：在同一事务内先把结果物化为 Session 稳定引用，再保存该唯一稳定结果与 SUCCEEDED。物化永久失败时回滚整个
    * 成功事务，并以独立的无资源 UNKNOWN 收敛，绝不重试外部副作用或再次消费同一 upload。
    */
-  private boolean commitSuccess(ToolResult result, ToolEffectBatch effects) {
+  private boolean commitSuccess(ToolResult result) {
     try {
       return Boolean.TRUE.equals(
           store.transaction(
@@ -729,7 +728,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
                           + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
                           + " bytes");
                 }
-                tx.tools().update(List.of(tool.succeed(stable, effects, now)));
+                tx.tools().update(List.of(tool.succeed(stable, now)));
                 tx.threads().update(thread.touchVersion(now));
                 tx.work().complete(claim);
                 return true;

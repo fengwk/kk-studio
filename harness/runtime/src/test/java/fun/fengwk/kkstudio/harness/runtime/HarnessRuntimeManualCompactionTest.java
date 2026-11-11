@@ -752,8 +752,7 @@ class HarnessRuntimeManualCompactionTest {
                 new BranchSettings(
                     "compaction",
                     HarnessRuntimeTestSupport.executionSelection(),
-                    HarnessRuntimeTestSupport.settings().environmentName(),
-                    null)));
+                    HarnessRuntimeTestSupport.settings().environmentName())));
       }
       return results.poll();
     }

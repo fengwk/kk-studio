@@ -18,8 +18,7 @@ import java.util.UUID;
  *   <li>{@code rootThreadId} / {@code rootSessionId}：该 Thread 不可变执行根及其所在会话；子代理运行在独立会话中时二者与上一组不同；
  *   <li>{@code assistantEntryId}：该调用所属 assistant 分支的入口 Entry。它由 Harness 从已冻结的 Tool 调用读出，因此 Tool
  *       可以按真实调用位置判断自己是否仍属于当前业务执行，不必、也不能自行推断；
- *   <li>{@code mediaCapabilities}：发起 Turn 在 TURN_START 中冻结的消费者媒体能力，是媒体可送达判定的唯一来源；
- *   <li>{@code branch}：只读本 Contributor 在当前 assistant 分支上的自定义状态与生效 Goal。
+ *   <li>{@code mediaCapabilities}：发起 Turn 在 TURN_START 中冻结的消费者媒体能力，是媒体可送达判定的唯一来源。
  * </ul>
  */
 public record ToolExecutionContext(
@@ -31,7 +30,6 @@ public record ToolExecutionContext(
     UUID assistantEntryId,
     Instant executedAt,
     TurnMediaCapabilities mediaCapabilities,
-    BranchView branch,
     Optional<BoundEnvironment> environment) {
 
   public ToolExecutionContext {
@@ -43,7 +41,6 @@ public record ToolExecutionContext(
     Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     Objects.requireNonNull(executedAt, "executedAt");
     Objects.requireNonNull(mediaCapabilities, "mediaCapabilities");
-    Objects.requireNonNull(branch, "branch");
     Objects.requireNonNull(environment, "environment");
   }
 }

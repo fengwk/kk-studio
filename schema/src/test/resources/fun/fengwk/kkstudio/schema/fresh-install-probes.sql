@@ -812,7 +812,7 @@ insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, reques
     values (pg_temp.uid(1100), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(210),
         '{}', 'SUCCEEDED', 1, '[]', '{}', pg_temp.uid(211), now(), now());
 select pg_temp.assert_true('Tool ownership is public and has no Model parent column',
-    (select count(*) = 16 from information_schema.columns
+    (select count(*) = 15 from information_schema.columns
         where table_name = 'harness_tool_invocation')
     and exists(select 1 from information_schema.columns
         where table_name = 'harness_tool_invocation' and column_name = 'thread_id')
@@ -828,11 +828,11 @@ select pg_temp.assert_true('Tool ownership has Thread, TurnStart and Assistant f
                 'fk_harness_tool_invocation_turn_start',
                 'fk_harness_tool_invocation_assistant')));
 insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
-    call_index, call, binding, status, attempt, effects, created_at, updated_at)
+    call_index, call, binding, status, attempt, created_at, updated_at)
     values (pg_temp.uid(1200), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 0,
         jsonb_build_object('id','call-question','toolName','ask_user',
             'argumentsJson','{"questions":[{"question":"Which?","options":[{"label":"A"}]}]}'::text),
-        '{"thread":{}}', 'WAITING_INPUT', 0, '{"customEntries":[]}', now(), now());
+        '{"thread":{}}', 'WAITING_INPUT', 0, now(), now());
 select pg_temp.rejects('invalid tool status is rejected',
     $$update harness_tool_invocation set status='INVALID_STATUS' where id=pg_temp.uid(1200)$$,
     '23514', 'ck_harness_tool_invocation_status');
@@ -844,21 +844,21 @@ select pg_temp.assert_true('pending input joins back through the public Tool own
         join harness_thread th on th.id = t.thread_id
         where t.status = 'WAITING_INPUT' and th.session_id = pg_temp.uid(102)));
 select pg_temp.rejects('a Tool cannot reference a missing public Thread',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1203),pg_temp.uid(9999),pg_temp.uid(210),pg_temp.uid(211),3,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,created_at,updated_at)
+      values(pg_temp.uid(1203),pg_temp.uid(9999),pg_temp.uid(210),pg_temp.uid(211),3,'{}','{}','READY',0,now(),now())$$,
     '23503', 'fk_harness_tool_invocation_thread');
 select pg_temp.rejects('a Tool cannot reference a missing TurnStart',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1204),pg_temp.uid(302),pg_temp.uid(9998),pg_temp.uid(211),4,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,created_at,updated_at)
+      values(pg_temp.uid(1204),pg_temp.uid(302),pg_temp.uid(9998),pg_temp.uid(211),4,'{}','{}','READY',0,now(),now())$$,
     '23503', 'fk_harness_tool_invocation_turn_start');
 select pg_temp.rejects('a Tool cannot reference a missing Assistant',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,created_at,updated_at)
+      values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,now(),now())$$,
     '23503', 'fk_harness_tool_invocation_assistant');
 insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
-    call_index, call, status, attempt, effects, error, created_at, updated_at)
+    call_index, call, status, attempt, error, created_at, updated_at)
     values (pg_temp.uid(1207), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 7,
-        '{}', 'FAILED', 0, '{"customEntries":[]}',
+        '{}', 'FAILED', 0,
         '{"code":"UNKNOWN_TOOL","message":"unknown"}', now(), now());
 select pg_temp.assert_true('a terminal unknown Tool may have no binding',
     (select binding is null and status = 'FAILED'

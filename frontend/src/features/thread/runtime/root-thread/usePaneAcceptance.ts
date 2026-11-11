@@ -19,7 +19,6 @@ import {
 import {
   acceptanceCompletionApplies,
   buildAcceptanceRequest,
-  buildGoalAcceptanceRequest,
   isDefiniteAcceptanceFailure,
   prependFrozenComposerParts,
   preserveCurrentBranchDraft,
@@ -40,7 +39,6 @@ import {
 import {
   errorMessage,
   type AgentPaneCapabilities,
-  type PaneInteraction,
   type RenameKind,
 } from '@/features/thread/runtime/root-thread/types'
 import type {
@@ -78,12 +76,10 @@ interface PaneAcceptanceOptions {
   /** 已绑定 Thread 的提交走通用 command batch（controller 持有）。 */
   boundSubmit: {
     submitMessage: (payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) => Promise<unknown> | unknown
-    submitGoal: (goalText: string | null) => Promise<unknown> | unknown
   }
   hasPendingOperation: () => boolean
   setActionError: (message: string | null) => void
   setConflict: (conflict: ConflictPresentation | null) => void
-  setInteraction: (next: PaneInteraction) => void
   openRename: (kind: RenameKind, id: string, name: string | null) => void
   setRenameError: (message: string | null) => void
 }
@@ -121,7 +117,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     owner, ownerKey, paneId, target, targetRef, setTarget, setFocusIntent, capabilities, onFocus,
     generationRef, pendingAcceptanceRef, composerScope, parts, partsRef, setParts, setPartsState,
     localDraftRef, setLocalDraft, activeDraft, entryBaseDraft, draftHistoryReady, draftHistoryEntries,
-    boundSubmit, hasPendingOperation, setActionError, setConflict, setInteraction, openRename,
+    boundSubmit, hasPendingOperation, setActionError, setConflict, openRename,
     setRenameError,
   } = options
   const { t } = useI18n()
@@ -249,56 +245,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       setParts([])
     }
     void submitFrozenAcceptance(pending)
-  }
-
-  function submitGoal(
-    goalText: string | null,
-    submitOptions?: {
-      localParts?: ComposerPart[]
-    },
-  ): void {
-    if (capabilities?.readOnly) {
-      return
-    }
-    if (blockSubmissionForForeignPending()) {
-      return
-    }
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return
-    }
-    // 既有 Thread 走通用 thread command batch：与普通消息共用同一 CAS 游标与未决重试通道。
-    if (isBoundTarget(target)) {
-      onFocus?.()
-      void boundSubmit.submitGoal(goalText)
-      setInteraction(null)
-      return
-    }
-    if (!owner) {
-      return
-    }
-    const effectiveBase = entryBaseDraft
-    const draft = activeDraft
-    if (!draft || !effectiveBase || !draftHistoryReady) {
-      setActionError(t('ai.runtime.action.threadNotLoaded'))
-      return
-    }
-    try {
-      const frozenParts = submitOptions?.localParts ?? parts
-      const frozen = buildGoalAcceptanceRequest({
-        owner,
-        target,
-        draft,
-        base: effectiveBase,
-        goalText,
-        localParts: frozenParts,
-      })
-      onFocus?.()
-      startAcceptance(frozen, false)
-      setInteraction(null)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.goal.submitFailed')))
-    }
   }
 
   async function invalidateAcceptanceResult(threadId: string): Promise<void> {
@@ -502,7 +448,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
   return {
     pendingAcceptance,
     pendingAcceptanceBlocked,
-    submitGoal,
     handleSubmit,
     retryAcceptance,
     abandonPendingAcceptance,

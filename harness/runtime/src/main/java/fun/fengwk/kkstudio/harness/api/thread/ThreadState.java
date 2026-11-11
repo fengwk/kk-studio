@@ -156,8 +156,8 @@ public record ThreadState(
   }
 
   /**
-   * 在一次原子步骤中预留 {@code count} 条 Command sequence 并设置执行控制：仅显式新 USER/GOAL/CUSTOM 输入可把 STOPPED 的目标
-   * Thread 恢复为 RUNNABLE，且必须在与命令写入同一 version 中完成；{@code count} 必须为正。
+   * 在一次原子步骤中预留 {@code count} 条 Command sequence 并设置执行控制：仅显式新 USER_MESSAGE/CUSTOM_MESSAGE 输入可把
+   * STOPPED 的目标 Thread 恢复为 RUNNABLE，且必须在与命令写入同一 version 中完成；{@code count} 必须为正。
    */
   public ThreadState reserveCommandSequencesAndSetControl(
       int count, ThreadExecutionControl executionControl, Instant now) {

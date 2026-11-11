@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -39,7 +38,6 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -160,7 +158,6 @@ import java.util.stream.Collectors;
 class DatabaseTurnResolverTest {
 
   private static final String BUSINESS_CONTRIBUTOR = "business";
-  private static final String BUSINESS_CUSTOM_TYPE = "run";
   private static final String BUSINESS_TOOL = "business_transition";
 
   /** 内置 Compaction Agent 在 catalog 中配置的 system prompt：历史压缩预览必须读同一份事实。 */
@@ -763,11 +760,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void bindsToolsInExactLatestAgentOrder() {
-    Fixture fixture =
-        new Fixture(
-            List.of("bash", "update_goal", "read"),
-            List.of(),
-            List.of(hostDescriptor("update_goal")));
+    Fixture fixture = new Fixture(List.of("bash", BUSINESS_TOOL, "read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
     BranchSettings settings = settings("default");
 
@@ -775,48 +768,18 @@ class DatabaseTurnResolverTest {
 
     List<String> boundNames =
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
-    assertEquals(List.of("bash", "update_goal", "read"), boundNames);
+    assertEquals(List.of("bash", BUSINESS_TOOL, "read"), boundNames);
     assertEquals(
         List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.ROUTED),
         requestSpec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
-    assertEquals(List.of("bash", "update_goal", "read"), boundNames);
+    assertEquals(List.of("bash", BUSINESS_TOOL, "read"), boundNames);
 
     Fixture missingFixture =
         new Fixture(List.of("missing"), List.of(), List.of(), HarnessCatalog.from(List.of()));
     assertEquals(
         "tool not found: missing",
         missingFixture.rejected(missingFixture.path(settings("default"))).error().message());
-  }
-
-  /**
-   * 验证 Goal Tool 的 contributor provenance 冻结，以及用户 Goal 绝不进入 systemInstruction。
-   *
-   * <p>Goal 正文由 branch settings 拥有：即使设置了 Goal，模型请求的 systemInstruction 也不会出现其正文。
-   */
-  @Test
-  void freezesGoalToolProvenanceWithoutProjectingUserGoalIntoSystemInstruction() {
-    Tool dummyTask = mock(Tool.class);
-    when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
-    when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    BuiltinHarnessContributor builtin =
-        new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask);
-    HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
-    Fixture fixture = new Fixture(List.of("update_goal"), List.of(), List.of(), catalog);
-    BranchSettings settings =
-        settings("default").withGoal(new GoalSetting(new UUID(0L, 42L), "ship the release"));
-    EntryPath path =
-        new EntryPath(List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
-
-    ModelRequestSpec requestSpec = fixture.resolved(path);
-
-    ToolBinding binding = requestSpec.toolBindings().getFirst();
-    assertEquals("builtin", binding.contributor().contributorId());
-    assertEquals("goal.update", binding.contributor().localName());
-    assertEquals("goal.progress", binding.contributor().stateAccesses().getFirst().customType());
-    assertFalse(
-        requestSpec.systemInstruction().contains("ship the release"),
-        requestSpec.systemInstruction());
   }
 
   @Test
@@ -1321,7 +1284,7 @@ class DatabaseTurnResolverTest {
     HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool");
     Fixture fixture =
         new Fixture(
-            List.of("bash", "fixed_tool", "update_goal", "read"),
+            List.of("bash", "fixed_tool", BUSINESS_TOOL, "read"),
             List.of(),
             List.of(),
             fixedCatalog);
@@ -1330,7 +1293,7 @@ class DatabaseTurnResolverTest {
 
     List<LiveTurnPlan.CandidateTool> candidates = planned.candidateTools();
     assertEquals(
-        List.of("update_goal", "read", "bash", "fixed_tool"),
+        List.of(BUSINESS_TOOL, "read", "bash", "fixed_tool"),
         candidates.stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
         List.of(
@@ -1341,7 +1304,7 @@ class DatabaseTurnResolverTest {
         candidates.stream().map(LiveTurnPlan.CandidateTool::state).toList());
     // 最终模型工具面只含 SENT 候选，顺序与候选投影中的 SENT 段一致。
     assertEquals(
-        List.of("update_goal", "read"),
+        List.of(BUSINESS_TOOL, "read"),
         planned.spec().toolBindings().stream()
             .map(binding -> binding.descriptor().name())
             .toList());
@@ -1451,9 +1414,9 @@ class DatabaseTurnResolverTest {
 
     Fixture enabled =
         new Fixture(
-            List.of("update_goal"),
+            List.of(BUSINESS_TOOL),
             List.of(),
-            List.of(hostDescriptor("update_goal")),
+            List.of(),
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
@@ -1718,8 +1681,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void resolvedSpecStaysFrozenAfterCatalogAndConfigChange() {
-    Fixture fixture =
-        new Fixture(List.of("update_goal"), List.of(), List.of(hostDescriptor("update_goal")));
+    Fixture fixture = new Fixture(List.of(BUSINESS_TOOL), List.of(), List.of());
     EntryPath path = fixture.path(settings("custom"));
     ModelRequestSpec frozen = fixture.resolved(path);
     String preamble = instructionText(frozen);
@@ -1746,14 +1708,14 @@ class DatabaseTurnResolverTest {
     assertEquals(tools, frozen.toolBindings());
     assertEquals("custom", frozen.variant().id());
     assertEquals(
-        List.of("update_goal"),
+        List.of(BUSINESS_TOOL),
         tools.stream().map(binding -> binding.descriptor().name()).toList());
     ProviderRequest after = new ModelRequestMaterializer().materialize(path, frozen);
     assertEquals(before, after);
     // 物化边界把冻结的 instruction 原样带到 Provider 请求，不再合成 SYSTEM 消息。
     assertEquals(preamble, after.systemInstruction());
     assertTrue(after.messages().stream().noneMatch(m -> textOf(m).equals(preamble)));
-    assertEquals(List.of("update_goal"), after.tools().stream().map(tool -> tool.name()).toList());
+    assertEquals(List.of(BUSINESS_TOOL), after.tools().stream().map(tool -> tool.name()).toList());
   }
 
   private static String textOf(ProviderMessage message) {
@@ -1788,19 +1750,6 @@ class DatabaseTurnResolverTest {
   private static EntryPath rootPath(BranchSettings settings) {
     return new EntryPath(
         List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
-  }
-
-  /** ROOT 之后追加一条业务 contributor 冻结的 custom state，模拟接受业务任务时写入的 branch state。 */
-  private static EntryPath customStatePath(BranchSettings settings, String stateJson) {
-    return new EntryPath(
-        List.of(
-            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
-            new Entry(
-                id(2),
-                SESSION_ID,
-                id(1),
-                new CustomEntryPayload(BUSINESS_CONTRIBUTOR, BUSINESS_CUSTOM_TYPE, stateJson),
-                NOW)));
   }
 
   /** ROOT + INPUT turn + USER + ASSISTANT，供压缩 materialize 按冻结 Entry IDs 取摘要范围。 */
@@ -2079,7 +2028,6 @@ class DatabaseTurnResolverTest {
     assertEquals(123, resolved.outputBudget());
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
-    assertNull(resolved.childSettings().goal());
     assertNull(resolved.childSettings().environmentName());
   }
 
@@ -2299,17 +2247,16 @@ class DatabaseTurnResolverTest {
     EntryPath path = projectionPath(settings, "summary text", id(4));
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
-    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER，随后是冻结压缩边界的 Goal 背景。
+    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER。
     assertTrue(requestSpec.systemInstruction().startsWith("[agent]\nagent system prompt"));
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(5, messages.size());
+    assertEquals(4, messages.size());
     assertEquals(ProviderMessageRole.USER, messages.get(0).role());
     assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(0)));
-    assertTrue(textOf(messages.get(1)).contains("No active user-set goal."));
     // 从 cut（ASST1）本身开始保留：ASST1、USER2、ASST2 继续投影；COMPACTION 控制 turn 内部不投影。
-    assertEquals("first reply", textOf(messages.get(2)));
-    assertEquals("second user", textOf(messages.get(3)));
-    assertEquals("second reply", textOf(messages.get(4)));
+    assertEquals("first reply", textOf(messages.get(1)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
   }
 
   @Test
@@ -2348,15 +2295,14 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER，其后的冻结 Goal 背景整体使索引后移。
-    assertEquals(6, messages.size());
+    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER。
+    assertEquals(5, messages.size());
     assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(0)));
-    assertTrue(textOf(messages.get(1)).contains("No active user-set goal."));
     // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
-    assertEquals("second user", textOf(messages.get(2)));
-    assertEquals("second reply", textOf(messages.get(3)));
-    assertEquals("third user", textOf(messages.get(4)));
-    assertEquals("third reply", textOf(messages.get(5)));
+    assertEquals("second user", textOf(messages.get(1)));
+    assertEquals("second reply", textOf(messages.get(2)));
+    assertEquals("third user", textOf(messages.get(3)));
+    assertEquals("third reply", textOf(messages.get(4)));
   }
 
   @Test
@@ -2370,17 +2316,13 @@ class DatabaseTurnResolverTest {
 
   @Test
   void selectableToolsPreserveOrderAndBindings() {
-    Fixture fixture =
-        new Fixture(
-            List.of("bash", "update_goal", "read"),
-            List.of(),
-            List.of(hostDescriptor("update_goal")));
+    Fixture fixture = new Fixture(List.of("bash", BUSINESS_TOOL, "read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
     List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    assertEquals(List.of("bash", "update_goal", "read"), names);
+    assertEquals(List.of("bash", BUSINESS_TOOL, "read"), names);
     assertEquals(
         List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.ROUTED),
         spec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
@@ -2392,11 +2334,7 @@ class DatabaseTurnResolverTest {
   @Test
   void toolBindingEnvironmentNameReflectsBranchEnvironmentSelection() {
     // 1. branch 选择了环境：REQUIRED 工具冻结环境名，OPTIONAL 工具冻结环境名，NONE 工具冻结 null
-    Fixture fixture =
-        new Fixture(
-            List.of("bash", "update_goal", "read"),
-            List.of(),
-            List.of(hostDescriptor("update_goal")));
+    Fixture fixture = new Fixture(List.of("bash", BUSINESS_TOOL, "read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
 
     ModelRequestSpec boundSpec = fixture.resolved(fixture.path(settings("default")));
@@ -2406,7 +2344,7 @@ class DatabaseTurnResolverTest {
     assertEquals(EnvironmentSupport.REQUIRED, boundTools.get(0).environmentSupport());
     assertEquals(ENV_A_NAME, boundTools.get(0).environmentName());
     assertEquals(ENV_A, boundTools.get(0).environmentId());
-    // update_goal (NONE) -> null
+    // 业务工具 (NONE) -> null
     assertEquals(EnvironmentSupport.NONE, boundTools.get(1).environmentSupport());
     assertNull(boundTools.get(1).environmentName());
     assertNull(boundTools.get(1).environmentId());
@@ -2419,7 +2357,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
     List<ToolBinding> unboundTools = unboundSpec.toolBindings();
     assertEquals(2, unboundTools.size());
-    assertEquals("update_goal", unboundTools.get(0).descriptor().name());
+    assertEquals(BUSINESS_TOOL, unboundTools.get(0).descriptor().name());
     assertEquals(EnvironmentSupport.NONE, unboundTools.get(0).environmentSupport());
     assertNull(unboundTools.get(0).environmentName());
     assertNull(unboundTools.get(0).environmentId());
@@ -2433,7 +2371,7 @@ class DatabaseTurnResolverTest {
         fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
     List<ToolBinding> clearedTools = clearedSpec.toolBindings();
     assertEquals(2, clearedTools.size());
-    assertEquals("update_goal", clearedTools.get(0).descriptor().name());
+    assertEquals(BUSINESS_TOOL, clearedTools.get(0).descriptor().name());
     assertEquals(EnvironmentSupport.NONE, clearedTools.get(0).environmentSupport());
     assertEquals("read", clearedTools.get(1).descriptor().name());
     assertEquals(EnvironmentSupport.ROUTED, clearedTools.get(1).environmentSupport());
@@ -2463,20 +2401,6 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(List.of(), spec.toolBindings());
-  }
-
-  /** 分支自定义状态不会被提升为系统指令。 */
-  @Test
-  void customStateDoesNotEnterSystemInstruction() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-
-    ModelRequestSpec frozen =
-        fixture.resolved(customStatePath(settings("default"), "{\"runId\":\"run-7\"}"));
-
-    assertFalse(frozen.systemInstruction().contains("{\"runId\":\"run-7\"}"));
-
-    ModelRequestSpec ordinary = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(ordinary.systemInstruction(), frozen.systemInstruction());
   }
 
   /** 测试意图：Catalog 缺失 Agent 显式声明的业务工具时 fail-closed，不静默少一个受控工具。 */
@@ -2538,7 +2462,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
-    assertNull(resolved.childSettings().goal());
   }
 
   /** 经公开规划/解析路径验证组快照与交集，不直接调用私有 resolveGroup。 */
@@ -2864,7 +2787,8 @@ class DatabaseTurnResolverTest {
               registrar.registerTool(
                   toolName.replace('_', '.'), tool, ToolVisibility.SELECTABLE, 0);
             });
-    return HarnessCatalog.from(List.of(defaultBuiltinContributor(), fixedContributor));
+    return HarnessCatalog.from(
+        List.of(defaultBuiltinContributor(), defaultBusinessContributor(), fixedContributor));
   }
 
   private static Fixture taskFixture() {
@@ -3097,8 +3021,6 @@ class DatabaseTurnResolverTest {
                   registrar -> {
                     for (ToolDescriptor descriptor : hostDescriptors) {
                       if (descriptor.name().equals("task")
-                          || descriptor.name().equals("get_goal")
-                          || descriptor.name().equals("update_goal")
                           || descriptor.name().equals("bash")
                           || descriptor.name().equals("read")
                           || descriptor.name().equals("write")

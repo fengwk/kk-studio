@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
@@ -21,7 +20,6 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 
 import java.util.List;
 
@@ -36,14 +34,12 @@ class ThreadCommandPayloadTest {
         List.of(
             ThreadCommandType.USER_MESSAGE,
             ThreadCommandType.CUSTOM_MESSAGE,
-            ThreadCommandType.GOAL,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
                 new CustomMessageCommandPayload(user("custom")),
-                new GoalCommandPayload("finish"),
                 new SetAgentCommandPayload("coding"),
                 new SetExecutionCommandPayload(EXECUTION),
                 new SetEnvironmentCommandPayload(null))
@@ -85,13 +81,11 @@ class ThreadCommandPayloadTest {
         IllegalArgumentException.class, () -> new SetEnvironmentCommandPayload("e".repeat(65)));
   }
 
-  /** GOAL 是 user-like 终止输入（贡献冻结 USER 消息），绝不是 SET_* prefix 设置命令。 */
+  /** 消息类命令是 user-like 终止输入，绝不是 SET_* prefix 设置命令。 */
   @Test
   void classifiesMessageAndSettingCommandTypes() {
     assertTrue(ThreadCommandType.USER_MESSAGE.isMessage());
     assertTrue(ThreadCommandType.CUSTOM_MESSAGE.isMessage());
-    assertTrue(ThreadCommandType.GOAL.isMessage());
-    assertFalse(ThreadCommandType.GOAL.isSetting());
     assertFalse(ThreadCommandType.SET_AGENT.isMessage());
     assertFalse(ThreadCommandType.SET_EXECUTION.isMessage());
     assertFalse(ThreadCommandType.SET_ENVIRONMENT.isMessage());
@@ -100,31 +94,6 @@ class ThreadCommandPayloadTest {
     assertTrue(ThreadCommandType.SET_AGENT.isSetting());
     assertTrue(ThreadCommandType.SET_EXECUTION.isSetting());
     assertTrue(ThreadCommandType.SET_ENVIRONMENT.isSetting());
-  }
-
-  /** 测试意图：GOAL payload 只接受 canonical 目标正文或 null（清除）；空串不是清除，codec 严格区分「显式 null」与「字段缺失」。 */
-  @Test
-  void goalPayloadAcceptsCanonicalTextOrExplicitClear() {
-    ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
-    assertEquals("finish", new GoalCommandPayload("finish").text());
-    assertNull(new GoalCommandPayload(null).text());
-    assertThrows(IllegalArgumentException.class, () -> new GoalCommandPayload(""));
-    assertThrows(IllegalArgumentException.class, () -> new GoalCommandPayload(" x"));
-    assertThrows(IllegalArgumentException.class, () -> new GoalCommandPayload("x".repeat(2_001)));
-
-    String set = codec.encode(new GoalCommandPayload("finish"));
-    assertEquals("{\"text\":\"finish\"}", set);
-    assertEquals(new GoalCommandPayload("finish"), codec.decode(ThreadCommandType.GOAL, set));
-    String clear = codec.encode(new GoalCommandPayload(null));
-    assertEquals("{\"text\":null}", clear);
-    assertEquals(new GoalCommandPayload(null), codec.decode(ThreadCommandType.GOAL, clear));
-    // 字段缺失 / 未知字段 / 非文本一律确定性拒绝。
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.GOAL, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.GOAL, "{\"text\":1}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.GOAL, "{\"text\":null,\"extra\":1}"));
   }
 
   private static AgentMessage user(String text) {

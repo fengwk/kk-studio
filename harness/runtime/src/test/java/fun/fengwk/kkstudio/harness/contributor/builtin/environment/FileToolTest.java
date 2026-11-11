@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -66,7 +65,6 @@ class FileToolTest {
 
     ToolRequirements requirements = tool.requirements();
     assertEquals(EnvironmentSupport.ROUTED, requirements.environmentSupport());
-    assertTrue(requirements.stateAccesses().isEmpty());
   }
 
   @Test
@@ -220,7 +218,6 @@ class FileToolTest {
 
   private static ToolExecutionRequest request(
       FileTool tool, String argumentsJson, BoundEnvironment environment) {
-    BranchView branch = mock(BranchView.class);
     ToolExecutionContext context =
         new ToolExecutionContext(
             UUID.randomUUID(),
@@ -231,7 +228,6 @@ class FileToolTest {
             UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
-            branch,
             Optional.ofNullable(environment));
     return new ToolExecutionRequest(
         tool.descriptor(),

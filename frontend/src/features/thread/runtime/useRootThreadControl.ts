@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { useBoundBranchPanel } from '@/features/thread/runtime/useBoundBranchPanel'
@@ -28,10 +28,6 @@ import {
   createBuiltinExecution,
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
-import {
-  parseGoalProgress,
-  type BranchGoalProgressResult,
-} from '@/features/thread/runtime/goal-progress'
 import {
   isBoundTarget,
   isDraftHistoryTarget,
@@ -404,11 +400,10 @@ export function useRootThreadControl({
     hasPendingOperation,
     setActionError,
     setConflict,
-    setInteraction,
     openRename: rename.openRename,
     setRenameError: rename.setRenameError,
   })
-  const { pendingAcceptance, pendingAcceptanceBlocked, submitGoal } = acceptance
+  const { pendingAcceptance, pendingAcceptanceBlocked } = acceptance
 
   function selectAgent(agentName: string): void {
     if (capabilities?.allowSwitchAgent === false) {
@@ -524,7 +519,6 @@ export function useRootThreadControl({
   const canBranchFromRoot = rootEntryId != null
 
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
-  const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
   const composerDisabled = Boolean(capabilities?.readOnly)
     || pending
     || (isBoundTarget(target)
@@ -567,20 +561,6 @@ export function useRootThreadControl({
       ideAvailable: onOpenIde != null,
     },
   )
-  const boundGoal = isBoundTarget(target) && controller.thread?.branchSettings?.goal != null
-    ? controller.thread.branchSettings.goal
-    : null
-
-  const boundGoalProgress: BranchGoalProgressResult = useMemo(() => {
-    if (!isBoundTarget(target) || !boundGoal) {
-      return { active: null, stale: null }
-    }
-    return parseGoalProgress(
-      controller.entries ?? [],
-      boundGoal.id,
-    )
-  }, [target, controller.entries, boundGoal])
-
   const commandContext: PaneCommandContext = {
     target,
     capabilities,
@@ -616,9 +596,6 @@ export function useRootThreadControl({
       ? (next) => controller.setDraft(next, 'history')
       : undefined,
     onSubmit: acceptance.handleSubmit,
-    onSubmitGoal: (goalText: string, localDraft?: ComposerPart[]) => {
-      submitGoal(goalText, { localParts: localDraft })
-    },
     onCommand: (command) => handlePaneCommand(commandContext, command),
     commands,
     focusOnEscape: focused,
@@ -739,16 +716,6 @@ export function useRootThreadControl({
     controller,
     branchPanel,
     boundViews,
-    boundGoal,
-    boundGoalProgress,
-    goalDraft,
-    setGoalDraft: (text: string) => {
-      if (isBoundTarget(target)) {
-        controller.setGoalDraft(text)
-      }
-    },
-    submitGoal,
-    clearGoal: () => submitGoal(null),
     composer,
     restoreComposerFocus: () => setFocusIntent(target),
     pendingAcceptance,

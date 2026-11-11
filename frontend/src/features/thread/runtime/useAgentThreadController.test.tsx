@@ -24,18 +24,13 @@ import {
   applyStopReceipt,
   loadThreadDraft,
   restoreThreadDraftParts,
-  restoreThreadGoalText,
   saveThreadDraftParts,
-  saveThreadGoalText,
   type DraftSaveOutcome,
   type StopReceiptMergeResult,
   type ThreadDraftRecord,
 } from '@/features/thread/runtime/thread-draft-store'
 import { loadPendingStop, pendingStopStorageKey } from '@/features/thread/runtime/pending-stop-sidecar'
-import {
-  boundPendingStorageKey,
-  loadBoundPendingMessage,
-} from '@/features/thread/runtime/pending-request-store'
+import { loadBoundPendingMessage } from '@/features/thread/runtime/pending-request-store'
 import { translate as t } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -43,12 +38,11 @@ function useTestController(
   threadId: string,
   initialParts: ComposerPart[] = [],
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
-  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
   injectedProjection?: ThreadProjection,
 ) {
   const ownProjection = useThreadProjection(threadId)
   const projection = injectedProjection ?? ownProjection
-  return useAgentThreadController(projection, initialParts, buildBatch, buildGoalBatch)
+  return useAgentThreadController(projection, initialParts, buildBatch)
 }
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -103,18 +97,14 @@ vi.mock('@/features/thread/runtime/thread-draft-store', async (importOriginal) =
     applyStopReceipt: vi.fn(actual.applyStopReceipt),
     loadThreadDraft: vi.fn(actual.loadThreadDraft),
     restoreThreadDraftParts: vi.fn(actual.restoreThreadDraftParts),
-    restoreThreadGoalText: vi.fn(actual.restoreThreadGoalText),
     saveThreadDraftParts: vi.fn(actual.saveThreadDraftParts),
-    saveThreadGoalText: vi.fn(actual.saveThreadGoalText),
   }
 })
 
 const applyStopReceiptMock = vi.mocked(applyStopReceipt)
 const loadThreadDraftMock = vi.mocked(loadThreadDraft)
 const restoreThreadDraftPartsMock = vi.mocked(restoreThreadDraftParts)
-const restoreThreadGoalTextMock = vi.mocked(restoreThreadGoalText)
 const saveThreadDraftPartsMock = vi.mocked(saveThreadDraftParts)
-const saveThreadGoalTextMock = vi.mocked(saveThreadGoalText)
 
 function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
@@ -123,7 +113,6 @@ function branchSettings(
     agentName: 'assistant',
     execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
-    goal: null,
     ...overrides,
   }
 }
@@ -304,29 +293,7 @@ function recordOf(
   parts: ThreadDraftRecord['parts'],
   appliedStopRequestIds: string[] = [],
 ): ThreadDraftRecord {
-  return { threadId: forThreadId, parts, goalText: null, appliedStopRequestIds }
-}
-
-/** pending GOAL sidecar：Stop 成功后会走「未消费 Goal 文本写回」路径。 */
-function goalPendingMessage() {
-  return {
-    threadId: THREAD_ID,
-    request: {
-      expectedHeadEntryId: 'h1',
-      expectedNextCommandSequence: '1',
-      commands: [{ type: 'GOAL', idempotencyKey: 'goal-1', text: 'pending goal' }],
-    },
-    targetDraft: {
-      agentName: 'assistant',
-      execution: createBuiltinExecution('MiniMax', 'default'),
-      environmentName: null,
-      yoloEnabled: false,
-    },
-    kind: 'GOAL',
-    localDraft: [],
-    goalText: 'pending goal',
-    unknownOutcome: true,
-  }
+  return { threadId: forThreadId, parts, appliedStopRequestIds }
 }
 
 /** 经快照补偿通道投递一条回执（走真实已有的回执应用入口）。 */
@@ -363,9 +330,7 @@ async function resetDraftStoreToReal() {
   applyStopReceiptMock.mockReset().mockImplementation(actual.applyStopReceipt)
   loadThreadDraftMock.mockReset().mockImplementation(actual.loadThreadDraft)
   restoreThreadDraftPartsMock.mockReset().mockImplementation(actual.restoreThreadDraftParts)
-  restoreThreadGoalTextMock.mockReset().mockImplementation(actual.restoreThreadGoalText)
   saveThreadDraftPartsMock.mockReset().mockImplementation(actual.saveThreadDraftParts)
-  saveThreadGoalTextMock.mockReset().mockImplementation(actual.saveThreadGoalText)
 }
 
 /**
@@ -2835,77 +2800,6 @@ describe('useAgentThreadController draft restore', () => {
     expect(partsToText(result.current.draft)).toBe('new thread edit')
   })
 
-  it('ignores a late save/failure and a late receipt failure from the previous binding', async () => {
-    // 旧 Thread 的 goal 写入失败与回执合并失败都晚于重绑：新 Thread 不得出现任何错误提示或回执收尾。
-    const saveGate = deferred<DraftSaveOutcome>()
-    const receiptGate = deferred<ThreadDraftRecord>()
-    saveThreadGoalTextMock.mockReturnValueOnce(saveGate.promise)
-    applyStopReceiptMock.mockReturnValueOnce(receiptGate.promise)
-    const receipt = stopReceipt(THREAD_ID, 'stop-late-fail', [cancelledUserMessage(1, 'cancelled')])
-    vi.mocked(harnessService.stopThread).mockResolvedValue({
-      status: 'STOPPED',
-      thread: threadFixture(),
-      stoppedThreads: [receipt],
-    } as HarnessThreadStopResultDTO)
-
-    const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useTestController(threadId),
-      { initialProps: { threadId: THREAD_ID }, wrapper },
-    )
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    act(() => result.current.setGoalDraft('old thread goal'))
-    let stopPromise: Promise<void> | undefined
-    act(() => {
-      stopPromise = result.current.stopThread()
-    })
-    await waitFor(() => expect(applyStopReceiptMock).toHaveBeenCalledTimes(1))
-
-    rerender({ threadId: THREAD_ID_2 })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-
-    await act(async () => {
-      saveGate.reject(new Error('quota exceeded'))
-      receiptGate.reject(new Error('IndexedDB transaction failed'))
-      await stopPromise
-    })
-
-    expect(result.current.actionError).toBeNull()
-    expect(result.current.draftRestoreError).toBeNull()
-    expect(result.current.goalDraft).toBeNull()
-    expect(partsToText(result.current.draft)).toBe('')
-  })
-
-  it('never writes a previous thread pending goal into the newly bound thread', async () => {
-    // 失败写回在 await 之后完成：身份已变，绝不把原 Thread 的 Goal 文本回填进新 Thread 的编辑区。
-    localStorage.setItem(boundPendingStorageKey(THREAD_ID), JSON.stringify(goalPendingMessage()))
-    const gate = deferred<boolean>()
-    restoreThreadGoalTextMock.mockReturnValueOnce(gate.promise)
-
-    const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useTestController(threadId),
-      { initialProps: { threadId: THREAD_ID }, wrapper },
-    )
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-    expect(result.current.pendingMessage).not.toBeNull()
-
-    let stopPromise: Promise<void> | undefined
-    act(() => {
-      stopPromise = result.current.stopThread()
-    })
-    await waitFor(() => expect(restoreThreadGoalTextMock).toHaveBeenCalledTimes(1))
-
-    rerender({ threadId: THREAD_ID_2 })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-
-    await act(async () => {
-      gate.resolve(true)
-      await stopPromise
-    })
-
-    expect(result.current.goalDraft).toBeNull()
-    expect(result.current.actionError).toBeNull()
-  })
-
   it('does not advance the observed generation when the loaded record content is not adopted', async () => {
     // 记录尚未到达时用户已开始编辑：不能只推进 generation 而不采纳内容，否则后续整份写入
     // 会把记录里已恢复的文本永久覆盖掉。这里必须保留原 generation + 提示，等待回执通道同步。
@@ -2959,36 +2853,6 @@ describe('useAgentThreadController draft restore', () => {
     await deliverReceipt(client, receipt, THREAD_ID)
 
     await waitFor(() => expect(partsToText(result.current.draft)).toBe('cancelled\n\nsecond edit'))
-  })
-
-  it('keeps one field completion from clearing the other field unsaved state', async () => {
-    // 两个字段各自独立：goal 写入成功不得清掉 composer 尚未落盘的编辑标记。
-    const client = testClient()
-    const receipt = stopReceipt(THREAD_ID, 'stop-cross-field', [cancelledUserMessage(1, 'cancelled')])
-    const { result } = renderHook(() => useTestController(THREAD_ID), {
-      wrapper: clientWrapper(client),
-    })
-    await waitFor(() => expect(result.current.disabled).toBe(false))
-
-    saveThreadDraftPartsMock.mockRejectedValueOnce(new Error('quota exceeded'))
-    act(() => result.current.setDraft([createTextPart('unsaved parts edit')]))
-    await waitFor(() => expect(result.current.actionError).toBe(t('ai.runtime.action.draftSaveFailed')))
-
-    // goal 写入成功（确定性完成）：它只应清掉 goal 自己的未保存标记。
-    const goalSave = deferred<DraftSaveOutcome>()
-    saveThreadGoalTextMock.mockReturnValueOnce(goalSave.promise)
-    act(() => result.current.setGoalDraft('goal saved'))
-    await act(async () => {
-      goalSave.resolve({ status: 'SAVED' })
-      await Promise.resolve()
-    })
-
-    applyStopReceiptMock.mockResolvedValue(
-      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-cross-field']),
-    )
-    await deliverReceipt(client, receipt, THREAD_ID)
-
-    await waitFor(() => expect(partsToText(result.current.draft)).toBe('cancelled\n\nunsaved parts edit'))
   })
 
   it('carries the observed receipt generation on every draft write', async () => {

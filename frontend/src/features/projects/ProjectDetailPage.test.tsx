@@ -303,7 +303,7 @@ describe('ProjectDetailPage', () => {
 
   it('mounts an owner-free bound-Thread AgentPane dock with container-only capabilities', async () => {
     // 测试意图：Issue 只是组织容器；合法 issue+thread 参数下挂载的 AgentPane 不伪造 owner、
-    // 不接管发送与停止，只保留禁用创建 Session/分叉的容器能力，已有 Thread 的输入、Goal、预览与 Stop 全走通用交互。
+    // 不接管发送与停止，只保留禁用创建 Session/分叉的容器能力，已有 Thread 的输入、预览与 Stop 全走通用交互。
     const api = createMockApi()
 
     renderPage(

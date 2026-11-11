@@ -929,7 +929,7 @@ abstract class ModelProcessorTestSupport {
     ToolBinding binding =
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
+            new ContributorBinding("core", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);

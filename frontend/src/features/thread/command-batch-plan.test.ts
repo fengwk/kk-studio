@@ -17,7 +17,6 @@ function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBra
     agentName: 'assistant',
     execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
-    goal: null,
     ...overrides,
   }
 }

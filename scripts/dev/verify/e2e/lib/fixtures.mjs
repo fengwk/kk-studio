@@ -446,17 +446,6 @@ export function agentConfigMatrix() {
       },
     },
     {
-      id: 'valid.goal_contributor_tools',
-      ok: true,
-      title: 'Goal contributor 工具已进入可选 ToolCatalog',
-      // Goal 正文只由用户经 typed GOAL 命令维护：Goal contributor 只贡献 get_goal/update_goal，没有创建工具。
-      build: () => ({
-        tools: ['get_goal', 'update_goal'],
-        skills: [],
-        subagents: [],
-      }),
-    },
-    {
       id: 'invalid.missing_tools',
       ok: false,
       expectStatus: 400,

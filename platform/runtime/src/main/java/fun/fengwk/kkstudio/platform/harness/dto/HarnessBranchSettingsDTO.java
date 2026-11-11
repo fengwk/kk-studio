@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
  * <p>wire 顺序显式冻结为声明顺序，完整快照要求可空字段总是显式出现。
  */
 @Data
-@JsonPropertyOrder({"agentName", "execution", "environmentName", "goal"})
+@JsonPropertyOrder({"agentName", "execution", "environmentName"})
 public class HarnessBranchSettingsDTO {
 
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
@@ -30,12 +30,4 @@ public class HarnessBranchSettingsDTO {
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String environmentName;
-
-  /**
-   * 用户维护的 Goal 快照；null 表示该 branch 当前没有用户设定 Goal。
-   *
-   * <p>Goal 正文只由 typed GOAL 用户命令设置，因此新建 branch 的 ROOT settings 与请求方向永不携带它；该字段用于向客户端投影当前值。
-   */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable HarnessGoalSettingDTO goal;
 }

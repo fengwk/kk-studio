@@ -402,7 +402,6 @@ describe('thread timeline', () => {
       agentName: 'reviewer',
       execution: createBuiltinExecution('glm-5.3-flash', 'max'),
       environmentName: null,
-      goal: { id: 'goal-1', text: 'code review' },
     }
     const entries = [
       entry('root-1', 'ROOT', { settings: rootSettings }),

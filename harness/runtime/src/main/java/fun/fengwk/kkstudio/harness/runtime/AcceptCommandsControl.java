@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.Names;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -626,15 +625,11 @@ final class AcceptCommandsControl {
 
   /**
    * 派生初始 Session 名称：只检查 validate 后的末尾 user-like message（初始 batch 恰以一条 user-like 结尾），取该消息第一个非空白
-   * 文本内容（仅 text 内容，不看附件 / resource 名称），规范化折叠为单行并取前 40 个 Unicode 码点（无省略号）；typed GOAL 用其目标正文
-   * 派生；无文本时回退为 {@code session-} + session UUID 前 8 位。
+   * 文本内容（仅 text 内容，不看附件 / resource 名称），规范化折叠为单行并取前 40 个 Unicode 码点（无省略号）；无文本时回退为 {@code session-} +
+   * session UUID 前 8 位。
    */
   static String initialSessionName(List<NewThreadCommand> commands, UUID sessionId) {
     NewThreadCommand trailing = commands.get(commands.size() - 1);
-    if (trailing.payload() instanceof GoalCommandPayload goal) {
-      String name = Names.sessionNameFromUserText(goal.text());
-      return name == null ? Names.defaultSessionName(sessionId) : name;
-    }
     AgentMessage message = userMessage(trailing);
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof TextMessageContent text) {

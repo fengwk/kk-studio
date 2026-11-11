@@ -38,7 +38,6 @@ final class ToolErrorClassifier {
   static final String INVALID_REQUEST_KIND = "INVALID_REQUEST";
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
-  static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
   static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
   static final String VFS_READ_ONLY_KIND = "VFS_READ_ONLY";
 
@@ -135,16 +134,6 @@ final class ToolErrorClassifier {
           true);
     }
     return unknown(toolName, error, "the tool failed for an unclassified reason");
-  }
-
-  /** Contributor 返回了非法的自定义条目：执行已发生，只能声明结果未确认。 */
-  static ToolInvocationError contributorContractViolation(Throwable failure, String whatFailed) {
-    return new ToolInvocationError(
-        CONTRIBUTOR_CONTRACT_VIOLATION_KIND,
-        ToolErrorGuidance.message(
-            failureMessage(failure, whatFailed),
-            ExecutionFact.UNCERTAIN,
-            DETERMINISTIC_REJECTION_NEXT_ACTION));
   }
 
   /** 终态结果本身不满足契约。 */

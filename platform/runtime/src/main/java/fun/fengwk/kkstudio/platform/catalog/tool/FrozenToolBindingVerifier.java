@@ -1,11 +1,9 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 
@@ -54,27 +52,6 @@ final class FrozenToolBindingVerifier {
           ToolBindingMismatchException.Reason.REQUIREMENTS,
           "Frozen tool environment requirement does not match catalog requirements: " + toolName);
     }
-    if (!stateAccessesMatch(frozenContributor, requirements)) {
-      throw new ToolBindingMismatchException(
-          ToolBindingMismatchException.Reason.REQUIREMENTS,
-          "Tool definition " + toolName + " no longer matches its frozen state access declaration");
-    }
     return contribution;
-  }
-
-  private static boolean stateAccessesMatch(
-      ContributorBinding binding, ToolRequirements requirements) {
-    if (binding.stateAccesses().size() != requirements.stateAccesses().size()) {
-      return false;
-    }
-    for (int i = 0; i < binding.stateAccesses().size(); i++) {
-      ContributorStateAccess frozen = binding.stateAccesses().get(i);
-      StateDeclaration current = requirements.stateAccesses().get(i);
-      if (!frozen.customType().equals(current.customType())
-          || !frozen.mode().name().equals(current.mode().name())) {
-        return false;
-      }
-    }
-    return true;
   }
 }

@@ -1191,9 +1191,6 @@ function checkHarnessCatalogBoundary() {
   if (!gatewayRun.includes(`import ${harnessCatalogImport};`)) {
     addError(`${harnessCatalogGatewayRun}: must import HarnessCatalog for metadata`)
   }
-  if (!/harnessCatalog\s*\.\s*findCustomEntryType/u.test(gatewayRun)) {
-    addError(`${harnessCatalogGatewayRun}: must validate custom entry types via HarnessCatalog`)
-  }
   for (const token of [
     'harnessCatalog.findTool',
     'harnessCatalog.selectableTools',

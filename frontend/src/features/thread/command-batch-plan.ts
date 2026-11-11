@@ -9,7 +9,6 @@ import {
 import {
   buildThreadCommandBatchRequest,
   copyBranchDraft,
-  normalizeGoalText,
 } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
 import {
   hasMessageContent,
@@ -75,36 +74,6 @@ export function buildMessageBatchPlan(options: {
       commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
       branchDraft: options.draft,
       parts: partsKey(payloadParts),
-    }),
-    targetDraft: copyBranchDraft(options.draft),
-  }
-}
-
-export function buildGoalBatchPlan(options: {
-  thread: HarnessThreadDTO
-  effectiveBase: BranchDraft
-  draft: BranchDraft
-  goalText: string | null
-  createCommandId?: () => string
-}): CommandBatchPlan {
-  const createId = options.createCommandId ?? createCommandId
-  const text = normalizeGoalText(options.goalText)
-  const goalCommand: HarnessCommandCreateDTO = {
-    type: 'GOAL',
-    idempotencyKey: createId(),
-    text,
-  }
-  const commands = [
-    ...buildBranchDiffCommands(options.effectiveBase, options.draft, createId),
-    goalCommand,
-  ]
-  return {
-    request: buildThreadCommandBatchRequest(options.thread, commands),
-    identity: JSON.stringify({
-      threadId: options.thread.threadId,
-      commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
-      branchDraft: options.draft,
-      goalText: text,
     }),
     targetDraft: copyBranchDraft(options.draft),
   }

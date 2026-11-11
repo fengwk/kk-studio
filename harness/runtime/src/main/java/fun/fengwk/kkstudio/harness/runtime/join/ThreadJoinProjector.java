@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.join;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
@@ -202,9 +201,6 @@ public final class ThreadJoinProjector {
     }
     if (command.payload() instanceof CustomMessageCommandPayload custom) {
       return extractMessageText(custom.message());
-    }
-    if (command.payload() instanceof GoalCommandPayload goal) {
-      return goal.text() != null ? goal.text() : "";
     }
     return "";
   }

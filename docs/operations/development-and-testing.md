@@ -438,7 +438,7 @@ L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.pre
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
 `distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
-但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受、阶段交接与 Goal 进度验收，
+但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受与阶段交接，
 这些需在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
@@ -547,8 +547,8 @@ system 很短，两组都保留其固定的 ephemeral 标记。
 [real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 的 `idSuffix`：
 `google_gemini`、`openai_responses`、`minimax_anthropic`（默认）、`deepseek_chat`。非法取值在 case
 开始前直接失败，不自动 fallback、不改 provider identity，实际选择写入 case artifact。该选项只让这两个
-内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*`、
-`real.reasoning_levels.*`、`real.tool.*` 仍按各自 provider 运行）。
+内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*` 与
+`real.reasoning_levels.*` 仍按各自 provider 运行）。
 
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、

@@ -9,13 +9,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import javax.sql.DataSource;
@@ -26,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * PostgreSQL loadBranchSettings 窄查询的专项回归测试：冷缓存只走窄 CTE，不物化完整 EntryPath。
  *
- * <p>只读 Contributor branch view 依赖该窄读取解析用户 Goal。
+ * <p>只读查询依赖该窄读取解析 branch settings。
  */
 class PostgresqlBranchSettingsQueryTest {
 
@@ -52,8 +50,7 @@ class PostgresqlBranchSettingsQueryTest {
   @Test
   void coldCacheBranchSettingsQueryExecutesNarrowCteAndZeroFullPathCte() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID goalId = TestIds.id(41L);
-    BranchSettings goalSettings = branchSettings().withGoal(new GoalSetting(goalId, "ship it"));
+    BranchSettings expectedSettings = branchSettings();
     UUID turnStartId =
         store.transaction(
             tx -> {
@@ -66,7 +63,7 @@ class PostgresqlBranchSettingsQueryTest {
                           baseline.rootEntryId(),
                           new TurnStartPayload(
                               TurnStartReason.INPUT,
-                              goalSettings,
+                              expectedSettings,
                               StoreTestSupport.OWNER_THREAD_ID),
                           StoreTestSupport.T1));
               return id;
@@ -75,7 +72,7 @@ class PostgresqlBranchSettingsQueryTest {
     cteCounter.set(0);
 
     BranchSettings settings = store.transaction(tx -> tx.entries().loadBranchSettings(turnStartId));
-    assertEquals(goalSettings, settings);
+    assertEquals(expectedSettings, settings);
     assertEquals(0, cteCounter.get(), "冷缓存窄查询不执行 with recursive entry_path 全路径 CTE");
 
     // ROOT 本身也是一个合法 head：同样只走窄查询。

@@ -19,15 +19,11 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
-import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -398,7 +394,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             pluginTool.definition(),
-            new ContributorBinding("plugin.contributor.demo", "echo-tool", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "echo-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -416,7 +412,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             builtinTool.definition(),
-            new ContributorBinding("builtin.system", "calc-tool", List.of()),
+            new ContributorBinding("builtin.system", "calc-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -439,7 +435,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             missingDefinition,
-            new ContributorBinding("plugin.contributor.demo", "missing-tool", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "missing-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -464,7 +460,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             driftedDefinition,
-            new ContributorBinding("plugin.contributor.demo", "echo-tool", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "echo-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -484,7 +480,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             pluginTool.definition(),
-            new ContributorBinding("other.contributor", "echo-tool", List.of()),
+            new ContributorBinding("other.contributor", "echo-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -504,7 +500,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             pluginTool.definition(),
-            new ContributorBinding("plugin.contributor.demo", "other-local", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "other-local"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -525,7 +521,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             pluginTool.definition(),
-            new ContributorBinding("plugin.contributor.demo", "echo-tool", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "echo-tool"),
             EnvironmentSupport.ROUTED,
             null,
             null);
@@ -536,47 +532,6 @@ class PluginRuntimeToolCatalogSourceTest {
     assertTrue(
         ex.getMessage()
             .contains("Frozen tool environment requirement does not match catalog requirements"));
-  }
-
-  @Test
-  void require_mismatch_stateAccesses_failsWithRequirementsReason() {
-    // 意图：验证 contributor stateAccesses 声明（类型或模式）与目录不匹配时拒绝并报告 REQUIREMENTS mismatch
-    ToolContribution stateTool =
-        createContribution(
-            PLUGIN_CONTRIBUTOR_ID,
-            "state-tool",
-            "state-tool",
-            "Stateful tool",
-            ToolVisibility.SELECTABLE,
-            new ToolRequirements(
-                EnvironmentSupport.NONE,
-                List.of(new StateDeclaration("custom-state", StateMode.READ))));
-
-    when(currentHarnessCatalog.tools()).thenReturn(List.of(stateTool));
-    when(currentHarnessCatalog.selectableTools()).thenReturn(List.of(stateTool));
-
-    PluginRuntimeToolCatalogSource source = new PluginRuntimeToolCatalogSource(runtime, mcpCatalog);
-    RuntimeToolCatalogSource.Lease lease = source.acquire();
-
-    // binding 的 contributor 声明了 WRITE 而不是 READ
-    ContributorBinding mismatchedStateContributor =
-        new ContributorBinding(
-            "plugin.contributor.demo",
-            "state-tool",
-            List.of(new ContributorStateAccess("custom-state", ContributorStateAccessMode.WRITE)));
-
-    ToolBinding binding =
-        new ToolBinding(
-            stateTool.definition(),
-            mismatchedStateContributor,
-            EnvironmentSupport.NONE,
-            null,
-            null);
-
-    ToolBindingMismatchException ex =
-        assertThrows(ToolBindingMismatchException.class, () -> lease.require(binding));
-    assertEquals(ToolBindingMismatchException.Reason.REQUIREMENTS, ex.reason());
-    assertTrue(ex.getMessage().contains("no longer matches its frozen state access declaration"));
   }
 
   @Test
@@ -623,7 +578,7 @@ class PluginRuntimeToolCatalogSourceTest {
     ToolBinding binding =
         new ToolBinding(
             pluginTool.definition(),
-            new ContributorBinding("plugin.contributor.demo", "echo-tool", List.of()),
+            new ContributorBinding("plugin.contributor.demo", "echo-tool"),
             EnvironmentSupport.NONE,
             null,
             null);

@@ -91,19 +91,18 @@ describe('extractQueuedCustomMessages', () => {
     expect(result[0]?.text).toBe('仍在队列中')
   })
 
-  it('不将 USER_MESSAGE、GOAL、NOTIFICATION 或设置命令当作待处理补充要求', () => {
+  it('不将 USER_MESSAGE、NOTIFICATION 或设置命令当作待处理补充要求', () => {
     const commands: HarnessThreadCommandDTO[] = [
       createCommand({ sequence: '1', type: 'USER_MESSAGE' }),
-      createCommand({ sequence: '2', type: 'GOAL' }),
-      createCommand({ sequence: '3', type: 'NOTIFICATION' }),
-      createCommand({ sequence: '4', type: 'SET_AGENT' }),
-      createCommand({ sequence: '5', type: 'CUSTOM_MESSAGE' }),
+      createCommand({ sequence: '2', type: 'NOTIFICATION' }),
+      createCommand({ sequence: '3', type: 'SET_AGENT' }),
+      createCommand({ sequence: '4', type: 'CUSTOM_MESSAGE' }),
     ]
 
     const result = extractQueuedCustomMessages(commands)
 
     expect(result).toHaveLength(1)
-    expect(result[0]?.sequence).toBe('5')
+    expect(result[0]?.sequence).toBe('4')
   })
 
   it('忽略空文本或空 contents，不生成空项', () => {

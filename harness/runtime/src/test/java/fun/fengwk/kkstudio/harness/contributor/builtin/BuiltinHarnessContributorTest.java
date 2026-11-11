@@ -5,12 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -21,9 +16,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
-import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -53,9 +45,8 @@ import java.util.stream.Collectors;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (13 tools: 5 file + 4 environment + 1 internal task + 2 goal + 1 ask_user),
- * visibility/requirements/capability 映射, 稳定模型可见 name, goal.progress ownership（无 Goal projector）,
- * 和全局唯一性。
+ * <p>验证 exact inventory (11 tools: 5 file + 4 environment + 1 internal task + 1 ask_user),
+ * visibility/requirements/capability 映射, 稳定模型可见 name 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
 
@@ -132,13 +123,13 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertEquals(new ContributorId("builtin"), catalog.descriptors().get(0).id());
 
-    // Tools inventory: exactly 13 tools（Goal 正文由用户维护，没有 create_goal；含 1 个人工输入工具）
+    // Tools inventory: exactly 11 tools（含 1 个人工输入工具）
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(13, tools.size(), "exact total 13 tools expected");
+    assertEquals(11, tools.size(), "exact total 11 tools expected");
 
-    // Selectable tools: 1 read + 8 environment + 2 goal + 1 ask_user = 12 tools (task is INTERNAL)
+    // Selectable tools: 1 read + 8 environment + 1 ask_user = 10 tools (task is INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
-    assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
+    assertEquals(10, selectables.size(), "exact 10 selectable tools expected");
 
     // 5 个逐调用路由的文件工具（SELECTABLE, localName=name, ROUTED）
     assertFileTool(
@@ -205,30 +196,8 @@ class BuiltinHarnessContributorTest {
     // 1 个 Internal 工具 (INTERNAL visibility, NONE requirements)
     assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());
 
-    // 2 个 Goal 工具 (SELECTABLE visibility, NONE requirements + progress state access)
-    assertTrue(catalog.findTool("create_goal").isEmpty(), "Goal 正文由用户维护，没有创建工具");
-    assertGoalTool(catalog, "get_goal", "goal.get", ToolSideEffect.READ_ONLY, StateMode.READ);
-    assertGoalTool(
-        catalog, "update_goal", "goal.update", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
-
     // 人工输入工具：Runtime 的 provenance 判据是 (contributor=builtin, name=ask_user)，因此身份必须在目录里冻结。
     assertAskUserTool(catalog);
-
-    // Custom entry types: exactly goal.progress ownership
-    HarnessRegistrar registrar = mock(HarnessRegistrar.class);
-    contributor.contribute(registrar);
-    verify(registrar, times(1)).registerCustomEntryType(anyString(), anyString(), anyInt());
-    verify(registrar).registerCustomEntryType("goal.progress-type", "goal.progress", 0);
-    verify(registrar, never()).registerCustomEntryType(anyString(), anyString());
-    assertTrue(
-        catalog.findCustomEntryType(new ContributorId("builtin"), "goal.progress").isPresent());
-    assertEquals(
-        "goal.progress-type",
-        catalog
-            .findCustomEntryType(new ContributorId("builtin"), "goal.progress")
-            .orElseThrow()
-            .id()
-            .localName());
 
     // Ensure all model-visible tool names and ContributionIds are unique
     Set<String> names = new HashSet<>();
@@ -426,31 +395,6 @@ class BuiltinHarnessContributorTest {
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
-  private static void assertGoalTool(
-      HarnessCatalog catalog,
-      String toolName,
-      String localName,
-      ToolSideEffect sideEffect,
-      StateMode mode) {
-    ToolContribution tool = catalog.findTool(toolName).orElseThrow();
-    assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
-    assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
-    assertEquals(
-        new ToolRequirements(
-            EnvironmentSupport.NONE,
-            List.of(new StateDeclaration(BuiltinHarnessContributor.GOAL_PROGRESS_TYPE, mode))),
-        tool.requirements());
-
-    ToolDescriptor descriptor = tool.definition().descriptor();
-    assertEquals(toolName, descriptor.name());
-    assertEquals(toolName, descriptor.rendererKey());
-    assertEquals(sideEffect, descriptor.sideEffect());
-    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
-    assertFalse(descriptor.description().isBlank());
-
-    assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
-  }
-
   /**
    * bash 提示词必须描述宿主配置的 shell（{@code bash -lc <command>}），不得残留未渲染的模板占位符。
    *
@@ -535,8 +479,7 @@ class BuiltinHarnessContributorTest {
 
       @Override
       public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
-        return ToolOutcome.withoutEffects(
-            new ToolResult(request.call().id(), List.of(), false, "{}"));
+        return new ToolOutcome(new ToolResult(request.call().id(), List.of(), false, "{}"));
       }
     };
   }

@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -380,40 +379,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
         () ->
             chatPreflight.prepare(
                 new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
-  }
-
-  /** Issue+Agent 的 Goal 也不能绕过产品工作流直接接受。 */
-  @Test
-  void rejectsGoalCommandsForIssueAgentThreads() {
-    NewThreadCommand goal =
-        new NewThreadCommand(new GoalCommandPayload("ship the release"), id(21));
-    assertThrows(
-        DirectCommandsNotAllowedException.class,
-        () ->
-            service.accept(
-                ISSUE_AGENT_OWNER,
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewThread(
-                        SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
-                    List.of(goal))));
-
-    verify(runtime, never()).acceptCommands(any(), any());
-    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
-  }
-
-  /** Chat 普通 Branch 的 Goal 是产品能力：同一 GOAL 命令在 CHAT owner 下必须继续被接受。 */
-  @Test
-  void acceptsGoalCommandsForOrdinaryChatBranches() {
-    NewThreadCommand goal =
-        new NewThreadCommand(new GoalCommandPayload("ship the release"), id(23));
-    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
-
-    assertSame(
-        accepted,
-        service.accept(
-            CHAT_OWNER, newSession(THREAD_ID, goal, user(new TextMessageContent("go")))));
-
-    verify(runtime).acceptCommands(any(), any());
   }
 
   @Test

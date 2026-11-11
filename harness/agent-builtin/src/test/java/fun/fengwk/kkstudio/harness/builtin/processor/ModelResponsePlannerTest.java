@@ -349,7 +349,7 @@ class ModelResponsePlannerTest {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", name, List.of()),
+        new ContributorBinding("core", name),
         EnvironmentSupport.NONE,
         null,
         null);

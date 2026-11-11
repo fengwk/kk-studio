@@ -4,7 +4,6 @@ import {
   partsToMessageContents,
 } from '@/features/thread/composer/composer-parts'
 import {
-  cancelledInputGoalText,
   cancelledInputMessageParts,
   prependCancelledMessages,
 } from '@/features/thread/runtime/cancelled-message-parts'
@@ -21,15 +20,6 @@ function cancelledMessage(
     idempotencyKey,
     type: 'USER_MESSAGE',
     payload: { message: { role: 'USER', contents } },
-  }
-}
-
-function cancelledGoal(sequence: string, text: string): HarnessCancelledInputDTO {
-  return {
-    sequence,
-    idempotencyKey: `g${sequence}`,
-    type: 'GOAL',
-    payload: { text },
   }
 }
 
@@ -63,8 +53,6 @@ describe('cancelled message composer recovery', () => {
   it('keeps the current draft reference untouched when nothing can be restored', () => {
     const current = [createTextPart('current')]
 
-    // GOAL 与系统事实都不是 composer 草稿内容；只有 USER_MESSAGE 会回到输入框。
-    expect(prependCancelledMessages([cancelledGoal('1', 'objective')], current)).toBe(current)
     expect(prependCancelledMessages([], current)).toBe(current)
   })
 
@@ -90,12 +78,4 @@ describe('cancelled message composer recovery', () => {
     }))).toEqual([{ type: 'TEXT', text: 'not-json' }])
   })
 
-  it('maps GOAL payloads back to the goal editor text and ignores non-goal inputs', () => {
-    expect(cancelledInputGoalText(cancelledGoal('1', 'objective'))).toBe('objective')
-    // 空目标与消息输入都不产生 Goal 文本。
-    expect(cancelledInputGoalText(cancelledGoal('2', ''))).toBeNull()
-    expect(cancelledInputGoalText(cancelledMessage('3', [{ type: 'text', text: 'hi' }]))).toBeNull()
-    // GOAL 输入不会污染 composer 草稿。
-    expect(cancelledInputMessageParts(cancelledGoal('4', 'objective'))).toEqual([])
-  })
 })

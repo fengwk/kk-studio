@@ -47,7 +47,6 @@ export function RootThreadControlArea({
     onPartsChange,
     onHistoryPartsChange,
     onSubmit,
-    onSubmitGoal,
     onCommand,
     commands,
     onCommandPaletteVisibilityChange,
@@ -86,7 +85,6 @@ export function RootThreadControlArea({
         onPartsChange={onPartsChange}
         onHistoryPartsChange={onHistoryPartsChange}
         onSubmit={onSubmit}
-        onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
         commands={commands}
         onCommandPaletteVisibilityChange={onCommandPaletteVisibilityChange}

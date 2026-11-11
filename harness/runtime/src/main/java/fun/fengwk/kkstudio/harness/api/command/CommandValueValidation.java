@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.command;
 
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 
 import java.util.Objects;
 
@@ -32,10 +31,5 @@ public final class CommandValueValidation {
   /** nullable Environment 名：null 表示解除环境选择；非 null 复用 {@link BranchSettings} 的 canonical 校验。 */
   public static String requireCanonicalEnvironmentName(String value, String field) {
     return BranchSettings.requireCanonicalEnvironmentName(value, field);
-  }
-
-  /** Goal 正文：null 表示清除；非 null 复用 {@link GoalSetting} 的 canonical 校验。 */
-  public static String requireCanonicalGoalText(String value, String field) {
-    return value == null ? null : GoalSetting.requireCanonicalText(value, field);
   }
 }

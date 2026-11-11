@@ -357,8 +357,7 @@ public final class ThreadProcessor {
     if (settings.isEmpty()) {
       return false;
     }
-    BranchSettings applied =
-        settingsReducer.reduce(thread.id(), path.baseSettings(), settings, tx::nextId);
+    BranchSettings applied = settingsReducer.reduce(thread.id(), path.baseSettings(), settings);
     UUID settingsEntryId = tx.nextId();
     tx.entries()
         .insert(

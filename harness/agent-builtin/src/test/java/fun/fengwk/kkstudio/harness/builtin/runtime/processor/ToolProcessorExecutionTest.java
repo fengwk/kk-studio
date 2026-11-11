@@ -14,10 +14,8 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -472,8 +470,7 @@ class ToolProcessorExecutionTest {
                 "call-1", new TextResultContent("a".repeat(24 * 1024 * 1024))));
     for (ToolResult result : invalid) {
       Fixture fixture = approvedFixture();
-      fixture.gateway.queueRun(
-          progress -> new ToolGateway.Succeeded(ToolSuccess.withoutEffects(result)));
+      fixture.gateway.queueRun(progress -> new ToolGateway.Succeeded(new ToolSuccess(result)));
 
       fixture.processor.process(claim(fixture));
       awaitStatus(fixture, ToolInvocationStatus.FAILED);
@@ -966,7 +963,7 @@ class ToolProcessorExecutionTest {
     fixture.gateway.queueRun(
         progress ->
             new ToolGateway.Succeeded(
-                ToolSuccess.withoutEffects(
+                new ToolSuccess(
                     new ToolResult("call-1", List.of(new TextResultContent("raw")), false, "{}"))));
     ToolResultHistoryMaterializer materializer =
         (sessionId, toolName, result) -> {
@@ -994,14 +991,11 @@ class ToolProcessorExecutionTest {
   void permanentMaterializationFailureRollsBackSuccessAndConvergesToUnknownOnce() throws Exception {
     Fixture fixture = approvedFixture();
     AtomicInteger calls = new AtomicInteger();
-    ToolEffectBatch effects =
-        new ToolEffectBatch(List.of(new CustomEntryPayload("goal", "materialized-effect", "{}")));
     fixture.gateway.queueRun(
         progress ->
             new ToolGateway.Succeeded(
                 new ToolSuccess(
-                    new ToolResult("call-1", List.of(new TextResultContent("raw")), false, "{}"),
-                    effects)));
+                    new ToolResult("call-1", List.of(new TextResultContent("raw")), false, "{}"))));
     ToolResultHistoryMaterializer materializer =
         (sessionId, toolName, result) -> {
           calls.incrementAndGet();
@@ -1019,7 +1013,6 @@ class ToolProcessorExecutionTest {
     assertEquals("RESOURCE_MATERIALIZATION_FAILED", tool.error().kind());
     assertEquals("upload is no longer ready", tool.error().message());
     assertNull(tool.result());
-    assertTrue(tool.effects().isEmpty(), "rolled-back success effects must not survive");
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 

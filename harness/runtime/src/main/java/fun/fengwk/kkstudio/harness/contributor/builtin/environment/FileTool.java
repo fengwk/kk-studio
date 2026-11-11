@@ -113,15 +113,14 @@ public final class FileTool implements Tool {
     String path = ToolArguments.text(arguments, "path");
 
     if (path != null && path.startsWith("vfs:")) {
-      return ToolOutcome.withoutEffects(vfs(request, progress));
+      return new ToolOutcome(vfs(request, progress));
     }
 
     Optional<BoundEnvironment> environment = environment(request);
     if (environment.isEmpty()) {
-      return ToolOutcome.withoutEffects(noEnvironment(request));
+      return new ToolOutcome(noEnvironment(request));
     }
-    return ToolOutcome.withoutEffects(
-        withGuidance(environment.get().execute(capability, request, progress)));
+    return new ToolOutcome(withGuidance(environment.get().execute(capability, request, progress)));
   }
 
   private ToolResult vfs(ToolExecutionRequest request, Consumer<ToolResult> progress)

@@ -152,8 +152,7 @@ Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大�
 删除 Entry 或 Session 时按 Session 驱逐。冷查询的 `loadCurrent` 只回溯并返回分类所需锚点；
 `isAncestor` 命中候选或 ROOT 即停；`loadPathMetrics` 在 SQL 聚合标量，
 三者都不把部分结果写入完整路径缓存。`loadSlice` 从 head 回溯至游标或 ROOT，
-游标不在祖先链上时返回完整链；`loadContributorCustom` 的冷查询只返回 head
-与匹配 contributor 的 CUSTOM 节点。完整路径已缓存时上述读取复用缓存。
+游标不在祖先链上时返回完整链。完整路径已缓存时上述读取复用缓存。
 
 完整路径按 ROOT 到 head 排序；只追加写入、同 Session 父子外键与非 ROOT 父约束保证父链终止，
 CTE 不另做环路检测。`findRoot` 优先使用缓存，未命中时经唯一 ROOT 索引点查并缓存。
@@ -163,7 +162,7 @@ COMPACTION 是回合，其 settings 不参与真实模型，已关闭 Turn 引�
 INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
 `loadSlice` 命中游标时不包含游标，游标即 head 返回空列表；其他分支、其他 Session 或未知游标
 返回完整链并将 `baseEntryId` 置空。head 缺失时拒绝。无游标时按完整路径读取，
-带游标的切片与 CUSTOM 窄查询不回填完整路径缓存。
+带游标的切片不回填完整路径缓存。
 
 深删除先排序并锁定目标 Thread，重复 ID、未锁树或仍被引用的目标被拒绝；
 依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Stop 回执、Tool、Driver 私有行、
@@ -434,7 +433,7 @@ headers 作为整体秘密：创建时省略即无 header，只接受 `SET`；�
 `findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
 Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品；Project 检查未归档项目的工作流阶段。
 
-Issue+Agent 的命令由 Issue 业务工作流拥有，SPI 声明通用命令直写为禁止，公共 batch 端点据此拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入，不写 Project contributor state。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
+Issue+Agent 的命令由 Issue 业务工作流拥有，SPI 声明通用命令直写为禁止，公共 batch 端点据此拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
 Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
@@ -444,7 +443,7 @@ Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事�
 subagent 与 system instruction，形成与模型无关的 `AgentTurnContext`。`DatabaseTurnResolver` 只在这份快照上规划 Model、Variant、
 模型组、压缩、缓存与输出预算；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
 Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、业务工具与身份上下文都在接受 Run 时
-显式提交或冻结到 branch state。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
+显式提交或冻结到 Run 上下文。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。

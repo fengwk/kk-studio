@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
@@ -226,13 +225,9 @@ public final class HarnessRuntimeRequestMapper {
     return validation("commands", () -> new AcceptCommandsCommand(target, commands));
   }
 
-  /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
+  /** rootSettings 是新建 branch 的初始快照。 */
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
-    if (dto.getGoal() != null) {
-      throw DomainException.validation(
-          "request", "branchSettings must not carry a goal; goals are set through a GOAL command");
-    }
     return validation(
         "branchSettings",
         () ->
@@ -297,8 +292,6 @@ public final class HarnessRuntimeRequestMapper {
             switch (dto) {
               case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
                   new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
-              case HarnessCommandCreateDTO.GoalDTO command -> new GoalCommandPayload(
-                  command.text());
               case HarnessCommandCreateDTO.SetAgentDTO command -> new SetAgentCommandPayload(
                   requireText(command.agentName(), "command.agentName"));
               case HarnessCommandCreateDTO.SetExecutionDTO
@@ -330,7 +323,7 @@ public final class HarnessRuntimeRequestMapper {
 
   /**
    * 产品 HTTP 命令批的 shape admission：SET_* 必须按固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt;
-   * SET_ENVIRONMENT）出现，每种至多一次且位于消息之前；user-like 输入（USER_MESSAGE / GOAL）至多一条且必须位于末尾。
+   * SET_ENVIRONMENT）出现，每种至多一次且位于消息之前；user-like 输入（USER_MESSAGE）至多一条且必须位于末尾。
    *
    * <p>创建型 target（NEW_SESSION / NEW_THREAD）要求恰有一条 user-like 输入；既有 Thread 允许纯设置批次（0 条
    * user-like），额外保证由 Core 在应用边界完成。
@@ -346,8 +339,8 @@ public final class HarnessRuntimeRequestMapper {
     int userLikeCount = 0;
     for (int i = 0; i < commands.size(); i++) {
       ThreadCommandType type = commands.get(i).payload().type();
-      if (type == ThreadCommandType.USER_MESSAGE || type == ThreadCommandType.GOAL) {
-        // typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入：至多一条且必须在最后。
+      if (type == ThreadCommandType.USER_MESSAGE) {
+        // USER_MESSAGE 是 user-like 终止输入：至多一条且必须在最后。
         userLikeCount++;
         if (i != commands.size() - 1) {
           throw DomainException.validation(
@@ -366,8 +359,8 @@ public final class HarnessRuntimeRequestMapper {
       throw DomainException.validation(
           "request",
           requireUserLike
-              ? "HTTP command batch must contain exactly one USER_MESSAGE or GOAL command"
-              : "HTTP command batch may contain at most one USER_MESSAGE or GOAL command");
+              ? "HTTP command batch must contain exactly one USER_MESSAGE command"
+              : "HTTP command batch may contain at most one USER_MESSAGE command");
     }
   }
 

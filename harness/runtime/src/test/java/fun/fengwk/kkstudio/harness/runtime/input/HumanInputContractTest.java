@@ -336,7 +336,7 @@ class HumanInputContractTest {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding(contributorId, localName, List.of()),
+        new ContributorBinding(contributorId, localName),
         EnvironmentSupport.NONE,
         null,
         null);

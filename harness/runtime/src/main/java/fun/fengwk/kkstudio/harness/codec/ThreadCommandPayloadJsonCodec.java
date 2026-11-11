@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.CommandValueValidation;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
@@ -35,8 +34,8 @@ import java.util.UUID;
  * Typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
- * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；GOAL 携带 nullable 目标正文（null 表示清除
- * Goal）；SET_EXECUTION 携带 Driver 与设置；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除 环境选择）。
+ * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_EXECUTION 携带 Driver
+ * 与设置；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除 环境选择）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -50,7 +49,6 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final Set<String> USER_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
-  private static final Set<String> GOAL_FIELDS = orderedSet("text");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_EXECUTION_FIELDS = orderedSet("execution");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
@@ -113,7 +111,6 @@ public final class ThreadCommandPayloadJsonCodec {
     return switch (type) {
       case USER_MESSAGE -> decodeUserMessage(root);
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
-      case GOAL -> decodeGoal(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_EXECUTION -> decodeSetExecution(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
@@ -150,16 +147,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case CustomMessageCommandPayload value -> NODES
           .objectNode()
           .set("message", MESSAGE_CODEC.encodeNode(value.message()));
-      case GoalCommandPayload value -> {
-        ObjectNode node = NODES.objectNode();
-        // text 必须显式存在：null 表示清除 Goal，与「字段缺失」严格区分。
-        if (value.text() == null) {
-          node.putNull("text");
-        } else {
-          node.put("text", value.text());
-        }
-        yield node;
-      }
       case SetAgentCommandPayload value -> NODES.objectNode().put("agentName", value.agentName());
       case SetExecutionCommandPayload value -> NODES
           .objectNode()
@@ -197,25 +184,6 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
     requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
-  }
-
-  private static GoalCommandPayload decodeGoal(JsonNode value) {
-    ObjectNode node = requireObject(value, "GOAL");
-    requireFields(node, GOAL_FIELDS, "GOAL");
-    return new GoalCommandPayload(nullableGoalText(node, "text", "GOAL"));
-  }
-
-  /** 解码可空 Goal 正文：text 或 null；其他类型（含对象/数组）确定性拒绝。 */
-  private static String nullableGoalText(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isString()) {
-      throw new IllegalArgumentException(context + "." + field + " must be text or null");
-    }
-    return CommandValueValidation.requireCanonicalGoalText(
-        value.stringValue(), context + "." + field);
   }
 
   private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {

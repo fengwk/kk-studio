@@ -8,14 +8,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 
-/** Branch settings 的 immutable snapshot、canonical 名称/Goal 校验与「不保存目录状态」契约。 */
+/** Branch settings 的 immutable snapshot、canonical 名称校验与「不保存目录状态」契约。 */
 class BranchSettingsTest {
 
   private static final ExecutionSelection EXECUTION =
@@ -31,11 +29,11 @@ class BranchSettingsTest {
     assertEquals("local", new BranchSettings("coding", EXECUTION, "local").environmentName());
   }
 
-  /** record 组件固定为 agentName/execution/environmentName/goal。 */
+  /** record 组件固定为 agentName/execution/environmentName。 */
   @Test
   void exposesNoWorkspaceState() {
     assertEquals(
-        List.of("agentName", "execution", "environmentName", "goal"),
+        List.of("agentName", "execution", "environmentName"),
         Arrays.stream(BranchSettings.class.getRecordComponents())
             .map(RecordComponent::getName)
             .toList());
@@ -70,38 +68,6 @@ class BranchSettingsTest {
     // 其他字段不受影响。
     assertEquals("coding", base.withEnvironmentName("shared").agentName());
     assertEquals(EXECUTION, base.withEnvironmentName("shared").execution());
-  }
-
-  /** 测试意图：Goal 是 settings 的一部分且只能整体替换——其它字段的 with 方法必须原样保留 Goal，withGoal(null) 表示用户清除。 */
-  @Test
-  void goalIsPreservedByOtherMutationsAndReplacedAtomically() {
-    GoalSetting goal = new GoalSetting(new UUID(0L, 7L), "ship it");
-    BranchSettings base = new BranchSettings("coding", EXECUTION, "local", goal);
-
-    assertEquals(goal, base.withAgentName("reviewer").goal());
-    assertEquals(goal, base.withExecution(EXECUTION).goal());
-    assertEquals(goal, base.withEnvironmentName("shared").goal());
-    assertEquals(goal, base.withGoal(goal).goal());
-    assertNull(base.withGoal(null).goal());
-    assertEquals("coding", base.withGoal(null).agentName());
-    assertNull(new BranchSettings("coding", EXECUTION, null).goal());
-  }
-
-  /** 测试意图：目标正文必须非 blank、无首尾空白、≤2000 码点；空字符串不是清除。 */
-  @Test
-  void rejectsNonCanonicalGoalText() {
-    UUID id = new UUID(0L, 7L);
-    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, " "));
-    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, " text"));
-    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, "text "));
-    assertThrows(NullPointerException.class, () -> new GoalSetting(id, null));
-    assertThrows(NullPointerException.class, () -> new GoalSetting(null, "text"));
-    assertEquals(
-        GoalSetting.MAX_TEXT_CODE_POINTS,
-        new GoalSetting(id, "x".repeat(GoalSetting.MAX_TEXT_CODE_POINTS)).text().length());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalSetting(id, "x".repeat(GoalSetting.MAX_TEXT_CODE_POINTS + 1)));
   }
 
   @Test

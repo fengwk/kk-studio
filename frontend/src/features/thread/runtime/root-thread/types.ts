@@ -10,7 +10,6 @@ export type PaneInteraction =
   | 'thread-threads'
   | 'rename-session'
   | 'rename-thread'
-  | 'goal'
   | null
 
 export type RenameKind = 'session' | 'thread'

@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -19,8 +18,8 @@ import java.util.UUID;
 /**
  * Stop 回执组装：把每个节点收敛后的停止边界与被取消命令固化为 {@link StoppedThreadReceipt}，并组装最终 {@link StopResult} 与本地取消集合。
  *
- * <p>首次 Stop 的回执按 Thread UuidOrder 排序；replay 直接返回持久保存的集合与顺序，不以当前树重算。人工输入 {@code USER_MESSAGE} /
- * {@code GOAL} 额外进入草稿恢复列表，系统通知、CUSTOM_MESSAGE 与 SET_* 只计入取消数量。
+ * <p>首次 Stop 的回执按 Thread UuidOrder 排序；replay 直接返回持久保存的集合与顺序，不以当前树重算。人工输入 {@code USER_MESSAGE}
+ * 额外进入草稿恢复列表，系统通知、CUSTOM_MESSAGE 与 SET_* 只计入取消数量。
  */
 final class StopReceipts {
 
@@ -72,12 +71,11 @@ final class StopReceipts {
     return new StopControl.Commit(new StopResult(true, target, stored), List.of(), List.of());
   }
 
-  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE 与 GOAL）；其余命令不退草稿。 */
+  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE）；其余命令不退草稿。 */
   static List<CancelledThreadInput> cancelledInputs(List<ThreadCommand> cancelled) {
     List<CancelledThreadInput> inputs = new ArrayList<>();
     for (ThreadCommand command : cancelled) {
-      if (command.payload() instanceof UserMessageCommandPayload
-          || command.payload() instanceof GoalCommandPayload) {
+      if (command.payload() instanceof UserMessageCommandPayload) {
         inputs.add(
             new CancelledThreadInput(
                 command.sequence(), command.idempotencyKey(), command.payload()));

@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -437,7 +436,7 @@ class CatalogToolHistoryActionResolverTest {
       EnvironmentId environmentId,
       String environmentName) {
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
-    ContributorBinding contributor = new ContributorBinding(contributorId, localName, List.of());
+    ContributorBinding contributor = new ContributorBinding(contributorId, localName);
     return new ToolBinding(
         definition, contributor, environmentSupport, environmentId, environmentName);
   }

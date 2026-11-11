@@ -44,7 +44,7 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
   // 即使调用方传入 owner 也绝不进入 wire，也不带 helper 路由描述符的 type/threadId。
   const threadId = cid()
   const headEntryId = cid()
-  const command = { type: 'GOAL', text: 'ship it', idempotencyKey: cid() }
+  const command = userMessageCommand('ship it', cid())
   const calls = []
   const ctx = {
     async call(...args) {
@@ -101,7 +101,7 @@ test('pure THREAD message omits both cursor fields from the owner-free wire body
 })
 
 test('cursor-bound THREAD batch without cursor is not silently completed by the helper', async () => {
-  // 测试意图：SET/GOAL 批次缺少 cursor 时 helper 不得合成字段，服务端 400 必须原样冒泡。
+  // 测试意图：SET batch 缺少 cursor 时 helper 不得合成字段，服务端 400 必须原样冒泡。
   const threadId = cid()
   const commands = [
     { type: 'SET_AGENT', idempotencyKey: cid(), agentName: 'coder' },

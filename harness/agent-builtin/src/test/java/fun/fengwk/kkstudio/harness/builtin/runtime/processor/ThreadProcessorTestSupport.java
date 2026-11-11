@@ -39,9 +39,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -802,23 +800,16 @@ public final class ThreadProcessorTestSupport {
                 tool.attempt(),
                 tool.approval(),
                 tool.result(),
-                tool.effects(),
                 tool.error(),
                 tool.createdAt(),
                 updatedAt));
   }
 
-  /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED 并挂载自定义结果（用于 mapper 回滚类测试）。 */
+  /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED（用于 mapper 回滚类测试）。 */
   static void succeedToolWith(InMemoryBuiltinHarnessStore store, UUID toolId, ToolResult result) {
-    succeedToolWith(store, toolId, result, ToolEffectBatch.EMPTY);
-  }
-
-  /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED，并原子附带自定义结果与 effects。 */
-  static void succeedToolWith(
-      InMemoryBuiltinHarnessStore store, UUID toolId, ToolResult result, ToolEffectBatch effects) {
     transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
     transitionTool(store, toolId, t -> t.markRunning(NOW));
-    transitionTool(store, toolId, t -> t.succeed(result, effects, NOW));
+    transitionTool(store, toolId, t -> t.succeed(result, NOW));
   }
 
   static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
@@ -1212,7 +1203,7 @@ public final class ThreadProcessorTestSupport {
   private static ToolBinding hostBinding(String name) {
     return new ToolBinding(
         toolDefinition(name),
-        new ContributorBinding("core", name, List.of()),
+        new ContributorBinding("core", name),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -1230,18 +1221,13 @@ public final class ThreadProcessorTestSupport {
             Duration.ofSeconds(30));
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     return new ToolBinding(
-        definition,
-        new ContributorBinding("core", name, List.of()),
-        EnvironmentSupport.NONE,
-        null,
-        null);
+        definition, new ContributorBinding("core", name), EnvironmentSupport.NONE, null, null);
   }
 
-  static ToolBinding declarativeBinding(
-      String name, String contributorId, String localName, List<ContributorStateAccess> accesses) {
+  static ToolBinding declarativeBinding(String name, String contributorId, String localName) {
     return new ToolBinding(
         toolDefinition(name),
-        new ContributorBinding(contributorId, localName, accesses),
+        new ContributorBinding(contributorId, localName),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -1299,7 +1285,7 @@ public final class ThreadProcessorTestSupport {
               4096L,
               CONTEXT_WINDOW,
               MAX_OUTPUT_TOKENS,
-              new BranchSettings("compaction", compactorExecution, null, null));
+              new BranchSettings("compaction", compactorExecution, null));
         }
         return new TurnResolver.Resolved(
             requestFor(path.baseSettings()), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);

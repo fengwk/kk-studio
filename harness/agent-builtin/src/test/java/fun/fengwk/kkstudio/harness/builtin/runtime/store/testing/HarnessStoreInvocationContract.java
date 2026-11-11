@@ -48,7 +48,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -56,7 +55,6 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -64,7 +62,6 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -1933,37 +1930,6 @@ public abstract class HarnessStoreInvocationContract {
 
     ToolInvocation stored = store.transaction(tx -> tx.tools().find(TestIds.id(10))).orElseThrow();
     assertEquals(argumentsJson, stored.call().argumentsJson());
-  }
-
-  @Test
-  void successfulToolEffectsRoundTripAsOneTerminalFact() {
-    UUID assistantEntryId = seedAssistantAndModel();
-    ToolInvocation ready =
-        toolInvocation(
-            TestIds.id(10),
-            baseline.threadId(),
-            baseline.turnStartEntryId(),
-            assistantEntryId,
-            0,
-            "call-1",
-            ToolInvocationStatus.READY,
-            T2);
-    inTransaction(store, tx -> tx.tools().insert(List.of(ready)));
-    updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
-    updateTool(TestIds.id(10), tool -> tool.markRunning(T2));
-    ToolEffectBatch effects =
-        new ToolEffectBatch(
-            List.of(
-                new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}"),
-                new CustomEntryPayload("goal", "state", "{\"objective\":\"verify\"}")));
-    ToolResult result =
-        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{\"done\":true}");
-    updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));
-
-    ToolInvocation stored = store.transaction(tx -> tx.tools().find(TestIds.id(10))).orElseThrow();
-    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
-    assertEquals(result, stored.result());
-    assertEquals(effects, stored.effects());
   }
 
   /**

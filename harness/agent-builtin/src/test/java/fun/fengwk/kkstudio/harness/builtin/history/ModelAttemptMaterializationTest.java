@@ -897,7 +897,7 @@ class ModelAttemptMaterializationTest {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
+            new ContributorBinding("core", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);

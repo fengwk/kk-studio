@@ -9,7 +9,6 @@ import {
   type BranchDraft,
 } from '@/features/thread/branch-draft'
 import {
-  buildGoalBatchPlan,
   buildMessageBatchPlan,
   createCommandId,
   type CommandBatchPlan,
@@ -119,11 +118,11 @@ function compareDecimalVersions(a: string, b: string): number {
 /**
  * 绑定 Thread 面板的共享编排（Bound Chat 与 Canvas Bound 同一事实源）：
  *
- * - `buildBatchRef` / `buildGoalBatchRef` 转发 + `useAgentThreadController` 的循环桥接
+  * - `buildBatchRef` 转发 + `useAgentThreadController` 的循环桥接
  *   （submit handler 事件驱动地读取最新 batch 构建器）；
  * - branch base/draft 从 snapshot 初始化、thread 重绑重置，以及 queued SET_*
  *   pending projection 出的 effectiveBase；
- * - 通过 `buildMessageBatchPlan` / `buildGoalBatchPlan` 构建原子 thread command batch；
+  * - 通过 `buildMessageBatchPlan` 构建原子 thread command batch；
  * - agent/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
  * - YOLO 走单字段策略控制面：写请求串行并合并快速连点（latest wins），
  *   重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
@@ -308,26 +307,10 @@ export function useBoundBranchPanel({
     },
     [boundBranchState, boundThread, effectiveBase],
   )
-  const buildGoalBatch = useCallback(
-    (goalText: string | null): CommandBatchPlan | null => {
-      if (boundThread == null || boundBranchState == null || effectiveBase == null) {
-        return null
-      }
-      return buildGoalBatchPlan({
-        thread: boundThread,
-        effectiveBase,
-        draft: boundBranchState.draft,
-        goalText,
-      })
-    },
-    [boundBranchState, boundThread, effectiveBase],
-  )
-
   const controller = useAgentThreadController(
     projection,
     initialParts,
     buildBatch,
-    buildGoalBatch,
   )
 
   const dirty =
@@ -700,6 +683,5 @@ export function useBoundBranchPanel({
     selectEnvironment,
     resetDraftFromThread,
     buildBatch,
-    buildGoalBatch,
   }
 }

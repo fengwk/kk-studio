@@ -18,11 +18,10 @@
  * fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper} 只把终态 ToolInvocation 与 history
  * normalization 事实纯映射为 Entry payload，不做持久化决策。
  *
- * <p>Tool 持久化列与 Daemon 预览共用的 binding、审批、编辑审查与副作用批次形态由 {@link
+ * <p>Tool 持久化列与 Daemon 预览共用的 binding、审批与编辑审查形态由 {@link
  * fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec}、{@link
- * fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec}、{@link
- * fun.fengwk.kkstudio.harness.codec.ToolEditReviewJsonCodec} 与 {@link
- * fun.fengwk.kkstudio.harness.codec.ToolEffectBatchJsonCodec} 定义，并共享 {@link
+ * fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec} 与 {@link
+ * fun.fengwk.kkstudio.harness.codec.ToolEditReviewJsonCodec} 定义，并共享 {@link
  * fun.fengwk.kkstudio.harness.codec.InvocationJsonSupport} 的严格 JSON 原语。
  *
  * <p>本包只做编解码、纯映射与 hash 推导，不含状态机、持久化、调度或 mailbox 归约；持久化命令、harvest 归约与执行状态机留在 {@code

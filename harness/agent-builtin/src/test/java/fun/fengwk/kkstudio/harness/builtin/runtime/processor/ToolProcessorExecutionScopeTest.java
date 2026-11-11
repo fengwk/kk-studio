@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe;
@@ -70,10 +69,6 @@ class ToolProcessorExecutionScopeTest {
     // 媒体能力唯一来源是该调用 TURN_START 的冻结快照，而不是实时模型。
     assertTrue(scope.mediaCapabilities().declares(ModelInputModality.IMAGE));
     assertTrue(scope.mediaCapabilities().acceptsProtocolPosition(ModelInputModality.IMAGE));
-    // 分支视图只按本 Contributor 与当前 assistant 分支限定；没有 custom entry 时为空。
-    assertNotNull(scope.branch());
-    assertTrue(scope.branch().customEntries("note").isEmpty());
-    assertTrue(scope.branch().goal().isEmpty());
   }
 
   /** 子代理 Tool：执行根与其会话来自真实根 Thread 行，与本 Thread 自身的会话不同，绝不按当前 Thread 合成。 */
@@ -105,7 +100,6 @@ class ToolProcessorExecutionScopeTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).assistantEntryId(),
         scope.assistantEntryId(),
         "child scope keeps the call's own assistant entry, not the root thread's");
-    assertNotNull(scope.branch());
     assertNotNull(scope.mediaCapabilities());
   }
 
@@ -178,79 +172,6 @@ class ToolProcessorExecutionScopeTest {
         "reattach must not read the execution root thread: " + prepare);
   }
 
-  /**
-   * READY prepare 内分支读取抛异常：事务完整回滚，工具未执行，按 admission 失败路径（admitFailureDelay）重排，claim / READY /
-   * attempt / Thread version 与状态都不变。
-   */
-  @Test
-  void branchReadFailureReschedulesReadyInvocationWithoutExecutingTool() {
-    Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.toApproved(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
-    long beforeVersion =
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version();
-    ProbeStore probe = failingBranchRead(fixture.store, () -> {});
-
-    try (ToolProcessor processor = processor(probe, fixture)) {
-      assertEquals(
-          ProcessResult.RESCHEDULED,
-          processor.process(
-              ToolProcessorTestSupport.claim(
-                  fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-      assertFalse(processor.hasActiveExecution());
-    }
-
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.READY, tool.status());
-    assertEquals(0, tool.attempt());
-    assertEquals(
-        beforeVersion,
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version(),
-        "scope read failure must not bump the thread version");
-    assertEquals(
-        ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
-        ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt(),
-        "reschedule must use admitFailureDelay");
-    assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.admitCalls, "tool must not be admitted or executed");
-  }
-
-  /** READY prepare 内分支读取抛异常后 claim 已过期：不重排、不写入任何持久状态，只报告 LOST_OWNERSHIP。 */
-  @Test
-  void branchReadFailureAfterClaimExpiryIsLostWithoutWrites() {
-    Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.toApproved(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ClaimedWork claimed =
-        ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    Work before = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
-    long beforeVersion =
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version();
-    // claim lease 为 60s：注入故障时推进时钟，使重排事务看到的所有权围栏已过期。
-    ProbeStore probe =
-        failingBranchRead(fixture.store, () -> fixture.clock.advance(Duration.ofMinutes(2)));
-
-    try (ToolProcessor processor = processor(probe, fixture)) {
-      assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
-      assertFalse(processor.hasActiveExecution());
-    }
-
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.READY, tool.status());
-    assertEquals(0, tool.attempt());
-    assertEquals(
-        beforeVersion,
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version(),
-        "lost claim must not bump the thread version");
-    Work after = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
-    assertEquals(before.availableAt(), after.availableAt(), "lost claim must not be rescheduled");
-    assertEquals(before.wakeVersion(), after.wakeVersion(), "lost claim must not be woken");
-    assertEquals(before.leaseToken(), after.leaseToken(), "lost claim must not be rewritten");
-    assertEquals(0, fixture.gateway.admitCalls);
-  }
-
   /** 只有新增 scope 读取的失败被重排：其它 prepare 读取失败保持原样抛出，工具不执行也不改状态。 */
   @Test
   void otherPrepareReadFailurePropagatesUnchanged() {
@@ -288,20 +209,6 @@ class ToolProcessorExecutionScopeTest {
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt(),
         "non-scope prepare failure must not be rescheduled");
     assertEquals(0, fixture.gateway.admitCalls);
-  }
-
-  /** 覆盖分支读取（新增 scope 读取）的探针：先执行 {@code beforeFailure}，再以注入异常失败。 */
-  private static ProbeStore failingBranchRead(
-      InMemoryBuiltinHarnessStore store, Runnable beforeFailure) {
-    return new ProbeStore(
-        store,
-        (call, next) -> {
-          if ("entries.loadBranchSettings".equals(call.operation())) {
-            beforeFailure.run();
-            throw new IllegalStateException("injected branch read failure");
-          }
-          return next.invoke();
-        });
   }
 
   /** 用探针 Store 构造与被替换 processor 共享 gateway / sink / clock / config 的 processor。 */

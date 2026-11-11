@@ -8,8 +8,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentPrompts;
-import fun.fengwk.kkstudio.harness.contributor.builtin.goal.GetGoalTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.input.AskUserTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
@@ -26,18 +24,16 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>集中注册 13 个内置工具（5 个逐调用路由的文件工具、{@code bash} 与 3 个 LSP 宿主工具、{@code task} internal 工具、2 个 Goal
- * 工具、{@code ask_user} 人工输入工具）与 {@code goal.progress} 自定义 Entry 类型。文件工具声明 {@link
- * EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明 {@link EnvironmentSupport#REQUIRED}，{@code
- * task}、Goal 工具与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。目标正文只由用户在 branch settings
- * 中维护，不提升为系统指令； {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
+ * <p>集中注册 11 个内置工具（5 个逐调用路由的文件工具、{@code bash} 与 3 个 LSP 宿主工具、{@code task} internal 工具、 {@code
+ * ask_user} 人工输入工具）。文件工具声明 {@link EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明 {@link
+ * EnvironmentSupport#REQUIRED}，{@code task} 与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。
+ * {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
   public static final ContributorId ID = new ContributorId("builtin");
   public static final String NAME = "Built-in";
   public static final String VERSION = "1";
-  public static final String GOAL_PROGRESS_TYPE = "goal.progress";
 
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
@@ -121,11 +117,6 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
 
     // 人工输入工具：Runtime 在 dispatch 前按 provenance 把内置 ask_user 冻结为 WAITING_INPUT。
     registrar.registerTool("ask-user", new AskUserTool(), ToolVisibility.SELECTABLE, 0);
-
-    // Goal tools & custom entry: 目标正文由用户维护，Agent 只能读取并报告进度。
-    registrar.registerCustomEntryType("goal.progress-type", GOAL_PROGRESS_TYPE, 0);
-    registrar.registerTool("goal.get", new GetGoalTool(), ToolVisibility.SELECTABLE, 0);
-    registrar.registerTool("goal.update", new UpdateGoalTool(), ToolVisibility.SELECTABLE, 0);
   }
 
   private static void registerEnvironment(

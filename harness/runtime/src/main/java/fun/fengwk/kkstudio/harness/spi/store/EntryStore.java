@@ -61,9 +61,6 @@ public interface EntryStore {
    */
   EntrySlice loadSlice(UUID headEntryId, UUID afterEntryId);
 
-  /** 读取祖先链上指定 contributor 的 Custom Entry，保持 root-to-head 顺序。 */
-  List<Entry> loadContributorCustom(UUID headEntryId, String contributorId);
-
   /** 读取指定 branch 的生效 settings 快照。 */
   BranchSettings loadBranchSettings(UUID headEntryId);
 

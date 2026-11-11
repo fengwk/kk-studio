@@ -608,7 +608,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 保存 agentName/yoloEnabled 与 required-nullable 默认 environmentName（无默认环境时显式 null）；NEW_SESSION rootSettings 携带 agentName/execution/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值（YOLO 或默认环境）不改变既有 Thread',
+  docs: 'Chat 保存 agentName/yoloEnabled 与 required-nullable 默认 environmentName（无默认环境时显式 null）；NEW_SESSION rootSettings 携带 agentName/execution/environmentName branch draft；更新 Chat 默认值（YOLO 或默认环境）不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -630,12 +630,10 @@ registerCase({
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
       // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
       const requested = branchSettingsOf(agent, modelSelectionFor(agent))
-      // 请求方向不携带 goal；Thread 完整快照总是显式投影 goal（未设置时为 null）。
       const expectedSettings = {
         agentName: requested.agentName,
         execution: requested.execution,
         environmentName: requested.environmentName,
-        goal: null,
       }
       const threadId = cid()
       const accepted = await createNewSession(ctx, {

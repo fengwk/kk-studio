@@ -20,8 +20,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 
-import java.util.List;
-
 /**
  * 只读命名空间写入的准入门禁。
  *
@@ -62,8 +60,7 @@ class ToolExecutionGatewayVfsReadOnlyTest {
             .message()
             .contains(
                 "Write under vfs:/sessions/"
-                    + ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW)
-                        .rootSessionId()
+                    + ToolGatewayTestSupport.scope().rootSessionId()
                     + "/ instead."),
         deny.error().message());
     // 只读拒绝先于权限：既不读权限策略，也不调用 evaluator，更不会弹审批。
@@ -158,16 +155,15 @@ class ToolExecutionGatewayVfsReadOnlyTest {
         new AgentToolDefinition(
             contribution.definition().descriptor(), contribution.definition().visibility()),
         new ContributorBinding(
-            contribution.id().contributorId().value(), contribution.id().localName(), List.of()),
+            contribution.id().contributorId().value(), contribution.id().localName()),
         EnvironmentSupport.ROUTED,
         null,
         null);
   }
 
-  /** preflight 需要冻结的执行根事实；本测试固定使用空分支视图。 */
+  /** preflight 需要冻结的执行根事实。 */
   private static ToolGateway.PreflightResult preflight(
       ToolExecutionGateway gateway, ToolInvocationRequest request) {
-    return gateway.preflight(
-        request, ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW));
+    return gateway.preflight(request, ToolGatewayTestSupport.scope());
   }
 }

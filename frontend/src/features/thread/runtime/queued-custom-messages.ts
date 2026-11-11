@@ -13,7 +13,7 @@ export interface QueuedCustomMessage {
  *
  * - 仅保留 state === 'QUEUED' 且 type === 'CUSTOM_MESSAGE' 的命令；
  * - 原始 payload.message.contents 里的实际文本提取为展示正文，空文本忽略；
- * - 顺序保留 queuedCommands 原始顺序，不进人类可编辑队列 USER_MESSAGE / GOAL，不写删重排；
+ * - 顺序保留 queuedCommands 原始顺序，不进人类可编辑队列 USER_MESSAGE，不写删重排；
  * - 当后端执行完毕且快照中状态不再是 QUEUED 时，自然从派生列表中移除，历史沿用 durable entry。
  */
 export function extractQueuedCustomMessages(

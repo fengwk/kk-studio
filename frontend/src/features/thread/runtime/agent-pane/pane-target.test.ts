@@ -176,7 +176,6 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
-            goal: null,
           },
           yoloEnabled: false,
         },
@@ -277,7 +276,6 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
-            goal: null,
           },
           yoloEnabled: false,
         },
@@ -352,7 +350,6 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
-            goal: null,
           },
           yoloEnabled: false,
         },
@@ -395,7 +392,6 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
-            goal: null,
           },
           yoloEnabled: false,
         },
@@ -735,7 +731,6 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
-            goal: null,
           },
           yoloEnabled: false,
         },
@@ -785,7 +780,6 @@ describe('PaneTarget durable-local FSM', () => {
     const rootSettingsWithoutEnv = {
       agentName: baseValid.request.target.rootSettings.agentName,
       execution: baseValid.request.target.rootSettings.execution,
-      goal: null,
     }
     storage.setItem(key, JSON.stringify({
       ...baseValid,
@@ -979,8 +973,6 @@ describe('PaneTarget durable-local FSM', () => {
     const threadId = 't-image-test-1'
     const validPending: BoundPendingMessage = {
       threadId,
-      kind: 'MESSAGE',
-      goalText: null,
       unknownOutcome: false,
       targetDraft: {
         agentName: 'assistant',
@@ -1022,7 +1014,7 @@ describe('PaneTarget durable-local FSM', () => {
     }
 
     it('accepts cursor-free pending storage only for a single USER_MESSAGE', () => {
-      // 本地持久化校验必须与 HTTP 准入一致，不能把缺失 cursor 的设置/Goal/多命令恢复为可发送请求。
+      // 本地持久化校验必须与 HTTP 准入一致，不能把缺失 cursor 的设置/多命令恢复为可发送请求。
       const command = validPending.request.commands[0]!
       const cursorFree = { ...validPending, request: { commands: [command] } }
       const storage = memoryStorage()
@@ -1030,7 +1022,6 @@ describe('PaneTarget durable-local FSM', () => {
       saveBoundPendingMessage(threadId, cursorFree, storage)
       expect(loadBoundPendingMessage(threadId, storage)?.request).toEqual(cursorFree.request)
       for (const commands of [
-        [{ type: 'GOAL', idempotencyKey: 'goal-key', text: 'goal' }],
         [{ type: 'SET_AGENT', idempotencyKey: 'agent-key', agentName: 'assistant' }, command],
         [command, { ...command, idempotencyKey: 'second-key' }],
       ]) {

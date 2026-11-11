@@ -203,7 +203,7 @@ public final class ToolProcessorTestSupport {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "ask-user", List.of()),
+            new ContributorBinding("core", "ask-user"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -235,7 +235,7 @@ public final class ToolProcessorTestSupport {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("builtin", "ask-user", List.of()),
+        new ContributorBinding("builtin", "ask-user"),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -854,7 +854,7 @@ public final class ToolProcessorTestSupport {
   private static ToolBinding hostBinding(ToolSideEffect sideEffect) {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -863,7 +863,7 @@ public final class ToolProcessorTestSupport {
   static ToolBinding remoteBinding(ToolSideEffect sideEffect) {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.REQUIRED,
         ENV_ID,
         "env-1");
@@ -1204,7 +1204,7 @@ public final class ToolProcessorTestSupport {
 
   static ToolGateway.Completion succeeded(String toolCallId) {
     return new ToolGateway.Succeeded(
-        ToolSuccess.withoutEffects(successResult(toolCallId, new TextResultContent("ok"))));
+        new ToolSuccess(successResult(toolCallId, new TextResultContent("ok"))));
   }
 
   static final class RecordingSink implements RealtimeEventSink {

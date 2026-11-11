@@ -33,13 +33,12 @@ public record ToolInvocation(
     int attempt,
     ToolApproval approval,
     ToolResult result,
-    ToolEffectBatch effects,
     ToolInvocationError error,
     Instant createdAt,
     Instant updatedAt,
     ToolInputReceipt inputReceipt) {
 
-  /** 构造不携带 branch effects 与人工输入回执的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
+  /** 构造不携带人工输入回执的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
   public ToolInvocation(
       UUID id,
       UUID threadId,
@@ -67,43 +66,6 @@ public record ToolInvocation(
         attempt,
         approval,
         result,
-        ToolEffectBatch.EMPTY,
-        error,
-        createdAt,
-        updatedAt,
-        null);
-  }
-
-  /** 构造携带 branch effects、但不携带人工输入回执的 invocation。 */
-  public ToolInvocation(
-      UUID id,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID assistantEntryId,
-      int callIndex,
-      ToolCall call,
-      ToolBinding binding,
-      ToolInvocationStatus status,
-      int attempt,
-      ToolApproval approval,
-      ToolResult result,
-      ToolEffectBatch effects,
-      ToolInvocationError error,
-      Instant createdAt,
-      Instant updatedAt) {
-    this(
-        id,
-        threadId,
-        turnStartEntryId,
-        assistantEntryId,
-        callIndex,
-        call,
-        binding,
-        status,
-        attempt,
-        approval,
-        result,
-        effects,
         error,
         createdAt,
         updatedAt,
@@ -123,8 +85,7 @@ public record ToolInvocation(
     if (attempt < 0) {
       throw new IllegalArgumentException("attempt must not be negative");
     }
-    effects = Objects.requireNonNull(effects, "effects");
-    validateStatusFields(status, attempt, approval, result, effects, error, call, inputReceipt);
+    validateStatusFields(status, attempt, approval, result, error, call, inputReceipt);
     validateBindingConstraint(status, attempt, call, binding);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
@@ -311,7 +272,6 @@ public record ToolInvocation(
     if (stored.status() != next.status()
         || stored.attempt() != next.attempt()
         || !Objects.equals(stored.result(), next.result())
-        || !stored.effects().equals(next.effects())
         || !Objects.equals(stored.error(), next.error())
         || !Objects.equals(stored.inputReceipt(), next.inputReceipt())) {
       throw new IllegalArgumentException("terminal tool invocation facts must not change");
@@ -327,13 +287,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException("approval already exists");
     }
     return withState(
-        ToolInvocationStatus.READY,
-        attempt,
-        ToolApproval.notRequired(),
-        null,
-        ToolEffectBatch.EMPTY,
-        null,
-        now);
+        ToolInvocationStatus.READY, attempt, ToolApproval.notRequired(), null, null, now);
   }
 
   /** READY 且无 approval -&gt; WAITING_APPROVAL，并附带一个 required undecided approval。 */
@@ -351,7 +305,6 @@ public record ToolInvocation(
         attempt,
         ToolApproval.request(effectiveNow, reason, editReview),
         null,
-        ToolEffectBatch.EMPTY,
         null,
         effectiveNow);
   }
@@ -366,8 +319,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException(
           "requestInput requires a READY invocation with attempt 0 and no approval");
     }
-    return withState(
-        ToolInvocationStatus.WAITING_INPUT, attempt, null, null, ToolEffectBatch.EMPTY, null, now);
+    return withState(ToolInvocationStatus.WAITING_INPUT, attempt, null, null, null, now);
   }
 
   /**
@@ -381,15 +333,7 @@ public record ToolInvocation(
     if (status != ToolInvocationStatus.WAITING_INPUT) {
       throw new IllegalArgumentException("acceptInput requires WAITING_INPUT status");
     }
-    return withState(
-        ToolInvocationStatus.SUCCEEDED,
-        attempt,
-        null,
-        result,
-        ToolEffectBatch.EMPTY,
-        null,
-        receipt,
-        now);
+    return withState(ToolInvocationStatus.SUCCEEDED, attempt, null, result, null, receipt, now);
   }
 
   /**
@@ -409,21 +353,13 @@ public record ToolInvocation(
     }
     ToolApproval nextApproval = approval.decide(decision, decisionId, actor, reason, decidedAt);
     if (nextApproval.decision() == ToolApprovalDecision.ALLOWED) {
-      return withState(
-          ToolInvocationStatus.READY,
-          attempt,
-          nextApproval,
-          null,
-          ToolEffectBatch.EMPTY,
-          null,
-          now);
+      return withState(ToolInvocationStatus.READY, attempt, nextApproval, null, null, now);
     }
     return withState(
         ToolInvocationStatus.FAILED,
         attempt,
         nextApproval,
         null,
-        ToolEffectBatch.EMPTY,
         new ToolInvocationError("DENIED", reason == null ? "denied by user" : reason),
         now);
   }
@@ -438,13 +374,7 @@ public record ToolInvocation(
           "markRunning requires a READY invocation with a completed preflight approval");
     }
     return withState(
-        ToolInvocationStatus.RUNNING,
-        Math.addExact(attempt, 1),
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        null,
-        now);
+        ToolInvocationStatus.RUNNING, Math.addExact(attempt, 1), approval, null, null, now);
   }
 
   /** RUNNING -&gt; READY：执行端报告了可重试的失败，因此同一个 attempt 被从头重新调度；attempt 与 已完成的预检 approval 保持已确认。 */
@@ -452,20 +382,13 @@ public record ToolInvocation(
     if (status != ToolInvocationStatus.RUNNING) {
       throw new IllegalArgumentException("retryReady requires RUNNING status");
     }
-    return withState(
-        ToolInvocationStatus.READY, attempt, approval, null, ToolEffectBatch.EMPTY, null, now);
+    return withState(ToolInvocationStatus.READY, attempt, approval, null, null, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，并附带完整的 ToolResult；attempt 必须为正数。 */
-  public ToolInvocation succeed(ToolResult result, ToolEffectBatch effects, Instant now) {
-    Objects.requireNonNull(result, "result");
-    Objects.requireNonNull(effects, "effects");
-    return withState(ToolInvocationStatus.SUCCEEDED, attempt, approval, result, effects, null, now);
-  }
-
-  /** RUNNING -&gt; SUCCEEDED，且不产生 branch effects。 */
   public ToolInvocation succeed(ToolResult result, Instant now) {
-    return succeed(result, ToolEffectBatch.EMPTY, now);
+    Objects.requireNonNull(result, "result");
+    return withState(ToolInvocationStatus.SUCCEEDED, attempt, approval, result, null, now);
   }
 
   /**
@@ -478,8 +401,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException(
           "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped");
     }
-    return withState(
-        ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
+    return withState(ToolInvocationStatus.FAILED, attempt, approval, null, error, now);
   }
 
   /**
@@ -488,15 +410,13 @@ public record ToolInvocation(
    */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    return withState(
-        ToolInvocationStatus.CANCELLED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
+    return withState(ToolInvocationStatus.CANCELLED, attempt, approval, null, error, now);
   }
 
   /** RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的结果或恢复的 lease 可能已经执行了该调用；attempt 保留已确认的值。 */
   public ToolInvocation unknown(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    return withState(
-        ToolInvocationStatus.UNKNOWN, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
+    return withState(ToolInvocationStatus.UNKNOWN, attempt, approval, null, error, now);
   }
 
   /**
@@ -508,22 +428,20 @@ public record ToolInvocation(
       int attempt,
       ToolApproval approval,
       ToolResult result,
-      ToolEffectBatch effects,
       ToolInvocationError error,
       Instant now) {
-    return withState(status, attempt, approval, result, effects, error, inputReceipt, now);
+    return withState(status, attempt, approval, result, error, inputReceipt, now);
   }
 
   /**
-   * 与 {@link #withState(ToolInvocationStatus, int, ToolApproval, ToolResult, ToolEffectBatch,
-   * ToolInvocationError, Instant)} 相同，但显式指定 inputReceipt（仅接受回答时写入，其余转换原样保留）。
+   * 与 {@link #withState(ToolInvocationStatus, int, ToolApproval, ToolResult, ToolInvocationError,
+   * Instant)} 相同，但显式指定 inputReceipt（仅接受回答时写入，其余转换原样保留）。
    */
   private ToolInvocation withState(
       ToolInvocationStatus status,
       int attempt,
       ToolApproval approval,
       ToolResult result,
-      ToolEffectBatch effects,
       ToolInvocationError error,
       ToolInputReceipt inputReceipt,
       Instant now) {
@@ -540,7 +458,6 @@ public record ToolInvocation(
             attempt,
             approval,
             result,
-            effects,
             error,
             createdAt,
             now,
@@ -588,7 +505,6 @@ public record ToolInvocation(
       int attempt,
       ToolApproval approval,
       ToolResult result,
-      ToolEffectBatch effects,
       ToolInvocationError error,
       ToolCall call,
       ToolInputReceipt inputReceipt) {
@@ -600,7 +516,7 @@ public record ToolInvocation(
       if (attempt != 0) {
         throw new IllegalArgumentException("WAITING_APPROVAL requires attempt 0");
       }
-      requireNoTerminalFacts(status, result, effects, error);
+      requireNoTerminalFacts(status, result, error);
       requireNoInputReceipt(status, inputReceipt);
     } else if (status == ToolInvocationStatus.WAITING_INPUT) {
       if (attempt != 0) {
@@ -610,10 +526,10 @@ public record ToolInvocation(
         throw new IllegalArgumentException(
             "WAITING_INPUT must not carry an approval: a questionnaire never authorizes a tool");
       }
-      requireNoTerminalFacts(status, result, effects, error);
+      requireNoTerminalFacts(status, result, error);
       requireNoInputReceipt(status, inputReceipt);
     } else if (status == ToolInvocationStatus.READY) {
-      requireNoTerminalFacts(status, result, effects, error);
+      requireNoTerminalFacts(status, result, error);
       requireNoInputReceipt(status, inputReceipt);
       if (approval != null
           && (approval.isUndecided() || approval.decision() == ToolApprovalDecision.DENIED)) {
@@ -623,7 +539,7 @@ public record ToolInvocation(
       if (attempt <= 0) {
         throw new IllegalArgumentException("RUNNING requires a positive attempt");
       }
-      requireNoTerminalFacts(status, result, effects, error);
+      requireNoTerminalFacts(status, result, error);
       requireNoInputReceipt(status, inputReceipt);
       requireCompletedPreflightApproval(status, approval);
     } else if (status == ToolInvocationStatus.SUCCEEDED) {
@@ -662,7 +578,6 @@ public record ToolInvocation(
       if (result != null) {
         throw new IllegalArgumentException("UNKNOWN must not carry a result");
       }
-      requireEmptyEffects(status, effects);
       requireCompletedPreflightApproval(status, approval);
       requireNoInputReceipt(status, inputReceipt);
     } else if (status == ToolInvocationStatus.FAILED) {
@@ -676,7 +591,6 @@ public record ToolInvocation(
         throw new IllegalArgumentException("FAILED must not carry a result");
       }
       requireNoInputReceipt(status, inputReceipt);
-      requireEmptyEffects(status, effects);
     } else {
       if (error == null) {
         throw new IllegalArgumentException(status + " requires an error");
@@ -685,7 +599,6 @@ public record ToolInvocation(
         throw new IllegalArgumentException(status + " must not carry a result");
       }
       requireNoInputReceipt(status, inputReceipt);
-      requireEmptyEffects(status, effects);
     }
   }
 
@@ -721,18 +634,9 @@ public record ToolInvocation(
   }
 
   private static void requireNoTerminalFacts(
-      ToolInvocationStatus status,
-      ToolResult result,
-      ToolEffectBatch effects,
-      ToolInvocationError error) {
-    if (result != null || error != null || !effects.isEmpty()) {
+      ToolInvocationStatus status, ToolResult result, ToolInvocationError error) {
+    if (result != null || error != null) {
       throw new IllegalArgumentException(status + " must not carry terminal facts");
-    }
-  }
-
-  private static void requireEmptyEffects(ToolInvocationStatus status, ToolEffectBatch effects) {
-    if (!effects.isEmpty()) {
-      throw new IllegalArgumentException(status + " must not carry tool effects");
     }
   }
 }

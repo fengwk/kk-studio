@@ -107,7 +107,6 @@ export function useBoundThreadPanelViews(
       model?.modelName ?? '',
       model?.variant ?? '',
       settings?.agentName ?? '',
-      settings?.goal?.id ?? '',
       environmentName ?? '',
       catalog,
     ].join('|')

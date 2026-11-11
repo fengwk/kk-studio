@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -469,7 +468,6 @@ class CompactionPlannerTest {
     PathBuilder path = new PathBuilder();
     path.root();
     path.completedCompaction(fullStart(id(1L)), "previous summary");
-    path.custom("com.example", "state");
 
     // 之后没有任何新对话消息：即使存在 previous summary 也不单独重压缩（避免空转）。
     assertTrue(plan(path, 100_000L).isEmpty());
@@ -492,20 +490,19 @@ class CompactionPlannerTest {
 
   @Test
   void metadataRewindIncludesControlEntriesButStopsAtConversation() {
-    // cut=USER(8)：重绕经过 TURN_START(7) / CUSTOM(6) / TURN_END(5)，止于 ASSISTANT(4)。
+    // cut=USER(7)：重绕经过 TURN_START(6) / TURN_END(5)，止于 ASSISTANT(4)。
     PathBuilder path = new PathBuilder();
     path.root();
     path.turn("first");
     path.assistant("first reply");
     path.closeTurn();
-    path.custom("com.example", "state");
     path.turn("second");
     path.assistant("second reply");
 
     CompactionPreparation preparation = plan(path, 60L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(id(8L), preparation.cutEntryId());
+    assertEquals(id(7L), preparation.cutEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
   }
 
@@ -1279,18 +1276,6 @@ class CompactionPlannerTest {
               parentId(),
               new TurnEndPayload(
                   id(startId), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1L)),
-              BASE));
-      return this;
-    }
-
-    PathBuilder custom(String contributorId, String customType) {
-      long cur = nextId++;
-      entries.add(
-          new Entry(
-              id(cur),
-              id(100L),
-              parentId(),
-              new CustomEntryPayload(contributorId, customType, "{\"s\":1}"),
               BASE));
       return this;
     }

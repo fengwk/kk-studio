@@ -56,7 +56,7 @@ public final class AskUserTool implements Tool {
   @Override
   public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
-    return ToolOutcome.withoutEffects(
+    return new ToolOutcome(
         ToolResult.error(
             request.call().id(),
             ToolErrorGuidance.message(

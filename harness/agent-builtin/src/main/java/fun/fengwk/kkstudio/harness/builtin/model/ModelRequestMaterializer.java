@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
@@ -28,7 +27,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
-import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
@@ -42,10 +40,6 @@ import java.util.UUID;
  * <p>不访问 catalog 或 Environment registry，也不持有事务。压缩执行已完全移出本 materializer：压缩子 Thread 由 {@code
  * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE； 父 COMPACTION turn 不创建
  * ModelInvocation，也不在请求内复制 compaction facts。
- *
- * <p>压缩感知历史投影还把执行本次压缩的 COMPACTION TURN_START 冻结 settings 中的 Goal 作为有界 USER 级历史背景放在摘要之后、真实近期消息之前：
- * 背景逐字来自该冻结快照（同一压缩每次重建结果相同），已被切掉或仍在近期消息中都不改变它，后续 Goal 设置 / 清除由真实输入消息自身携带。 Goal 只作为用户级背景，绝不提升为
- * SYSTEM，背景也不是新指令。
  *
  * <p>历史 native 资格按次判定：toolName 必须在当前 {@code toolBindings} 中，且环境工具冻结的 Environment 名必须与当前 binding
  * 一致；其余调用及结果在投影时降级为 USER 自然语言上下文，durable Entry 永不被改写。
@@ -122,7 +116,6 @@ public final class ModelRequestMaterializer {
           ProviderMessageProjector.ProjectedMessage.of(
               AgentMessage.user(
                   CompactionPrompts.compactedContext(complete.result().summaryText()))));
-      appendGoalBackground(complete.start().settings().goal(), projectedMessages);
       walkStart = cutIndex;
       compactionResultIndex = complete.resultIndex();
     }
@@ -179,20 +172,6 @@ public final class ModelRequestMaterializer {
       }
     }
     return null;
-  }
-
-  /**
-   * 压缩后 Goal 的用户级历史背景：唯一来源是最新 complete 压缩的冻结 settings 快照（{@code start().settings().goal()}），因此同一
-   * 压缩每次重建都得到逐字相同的背景，不扫描后续 Goal 切换、不做文本级替换，也不因后续真实输入而改变。后续 Goal 设置 / 清除由真实输入 消息自身携带；冻结快照无 Goal
-   * 时只陈述该事实，绝不复活更早的目标。
-   */
-  private static void appendGoalBackground(
-      GoalSetting goal, List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
-    projectedMessages.add(
-        ProviderMessageProjector.ProjectedMessage.of(
-            goal == null
-                ? GoalMessages.backgroundCleared()
-                : GoalMessages.backgroundSet(goal.text())));
   }
 
   private List<ProviderToolDefinition> providerTools(List<ToolBinding> toolBindings) {

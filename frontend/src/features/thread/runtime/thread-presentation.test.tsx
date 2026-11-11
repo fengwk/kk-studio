@@ -17,7 +17,7 @@ const thread: HarnessThreadDTO = {
   executionControl: 'RUNNABLE', createdAt: 0, updatedAt: 0,
   branchSettings: {
     agentName: 'researcher', execution: createBuiltinExecution('model', 'deep'),
-    environmentName: null, goal: null,
+    environmentName: null,
   },
 }
 const model: ModelDTO = {

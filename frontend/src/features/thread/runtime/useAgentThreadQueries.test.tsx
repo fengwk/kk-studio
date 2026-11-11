@@ -24,7 +24,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE',
       branchSettings: { agentName: 'agent', execution: createBuiltinExecution('m', 'default'),
-        environmentName: 'composer-is-not-the-route', goal: null },
+        environmentName: 'composer-is-not-the-route' },
       createdAt: 0, updatedAt: 0,
     },
     baseEntryId: null,

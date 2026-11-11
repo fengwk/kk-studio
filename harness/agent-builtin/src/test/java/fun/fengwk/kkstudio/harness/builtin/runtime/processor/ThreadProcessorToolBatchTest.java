@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
@@ -62,7 +61,6 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
@@ -371,57 +369,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             .orElse(null));
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
-  }
-
-  /** effects 落在 ToolResult 之前；两个 tool 的 batch 后固定 TURN_END，随后单独 claim 启动 continuation。 */
-  @Test
-  void successfulEffectsAreAppendedBeforeTheirToolResults() {
-    Fixture fixture = fixture();
-    var chain =
-        seedToolChain(
-            fixture.store,
-            List.of("call-1", "call-2"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.READY, ToolInvocationStatus.READY));
-    ToolEffectBatch effects =
-        new ToolEffectBatch(
-            List.of(
-                new CustomEntryPayload("goal", "state", "{\"step\":1}"),
-                new CustomEntryPayload("goal", "state", "{\"step\":2}")));
-    succeedToolWith(
-        fixture.store,
-        chain.toolInvocationIds().get(0),
-        new ToolResult("call-1", List.of(new TextResultContent("first")), false, "{}"),
-        effects);
-    succeedToolWith(
-        fixture.store,
-        chain.toolInvocationIds().get(1),
-        new ToolResult("call-2", List.of(new TextResultContent("second")), false, "{}"));
-    requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
-
-    // claim1：Tool batch apply：effects 先于 ToolResult，TURN_END 收尾，rows 删除。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
-    List<Entry> batchEntries = path(fixture.store, chain.turn().threadId()).entries();
-    assertEquals(9, batchEntries.size());
-    assertEquals(
-        new CustomEntryPayload("goal", "state", "{\"step\":1}"), batchEntries.get(4).payload());
-    assertEquals(
-        new CustomEntryPayload("goal", "state", "{\"step\":2}"), batchEntries.get(5).payload());
-    assertTrue(batchEntries.get(6).payload() instanceof MessagePayload);
-    assertTrue(batchEntries.get(7).payload() instanceof MessagePayload);
-    // applyToolBatch 同事务删除全部 child ToolInvocation 行与 parent ModelInvocation 行。
-    assertTrue(toolsByAssistant(fixture.store, chain.assistantEntryId()).isEmpty());
-    assertNull(
-        fixture
-            .store
-            .transaction(
-                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
-            .orElse(null));
-
-    // claim2：continuation 使 branch 到达 10 条（TURN_START 追加在 TURN_END 后）。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
-    assertEquals(10, path(fixture.store, chain.turn().threadId()).entries().size());
   }
 
   @Test

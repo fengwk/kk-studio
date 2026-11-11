@@ -47,7 +47,6 @@ const thread: HarnessThreadDTO = {
     agentName: 'assistant',
     execution: createBuiltinExecution('model', 'default'),
     environmentName: null,
-    goal: null,
   },
   createdAt: 0,
   updatedAt: 0,
@@ -92,7 +91,6 @@ describe('AgentPane acceptance pipeline', () => {
       agentName: 'assistant',
       execution: baseDraft.execution,
       environmentName: null,
-      goal: null,
     })
 
     const settingsWithString = createBranchSettings({
@@ -103,7 +101,6 @@ describe('AgentPane acceptance pipeline', () => {
       agentName: 'assistant',
       execution: baseDraft.execution,
       environmentName: 'isolated-docker',
-      goal: null,
     })
   })
 
@@ -322,8 +319,8 @@ describe('AgentPane acceptance pipeline', () => {
   it('projects one command matrix for Chat and Canvas across all four targets', () => {
     const expected = {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts', 'files', 'shell'],
-      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'goal', 'files', 'shell'],
-      FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'goal', 'files', 'shell'],
+      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'rename-thread', 'files', 'shell'],
+      FORK_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'history', 'new', 'upload', 'debug', 'shortcuts', 'files', 'shell'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {

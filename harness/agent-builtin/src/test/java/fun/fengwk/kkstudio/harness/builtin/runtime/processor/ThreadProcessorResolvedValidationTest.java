@@ -145,7 +145,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("base", "fs", List.of()),
+            new ContributorBinding("base", "fs"),
             EnvironmentSupport.REQUIRED,
             EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
             "dev");

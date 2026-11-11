@@ -20,8 +20,8 @@ import java.util.UUID;
  * package-private EntryPath turn-sequence validation state（KISS：非通用 workflow/state-machine）。
  *
  * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须在 open TURN_START
- * 内（CUSTOM 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；MODEL_ATTEMPT_FAILURE 只能位于 open
- * 非压缩 Turn 的 Assistant 结果之前，attempt 从 1 连续递增；INPUT turn 在 Assistant 结果前必须已有至少一条
+ * 内（NATIVE_COMPACTION 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；MODEL_ATTEMPT_FAILURE
+ * 只能位于 open 非压缩 Turn 的 Assistant 结果之前，attempt 从 1 连续递增；INPUT turn 在 Assistant 结果前必须已有至少一条
  * USER/CUSTOM（或紧邻其前的回合间系统通知，由本 INPUT 接纳；compaction 不消费该待接纳输入）；CONTINUATION turn 偿还上一 TURN_END 的
  * continueModel obligation，不消费 USER/CUSTOM（配置 Commands 只体现在 TURN_START.settings），可零 input 直接产生
  * Assistant 结果；COMPACTION turn 消费零 Command、绝不出现 USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通
@@ -55,8 +55,8 @@ final class TurnPathValidator {
   /** 按 root-to-head 顺序访问一个非 ROOT Entry。 */
   void visit(Entry entry) {
     EntryPayload payload = entry.payload();
-    if (payload instanceof CustomEntryPayload || payload instanceof NativeCompactionPayload) {
-      // CUSTOM 是透明 branch state：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/callIndex
+    if (payload instanceof NativeCompactionPayload) {
+      // NATIVE_COMPACTION 是透明审计：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/callIndex
       // 判定，也不打开/关闭 turn。
       return;
     }

@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
-import {
-  mergeCancelledGoalTexts,
-  prependCancelledMessages,
-} from '@/features/thread/runtime/cancelled-message-parts'
+import { prependCancelledMessages } from '@/features/thread/runtime/cancelled-message-parts'
 import type { BoundPendingMessage } from '@/features/thread/runtime/pending-request-store'
 import {
   applyStopReceipt,
   loadThreadDraft,
   restoreThreadDraftParts,
-  restoreThreadGoalText,
   saveThreadDraftParts,
-  saveThreadGoalText,
   type DraftSaveOutcome,
   type ThreadDraftRecord,
 } from '@/features/thread/runtime/thread-draft-store'
@@ -29,7 +24,7 @@ interface ThreadDraftRecordInput {
 }
 
 /**
- * 绑定 Thread 的编辑区草稿（composer 与 Goal 编辑区）及其持久记录。
+ * 绑定 Thread 的 Composer 草稿及其持久记录。
  *
  * 记录是权威：整份字段写入携带本 UI 已观察到的 Stop 恢复 generation，存储层据此拒绝陈旧覆盖写；Stop 回执经响应与快照两个通道投递，按
  * (threadId, stopRequestId) 原子幂等合并，同一回执不会重复回填，也不回退用户随后的编辑。所有异步收尾都先过「原 Thread + epoch」栅栏，旧
@@ -47,8 +42,6 @@ export function useThreadDraftRecord({
   const { t } = useI18n()
   const [draft, setDraftState] = useState<ComposerPart[]>(() => initialParts)
   const draftRef = useRef<ComposerPart[]>(draft)
-  const [goalDraft, setGoalDraftState] = useState<string | null>(null)
-  const goalDraftRef = useRef<string | null>(null)
   // 每次用户编辑自增：回执合并完成时据此判断编辑区是否已被更新的输入取代。
   const draftRevisionRef = useRef(0)
   // 挂载时的初始草稿（面板当前一律传空）；重绑时用它清空，避免上一 Thread 的草稿泄漏。
@@ -61,7 +54,6 @@ export function useThreadDraftRecord({
   const observedStopRequestIdsRef = useRef<readonly string[]>([])
   // 每个字段各自的「最新写入 token + 是否未落盘」：旧 completion 既不得把新编辑标成已保存，也不得清掉尚未落盘的编辑。
   const partsWriteRef = useRef({ token: 0, dirty: false })
-  const goalWriteRef = useRef({ token: 0, dirty: false })
   const attemptedReceiptSignatureRef = useRef<string | null>(null)
   const initializedThreadRef = useRef<string | null>(null)
   const [draftRestoreError, setDraftRestoreError] = useState<string | null>(null)
@@ -70,17 +62,14 @@ export function useThreadDraftRecord({
     if (initializedThreadRef.current !== threadId) {
       initializedThreadRef.current = threadId
 
-      // 重绑必须丢弃上一 Thread 的全部本地草稿状态：草稿、Goal 文本、编辑修订与回执重试记录。
+      // 重绑必须丢弃上一 Thread 的全部本地草稿状态与回执重试记录。
       draftRef.current = initialPartsRef.current
       setDraftState(initialPartsRef.current)
-      goalDraftRef.current = null
-      setGoalDraftState(null)
       draftRevisionRef.current = 0
       failedReceiptsRef.current = []
       appliedReceiptKeysRef.current = new Set()
       observedStopRequestIdsRef.current = []
       partsWriteRef.current = { token: 0, dirty: false }
-      goalWriteRef.current = { token: 0, dirty: false }
       attemptedReceiptSignatureRef.current = null
       setDraftRestoreError(null)
     }
@@ -95,32 +84,21 @@ export function useThreadDraftRecord({
         }
         // 记录是权威：编辑区为空才采纳内容；用户先编辑过就保留用户输入。
         const adoptParts = !hasMessageContent(draftRef.current)
-        const adoptGoal = (goalDraftRef.current ?? '').length === 0
         if (adoptParts) {
           draftRef.current = record.parts
           setDraftState(record.parts)
-        }
-        if (adoptGoal) {
-          goalDraftRef.current = record.goalText
-          setGoalDraftState(record.goalText)
         }
         // generation 只有真的采纳了记录内容（或记录里该字段本就没有内容可丢、内容已与编辑区一致）时才推进：
         // 只推进 generation 而不采纳内容，会让后续整份写入把已恢复文本永久覆盖掉。
         const partsAccounted = adoptParts
           || !hasMessageContent(record.parts)
           || partsKey(record.parts) === partsKey(draftRef.current)
-        const goalAccounted = adoptGoal
-          || (record.goalText ?? '').length === 0
-          || record.goalText === goalDraftRef.current
-        if (partsAccounted && goalAccounted) {
+        if (partsAccounted) {
           observedStopRequestIdsRef.current = record.appliedStopRequestIds
           return
         }
         if (!partsAccounted) {
           partsWriteRef.current.dirty = true
-        }
-        if (!goalAccounted) {
-          goalWriteRef.current.dirty = true
         }
         if (record.appliedStopRequestIds.length > 0) {
           // 有已恢复内容没被采纳：保留原 generation 并提示，等待既有回执通道合并进编辑区。
@@ -140,7 +118,7 @@ export function useThreadDraftRecord({
 
   /** 编辑区是否存在未落盘的输入：存在时绝不拿记录覆盖编辑区。 */
   function hasUnsavedDraft(): boolean {
-    return partsWriteRef.current.dirty || goalWriteRef.current.dirty
+    return partsWriteRef.current.dirty
   }
 
   /**
@@ -182,11 +160,6 @@ export function useThreadDraftRecord({
       saveThreadDraftParts(threadId, parts, observedStopRequestIdsRef.current))
   }
 
-  function persistGoalText(goalText: string | null): void {
-    persistDraftField(goalWriteRef.current, () =>
-      saveThreadGoalText(threadId, goalText, observedStopRequestIdsRef.current))
-  }
-
   /**
    * 草稿写入口。`edit` 落盘到该 Thread 的持久记录；`history`（上下键浏览）与 `restore`（Stop 回执已原子落盘）只更新内存。
    */
@@ -197,15 +170,6 @@ export function useThreadDraftRecord({
     }
     draftRef.current = next
     setDraftState(next)
-  }
-
-  function setGoalDraft(next: string | null, source: 'edit' | 'restore' = 'edit') {
-    draftRevisionRef.current += 1
-    if (source === 'edit') {
-      persistGoalText(next)
-    }
-    goalDraftRef.current = next
-    setGoalDraftState(next)
   }
 
   /** 消息已冻结进未决请求：清空 composer 并落盘，不计作用户编辑。 */
@@ -224,23 +188,11 @@ export function useThreadDraftRecord({
     pending: BoundPendingMessage,
   ): Promise<void> {
     try {
-      if (pending.kind === 'MESSAGE') {
-        const restored = await restoreThreadDraftParts(originThreadId, pending.localDraft)
-        // await 之后重新校验身份：原 Thread 的失败消息绝不回填进新 Thread 的编辑区。
-        if (restored && isStillBound(originThreadId, originEpoch) && !hasMessageContent(draftRef.current)) {
-          draftRef.current = pending.localDraft
-          setDraftState(pending.localDraft)
-        }
-        return
-      }
-      const goalText = pending.goalText
-      if (goalText == null) {
-        return
-      }
-      const restored = await restoreThreadGoalText(originThreadId, goalText)
-      if (restored && isStillBound(originThreadId, originEpoch) && (goalDraftRef.current ?? '').length === 0) {
-        goalDraftRef.current = goalText
-        setGoalDraftState(goalText)
+      const restored = await restoreThreadDraftParts(originThreadId, pending.localDraft)
+      // await 之后重新校验身份：原 Thread 的失败消息绝不回填进新 Thread 的编辑区。
+      if (restored && isStillBound(originThreadId, originEpoch) && !hasMessageContent(draftRef.current)) {
+        draftRef.current = pending.localDraft
+        setDraftState(pending.localDraft)
       }
     } catch {
       if (isStillBound(originThreadId, originEpoch)) {
@@ -257,10 +209,6 @@ export function useThreadDraftRecord({
     if (partsKey(parts) !== partsKey(draftRef.current)) {
       draftRef.current = parts
       setDraftState(parts)
-    }
-    if (record.goalText !== goalDraftRef.current) {
-      goalDraftRef.current = record.goalText
-      setGoalDraftState(record.goalText)
     }
   }
 
@@ -299,16 +247,11 @@ export function useThreadDraftRecord({
           // 编辑区没有未落盘的输入：无论是本次事务合并还是别的标签页已合并，记录都是权威结果。
           applyRecordToEditor(record)
           partsWriteRef.current.dirty = false
-          goalWriteRef.current.dirty = false
           continue
         }
         // 合并期间用户又编辑过：不拿迟到结果覆盖用户输入，而是把回执内容与当前输入合并后沿同一条链落盘。
         const cancelledInputs = receipt.cancelledInputs ?? []
         setDraft(prependCancelledMessages(cancelledInputs, draftRef.current))
-        const mergedGoal = mergeCancelledGoalTexts(cancelledInputs, goalDraftRef.current)
-        if (mergedGoal !== goalDraftRef.current) {
-          setGoalDraft(mergedGoal)
-        }
       } catch {
         failed.push(receipt)
       }
@@ -380,11 +323,8 @@ export function useThreadDraftRecord({
   return {
     draft,
     draftRef,
-    goalDraft,
-    goalDraftRef,
     draftRestoreError,
     setDraft,
-    setGoalDraft,
     clearSubmittedParts,
     restorePendingDraft,
     applyStopReceipts,

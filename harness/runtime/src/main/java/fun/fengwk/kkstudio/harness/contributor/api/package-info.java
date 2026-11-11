@@ -8,13 +8,10 @@
  *       fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor}： 声明贡献者身份、展示元数据与 {@code
  *       requires} 依赖 DAG；
  *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar}： 类型化注册统一 {@link
- *       fun.fengwk.kkstudio.harness.contributor.api.Tool} 与 Custom Entry ownership；
+ *       fun.fengwk.kkstudio.harness.contributor.api.Tool}；
  *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog}： 验证 requires DAG
  *       无环无缺失，按拓扑序收集贡献，冻结为不可变目录；
- *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.BranchView}、{@link
- *       fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration} 与 {@link
- *       fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome}： 限定所有权边界的分支自定义状态只读查询、静态访问声明与状态追加
- *       effects。
+ *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome}： 工具终态结果。
  * </ul>
  *
  * <p>依赖与边界：
@@ -29,15 +26,9 @@
  *
  * <ul>
  *   <li>全局唯一性：{@link fun.fengwk.kkstudio.harness.contributor.api.ContributorId} 与模型可见 Tool name
- *       全局唯一； 贡献 {@code localName} 在所属 Contributor 内唯一；Custom Entry ownership 键为 {@code
- *       (contributorId, customType)}；
- *   <li>静态状态声明校验：Tool 声明的 {@link fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration} 涉及的
- *       customType 必须在该 Contributor 内显式注册；
- *   <li>执行与 effects：{@link fun.fengwk.kkstudio.harness.contributor.api.Tool#execute} 为阻塞
- *       SPI，取消即对执行线程 interrupt； {@link fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome}
- *       仅在成功时允许携带 {@link fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry} effects；
- *   <li>分支隔离：{@link fun.fengwk.kkstudio.harness.contributor.api.BranchView} 查询严格限定在当前 Contributor
- *       且限定在当前 Assistant branch 的 root-to-head 路径上；
+ *       全局唯一； 贡献 {@code localName} 在所属 Contributor 内唯一；
+ *   <li>执行与结果：{@link fun.fengwk.kkstudio.harness.contributor.api.Tool#execute} 为阻塞 SPI，取消即对执行线程
+ *       interrupt；结果只携带模型可见 {@code ToolResult}；
  *   <li>冻结不可变性：冻结后各扩展点按 requires 传递偏序、priority 降序、ContributionId 字典序排序，目录完全不可变。
  * </ul>
  */

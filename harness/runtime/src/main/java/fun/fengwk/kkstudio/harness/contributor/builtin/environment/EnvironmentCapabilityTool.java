@@ -85,7 +85,7 @@ public final class EnvironmentCapabilityTool implements Tool {
     Optional<BoundEnvironment> environment =
         context == null ? Optional.empty() : context.environment();
     if (environment.isEmpty()) {
-      return ToolOutcome.withoutEffects(
+      return new ToolOutcome(
           new ToolResult(
               request.call().id(),
               List.of(
@@ -97,6 +97,6 @@ public final class EnvironmentCapabilityTool implements Tool {
               true,
               "{}"));
     }
-    return ToolOutcome.withoutEffects(environment.get().execute(capability, request, progress));
+    return new ToolOutcome(environment.get().execute(capability, request, progress));
   }
 }

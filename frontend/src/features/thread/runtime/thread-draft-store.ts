@@ -3,18 +3,15 @@ import {
   partsKey,
   type ComposerPart,
 } from '@/features/thread/composer/composer-parts'
-import {
-  mergeCancelledGoalTexts,
-  prependCancelledMessages,
-} from '@/features/thread/runtime/cancelled-message-parts'
+import { prependCancelledMessages } from '@/features/thread/runtime/cancelled-message-parts'
 import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 import { isRecord } from '@/shared/lib/value'
 
 /**
  * 绑定 Thread 的本地草稿事实源。
  *
- * 它是每个 Thread 的唯一权威记录：composer 可编辑 parts、Goal 编辑区文本，以及已合并的
- * Stop 回执身份。三者必须在同一个 IndexedDB 事务里更新，才能保证
+ * 它是每个 Thread 的唯一权威记录：composer 可编辑 parts，以及已合并的 Stop 回执身份。
+ * 两者必须在同一个 IndexedDB 事务里更新，才能保证
  *
  * - 同一 Stop 回执从 Stop 响应或 snapshot 重复到达时不会重复回填；
  * - 刷新、多标签或响应丢失后重放时，草稿与「已合并回执」不会各写一半。
@@ -26,8 +23,6 @@ export interface ThreadDraftRecord {
   threadId: string
   /** composer 可编辑 parts（text + durable resource）。 */
   parts: ComposerPart[]
-  /** Goal 编辑区未提交文本。 */
-  goalText: string | null
   /** 已合并的 Stop 回执身份，按合并顺序。 */
   appliedStopRequestIds: string[]
 }
@@ -126,7 +121,7 @@ export async function loadThreadDraft(threadId: string): Promise<ThreadDraftReco
 }
 
 /**
- * 写入 composer 草稿；Goal 文本与已合并回执身份在同一事务内保留。
+ * 写入 composer 草稿；已合并回执身份在同一事务内保留。
  *
  * `observedStopRequestIds` 是调用方 UI 已观察到的恢复 generation（来自 loadThreadDraft 或
  * applyStopReceipt 返回的 record）。记录里出现调用方尚未观察的回执时，本次整份写入会被拒绝。
@@ -137,15 +132,6 @@ export function saveThreadDraftParts(
   observedStopRequestIds: readonly string[],
 ): Promise<DraftSaveOutcome> {
   return saveObserved(threadId, observedStopRequestIds, (current) => ({ ...current, parts }))
-}
-
-/** 写入 Goal 编辑区文本；composer 草稿与已合并回执身份在同一事务内保留，判定语义同 {@link saveThreadDraftParts}。 */
-export function saveThreadGoalText(
-  threadId: string,
-  goalText: string | null,
-  observedStopRequestIds: readonly string[],
-): Promise<DraftSaveOutcome> {
-  return saveObserved(threadId, observedStopRequestIds, (current) => ({ ...current, goalText }))
 }
 
 /**
@@ -199,22 +185,6 @@ export function restoreThreadDraftParts(
   })
 }
 
-/** Goal 编辑区的对应回填；语义与 {@link restoreThreadDraftParts} 一致。 */
-export function restoreThreadGoalText(threadId: string, goalText: string): Promise<boolean> {
-  return enqueueWrite(threadId, async (database) => {
-    let restored = false
-    await updateRecord(database, threadId, (current) => {
-      const existing = current.goalText ?? ''
-      if (existing.length > 0 && existing !== goalText) {
-        return current
-      }
-      restored = true
-      return { ...current, goalText }
-    })
-    return restored
-  })
-}
-
 /**
  * 原子幂等合并一条 Stop 回执。
  *
@@ -235,7 +205,6 @@ export function applyStopReceipt(
       return {
         threadId: receipt.threadId,
         parts: prependCancelledMessages(cancelledInputs, current.parts),
-        goalText: mergeCancelledGoalTexts(cancelledInputs, current.goalText),
         appliedStopRequestIds: [...current.appliedStopRequestIds, receipt.stopRequestId],
       }
     }))
@@ -282,7 +251,6 @@ function normalizeRecord(value: unknown, threadId: string): ThreadDraftRecord {
   return {
     threadId,
     parts: Array.isArray(record.parts) ? record.parts.filter(isPersistablePart) : [],
-    goalText: typeof record.goalText === 'string' ? record.goalText : null,
     appliedStopRequestIds: Array.isArray(record.appliedStopRequestIds)
       ? record.appliedStopRequestIds.filter((id): id is string => typeof id === 'string')
       : [],

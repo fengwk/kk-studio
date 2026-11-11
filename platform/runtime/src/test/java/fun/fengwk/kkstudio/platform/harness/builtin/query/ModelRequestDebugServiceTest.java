@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
@@ -104,7 +103,6 @@ class ModelRequestDebugServiceTest {
   private static final String CURRENT_COMMIT = "0123456789abcdef0123456789abcdef01234567";
   private static final String ARTIFACT_SHA256 = "a".repeat(64);
   private static final String LOCAL_PATH = "/data/skills/test-package/dev/SKILL.md";
-  private static final GoalSetting GOAL = new GoalSetting(new UUID(0L, 7L), "ship the release");
 
   /** 草稿 model / environment：与 branch settings 不同，用来证明顶层字段只来自本次请求。 */
   private static final ModelSelection DRAFT_MODEL =
@@ -237,8 +235,8 @@ class ModelRequestDebugServiceTest {
   }
 
   /**
-   * 测试意图：预览是单次不可变 snapshot 上的纯查询——只读取一次 Thread snapshot，把草稿 model / environment 合并进真实 base
-   * settings（保留 Agent 与 Goal）后交给共享规划，不做任何写入或控制面调用，也不改动 EntryPath。
+   * 测试意图：预览是单次不可变 snapshot 上的纯查询——只读取一次 Thread snapshot，把草稿 model / environment 合并进真实 base settings
+   * 后交给共享规划，不做任何写入或控制面调用，也不改动 EntryPath。
    */
   @Test
   void forwardsDraftSelectionToTheSharedPlannerWithoutMutatingThePath() {
@@ -271,7 +269,6 @@ class ModelRequestDebugServiceTest {
             .withEnvironmentName(DRAFT_ENV),
         draft);
     assertEquals("assistant", draft.agentName());
-    assertEquals(GOAL, draft.goal());
     // EntryPath 与真实 base settings 完全未被草稿覆写。
     assertEquals(branchSettings(), snapshot.entryState().baseSettings());
     assertEquals(
@@ -620,7 +617,7 @@ class ModelRequestDebugServiceTest {
 
   private static ThreadSnapshot nonBuiltinSnapshot() {
     BranchSettings settings =
-        new BranchSettings("assistant", new ExecutionSelection("external", "{}"), "env-b", GOAL);
+        new BranchSettings("assistant", new ExecutionSelection("external", "{}"), "env-b");
     EntryPath path =
         new EntryPath(
             List.of(
@@ -760,7 +757,7 @@ class ModelRequestDebugServiceTest {
 
   private static BranchSettings branchSettings() {
     return new BranchSettings(
-        "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), "env-b", GOAL);
+        "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), "env-b");
   }
 
   /** 成功共享规划：SENT 候选在前、FILTERED 候选在后，附 Skill 交付事实、subagent 与 cache control。 */

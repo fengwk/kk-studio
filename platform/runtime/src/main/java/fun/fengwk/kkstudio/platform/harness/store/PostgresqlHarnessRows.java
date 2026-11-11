@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.codec.ToolEffectBatchJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
@@ -60,7 +59,6 @@ final class PostgresqlHarnessRows {
       new ProviderReplayStateJsonCodec();
   static final ToolBindingJsonCodec TOOL_BINDINGS = new ToolBindingJsonCodec();
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
-  static final ToolEffectBatchJsonCodec TOOL_EFFECTS = new ToolEffectBatchJsonCodec();
 
   /** wire 与领域 record 一致的列（tool call、checkpoint、错误、失败审计、输入回执）直接严格绑定。 */
   static final StrictJson JSON = StrictJson.standard();
@@ -192,7 +190,6 @@ final class PostgresqlHarnessRows {
               resultSet.getInt("attempt"),
               decodeNullable(resultSet.getString("approval"), TOOL_APPROVALS::decode),
               decodeNullable(resultSet.getString("result"), ToolResultJsonCodec::decode),
-              TOOL_EFFECTS.decode(resultSet.getString("effects")),
               decodeNullable(
                   resultSet.getString("error"),
                   json -> JSON.read(json, ToolInvocationError.class, "toolInvocationError")),

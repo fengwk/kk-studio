@@ -267,11 +267,11 @@ registerCase({
 })
 
 registerCase({
-  id: 'chat.attachment_inline_image_latest_agent_tools',
+  id: 'chat.attachment_inline_image',
   level: 'L1',
   requires: ['canvas-storage'],
-  title: '本地 Blob 图片内联且现有 Thread 使用最新 Agent 工具',
-  docs: '本地 OpenAI Responses mock：使用无需 Environment 的 Goal tools，首轮建立并静止 Thread 后更新同名 Agent 的 tools，第二轮必须发送最新工具；第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
+  title: '本地 Blob 图片在模型请求中内联',
+  docs: '本地 OpenAI Responses mock：第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const mock = await startResponsesProbe()
@@ -315,11 +315,11 @@ registerCase({
       agent = (
           await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-agent-image-${suffix}`,
-            description: 'Agent starts with one environment-independent tool.',
+            description: 'Agent for local image materialization.',
             systemPrompt: 'Complete without calling tools.',
             execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
             config: {
-              tools: ['get_goal'],
+              tools: [],
               skills: [],
               subagents: [],
             },
@@ -366,31 +366,11 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
       const firstSnapshot = await getThreadSnapshot(ctx, threadId)
       assert(mock.requests.length === 1, JSON.stringify(mock.requests))
-      const firstToolNames = collectToolNames(mock.requests[0].body)
-      assert(
-        firstToolNames.includes('get_goal') && !firstToolNames.includes('update_goal'),
-        JSON.stringify({ firstToolNames, tools: mock.requests[0].body.tools }),
-      )
       assert(
         !collectStrings(mock.requests[0].body).some((value) => value.startsWith('data:image/')),
         JSON.stringify(mock.requests[0].body),
       )
 
-      // 既有 Thread 的第二轮必须读取最新 Agent config.tools。
-      // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
-      agent = (
-          await ctx.call('PUT', `/api/platform/agents/${encodeURIComponent(agent.name)}`, {
-            description: 'Agent now has the latest tools.',
-            systemPrompt: 'Complete without calling tools.',
-            execution: agent.execution,
-            config: {
-              tools: ['get_goal', 'update_goal'],
-              skills: [],
-              subagents: [],
-            },
-            expectedVersion: agent.version,
-          })
-        ).json
       const uploadId = await uploadReadyFile(ctx, {
         filename: 'pixel.png',
         mediaType: 'image/png',
@@ -443,20 +423,10 @@ registerCase({
         imageSources[0],
       )
       assert(!bodyText.includes('127.0.0.1') && !bodyText.includes('localhost'), bodyText)
-      const toolNames = collectToolNames(request.body)
-      assert(toolNames.includes('get_goal'), JSON.stringify({ toolNames, tools: request.body.tools }))
-      assert(
-        toolNames.includes('update_goal'),
-        `latest Agent tool missing from existing Thread request: ${JSON.stringify({
-          toolNames,
-          tools: request.body.tools,
-        })}`,
-      )
-
       ctx.writeArtifact(
-        'inline-image-latest-tools-request.json',
+        'inline-image-request.json',
         JSON.stringify(
-          { firstToolNames, toolNames, imageSource: imageSources[0], request: request.body },
+          { imageSource: imageSources[0], request: request.body },
           null,
           2,
         ),
@@ -577,19 +547,6 @@ async function startResponsesProbe() {
       server.close((error) => (error ? reject(error) : resolve()))
     }),
   }
-}
-
-function collectToolNames(value, result = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectToolNames(item, result)
-  } else if (value && typeof value === 'object') {
-    const name = value.name ?? value.function?.name
-    if (typeof name === 'string' && name.trim() && (value.type === 'function' || value.function || value.parameters)) {
-      result.push(name)
-    }
-    for (const item of Object.values(value)) collectToolNames(item, result)
-  }
-  return result
 }
 
 function collectStrings(value, result = []) {

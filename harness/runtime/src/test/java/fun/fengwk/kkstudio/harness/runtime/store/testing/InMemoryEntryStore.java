@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -241,19 +240,6 @@ final class InMemoryEntryStore implements EntryStore {
     }
     Collections.reverse(suffix);
     return new EntrySlice(null, suffix);
-  }
-
-  @Override
-  public List<Entry> loadContributorCustom(UUID headEntryId, String contributorId) {
-    tx.checkOpen();
-    Objects.requireNonNull(headEntryId, "headEntryId");
-    Objects.requireNonNull(contributorId, "contributorId");
-    return loadPath(headEntryId).entries().stream()
-        .filter(
-            entry ->
-                entry.payload() instanceof CustomEntryPayload custom
-                    && contributorId.equals(custom.contributorId()))
-        .toList();
   }
 
   @Override

@@ -24,7 +24,6 @@ export type ThreadCommandId =
   | 'compact'
   | 'rename-session'
   | 'rename-thread'
-  | 'goal'
   | 'files'
   | 'shell'
 
@@ -59,7 +58,6 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('compact', ['context', 'tokens', 'summary', 'reduce']),
   command('rename-session', ['session', 'name']),
   command('rename-thread', ['thread', 'name']),
-  command('goal', ['objective', 'target', 'task', 'goal']),
   command('files', ['explorer', 'browse', 'directory', 'fs']),
   command('shell', ['terminal', 'bash', 'console', 'cli']),
 ]
@@ -89,12 +87,11 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'shortcuts',
     'rename-session',
     'rename-thread',
-    'goal',
     'files',
     'shell',
   ],
   // 会话 fork 草稿：新 Session/Thread 尚未创建，也没有用户可见名称，因此不提供任何重命名；
-  // 其余草稿能力（设置、历史、预览、Goal）与新建 Thread 分支保持一致。
+  // 其余草稿能力（设置、历史、预览）与新建 Thread 分支保持一致。
   FORK_SESSION_DRAFT: [
     'thread',
     'agent',
@@ -105,7 +102,6 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'upload',
     'debug',
     'shortcuts',
-    'goal',
     'files',
     'shell',
   ],

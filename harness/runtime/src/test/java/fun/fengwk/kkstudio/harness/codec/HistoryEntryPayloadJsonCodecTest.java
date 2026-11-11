@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -23,7 +22,6 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
@@ -130,7 +128,6 @@ class HistoryEntryPayloadJsonCodecTest {
             CustomMessagePayload.CORE_RENDERER_KEY,
             user("system"),
             CustomMessagePayload.CORE_DETAILS_JSON);
-    EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", "{\"s\":1}");
     EntryPayload attemptFailure =
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
@@ -157,7 +154,6 @@ class HistoryEntryPayloadJsonCodecTest {
             assistant,
             tool,
             custom,
-            customEntry,
             attemptFailure,
             error,
             aborted,
@@ -359,7 +355,7 @@ class HistoryEntryPayloadJsonCodecTest {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "custom-tool", List.of()),
+            new ContributorBinding("core", "custom-tool"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -463,12 +459,12 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"execution\":{"
             + "\"driver\":\"fake\",\"settings\":{}}"
-            + ",\"environmentName\":null,\"goal\":null}}",
+            + ",\"environmentName\":null}}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"execution\":{"
             + "\"driver\":\"fake\",\"settings\":{}}"
-            + ",\"environmentName\":null,\"goal\":null},"
+            + ",\"environmentName\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null"
@@ -487,10 +483,6 @@ class HistoryEntryPayloadJsonCodecTest {
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 user("sys"),
                 CustomMessagePayload.CORE_DETAILS_JSON)));
-    assertEquals(
-        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\","
-            + "\"data\":{\"state\":\"open\"}}",
-        CODEC.encode(new CustomEntryPayload("com.example.goal", "goal", "{\"state\":\"open\"}")));
     assertEquals(
         "{\"turnStartEntryId\":\""
             + UUID_7
@@ -699,52 +691,6 @@ class HistoryEntryPayloadJsonCodecTest {
         CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(withEnvironment))));
   }
 
-  /** 测试意图：goal 属于 settings 完整快照——null 与 {id,text} 精确往返；缺失字段、缺 text、非对象、非法 UUID 都确定性拒绝。 */
-  @Test
-  void roundTripsGoalSettingAndRejectsMalformedShapes() {
-    BranchSettings withGoal = settings().withGoal(new GoalSetting(id(700L), "ship it"));
-    assertEquals(
-        new RootPayload(withGoal),
-        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(withGoal))));
-    assertEquals(
-        new RootPayload(settings()),
-        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(settings()))));
-
-    String base =
-        "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\","
-            + "\"variant\":\"v\"},\"environmentName\":null";
-    // 缺失 goal 字段拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + "}}"));
-    // 缺 text / 非对象 / 非 UUID id 拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.ROOT,
-                "{\"settings\":{" + base + ",\"goal\":{\"id\":\"" + id(700L) + "\"}}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + ",\"goal\":\"x\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.ROOT,
-                "{\"settings\":{" + base + ",\"goal\":{\"id\":\"not-a-uuid\",\"text\":\"x\"}}}"));
-    // 大写变体可被 UUID.fromString 解析，但持久化身份只接受 canonical 文本。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.ROOT,
-                "{\"settings\":{"
-                    + base
-                    + ",\"goal\":{\"id\":\"00000000-0000-0000-0000-0000000002BC\","
-                    + "\"text\":\"x\"}}}"));
-  }
-
   @Test
   void rejectsUnknownMissingAndWrongTypedFields() {
     assertThrows(
@@ -757,7 +703,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"environmentName\":null,\"goal\":null},\"subagentContext\":null}"));
+                    + "\"environmentName\":null},\"subagentContext\":null}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "[]"));
     assertThrows(
@@ -1063,7 +1009,7 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"definition\":{\"descriptor\":{\"name\":\"read\",\"description\":\"read\","
             + "\"rendererKey\":\"read\",\"sideEffect\":\"READ_ONLY\",\"defaultTimeoutMillis\":30000,"
             + "\"inputSchema\":{\"type\":\"object\",\"description\":\"arguments\",\"properties\":{},\"required\":[],\"additionalProperties\":false}},"
-            + "\"visibility\":\"SELECTABLE\"},\"contributor\":{\"contributorId\":\"core\",\"localName\":\"read\",\"stateAccesses\":[]},"
+            + "\"visibility\":\"SELECTABLE\"},\"contributor\":{\"contributorId\":\"core\",\"localName\":\"read\"},"
             + "\"environmentSupport\":\"NONE\",\"environmentId\":null,\"environmentName\":null}";
     assertThrows(
         IllegalArgumentException.class,
@@ -1094,39 +1040,6 @@ class HistoryEntryPayloadJsonCodecTest {
     assertThrows(
         NullPointerException.class,
         () -> CODEC.decodeNode(null, HistoryValueCodecs.NODES.objectNode()));
-  }
-
-  @Test
-  void rejectsMalformedCustomEntryShapes() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\","
-                    + "\"data\":{},\"extra\":1}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(EntryType.CUSTOM, "{\"contributorId\":\"goal\",\"customType\":\"goal\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":[]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"Goal\",\"customType\":\"goal\"," + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":null}"));
   }
 
   @Test
@@ -1361,20 +1274,6 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static BranchSettings settings() {
     return new BranchSettings("coding", MODEL, null);
-  }
-
-  /** CUSTOM entry 的 data 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
-  @Test
-  void preservesCustomEntryDataNumberPrecision() {
-    String dataJson = "{\"big\":1E+309,\"tiny\":1E-324}";
-    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", dataJson);
-
-    String encoded = CODEC.encode(payload);
-
-    assertTrue(encoded.contains("1E+309"), encoded);
-    assertTrue(encoded.contains("1E-324"), encoded);
-    assertFalse(encoded.contains("Infinity"), encoded);
-    assertEquals(payload, CODEC.decode(EntryType.CUSTOM, encoded));
   }
 
   /** CUSTOM_MESSAGE 的 details 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */

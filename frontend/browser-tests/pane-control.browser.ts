@@ -38,7 +38,6 @@ function rootThread(overrides: Record<string, unknown> = {}) {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
       environmentName: null,
-      goal: null,
     },
     createdAt: 1790812800,
     updatedAt: 1790812800,
@@ -530,32 +529,6 @@ test('switching environment on a root with running subagents warns it applies to
   expect(recorded.commandRequests).toEqual([])
 })
 
-test('the goal panel closes on Escape and restores focus to the editable composer', async ({ page }) => {
-  const recorded = await installPaneApi(page)
-  const { composer } = await openRootPane(page, recorded)
-  const editor = composer.locator('.composer-editor')
-  await editor.click()
-  await editor.fill('/goal')
-  const palette = composer.locator('.thread-command-palette')
-  const goalItem = palette.locator('button', { hasText: 'goal' })
-  await expect(goalItem).toBeVisible()
-  await goalItem.click()
-
-  const panel = page.locator('.thread-interaction-panel[aria-label="thread 目标"]')
-  await expect(panel).toBeVisible()
-  // 打开即把焦点放进面板内的目标输入框：Esc 不再依赖被接管（active=false）的 Composer。
-  await expect(panel.locator('.ui-textarea')).toBeFocused()
-
-  await page.keyboard.press('Escape')
-  await expect(panel).toBeHidden()
-  // 关闭后焦点回到当前可编辑 Composer 编辑器；输入直接落在草稿上，且不提交/不停。
-  await expect(editor).toBeFocused()
-  await page.keyboard.type('继续输入')
-  await expect(editor).toContainText('继续输入')
-  expect(recorded.commandRequests).toEqual([])
-  expect(recorded.stopRequests).toEqual([])
-})
-
 test('recognizes SETTINGS once and uses the same model label in the footer', async ({ page }, testInfo) => {
   // 安全点立即展示变更；后续相同回合快照不重复，底栏文字与提示同源。
   const rootSettings = {
@@ -567,7 +540,6 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
     agentName: 'researcher',
     execution: { driver: 'builtin', settings: { modelName: 'grok-4.7', variant: 'xhigh' } },
     environmentName: null,
-    goal: null,
   }
   const rootEntries = [
     {

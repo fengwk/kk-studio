@@ -15,9 +15,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.builtin.port.PortTestData;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
-import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
@@ -28,7 +25,6 @@ import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -84,7 +80,6 @@ class ToolGatewayTest {
     assertEquals(
         UUID.fromString("00000000-0000-0000-0000-0000000000c3"), execution.scope().rootSessionId());
     assertEquals(TurnMediaCapabilities.NONE, execution.scope().mediaCapabilities());
-    assertNotNull(execution.scope().branch());
     assertEquals(1, execution.attempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertEquals(ToolApproval.notRequired(), execution.approval());
@@ -328,22 +323,6 @@ class ToolGatewayTest {
         UUID.fromString("00000000-0000-0000-0000-0000000000c2"),
         UUID.fromString("00000000-0000-0000-0000-0000000000c3"),
         UUID.fromString("00000000-0000-0000-0000-0000000000c4"),
-        new BranchView() {
-          @Override
-          public List<CustomStateSnapshot> customEntries(String customType) {
-            return List.of();
-          }
-
-          @Override
-          public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-            return Optional.empty();
-          }
-
-          @Override
-          public Optional<GoalSnapshot> goal() {
-            return Optional.empty();
-          }
-        },
         TurnMediaCapabilities.NONE);
   }
 

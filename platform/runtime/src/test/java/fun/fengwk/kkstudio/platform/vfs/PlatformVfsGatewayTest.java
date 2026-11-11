@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -530,7 +529,7 @@ class PlatformVfsGatewayTest {
         new ToolCall("c1", toolName, argumentsJson),
         new ToolBinding(
             new AgentToolDefinition(descriptor(descriptor, toolName), ToolVisibility.SELECTABLE),
-            new ContributorBinding("test", toolName, List.of()),
+            new ContributorBinding("test", toolName),
             EnvironmentSupport.NONE,
             null,
             null));
@@ -546,7 +545,6 @@ class PlatformVfsGatewayTest {
 
   private static ToolExecutionRequest request(
       EnvironmentCapabilityDescriptor descriptor, String toolName, String argumentsJson) {
-    BranchView branch = mock(BranchView.class);
     ToolExecutionContext context =
         new ToolExecutionContext(
             UUID.randomUUID(),
@@ -557,7 +555,6 @@ class PlatformVfsGatewayTest {
             UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
-            branch,
             Optional.empty());
     return new ToolExecutionRequest(
         descriptor(descriptor, toolName),

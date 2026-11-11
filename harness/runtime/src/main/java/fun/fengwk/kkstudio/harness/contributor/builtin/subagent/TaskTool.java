@@ -91,7 +91,7 @@ public final class TaskTool implements Tool {
               request.context().invocationId(), request.context().threadId(), request.call());
     } catch (TaskRejectedException rejected) {
       // 参数被拒是派发前确定性结果：父线程保留，明确未执行并给出继续参数。
-      return ToolOutcome.withoutEffects(
+      return new ToolOutcome(
           error(
               callId,
               ToolErrorGuidance.message(
@@ -101,10 +101,10 @@ public final class TaskTool implements Tool {
     }
     try {
       SubagentTaskAcceptance acceptance = runner.accept(taskRequest);
-      return ToolOutcome.withoutEffects(accepted(callId, taskRequest.subagentType(), acceptance));
+      return new ToolOutcome(accepted(callId, taskRequest.subagentType(), acceptance));
     } catch (RuntimeException failure) {
       // 接受是原子持久操作：提交结果不确定时绝不能声称「未创建」。
-      return ToolOutcome.withoutEffects(
+      return new ToolOutcome(
           error(
               callId,
               ToolErrorGuidance.message(

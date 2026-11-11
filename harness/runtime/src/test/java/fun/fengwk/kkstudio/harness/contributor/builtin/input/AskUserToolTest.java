@@ -155,7 +155,6 @@ class AskUserToolTest {
 
     assertTrue(outcome.result().error());
     assertEquals("call-1", outcome.result().toolCallId());
-    assertTrue(outcome.customEntries().isEmpty());
     String message =
         assertInstanceOf(TextResultContent.class, outcome.result().contents().get(0)).text();
     assertFalse(message.contains("which plan?"), "the error must not echo the questionnaire");

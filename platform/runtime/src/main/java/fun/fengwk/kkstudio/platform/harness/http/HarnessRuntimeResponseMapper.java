@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.generation.FailureProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
@@ -40,7 +39,6 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCancelledInputDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionExitDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessGenerationFailureDTO;
-import fun.fengwk.kkstudio.platform.harness.dto.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryDTO;
@@ -138,8 +136,6 @@ public final class HarnessRuntimeResponseMapper {
     dto.setExecution(toExecutionSelectionDto(settings.execution()));
     // Environment 引用平铺为 nullable canonical name；null 显式保留（@JsonInclude(ALWAYS)）。
     dto.setEnvironmentName(settings.environmentName());
-    // 用户 Goal 同样显式输出：null 表示当前没有用户设定 Goal。
-    dto.setGoal(toGoalSettingDto(settings.goal()));
     return dto;
   }
 
@@ -149,16 +145,6 @@ public final class HarnessRuntimeResponseMapper {
     HarnessExecutionSelectionDTO dto = new HarnessExecutionSelectionDTO();
     dto.setDriver(selection.driver());
     dto.setSettings(JSON.read(selection.settingsJson(), JsonNode.class, "execution.settings"));
-    return dto;
-  }
-
-  private static HarnessGoalSettingDTO toGoalSettingDto(GoalSetting goal) {
-    if (goal == null) {
-      return null;
-    }
-    HarnessGoalSettingDTO dto = new HarnessGoalSettingDTO();
-    dto.setId(goal.id().toString());
-    dto.setText(goal.text());
     return dto;
   }
 

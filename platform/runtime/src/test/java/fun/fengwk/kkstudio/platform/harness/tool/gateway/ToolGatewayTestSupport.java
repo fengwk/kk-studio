@@ -9,12 +9,9 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
-import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -65,7 +62,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -90,34 +86,14 @@ final class ToolGatewayTestSupport {
   /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
-  /** 测试默认的空 BranchView。 */
-  static final BranchView EMPTY_BRANCH_VIEW =
-      new BranchView() {
-        @Override
-        public List<CustomStateSnapshot> customEntries(String customType) {
-          return List.of();
-        }
-
-        @Override
-        public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-          return Optional.empty();
-        }
-
-        @Override
-        public Optional<GoalSnapshot> goal() {
-          return Optional.empty();
-        }
-      };
-
   /** 测试默认的冻结上下文事实：Harness 会在 admission 前把这些事实随执行描述传入。 */
-  static ToolGateway.ExecutionScope scope(BranchView branch) {
+  static ToolGateway.ExecutionScope scope() {
     return new ToolGateway.ExecutionScope(
         THREAD_ID,
         SESSION_ID,
         ROOT_THREAD_ID,
         ROOT_SESSION_ID,
         ASSISTANT_ENTRY_ID,
-        branch,
         TurnMediaCapabilities.NONE);
   }
 
@@ -175,7 +151,7 @@ final class ToolGatewayTestSupport {
         new ToolCall(callId, descriptor.name(), "{}"),
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
-            new ContributorBinding("test", "host-tool", List.of()),
+            new ContributorBinding("test", "host-tool"),
             EnvironmentSupport.NONE,
             null,
             null));
@@ -194,9 +170,7 @@ final class ToolGatewayTestSupport {
     ToolContribution bashContribution = catalog.findTool("bash").orElseThrow();
     ContributorBinding contributor =
         new ContributorBinding(
-            bashContribution.id().contributorId().value(),
-            bashContribution.id().localName(),
-            List.of());
+            bashContribution.id().contributorId().value(), bashContribution.id().localName());
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", argumentsJson),
         new ToolBinding(
@@ -214,12 +188,7 @@ final class ToolGatewayTestSupport {
   static ToolGateway.Execution execution(
       ToolInvocationRequest request, ToolGateway.RemoteExecutionObserver remoteExecutions) {
     return new ToolGateway.Execution(
-        INVOCATION_ID,
-        scope(EMPTY_BRANCH_VIEW),
-        1,
-        request,
-        ToolApproval.notRequired(),
-        remoteExecutions);
+        INVOCATION_ID, scope(), 1, request, ToolApproval.notRequired(), remoteExecutions);
   }
 
   /** 使用调用方提供的权限求值器与设置提供者装配网关：用于证明门禁先于权限评估。 */
@@ -279,8 +248,7 @@ final class ToolGatewayTestSupport {
             "{\"path\":\"" + path + "\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
         new ToolBinding(
             edit.definition(),
-            new ContributorBinding(
-                edit.id().contributorId().value(), edit.id().localName(), List.of()),
+            new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),
             EnvironmentSupport.ROUTED,
             null,
             null));

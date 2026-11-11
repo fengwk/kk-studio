@@ -130,14 +130,14 @@ class ModelRequestSpecTest {
     ToolBinding tool1 =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
+            new ContributorBinding("core", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);
     ToolBinding tool2 =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("other", "bash", List.of()),
+            new ContributorBinding("other", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -166,7 +166,7 @@ class ModelRequestSpecTest {
     ToolBinding optionalWithDifferentEnv =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "optional", List.of()),
+            new ContributorBinding("core", "optional"),
             EnvironmentSupport.ROUTED,
             other,
             "other-env");
@@ -178,7 +178,7 @@ class ModelRequestSpecTest {
     ToolBinding optionalWithEnv1 =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional1"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "opt1", List.of()),
+            new ContributorBinding("core", "opt1"),
             EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
@@ -193,14 +193,14 @@ class ModelRequestSpecTest {
     ToolBinding optionalWithSameEnv =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "optional", List.of()),
+            new ContributorBinding("core", "optional"),
             EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
     ToolBinding optionalWithoutEnv =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_unbound"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "unbound", List.of()),
+            new ContributorBinding("core", "unbound"),
             EnvironmentSupport.ROUTED,
             null,
             null);

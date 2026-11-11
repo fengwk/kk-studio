@@ -229,14 +229,12 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
 
 test('tool catalog case accepts its public fields and rejects extra fields', async () => {
   // 真实 case 检查工具目录形状，不允许未知成员绕过。
-  const entries = ['get_goal', 'update_goal'].map((name) => ({
-    name, description: 'fixture', environmentSupport: 'NONE',
-  }))
+  const entries = [{ name: 'read', description: 'fixture', environmentSupport: 'NONE' }]
   const run = (tools) => getCase('catalog.internal_tools_hidden').run({
     async call() { return { json: tools } },
   })
   await run(entries)
-  await assert.rejects(run([{ ...entries[0], unexpected: true }, entries[1]]), /fields must be/)
+  await assert.rejects(run([{ ...entries[0], unexpected: true }]), /fields must be/)
 })
 
 test('chat default environment case executes the create/replace/clear wire with full replacement', async () => {

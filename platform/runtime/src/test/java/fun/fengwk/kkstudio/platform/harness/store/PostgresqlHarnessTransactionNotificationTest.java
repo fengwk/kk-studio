@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -589,7 +588,6 @@ class PostgresqlHarnessTransactionNotificationTest {
                           0,
                           null,
                           null,
-                          ToolEffectBatch.EMPTY,
                           null,
                           T1,
                           T1)));

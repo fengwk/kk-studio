@@ -714,14 +714,6 @@ export const chatCatalog = {
     'en-US': 'rename-thread',
     'zh-CN': 'rename-thread',
   },
-  'ai.runtime.command.goal': {
-    'en-US': 'View, edit, or clear the thread goal',
-    'zh-CN': '查看、编辑或清除 thread 目标',
-  },
-  'ai.runtime.command.goalLabel': {
-    'en-US': 'goal',
-    'zh-CN': 'goal',
-  },
   'ai.runtime.command.files': {
     'en-US': 'Open file explorer in workspace',
     'zh-CN': '在工作区打开文件浏览',
@@ -737,82 +729,6 @@ export const chatCatalog = {
   'ai.runtime.command.shellLabel': {
     'en-US': 'shell',
     'zh-CN': 'shell',
-  },
-  'ai.runtime.goal.title': {
-    'en-US': 'Thread goal',
-    'zh-CN': 'thread 目标',
-  },
-  'ai.runtime.goal.currentGoal': {
-    'en-US': 'Current Goal',
-    'zh-CN': '当前目标',
-  },
-  'ai.runtime.goal.emptyGoal': {
-    'en-US': 'No goal set for this thread',
-    'zh-CN': '当前 thread 暂无设定目标',
-  },
-  'ai.runtime.goal.agentReportTitle': {
-    'en-US': 'Agent Progress Report',
-    'zh-CN': 'Agent 进展报告',
-  },
-  'ai.runtime.goal.agentReportDisclaimer': {
-    'en-US': 'Reported by Agent, not system acceptance',
-    'zh-CN': '由 Agent 报告，非系统验收',
-  },
-  'ai.runtime.goal.statusCompleteReported': {
-    'en-US': 'Completed',
-    'zh-CN': '已完成',
-  },
-  'ai.runtime.goal.statusBlockedReported': {
-    'en-US': 'Blocked',
-    'zh-CN': '阻塞',
-  },
-  'ai.runtime.goal.staleReportNotice': {
-    'en-US': 'Previous goal progress report is stale',
-    'zh-CN': '历史目标的 Agent 报告已失效',
-  },
-  'ai.runtime.goal.setGoalLabel': {
-    'en-US': 'Set New Goal',
-    'zh-CN': '设置新目标',
-  },
-  'ai.runtime.goal.updateGoalLabel': {
-    'en-US': 'Update Goal',
-    'zh-CN': '更新目标',
-  },
-  'ai.runtime.goal.inputPlaceholder': {
-    'en-US': 'Enter thread goal...',
-    'zh-CN': '输入 thread 目标...',
-  },
-  'ai.runtime.goal.setGoalBtn': {
-    'en-US': 'Set Goal',
-    'zh-CN': '设置目标',
-  },
-  'ai.runtime.goal.clearGoalBtn': {
-    'en-US': 'Clear Goal',
-    'zh-CN': '清除目标',
-  },
-  'ai.runtime.goal.busy': {
-    'en-US': 'Applying...',
-    'zh-CN': '正在提交...',
-  },
-  'ai.runtime.goal.readOnlyNotice': {
-    'en-US': 'Read-only mode; cannot modify goal.',
-    'zh-CN': '只读模式，不可修改目标。',
-  },
-  'ai.runtime.goal.notAllowed': {
-    'en-US': 'Goal is not supported on this thread',
-    'zh-CN': '当前 thread 不支持设置目标',
-  },
-  'ai.runtime.goal.errorEmpty': {
-    'en-US': 'Goal text cannot be empty',
-    'zh-CN': '目标正文不能为空',
-  },
-  'ai.runtime.goal.errorTooLong': {
-    'en-US': 'Goal text must be 2,000 characters or fewer',
-    'zh-CN': '目标正文不能超过 2000 个字符',
-  },
-  'ai.runtime.goal.submitFailed': {
-    'en-US': 'Failed to update goal',
-    'zh-CN': '更新目标失败',
   },
   'ai.runtime.rename.sessionTitle': {
     'en-US': 'Rename Session',

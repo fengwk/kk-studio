@@ -31,17 +31,15 @@ export interface PendingAcceptance {
 }
 
 /**
- * 既有 Thread 的一次未决写入（普通消息或 Goal）。它只依赖 Thread 的 CAS 游标，
+ * 既有 Thread 的一次未决消息写入。它只依赖 Thread 的 CAS 游标，
  * 不携带 owner；发送前持久化，未知结果后保留，刷新/重绑后按 thread 恢复精确重试，
- * 并按 kind 把内容恢复到对应编辑区（消息 → composer，目标 → Goal 编辑区）。
+ * 并在确定失败后把内容恢复到 composer。
  */
 export interface BoundPendingMessage {
   threadId: string
   request: HarnessThreadCommandBatchDTO
   targetDraft: BranchDraft
-  kind: 'MESSAGE' | 'GOAL'
   localDraft: ComposerPart[]
-  goalText: string | null
   unknownOutcome: boolean
 }
 
@@ -86,19 +84,15 @@ export function isBoundPendingMessageValue(value: unknown): value is BoundPendin
       'threadId',
       'request',
       'targetDraft',
-      'kind',
       'localDraft',
-      'goalText',
       'unknownOutcome',
     ])
     && nonBlank(value.threadId)
-    && (value.kind === 'MESSAGE' || value.kind === 'GOAL')
     && typeof value.unknownOutcome === 'boolean'
     && isThreadCommandBatchRequest(value.request)
     && isBranchDraft(value.targetDraft)
     && Array.isArray(value.localDraft)
     && value.localDraft.every(isComposerPart)
-    && (value.goalText === null || typeof value.goalText === 'string')
 }
 
 export function samePendingAcceptanceIdentity(

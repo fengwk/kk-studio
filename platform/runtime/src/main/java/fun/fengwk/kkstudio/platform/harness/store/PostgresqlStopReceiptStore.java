@@ -4,7 +4,6 @@ import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -128,13 +127,10 @@ final class PostgresqlStopReceiptStore implements StopReceiptStore {
     }
   }
 
-  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE 与 GOAL）；其它类型不退草稿。 */
+  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE）；其它类型不退草稿。 */
   private static List<CancelledThreadInput> cancelledInputs(List<ThreadCommand> cancelled) {
     return cancelled.stream()
-        .filter(
-            command ->
-                command.payload() instanceof UserMessageCommandPayload
-                    || command.payload() instanceof GoalCommandPayload)
+        .filter(command -> command.payload() instanceof UserMessageCommandPayload)
         .map(
             command ->
                 new CancelledThreadInput(

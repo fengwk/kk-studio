@@ -4,8 +4,8 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * canonical 标识符校验的单一实现：{@link CustomEntryPayload} / {@link CustomMessagePayload} 的 contributorId /
- * customType / rendererKey 在构造时校验，history codec 在解码时先按字段顺序显式前置校验，两侧共用同一规则与文案。
+ * canonical 标识符校验的单一实现：{@link CustomMessagePayload} 的 contributorId / customType / rendererKey
+ * 在构造时校验，history codec 在解码时先按字段顺序显式前置校验，两侧共用同一规则与文案。
  */
 public final class CanonicalIdentifiers {
 

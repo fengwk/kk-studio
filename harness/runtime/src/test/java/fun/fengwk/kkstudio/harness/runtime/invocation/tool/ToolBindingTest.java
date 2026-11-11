@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -51,7 +48,7 @@ class ToolBindingTest {
     ToolBinding host =
         new ToolBinding(
             definition("bash"),
-            contributorProvenance("core", "bash", List.of()),
+            contributorProvenance("core", "bash"),
             EnvironmentSupport.NONE,
             null,
             null);
@@ -65,7 +62,7 @@ class ToolBindingTest {
     ToolBinding environment =
         new ToolBinding(
             definition("fs"),
-            contributorProvenance("base", "read", List.of()),
+            contributorProvenance("base", "read"),
             EnvironmentSupport.REQUIRED,
             ENV_ID,
             "dev");
@@ -79,7 +76,7 @@ class ToolBindingTest {
     ToolBinding optionalWithEnv =
         new ToolBinding(
             definition("custom"),
-            contributorProvenance("base", "custom", List.of()),
+            contributorProvenance("base", "custom"),
             EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
@@ -91,7 +88,7 @@ class ToolBindingTest {
     ToolBinding optionalWithoutEnv =
         new ToolBinding(
             definition("custom"),
-            contributorProvenance("base", "custom", List.of()),
+            contributorProvenance("base", "custom"),
             EnvironmentSupport.ROUTED,
             null,
             null);
@@ -101,27 +98,21 @@ class ToolBindingTest {
   }
 
   @Test
-  void permitsCoexistenceOfStateAccessesAndEnvironment() {
-    // 允许 stateAccesses 与 environment 在同一 binding 中并存。
-    ContributorBinding statefulContributor = declarativeProvenance();
+  void permitsCoexistenceOfContributorBindingAndEnvironment() {
+    // 允许 contributor binding 与 environment 在同一 ToolBinding 中并存。
+    ContributorBinding provenance = declarativeProvenance();
     ToolBinding combined =
         new ToolBinding(
-            definition("state_tool"),
-            statefulContributor,
-            EnvironmentSupport.REQUIRED,
-            ENV_ID,
-            "dev");
+            definition("state_tool"), provenance, EnvironmentSupport.REQUIRED, ENV_ID, "dev");
     assertEquals(EnvironmentSupport.REQUIRED, combined.environmentSupport());
     assertEquals(ENV_ID, combined.environmentId());
-    assertEquals(statefulContributor, combined.contributor());
-    assertFalse(combined.contributor().stateAccesses().isEmpty());
+    assertEquals(provenance, combined.contributor());
 
-    ToolBinding stateWithoutEnv =
-        new ToolBinding(
-            definition("state_tool"), statefulContributor, EnvironmentSupport.NONE, null, null);
-    assertEquals(EnvironmentSupport.NONE, stateWithoutEnv.environmentSupport());
-    assertNull(stateWithoutEnv.environmentId());
-    assertEquals(statefulContributor, stateWithoutEnv.contributor());
+    ToolBinding withoutEnv =
+        new ToolBinding(definition("state_tool"), provenance, EnvironmentSupport.NONE, null, null);
+    assertEquals(EnvironmentSupport.NONE, withoutEnv.environmentSupport());
+    assertNull(withoutEnv.environmentId());
+    assertEquals(provenance, withoutEnv.contributor());
   }
 
   /**
@@ -130,7 +121,7 @@ class ToolBindingTest {
    */
   @Test
   void enforcesEnvironmentSupportInvariants() {
-    ContributorBinding contributor = contributorProvenance("core", "bash", List.of());
+    ContributorBinding contributor = contributorProvenance("core", "bash");
 
     // NONE 携带 environmentId 或 environmentName 必须被拒绝
     assertThrows(
@@ -202,28 +193,13 @@ class ToolBindingTest {
   }
 
   @Test
-  void contributorBindingFreezesCanonicalOwnerAndUniqueStateAccesses() {
-    // ContributorBinding 校验规范标识符与唯一的 stateAccess customType。
-    ContributorBinding contributor =
-        new ContributorBinding(
-            "goal",
-            "create",
-            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
+  void contributorBindingFreezesCanonicalOwner() {
+    // ContributorBinding 校验规范标识符。
+    ContributorBinding contributor = new ContributorBinding("builtin", "read");
     ToolBinding binding =
-        new ToolBinding(
-            definition("create_goal"), contributor, EnvironmentSupport.NONE, null, null);
+        new ToolBinding(definition("read"), contributor, EnvironmentSupport.NONE, null, null);
     assertEquals(contributor, binding.contributor());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ContributorBinding(
-                "goal",
-                "create",
-                List.of(
-                    new ContributorStateAccess("state", ContributorStateAccessMode.READ),
-                    new ContributorStateAccess("state", ContributorStateAccessMode.WRITE))));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ContributorBinding("Goal", "create", List.of()));
+    assertThrows(IllegalArgumentException.class, () -> new ContributorBinding("Builtin", "read"));
   }
 
   private static ToolDescriptor descriptor(String name) {
@@ -234,15 +210,11 @@ class ToolBindingTest {
     return new AgentToolDefinition(descriptor(name), ToolVisibility.SELECTABLE);
   }
 
-  private static ContributorBinding contributorProvenance(
-      String contributorId, String localName, List<ContributorStateAccess> accesses) {
-    return new ContributorBinding(contributorId, localName, accesses);
+  private static ContributorBinding contributorProvenance(String contributorId, String localName) {
+    return new ContributorBinding(contributorId, localName);
   }
 
   private static ContributorBinding declarativeProvenance() {
-    return new ContributorBinding(
-        "goal",
-        "create",
-        List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
+    return new ContributorBinding("goal", "create");
   }
 }

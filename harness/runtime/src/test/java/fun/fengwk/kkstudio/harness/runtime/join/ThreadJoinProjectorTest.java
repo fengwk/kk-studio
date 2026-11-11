@@ -11,7 +11,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -1303,7 +1302,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void handlesMultiInputAndCustomCommandPayloads() {
-    // 测试意图：验证 UserMessage、CustomMessage、GoalCommand 以及多段 contents（Text + Json）等 prompt 提取与多输入场景。
+    // 测试意图：验证 UserMessage、CustomMessage 以及多段 contents（Text + Json）等 prompt 提取与多输入场景。
     UUID turnStart = id(900);
     UUID user = id(901);
     UUID assistant = id(902);
@@ -1358,7 +1357,7 @@ class ThreadJoinProjectorTest {
                       new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
                       T0));
 
-          // 包含多段内容的 USER 命令、CUSTOM_MESSAGE 命令与 GOAL 命令
+          // 包含多段内容的 USER 命令与 CUSTOM_MESSAGE 命令
           tx.threads().lock(childThreadId);
           ThreadCommand cmdUser =
               new ThreadCommand(
@@ -1390,24 +1389,9 @@ class ThreadJoinProjectorTest {
                   null,
                   null,
                   T0);
-          ThreadCommand cmdGoal =
-              new ThreadCommand(
-                  childThreadId,
-                  3L,
-                  new GoalCommandPayload("reach milestone"),
-                  id(912),
-                  VALID_HASH,
-                  null,
-                  null,
-                  null,
-                  T0);
-          tx.commands().insert(List.of(cmdUser, cmdCustom, cmdGoal));
+          tx.commands().insert(List.of(cmdUser, cmdCustom));
           tx.commands()
-              .update(
-                  List.of(
-                      cmdUser.markApplied(turnStart),
-                      cmdCustom.markApplied(turnStart),
-                      cmdGoal.markApplied(turnStart)));
+              .update(List.of(cmdUser.markApplied(turnStart), cmdCustom.markApplied(turnStart)));
           return null;
         });
 
@@ -1447,24 +1431,6 @@ class ThreadJoinProjectorTest {
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
                   null);
-          ThreadJoin joinGoal =
-              new ThreadJoin(
-                  id(93),
-                  VALID_HASH,
-                  id(11),
-                  childThreadId,
-                  3L,
-                  "coder",
-                  10,
-                  0L,
-                  turnEnd,
-                  assistant,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null);
-
           ThreadJoinReceipt receiptUser =
               ThreadJoinProjector.INSTANCE.project(tx, joinUser).orElseThrow();
           assertEquals("multi text {\"input\":1}", receiptUser.prompt());
@@ -1474,9 +1440,6 @@ class ThreadJoinProjectorTest {
               ThreadJoinProjector.INSTANCE.project(tx, joinCustom).orElseThrow();
           assertEquals("custom instruction", receiptCustom.prompt());
 
-          ThreadJoinReceipt receiptGoal =
-              ThreadJoinProjector.INSTANCE.project(tx, joinGoal).orElseThrow();
-          assertEquals("reach milestone", receiptGoal.prompt());
           return null;
         });
   }

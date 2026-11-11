@@ -7,8 +7,6 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
@@ -219,19 +217,9 @@ public final class DatabaseAgentTurnContextResolver {
                 LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED));
         continue;
       }
-      List<ContributorStateAccess> stateAccesses =
-          contribution.requirements().stateAccesses().stream()
-              .map(
-                  access ->
-                      new ContributorStateAccess(
-                          access.customType(),
-                          ContributorStateAccessMode.valueOf(access.mode().name())))
-              .toList();
       ContributorBinding contributor =
           new ContributorBinding(
-              contribution.id().contributorId().value(),
-              contribution.id().localName(),
-              stateAccesses);
+              contribution.id().contributorId().value(), contribution.id().localName());
       EnvironmentId boundEnvironmentId =
           environmentSupport == EnvironmentSupport.NONE ? null : environmentId;
       String boundEnvironmentName =

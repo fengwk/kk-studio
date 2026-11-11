@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +14,6 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
@@ -296,7 +294,6 @@ class TaskToolTest {
             UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
-            mock(BranchView.class),
             Optional.empty());
     return new ToolExecutionRequest(
         tool.descriptor(),

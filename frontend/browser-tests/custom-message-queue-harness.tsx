@@ -133,7 +133,6 @@ export function CustomMessageQueueHarness() {
         agentName: 'worker',
         execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         environmentName: null,
-        goal: null,
       },
       createdAt: 1774958400,
       updatedAt: 1774958400,

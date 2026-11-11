@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.store;
 
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -80,30 +79,6 @@ final class PostgresqlEntryStore implements EntryStore {
       )
       select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from entry_slice
-      order by depth desc
-      """;
-
-  /**
-   * 窄查询递归 CTE：仅提取路径上的 head 与指定 contributorId 的 CUSTOM Entry；head 行用于区分「head 不存在」与「没有状态」。
-   *
-   * <p>用于局部 Contributor 状态提取；递归仍遍历祖先链，但只返回必要节点，减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。
-   */
-  private static final String LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH =
-      """
-      with recursive custom_entry_path as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 0 as depth
-          from harness_entry
-          where id = ?
-          union all
-          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, cep.depth + 1
-          from harness_entry e
-          join custom_entry_path cep on e.id = cep.parent_entry_id
-          where cep.parent_entry_id is not null
-      )
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
-      from custom_entry_path
-      where depth = 0
-         or (entry_type = 'CUSTOM' and payload ->> 'contributorId' = ?)
       order by depth desc
       """;
 
@@ -556,43 +531,6 @@ final class PostgresqlEntryStore implements EntryStore {
       }
     }
     return new EntrySlice(null, rootToHead);
-  }
-
-  /**
-   * 加载指定 head 路径上属于特定 Contributor 的自定义 Entry。
-   *
-   * <p>若完整路径已在事务局部缓存中命中，直接在内存中过滤返回；cold cache 则执行窄查询 CTE（{@link
-   * #LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH}），部分投影结果绝不写入完整路径缓存。
-   */
-  @Override
-  public List<Entry> loadContributorCustom(UUID headEntryId, String contributorId) {
-    tx.checkOpen();
-    Objects.requireNonNull(headEntryId, "headEntryId");
-    Objects.requireNonNull(contributorId, "contributorId");
-    EntryPath cached = tx.entryPathCache().get(headEntryId);
-    if (cached != null) {
-      return cached.entries().stream()
-          .filter(
-              entry ->
-                  entry.payload() instanceof CustomEntryPayload custom
-                      && contributorId.equals(custom.contributorId()))
-          .toList();
-    }
-    List<Entry> rows =
-        tx.queryList(
-            LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH,
-            PostgresqlHarnessRows.ENTRY,
-            headEntryId,
-            contributorId);
-    if (rows.isEmpty()) {
-      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
-    }
-    return rows.stream()
-        .filter(
-            entry ->
-                entry.payload() instanceof CustomEntryPayload custom
-                    && contributorId.equals(custom.contributorId()))
-        .toList();
   }
 
   /**

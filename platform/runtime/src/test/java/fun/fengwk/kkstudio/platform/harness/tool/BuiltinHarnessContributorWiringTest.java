@@ -65,7 +65,6 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
 
     assertTrue(harnessCatalog.findTool(FileTool.READ_NAME).isPresent());
     assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
-    assertTrue(harnessCatalog.findTool("update_goal").isPresent());
 
     assertEquals(
         FileTool.READ_NAME,

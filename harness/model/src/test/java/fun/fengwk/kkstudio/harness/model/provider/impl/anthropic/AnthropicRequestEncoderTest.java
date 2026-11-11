@@ -1817,8 +1817,8 @@ class AnthropicRequestEncoderTest {
     content
         .addObject()
         .put("type", "tool_use")
-        .put("id", "call_goal")
-        .put("name", "get_goal")
+        .put("id", "call_lookup")
+        .put("name", "lookup_status")
         .set("input", NODES.objectNode());
 
     ProviderReplayState wireReplayState =
@@ -1831,7 +1831,7 @@ class AnthropicRequestEncoderTest {
         List.of(
             new ProviderThinkingBlock("deep reasoning"),
             new ProviderTextBlock("replayed answer"),
-            new ProviderToolCallBlock(new ProviderToolCall("call_goal", "get_goal", "{}")));
+            new ProviderToolCallBlock(new ProviderToolCall("call_lookup", "lookup_status", "{}")));
 
     ProviderMessage asst = asstMsg(durableBlocks, wireReplayState);
 
@@ -1840,8 +1840,8 @@ class AnthropicRequestEncoderTest {
             ProviderMessageRole.TOOL,
             List.of(
                 new ProviderToolResultBlock(
-                    "call_goal",
-                    "get_goal",
+                    "call_lookup",
+                    "lookup_status",
                     List.<ProviderContentBlock>of(new ProviderTextBlock("ok")),
                     false,
                     "{}")));
@@ -1871,7 +1871,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("text", wireAsst.path("content").get(1).path("type").asString(""));
     assertEquals("replayed answer", wireAsst.path("content").get(1).path("text").asString(""));
     assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asString(""));
-    assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asString(""));
+    assertEquals("call_lookup", wireAsst.path("content").get(2).path("id").asString(""));
 
     // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
     //    原生 thinking signature 无法由 durable 重建，只能降级为普通文本，绝不抛错。

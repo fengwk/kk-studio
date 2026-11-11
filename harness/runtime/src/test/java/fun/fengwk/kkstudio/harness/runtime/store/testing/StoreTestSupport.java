@@ -614,7 +614,6 @@ public final class StoreTestSupport {
         invocation.attempt(),
         invocation.approval(),
         invocation.result(),
-        invocation.effects(),
         invocation.error(),
         invocation.createdAt(),
         invocation.updatedAt());
@@ -661,7 +660,7 @@ public final class StoreTestSupport {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("builtin", "ask-user", List.of()),
+        new ContributorBinding("builtin", "ask-user"),
         EnvironmentSupport.NONE,
         null,
         null);
@@ -670,7 +669,7 @@ public final class StoreTestSupport {
   public static ToolBinding hostBinding() {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

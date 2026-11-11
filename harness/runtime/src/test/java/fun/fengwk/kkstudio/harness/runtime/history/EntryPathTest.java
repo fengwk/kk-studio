@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,7 +15,6 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -24,7 +22,6 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -62,7 +59,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /** EntryPath 链的不变量：同一 head 的 settings、turn 顺序、tool 前缀与结局。 */
@@ -1124,50 +1120,6 @@ class EntryPathTest {
   }
 
   @Test
-  void customEntriesAreTransparentToTurnGrammar() {
-    Entry root = root(settings("root"));
-    Entry customBeforeTurn = customEntry(id(2L), id(1L), "goal");
-    Entry start = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("turn"));
-    Entry customInsideTurn = customEntry(id(4L), id(3L), "goal");
-    Entry user = userMessage(id(5L), id(4L));
-    Entry assistant = assistantMessage(id(6L), id(5L));
-    Entry customAfterAssistant = customEntry(id(7L), id(6L), "goal");
-    Entry end = turnEnd(id(8L), id(7L), id(3L), TurnEndOutcome.COMPLETED, null, null);
-    Entry customAfterTurn = customEntry(id(9L), id(8L), "goal");
-
-    EntryPath path =
-        new EntryPath(
-            List.of(
-                root,
-                customBeforeTurn,
-                start,
-                customInsideTurn,
-                user,
-                assistant,
-                customAfterAssistant,
-                end,
-                customAfterTurn));
-
-    assertEquals(
-        4,
-        path.entries().stream()
-            .filter(entry -> entry.payload() instanceof CustomEntryPayload)
-            .count());
-    // CUSTOM 不打开/关闭 turn：closed turn 之后 openTurnStart 为空。
-    assertEquals(Optional.empty(), path.openTurnStart());
-    assertEquals(settings("turn"), path.baseSettings());
-  }
-
-  @Test
-  void customEntryAfterRootWithoutAnyTurnIsAccepted() {
-    Entry root = root(settings("root"));
-    Entry custom = customEntry(id(2L), id(1L), "goal");
-    EntryPath path = new EntryPath(List.of(root, custom));
-    assertEquals(custom, path.head());
-    assertEquals(Optional.empty(), path.openTurnStart());
-  }
-
-  @Test
   void modelAttemptFailuresAreConsecutiveAndPrecedeTheAssistantResult() {
     Entry root = root(settings("root"));
     Entry turn = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
@@ -1209,27 +1161,6 @@ class EntryPathTest {
   }
 
   private static final UUID SESSION_ID = id(1L);
-
-  /** 测试意图：分叉以分叉点的 Entry 作为新 head，自然继承该点的完整 settings 快照（含用户 Goal）；Goal 之前的分叉点仍然无 Goal。 */
-  @Test
-  void forkInheritsGoalSnapshotAtTheForkPoint() {
-    GoalSetting goal = new GoalSetting(id(700L), "ship it");
-    Entry root = root(settings("root"));
-    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
-    Entry goalUser = userMessage(id(3L), id(2L));
-    Entry reply = assistantMessage(id(4L), id(3L));
-    Entry end = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null);
-    // 6 号 Entry：携带 Goal 的 TURN_START（分叉点）。
-    Entry goalStart =
-        turnStart(id(6L), id(5L), TurnStartReason.INPUT, settings("turn").withGoal(goal));
-
-    // 分叉点在 Goal 设置之前：新 branch 没有 Goal。
-    assertNull(new EntryPath(List.of(root, start, goalUser)).baseSettings().goal());
-    // 从携带 Goal 的 TURN_START 分叉：Goal 快照自然继承。
-    assertEquals(
-        goal,
-        new EntryPath(List.of(root, start, goalUser, reply, end, goalStart)).baseSettings().goal());
-  }
 
   /**
    * N1：回合之间的系统通知是「待下一 INPUT 接纳」的输入来源，因此 notification-only 的 INPUT 无需再写 USER 消息即可规划；该 pending
@@ -1393,15 +1324,6 @@ class EntryPathTest {
             CustomMessagePayload.CORE_RENDERER_KEY,
             SystemReminder.message(text),
             CustomMessagePayload.CORE_DETAILS_JSON),
-        time(id));
-  }
-
-  private static Entry customEntry(UUID id, UUID parentId, String customType) {
-    return new Entry(
-        id,
-        SESSION_ID,
-        parentId,
-        new CustomEntryPayload("com.example.goal", customType, "{\"s\":1}"),
         time(id));
   }
 

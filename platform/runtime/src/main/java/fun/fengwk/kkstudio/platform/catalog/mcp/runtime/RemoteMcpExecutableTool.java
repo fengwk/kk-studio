@@ -133,7 +133,7 @@ public final class RemoteMcpExecutableTool implements Tool {
       try (McpClient client = clientProvider.apply(config, deadline)) {
         McpToolCallResult outcome =
             client.callTool(sourceName, request.call().argumentsJson(), deadline, token);
-        return ToolOutcome.withoutEffects(
+        return new ToolOutcome(
             new ToolResult(
                 request.call().id(), outcome.contents(), outcome.error(), outcome.detailsJson()));
       }
@@ -157,7 +157,7 @@ public final class RemoteMcpExecutableTool implements Tool {
   }
 
   private static ToolOutcome error(ToolExecutionRequest request, String message) {
-    return ToolOutcome.withoutEffects(
+    return new ToolOutcome(
         new ToolResult(request.call().id(), List.of(new TextResultContent(message)), true, "{}"));
   }
 }

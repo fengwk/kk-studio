@@ -8,8 +8,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -20,7 +18,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,7 +38,7 @@ class ToolBindingJsonCodecTest {
         "{\"definition\":"
             + definitionCodec.encode(environment.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\"}"
             + ",\"environmentSupport\":\"REQUIRED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
@@ -56,7 +53,7 @@ class ToolBindingJsonCodecTest {
         "{\"definition\":"
             + definitionCodec.encode(host.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\"}"
             + ",\"environmentSupport\":\"NONE\""
             + ",\"environmentId\":null"
             + ",\"environmentName\":null"
@@ -72,7 +69,7 @@ class ToolBindingJsonCodecTest {
         "{\"definition\":"
             + definitionCodec.encode(optionalWithoutEnv.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\"}"
             + ",\"environmentSupport\":\"ROUTED\""
             + ",\"environmentId\":null"
             + ",\"environmentName\":null"
@@ -95,7 +92,7 @@ class ToolBindingJsonCodecTest {
         "{\"definition\":"
             + definitionCodec.encode(optionalWithEnv.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\"}"
             + ",\"environmentSupport\":\"ROUTED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
@@ -107,36 +104,27 @@ class ToolBindingJsonCodecTest {
     assertEquals(ENVIRONMENT_ID, codec.decode(optionalWithEnvJson).environmentId());
     assertEquals("dev", codec.decode(optionalWithEnvJson).environmentName());
 
-    ToolBinding declarative = binding(EnvironmentSupport.NONE, true);
-    String declarativeJson =
+    ToolBinding requiredWithGoalContributor =
+        new ToolBinding(
+            definition("fs"),
+            new ContributorBinding("goal", "create"),
+            EnvironmentSupport.REQUIRED,
+            ENVIRONMENT_ID,
+            "dev");
+    String requiredJson =
         "{\"definition\":"
-            + definitionCodec.encode(declarative.definition())
+            + definitionCodec.encode(requiredWithGoalContributor.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"goal\",\"localName\":\"create\","
-            + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
-            + ",\"environmentSupport\":\"NONE\""
-            + ",\"environmentId\":null"
-            + ",\"environmentName\":null"
-            + "}";
-    assertEquals(declarativeJson, codec.encode(declarative));
-    assertEquals(declarative, codec.decode(declarativeJson));
-
-    ToolBinding stateWithEnv = binding(EnvironmentSupport.REQUIRED, true);
-    String stateWithEnvJson =
-        "{\"definition\":"
-            + definitionCodec.encode(stateWithEnv.definition())
-            + ",\"contributor\":"
-            + "{\"contributorId\":\"goal\",\"localName\":\"create\","
-            + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
+            + "{\"contributorId\":\"goal\",\"localName\":\"create\"}"
             + ",\"environmentSupport\":\"REQUIRED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
             + "}";
-    assertEquals(stateWithEnvJson, codec.encode(stateWithEnv));
-    assertEquals(stateWithEnv, codec.decode(stateWithEnvJson));
-    assertEquals(EnvironmentSupport.REQUIRED, codec.decode(stateWithEnvJson).environmentSupport());
-    assertEquals(ENVIRONMENT_ID, codec.decode(stateWithEnvJson).environmentId());
+    assertEquals(requiredJson, codec.encode(requiredWithGoalContributor));
+    assertEquals(requiredWithGoalContributor, codec.decode(requiredJson));
+    assertEquals(EnvironmentSupport.REQUIRED, codec.decode(requiredJson).environmentSupport());
+    assertEquals(ENVIRONMENT_ID, codec.decode(requiredJson).environmentId());
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -166,7 +154,7 @@ class ToolBindingJsonCodecTest {
     String valid =
         "{\"definition\":"
             + definition
-            + ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\"}"
             + ",\"environmentSupport\":\"REQUIRED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
@@ -187,8 +175,7 @@ class ToolBindingJsonCodecTest {
         () ->
             codec.decode(
                 valid.replace(
-                    ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
-                    "")));
+                    ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\"}", "")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace(",\"environmentSupport\":\"REQUIRED\"", "")));
@@ -210,9 +197,7 @@ class ToolBindingJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                valid.replace(
-                    "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
-                    "1")));
+                valid.replace("{\"contributorId\":\"core\",\"localName\":\"bash\"}", "1")));
     // environmentSupport 为布尔值或未知枚举值必须被拒绝
     assertThrows(
         IllegalArgumentException.class,
@@ -239,12 +224,10 @@ class ToolBindingJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                valid.replace(
-                    "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
-                    "null")));
+                valid.replace("{\"contributorId\":\"core\",\"localName\":\"bash\"}", "null")));
   }
 
-  /** Contributor 对象内部字段校验：必须是 contributorId/localName/stateAccesses。 */
+  /** Contributor 对象内部字段校验：必须是 contributorId/localName，且拒绝未知字段。 */
   @Test
   void rejectsInvalidContributorFields() {
     ToolBinding host = binding(EnvironmentSupport.NONE);
@@ -263,27 +246,14 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentName\":null"
                     + "}"));
 
-    // 缺少 stateAccesses
+    // 缺少必要字段
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
                     + definition
-                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\"}"
-                    + ",\"environmentSupport\":\"NONE\""
-                    + ",\"environmentId\":null"
-                    + ",\"environmentName\":null"
-                    + "}"));
-
-    // stateAccesses 元素格式非法
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"definition\":"
-                    + definition
-                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"INVALID\"}]}"
+                    + ",\"contributor\":{\"contributorId\":\"goal\"}"
                     + ",\"environmentSupport\":\"NONE\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":null"
@@ -295,8 +265,7 @@ class ToolBindingJsonCodecTest {
   void rejectsMismatchedEnvironmentRequiredAndEnvironmentCombinations() {
     ToolBinding host = binding(EnvironmentSupport.NONE);
     String definition = definitionCodec.encode(host.definition());
-    String emptyContributorJson =
-        "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}";
+    String emptyContributorJson = "{\"contributorId\":\"core\",\"localName\":\"bash\"}";
     String prefix = "{\"definition\":" + definition + ",\"contributor\":" + emptyContributorJson;
     String suffix = "}";
 
@@ -392,18 +361,7 @@ class ToolBindingJsonCodecTest {
   }
 
   private static ToolBinding binding(EnvironmentSupport environmentSupport) {
-    return binding(environmentSupport, false);
-  }
-
-  private static ToolBinding binding(
-      EnvironmentSupport environmentSupport, boolean withStateAccesses) {
-    ContributorBinding contributor =
-        withStateAccesses
-            ? new ContributorBinding(
-                "goal",
-                "create",
-                List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
-            : new ContributorBinding("core", "bash", List.of());
+    ContributorBinding contributor = new ContributorBinding("core", "bash");
     boolean hasEnv = environmentSupport == EnvironmentSupport.REQUIRED;
     return new ToolBinding(
         definition(hasEnv ? "fs" : "bash"),

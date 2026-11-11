@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -40,21 +39,19 @@ class StopReceiptsTest {
   @Test
   void cancelledInputsKeepOnlyHumanInputsInSequenceOrder() {
     ThreadCommand user = command(1L, userMessagePayload("first"));
-    ThreadCommand goal = command(2L, new GoalCommandPayload("goal"));
-    ThreadCommand custom = command(3L, new CustomMessageCommandPayload(userMessage("custom")));
+    ThreadCommand custom = command(2L, new CustomMessageCommandPayload(userMessage("custom")));
     ThreadCommand notification =
         command(
-            4L,
+            3L,
             new NotificationCommandPayload(
                 id(11L), NotificationKind.SUBAGENT_RESULT, id(12L), userMessage("notice")));
-    ThreadCommand setting = command(5L, new SetAgentCommandPayload("agent"));
+    ThreadCommand setting = command(4L, new SetAgentCommandPayload("agent"));
 
     List<CancelledThreadInput> inputs =
-        StopReceipts.cancelledInputs(List.of(user, goal, custom, notification, setting));
+        StopReceipts.cancelledInputs(List.of(user, custom, notification, setting));
 
-    assertEquals(List.of(1L, 2L), inputs.stream().map(CancelledThreadInput::sequence).toList());
+    assertEquals(List.of(1L), inputs.stream().map(CancelledThreadInput::sequence).toList());
     assertTrue(inputs.get(0).payload() instanceof UserMessageCommandPayload);
-    assertTrue(inputs.get(1).payload() instanceof GoalCommandPayload);
   }
 
   @Test
@@ -63,17 +60,16 @@ class StopReceiptsTest {
     List<ThreadCommand> cancelled =
         List.of(
             command(1L, userMessagePayload("first")),
-            command(2L, new GoalCommandPayload("goal")),
-            command(3L, new CustomMessageCommandPayload(userMessage("custom"))));
+            command(2L, new CustomMessageCommandPayload(userMessage("custom"))));
 
     StoppedThreadReceipt receipt = StopReceipts.nodeReceipt(stopped, id(22L), id(23L), cancelled);
 
     assertEquals(stopped.id(), receipt.threadId());
     assertEquals(id(22L), receipt.stopRequestId());
     assertEquals(id(23L), receipt.stoppedTurnEndEntryId());
-    assertEquals(3, receipt.cancelledCommandCount());
+    assertEquals(2, receipt.cancelledCommandCount());
     assertEquals(
-        List.of(1L, 2L),
+        List.of(1L),
         receipt.cancelledInputs().stream().map(CancelledThreadInput::sequence).toList());
   }
 
