@@ -329,6 +329,12 @@ export function ToolMessageBlock({
             <span className="thread-tool-name">{summary.name}</span>
             {view.executionState === 'environment'
               ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
+            {message.invocationStatus === 'READY' && message.queuedBehindToolCallUnfinished
+              ? (
+                <span className="thread-tool-state-label">
+                  {' · '}{t('ai.runtime.tool.waitingForPreviousFileChange')}
+                </span>
+              ) : null}
             {summary.detail ? (
               <>
                 {' '}

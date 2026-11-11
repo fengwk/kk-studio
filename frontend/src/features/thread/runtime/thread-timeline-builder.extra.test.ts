@@ -454,6 +454,7 @@ describe('thread timeline edge branches', () => {
       status: 'RUNNING',
       attempt: 1,
       toolCallId: 'call-1',
+      queuedBehindToolCallId: null,
       toolName: 'bash',
       rendererKey: 'bash',
       environmentId: null,

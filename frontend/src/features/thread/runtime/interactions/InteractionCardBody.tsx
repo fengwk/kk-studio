@@ -52,6 +52,7 @@ export function InteractionCardBody({
       toolName={item.toolName}
       approval={item.approval}
       argumentsJson={item.argumentsJson}
+      queuedSameFileCount={item.queuedSameFileCount}
       onSuccess={onSuccess}
     />
   )

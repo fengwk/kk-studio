@@ -156,9 +156,10 @@ Thread / Tool claim 由内核 Processor 处理；Driver 注册的 Work 处理器
 
 [`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 校验 claim 与准入后取执行树锁，按分类结果行动：
 
-- `GENERATION_TERMINAL_PENDING`：写入 Assistant / Error / Compaction 结果；关闭回合或进入 Tool 阶段。
+- `GENERATION_TERMINAL_PENDING`：写入 Assistant / Error / Compaction 结果；关闭回合或进入 Tool 阶段。进入 Tool 阶段时，无键调用照常派发；同一批 Environment `edit` / `write` 按 Environment 与绝对路径词法键仅派发每个键的首个未结束调用。
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool 结果，追加 `TURN_END(continueModel=true)`，删除调用行。
-- `GENERATION_ACTIVE` / `TOOL_ACTIVE`：外部执行仍在进行，归还 claim。
+- `TOOL_ACTIVE`：每次 THREAD 唤醒都重查批次；对每个文件键，在没有 TOOL Work 的情况下派发首个 `READY`、attempt 为 0 且审批为空的调用。前项结束事务请求 THREAD Work，故后继派发与唤醒同事务提交，可在进程重启后恢复；无键调用不改变既有派发行为。
+- `GENERATION_ACTIVE`：外部执行仍在进行，归还 claim。
 - `CONTINUATION_DUE` / `IDLE_OR_HISTORICAL`：先处理适用的自动压缩；有排队输入或通知需求时启动 `INPUT` 回合并一次性消费冻结 cutoff 内的完整队列，否则偿还续写义务或直接完成。
 
 需要规划的回合在单个事务内完成：锁 Thread、捕获命令快照、构造只存在于内存的 candidate 路径，同步调用 Driver 解析，机械校验其结果与 candidate 一致后提交 `TURN_START`、消息、命令标记与 Driver 私有 generation。只有显式的 `TurnResolveTransientException` 在回滚后按失败延迟重排，其它解析失败落 durable `FAILED` 终态，绝不静默丢失 Work。回合规划、Driver 状态机推进与钩子语义详见 [Agent Driver](#agent-driver)。

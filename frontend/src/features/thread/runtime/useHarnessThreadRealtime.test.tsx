@@ -1950,6 +1950,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     status: 'RUNNING',
     attempt: 1,
     toolCallId: 'call-1',
+    queuedBehindToolCallId: null,
     toolName: 'web-search',
     rendererKey: 'web-search',
     environmentId: null,

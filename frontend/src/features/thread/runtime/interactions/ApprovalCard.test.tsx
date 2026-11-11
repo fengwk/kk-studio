@@ -4,15 +4,28 @@ import type { ReactNode } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import { setLocale } from '@/shared/i18n'
 import { ApprovalCard } from './ApprovalCard'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  setLocale('zh-CN')
+})
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
 }
 const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","extra":{"flag":false}}'
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',
   argumentsJson: args, approval: { required: true, reason: 'Permission rules require approval' } }
+
+it('显示同文件后续审批数量并本地化单复数文案', () => {
+  const { rerender } = render(<ApprovalCard {...props} queuedSameFileCount={2} />, { wrapper })
+  expect(screen.getByText('处理后，此文件还有 2 个修改将依次请求审批')).toBeInTheDocument()
+  setLocale('en-US')
+  rerender(<ApprovalCard {...props} queuedSameFileCount={1} />)
+  expect(screen.getByText('1 more change to this file will ask for approval after this one'))
+    .toBeInTheDocument()
+})
 
 it('默认权限原因本地化；完整 arguments/workdir 一次，额外真实原因完整保留', () => {
   const { container, rerender } = render(<ApprovalCard {...props} />, { wrapper })

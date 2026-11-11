@@ -101,6 +101,7 @@ describe('InteractionsPage', () => {
           toolName: 'bash',
           argumentsJson: '{"command":"ls"}',
           approval: { required: true, reason: '列目录' },
+          queuedSameFileCount: 0,
           createdAt: 1790503560000,
         },
       ],
@@ -173,6 +174,7 @@ describe('InteractionsPage', () => {
           toolName: 'write',
           argumentsJson: '{"path":"main.ts"}',
           approval: { required: true, reason: '写代码' },
+          queuedSameFileCount: 2,
           createdAt: 1790503500000,
         },
       ],
@@ -197,6 +199,7 @@ describe('InteractionsPage', () => {
     // 验证审批内容存在
     expect(screen.getByText('write')).toBeInTheDocument()
     expect(screen.getByText('写代码')).toBeInTheDocument()
+    expect(screen.getByText('处理后，此文件还有 2 个修改将依次请求审批')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
     const chatSourceBtn = screen.getByRole('button', { name: 'Chat · 产品对话' })
@@ -219,6 +222,7 @@ describe('InteractionsPage', () => {
       status: 'READY',
       attempt: 1,
       toolCallId: 'call-2',
+      queuedBehindToolCallId: null,
       toolName: 'write',
       rendererKey: 'raw',
       environmentId: null,
@@ -297,6 +301,7 @@ describe('InteractionsPage', () => {
               toolName: 'shell',
               argumentsJson: '{"cmd":"ls"}',
               approval: { required: true },
+              queuedSameFileCount: 0,
               createdAt: 1790503200000,
             },
           ],

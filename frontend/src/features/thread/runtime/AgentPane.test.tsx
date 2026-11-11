@@ -406,7 +406,8 @@ function snapshot(
 function pendingInvocation(): ToolInvocationDTO {
   return {
     id: 'waiting-tool', threadId: 'thread-1', turnStartEntryId: 'turn-1', assistantEntryId: 'assistant-1', callIndex: 0,
-    status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
+    status: 'READY', attempt: 1, toolCallId: 'call-1', queuedBehindToolCallId: null,
+    toolName: 'bash', rendererKey: 'bash',
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
     requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"pwd"}', approval: null, result: null, error: null,
@@ -593,6 +594,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approval: { reason: '需要确认', decision: null },
+    queuedSameFileCount: 0,
     createdAt: 1785232801000,
   }
 }

@@ -228,6 +228,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       status: 'READY',
       attempt: 1,
       toolCallId: 'c-1',
+      queuedBehindToolCallId: null,
       toolName: 'bash',
       rendererKey: 'tool',
       environmentId: null,
