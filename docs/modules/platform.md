@@ -50,7 +50,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
-| [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约、宿主信息和 Skill 同步 |
+| [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Environment CRUD、注册令牌、路由租约与宿主信息 |
 | [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值和 problem 解析，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
@@ -287,8 +287,7 @@ durable 快照，到期后同 version 重新 GET 会自然变化，无额外持�
 
 数据库 `environment_changed` 同时失效环境与交互查询；channel 与订阅入口由
 [`EnvironmentChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentChangeNotifications.java)
-定义，写侧在同一事务内投递。连接认领、READY（包括宿主信息与
-Skill 投影重建）、断线、释放及运维事件等事实变更仍在写事务内发布；围栏失败不发布，
+定义，写侧在同一事务内投递。连接认领、READY（包括宿主信息）、断线、释放及运维事件等事实变更仍在写事务内发布；围栏失败不发布，
 发布失败回滚对应状态写。心跳仅在既有 owner/token/有效期围栏下持久续租 `last_seen_at`
 和 `lease_until`，纯续租不产生即时失效提示。心跳中若携带实质变化的运行态，或独立运行态消息
 改变该状态，会先更新会话快照，再在有效 READY 租约的行锁下发布通知；重复、过期或仅
@@ -368,14 +367,10 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
 检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。
 
-稳定路径为 `vfs:/skills/<package>/<skill>/...`，每次读取 Package 当前版本归档中的内容。
+技能归档通过只读 `vfs:/skills/<package>/<skill>/...` 路径按需读取当前发布版本的内容。
 发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
 平台服务端不保留本地 Git 缓存。
-发布后的通知唤醒各节点并同步本节点在线 Daemon；
-listener 建连/重连全量对账。执行根未选择 Environment 时，Prompt 使用
-`vfs:/skills/<package>/<skill>/SKILL.md`；已选择 Environment 且 Daemon 安装摘要与
-current artifact 完全一致时使用其本地稳定路径，否则该技能不进入 system prompt，
-由对话界面另行提示未安装、版本不一致或安装失败。
+系统提示按 Agent 技能配置顺序列出名称与描述；其内容不会推送到 Environment。
 
 ### MCP server 与运行时工具目录
 
@@ -455,8 +450,8 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`ROUTED` 工具保留，未选环境时只过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
-subagent 生成；执行根已选 Environment 时只有精确安装的技能进入 `[skills]`，未安装或安装失败
-只保留结构化事实、不进入 prompt。规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 Compaction Agent 的 variant，后续配置更改不影响已冻结调用。
+subagent 生成；技能按 Agent 配置顺序列出名称与描述，不依赖 Environment 的连接或安装状态。
+规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 Compaction Agent 的 variant，后续配置更改不影响已冻结调用。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的
@@ -476,8 +471,7 @@ Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；�
 `tryStart` 失败时零发送并收敛为取消；参数构造校验先于登记。只有 transport 明确保证未发送的
 Busy / Unavailable 才确认未启动，send-uncertain、普通异常、中断与超时均保留未确认。远端
 `onExitConfirmed` 直接确认该次执行，独立于可能已异常结束的结果 future；普通成功或失败终态不替代退出
-ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览与 Environment skill 同步是独立的
-Environment 管理调用，不写 Thread Tool 执行账本。
+ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览不写 Thread Tool 执行账本。
 
 媒体物化将模型模态、adapter 能力和权威 MIME 取交集。Blob 转换为 attempt-only Base64；
 原始文件上限 100 MiB，请求累计 data URI 上限 160 MiB。图片按冻结的
@@ -566,7 +560,7 @@ Environment 的 name 创建后不可变，UUID 用于路由；`environment_conne
 READY 更新 `ready_metadata`：Daemon 上报的 `daemonVersion`（生产进程取自
 [`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`）与 `HostInfo`（OS、架构、时区、进程用户、
 HOME、临时目录），断线保留最后已接受的 metadata；`daemonVersion` 与 Environment 的 CAS 配置版本是两个不同事实。
-Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
+连接状态与运维事件按 owner/lease fence 写回；事件窗口有界并去敏。
 
 每张卡片的可编辑属性是 `note` 与 `daemonConfig`（`studioUrl` 必填，`bashExecutable`、`lsp`、`proxyUrl`
 可空）。`environment` 行的 `daemon_config` 是唯一配置权威，`version` 既是 CAS 版本也是完整配置快照版本；
@@ -782,7 +776,7 @@ Daemon；浏览器的网络策略独立。
 | 前缀 | 用途 |
 | --- | --- |
 | `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll 与拒绝 |
-| `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
+| `kk-studio.harness.execution-admission` | model/tool 本机并发 |
 | `kk-studio.harness.runtime` | worker 开关 |
 | `kk-studio.storage.s3` | S3 端点/凭据/bucket 与公网 endpoint 映射 |
 | `kk-studio.storage.maintenance` | 后台轮询与过期上传对象清理 lease |

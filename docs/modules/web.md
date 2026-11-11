@@ -47,9 +47,9 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，model executor 
 装配通知 codec、超限 payload 缓冲、本地优先 realtime 总线，以及流式追帧 codec 与应用服务。
 
 [`HarnessEnvironmentConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java)
-装配 Skill 同步执行器与编排器、远端退出对账专用虚拟线程 Executor 与 RemoteExitReconciler，并把 dispatcher 唤醒、Skill 同步、远端退出事实对账与 IDE 租约心跳收进同一个会话监听器。
+装配远端退出对账专用虚拟线程 Executor 与 RemoteExitReconciler，并把 dispatcher 唤醒、远端退出事实对账与 IDE 租约心跳收进同一个会话监听器。
 另一个 Daemon 实例接管时，连接服务关闭前一代会话，其隧道子流随之失败；旧代际 IDE 票据与 cookie 在下次使用时按 `IdeGenerationState` 的 `REPLACED` 拒绝，会话探测返回 409。
-Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需要 Harness 会话或 store。各动作在监听器内通过 ObjectProvider 延迟解析并各自隔离运行时异常。
+PluginResourceGateway 留在 Harness 组合内，因为它需要 Harness 会话或 store。各动作在监听器内通过 ObjectProvider 延迟解析并各自隔离运行时异常。
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
@@ -72,7 +72,7 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | --- | --- | --- |
 | Health | `/actuator/health` | 健康探针 |
 | Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider credential 用 SecretUpdate 且只回 `configured`；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
-| Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、环境技能重同步（`environments/{environmentId}/resync-skills`）；Git 令牌用 SecretUpdate，响应只回 `configured` |
+| Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、归档读取；Git 令牌用 SecretUpdate，响应只回 `configured` |
 | MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
 | Chat | `/api/chat/chats` | 由 [Chat](chat.md) 模块提供的 CRUD、整体替换 PUT、YOLO 子资源与归属 Session；Web 只做装配 |
@@ -231,7 +231,7 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 
 [`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
 共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
-Thread version、Canvas revision、Project changed、Settings、Skill 同步、执行树、交互、环境失效与 Plugin 目录变更；realtime 走独立的 LISTEN 连接。
+Thread version、Canvas revision、Project changed、Settings、执行树、交互、环境失效与 Plugin 目录变更；realtime 走独立的 LISTEN 连接。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 通道、payload 与进程内 fan-out 归各自生产方所有：Harness 的 Thread version、执行树与交互失效由
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)

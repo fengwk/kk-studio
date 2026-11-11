@@ -382,7 +382,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local App | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`；Compose 传入容器，默认分别为 16、64 |
-| App 自定义部署 | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SKILL_SYNC_MAX_CONCURRENCY`；subagent 并发上限由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有 |
+| App 自定义部署 | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`；subagent 并发上限由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有 |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_STORAGE_MEDIA_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED`（仅测试栈使用；生产部署不得设置） |

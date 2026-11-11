@@ -259,13 +259,6 @@ Thread ID 前 8 位，悬停查看完整值，复制按钮复制完整 ID。
 子线程只读视图在顶部显示“环境：<名称> · 跟随主对话”：环境名取该 Thread Snapshot 冻结的值，
 即规划该回合时执行根已生效的环境；执行根此后切换环境不会改写既有快照，子线程下一回合才使用新环境。
 执行根没有环境时显示“环境：未选择 · 跟随主对话”，执行根自身不显示该行。
-执行根已选择环境时，[`SkillEnvironmentHint`](../../frontend/src/features/thread/runtime/SkillEnvironmentHint.tsx)
-在输入区上方列出该环境拿不到当前版本的技能与原因：未安装、版本不一致、安装失败。
-两类事实只读既有契约：Agent 的 `config.skills` 与 `GET /api/platform/skill-packages/{name}/environments` 的
-`installedSha256` / `error` / `upToDate`；判定与 system prompt 的技能路径同源，安装失败优先于
-版本判断，缺少环境行按未安装处理。任一 Package 摘要尚未就绪或读取失败时不提示，不推断安装状态。
-未选择环境时不出现提示，技能走 `vfs:` 路径。提示跟随执行根生效的 Agent 与环境草稿：
-切换环境立即重算，环境的 `changed` 推送只回读安装摘要，安装完成后提示随之消失。
 子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
@@ -431,8 +424,8 @@ Environment 管理面把**连接状态**与**配置状态**分开呈现，并提
 [`SkillPackagesPage`](../../frontend/src/features/catalog/skills/SkillPackagesPage.tsx)
 提供，页面只消费生成契约，不写手写 decoder。
 
-列表卡片展示包版本、来源与技能数量；Git 渠道另显示最近一次检查的结论，任一在线 Environment
-安装失败时给出失败环境名。卡片只保留一个主按钮：观察到的分支 HEAD 与当前版本一致时是“检查更新”，
+列表卡片展示包版本、来源与技能数量；Git 渠道另显示最近一次检查的结论。卡片只保留一个主按钮：
+观察到的分支 HEAD 与当前版本一致时是“检查更新”，
 有更新时是“更新到 `<commit>`”，上传渠道则是“详情”。检查更新只刷新观察值，不改变当前版本；
 发布以卡片展示的观察值为 `targetCommit`，并携带当前 `version` 做乐观锁。
 
@@ -443,7 +436,7 @@ Environment 管理面把**连接状态**与**配置状态**分开呈现，并提
 Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准。发布使用暂存句柄与包的当前版本，新包不带
 `expectedVersion`；取消预览会释放暂存归档。
 
-详情弹窗展示概览、技能、服务端归档索引还原出的文件树、各 Environment 的安装状态与归档下载，
+详情弹窗展示概览、技能、服务端归档索引还原出的文件树与归档下载，
 并承载编辑与删除。Git 渠道可以修改描述、分支与令牌，仓库地址只读；上传渠道只能修改描述，
 带分支或令牌的请求由服务端拒绝。删除使用确认弹窗，包仍被 Agent 引用时展示后端 `detail`
 并保留包本身。

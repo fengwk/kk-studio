@@ -127,7 +127,6 @@ RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 UPDATE / UPDATE_RESULT
 IDE_COMMAND / IDE_RESULT
 IDE_LEASE
-SKILL_SYNC / SKILL_STATE
 ```
 
 Protobuf `Envelope` 的固定字段为：
@@ -136,7 +135,7 @@ Protobuf `Envelope` 的固定字段为：
 message_type / environment_id / invocation_id? / payload (oneof body)
 ```
 
-`environment_id` 是规范小写 UUID 字符串作用域。调用与资源上传消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY`、`SKILL_SYNC`、`SKILL_STATE` 与 `IDE_LEASE` 作用于整个连接作用域，不携带 `invocation_id`。
+`environment_id` 是规范小写 UUID 字符串作用域。调用与资源上传消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY` 与 `IDE_LEASE` 作用于整个连接作用域，不携带 `invocation_id`。
 
 重连恢复按 `invocationId` 以不终止执行的 `RECOVER` 取回在途调用（Daemon 回放 STARTED，或重放冻结的终态与退出确认），只有调用方已表达取消意图的调用才重放 `CANCEL`；各调用沿自己的 STARTED/PROGRESS/终态推进。
 
@@ -149,8 +148,6 @@ Daemon -> READY(daemon_version, host_info, runtime_status)
 Daemon -> HEARTBEAT(runtime_status, ide_lease_round)*
 Daemon -> RUNTIME_STATUS(runtime_status)
 Studio -> TEMPORARY_RESOURCE_POLICY
-Studio -> SKILL_SYNC
-Daemon -> SKILL_STATE
 
 Studio -> INVOKE
 Daemon -> STARTED
@@ -190,7 +187,6 @@ Studio -> IDE_LEASE(round, bindings)
 
 宿主环境元数据持久化：[`DaemonReadyMetadataCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonReadyMetadataCodec.java) 编解码 `daemonVersion + hostInfo`，由 Server 持久化到 `ready_metadata`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
 - `ready_metadata`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
-- `skill_state`：可重建投影，READY 后重新同步；基于有效 READY 租约围栏原子替换。
 - `recent_events`：最近 200 条去敏、有界运维事件，包括更新失败；不作为锁或完整审计账本。
 
 `READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据（`HostInfo`）只包含目标操作系统、CPU 架构、时区、Daemon 进程用户、用户 HOME 与操作系统临时目录，不包含卡片备注或可编辑配置。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
@@ -234,9 +230,6 @@ runtimeStatus: {
 `transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 `ControlProtocolValidator` 校验。协议验证未知字段、必填字段、canonical UUID/Instant、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
 
 上传资源的字节不进入控制通道：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。控制流和 IDE 数据流通过承载在 WebSocket 上的 HTTP/2 会话多路复用；所有能力统一通过通用 INVOKE 与结果协议交互。
-
-技能同步不作为原子 capability，而是通过连接级控制信封 `SKILL_SYNC` / `SKILL_STATE` 进行期望状态对账：
-Platform 下发包含包名、SHA-256、大小与下载地址的全量期望集合，Daemon 异步完成单飞对账，下载归档并解压验证，删除未在期望集中的标记目录，最终以 `SKILL_STATE` 上报所有受管技能包状态。
 
 ## workdir 词法契约（`process.exec`）
 
@@ -339,7 +332,7 @@ COMPLETED
 `EnvironmentDaemonServer` 额外承载专用管理通道（`UPDATE` / `UPDATE_RESULT`），它不经过 capability 目录，因此即使连接未注册任何普通 capability，连接仍可完成认证并承载版本查询与受管更新。
 
 - `beginUpdate(environmentId, operationId)`：要求当前节点 READY、无在途调用、无其它活动 operation；成功后登记该 operation，此后该
-  Environment 的普通调用（含 Skill 同步）在起点 busy。同一 operationId 重复准入幂等。
+  Environment 的普通调用在起点 busy。同一 operationId 重复准入幂等。
 - `sendUpdate(environmentId, command)`：只在同一 operation 已准入时下发 `UPDATE`；命令未进入传输时按 BUSY/UNAVAILABLE 收敛。
 - `endUpdate(environmentId, operationId)`：只有与当前登记一致的 operationId 才释放准入，旧 operation 不能释放新 operation。
 - `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
