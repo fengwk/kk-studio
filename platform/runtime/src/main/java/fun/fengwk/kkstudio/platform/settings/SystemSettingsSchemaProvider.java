@@ -133,14 +133,6 @@ public class SystemSettingsSchemaProvider {
             FieldType.INTEGER,
             false,
             1,
-            null),
-        field(
-            "aiRuntime.compactionReserveTokens",
-            "settings.field.aiRuntime.compactionReserveTokens",
-            "settings.field.aiRuntime.compactionReserveTokens.hint",
-            FieldType.INTEGER,
-            false,
-            1,
             null));
   }
 
@@ -224,6 +216,14 @@ public class SystemSettingsSchemaProvider {
         false,
         ApplyTiming.NEXT_INVOCATION,
         field(
+            "tool.maxOutputMib",
+            "settings.field.tool.maxOutputMib",
+            "settings.field.tool.maxOutputMib.hint",
+            FieldType.INTEGER,
+            false,
+            1,
+            100),
+        field(
             "tool.modelGatewayBusyRetryMillis",
             "settings.field.tool.modelGatewayBusyRetryMillis",
             null,
@@ -258,14 +258,6 @@ public class SystemSettingsSchemaProvider {
         "settings.section.environment.runtime.description",
         false,
         ApplyTiming.NEXT_INVOCATION,
-        field(
-            "environment.maxResourceBytes",
-            "settings.field.environment.maxResourceBytes",
-            null,
-            FieldType.LONG,
-            false,
-            1,
-            null),
         field(
             "environment.heartbeatTimeoutMillis",
             "settings.field.environment.heartbeatTimeoutMillis",

@@ -47,11 +47,13 @@ public record SystemSettings(
   /** tool section：权限规则（保序数组）+ 模型/工具 Gateway 重试预算。 */
   public record Tool(
       Map<String, List<PermissionRule>> permission,
+      int maxOutputMib,
       long modelGatewayBusyRetryMillis,
       long toolGatewayOverloadRetryMillis) {
 
     public Tool {
       permission = copyPermission(permission);
+      SystemSettingsValidation.requireBounded(maxOutputMib, 1, 100, "tool.maxOutputMib");
       SystemSettingsValidation.requirePositive(
           modelGatewayBusyRetryMillis, "tool.modelGatewayBusyRetryMillis");
       SystemSettingsValidation.requirePositive(
@@ -87,7 +89,6 @@ public record SystemSettings(
       long retryMaxDelayMillis,
       @Nullable ModelSelection compactionModel,
       int compactionKeepRecentTokens,
-      int compactionReserveTokens,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
@@ -108,8 +109,6 @@ public record SystemSettings(
       }
       SystemSettingsValidation.requirePositive(
           compactionKeepRecentTokens, "aiRuntime.compactionKeepRecentTokens");
-      SystemSettingsValidation.requirePositive(
-          compactionReserveTokens, "aiRuntime.compactionReserveTokens");
       SystemSettingsValidation.requireAtLeast(subagentMaxDepth, 1, "aiRuntime.subagentMaxDepth");
       SystemSettingsValidation.requireAtLeast(
           subagentMaxConcurrency, 1, "aiRuntime.subagentMaxConcurrency");
@@ -125,14 +124,14 @@ public record SystemSettings(
     }
   }
 
-  /** environment section：daemon gateway 的资源边界与心跳超时。 */
-  public record Environment(long maxResourceBytes, long heartbeatTimeoutMillis) {
+  /** environment section：daemon gateway 的心跳超时。 */
+  public record Environment(long heartbeatTimeoutMillis) {
 
     public Environment {
-      SystemSettingsValidation.requirePositiveMillis(
-          maxResourceBytes, "environment.maxResourceBytes");
-      SystemSettingsValidation.requirePositiveMillis(
-          heartbeatTimeoutMillis, "environment.heartbeatTimeoutMillis");
+      if (heartbeatTimeoutMillis < 30_000) {
+        throw new IllegalArgumentException(
+            "environment.heartbeatTimeoutMillis must be at least 30000");
+      }
     }
   }
 
@@ -206,7 +205,6 @@ public record SystemSettings(
 
   /** advanced section：processor/executor/事件通道/工作通知的进程级运行预算。 */
   public record Advanced(
-      long resourceMaxBytes,
       long processorLeaseDurationMillis,
       long processorHeartbeatIntervalMillis,
       long threadResolveFailureDelayMillis,
@@ -221,14 +219,13 @@ public record SystemSettings(
       long postgresqlWorkReconnectBackoffMillis) {
 
     public Advanced {
-      SystemSettingsValidation.requirePositiveMillis(resourceMaxBytes, "advanced.resourceMaxBytes");
       SystemSettingsValidation.requirePositiveMillis(
           processorLeaseDurationMillis, "advanced.processorLeaseDurationMillis");
       SystemSettingsValidation.requirePositiveMillis(
           processorHeartbeatIntervalMillis, "advanced.processorHeartbeatIntervalMillis");
-      if (processorHeartbeatIntervalMillis >= processorLeaseDurationMillis) {
+      if (processorHeartbeatIntervalMillis > processorLeaseDurationMillis / 2) {
         throw new IllegalArgumentException(
-            "advanced.processorHeartbeatIntervalMillis must be less than"
+            "advanced.processorHeartbeatIntervalMillis must not exceed half"
                 + " processorLeaseDurationMillis");
       }
       SystemSettingsValidation.requirePositiveMillis(

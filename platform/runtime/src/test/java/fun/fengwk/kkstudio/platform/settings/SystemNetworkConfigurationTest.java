@@ -153,7 +153,6 @@ class SystemNetworkConfigurationTest {
                         current.tool(),
                         current.aiRuntime(),
                         new SystemSettings.Environment(
-                            current.environment().maxResourceBytes(),
                             current.environment().heartbeatTimeoutMillis() + 1),
                         current.backendNetwork(),
                         current.storageMedia(),

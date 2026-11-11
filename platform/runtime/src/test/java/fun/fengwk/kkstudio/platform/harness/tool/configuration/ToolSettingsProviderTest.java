@@ -57,6 +57,7 @@ class ToolSettingsProviderTest {
         systemSettingsWithTool(
             new SystemSettings.Tool(
                 Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))),
+                16,
                 5_000L,
                 5_000L)));
 

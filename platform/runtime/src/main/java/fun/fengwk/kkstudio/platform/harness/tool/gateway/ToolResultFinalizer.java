@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.function.IntSupplier;
 
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。
@@ -98,14 +99,18 @@ public final class ToolResultFinalizer {
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
 
   private final ToolResourceStager resourceStager;
-  private final int resourceMaxBytes;
+  private final IntSupplier outputLimitBytes;
 
-  public ToolResultFinalizer(ToolResourceStager resourceStager, int resourceMaxBytes) {
+  public ToolResultFinalizer(ToolResourceStager resourceStager, int maxOutputBytes) {
+    this(resourceStager, () -> maxOutputBytes);
+  }
+
+  public ToolResultFinalizer(ToolResourceStager resourceStager, IntSupplier outputLimitBytes) {
     this.resourceStager = Objects.requireNonNull(resourceStager, "resourceStager");
-    if (resourceMaxBytes <= 0) {
-      throw new IllegalArgumentException("resourceMaxBytes must be positive");
+    this.outputLimitBytes = Objects.requireNonNull(outputLimitBytes, "outputLimitBytes");
+    if (outputLimitBytes.getAsInt() <= 0) {
+      throw new IllegalArgumentException("tool output size limit must be positive");
     }
-    this.resourceMaxBytes = resourceMaxBytes;
   }
 
   /**
@@ -119,9 +124,13 @@ public final class ToolResultFinalizer {
     Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(result, "result");
 
+    int maxOutputBytes = outputLimitBytes.getAsInt();
+    if (maxOutputBytes <= 0) {
+      throw new IllegalStateException("tool output size limit must be positive");
+    }
     Plan plan;
     try {
-      plan = plan(toolName, result);
+      plan = plan(toolName, result, maxOutputBytes);
     } catch (OutputTooLargeException tooLarge) {
       return Outcome.outputTooLarge(tooLarge.getMessage());
     } catch (IllegalArgumentException invalid) {
@@ -146,7 +155,7 @@ public final class ToolResultFinalizer {
         if (returned != null && returned.blobUploadId() != null) {
           stagedResources.add(returned);
         }
-        if (!sameContentFacts(store.planned(), returned, resourceMaxBytes)) {
+        if (!sameContentFacts(store.planned(), returned, maxOutputBytes)) {
           discard(stagedResources);
           return Outcome.storeFailed();
         }
@@ -174,7 +183,7 @@ public final class ToolResultFinalizer {
   }
 
   /** 计划阶段：无副作用完成所有内容校验、文本聚合、尺寸与物理行测量、ResourceRef 规划及最终 ToolResult JSON 尺寸核验。 */
-  private Plan plan(String toolName, ToolResult result) {
+  private Plan plan(String toolName, ToolResult result, int maxOutputBytes) {
     List<ResultContent> source = result.contents();
     List<TextPiece> textPieces = new ArrayList<>();
     List<BinaryPiece> binaryPieces = new ArrayList<>();
@@ -190,12 +199,12 @@ public final class ToolResultFinalizer {
         textPieces.add(new TextPiece(index, json.json(), true));
       } else if (content instanceof BinaryResultContent binary) {
         requireCanonicalMediaType(binary.mediaType());
-        if (binary.size() > resourceMaxBytes) {
+        if (binary.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
               "content at index "
                   + index
                   + " must not exceed "
-                  + resourceMaxBytes
+                  + maxOutputBytes
                   + " bytes of stored resource content");
         }
         byte[] bytes = binary.content();
@@ -228,12 +237,12 @@ public final class ToolResultFinalizer {
           throw new IllegalArgumentException(
               "resource at index " + index + " must be a staged upload or a session resource");
         }
-        if (ref.size() > resourceMaxBytes) {
+        if (ref.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
               "content at index "
                   + index
                   + " must not exceed "
-                  + resourceMaxBytes
+                  + maxOutputBytes
                   + " bytes of stored resource content");
         }
         // 已由 Daemon 或插件直传对象存储的上传引用：本阶段只做形状校验并原样透传。
@@ -268,15 +277,15 @@ public final class ToolResultFinalizer {
       }
       joinedText = sb.toString();
 
-      // 有界测量 UTF-8 长度：超过 resourceMaxBytes 立即抛出
-      if (joinedText.length() > resourceMaxBytes) {
+      // 有界测量 UTF-8 长度：超过 maxOutputBytes 立即抛出
+      if (joinedText.length() > maxOutputBytes) {
         throw new OutputTooLargeException(
-            "tool output exceeded " + resourceMaxBytes + " bytes hard limit");
+            "tool output exceeded " + maxOutputBytes + " bytes hard limit");
       }
-      int utf8Len = ResourceRef.utf8LengthUpTo(joinedText, "tool output", resourceMaxBytes);
-      if (utf8Len > resourceMaxBytes) {
+      int utf8Len = ResourceRef.utf8LengthUpTo(joinedText, "tool output", maxOutputBytes);
+      if (utf8Len > maxOutputBytes) {
         throw new OutputTooLargeException(
-            "tool output exceeded " + resourceMaxBytes + " bytes hard limit");
+            "tool output exceeded " + maxOutputBytes + " bytes hard limit");
       }
       totalTextBytes = utf8Len;
       totalTextLines = countPhysicalLines(joinedText);
@@ -504,11 +513,11 @@ public final class ToolResultFinalizer {
   }
 
   private static boolean sameContentFacts(
-      ResourceRef expected, ResourceRef actual, int resourceMaxBytes) {
+      ResourceRef expected, ResourceRef actual, int maxOutputBytes) {
     return actual != null
         && actual.blobUploadId() != null
         && actual.size() != null
-        && actual.size() <= resourceMaxBytes
+        && actual.size() <= maxOutputBytes
         && Objects.equals(expected.name(), actual.name())
         && Objects.equals(expected.size(), actual.size())
         && expected.sha256().equals(actual.sha256());

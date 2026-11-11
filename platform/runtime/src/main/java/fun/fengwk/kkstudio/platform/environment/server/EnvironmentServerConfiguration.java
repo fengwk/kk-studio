@@ -96,7 +96,7 @@ public class EnvironmentServerConfiguration {
     SystemSettings.StorageMedia storageMedia = settings.storageMedia();
     return new EnvironmentServerSettings(
         Duration.ofMillis(environment.heartbeatTimeoutMillis()),
-        environment.maxResourceBytes(),
+        (long) settings.tool().maxOutputMib() * 1_048_576L,
         storageMedia.temporaryResourceTtlSeconds(),
         storageMedia.temporaryResourceCleanupIntervalSeconds());
   }

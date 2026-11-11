@@ -97,7 +97,6 @@ class HarnessCompactionConfigurationTest {
             SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
             SystemSettingsTestFixture.AI_RUNTIME.compactionModel(),
             keepRecentTokens,
-            SystemSettingsTestFixture.AI_RUNTIME.compactionReserveTokens(),
             SystemSettingsTestFixture.AI_RUNTIME.subagentMaxDepth(),
             SystemSettingsTestFixture.AI_RUNTIME.subagentMaxConcurrency(),
             SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTotalConcurrency(),

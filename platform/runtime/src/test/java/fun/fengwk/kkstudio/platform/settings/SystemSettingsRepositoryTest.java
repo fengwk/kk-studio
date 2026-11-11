@@ -129,7 +129,10 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
-            base.permission(), busyRetryMillis, base.toolGatewayOverloadRetryMillis()),
+            base.permission(),
+            base.maxOutputMib(),
+            busyRetryMillis,
+            base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
         SystemSettingsTestFixture.DEFAULT.backendNetwork(),
@@ -144,7 +147,10 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
-            merged, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
+            merged,
+            base.maxOutputMib(),
+            base.modelGatewayBusyRetryMillis(),
+            base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
         SystemSettingsTestFixture.DEFAULT.backendNetwork(),

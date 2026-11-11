@@ -7,23 +7,28 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;
 import java.util.Objects;
+import java.util.function.IntSupplier;
 
 /** 通过统一 storage upload staging 生命周期准备工具资源。 */
 @Slf4j
 public final class StorageUploadToolResourceStager implements ToolResourceStager {
 
   private final StorageUploadService uploadService;
-  private final int maxBytes;
+  private final IntSupplier maxBytes;
 
   public StorageUploadToolResourceStager(StorageUploadService uploadService, int maxBytes) {
+    this(uploadService, () -> maxBytes);
+  }
+
+  public StorageUploadToolResourceStager(StorageUploadService uploadService, IntSupplier maxBytes) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
-    this.maxBytes = maxBytes;
+    this.maxBytes = Objects.requireNonNull(maxBytes, "maxBytes");
   }
 
   @Override
   public ResourceRef stage(String mediaType, String name, byte[] content) {
     StorageUploadService.StagedUpload upload =
-        uploadService.stage(name, mediaType, new ByteArrayInputStream(content), maxBytes);
+        uploadService.stage(name, mediaType, new ByteArrayInputStream(content), maxBytes.getAsInt());
     return new ResourceRef(
         ResourceRef.blobUploadUri(upload.uploadId()),
         upload.mediaType(),
