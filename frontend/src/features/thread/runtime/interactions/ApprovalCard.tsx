@@ -6,7 +6,6 @@ import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
-import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 import { extractApprovalEditReview } from '@/features/thread/runtime/mutation-review'
 import { asRecord } from '@/features/thread/runtime/payload-json'
@@ -37,6 +36,7 @@ export function ApprovalCard({
   const queryClient = useQueryClient()
 
   const [busy, setBusy] = useState(false)
+  const [denyReason, setDenyReason] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isNonRecoverable, setIsNonRecoverable] = useState(false)
 
@@ -81,7 +81,7 @@ export function ApprovalCard({
       await harnessService.decideApproval(threadId, invocationId, {
         decision,
         decisionId,
-        reason: null,
+        reason: decision === 'DENY' ? denyReason.trim() || null : null,
       })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all }),
@@ -135,15 +135,15 @@ export function ApprovalCard({
         ) : null}
       </div>
 
-      {isMutation ? (
-        mutationPreview ? (
-          <div className="interaction-approval-mutation-preview">
-            <ToolCallPreview preview={mutationPreview} streaming={false} variant="approval" />
-          </div>
-        ) : null
-      ) : argumentsJson ? (
-        <div className="interaction-approval-arguments">
-          <Code className="interaction-raw-pre">{argumentsJson}</Code>
+      {argumentsJson ? (
+        <div className="interaction-approval-mutation-preview">
+          <ToolCallPreview
+            preview={mutationPreview}
+            streaming={false}
+            variant="approval"
+            toolName={toolName}
+            argumentsJson={argumentsJson}
+          />
         </div>
       ) : null}
 
@@ -170,6 +170,24 @@ export function ApprovalCard({
           <span>{error}</span>
         </div>
       ) : null}
+
+      <label className="interaction-approval-deny-reason">
+        <span>{t('ai.interaction.denyReason')}</span>
+        <input
+          type="text"
+          value={denyReason}
+          aria-label={t('ai.interaction.denyReason')}
+          placeholder={t('ai.interaction.denyReasonOptional')}
+          disabled={busy || isNonRecoverable}
+          onChange={(event) => setDenyReason(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              void handleDecision('DENY')
+            }
+          }}
+        />
+      </label>
 
       <div className="interaction-actions-bar">
         <Button

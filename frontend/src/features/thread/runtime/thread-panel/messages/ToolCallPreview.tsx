@@ -14,15 +14,56 @@ export function ToolCallPreview({
   preview,
   streaming,
   variant,
+  toolName,
+  argumentsJson,
 }: {
-  preview: ToolCallPreviewData
+  preview?: ToolCallPreviewData | null
   streaming: boolean
   /** 调用方必须显式区分只读记录与审批交互卡片。 */
   variant: 'transcript' | 'approval'
+  toolName?: string
+  argumentsJson?: string
 }) {
   const { t } = useI18n()
   const bounded = variant === 'approval'
   const showTarget = variant === 'approval'
+
+  if (!preview) {
+    if (variant !== 'approval' || !argumentsJson) return null
+    let fields: Record<string, unknown> = {}
+    try {
+      const parsed: unknown = JSON.parse(argumentsJson)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        fields = parsed as Record<string, unknown>
+      }
+    } catch {
+      return <div className="thread-tool-approval-unreadable">{t('ai.interaction.unreadableArguments')}</div>
+    }
+    const entries = toolName?.trim().toLowerCase() === 'bash'
+      ? ['command', 'workdir', 'timeout_seconds', 'timeout_ms', 'timeout']
+        .filter((key) => key in fields).map((key) => [key, fields[key]] as const)
+      : Object.entries(fields)
+    if (entries.length === 0) return null
+    return (
+      <dl className="thread-tool-approval-fields">
+        {entries.map(([key, value]) => {
+          const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)
+          const long = text.length > 320
+          return (
+            <div className="thread-tool-approval-field" key={key}>
+              <dt>{key.startsWith('timeout') ? 'timeout' : key}</dt>
+              <dd>{long ? (
+                <details>
+                  <summary>{text.slice(0, 160)}…</summary>
+                  <pre>{text}</pre>
+                </details>
+              ) : <pre className={key === 'command' ? 'is-command' : ''}>{text}</pre>}</dd>
+            </div>
+          )
+        })}
+      </dl>
+    )
+  }
 
   if (preview.kind === 'write') {
     if (!preview.hasContent && !preview.content && !preview.path) {

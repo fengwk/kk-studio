@@ -119,6 +119,38 @@ describe('InteractionsPage', () => {
     expect(mockedNavigate).not.toHaveBeenCalled()
   })
 
+  // 测试意图：相同 sessionId 的事项属于一个会话组，且组内按新到旧排列并可进入根会话。
+  it('groups pending items by session and sorts items newest first', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
+      items: [
+        {
+          type: 'APPROVAL', toolInvocationId: 'older', threadId: 'thread-older',
+          rootThreadId: 'root-session', sessionId: 'session-1',
+          owner: { kind: 'CHAT', id: 'chat-1', title: '同一会话', link: '/chats/chat-1' },
+          toolCallId: 'call-older', toolName: 'plugin_a', argumentsJson: '{"value":"old"}',
+          approval: { required: true }, queuedSameFileCount: 0, createdAt: 100,
+        },
+        {
+          type: 'APPROVAL', toolInvocationId: 'newer', threadId: 'thread-newer',
+          rootThreadId: 'root-session', sessionId: 'session-1',
+          owner: { kind: 'CHAT', id: 'chat-1', title: '同一会话', link: '/chats/chat-1' },
+          toolCallId: 'call-newer', toolName: 'plugin_b', argumentsJson: '{"value":"new"}',
+          approval: { required: true }, queuedSameFileCount: 0, createdAt: 200,
+        },
+      ],
+      nextCursor: null, total: 2, freshnessAt: null,
+    })
+
+    const { container } = render(<InteractionsPage />, { wrapper })
+    expect(await screen.findByRole('heading', { name: '同一会话' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '会话: 同一会话' })).toHaveAttribute('href', '/threads/root-session')
+    expect(container.querySelectorAll('.interactions-session-group')).toHaveLength(1)
+    expect(screen.getByText('new')).toBeInTheDocument()
+    expect(screen.getByText('old')).toBeInTheDocument()
+    expect(Array.from(container.querySelectorAll('.interaction-approval-tool-name')).map((node) => node.textContent))
+      .toEqual(['plugin_b', 'plugin_a'])
+  })
+
   it('renders error state and retries on button click', async () => {
     let callCount = 0
     const listSpy = vi.spyOn(interactionService, 'listInteractions').mockImplementation(async () => {
