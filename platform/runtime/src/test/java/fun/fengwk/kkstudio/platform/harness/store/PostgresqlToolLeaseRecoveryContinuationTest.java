@@ -206,7 +206,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
-        new ContributorBinding("core", "bash", List.of()),
+        new ContributorBinding("core", "bash"),
         EnvironmentSupport.REQUIRED,
         ENV_ID,
         "bash");
@@ -214,7 +214,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private static ToolGateway.Succeeded succeeded(String toolCallId) {
     return new ToolGateway.Succeeded(
-        ToolSuccess.withoutEffects(
+        new ToolSuccess(
             new ToolResult(toolCallId, List.of(new TextResultContent("ok")), false, "{}")));
   }
 

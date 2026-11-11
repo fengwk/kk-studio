@@ -10,7 +10,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
@@ -49,8 +48,8 @@ import java.util.stream.Stream;
  * <ul>
  *   <li><b>根对身份与隔离</b>：回执集合以 {@code (rootThreadId, rootStopRequestId)} 标识；不同执行树复用同一请求 UUID 时各自读取
  *       只返回本树集合，派生身份不互相串回执；
- *   <li><b>往返保真</b>：{@code cancelledInputs}（USER_MESSAGE / GOAL）经 jsonb 往返后 sequence、idempotencyKey
- *       与 payload 精确保持；
+ *   <li><b>往返保真</b>：{@code cancelledInputs}（USER_MESSAGE）经 jsonb 往返后 sequence、idempotencyKey 与
+ *       payload 精确保持；
  *   <li><b>集合校验</b>：插入必须包含根 Thread 自身回执，且每条回执 Thread 必须位于根树内，否则拒绝；
  *   <li><b>身份不可重用与 FK</b>：{@code (threadId, stopRequestId)} 重复插入与不存在的 {@code stoppedTurnEndEntryId}
  *       均被拒绝；
@@ -210,13 +209,12 @@ class PostgresqlStopReceiptTest {
 
   @Test
   void stopReceiptRoundTripPersistsIdentityAndCancelledInputs() {
-    // 测试意图：根对身份下三类回执可往返读取，集合按 Thread UUID 升序返回，cancelledInputs 的 USER_MESSAGE / GOAL 精确还原。
+    // 测试意图：根对身份下三类回执可往返读取，集合按 Thread UUID 升序返回，cancelledInputs 的 USER_MESSAGE 精确还原。
     Tree tree = seedTree("tree");
     UUID rootStopRequestId = UUID.randomUUID();
     UUID childStopRequestId = UUID.randomUUID();
     UUID grandStopRequestId = UUID.randomUUID();
     UUID userMessageIdempotencyKey = UUID.randomUUID();
-    UUID goalIdempotencyKey = UUID.randomUUID();
 
     StoppedThreadReceipt rootReceipt =
         new StoppedThreadReceipt(tree.rootThreadId(), rootStopRequestId, null, 0, List.of());
@@ -225,14 +223,12 @@ class PostgresqlStopReceiptTest {
             tree.childThreadId(),
             childStopRequestId,
             null,
-            3,
+            2,
             List.of(
                 new CancelledThreadInput(
                     1,
                     userMessageIdempotencyKey,
-                    new UserMessageCommandPayload(AgentMessage.user("draft one"))),
-                new CancelledThreadInput(
-                    2, goalIdempotencyKey, new GoalCommandPayload("Ship the feature"))));
+                    new UserMessageCommandPayload(AgentMessage.user("draft one")))));
     StoppedThreadReceipt grandReceipt =
         new StoppedThreadReceipt(tree.grandChildThreadId(), grandStopRequestId, null, 0, List.of());
 
@@ -249,7 +245,6 @@ class PostgresqlStopReceiptTest {
     assertEquals(1L, loadedUserMessage.sequence());
     assertEquals(userMessageIdempotencyKey, loadedUserMessage.idempotencyKey());
     assertTrue(loadedUserMessage.payload() instanceof UserMessageCommandPayload);
-    assertTrue(loadedChild.cancelledInputs().get(1).payload() instanceof GoalCommandPayload);
 
     // 按 Thread 读取只返回该 Thread 自己的回执。
     assertEquals(

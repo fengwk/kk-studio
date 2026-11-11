@@ -327,7 +327,7 @@ class EditReviewPreflightTest {
         ToolGatewayTestSupport.defaultCatalog().findTool("edit").orElseThrow();
     ContributorBinding contributor =
         new ContributorBinding(
-            contribution.id().contributorId().value(), contribution.id().localName(), List.of());
+            contribution.id().contributorId().value(), contribution.id().localName());
     String args = "{\"path\":\"/srv/repo/App.java\",\"old_string\":\"old\",\"new_string\":\"new\"}";
     return new ToolInvocationRequest(
         new ToolCall("call-1", "edit", args),

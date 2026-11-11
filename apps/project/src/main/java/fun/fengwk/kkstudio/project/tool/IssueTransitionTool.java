@@ -119,11 +119,11 @@ public final class IssueTransitionTool implements Tool {
                     "to",
                     result.toState()))
             .stripTrailing();
-    return ToolOutcome.withoutEffects(result(request, text, false));
+    return new ToolOutcome(result(request, text, false));
   }
 
   private static ToolOutcome error(ToolExecutionRequest request, RuntimeException error) {
-    return ToolOutcome.withoutEffects(result(request, message(error), true));
+    return new ToolOutcome(result(request, message(error), true));
   }
 
   /** 只透出确定性业务拒绝与参数错误的文本，模型才能据此修正目标；基础设施级异常（数据不一致、事务冲突、连接失败等）一律收敛为通用错误，绝不回显 内部细节。 */

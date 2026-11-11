@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -143,42 +142,6 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertInstanceOf(
         UserMessageCommandPayload.class, continued.acceptedCommands().getLast().payload());
     assertEquals(3, count("harness_thread_command", "thread_id", threadId));
-  }
-
-  @Test
-  void goalCommandsPersistAndReplayInPostgresql() {
-    // 测试意图：Goal 设置与清除均是 typed 用户命令，必须通过真实 PostgreSQL 约束并保持精确重放幂等。
-    UUID chatId = createChat("goal-command");
-    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    AcceptCommandsCommand setGoal =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
-            List.of(
-                new NewThreadCommand(
-                    new GoalCommandPayload("ship the release"), UUID.randomUUID())));
-    AcceptedCommands accepted = acceptanceService.accept(owner, setGoal);
-    assertEquals(
-        "GOAL",
-        jdbc.queryForObject(
-            "select command_type from harness_thread_command where thread_id = ? and sequence = 1",
-            String.class,
-            threadId));
-    assertEquals(true, acceptanceService.accept(owner, setGoal).replayed());
-
-    acceptanceService.acceptOnThread(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                threadId, accepted.thread().headEntryId(), accepted.thread().nextCommandSequence()),
-            List.of(new NewThreadCommand(new GoalCommandPayload(null), UUID.randomUUID()))));
-    assertEquals(2, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(
-        "GOAL",
-        jdbc.queryForObject(
-            "select command_type from harness_thread_command where thread_id = ? and sequence = 2",
-            String.class,
-            threadId));
   }
 
   @Test

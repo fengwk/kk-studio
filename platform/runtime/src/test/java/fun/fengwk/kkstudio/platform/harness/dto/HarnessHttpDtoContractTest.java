@@ -44,7 +44,6 @@ class HarnessHttpDtoContractTest {
               "owner": {"kind": "CHAT", "id": "chat-1"},
               "target": {"type": "NEW_SESSION", "sessionId": "s-1", "threadId": "t-1", "yoloEnabled": false},
               "commands": [
-                {"type": "GOAL", "idempotencyKey": "k-1", "text": null},
                 {"type": "SET_ENVIRONMENT", "idempotencyKey": "k-2", "environmentName": null},
                 {"type": "USER_MESSAGE", "idempotencyKey": "k-3", "contents": [
                   {"type": "TEXT", "text": "hi"},
@@ -56,18 +55,15 @@ class HarnessHttpDtoContractTest {
             HarnessCommandBatchDTO.class);
 
     assertInstanceOf(HarnessCommandTargetDTO.NewSessionDTO.class, batch.getTarget());
-    assertEquals(3, batch.getCommands().size());
+    assertEquals(2, batch.getCommands().size());
 
-    HarnessCommandCreateDTO.GoalDTO goal =
-        assertInstanceOf(HarnessCommandCreateDTO.GoalDTO.class, batch.getCommands().get(0));
-    assertNull(goal.text());
     HarnessCommandCreateDTO.SetEnvironmentDTO environment =
         assertInstanceOf(
-            HarnessCommandCreateDTO.SetEnvironmentDTO.class, batch.getCommands().get(1));
+            HarnessCommandCreateDTO.SetEnvironmentDTO.class, batch.getCommands().get(0));
     assertNull(environment.environmentName());
 
     HarnessCommandCreateDTO.UserMessageDTO message =
-        assertInstanceOf(HarnessCommandCreateDTO.UserMessageDTO.class, batch.getCommands().get(2));
+        assertInstanceOf(HarnessCommandCreateDTO.UserMessageDTO.class, batch.getCommands().get(1));
     HarnessUserMessageContentDTO.TextDTO text =
         assertInstanceOf(HarnessUserMessageContentDTO.TextDTO.class, message.contents().get(0));
     assertEquals("hi", text.text());
@@ -83,7 +79,7 @@ class HarnessHttpDtoContractTest {
     assertTrue(HarnessCommandTargetDTO.class.isSealed());
     assertTrue(HarnessUserMessageContentDTO.class.isSealed());
     assertEquals(
-        Set.of("USER_MESSAGE", "GOAL", "SET_AGENT", "SET_EXECUTION", "SET_ENVIRONMENT"),
+        Set.of("USER_MESSAGE", "SET_AGENT", "SET_EXECUTION", "SET_ENVIRONMENT"),
         subtypes(HarnessCommandCreateDTO.class));
     assertEquals(
         Set.of("NEW_SESSION", "NEW_THREAD", "NEW_FORKED_SESSION"),

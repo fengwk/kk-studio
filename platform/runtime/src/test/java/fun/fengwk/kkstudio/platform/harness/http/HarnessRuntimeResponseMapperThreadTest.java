@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.http;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.NOW;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.id;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idText;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idleSnapshot;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.snapshot;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
@@ -15,7 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
@@ -37,7 +35,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 class HarnessRuntimeResponseMapperThreadTest {
 
@@ -71,23 +68,6 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertEquals(NOW, dto.getCreatedAt());
     assertEquals(NOW, dto.getUpdatedAt());
     assertEquals(ThreadExecutionControl.RUNNABLE, dto.getExecutionControl());
-  }
-
-  /** 测试意图：branch settings 的 goal 投影必须显式 nullable：已设置时输出 {id,text}，未设置或已清除时输出 null。 */
-  @Test
-  void projectsNullableUserGoalSnapshot() {
-    UUID goalId = id(42);
-    HarnessThreadDTO withGoal =
-        HarnessRuntimeResponseMapper.toThreadDto(
-            idleSnapshot(
-                HarnessRuntimeTestFixtures.settings()
-                    .withGoal(new GoalSetting(goalId, "ship the release"))));
-    assertEquals(idText(42), withGoal.getBranchSettings().getGoal().getId());
-    assertEquals("ship the release", withGoal.getBranchSettings().getGoal().getText());
-
-    HarnessThreadDTO cleared =
-        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
-    assertNull(cleared.getBranchSettings().getGoal());
   }
 
   @Test

@@ -739,7 +739,7 @@ final class DispatcherTestSupport {
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
-            new ContributorBinding("test", "bash", List.of()),
+            new ContributorBinding("test", "bash"),
             EnvironmentSupport.REQUIRED,
             ENV_ID,
             "test-env"));

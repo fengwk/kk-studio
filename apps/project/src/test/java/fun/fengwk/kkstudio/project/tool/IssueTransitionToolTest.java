@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -63,7 +62,6 @@ class IssueTransitionToolTest {
         assistantEntryId,
         Instant.now(),
         TurnMediaCapabilities.NONE,
-        mock(BranchView.class),
         Optional.empty());
   }
 
@@ -79,13 +77,12 @@ class IssueTransitionToolTest {
     return ((TextResultContent) result.contents().get(0)).text();
   }
 
-  /** 测试意图：工具身份、副作用级别与 schema 冻结为受控交接契约；它不声明 Environment 或任何 branch state 依赖。 */
+  /** 测试意图：工具身份、副作用级别与 schema 冻结为受控交接契约；它不声明 Environment 依赖。 */
   @Test
   void descriptorFreezesTheControlledContract() {
     assertEquals("issue_transition", tool.descriptor().name());
     assertEquals(ToolSideEffect.IDEMPOTENT, tool.descriptor().sideEffect());
     assertEquals(EnvironmentSupport.NONE, tool.requirements().environmentSupport());
-    assertTrue(tool.requirements().stateAccesses().isEmpty());
     assertTrue(tool.descriptor().inputSchema().properties().containsKey("to_state"));
     assertEquals(Set.of("to_state"), tool.descriptor().inputSchema().required());
   }

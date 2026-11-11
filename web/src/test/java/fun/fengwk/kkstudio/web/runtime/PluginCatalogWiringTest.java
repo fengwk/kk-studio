@@ -54,7 +54,7 @@ class PluginCatalogWiringTest {
   private static final String PLUGIN_ID = "wiring-plugin";
 
   @Test
-  void collectsBuiltinContributorsIntoTheRuntimeSnapshot() {
+  void collectsContributorsIntoTheRuntimeSnapshot() {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       registerHost(context);
       for (String id : List.of("first", "second")) {
@@ -64,17 +64,13 @@ class PluginCatalogWiringTest {
             () ->
                 HarnessContributor.of(
                     new ContributorDescriptor(new ContributorId(id), id, "1", Set.of()),
-                    registrar -> registrar.registerCustomEntryType(id, "custom." + id)));
+                    registrar -> {}));
       }
       context.refresh();
       try (PluginCatalogRuntime.Lease lease =
           context.getBean(PluginCatalogRuntime.class).acquire()) {
         HarnessCatalog catalog = lease.snapshot().harnessCatalog();
         assertEquals(2, catalog.descriptors().size());
-        assertTrue(
-            catalog.findCustomEntryType(new ContributorId("first"), "custom.first").isPresent());
-        assertTrue(
-            catalog.findCustomEntryType(new ContributorId("second"), "custom.second").isPresent());
       }
     }
   }
@@ -90,8 +86,6 @@ class PluginCatalogWiringTest {
         assertTrue(catalog.descriptors().isEmpty());
         assertTrue(catalog.tools().isEmpty());
         assertTrue(catalog.selectableTools().isEmpty());
-        assertTrue(
-            catalog.findCustomEntryType(new ContributorId("first"), "custom.first").isEmpty());
       }
     }
   }

@@ -454,7 +454,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
     ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
     BranchSettings childSettings =
-        new BranchSettings(compactionAgentName, compactorExecution, null, null);
+        new BranchSettings(compactionAgentName, compactorExecution, null);
     return new TurnResolver.CompactionResolved(
         compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }

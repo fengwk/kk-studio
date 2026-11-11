@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMap
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.assertCommandRejected;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.cursorBatch;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.executionSelection;
-import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.goal;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.id;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.mapContent;
@@ -28,7 +27,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -335,47 +333,5 @@ class HarnessRuntimeRequestMapperCommandTest {
     owner.setKind("CHAT");
     assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(owner));
     assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
-  }
-
-  /** typed GOAL 的 null 表示清除，canonical 文本表示设置；空白文本与 batch 形状错误必须 fail closed。 */
-  @Test
-  void goalCommandMapsNullableTextAndRejectsInvalidBatchShapes() {
-    HarnessCommandCreateDTO set = goal("goal-set", "ship the release");
-    AcceptCommandsCommand mapped =
-        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(set));
-    assertEquals(ThreadCommandType.GOAL, mapped.commands().getFirst().payload().type());
-    assertEquals(
-        new GoalCommandPayload("ship the release"), mapped.commands().getFirst().payload());
-    assertEquals(
-        ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getFirst().payload()),
-        mapped.commands().getFirst().requestHash());
-
-    HarnessCommandCreateDTO cleared = goal("goal-clear", null);
-    assertEquals(
-        new GoalCommandPayload(null),
-        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(cleared))
-            .commands()
-            .getFirst()
-            .payload());
-
-    // 空白文本不是清除，必须由 Core canonical 规则拒绝。
-    HarnessCommandCreateDTO blank = goal("goal-blank", "   ");
-    assertThrows(
-        DomainException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(blank)));
-
-    // GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须是最后一条。
-    assertThrows(
-        DomainException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(set, userCommand("tail"))));
-    assertThrows(
-        DomainException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(userCommand("head"), set)));
   }
 }

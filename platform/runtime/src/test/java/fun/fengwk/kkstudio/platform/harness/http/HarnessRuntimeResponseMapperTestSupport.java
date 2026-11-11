@@ -211,7 +211,7 @@ final class HarnessRuntimeResponseMapperTestSupport {
   static ToolBinding environmentToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
-        new ContributorBinding("test", "bash", List.of()),
+        new ContributorBinding("test", "bash"),
         EnvironmentSupport.REQUIRED,
         EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
         "test-env");
@@ -220,7 +220,7 @@ final class HarnessRuntimeResponseMapperTestSupport {
   static ToolBinding hostToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
-        new ContributorBinding("test", "bash", List.of()),
+        new ContributorBinding("test", "bash"),
         EnvironmentSupport.NONE,
         null,
         null);

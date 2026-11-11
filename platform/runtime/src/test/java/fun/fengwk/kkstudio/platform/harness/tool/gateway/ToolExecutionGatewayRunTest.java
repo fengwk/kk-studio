@@ -104,7 +104,7 @@ class ToolExecutionGatewayRunTest {
   }
 
   private ToolGateway.Completion runHostResult(ToolResult result) {
-    return runHost((request, progress) -> ToolOutcome.withoutEffects(result));
+    return runHost((request, progress) -> new ToolOutcome(result));
   }
 
   private static ToolResult result(String callId, TextResultContent... contents) {
@@ -230,7 +230,7 @@ class ToolExecutionGatewayRunTest {
             (request, sink) -> {
               sink.accept(result("call-1", new TextResultContent("p1")));
               sink.accept(result("call-1", new TextResultContent("p2")));
-              return ToolOutcome.withoutEffects(result("call-1", new TextResultContent("done")));
+              return new ToolOutcome(result("call-1", new TextResultContent("done")));
             },
             progress);
 
@@ -260,7 +260,7 @@ class ToolExecutionGatewayRunTest {
               (request, sink) -> {
                 sink.accept(partial);
                 Thread.sleep(10_000);
-                return ToolOutcome.withoutEffects(result("call-1", new TextResultContent("late")));
+                return new ToolOutcome(result("call-1", new TextResultContent("late")));
               },
               forwarded);
 
@@ -392,8 +392,7 @@ class ToolExecutionGatewayRunTest {
         (request, progress) -> {
           BoundEnvironment environment = request.context().environment().orElseThrow();
           environment.execute(REMOTE_CAPABILITY, request, progress);
-          return ToolOutcome.withoutEffects(
-              environment.execute(REMOTE_CAPABILITY, request, progress));
+          return new ToolOutcome(environment.execute(REMOTE_CAPABILITY, request, progress));
         };
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
@@ -724,8 +723,7 @@ class ToolExecutionGatewayRunTest {
   void quotaStaysHeldUntilCloseAndIsReleasedExactlyOnce() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.body =
-        (request, progress) ->
-            ToolOutcome.withoutEffects(result("call-1", new TextResultContent("ok")));
+        (request, progress) -> new ToolOutcome(result("call-1", new TextResultContent("ok")));
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -788,7 +786,7 @@ class ToolExecutionGatewayRunTest {
   @Test
   void catalogCloseFailureStillReleasesTheQuota() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
-    tool.body = (request, progress) -> ToolOutcome.withoutEffects(result("call-1"));
+    tool.body = (request, progress) -> new ToolOutcome(result("call-1"));
     IllegalStateException closeFailure = new IllegalStateException("catalog close failed");
     RuntimeToolCatalogSource failingClose =
         failingCloseCatalogSource(

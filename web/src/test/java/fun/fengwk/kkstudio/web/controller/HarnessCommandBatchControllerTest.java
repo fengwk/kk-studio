@@ -24,9 +24,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
@@ -285,105 +282,6 @@ class HarnessCommandBatchControllerTest {
 
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
-  }
-
-  /**
-   * 测试意图：typed GOAL 是合法的终止 user-like 命令——显式 null 表示清除、文本表示设置；缺 text、与 USER_MESSAGE 共存或非末位都返回 400
-   * 且不调用 acceptance service。
-   */
-  @Test
-  void acceptsTypedGoalAsTerminalUserLikeCommandAndRejectsMalformedShapes() throws Exception {
-    String withGoal =
-        batchWithCommands(
-            newThreadTarget(),
-            """
-            [{
-              "type":"SET_AGENT",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000031",
-              "agentName":"default-assistant"
-            },
-            {
-              "type":"GOAL",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000032",
-              "text":"ship the release"
-            }]
-            """);
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(withGoal))
-        .andExpect(status().isAccepted());
-
-    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService).accept(any(SessionOwner.class), commandCaptor.capture());
-    List<ThreadCommandPayload> payloads =
-        commandCaptor.getValue().commands().stream().map(command -> command.payload()).toList();
-    assertEquals(
-        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.GOAL),
-        payloads.stream().map(ThreadCommandPayload::type).toList());
-    assertEquals(new GoalCommandPayload("ship the release"), payloads.get(1));
-
-    // 显式 null 是「清除 Goal」，同样合法。
-    String cleared =
-        batchWithCommands(
-            newThreadTarget(),
-            """
-            [{
-              "type":"GOAL",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000033",
-              "text":null
-            }]
-            """);
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(cleared))
-        .andExpect(status().isAccepted());
-
-    // text 是 required-nullable：省略等价于 null（清除 Goal）；USER_MESSAGE 携带 text 是未知字段，必须 400。
-    String userWithText =
-        batchWithCommands(
-            newThreadTarget(),
-            """
-            [{
-              "type":"USER_MESSAGE",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000035",
-              "text":"ship",
-              "contents":[{"type":"TEXT","text":"hello"}]
-            }]
-            """);
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(userWithText))
-        .andExpect(status().isBadRequest());
-
-    // GOAL 与 USER_MESSAGE 不能共存：恰有一条 user-like 终止命令。
-    String bothUserLike =
-        batchWithCommands(
-            newThreadTarget(),
-            """
-            [{
-              "type":"GOAL",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000036",
-              "text":"ship"
-            },
-            {
-              "type":"USER_MESSAGE",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000037",
-              "contents":[{"type":"TEXT","text":"hello"}]
-            }]
-            """);
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(bothUserLike))
-        .andExpect(status().isBadRequest());
   }
 
   @Test

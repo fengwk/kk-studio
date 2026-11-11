@@ -304,10 +304,10 @@ final class PostgresqlToolStore implements ToolStore {
           """
           insert into harness_tool_invocation (
               id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding, status, attempt,
-              approval, result, effects, error, created_at, updated_at, input_receipt
+              approval, result, error, created_at, updated_at, input_receipt
           ) values (
               ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb),
-              cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb)
+              cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb)
           )
           """,
           invocation.id(),
@@ -321,7 +321,6 @@ final class PostgresqlToolStore implements ToolStore {
           invocation.attempt(),
           encodeToolApproval(invocation),
           encodeToolResult(invocation),
-          encodeToolEffects(invocation),
           encodeToolError(invocation),
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
           PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
@@ -369,7 +368,6 @@ final class PostgresqlToolStore implements ToolStore {
                   attempt = ?,
                   approval = cast(? as jsonb),
                   result = cast(? as jsonb),
-                  effects = cast(? as jsonb),
                   error = cast(? as jsonb),
                   updated_at = ?,
                   input_receipt = cast(? as jsonb)
@@ -379,7 +377,6 @@ final class PostgresqlToolStore implements ToolStore {
               invocation.attempt(),
               encodeToolApproval(invocation),
               encodeToolResult(invocation),
-              encodeToolEffects(invocation),
               encodeToolError(invocation),
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
               encodeToolInputReceipt(invocation),
@@ -539,10 +536,6 @@ final class PostgresqlToolStore implements ToolStore {
 
   private static String encodeToolResult(ToolInvocation invocation) {
     return invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result());
-  }
-
-  private static String encodeToolEffects(ToolInvocation invocation) {
-    return PostgresqlHarnessRows.TOOL_EFFECTS.encode(invocation.effects());
   }
 
   private static String encodeToolInputReceipt(ToolInvocation invocation) {

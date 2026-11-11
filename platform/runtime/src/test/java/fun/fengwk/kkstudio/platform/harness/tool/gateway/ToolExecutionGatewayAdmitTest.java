@@ -84,7 +84,6 @@ class ToolExecutionGatewayAdmitTest {
     // 网关必须原样传递该调用冻结的 assistant 入口，产品据此判断调用归属。
     assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, executed.context().assistantEntryId());
     assertEquals(TurnMediaCapabilities.NONE, executed.context().mediaCapabilities());
-    assertSame(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW, executed.context().branch());
     assertTrue(transport.invocations.isEmpty());
   }
 
@@ -286,7 +285,7 @@ class ToolExecutionGatewayAdmitTest {
             hostRequest.call(),
             new ToolBinding(
                 hostRequest.binding().definition(),
-                new ContributorBinding("test", "forged-name", List.of()),
+                new ContributorBinding("test", "forged-name"),
                 EnvironmentSupport.NONE,
                 null,
                 null));
@@ -348,7 +347,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 new ToolGateway.Execution(
                     ToolGatewayTestSupport.INVOCATION_ID,
-                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    ToolGatewayTestSupport.scope(),
                     1,
                     request,
                     approved(null),
@@ -388,7 +387,7 @@ class ToolExecutionGatewayAdmitTest {
                 gateway.admit(
                     new ToolGateway.Execution(
                         ToolGatewayTestSupport.INVOCATION_ID,
-                        ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                        ToolGatewayTestSupport.scope(),
                         1,
                         request,
                         approved(new ToolEditReview(expectedFile, "-old\n+new")),
@@ -425,7 +424,7 @@ class ToolExecutionGatewayAdmitTest {
             new ToolCall("call-host-edit", "edit", "{}"),
             new ToolBinding(
                 contribution.definition(),
-                new ContributorBinding("host-contrib", "edit", List.of()),
+                new ContributorBinding("host-contrib", "edit"),
                 EnvironmentSupport.NONE,
                 null,
                 null));
@@ -440,7 +439,7 @@ class ToolExecutionGatewayAdmitTest {
                 gateway.admit(
                     new ToolGateway.Execution(
                         ToolGatewayTestSupport.INVOCATION_ID,
-                        ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                        ToolGatewayTestSupport.scope(),
                         1,
                         request,
                         approved(null),
@@ -475,7 +474,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 new ToolGateway.Execution(
                     ToolGatewayTestSupport.INVOCATION_ID,
-                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    ToolGatewayTestSupport.scope(),
                     1,
                     request,
                     approved(source.review),
@@ -514,7 +513,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 new ToolGateway.Execution(
                     ToolGatewayTestSupport.INVOCATION_ID,
-                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    ToolGatewayTestSupport.scope(),
                     1,
                     ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path),
                     approved(source.review),
@@ -539,7 +538,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 new ToolGateway.Execution(
                     ToolGatewayTestSupport.INVOCATION_ID,
-                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    ToolGatewayTestSupport.scope(),
                     1,
                     ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path),
                     approved(null),
@@ -556,8 +555,7 @@ class ToolExecutionGatewayAdmitTest {
             "{\"path\":\"/workspace/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
         new ToolBinding(
             edit.definition(),
-            new ContributorBinding(
-                edit.id().contributorId().value(), edit.id().localName(), List.of()),
+            new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),
             EnvironmentSupport.ROUTED,
             ToolGatewayTestSupport.ENV_A,
             "test-env"));

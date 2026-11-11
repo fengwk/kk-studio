@@ -36,10 +36,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
@@ -77,7 +74,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -112,27 +108,6 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     if (fakeServer != null) {
       fakeServer.close();
     }
-  }
-
-  /** 验证动态 MCP 工具从发现、暴露、校验、规划到 ToolGateway 执行的完整生产路径。 */
-  /** 该场景不经过 Harness Processor，因此直接给出空 branch 事实；真实执行仍走生产 ToolExecutionGateway。 */
-  private static BranchView emptyBranchView() {
-    return new BranchView() {
-      @Override
-      public List<CustomStateSnapshot> customEntries(String customType) {
-        return List.of();
-      }
-
-      @Override
-      public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-        return Optional.empty();
-      }
-
-      @Override
-      public Optional<GoalSnapshot> goal() {
-        return Optional.empty();
-      }
-    };
   }
 
   @Test
@@ -342,7 +317,6 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
             threadId,
             sessionId,
             UUID.randomUUID(),
-            emptyBranchView(),
             TurnMediaCapabilities.NONE);
     assertInstanceOf(ToolGateway.Allow.class, toolGateway.preflight(invocationRequest, scope));
 

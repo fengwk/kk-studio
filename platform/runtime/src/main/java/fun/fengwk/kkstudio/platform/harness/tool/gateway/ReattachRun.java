@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
@@ -94,8 +93,7 @@ final class ReattachRun extends AbstractToolRun {
         result = terminalOutcome.get();
       }
       return completion(
-          RemoteToolExecution.toToolResult(result, remoteExecutionId, expectedCallId()),
-          () -> ToolEffectBatch.EMPTY);
+          RemoteToolExecution.toToolResult(result, remoteExecutionId, expectedCallId()));
     } catch (InterruptedException interrupted) {
       RemoteToolExecution.releaseInFlight(
           terminalOutcome,

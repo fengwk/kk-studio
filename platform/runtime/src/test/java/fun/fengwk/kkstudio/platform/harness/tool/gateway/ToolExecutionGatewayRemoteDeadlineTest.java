@@ -642,9 +642,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
         new ToolBinding(
             contribution.definition(),
             new ContributorBinding(
-                contribution.id().contributorId().value(),
-                contribution.id().localName(),
-                List.of()),
+                contribution.id().contributorId().value(), contribution.id().localName()),
             EnvironmentSupport.REQUIRED,
             ENV,
             "remote-env"));

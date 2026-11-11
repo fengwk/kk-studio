@@ -1,17 +1,12 @@
 package fun.fengwk.kkstudio.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -47,10 +42,7 @@ class ProjectToolConfigurationTest {
         });
   }
 
-  /**
-   * 测试意图：Contributor 只冻结唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择）；Issue 的运行上下文由
-   * Markdown 任务消息承载，因此不注册 custom entry type。
-   */
+  /** 测试意图：Contributor 只冻结唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择）。 */
   @Test
   void freezesOnlyTheSelectableTransitionTool() {
     runner.run(
@@ -64,11 +56,6 @@ class ProjectToolConfigurationTest {
           assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
           assertEquals("project:issue.transition", tool.id().toString());
           assertEquals(List.of(tool), catalog.selectableTools());
-
-          HarnessRegistrar registrar = mock(HarnessRegistrar.class);
-          context.getBean(ProjectHarnessContributor.class).contribute(registrar);
-          verify(registrar, never()).registerCustomEntryType(anyString(), anyString(), anyInt());
-          verify(registrar, never()).registerCustomEntryType(anyString(), anyString());
         });
   }
 }
