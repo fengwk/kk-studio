@@ -20,6 +20,7 @@ export interface ApprovalCardProps {
   toolName: string
   approval?: unknown
   argumentsJson?: string
+  queuedSameFileCount?: number
   onSuccess?: () => void
 }
 
@@ -29,6 +30,7 @@ export function ApprovalCard({
   toolName,
   approval,
   argumentsJson,
+  queuedSameFileCount = 0,
   onSuccess,
 }: ApprovalCardProps) {
   const { t } = useI18n()
@@ -142,6 +144,14 @@ export function ApprovalCard({
       ) : argumentsJson ? (
         <div className="interaction-approval-arguments">
           <Code className="interaction-raw-pre">{argumentsJson}</Code>
+        </div>
+      ) : null}
+
+      {queuedSameFileCount > 0 ? (
+        <div className="interaction-approval-reason">
+          {queuedSameFileCount === 1
+            ? t('ai.interaction.queuedSameFile.one')
+            : t('ai.interaction.queuedSameFile.other', { count: queuedSameFileCount })}
         </div>
       ) : null}
 

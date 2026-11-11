@@ -2107,6 +2107,18 @@ export const chatCatalog = {
     'en-US': '{{count}} tool calls waiting for {{environmentName}}',
     'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
   },
+  'ai.interaction.queuedSameFile.one': {
+    'en-US': '1 more change to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 1 个修改将依次请求审批',
+  },
+  'ai.interaction.queuedSameFile.other': {
+    'en-US': '{{count}} more changes to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 {{count}} 个修改将依次请求审批',
+  },
+  'ai.runtime.tool.waitingForPreviousFileChange': {
+    'en-US': 'Waiting for the earlier change to this file',
+    'zh-CN': '等待前一个对此文件的修改',
+  },
   'ai.sessionFiles.action': {
     'en-US': 'Files',
     'zh-CN': '文件',

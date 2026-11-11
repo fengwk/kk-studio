@@ -63,6 +63,31 @@ const expandButton = () => screen.queryByRole('button', { name: '展开详情' }
 const collapseButton = () => screen.queryByRole('button', { name: '收起详情' })
 
 describe('ToolMessageBlock shell', () => {
+  it('shows the localized waiting suffix only while a READY predecessor is unfinished', () => {
+    const { container, rerender } = render(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: true,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .toHaveTextContent('edit · 等待前一个对此文件的修改')
+
+    setLocale('en-US')
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: true,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .toHaveTextContent('edit · Waiting for the earlier change to this file')
+
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: false,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .not.toHaveTextContent('Waiting for the earlier change to this file')
+    setLocale('zh-CN')
+  })
+
   it('localizes the real environment wait label in English', () => {
     setLocale('en-US')
     render(<ToolMessageBlock message={message({

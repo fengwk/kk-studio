@@ -63,6 +63,7 @@ function buildItems(): InteractionDTO[] {
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
       approval: { required: true, reason: LONG_REASON },
+      queuedSameFileCount: 0,
       createdAt: 1791194220000,
     },
     {

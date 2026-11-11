@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
@@ -201,6 +202,31 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  private static List<ToolInvocationDTO> toToolInvocationDtos(List<ToolInvocation> invocations) {
+    List<ToolInvocationDTO> dtos = new ArrayList<>(invocations.size());
+    for (ToolInvocation invocation : invocations) {
+      ToolInvocationDTO dto = toToolInvocationDto(invocation);
+      ToolFileMutationOrder.key(invocation)
+          .ifPresent(
+              key -> {
+                ToolInvocation previous = null;
+                for (ToolInvocation candidate : invocations) {
+                  if (candidate.assistantEntryId().equals(invocation.assistantEntryId())
+                      && candidate.callIndex() < invocation.callIndex()
+                      && ToolFileMutationOrder.key(candidate).filter(key::equals).isPresent()
+                      && (previous == null || candidate.callIndex() > previous.callIndex())) {
+                    previous = candidate;
+                  }
+                }
+                if (previous != null) {
+                  dto.setQueuedBehindToolCallId(previous.call().id());
+                }
+              });
+      dtos.add(dto);
+    }
+    return List.copyOf(dtos);
+  }
+
   public static ToolInvocationDTO toToolInvocationDto(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
     ToolInvocationDTO dto = new ToolInvocationDTO();
@@ -258,8 +284,7 @@ public final class HarnessRuntimeResponseMapper {
     GenerationProjection generation = snapshot.generation();
     dto.setActiveAssistantOutput(
         generation == null ? null : toActiveAssistantOutputDto(generation));
-    dto.setToolInvocations(
-        mapAll(snapshot.toolSiblings(), HarnessRuntimeResponseMapper::toToolInvocationDto));
+    dto.setToolInvocations(toToolInvocationDtos(snapshot.toolSiblings()));
     dto.setGenerationFailures(
         mapAll(
             snapshot.generationFailures(), failure -> toGenerationFailureDto(failure, generation)));

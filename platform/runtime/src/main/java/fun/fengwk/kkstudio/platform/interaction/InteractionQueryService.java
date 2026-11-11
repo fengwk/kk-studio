@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -136,7 +138,7 @@ public class InteractionQueryService {
         consumedId = manual.invocationId();
         ResolvedRoot resolved = context.resolveManual(manual);
         if (resolved != null) {
-          items.add(toManualDto(manual, resolved));
+          items.add(toManualDto(manual, resolved, context));
         }
       } else {
         environmentQueue.poll();
@@ -264,7 +266,8 @@ public class InteractionQueryService {
     return UuidOrder.COMPARATOR.compare(leftId, rightId);
   }
 
-  private static InteractionDTO toManualDto(PendingInteraction interaction, ResolvedRoot resolved) {
+  private static InteractionDTO toManualDto(
+      PendingInteraction interaction, ResolvedRoot resolved, QueryContext context) {
     if (interaction.status() == ToolInvocationStatus.WAITING_APPROVAL) {
       return new InteractionDTO.Approval(
           interaction.invocationId().toString(),
@@ -276,6 +279,7 @@ public class InteractionQueryService {
           interaction.toolName(),
           interaction.argumentsJson(),
           JsonValues.readTree(interaction.approvalJson()),
+          context.queuedSameFileCount(interaction),
           interaction.createdAt());
     }
     return new InteractionDTO.Input(
@@ -310,6 +314,7 @@ public class InteractionQueryService {
     private final Map<UUID, UUID> rootBySourceThread = new HashMap<>();
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
     private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
+    private final Map<UUID, ThreadSnapshot> threadSnapshotByThread = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
     private final Map<EnvironmentId, Optional<Instant>> readyLeaseById = new HashMap<>();
 
@@ -320,6 +325,35 @@ public class InteractionQueryService {
 
     HarnessRuntime runtime() {
       return runtime;
+    }
+
+    /** 当前审批之后仍未结束的同批同文件修改数。 */
+    int queuedSameFileCount(PendingInteraction interaction) {
+      ThreadSnapshot snapshot =
+          threadSnapshotByThread.computeIfAbsent(
+              interaction.threadId(), runtime::getThreadSnapshot);
+      ToolInvocation current =
+          snapshot.toolSiblings().stream()
+              .filter(candidate -> candidate.id().equals(interaction.invocationId()))
+              .findFirst()
+              .orElse(null);
+      if (current == null) {
+        return 0;
+      }
+      var key = ToolFileMutationOrder.key(current);
+      if (key.isEmpty()) {
+        return 0;
+      }
+      int count = 0;
+      for (ToolInvocation candidate : snapshot.toolSiblings()) {
+        if (candidate.assistantEntryId().equals(current.assistantEntryId())
+            && candidate.callIndex() > current.callIndex()
+            && !candidate.status().isTerminal()
+            && ToolFileMutationOrder.key(candidate).filter(key.get()::equals).isPresent()) {
+          count++;
+        }
+      }
+      return count;
     }
 
     /** 人工等待：沿来源不可变祖先链解析真实根、可选根过滤与产品 owner；根无产品归属时返回 null。 */
