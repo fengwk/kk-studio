@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -116,7 +117,7 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     }
     if (ref.size() > maxOutputBytes) {
       throw new ToolOutcomeMaterializationException(
-          "uploaded resource must not exceed " + maxOutputBytes + " bytes");
+          ToolOutputLimit.exceededMessage(ref.size(), maxOutputBytes));
     }
     StorageUploadService.ReadyUpload ready;
     try {

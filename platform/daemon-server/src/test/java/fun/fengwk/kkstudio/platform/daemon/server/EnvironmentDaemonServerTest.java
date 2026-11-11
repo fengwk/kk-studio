@@ -3560,6 +3560,9 @@ class EnvironmentDaemonServerTest {
             new ExpectedFile("/srv/repo/README.md", "a".repeat(64)));
     fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());
     assertEquals(1, channel.countOf(MessageType.INVOKE));
+    assertEquals(
+        fixture.settings.get().maxOutputBytes(),
+        channel.lastEnvelope().getInvoke().getMaxOutputBytes());
     assertTrue(channel.lastEnvelope().getInvoke().hasExpectedFile());
     assertEquals(
         "/srv/repo/README.md", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
@@ -3567,10 +3570,12 @@ class EnvironmentDaemonServerTest {
   }
 
   @Test
-  void resourceTransferExceedingLimitIsRejected() {
+  void resourceTransferExceedingLimitFailsOnlyItsInvocation() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-transfer-limit");
-    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    long actualSize = fixture.settings.get().maxOutputBytes() + 1;
     Envelope request =
         Envelope.newBuilder()
             .setMessageType(MessageType.RESOURCE_UPLOAD_REQUEST)
@@ -3581,12 +3586,22 @@ class EnvironmentDaemonServerTest {
                     .setTransferId(UUID.randomUUID().toString())
                     .setMediaType("text/plain")
                     .setName("big.txt")
-                    .setSize(fixture.settings.get().maxResourceBytes() + 1)
+                    .setSize(actualSize)
                     .setSha256("a".repeat(64))
                     .build())
             .build();
     fixture.receive(channel, request);
-    assertTrue(channel.closed());
+
+    Envelope ticket = ticketEnvelope(channel);
+    assertEquals(TicketState.TICKET_FAILED, ticket.getResourceUploadTicket().getState());
+    assertEquals(
+        "Tool output is 16.000001 MiB, which exceeds the tool output size limit of 16 MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings.",
+        ticket.getResourceUploadTicket().getMessage());
+    fixture.receive(
+        channel,
+        failedEnvelope(CALL_ONE.toString(), ticket.getResourceUploadTicket().getMessage()));
+    assertEquals(ticket.getResourceUploadTicket().getMessage(), listener.error.getMessage());
+    assertFalse(channel.closed());
   }
 
   @Test

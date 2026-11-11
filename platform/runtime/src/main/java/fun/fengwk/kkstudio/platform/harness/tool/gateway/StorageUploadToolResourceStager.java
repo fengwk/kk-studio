@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;
@@ -27,8 +28,13 @@ public final class StorageUploadToolResourceStager implements ToolResourceStager
 
   @Override
   public ResourceRef stage(String mediaType, String name, byte[] content) {
+    int limitBytes = maxBytes.getAsInt();
+    if (content.length > limitBytes) {
+      throw new ToolOutputLimitExceededException(
+          ToolOutputLimit.exceededMessage(content.length, limitBytes));
+    }
     StorageUploadService.StagedUpload upload =
-        uploadService.stage(name, mediaType, new ByteArrayInputStream(content), maxBytes.getAsInt());
+        uploadService.stage(name, mediaType, new ByteArrayInputStream(content), limitBytes);
     return new ResourceRef(
         ResourceRef.blobUploadUri(upload.uploadId()),
         upload.mediaType(),

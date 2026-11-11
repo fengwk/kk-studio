@@ -80,6 +80,7 @@ export async function createControlServer(): Promise<ControlFixture> {
                 capabilityId: payload.capabilityId,
                 argumentsJson: payload.argumentsJson,
                 timeoutMillis: payload.timeoutMillis ?? 0n,
+                maxOutputBytes: 16n * 1024n * 1024n,
               }),
             },
           }),

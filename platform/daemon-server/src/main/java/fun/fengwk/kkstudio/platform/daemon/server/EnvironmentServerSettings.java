@@ -6,7 +6,7 @@ import java.util.Objects;
 /** 核心每次判定现读的运行期设置；只包含平台资源约束。 */
 public record EnvironmentServerSettings(
     Duration heartbeatTimeout,
-    long maxResourceBytes,
+    long maxOutputBytes,
     long temporaryResourceTtlSeconds,
     long temporaryResourceCleanupIntervalSeconds) {
 
@@ -15,8 +15,8 @@ public record EnvironmentServerSettings(
     if (heartbeatTimeout.isZero() || heartbeatTimeout.isNegative()) {
       throw new IllegalArgumentException("heartbeatTimeout must be positive");
     }
-    if (maxResourceBytes <= 0L) {
-      throw new IllegalArgumentException("maxResourceBytes must be positive");
+    if (maxOutputBytes <= 0L) {
+      throw new IllegalArgumentException("maxOutputBytes must be positive");
     }
     if (temporaryResourceTtlSeconds <= 0L) {
       throw new IllegalArgumentException("temporaryResourceTtlSeconds must be positive");

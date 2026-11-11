@@ -407,7 +407,6 @@ describe('Unified Transport & Control Protocol', () => {
         value: create(SettingsSchema, {
           noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
-            maxResourceBytes: 1048576n,
             temporaryResourceTtlSeconds: 3600n,
             temporaryResourceCleanupIntervalSeconds: 60n,
           }),
@@ -803,7 +802,6 @@ describe('Unified Transport & Control Protocol', () => {
             case: 'settings',
             value: create(SettingsSchema, {
               resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 3600n,
                 temporaryResourceCleanupIntervalSeconds: 60n,
               }),
@@ -842,6 +840,7 @@ describe('Unified Transport & Control Protocol', () => {
               capabilityId: 'test.echo',
               argumentsJson: JSON.stringify({ msg: 'ping' }),
               timeoutMillis: 5000n,
+              maxOutputBytes: 16n * 1024n * 1024n,
             }),
           },
         }),

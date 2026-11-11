@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
@@ -30,8 +31,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.function.IntSupplier;
+import java.util.regex.Pattern;
 
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。
@@ -148,6 +149,9 @@ public final class ToolResultFinalizer {
           returned =
               resourceStager.stage(
                   store.planned().mediaType(), store.planned().name(), store.bytes());
+        } catch (ToolOutputLimitExceededException tooLarge) {
+          discard(stagedResources);
+          return Outcome.outputTooLarge(tooLarge.getMessage());
         } catch (RuntimeException failure) {
           discard(stagedResources);
           return Outcome.storeFailed();
@@ -201,11 +205,7 @@ public final class ToolResultFinalizer {
         requireCanonicalMediaType(binary.mediaType());
         if (binary.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
-              "content at index "
-                  + index
-                  + " must not exceed "
-                  + maxOutputBytes
-                  + " bytes of stored resource content");
+              ToolOutputLimit.exceededMessage(binary.size(), maxOutputBytes));
         }
         byte[] bytes = binary.content();
         TextArtifact textArtifact =
@@ -239,11 +239,7 @@ public final class ToolResultFinalizer {
         }
         if (ref.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
-              "content at index "
-                  + index
-                  + " must not exceed "
-                  + maxOutputBytes
-                  + " bytes of stored resource content");
+              ToolOutputLimit.exceededMessage(ref.size(), maxOutputBytes));
         }
         // 已由 Daemon 或插件直传对象存储的上传引用：本阶段只做形状校验并原样透传。
         if (res.textMetadata() != null) {
@@ -277,17 +273,13 @@ public final class ToolResultFinalizer {
       }
       joinedText = sb.toString();
 
-      // 有界测量 UTF-8 长度：超过 maxOutputBytes 立即抛出
-      if (joinedText.length() > maxOutputBytes) {
+      // Measure without allocating an encoded copy so the error can report the exact byte count.
+      long utf8Length = utf8Length(joinedText);
+      if (utf8Length > maxOutputBytes) {
         throw new OutputTooLargeException(
-            "tool output exceeded " + maxOutputBytes + " bytes hard limit");
+            ToolOutputLimit.exceededMessage(utf8Length, maxOutputBytes));
       }
-      int utf8Len = ResourceRef.utf8LengthUpTo(joinedText, "tool output", maxOutputBytes);
-      if (utf8Len > maxOutputBytes) {
-        throw new OutputTooLargeException(
-            "tool output exceeded " + maxOutputBytes + " bytes hard limit");
-      }
-      totalTextBytes = utf8Len;
+      totalTextBytes = utf8Length;
       totalTextLines = countPhysicalLines(joinedText);
 
       if (totalTextBytes > inlineMaxUtf8Bytes(toolName)
@@ -454,15 +446,29 @@ public final class ToolResultFinalizer {
     return 4;
   }
 
+  private static long utf8Length(String text) {
+    long bytes = 0;
+    for (int index = 0; index < text.length(); ) {
+      char current = text.charAt(index);
+      if (Character.isHighSurrogate(current)) {
+        if (index + 1 >= text.length() || !Character.isLowSurrogate(text.charAt(index + 1))) {
+          throw new IllegalArgumentException("tool output must be valid Unicode");
+        }
+      } else if (Character.isLowSurrogate(current)) {
+        throw new IllegalArgumentException("tool output must be valid Unicode");
+      }
+      int codePoint = text.codePointAt(index);
+      bytes += utf8Bytes(codePoint);
+      index += Character.charCount(codePoint);
+    }
+    return bytes;
+  }
+
   private static void validateStrictUnicode(String text, String name) {
     try {
-      StandardCharsets.UTF_8
-          .newEncoder()
-          .onMalformedInput(CodingErrorAction.REPORT)
-          .onUnmappableCharacter(CodingErrorAction.REPORT)
-          .encode(CharBuffer.wrap(text));
-    } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException(name + " must be valid Unicode", error);
+      utf8Length(text);
+    } catch (IllegalArgumentException invalid) {
+      throw new IllegalArgumentException(name + " must be valid Unicode", invalid);
     }
   }
 

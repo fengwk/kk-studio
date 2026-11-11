@@ -83,6 +83,7 @@ final class ControlProtocolFixtures {
                     .setCapabilityId(CAPABILITY_ID)
                     .setArgumentsJson(ARGUMENTS_JSON)
                     .setTimeoutMillis(TIMEOUT_MILLIS)
+                    .setMaxOutputBytes(16L * 1024 * 1024)
                     .setExpectedFile(
                         ExpectedFile.newBuilder().setPath(EXPECTED_PATH).setSha256(SHA_A))));
   }

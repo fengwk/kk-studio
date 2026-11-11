@@ -274,12 +274,6 @@ public final class ControlProtocolValidator {
       throw new ControlProtocolException("settings.resourceBudgets is required");
     }
     ResourceBudgets budgets = settings.getResourceBudgets();
-    requireInt64(
-        budgets.hasMaxResourceBytes(),
-        budgets.getMaxResourceBytes(),
-        "settings.resourceBudgets.maxResourceBytes",
-        1,
-        DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
     requirePositive(
         budgets.hasTemporaryResourceTtlSeconds(),
         budgets.getTemporaryResourceTtlSeconds(),
@@ -543,6 +537,12 @@ public final class ControlProtocolValidator {
         invoke.getTimeoutMillis(),
         "invoke.timeoutMillis",
         0,
+        DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
+    requireInt64(
+        invoke.hasMaxOutputBytes(),
+        invoke.getMaxOutputBytes(),
+        "invoke.maxOutputBytes",
+        1,
         DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
     if (invoke.hasExpectedFile()) {
       validateExpectedFile(capabilityId, invoke.getExpectedFile());

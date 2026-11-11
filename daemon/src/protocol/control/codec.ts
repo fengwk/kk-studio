@@ -320,7 +320,6 @@ function validateSettings(settings: Settings): void {
     throw new Error('settings.resourceBudgets is required')
   }
   assertNoUnknown(settings.resourceBudgets, 'settings.resourceBudgets')
-  requireSafeLong(settings.resourceBudgets.maxResourceBytes, 'settings.resourceBudgets.maxResourceBytes', 1n, MAX_SAFE_BIGINT)
   requirePositive(settings.resourceBudgets.temporaryResourceTtlSeconds, 'settings.resourceBudgets.temporaryResourceTtlSeconds')
   requirePositive(
     settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds,
@@ -525,6 +524,7 @@ function validateInvoke(invoke: Invoke): void {
   })
   parseJsonObject(invoke.argumentsJson, 'invoke.argumentsJson', MAX_ARGUMENTS_JSON_UTF8_BYTES)
   requireSafeLong(invoke.timeoutMillis, 'invoke.timeoutMillis', 0n, MAX_SAFE_BIGINT)
+  requireSafeLong(invoke.maxOutputBytes, 'invoke.maxOutputBytes', 1n, MAX_SAFE_BIGINT)
   if (invoke.expectedFile !== undefined) {
     if (capabilityId !== 'fs.edit') {
       throw new Error('invoke.expectedFile is only valid for fs.edit')

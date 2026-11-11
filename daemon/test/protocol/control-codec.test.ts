@@ -155,6 +155,7 @@ function validInvoke() {
     capabilityId: CAPABILITY_ID,
     argumentsJson: ARGUMENTS_JSON,
     timeoutMillis: TIMEOUT_MILLIS,
+    maxOutputBytes: 16n * 1024n * 1024n,
   })
 }
 
@@ -389,21 +390,13 @@ describe('control binary codec', () => {
     expect(() =>
       encodeBinary(
         create(EnvelopeSchema, {
-          messageType: MessageType.SETTINGS,
+          messageType: MessageType.INVOKE,
           environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'settings',
-            value: create(SettingsSchema, {
-              resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 0n,
-                temporaryResourceTtlSeconds: 60n,
-                temporaryResourceCleanupIntervalSeconds: 30n,
-              }),
-            }),
-          },
+          invocationId: INVOCATION_ID,
+          payload: { case: 'invoke', value: create(InvokeSchema, { ...validInvoke(), maxOutputBytes: 0n }) },
         }),
       ),
-    ).toThrow(/maxResourceBytes/)
+    ).toThrow(/maxOutputBytes/)
 
     expect(() =>
       encodeBinary(
@@ -415,7 +408,6 @@ describe('control binary codec', () => {
             case: 'settings',
             value: create(SettingsSchema, {
               resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 1024n,
                 temporaryResourceTtlSeconds: 60n,
                 temporaryResourceCleanupIntervalSeconds: 30n,
               }),
@@ -732,6 +724,7 @@ describe('control binary codec', () => {
               capabilityId: 'fs.read',
               argumentsJson: '{}',
               timeoutMillis: 0n,
+              maxOutputBytes: 16n * 1024n * 1024n,
               expectedFile: create(ExpectedFileSchema, {
                 path: 'test.txt',
                 sha256: 'a'.repeat(64),

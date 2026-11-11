@@ -323,18 +323,6 @@ class ControlProtocolCodecTest {
                 settings.toBuilder()
                     .setInvocationId(ControlProtocolFixtures.INVOCATION_ID)
                     .build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                settings.toBuilder()
-                    .setSettings(
-                        settings.getSettings().toBuilder()
-                            .setResourceBudgets(
-                                settings.getSettings().getResourceBudgets().toBuilder()
-                                    .setMaxResourceBytes(0)))
-                    .build()));
-
     Envelope ready =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("ready.bin"));
     assertThrows(
@@ -699,7 +687,6 @@ class ControlProtocolCodecTest {
                 Settings.newBuilder()
                     .setResourceBudgets(
                         ResourceBudgets.newBuilder()
-                            .setMaxResourceBytes(1048576)
                             .setTemporaryResourceTtlSeconds(3600)
                             .setTemporaryResourceCleanupIntervalSeconds(60)))
             .build();
@@ -1135,6 +1122,17 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 ControlProtocolFixtures.envelope(
                     MessageType.INVOKE, Envelope.newBuilder().setInvoke(missingArguments))));
+
+    Invoke invalidOutputLimit =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setMaxOutputBytes(0)
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE, Envelope.newBuilder().setInvoke(invalidOutputLimit))));
 
     Invoke invalidCapability =
         ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()

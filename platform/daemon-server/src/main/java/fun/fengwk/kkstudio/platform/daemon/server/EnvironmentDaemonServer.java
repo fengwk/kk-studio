@@ -247,7 +247,6 @@ public final class EnvironmentDaemonServer
     return Settings.newBuilder()
         .setResourceBudgets(
             ResourceBudgets.newBuilder()
-                .setMaxResourceBytes(settings.maxResourceBytes())
                 .setTemporaryResourceTtlSeconds(settings.temporaryResourceTtlSeconds())
                 .setTemporaryResourceCleanupIntervalSeconds(
                     settings.temporaryResourceCleanupIntervalSeconds()))
@@ -379,7 +378,8 @@ public final class EnvironmentDaemonServer
           Invoke.newBuilder()
               .setCapabilityId(descriptor.id().value())
               .setArgumentsJson(request.call().argumentsJson())
-              .setTimeoutMillis(request.timeout().toMillis());
+              .setTimeoutMillis(request.timeout().toMillis())
+              .setMaxOutputBytes(settings().maxOutputBytes());
       if (request.expectedFile() != null) {
         invokeBuilder.setExpectedFile(
             ExpectedFile.newBuilder()

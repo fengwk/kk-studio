@@ -145,7 +145,8 @@ message Settings {
 }
 
 message ResourceBudgets {
-  optional int64 max_resource_bytes = 1;
+  reserved 1;
+  reserved "max_resource_bytes";
   optional int64 temporary_resource_ttl_seconds = 2;
   optional int64 temporary_resource_cleanup_interval_seconds = 3;
 }
@@ -237,6 +238,7 @@ message Invoke {
   optional string arguments_json = 2;
   optional int64 timeout_millis = 3;
   optional ExpectedFile expected_file = 4;
+  optional int64 max_output_bytes = 5;
 }
 
 message ExpectedFile {

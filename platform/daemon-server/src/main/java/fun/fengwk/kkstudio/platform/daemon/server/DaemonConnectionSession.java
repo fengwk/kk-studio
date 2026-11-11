@@ -337,7 +337,7 @@ final class DaemonConnectionSession implements DaemonSession {
                       this,
                       active,
                       envelope.getResourceUploadRequest(),
-                      settings().maxResourceBytes());
+                      settings().maxOutputBytes());
             }
             case RESOURCE_UPLOAD_COMMIT -> {
               requireReady();

@@ -90,6 +90,7 @@ export function invokeEnvelope() {
       capabilityId: CAPABILITY_ID,
       argumentsJson: ARGUMENTS_JSON,
       timeoutMillis: TIMEOUT_MILLIS,
+      maxOutputBytes: 16n * 1024n * 1024n,
       expectedFile: create(ExpectedFileSchema, {
         path: EXPECTED_PATH,
         sha256: SHA_A,
@@ -196,7 +197,6 @@ export function settingsEnvelope() {
       case: 'settings',
       value: create(SettingsSchema, {
         resourceBudgets: create(ResourceBudgetsSchema, {
-          maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 3600n,
           temporaryResourceCleanupIntervalSeconds: 60n,
         }),
