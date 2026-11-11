@@ -35,7 +35,7 @@ export function detectMediaMimeType(head: Uint8Array): MediaMimeType | null {
   if (head.length >= 12 && ascii(head, 4, 4) === 'ftyp') {
     const brand = ascii(head, 8, 4).toLowerCase()
     if (brand.startsWith('m4a') || brand.startsWith('mp4a')) {
-      // 音频 ISO 容器不属于本切片的音视频原样上传通道。
+      // M4A 等音频 ISO 容器不在音视频原样上传的支持范围内。
       return null
     }
     if (brand.startsWith('qt')) {
