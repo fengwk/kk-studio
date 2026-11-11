@@ -60,9 +60,15 @@ LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始
 
 客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；共享池初始化生命周期默认 180 秒（独立资源生命周期，不重起查询 timer），一个 waiter 停止不影响其他，最后退出等待 cleanup；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown（1 秒）、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
 
-## 异步 task
+## 同步 task 与异步通知
 
-task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
+task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模型调用固定使用内部 `async=false`：工具在隔离的子 Thread 上追加任务后等待对应 Join 冻结，再把最终报告或明确的失败/取消原因作为本次 tool_result 返回。并行工具批次中的 task 可同时运行；父 Thread 在批次全部结算后才继续模型请求。工具执行线程负责等待，事务与调度线程不阻塞。
+
+子代理运行中状态通过工具进度显示，结果卡可进入对应子 Thread。并发额度已满时任务不会启动，tool_result 明确返回 `not started: the subagent concurrency limit is reached; retry in a later batch`。父 Thread 停止会按执行树规则停止子代理，并将父 task 工具结果持久化为取消。
+
+`NOTIFY_PARENT`、异步受理回执及 `SUBAGENT_RESULT` 通知链仍保留给异步任务使用；同步 task 不走该通知交付路径。
+
+任务参数、Thread 续接、`max_turns` 软预算与 Join 幂等行为如下：新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
 
 子 Thread 存在未完成的 `SETTLE_OWNER_TURN` 时拒绝新续接，须完成 owner 结算后才可继续；精确重放返回原票据。通过准入的忙时续接不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。
 
@@ -70,20 +76,22 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 从历史边界 fork 的 Thread 是独立执行根：分支 fork 的 head 是一个只记录 `mode`/切点的新 `FORK` Entry，会话 fork 则把切点处的有效上下文复制到新 Session，两者都追加固定英文 FORK 通知（只陈述事实）。它不继承源 Thread 的待处理命令、子执行或 Join 订阅；原有子任务之后的回执仍交给原父 Thread，新分支不能通过旧 thread_id 接管原有子执行，已在分叉前进入共享历史的回执仍可见。
 
-持久接受后立即返回可读英文回执 `Task accepted. thread_id: <uuid>.`：说明子代理在隔离会话异步运行、稍后以独立消息回报，可完成/失败/取消，父应继续其他独立工作或在无剩余时让出，并给出 `task(thread_id, subagent_type, prompt)` 的续做方式；续接取代旧等待时额外说明只会为最新一次 prompt 汇总一份结果。它不是裸 JSON；结构化元数据由 tool_result 的 details 承载（`kind=task.accepted`，含 thread_id/status/session_id/subagent_type/replayed/replaced）。
+异步委派仍保留 `task.accepted` 结构化回执（含 thread_id、session_id、subagent_type 与幂等元数据）；同步 task 的运行中进度与终态则以 `task.result` details 表达，状态为 running、completed、failed 或 cancelled。
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
-完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执。普通结算要求源输入已应用，本地流程已结束，没有未完成的直接子 Join（含 owner 压缩结算义务）、待处理输入或未确认退出的执行，再以最终回答或不可继续失败冻结 `terminalEntryId` / `finalAnswerEntryId`。Stop 允许结算尚未应用的源输入，但仍须等待执行退出与直接子 Join 收敛；保留的系统通知不触发已停止 Thread 继续执行。结果冻结与父 `NOTIFICATION` 命令在同一事务提交，不存在等待补投的持久中间态。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
+同步 task 的最终 ToolResult 直接包含 Join 冻结的报告或错误，不另向父 Thread 注入 `SUBAGENT_RESULT`。Join 只有在子输入已应用、子本地流程结束、没有未完成直接子 Join、待处理输入或未确认退出时才冻结；停止路径也遵循同一收敛条件。终态冻结与父 Thread Work 唤醒在同一事务提交，等待中的工具执行线程通过子 Thread version change 订阅后重读 Join；订阅先于查询，避免错过终态唤醒。父停止会中断等待的工具执行，并在 Stop 事务中将运行中的 task Invocation 物化为 CANCELLED。
+
+异步通知交付仍把冻结结果与父 `NOTIFICATION` 命令在同一事务提交：父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史。
 
 ### 持久义务与交付
 
-Thread 的活动状态与执行控制正交：本地流程未结束、续作或 owner 压缩结算义务时为 `RUNNING`；没有上述活跃流程、但仍有已登记且未确认退出的执行阻塞收敛或待启动动作时为 `EXIT_PENDING`；本地已让出执行且等待直接 `NOTIFY_PARENT` 子 Join 异步结果时为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。`EXIT_PENDING` 不等同空闲，不放宽 Join 或输入门禁。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。状态与 Join 结算使用同一收敛判据，子任务自底向上逐层结算并通知父；单轮 `TURN_END` 本身不足以保证整次委派可交付。
+Thread 的活动状态与执行控制正交：本地流程未结束、续作或 owner 压缩结算义务时为 `RUNNING`；没有上述活跃流程、但仍有已登记且未确认退出的执行阻塞收敛或待启动动作时为 `EXIT_PENDING`；本地已让出执行且等待直接 `NOTIFY_PARENT` 子 Join 异步结果或同步 task Join时为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。`EXIT_PENDING` 不等同空闲，不放宽 Join 或输入门禁。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。状态与 Join 结算使用同一收敛判据，子任务自底向上逐层结算并通知父；单轮 `TURN_END` 本身不足以保证整次委派可交付。
 
 内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、源命令、冻结的终态/最终回答 Entry 与投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 
 join 冻结与父通知交付在同一数据库事务内完成；子 Thread 终态已先物化时，最后一次退出确认可在其事务中补结算。接受与结果交付使用工具 invocation ID
-作为稳定幂等身份；并发额度按尚未冻结终态且未被 supersede 的 `NOTIFY_PARENT` 子 Join 计，同一父/子对至多一个有效未完成 join，
+作为稳定幂等身份；并发额度按尚未冻结终态且未被 supersede 的 `NOTIFY_PARENT` 与 `SETTLE_TOOL_RESULT` 子 Join 计，同一父/子对至多一个有效未完成 join，
 root ticket 不占子任务名额。忙时继续仍需通过单父与全局额度准入，额度已满则明确拒绝。
 Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢失；
 父为 `STOPPED` 时通知只固化、不唤醒。

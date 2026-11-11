@@ -367,8 +367,19 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID parentId = parent.thread().id();
     UUID parentHead = parent.thread().headEntryId();
 
-    // child1 占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
-    Ticket join1 = Ticket.task(TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
+    // SETTLE_TOOL_RESULT 子任务同样占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
+    Ticket join1 =
+        new Ticket(
+            TestIds.id(72),
+            parentId,
+            parentHead,
+            HASH,
+            "assistant",
+            3,
+            3,
+            1,
+            5,
+            JoinDelivery.SETTLE_TOOL_RESULT);
     AcceptedCommands child1 =
         acceptAndJoin(runtime, child(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
     UUID child1Id = child1.thread().id();
