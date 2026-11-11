@@ -304,6 +304,16 @@ func ReadRecoveryBackup(config config.DaemonConfig, viewID string, quota int64) 
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		dirInfo, dirErr := os.Stat(recoveryDirectory(config))
+		if errors.Is(dirErr, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if dirErr != nil {
+			return nil, &RecoveryQuotaError{message: fmt.Sprintf("recovery backup is unreadable: %s", fsCode(dirErr))}
+		}
+		if !dirInfo.IsDir() {
+			return nil, &RecoveryQuotaError{message: "recovery backup is unreadable: ENOTDIR"}
+		}
 		return nil, nil
 	}
 	if err != nil {
