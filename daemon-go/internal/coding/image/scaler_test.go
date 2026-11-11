@@ -2,6 +2,7 @@ package image
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"hash/crc32"
 	"image"
@@ -51,6 +52,20 @@ func TestTierBoxesAndNoUpscale(t *testing.T) {
 				t.Fatal("image within tier box was not passed through byte-for-byte")
 			}
 		})
+	}
+}
+
+// COD-N-006
+func TestScaleContextAppliesOutputLimitOnlyToResizedImage(t *testing.T) {
+	var source bytes.Buffer
+	if err := png.Encode(&source, patternImage(2000, 1000, false)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ScaleContext(context.Background(), "image/png", source.Bytes(), P720, 1); err == nil || !strings.Contains(err.Error(), "resized image exceeds 1 bytes") {
+		t.Fatalf("oversized resized image error=%v", err)
+	}
+	if _, err := ScaleContext(context.Background(), "image/png", source.Bytes(), Original, 1); err != nil {
+		t.Fatalf("ORIGINAL must pass through without resize budget: %v", err)
 	}
 }
 

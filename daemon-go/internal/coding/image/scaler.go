@@ -36,7 +36,7 @@ func ScaleContext(ctx context.Context, mediaType string, data []byte, tier Tier,
 	if err != nil {
 		return Result{}, err
 	}
-	if maxOutputBytes > 0 && int64(len(result.Bytes)) > maxOutputBytes {
+	if result.Resized && maxOutputBytes > 0 && int64(len(result.Bytes)) > maxOutputBytes {
 		return Result{}, fmt.Errorf("resized image exceeds %d bytes (%d bytes)", maxOutputBytes, len(result.Bytes))
 	}
 	return result, nil
@@ -60,8 +60,13 @@ const (
 )
 
 type Result struct {
-	MediaType string
-	Bytes     []byte
+	MediaType      string
+	Bytes          []byte
+	OriginalWidth  int
+	OriginalHeight int
+	DisplayWidth   int
+	DisplayHeight  int
+	Resized        bool
 }
 
 type box struct{ width, height int }
@@ -118,23 +123,27 @@ func scale(mediaType string, data []byte, tier Tier, engine Engine) (Result, err
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width) > MaxPixels/int64(cfg.Height) {
 		return Result{}, fmt.Errorf("image %dx%d exceeds pixel budget %d", cfg.Width, cfg.Height, MaxPixels)
 	}
+	displayWidth, displayHeight := cfg.Width, cfg.Height
+	if orientation >= 5 {
+		displayWidth, displayHeight = displayHeight, displayWidth
+	}
+	metadata := Result{OriginalWidth: cfg.Width, OriginalHeight: cfg.Height, DisplayWidth: displayWidth, DisplayHeight: displayHeight}
 	animated, err := validateAnimation(format, data)
 	if err != nil {
 		return Result{}, err
 	}
 	if tier == Original {
-		return Result{MediaType: mediaType, Bytes: data}, nil
+		metadata.MediaType, metadata.Bytes = mediaType, data
+		return metadata, nil
 	}
-	w, h := cfg.Width, cfg.Height
-	if orientation >= 5 {
-		w, h = h, w
-	}
+	w, h := displayWidth, displayHeight
 	b, err := tierBox(tier, w, h)
 	if err != nil {
 		return Result{}, err
 	}
 	if w <= b.width && h <= b.height {
-		return Result{MediaType: mediaType, Bytes: data}, nil
+		metadata.MediaType, metadata.Bytes = mediaType, data
+		return metadata, nil
 	}
 	if animated {
 		return Result{}, errors.New("animated or multi-frame image cannot be resized")
@@ -166,7 +175,9 @@ func scale(mediaType string, data []byte, tier Tier, engine Engine) (Result, err
 	if err != nil {
 		return Result{}, fmt.Errorf("encode resized image: %w", err)
 	}
-	return Result{MediaType: outType, Bytes: output.Bytes()}, nil
+	metadata.MediaType, metadata.Bytes, metadata.Resized = outType, output.Bytes(), true
+	metadata.DisplayWidth, metadata.DisplayHeight = dw, dh
+	return metadata, nil
 }
 
 func formatMatches(mediaType, format string) bool {
