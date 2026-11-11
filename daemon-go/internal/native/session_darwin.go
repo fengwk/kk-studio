@@ -3,19 +3,31 @@
 package native
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
 type sessionMember struct {
 	PID      int
+	Parent   int
 	Session  int
 	Identity string
 	State    string
+	Threads  int
+}
+
+func (m sessionMember) isLive() bool { return m.State != "Z" && m.State != "X" && m.State != "x" }
+
+func directChildren(ownerPID int, excludedPIDs []int) ([]sessionMember, error) { return nil, nil }
+
+func convergeAdoptedChildren(ctx context.Context, ownerPID int, grace time.Duration, excludedPIDs []int) error {
+	return nil
 }
 
 func sessionMembers(sid int) ([]sessionMember, error) {

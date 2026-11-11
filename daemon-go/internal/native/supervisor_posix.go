@@ -372,7 +372,7 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 			if m.PID == excludedPID {
 				continue
 			}
-			if m.State != "Z" {
+			if m.isLive() {
 				active = append(active, m)
 			}
 		}
