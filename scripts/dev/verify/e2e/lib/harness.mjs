@@ -29,7 +29,7 @@ import {
  *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
  * commands 必须是固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT 前缀 +
- * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
+ * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {
@@ -898,7 +898,7 @@ export async function renameThread(ctx, threadId, name) {
   return renamed
 }
 
-/** 校验一条 StoppedThreadReceiptDTO：身份、边界、计数与仅含人类输入的 cancelledInputs。 */
+/** 校验一条 StoppedThreadReceiptDTO：身份、边界、计数与仅含 USER_MESSAGE 的 cancelledInputs。 */
 function assertStoppedThreadReceipt(receipt) {
   canonicalUuid(receipt?.threadId, 'receipt.threadId')
   canonicalUuid(receipt.stopRequestId, 'receipt.stopRequestId')
@@ -922,8 +922,8 @@ function assertStoppedThreadReceipt(receipt) {
     previous = sequence
     canonicalUuid(input.idempotencyKey, 'cancelledInput.idempotencyKey')
     assert(
-      input.type === 'USER_MESSAGE' || input.type === 'GOAL',
-      `cancelled input must be human USER_MESSAGE|GOAL: ${JSON.stringify(input)}`,
+      input.type === 'USER_MESSAGE',
+      `cancelled input must be USER_MESSAGE: ${JSON.stringify(input)}`,
     )
     assert(
       input.payload != null && typeof input.payload === 'object' && !Array.isArray(input.payload),

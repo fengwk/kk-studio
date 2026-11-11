@@ -25,8 +25,8 @@ import {
   requireRealMiniMaxM3,
 } from '../cases/real.mjs'
 
-test('十二个指定 real case 正确注册到 case registry', () => {
-  // 测试意图：确保四个声明式模型文本+缓存 case、四个多推理级别烟雾 case 和四个真实工具 case 正确注册，注册表保持干净且可单独 --only 运行。
+test('八个指定 real case 正确注册到 case registry', () => {
+  // 测试意图：确保四个声明式模型文本+缓存 case 和四个多推理级别烟雾 case 正确注册，注册表保持干净且可单独 --only 运行。
   const caseIds = ALL_CASES.map((c) => c.id)
 
   const expectedTextCacheIds = [
@@ -49,15 +49,6 @@ test('十二个指定 real case 正确注册到 case registry', () => {
     assert.equal(caseIds.includes(id), true, `missing reasoning levels case: ${id}`)
   }
 
-  const expectedToolIds = [
-    'real.tool.google_gemini',
-    'real.tool.openai_responses',
-    'real.tool.minimax_anthropic',
-    'real.tool.deepseek_chat',
-  ]
-  for (const id of expectedToolIds) {
-    assert.equal(caseIds.includes(id), true, `missing tool case: ${id}`)
-  }
 })
 
 test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reasoning_levels 仅 real，tool 与 delegation 需 real+tools）', () => {
@@ -73,10 +64,6 @@ test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reason
     assert.equal(reasoningCase.level, 'L2')
     assert.deepEqual([...reasoningCase.requires].sort(), ['real'])
 
-    const toolCase = ALL_CASES.find((c) => c.id === `real.tool.${def.idSuffix}`)
-    assert.ok(toolCase, `tool case not found for ${def.idSuffix}`)
-    assert.equal(toolCase.level, 'L4')
-    assert.deepEqual([...toolCase.requires].sort(), ['real', 'tools'])
   }
 
   const delegationCase = ALL_CASES.find((c) => c.id === 'real.task_delegation')
@@ -90,37 +77,6 @@ test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reason
   const readTurnCase = ALL_CASES.find((c) => c.id === 'tool.read_turn')
   assert.ok(readTurnCase, 'tool.read_turn missing')
   assert.deepEqual([...readTurnCase.requires].sort(), ['canvas-storage', 'real', 'tools'])
-})
-
-test('真实工具 case 文案契约：OpenAI Responses 与 MiniMax Anthropic 明确由确定性单测覆盖 reasoning/replay，其余模型保持首轮推理强证据', () => {
-  // 测试意图：锁定 OpenAI Responses 与 MiniMax Anthropic 真实工具用例文档对齐（不依赖外部机会性/随机 reasoning，由单测覆盖结构），而 Google 与 DeepSeek 保持严格首轮推理断言描述。
-  const deterministicToolCases = [
-    { id: 'real.tool.openai_responses', title: 'OpenAI Responses' },
-    { id: 'real.tool.minimax_anthropic', title: 'MiniMax Anthropic' },
-  ]
-  for (const { id, title } of deterministicToolCases) {
-    const c = ALL_CASES.find((item) => item.id === id)
-    assert.ok(c, `${id} missing`)
-    assert.ok(
-      c.docs.includes(`${title} 的 reasoning/replay 结构由确定性 provider 单测覆盖`),
-      `${id} docs mismatch: ${c.docs}`,
-    )
-    assert.equal(
-      c.docs.includes('首轮推理证据'),
-      false,
-      `${id} docs must not require first-turn reasoning evidence: ${c.docs}`,
-    )
-  }
-
-  const strongReasoningSuffixes = ['google_gemini', 'deepseek_chat']
-  for (const suffix of strongReasoningSuffixes) {
-    const c = ALL_CASES.find((item) => item.id === `real.tool.${suffix}`)
-    assert.ok(c, `real.tool.${suffix} missing`)
-    assert.ok(
-      c.docs.includes('首轮推理证据'),
-      `${suffix} docs must retain first-turn reasoning assertion: ${c.docs}`,
-    )
-  }
 })
 
 test('真实文本缓存 case 文案契约：Google 明确只观测 cache hit 且由单测覆盖映射，其余模型保持强断言', () => {

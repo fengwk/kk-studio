@@ -385,6 +385,6 @@ test('test intent: the lifecycle fixture seeds canonical branch settings', () =>
   const block = content.match(/ROOT_PAYLOAD_JSON\s*=\s*"""([\s\S]*?)"""/u)
   assert.ok(block, 'lifecycle fixture must declare the root payload')
   const payload = JSON.parse(block[1].replaceAll('\\\n', ''))
-  assert.deepEqual(Object.keys(payload.settings).sort(), ['agentName', 'environmentName', 'execution', 'goal'])
+  assert.deepEqual(Object.keys(payload.settings).sort(), ['agentName', 'environmentName', 'execution'])
   assert.equal(payload.settings.agentName, 'lifecycle-test')
 })
