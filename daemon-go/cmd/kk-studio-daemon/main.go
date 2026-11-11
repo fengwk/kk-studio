@@ -18,7 +18,10 @@ const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config
 type RuntimeRunner interface {
 	Run(context.Context, config.DaemonConfig) error
 }
-type Dependencies struct{ Runtime RuntimeRunner }
+type Dependencies struct {
+	Runtime    RuntimeRunner
+	HelperMain func([]string) int
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -34,6 +37,13 @@ func RunCLI(ctx context.Context, args []string, deps Dependencies, stdout, stder
 			fmt.Fprintln(stderr, "invalid daemon argument transport")
 			return 2
 		}
+	}
+	if len(args) > 0 && strings.HasPrefix(args[0], "--internal-") {
+		if deps.HelperMain == nil {
+			fmt.Fprintln(stderr, "daemon: internal helper is unavailable")
+			return 1
+		}
+		return deps.HelperMain(args)
 	}
 	if len(args) == 1 {
 		switch args[0] {

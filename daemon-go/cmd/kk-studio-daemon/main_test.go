@@ -16,6 +16,22 @@ func TestInformationCommands(t *testing.T) {
 	}
 }
 
+// RUN-T-153 verifies internal helper arguments are dispatched without being re-parsed as service flags.
+func TestInternalHelperDispatch(t *testing.T) {
+	var out, errOut bytes.Buffer
+	called := false
+	deps := Dependencies{HelperMain: func(args []string) int {
+		called = true
+		if len(args) != 2 || args[1] != "raw value" {
+			t.Fatalf("helper args changed: %#v", args)
+		}
+		return 7
+	}}
+	if code := RunCLI(context.Background(), []string{"--internal-install-lock", "raw value"}, deps, &out, &errOut); code != 7 || !called || out.Len() != 0 || errOut.Len() != 0 {
+		t.Fatalf("helper dispatch code=%d called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+	}
+}
+
 // RUN-T-136 checks malformed command forms fail safely without echoing arguments.
 func TestInvalidCommandsDoNotEchoArguments(t *testing.T) {
 	var out, stderr bytes.Buffer
