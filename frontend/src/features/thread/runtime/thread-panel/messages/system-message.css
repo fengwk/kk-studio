@@ -6,7 +6,6 @@
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
   font-weight: 600;
-  line-height: 1.45;
 }
 
 .thread-system-message-body {

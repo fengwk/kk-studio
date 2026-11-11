@@ -52,11 +52,14 @@
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
+  min-height: 28px;
 }
 
 .thread-disclosure-header-text {
   flex: 1 1 auto;
+  align-self: center;
   min-width: 0;
+  line-height: 28px;
 }
 
 /* 收起时最多两行（HEADER_COLLAPSED_LINES）；展开时完整折行。 */

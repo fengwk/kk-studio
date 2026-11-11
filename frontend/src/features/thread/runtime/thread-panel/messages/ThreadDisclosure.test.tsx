@@ -51,6 +51,25 @@ describe('ThreadDisclosure', () => {
     expect(section.querySelector('.thread-disclosure-body')).toHaveTextContent('supplement')
   })
 
+  it('uses the header as the first-row box with clamped text and actions as aligned siblings', () => {
+    // 意图：外层 header 负责统一首行盒，clamp 只作用于文本，动作作为首行同级项定位。
+    const { container } = render(
+      <ControlledDisclosure {...baseProps({
+        header: <span>two-line header content</span>,
+        actions: <button type="button">Action</button>,
+      })} />,
+    )
+    const header = container.querySelector('.thread-disclosure-header')
+    const text = header?.querySelector('.thread-disclosure-header-text.is-clamped')
+    const actions = header?.querySelector('.thread-disclosure-actions')
+
+    expect(header).toHaveClass('thread-disclosure-header')
+    expect(header?.firstElementChild).toBe(text)
+    expect(actions).toHaveClass('thread-disclosure-actions')
+    expect(actions?.parentElement).toBe(header)
+    expect(header?.querySelector('.thread-disclosure-toggle')).not.toBeNull()
+  })
+
   it('hides the chevron when the collapsed and expanded views are identical', () => {
     const { container } = render(
       <ControlledDisclosure {...baseProps({

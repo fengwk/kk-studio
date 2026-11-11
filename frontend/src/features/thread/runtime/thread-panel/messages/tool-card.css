@@ -24,7 +24,6 @@
 /* Header 参数与名称属于同一 inline 文本流，完整原文留在 DOM 中可选中复制。 */
 .thread-tool-summary {
   display: block;
-  padding: 4px 0;
   color: var(--fg-muted);
   font-family: var(--mono);
   font-size: var(--font-size-xs);
