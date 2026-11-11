@@ -114,7 +114,6 @@
                                         <include>fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog</include>
                                         <include>fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor</include>
-                                        <include>fun.fengwk.kkstudio.harness.contributor.builtin.goal.GoalProgressCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.prompt.PromptRenderer</include>
                                     </includes>
                                     <limits>
