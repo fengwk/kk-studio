@@ -30,7 +30,8 @@ export function announceTranscriptReading(element: Element, source: string): voi
  *
  * 只由「仍在流式」的正文文本构成：
  * - assistant：消息文本；
- * - tool：调用参数的 text / json 片段，json 用确定性序列化；
+ * - tool：按稳定调用身份计入流式参数长度（write/edit 的参数逐帧增长）与部分输出的
+ *   text / json 片段，json 用确定性序列化；
  * - resource（图片、音频、视频等媒体）不参与——异步媒体加载与解码绝不产生 revision，
  *   因此绝不触发外层贴底；
  * - 只有推理思考（没有正文文本）时也不产生 revision，思考区本身默认一行，展开是
@@ -52,7 +53,10 @@ export function transcriptStreamRevision(messages: DialogueMessage[]): string | 
       continue
     }
     if (message.role === 'tool') {
-      parts.push(`${message.id}:${contentsLength(message.partialContents ?? [])}`)
+      const argumentsLength = message.arguments?.length ?? 0
+      parts.push(
+        `${message.id}:${message.toolCallId}:${argumentsLength}:${contentsLength(message.partialContents ?? [])}`,
+      )
       continue
     }
     parts.push(message.id)

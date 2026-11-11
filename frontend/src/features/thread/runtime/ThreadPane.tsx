@@ -17,9 +17,9 @@ import { storageService } from '@/shared/api/storage-service'
 import type { EnvironmentStatusIdentity } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
-import { toolExecutionState } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import { isExitPendingStatus } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import { deriveThreadWorkPhase } from '@/features/thread/runtime/thread-work-phase'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
 export interface ThreadPaneLabels {
@@ -31,8 +31,6 @@ export interface ThreadPaneLabels {
 
 /** 只读 Thread 视图的可选交互：仅根面板的 Debug 预检需要。 */
 export interface ThreadPaneActivityInput {
-  working: boolean
-  workingLabel?: string
   actionError?: string | null
   onDismissActionError?: () => void
   /** EXIT_PENDING + RUNNABLE 时把“停止并处理”接到现有 Stop 流程；只读视图可不提供。 */
@@ -74,50 +72,36 @@ export function ThreadPane({
 }) {
   const labels = useBoundThreadPanelLabels(environments, projection)
   const { t } = useI18n()
-  const pendingTool = projection.toolInvocations.find(
-    (invocation) => ['READY', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(invocation.status),
-  )
-  const executing = projection.toolInvocations.some(
-    (invocation) => invocation.status === 'RUNNING',
-  ) || projection.activeAssistantOutput?.status === 'RUNNING'
-  const pendingToolState = pendingTool ? toolExecutionState({
-    invocationStatus: pendingTool.status,
-    waitingForEnvironment: pendingTool.waitingForEnvironment,
-    phase: 'call',
-  }) : null
+  const workPhase = deriveThreadWorkPhase({
+    thread: projection.thread,
+    activeAssistantOutput: projection.activeAssistantOutput,
+    entries: projection.entries,
+    toolInvocations: projection.toolInvocations,
+  })
   // 活跃执行中的 UNCONFIRMED 是正常在途事实，不进入异常/待处理面板；只有真正 EXIT_PENDING 才展示详情。
   const exitPending = isExitPendingStatus(projection.thread?.status)
   const unconfirmedExecutions = exitPending ? projection.unconfirmedExecutions : []
 
-  // 事实优先级：
-  // 1. 真实 RUNNING model/tool 优先，STOPPED 不可遮在途执行
-  // 2. EXIT_PENDING：没有活跃流程但退出未确认；RUNNABLE 无异常告警，STOPPED 才可显式放弃
-  // 3. pendingTool 阻塞：审批 / 问卷 / environment 文案准确且无动画
-  // 4. 其它 status：RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
-  // 5. 其余回退外部 activity
-  let resolvedWorking = activity.working
-  let resolvedWorkingLabel: string | undefined = activity.workingLabel
-
-  if (executing) {
-    resolvedWorking = true
-    resolvedWorkingLabel = t('ai.runtime.thread.working')
-  } else if (exitPending) {
-    resolvedWorking = true
-    resolvedWorkingLabel = projection.thread?.executionControl === 'STOPPED'
-      ? t('ai.runtime.thread.stopExitUnconfirmed')
-      : t('ai.runtime.thread.exitPending')
-  } else if (pendingToolState) {
-    resolvedWorking = true
-    resolvedWorkingLabel = t(`ai.runtime.tool.${pendingToolState}`, {
-      environment: pendingTool?.requiredEnvironmentName ?? '',
-    })
-  } else if (projection.thread?.status === 'WAITING') {
-    resolvedWorking = true
-    resolvedWorkingLabel = t('ai.runtime.thread.status.WAITING')
-  } else if (projection.thread?.status === 'RUNNING') {
-    resolvedWorking = true
-    resolvedWorkingLabel = t('ai.runtime.thread.status.RUNNING')
+  // 工作条文案与动画都只由这一份阶段事实派生。
+  const phaseLabels = {
+    'model-running': t('ai.runtime.thread.phase.generating'),
+    'tool-running': t('ai.runtime.thread.phase.executingTool'),
+    'materializing-result': t('ai.runtime.thread.phase.materializing'),
+    'next-step': t('ai.runtime.thread.phase.nextStep'),
+    none: '',
   }
+  const waitingLabels = {
+    environment: t('ai.runtime.tool.environment', {
+      environment: workPhase.kind === 'waiting' ? workPhase.environmentName ?? '' : '',
+    }),
+    approval: t('ai.runtime.tool.approval'),
+    input: t('ai.runtime.tool.input'),
+    'exit-confirmation': t('ai.runtime.thread.exitPending'),
+    'async-result': t('ai.runtime.thread.status.WAITING'),
+  }
+  const phaseLabel = workPhase.kind === 'waiting'
+    ? waitingLabels[workPhase.reason]
+    : phaseLabels[workPhase.kind]
 
   const transcript: ThreadPanelTranscriptInput = {
     messages: projection.timeline.messages,
@@ -131,9 +115,9 @@ export function ThreadPane({
     eventCount: projection.entries.length + projection.queuedCommands.length,
   }
   const panelActivity: ThreadPanelActivityInput = {
-    working: resolvedWorking,
-    workingLabel: resolvedWorkingLabel,
-    animated: executing,
+    working: workPhase.kind !== 'none',
+    workingLabel: phaseLabel,
+    animated: workPhase.kind === 'model-running' || workPhase.kind === 'tool-running',
     widgets: unconfirmedExecutions.length === 0
       ? activity.widgets
       : (

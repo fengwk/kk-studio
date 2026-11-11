@@ -47,6 +47,10 @@
   background: var(--scrim);
 }
 
+/*
+ * 首行基准 28px：文本行高 20px，外层首行盒上下各留 4px；动作与 chevron 高 28px 并对齐首行。
+ * 单行时文本在首行盒内居中；多行时从同一首行位置向下延展。适配器不再自行补垂直留白。
+ */
 .thread-disclosure-header {
   display: flex;
   align-items: flex-start;
@@ -54,9 +58,11 @@
   min-width: 0;
 }
 
-.thread-disclosure-header-text {
+.thread-disclosure-header-main {
   flex: 1 1 auto;
   min-width: 0;
+  padding: 4px 0;
+  line-height: 20px;
 }
 
 /* 收起时最多两行（HEADER_COLLAPSED_LINES）；展开时完整折行。 */

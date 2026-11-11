@@ -36,7 +36,7 @@ test.describe('Subagent receipt card', () => {
         const link = header.querySelector('a')!
         const toggle = header.querySelector('.thread-disclosure-toggle')!
         return {
-          textFirst: header.firstElementChild === text,
+          textFirst: header.firstElementChild === text.parentElement,
           lastIsToggle: header.lastElementChild === toggle,
           separate: !toggle.contains(link),
           ordered: link.getBoundingClientRect().right <= toggle.getBoundingClientRect().left,

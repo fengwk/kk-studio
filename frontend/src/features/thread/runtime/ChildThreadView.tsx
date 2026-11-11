@@ -98,7 +98,7 @@ export function ThreadView({
       <ThreadPane
         projection={projection}
         environments={environments}
-        activity={{ working: projection.working }}
+        activity={{}}
         views={{
           mainView: views.mainView,
           initialConversationScrollTop: views.initialConversationScrollTop,
