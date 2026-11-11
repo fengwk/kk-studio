@@ -117,7 +117,7 @@ func (s *windowsSupervisor) Start(ctx context.Context, spec ProcessSpec) (Manage
 	}
 	threadCloseErr := windows.CloseHandle(helper.Thread)
 	pipesCloseErr := pipes.closeChildHandles()
-	p := &windowsProcess{supervisor: s, pid: int(helper.ProcessId), helper: helper.Process, helperThread: helper.Thread, inheritedHandles: append([]windows.Handle(nil), pipes.childHandles...), owner: pipes.ownerFile, stdin: pipes.inputFile, stdout: pipes.outputFile, stderr: pipes.errorFile, stateDir: stateDir, jobName: jobNameFor(stateDir), done: make(chan struct{}), waitFailure: make(chan struct{}), helperCode: errorExitUnknown}
+	p := &windowsProcess{supervisor: s, pid: int(helper.ProcessId), helper: helper.Process, helperThread: helper.Thread, inheritedHandles: append([]windows.Handle(nil), pipes.childHandles...), owner: pipes.ownerFile, stdin: &windowsManagedPipe{file: pipes.inputFile}, stdout: &windowsManagedPipe{file: pipes.outputFile}, stderr: &windowsManagedPipe{file: pipes.errorFile}, stateDir: stateDir, jobName: jobNameFor(stateDir), done: make(chan struct{}), waitFailure: make(chan struct{}), helperCode: errorExitUnknown}
 	if threadCloseErr == nil {
 		p.helperThread = 0
 	}
@@ -449,6 +449,19 @@ func windowsEnvironmentBlock(entries []string) []uint16 {
 	return utf16.Encode([]rune(block))
 }
 
+type windowsManagedPipe struct {
+	file      *os.File
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (p *windowsManagedPipe) Read(data []byte) (int, error)  { return p.file.Read(data) }
+func (p *windowsManagedPipe) Write(data []byte) (int, error) { return p.file.Write(data) }
+func (p *windowsManagedPipe) Close() error {
+	p.closeOnce.Do(func() { p.closeErr = p.file.Close() })
+	return p.closeErr
+}
+
 type windowsProcess struct {
 	supervisor       *windowsSupervisor
 	pid              int
@@ -457,9 +470,9 @@ type windowsProcess struct {
 	inheritedHandles []windows.Handle
 	job              windows.Handle
 	owner            *os.File
-	stdin            *os.File
-	stdout           *os.File
-	stderr           *os.File
+	stdin            *windowsManagedPipe
+	stdout           *windowsManagedPipe
+	stderr           *windowsManagedPipe
 	stateDir         string
 	jobName          string
 	done             chan struct{}

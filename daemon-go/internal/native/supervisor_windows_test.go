@@ -150,7 +150,7 @@ func fixturePID(t *testing.T, path string) uint32 {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
-		if err == nil {
+		if err == nil && len(data) > 0 {
 			pid, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
 			if parseErr != nil {
 				t.Fatal(parseErr)
