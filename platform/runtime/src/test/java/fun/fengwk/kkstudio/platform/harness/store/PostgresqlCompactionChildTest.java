@@ -308,10 +308,10 @@ class PostgresqlCompactionChildTest {
         gateway,
         event -> {},
         new ToolProcessorConfig(
-            new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+            () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             () -> NO_RETRY,
-            Duration.ofSeconds(5),
-            Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(5),
             Duration.ofMinutes(10)),
         Clock.fixed(T1, ZoneOffset.UTC),
         scheduler,
@@ -468,7 +468,7 @@ class PostgresqlCompactionChildTest {
         new ThreadProcessor(
             store,
             builtinRegistry(store, resolver),
-            new ThreadProcessorConfig(Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
     gateway = new ScriptedChildGateway();
     modelProcessor =
         new ModelProcessor(
@@ -476,9 +476,9 @@ class PostgresqlCompactionChildTest {
             gateway,
             event -> {},
             new ModelProcessorConfig(
-                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 () -> retryPolicy,
-                Duration.ofSeconds(5)),
+                () -> Duration.ofSeconds(5)),
             clock,
             scheduler,
             Runnable::run,
@@ -1020,9 +1020,9 @@ class PostgresqlCompactionChildTest {
               holdingGateway,
               event -> {},
               new ModelProcessorConfig(
-                  new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                  () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   () -> NO_RETRY,
-                  Duration.ofSeconds(5)),
+                  () -> Duration.ofSeconds(5)),
               Clock.fixed(T1, ZoneOffset.UTC),
               scheduler,
               Runnable::run,

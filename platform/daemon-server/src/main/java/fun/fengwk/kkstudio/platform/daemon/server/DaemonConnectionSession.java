@@ -221,12 +221,14 @@ final class DaemonConnectionSession implements DaemonSession {
             .setEnvironmentId(environmentId.value().toString())
             .setSettings(EnvironmentDaemonServer.settingsMessage(current))
             .build();
-    if (!offer(envelope)) {
-      return false;
+    synchronized (stateLock) {
+      if (!offer(envelope)) {
+        return false;
+      }
+      temporaryResourceTtlSeconds = current.temporaryResourceTtlSeconds();
+      temporaryResourceCleanupIntervalSeconds = current.temporaryResourceCleanupIntervalSeconds();
+      return true;
     }
-    temporaryResourceTtlSeconds = current.temporaryResourceTtlSeconds();
-    temporaryResourceCleanupIntervalSeconds = current.temporaryResourceCleanupIntervalSeconds();
-    return true;
   }
 
   /** 初始控制流：SETTINGS 之后立即下发当前完整卡片配置；缺失卡片明确报错并关闭。 */

@@ -107,6 +107,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * ToolProcessor 测试共享基座：InMemoryBuiltinHarnessStore + fake ToolGateway / sink + 可变时钟 + 种子与断言 helper。
@@ -129,6 +130,9 @@ public final class ToolProcessorTestSupport {
   static final Duration PREFLIGHT_FAILURE_DELAY = Duration.ofSeconds(7);
   static final Duration BUSY_FALLBACK_DELAY = Duration.ofSeconds(9);
   static final Duration REATTACH_WINDOW = Duration.ofMinutes(10);
+  static final Supplier<ProcessorLeaseConfig> LEASE_CONFIG_PROVIDER = () -> LEASE_CONFIG;
+  static final Supplier<Duration> PREFLIGHT_FAILURE_DELAY_PROVIDER = () -> PREFLIGHT_FAILURE_DELAY;
+  static final Supplier<Duration> BUSY_FALLBACK_DELAY_PROVIDER = () -> BUSY_FALLBACK_DELAY;
   public static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
@@ -317,10 +321,10 @@ public final class ToolProcessorTestSupport {
               gateway,
               sink,
               new ToolProcessorConfig(
-                  LEASE_CONFIG,
+                  LEASE_CONFIG_PROVIDER,
                   () -> retryPolicy,
-                  PREFLIGHT_FAILURE_DELAY,
-                  BUSY_FALLBACK_DELAY,
+                  PREFLIGHT_FAILURE_DELAY_PROVIDER,
+                  BUSY_FALLBACK_DELAY_PROVIDER,
                   REATTACH_WINDOW),
               clock,
               scheduler,

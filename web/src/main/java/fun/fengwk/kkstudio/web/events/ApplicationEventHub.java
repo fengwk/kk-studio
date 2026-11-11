@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntSupplier;
 
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
@@ -129,7 +130,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private final CanvasVersionEventSource canvasVersionSource;
   private final NotificationInvalidationSource projectChangeSource;
   private final NotificationInvalidationSource environmentChangeSource;
-  private final int maxBufferedSignals;
+  private final IntSupplier maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
   /**
@@ -141,10 +142,7 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 关闭标记：仅在 {@link #lifecycleFence} 内由 false 转为 true；之后不得再发布新状态。 */
   private volatile boolean closed;
 
-  /**
-   * 单订阅待发缓冲与建立期 early 缓冲的最大信号数（由数据库 SystemSettings.Advanced.applicationEventQueueCapacity
-   * 在装配时传入）；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。
-   */
+  /** 单订阅待发缓冲与建立期 early 缓冲的最大信号数（每次创建订阅时读取当前配置）；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。 */
   ApplicationEventHub(
       HarnessChangeSubscriptions harnessChanges,
       RealtimeEventSource realtimeSource,
@@ -152,7 +150,7 @@ final class ApplicationEventHub implements AutoCloseable {
       CanvasVersionEventSource canvasVersionSource,
       NotificationInvalidationSource projectChangeSource,
       NotificationInvalidationSource environmentChangeSource,
-      int maxBufferedSignals) {
+      IntSupplier maxBufferedSignals) {
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
@@ -161,10 +159,7 @@ final class ApplicationEventHub implements AutoCloseable {
     this.projectChangeSource = Objects.requireNonNull(projectChangeSource, "projectChangeSource");
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
-    if (maxBufferedSignals <= 0) {
-      throw new IllegalArgumentException("maxBufferedSignals must be positive");
-    }
-    this.maxBufferedSignals = maxBufferedSignals;
+    this.maxBufferedSignals = Objects.requireNonNull(maxBufferedSignals, "maxBufferedSignals");
   }
 
   /**
@@ -204,8 +199,12 @@ final class ApplicationEventHub implements AutoCloseable {
           closeUpstreams(state);
           throw error;
         }
+        int maxSignals = maxBufferedSignals.getAsInt();
+        if (maxSignals <= 0) {
+          throw new IllegalStateException("application event queue capacity must be positive");
+        }
         LocalSubscription subscription =
-            new LocalSubscription(this, resource, state.cursor, sink, maxBufferedSignals);
+            new LocalSubscription(this, resource, state.cursor, sink, maxSignals);
         state.subscribers.add(subscription);
         // 回放建立上游期间暂存的信号（establish 回调早于第一个订阅者加入）；deliver 按 cursor 过滤并缓冲到激活。
         for (Signal signal : state.early) {
@@ -355,7 +354,7 @@ final class ApplicationEventHub implements AutoCloseable {
         if (state.earlyCollapsed) {
           return;
         }
-        if (state.early.size() >= maxBufferedSignals) {
+        if (state.early.size() >= maxBufferedSignals.getAsInt()) {
           state.early.clear();
           state.early.add(new Signal.Resync());
           state.earlyCollapsed = true;

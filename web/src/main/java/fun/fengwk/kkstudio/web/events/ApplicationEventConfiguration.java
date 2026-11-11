@@ -40,6 +40,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Supplier;
 
 /** 事件通道组合：严格帧 codec 与传输无关的 {@link ApplicationEventHub}。 */
 @Configuration(proxyBeanMethods = false)
@@ -50,19 +51,18 @@ public class ApplicationEventConfiguration {
     return new EventFrameCodec(new RealtimeEventJsonCodec());
   }
 
-  /**
-   * 浏览器事件通道的软策略快照：读取共享启动快照 {@link SystemSettingsSnapshot} 的 SystemSettings.Advanced {@code
-   * applicationEvent*} 字段（装配期一次 DB 读取，DB 变更需重启生效），供 Hub 缓冲上限、发送队列上界、send timeout 与 heartbeat 间隔使用。
-   */
+  /** 浏览器事件通道设置在每次使用时从共享 {@link SystemSettingsSnapshot} 读取；每条新 WebSocket 连接将其当前配置冻结为连接级快照。 */
   @Bean
-  public ApplicationEventSettings applicationEventSettings(
+  public Supplier<ApplicationEventSettings> applicationEventSettingsProvider(
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
-    return new ApplicationEventSettings(
-        advanced.applicationEventQueueCapacity(),
-        advanced.applicationEventMaxBytes(),
-        advanced.applicationEventSendTimeoutMillis(),
-        advanced.applicationEventHeartbeatIntervalMillis());
+    return () -> {
+      SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+      return new ApplicationEventSettings(
+          advanced.applicationEventQueueCapacity(),
+          advanced.applicationEventMaxBytes(),
+          advanced.applicationEventSendTimeoutMillis(),
+          advanced.applicationEventHeartbeatIntervalMillis());
+    };
   }
 
   /** 全应用共享一个专用 PostgreSQL connection，固定监听全部低延迟通知 channel。 */
@@ -82,7 +82,6 @@ public class ApplicationEventConfiguration {
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     HarnessNotificationBinding threadVersions = harnessNotifications.threadVersionsNotification();
     HarnessNotificationBinding executionTree = harnessNotifications.executionTreeNotification();
     HarnessNotificationBinding interactions = harnessNotifications.interactionsNotification();
@@ -153,8 +152,12 @@ public class ApplicationEventConfiguration {
             // 10. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
             // 建连/重连时同样 resync，通知丢失由周期对账追平
             pluginCatalogNotificationHandler),
-        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
-        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().postgresqlWorkNotificationPollMillis()),
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().postgresqlWorkReconnectBackoffMillis()));
   }
 
   /** 流式增量使用独立 LISTEN 连接：realtime 的高频小帧与 durable work / 失效提示互不阻塞，重连也只 resync 实时订阅。 */
@@ -164,21 +167,24 @@ public class ApplicationEventConfiguration {
       RealtimeBus realtimeBus,
       HarnessStreamCatchupService streamCatchupService,
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return createRealtimeNotificationLoop(
         dataSource,
         realtimeBus,
         streamCatchupService,
-        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
-        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().postgresqlWorkNotificationPollMillis()),
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().postgresqlWorkReconnectBackoffMillis()));
   }
 
   static PostgresqlNotificationLoop createRealtimeNotificationLoop(
       DataSource dataSource,
       RealtimeBus realtimeBus,
       HarnessStreamCatchupService streamCatchupService,
-      Duration notificationPollInterval,
-      Duration reconnectBackoff) {
+      Supplier<Duration> notificationPollIntervalProvider,
+      Supplier<Duration> reconnectBackoffProvider) {
     return new PostgresqlNotificationLoop(
         dataSource,
         List.of(
@@ -192,8 +198,8 @@ public class ApplicationEventConfiguration {
                 HarnessStreamCatchupService.CHANNEL,
                 streamCatchupService::onNotification,
                 () -> {})),
-        notificationPollInterval,
-        reconnectBackoff);
+        notificationPollIntervalProvider,
+        reconnectBackoffProvider);
   }
 
   @Bean
@@ -213,7 +219,7 @@ public class ApplicationEventConfiguration {
       CanvasVersionEventSource canvasVersionSource,
       ProjectChangeNotifications projectChangeNotifications,
       EnvironmentChangeNotifications environmentChangeNotifications,
-      ApplicationEventSettings settings) {
+      Supplier<ApplicationEventSettings> settingsProvider) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
@@ -221,7 +227,7 @@ public class ApplicationEventConfiguration {
         canvasVersionSource,
         projectChangeNotifications,
         environmentChangeNotifications,
-        settings.queueCapacity());
+        () -> settingsProvider.get().queueCapacity());
   }
 
   /** 全应用事件连接共享一个 heartbeat scheduler；每次 tick 只做异步发送队列入队。 */

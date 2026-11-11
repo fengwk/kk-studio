@@ -8,38 +8,30 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** ThreadProcessorConfig 部署配置校验：至少 1ms 的正 resolveFailureDelay、非空 compaction。 */
+/** ThreadProcessorConfig 的动态 resolve 延迟 provider 与必需依赖校验。 */
 class ThreadProcessorConfigTest {
 
   private static final CompactionConfig COMPACTION = new CompactionConfig(20_000);
 
   @Test
-  void acceptsMillisecondResolutionDelay() {
-    ThreadProcessorConfig config =
-        new ThreadProcessorConfig(Duration.ofMillis(7_500), () -> COMPACTION);
-    assertEquals(Duration.ofMillis(7_500), config.resolveFailureDelay());
-    assertEquals(COMPACTION, config.compactionProvider().compactionConfig());
+  void resolveFailureDelayProviderUsesTheCurrentValue() {
+    AtomicReference<Duration> current = new AtomicReference<>(Duration.ofMillis(10));
+    ThreadProcessorConfig config = new ThreadProcessorConfig(current::get, () -> COMPACTION);
+    assertEquals(Duration.ofMillis(10), config.resolveFailureDelayProvider().get());
+
+    current.set(Duration.ofMillis(25));
+
+    assertEquals(Duration.ofMillis(25), config.resolveFailureDelayProvider().get());
   }
 
   @Test
-  void rejectsMissingOrNonPositiveResolveFailureDelay() {
+  void rejectsNullProviders() {
     assertThrows(
         NullPointerException.class, () -> new ThreadProcessorConfig(null, () -> COMPACTION));
-    for (Duration delay :
-        new Duration[] {
-          Duration.ZERO, Duration.ofMillis(-1), Duration.ofNanos(999_999), Duration.ofSeconds(-5)
-        }) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new ThreadProcessorConfig(delay, () -> COMPACTION),
-          "delay " + delay);
-    }
-  }
-
-  @Test
-  void rejectsNullCompactionConfigProvider() {
     assertThrows(
-        NullPointerException.class, () -> new ThreadProcessorConfig(Duration.ofSeconds(1), null));
+        NullPointerException.class,
+        () -> new ThreadProcessorConfig(() -> Duration.ofSeconds(1), null));
   }
 }
