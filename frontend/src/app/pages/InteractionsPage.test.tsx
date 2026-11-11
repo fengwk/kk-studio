@@ -101,6 +101,7 @@ describe('InteractionsPage', () => {
           toolName: 'bash',
           argumentsJson: '{"command":"ls"}',
           approval: { required: true, reason: '列目录' },
+          queuedSameFileCount: 0,
           createdAt: 1790503560000,
         },
       ],
@@ -116,6 +117,38 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('Agent 任务 · reporter').closest('button')).toBeNull()
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(mockedNavigate).not.toHaveBeenCalled()
+  })
+
+  // 测试意图：相同 sessionId 的事项属于一个会话组，且组内按新到旧排列并可进入根会话。
+  it('groups pending items by session and sorts items newest first', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
+      items: [
+        {
+          type: 'APPROVAL', toolInvocationId: 'older', threadId: 'thread-older',
+          rootThreadId: 'root-session', sessionId: 'session-1',
+          owner: { kind: 'CHAT', id: 'chat-1', title: '同一会话', link: '/chats/chat-1' },
+          toolCallId: 'call-older', toolName: 'plugin_a', argumentsJson: '{"value":"old"}',
+          approval: { required: true }, queuedSameFileCount: 0, createdAt: 100,
+        },
+        {
+          type: 'APPROVAL', toolInvocationId: 'newer', threadId: 'thread-newer',
+          rootThreadId: 'root-session', sessionId: 'session-1',
+          owner: { kind: 'CHAT', id: 'chat-1', title: '同一会话', link: '/chats/chat-1' },
+          toolCallId: 'call-newer', toolName: 'plugin_b', argumentsJson: '{"value":"new"}',
+          approval: { required: true }, queuedSameFileCount: 0, createdAt: 200,
+        },
+      ],
+      nextCursor: null, total: 2, freshnessAt: null,
+    })
+
+    const { container } = render(<InteractionsPage />, { wrapper })
+    expect(await screen.findByRole('heading', { name: '同一会话' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '会话: 同一会话' })).toHaveAttribute('href', '/threads/root-session')
+    expect(container.querySelectorAll('.interactions-session-group')).toHaveLength(1)
+    expect(screen.getByText('new')).toBeInTheDocument()
+    expect(screen.getByText('old')).toBeInTheDocument()
+    expect(Array.from(container.querySelectorAll('.interaction-approval-tool-name')).map((node) => node.textContent))
+      .toEqual(['plugin_b', 'plugin_a'])
   })
 
   it('renders error state and retries on button click', async () => {
@@ -173,6 +206,7 @@ describe('InteractionsPage', () => {
           toolName: 'write',
           argumentsJson: '{"path":"main.ts"}',
           approval: { required: true, reason: '写代码' },
+          queuedSameFileCount: 2,
           createdAt: 1790503500000,
         },
       ],
@@ -197,6 +231,7 @@ describe('InteractionsPage', () => {
     // 验证审批内容存在
     expect(screen.getByText('write')).toBeInTheDocument()
     expect(screen.getByText('写代码')).toBeInTheDocument()
+    expect(screen.getByText('处理后，此文件还有 2 个修改将依次请求审批')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
     const chatSourceBtn = screen.getByRole('button', { name: 'Chat · 产品对话' })
@@ -219,6 +254,7 @@ describe('InteractionsPage', () => {
       status: 'READY',
       attempt: 1,
       toolCallId: 'call-2',
+      queuedBehindToolCallId: null,
       toolName: 'write',
       rendererKey: 'raw',
       environmentId: null,
@@ -297,6 +333,7 @@ describe('InteractionsPage', () => {
               toolName: 'shell',
               argumentsJson: '{"cmd":"ls"}',
               approval: { required: true },
+              queuedSameFileCount: 0,
               createdAt: 1790503200000,
             },
           ],

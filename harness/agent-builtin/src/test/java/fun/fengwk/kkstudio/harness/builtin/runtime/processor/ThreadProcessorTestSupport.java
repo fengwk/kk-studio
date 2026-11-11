@@ -700,6 +700,39 @@ public final class ThreadProcessorTestSupport {
     return toolId;
   }
 
+  static UUID seedReadyToolInvocation(
+      InMemoryBuiltinHarnessStore store,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID assistantEntryId,
+      int callIndex,
+      ToolCall call,
+      ToolBinding binding) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          id,
+                          threadId,
+                          turnStartEntryId,
+                          assistantEntryId,
+                          callIndex,
+                          call,
+                          binding,
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          NOW,
+                          NOW)));
+          return id;
+        });
+  }
+
   public static ClaimedWork claimThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return claimThreadWork(store, threadId, NOW);
   }
@@ -935,6 +968,23 @@ public final class ThreadProcessorTestSupport {
             null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
+  }
+
+  static ToolBinding environmentBinding(String name) {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            name,
+            "description of " + name,
+            name,
+            new InputSchema("arguments", Map.of(), Set.of(), true),
+            ToolSideEffect.IDEMPOTENT,
+            Duration.ofSeconds(30));
+    return new ToolBinding(
+        new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
+        new ContributorBinding("core", name),
+        EnvironmentSupport.ROUTED,
+        ENV_ID,
+        "dev");
   }
 
   static ModelRequestSpec tooledRequest(List<String> toolNames) {

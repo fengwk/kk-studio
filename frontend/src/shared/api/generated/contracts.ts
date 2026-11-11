@@ -1665,6 +1665,7 @@ export interface InteractionApproval {
   toolName: string
   argumentsJson: string
   approval?: unknown | null
+  queuedSameFileCount: number
   createdAt: number
 }
 
@@ -2967,6 +2968,7 @@ export interface ToolInvocationDTO {
   status: ToolInvocationStatus
   attempt: number
   toolCallId: string
+  queuedBehindToolCallId: string | null
   toolName: string
   rendererKey: string
   environmentId: string | null

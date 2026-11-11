@@ -17,8 +17,19 @@ type CapabilityCall struct {
 	Arguments      json.RawMessage
 	TimeoutMillis  int64
 	MaxOutputBytes int64
+	ImageInputTier ImageInputTier
 	ExpectedFile   *ExpectedFile
 }
+
+// ImageInputTier is the image scaling tier carried by each INVOKE; it selects the box that
+// local images are scaled into before they leave the daemon.
+type ImageInputTier string
+
+const (
+	ImageInputTierP720     ImageInputTier = "P720"
+	ImageInputTierP1080    ImageInputTier = "P1080"
+	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
+)
 
 // ExpectedFile identifies a user-approved file snapshot for fs.edit.
 type ExpectedFile struct {

@@ -12,6 +12,10 @@
   align-items: center;
 }
 
+.group-member-row .ui-select-value {
+  white-space: nowrap;
+}
+
 .group-member-index {
   color: var(--fg-muted);
   text-align: center;

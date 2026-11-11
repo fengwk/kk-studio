@@ -264,6 +264,69 @@ class InteractionQueryServiceTest {
     verify(ownership, times(1)).findOwner(threadId2, sessionId2);
   }
 
+  /** 测试意图：只统计同一 Assistant、同一 Environment、同一归一化文件路径上仍未结束的后继审批调用。 */
+  @Test
+  void approvalProjectsUnfinishedSameFileSuccessorsOnly() {
+    UUID sessionId = id(60);
+    UUID threadId = id(61);
+    Instant createdAt = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction row =
+        new PendingInteraction(
+            id(64),
+            threadId,
+            sessionId,
+            ToolInvocationStatus.WAITING_APPROVAL,
+            "call-1",
+            "edit",
+            "{\"path\":\"/a/b\"}",
+            "{}",
+            createdAt);
+    stubRoot(threadId);
+    stubOwner(threadId, sessionId, "CHAT", id(65), "chat");
+
+    when(runtime.countQueuedSameFileMutationsAfter(id(64))).thenReturn(1);
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
+
+    InteractionDTO.Approval approval =
+        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+
+    assertEquals(1, approval.queuedSameFileCount());
+    verify(runtime).countQueuedSameFileMutationsAfter(id(64));
+    verify(runtime, never()).getThreadSnapshot(threadId);
+  }
+
+  /** 非文件修改审批无需读取 Thread 快照或查询同文件排队项。 */
+  @Test
+  void nonFileMutationApprovalSkipsQueueCountQuery() {
+    UUID sessionId = id(80);
+    UUID threadId = id(81);
+    PendingInteraction row =
+        new PendingInteraction(
+            id(82),
+            threadId,
+            sessionId,
+            ToolInvocationStatus.WAITING_APPROVAL,
+            "call",
+            "deploy_service",
+            "{}",
+            "{}",
+            Instant.parse("2026-03-01T10:00:00Z"));
+    stubRoot(threadId);
+    stubOwner(threadId, sessionId, "CHAT", id(83), "chat");
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
+
+    InteractionDTO.Approval dto =
+        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+
+    assertEquals(0, dto.queuedSameFileCount());
+    verify(runtime, never()).countQueuedSameFileMutationsAfter(any());
+    verify(runtime, never()).getThreadSnapshot(threadId);
+  }
+
   /**
    * 测试意图：验证没有直接产品绑定的后代来源仍可见——服务端回读根快照取得根 Session 并解析出根产品归属，DTO 保留原始子 threadId/sessionId，另以
    * rootThreadId 指向真实根。

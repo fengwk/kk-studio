@@ -156,9 +156,10 @@ Thread / Tool claim 由内核 Processor 处理；Driver 注册的 Work 处理器
 
 [`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 校验 claim 与准入后取执行树锁，按分类结果行动：
 
-- `GENERATION_TERMINAL_PENDING`：写入 Assistant / Error / Compaction 结果；关闭回合或进入 Tool 阶段。
+- `GENERATION_TERMINAL_PENDING`：写入 Assistant / Error / Compaction 结果；关闭回合或进入 Tool 阶段。进入 Tool 阶段时，无键调用照常派发；同一批 Environment `edit` / `write` 按 Environment 与绝对路径词法键仅派发每个键的首个未结束调用。
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool 结果，追加 `TURN_END(continueModel=true)`，删除调用行。
-- `GENERATION_ACTIVE` / `TOOL_ACTIVE`：外部执行仍在进行，归还 claim。
+- `TOOL_ACTIVE`：每次 THREAD 唤醒都重查批次；对每个文件键，在没有 TOOL Work 的情况下派发首个 `READY`、attempt 为 0 且审批为空的调用。前项结束事务请求 THREAD Work，故后继派发与唤醒同事务提交，可在进程重启后恢复；无键调用不改变既有派发行为。
+- `GENERATION_ACTIVE`：外部执行仍在进行，归还 claim。
 - `CONTINUATION_DUE` / `IDLE_OR_HISTORICAL`：先处理适用的自动压缩；有排队输入或通知需求时启动 `INPUT` 回合并一次性消费冻结 cutoff 内的完整队列，否则偿还续写义务或直接完成。
 
 需要规划的回合在单个事务内完成：锁 Thread、捕获命令快照、构造只存在于内存的 candidate 路径，同步调用 Driver 解析，机械校验其结果与 candidate 一致后提交 `TURN_START`、消息、命令标记与 Driver 私有 generation。只有显式的 `TurnResolveTransientException` 在回滚后按失败延迟重排，其它解析失败落 durable `FAILED` 终态，绝不静默丢失 Work。回合规划、Driver 状态机推进与钩子语义详见 [Agent Driver](#agent-driver)。
@@ -306,11 +307,12 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 ## 子智能体委派与 Join
 
-内置 `task` 工具只做一次持久接受：平台经 `AgentTaskService` 调用统一 `spawn`，在同一事务接受源 prompt、创建或续用子 Thread、写入 Join 票据并请求 Work，然后立即回执 `Task accepted. thread_id: <uuid>.`。子结果不经过工具返回，而是在子执行收敛后作为父 Thread 的一条系统通知交付。
+内置 `task` 工具经 `AgentTaskService` 调用统一 `spawn`，在同一事务接受源 prompt、创建或续用子 Thread、写入 Join 票据并请求 Work。工具固定等待 Join 冻结后，把报告或明确失败/取消原因作为本次 tool result 返回；异步任务仍使用同一持久接受路径并保留父通知链。
 
-`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号（并发额度由 `delivery == NOTIFY_PARENT` 直接推导，不设独立字段）。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/join/JoinDelivery.java) 有三种：
+`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号。子任务并发额度由 `NOTIFY_PARENT` 与 `SETTLE_TOOL_RESULT` 的未完成 Join 直接推导，不设独立字段。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/join/JoinDelivery.java) 有四种：
 
-- `NOTIFY_PARENT`：task 子执行，计入额度；同一事务校验父可接受本次调用、父 head 匹配与深度/并发额度，父已 `STOPPED` 时拒绝新委派。续用只能向既有子追加 prompt，不能改父关系。
+- `NOTIFY_PARENT`：异步子任务，计入额度；同一事务校验父可接受本次调用、父 head 匹配与深度/并发额度，父已 `STOPPED` 时拒绝新委派。子完成后冻结结果并向父投递 `SUBAGENT_RESULT` 通知。续用只能向既有子追加 prompt，不能改父关系。
+- `SETTLE_TOOL_RESULT`：同步 task 子任务，计入额度；Join 结算只冻结结果并唤醒父，不生成异步通知。等待中的工具线程重读固定 Join 并返回其收据。
 - `RECEIPT_ONLY`：没有父的内部 root 任务，不计额度，只供票据观察。
 - `SETTLE_OWNER_TURN`：压缩等运行时子执行，不计额度，结算后只唤醒父 Thread 的 open 回合；父已 `STOPPED` 时只推进一次 owner `version` 使结算后的派生状态可见，不请求 Work、不自动恢复执行。
 
@@ -393,7 +395,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 
 每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时只过滤 `REQUIRED` 工具（`bash` 与 LSP），文件工具始终可见。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`vfs:` 路径调用 [`VfsGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/VfsGateway.java)，绝对路径委托 `BoundEnvironment`，没有绑定环境时非 `vfs:` 路径返回「未执行」并提示会话目录。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行。
 
-[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给只接受、不等待的 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期与异步委派的行为契约见 [内置工具与异步委派](builtin-tools.md)。
+[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；模型固定以 `async=false` 等待 Join 冻结结果。等待仅发生在独立工具执行线程：Join 终态事务通过子 Thread version change 唤醒该线程，线程重读固定 Join 并投影 ToolResult，不阻塞事务或调度线程。父 Stop 中断等待并将 task Invocation 持久结算为 CANCELLED。[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期、同步 task 与保留的异步通知契约见 [内置工具](builtin-tools.md)。
 
 ## Prompt 模板
 

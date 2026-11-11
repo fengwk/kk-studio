@@ -115,16 +115,17 @@ describe('parseTaskReceipt', () => {
     expect(parseTaskReceipt({ kind: 'task.accepted', thread_id: 123 })).toBeNull()
   })
 
-  it('strictly rejects non-task.accepted kind and avoids accepted vs completed confusion', () => {
-    // 终态 completed 或其他 kind 绝不是受理收据，必须返回 null
+  it('accepts only known task.result terminal statuses', () => {
+    for (const status of ['running', 'completed', 'failed', 'cancelled'] as const) {
+      expect(
+        parseTaskReceipt({ kind: 'task.result', status, thread_id: '00000000-0000-0000-0000-000000000004' }),
+      ).toEqual({ status, threadId: '00000000-0000-0000-0000-000000000004' })
+    }
+    expect(
+      parseTaskReceipt({ kind: 'task.result', status: 'unexpected', thread_id: '00000000-0000-0000-0000-000000000004' }),
+    ).toBeNull()
     expect(
       parseTaskReceipt({ kind: 'task.completed', thread_id: '00000000-0000-0000-0000-000000000004' }),
-    ).toBeNull()
-    expect(
-      parseTaskReceipt({ kind: 'task.error', thread_id: '00000000-0000-0000-0000-000000000004' }),
-    ).toBeNull()
-    expect(
-      parseTaskReceipt({ kind: 'task.cancelled', thread_id: '00000000-0000-0000-0000-000000000004' }),
     ).toBeNull()
     // 缺少 kind='task.accepted' 的 details 不是受理收据。
     expect(
@@ -282,6 +283,26 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行|已完成|报告/)).not.toBeInTheDocument()
+  })
+
+  it('renders the synchronous terminal report', () => {
+    render(
+      <MemoryRouter>
+        <TaskToolRenderer
+          message={message({
+            phase: 'result',
+            status: 'done',
+            details: {
+              kind: 'task.result',
+              status: 'completed',
+              thread_id: '00000000-0000-0000-0000-000000000202',
+            },
+            contents: [{ type: 'text', text: 'subagent report: work completed' }],
+          })}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('subagent report: work completed')).toBeInTheDocument()
   })
 
   it('falls back to the full contents when details is missing or invalid', () => {

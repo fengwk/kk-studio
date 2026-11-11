@@ -295,6 +295,11 @@ public final class HarnessRuntimeTestSupport {
   /** 无 Model 父行的完整多工具批次，调用顺序与 sibling 序号一致。 */
   static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
       InMemoryHarnessStore store, int toolCount) {
+    return seedModelFreeToolBaseline(store, toolCount, "bash");
+  }
+
+  static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
+      InMemoryHarnessStore store, int toolCount, String toolName) {
     if (toolCount <= 0) {
       throw new IllegalArgumentException("toolCount must be positive");
     }
@@ -327,7 +332,11 @@ public final class HarnessRuntimeTestSupport {
           tx.entries()
               .insert(
                   new Entry(
-                      assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), T1));
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      assistantPayload(toolName, callIds),
+                      T1));
           List<UUID> toolIds = new ArrayList<>(toolCount);
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
           for (int i = 0; i < toolCount; i++) {
@@ -335,7 +344,14 @@ public final class HarnessRuntimeTestSupport {
             toolIds.add(toolId);
             invocations.add(
                 toolInvocation(
-                    toolId, threadId, turnStartEntryId, assistantEntryId, i, callIds[i], T1));
+                    toolId,
+                    threadId,
+                    turnStartEntryId,
+                    assistantEntryId,
+                    i,
+                    callIds[i],
+                    T1,
+                    toolName));
           }
           tx.tools().insert(invocations);
           tx.threads().update(thread.advanceHead(assistantEntryId, T2));
@@ -734,9 +750,13 @@ public final class HarnessRuntimeTestSupport {
   }
 
   static MessagePayload assistantPayload(String... toolCallIds) {
+    return assistantPayload("bash", toolCallIds);
+  }
+
+  private static MessagePayload assistantPayload(String toolName, String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
+      contents.add(new ToolCallMessageContent(toolCallId, toolName, toolName, "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     GenerationStopReason stopReason =
@@ -837,14 +857,32 @@ public final class HarnessRuntimeTestSupport {
       int callIndex,
       String toolCallId,
       Instant createdAt) {
+    return toolInvocation(
+        id, threadId, turnStartEntryId, assistantEntryId, callIndex, toolCallId, createdAt, "bash");
+  }
+
+  static ToolInvocation toolInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID assistantEntryId,
+      int callIndex,
+      String toolCallId,
+      Instant createdAt,
+      String toolName) {
     return new ToolInvocation(
         id,
         threadId,
         turnStartEntryId,
         assistantEntryId,
         callIndex,
-        new ToolCall(toolCallId, "bash", "{}"),
-        hostBinding(),
+        new ToolCall(toolCallId, toolName, "{}"),
+        new ToolBinding(
+            toolDefinition(toolName),
+            new ContributorBinding("core", toolName),
+            EnvironmentSupport.NONE,
+            null,
+            null),
         ToolInvocationStatus.READY,
         0,
         null,
