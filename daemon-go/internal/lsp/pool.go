@@ -20,11 +20,16 @@ type poolEntry struct {
 	timer    *time.Timer
 }
 type boot struct {
-	done    chan struct{}
-	cancel  context.CancelFunc
-	client  *Client
-	err     error
-	waiters int
+	done      chan struct{}
+	cancel    context.CancelFunc
+	client    *Client
+	err       error
+	waiters   int
+	retryable bool
+}
+type retirement struct {
+	done chan struct{}
+	err  error
 }
 
 // Pool reuses one LSP client per structured workspace/server configuration key.
@@ -35,7 +40,7 @@ type Pool struct {
 	options   PoolOptions
 	entries   map[string]*poolEntry
 	boots     map[string]*boot
-	retiring  map[string]error
+	retiring  map[string]*retirement
 	closing   bool
 	closeDone chan struct{}
 	closeErr  error
@@ -57,7 +62,7 @@ func NewPool(discovery *Discovery, processes native.Supervisor, options PoolOpti
 	if options.InitializeTimeout == 0 {
 		options.InitializeTimeout = 180 * time.Second
 	}
-	return &Pool{discovery: discovery, processes: processes, options: options, entries: map[string]*poolEntry{}, boots: map[string]*boot{}, retiring: map[string]error{}, closeDone: make(chan struct{})}
+	return &Pool{discovery: discovery, processes: processes, options: options, entries: map[string]*poolEntry{}, boots: map[string]*boot{}, retiring: map[string]*retirement{}, closeDone: make(chan struct{})}
 }
 func poolKey(root string, server ServerConfig) string {
 	b, _ := json.Marshal([]any{root, server.ID, server.Command, server.Extensions, server.RootMarkers, server.FirstMatchMarkers})
@@ -83,9 +88,20 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 			p.mu.Unlock()
 			return nil, &LspError{Message: "LSP service is closed"}
 		}
-		if failure, ok := p.retiring[key]; ok && failure != nil {
+		if old, ok := p.retiring[key]; ok {
 			p.mu.Unlock()
-			return nil, failure
+			select {
+			case <-ctx.Done():
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+				}
+				return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+			case <-old.done:
+				if old.err != nil {
+					return nil, old.err
+				}
+				continue
+			}
 		}
 		if entry := p.entries[key]; entry != nil {
 			if entry.client.IsAlive() {
@@ -161,6 +177,7 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 				err = &LspBootstrapError{Message: err.Error(), Converged: false, Cause: errors.Join(err, stopErr)}
 			}
 		} else {
+			b.retryable = true
 			var be *LspBootstrapError
 			if errors.As(err, &be) {
 				be.Converged = true
@@ -175,7 +192,7 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 		b.client = client
 	} else if err != nil {
 		var be *LspBootstrapError
-		if errors.As(err, &be) && be.Converged {
+		if b.retryable || (errors.As(err, &be) && be.Converged) {
 			delete(p.boots, key)
 		}
 	}
@@ -207,15 +224,15 @@ func (p *Pool) retire(e *poolEntry) {
 		return
 	}
 	delete(p.entries, e.key)
-	p.retiring[e.key] = nil
+	r := &retirement{done: make(chan struct{})}
+	p.retiring[e.key] = r
 	p.mu.Unlock()
-	err := e.client.Stop(p.options.ShutdownGrace)
+	r.err = e.client.Stop(p.options.ShutdownGrace)
 	p.mu.Lock()
-	if err != nil {
-		p.retiring[e.key] = err
-	} else {
+	if r.err == nil {
 		delete(p.retiring, e.key)
 	}
+	close(r.done)
 	p.mu.Unlock()
 }
 func (p *Pool) Client(path string) *Client {
@@ -258,9 +275,15 @@ func (p *Pool) Close() error {
 		}
 		entries = append(entries, e)
 	}
+	retirements := make([]*retirement, 0, len(p.retiring))
+	for _, r := range p.retiring {
+		retirements = append(retirements, r)
+	}
 	p.entries = map[string]*poolEntry{}
 	p.mu.Unlock()
+
 	var failures []error
+	stopped := map[*Client]bool{}
 	for _, b := range boots {
 		<-b.done
 		if b.err != nil {
@@ -270,26 +293,31 @@ func (p *Pool) Close() error {
 			}
 			continue
 		}
-		if b.client != nil {
-			if e := b.client.Stop(p.options.ShutdownGrace); e != nil {
-				failures = append(failures, e)
+		if b.client != nil && !stopped[b.client] {
+			stopped[b.client] = true
+			if err := b.client.Stop(p.options.ShutdownGrace); err != nil {
+				failures = append(failures, err)
 			}
 		}
 	}
 	for _, e := range entries {
-		if err := e.client.Stop(p.options.ShutdownGrace); err != nil {
-			failures = append(failures, err)
+		if !stopped[e.client] {
+			stopped[e.client] = true
+			if err := e.client.Stop(p.options.ShutdownGrace); err != nil {
+				failures = append(failures, err)
+			}
 		}
 	}
-	p.mu.Lock()
-	for _, err := range p.retiring {
-		if err != nil {
-			failures = append(failures, err)
+	for _, r := range retirements {
+		<-r.done
+		if r.err != nil {
+			failures = append(failures, r.err)
 		}
 	}
 	if len(failures) > 0 {
 		p.closeErr = &LspCleanupError{Failures: failures}
 	}
+	p.mu.Lock()
 	close(p.closeDone)
 	p.mu.Unlock()
 	return p.closeErr

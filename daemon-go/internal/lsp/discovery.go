@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
@@ -25,8 +26,9 @@ type Support struct {
 
 // ResolverOptions permits deterministic executable resolution in tests.
 type ResolverOptions struct {
-	Windows             bool
-	Path, PathExt, Home string
+	Windows                      bool
+	Path, PathExt, Home          string
+	PathSet, PathExtSet, HomeSet bool
 }
 
 // ExecutableResolver resolves configured commands without launching them.
@@ -36,20 +38,20 @@ func NewExecutableResolver(options ResolverOptions) *ExecutableResolver {
 	if options.Windows == false && runtime.GOOS == "windows" {
 		options.Windows = true
 	}
-	if options.Path == "" {
+	if options.Path == "" && !options.PathSet {
 		options.Path = os.Getenv("PATH")
 	}
-	if options.PathExt == "" {
+	if options.PathExt == "" && !options.PathExtSet {
 		options.PathExt = os.Getenv("PATHEXT")
 	}
-	if options.Home == "" {
+	if options.Home == "" && !options.HomeSet {
 		options.Home, _ = os.UserHomeDir()
 	}
 	return &ExecutableResolver{options: options}
 }
 func (r *ExecutableResolver) expand(path string) string {
 	h := r.options.Home
-	for _, prefix := range []string{"~/", `~\\`, "$HOME/", "$HOME\\", "${HOME}/", "${HOME}\\"} {
+	for _, prefix := range []string{"~/", "~\\", "$HOME/", "$HOME\\", "${HOME}/", "${HOME}\\"} {
 		if strings.HasPrefix(path, prefix) {
 			return filepath.Join(h, path[len(prefix):])
 		}
@@ -86,8 +88,6 @@ func (r *ExecutableResolver) Resolve(command string) (string, bool) {
 		candidates := []string{command}
 		if r.options.Windows {
 			ext := strings.ToLower(filepath.Ext(command))
-			suffixes := []string{strings.ToLower(filepath.Ext("x" + ext))}
-			_ = suffixes
 			pathext := r.options.PathExt
 			if pathext == "" {
 				pathext = ".EXE;.CMD;.BAT;.COM"
@@ -150,6 +150,7 @@ func (r *ExecutableResolver) executable(path string) (string, bool) {
 type Discovery struct {
 	servers    []ServerConfig
 	resolver   *ExecutableResolver
+	mu         sync.Mutex
 	executable map[string]resolution
 }
 type resolution struct {
@@ -207,6 +208,8 @@ func (d *Discovery) Server(path string) (ServerConfig, bool) {
 	return ServerConfig{}, false
 }
 func (d *Discovery) Executable(s ServerConfig) (string, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if len(s.Command) == 0 {
 		return "", false
 	}

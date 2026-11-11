@@ -19,34 +19,46 @@ const maxBannerBytes = 8192
 type lspCodec struct{ first bool }
 
 func newLSPCodec() *lspCodec { return &lspCodec{first: true} }
+
 func (c *lspCodec) ReadObject(r *bufio.Reader, value any) error {
 	var header []byte
+	if c.first {
+		const marker = "content-length:"
+		window := make([]byte, 0, len(marker))
+		bannerBytes := 0
+		for {
+			b, err := r.ReadByte()
+			if err != nil {
+				if bannerBytes+len(window) > maxBannerBytes {
+					return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
+				}
+				return err
+			}
+			window = append(window, b)
+			if len(window) > len(marker) {
+				window = window[1:]
+				bannerBytes++
+				if bannerBytes > maxBannerBytes {
+					return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
+				}
+			}
+			if strings.EqualFold(string(window), marker) {
+				header = append(header, window...)
+				break
+			}
+		}
+		c.first = false
+	}
 	for {
-		line, err := r.ReadBytes('\n')
+		b, err := r.ReadByte()
 		if err != nil {
 			return err
 		}
-		if c.first {
-			lower := bytes.ToLower(line)
-			if !bytes.HasPrefix(bytes.TrimSpace(lower), []byte("content-length:")) {
-				if len(header)+len(line) > maxBannerBytes {
-					return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
-				}
-				continue
-			}
-			c.first = false
-		}
-		header = append(header, line...)
-		if bytes.Equal(bytes.TrimSpace(line), nil) {
-			break
-		}
+		header = append(header, b)
 		if len(header) > 64*1024 {
 			return errors.New("invalid LSP message header")
 		}
-		if len(line) == 2 && line[0] == '\r' && line[1] == '\n' {
-			break
-		}
-		if len(line) == 1 && line[0] == '\n' {
+		if bytes.HasSuffix(header, []byte("\r\n\r\n")) || bytes.HasSuffix(header, []byte("\n\n")) {
 			break
 		}
 	}
@@ -70,6 +82,7 @@ func (c *lspCodec) ReadObject(r *bufio.Reader, value any) error {
 	}
 	return json.Unmarshal(body, value)
 }
+
 func (c *lspCodec) WriteObject(w io.Writer, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {

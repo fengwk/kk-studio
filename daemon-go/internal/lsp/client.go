@@ -175,6 +175,8 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		return &LspError{Message: "LSP client stopped"}
 	}
 	id := c.requestID.Add(1)
+	started := time.Now()
+	deadline, hasDeadline := ctx.Deadline()
 	done := make(chan error, 1)
 	go func() { done <- c.conn.Call(ctx, method, params, result, jsonrpc2.PickID(jsonrpc2.ID{Num: id})) }()
 	select {
@@ -186,7 +188,13 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	case <-ctx.Done():
 		_ = c.conn.Notify(context.Background(), "$/cancelRequest", map[string]any{"id": id})
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+			message := fmt.Sprintf("LSP request timed out (%s).", method)
+			if hasDeadline {
+				if timeout := deadline.Sub(started); timeout > 0 {
+					message = fmt.Sprintf("LSP request timed out after %dms (%s).", timeout.Milliseconds(), method)
+				}
+			}
+			return &LspTimeoutError{Message: message, Cause: ctx.Err()}
 		}
 		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 	case <-c.exited:

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -90,7 +91,11 @@ func (c *Client) Position(path string, line, character int) (map[string]int, err
 	doc := c.documents[abs]
 	encoding := c.positionEncoding
 	c.mu.RUnlock()
-	lines := strings.Split(doc.text, "\n")
+	return documentPosition(doc.text, line, character, encoding)
+}
+
+func documentPosition(document string, line, character int, encoding string) (map[string]int, error) {
+	lines := strings.Split(document, "\n")
 	if line < 1 || line > len(lines) {
 		return nil, &LspError{Message: fmt.Sprintf("line %d is beyond the end of the synchronized document", line)}
 	}
@@ -140,36 +145,37 @@ func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int) 
 	}
 	return formatSymbols(result, limit)
 }
+
+var jdtURI = regexp.MustCompile(`jdt://\S+`)
+
 func (c *Client) JavaDecompile(ctx context.Context, target string) (string, error) {
 	var result string
 	var err error
-	if strings.HasPrefix(target, "jdt://") {
+	if match := jdtURI.FindString(target); match != "" {
 		if !c.jdtls {
 			return "", &LspError{Message: "lsp_java_decompile is only supported by jdtls."}
 		}
-		err = c.Call(ctx, "java/classFileContents", map[string]string{"uri": target}, &result)
+		err = c.Call(ctx, "java/classFileContents", map[string]string{"uri": match}, &result)
 	} else {
-		var uri string
-		if strings.HasPrefix(target, "file://") {
-			parsed, e := url.Parse(target)
+		localPath := strings.TrimSpace(target)
+		if strings.HasPrefix(localPath, "file:") {
+			parsed, e := url.Parse(localPath)
+			if e != nil || parsed.Scheme != "file" || parsed.Path == "" {
+				return "", &LspError{Message: "invalid class target URI: " + target}
+			}
+			decoded, e := url.PathUnescape(parsed.Path)
 			if e != nil {
-				return "", e
+				return "", &LspError{Message: "invalid class target URI: " + target}
 			}
-			uri = target
-			if parsed.Path == "" {
-				return "", fmt.Errorf("Could not load or decompile class for target: %s", target)
-			}
-		} else {
-			if !filepath.IsAbs(target) {
-				return "", &LspError{Message: "path must be an absolute path (a relative or non-absolute value was given)"}
-			}
-			info, e := os.Stat(target)
-			if e != nil || info.IsDir() {
-				return "", &LspError{Message: "path must exist: " + target}
-			}
-			uri = pathURI(target)
+			localPath = filepath.FromSlash(decoded)
+		} else if !filepath.IsAbs(localPath) {
+			return "", &LspError{Message: "target must be an absolute class path, a file: URI, or a jdt:// URI: " + target}
 		}
-		err = c.Call(ctx, "workspace/executeCommand", map[string]any{"command": "java.decompile", "arguments": []string{uri}}, &result)
+		info, e := os.Stat(localPath)
+		if e != nil || !info.Mode().IsRegular() {
+			return "", &LspError{Message: "target is not a readable class file: " + localPath}
+		}
+		err = c.Call(ctx, "workspace/executeCommand", map[string]any{"command": "java.decompile", "arguments": []string{pathURI(localPath)}}, &result)
 	}
 	if err != nil {
 		return "", err
@@ -228,6 +234,9 @@ func locationPath(value string) string {
 	return value
 }
 func formatSymbols(raw json.RawMessage, limit int) ([]string, error) {
+	if limit == 0 {
+		return []string{"No symbols found"}, nil
+	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return []string{"No symbols found"}, nil
 	}

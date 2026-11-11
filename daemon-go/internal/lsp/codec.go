@@ -53,7 +53,7 @@ func DecodeTextFile(data []byte) (DecodedText, error) {
 			if b == 0 {
 				return DecodedText{}, errors.New("file appears to be binary: contains NUL character")
 			}
-			if b < 0x20 && b != '\n' && b != '\r' && b != '\t' && b != '\f' {
+			if b < 0x09 || (b > 0x0d && b < 0x20 && b != 0x1b) {
 				return DecodedText{}, errors.New("file appears to be binary")
 			}
 		}
@@ -62,7 +62,6 @@ func DecodeTextFile(data []byte) (DecodedText, error) {
 		}
 		text = string(data)
 	}
-	text = strings.TrimPrefix(text, "\ufeff")
 	text = strings.TrimPrefix(text, "\ufeff")
 	for _, r := range text {
 		if r == 0 {

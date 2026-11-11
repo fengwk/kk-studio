@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -76,5 +75,3 @@ func requestContext(ctx context.Context, timeout int64) (context.Context, contex
 	}
 	return context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 }
-func noServerError() error            { return &LspError{Message: "LSP is not configured for this environment"} }
-func inputError(message string) error { return fmt.Errorf("%s", message) }

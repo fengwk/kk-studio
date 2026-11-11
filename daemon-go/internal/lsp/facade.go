@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -190,6 +189,15 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 	if err != nil {
 		return fail(err.Error()), nil
 	}
+	if kind == "definition" {
+		info, statErr := os.Stat(realPath)
+		if statErr != nil {
+			return fail("path must exist: " + realPath), nil
+		}
+		if info.IsDir() {
+			return fail("path must be a file: " + realPath), nil
+		}
+	}
 	var line, character, limit int
 	var query, target string
 	switch kind {
@@ -343,5 +351,3 @@ func validatePath(path string) (string, error) {
 	}
 	return real, nil
 }
-
-var _ = fmt.Sprintf
