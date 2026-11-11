@@ -145,7 +145,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(locations) != 1 || locations[0] != "/tmp/target.go:3:4" {
+	if len(locations) != 1 || locations[0] != filepath.FromSlash("/tmp/target.go")+":3:4" {
 		t.Fatalf("locations = %v", locations)
 	}
 	if err = client.Stop(100 * time.Millisecond); err != nil {
