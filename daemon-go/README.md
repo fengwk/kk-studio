@@ -25,7 +25,11 @@ CGO_ENABLED=0 go test ./...
 
 The standard-library protobuf representation is also tested against all 28 binary fixtures under `platform/daemon-server/src/main/protocol/golden/`. Linux/macOS CI additionally runs `go test -race ./...`. The six cross-build targets are Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64. The GitHub Actions workflow `.github/workflows/daemon-go-ci.yml` runs these checks on the supported platform matrix.
 
-During this skeleton phase the executable supports `--help` and `--version`; `--config` and `--check-config` return explicit not-implemented errors until the runtime partition implements their behavior.
+The runtime partition implements CLI parsing, `--help`, `--version`, read-only `--check-config`, configuration validation, and an injected `RuntimeRunner` boundary for service execution. Final service assembly is completed when the feature partitions are integrated.
+
+### Runtime-partition behavior change
+
+**RUN-N-004 — `skill.install` contract.** Arguments are exactly `{"transferId":"<lowercase UUID>","package":"<name>","version":"<version>","skill":"<skill name>"}`. `package`, `version`, and `skill` must each be one safe path segment: nonempty, not `.` or `..`, no path separator, and no control character. The runtime downloads the ZIP through the `transferId` using `skill.ResourceDownloader`; the downloader validates ticket, size, and SHA-256. To avoid a repeated archive transfer for a matching installation, the downloader also exposes the verified ticket digest through `skill.ResourceDigestProvider`. Install into `<dataDir>/skills/<package>/<version>/`. Reuse an installation only when its recorded SHA-256 matches the verified ticket archive. Otherwise extract into a temporary directory and atomically publish after rejecting absolute/traversal paths, backslashes, and symlink entries. Limits are 10,000 archive entries, 128 MiB compressed bytes, and 512 MiB expanded bytes. Require `<package dir>/<skill>/SKILL.md`; return details `{"skill_dir":"<absolute installed skill directory>"}` and one English sentence. Failures return explicit English errors and must not report success.
 
 ## Package boundaries
 
