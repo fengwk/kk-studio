@@ -20,10 +20,14 @@ func TestResolver_AbsoluteHomePATHAndPATHEXT(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := NewExecutableResolver(ResolverOptions{Path: " ", PathSet: true, Home: home, HomeSet: true})
-	if got, ok := resolver.Resolve(tool); !ok || got != tool {
+	canonicalTool, err := filepath.EvalSymlinks(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := resolver.Resolve(tool); !ok || got != canonicalTool {
 		t.Fatalf("absolute resolution = %q %v", got, ok)
 	}
-	if got, ok := resolver.Resolve("~/bin/tool"); !ok || got != tool {
+	if got, ok := resolver.Resolve("~/bin/tool"); !ok || got != canonicalTool {
 		t.Fatalf("home resolution = %q %v", got, ok)
 	}
 	if _, ok := resolver.Resolve("relative/tool"); ok {
@@ -37,7 +41,11 @@ func TestResolver_AbsoluteHomePATHAndPATHEXT(t *testing.T) {
 		t.Fatal(err)
 	}
 	windows := NewExecutableResolver(ResolverOptions{Windows: true, Path: bin, PathSet: true, PathExt: ".CMD;.EXE", PathExtSet: true, Home: home, HomeSet: true})
-	if got, ok := windows.Resolve("tool"); !ok || got != cmd {
+	canonicalCommand, err := filepath.EvalSymlinks(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := windows.Resolve("tool"); !ok || got != canonicalCommand {
 		t.Fatalf("PATHEXT resolution = %q %v", got, ok)
 	}
 	if _, ok := windows.Resolve("tool.cmd"); !ok {

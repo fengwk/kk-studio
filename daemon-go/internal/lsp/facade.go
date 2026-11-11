@@ -111,7 +111,7 @@ type PreparedGeneration struct {
 	once       sync.Once
 }
 
-func (f *Facade) Prepare(servers map[string]config.LSPServerConfig) (*PreparedGeneration, error) {
+func (f *Facade) Prepare(servers []config.LSPServerConfig) (*PreparedGeneration, error) {
 	d, err := NewDiscovery(servers, ResolverOptions{})
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (p *PreparedGeneration) Retire() error {
 	<-p.generation.done
 	return p.generation.closeErr
 }
-func (f *Facade) Update(servers map[string]config.LSPServerConfig) error {
+func (f *Facade) Update(servers []config.LSPServerConfig) error {
 	p, err := f.Prepare(servers)
 	if err != nil {
 		return err

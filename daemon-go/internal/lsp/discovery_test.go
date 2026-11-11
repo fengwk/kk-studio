@@ -26,7 +26,7 @@ func TestDiscovery_MatchesAndResolves(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	d, err := NewDiscovery(map[string]config.LSPServerConfig{"java": {Command: []string{bin}, Extensions: []string{".java"}, RootMarkers: []string{"pom.xml"}}}, ResolverOptions{})
+	d, err := NewDiscovery([]config.LSPServerConfig{{ID: "java", Command: []string{bin}, Extensions: []string{".java"}, RootMarkers: []string{"pom.xml"}}}, ResolverOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

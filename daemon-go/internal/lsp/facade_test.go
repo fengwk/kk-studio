@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
@@ -13,11 +14,12 @@ func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	facade := NewFacade(supervisor, PoolOptions{})
 	confirmed := 0
+	missing := filepath.Join(t.TempDir(), "missing-source.java")
 	cases := []struct {
 		id   string
 		args string
 		want string
-	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", `{"path":"/missing","query":" "}`, "path does not exist: /missing"}, {"lsp.java-decompile", `{"path":"/missing","target":"x"}`, "path does not exist: /missing"}}
+	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", `{"path":"` + missing + `","query":" "}`, "path does not exist: " + missing}, {"lsp.java-decompile", `{"path":"` + missing + `","target":"x"}`, "path does not exist: " + missing}}
 	for _, tc := range cases {
 		call := runtime.CapabilityCall{InvocationID: "id", CapabilityID: tc.id, Arguments: json.RawMessage(tc.args)}
 		result, err := facade.Capabilities()[tc.id](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})

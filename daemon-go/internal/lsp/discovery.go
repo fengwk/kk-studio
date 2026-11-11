@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 
@@ -158,16 +157,10 @@ type resolution struct {
 	ok   bool
 }
 
-func NewDiscovery(configured map[string]config.LSPServerConfig, options ResolverOptions) (*Discovery, error) {
-	ids := make([]string, 0, len(configured))
-	for id := range configured {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	servers := make([]ServerConfig, 0, len(ids))
-	for _, id := range ids {
-		c := configured[id]
-		servers = append(servers, ServerConfig{ID: id, Command: append([]string(nil), c.Command...), Extensions: append([]string(nil), c.Extensions...), RootMarkers: append([]string(nil), c.RootMarkers...), FirstMatchMarkers: append([]string(nil), c.FirstMatchMarkers...)})
+func NewDiscovery(configured []config.LSPServerConfig, options ResolverOptions) (*Discovery, error) {
+	servers := make([]ServerConfig, len(configured))
+	for i, c := range configured {
+		servers[i] = ServerConfig{ID: c.ID, Command: c.Command, Extensions: c.Extensions, RootMarkers: c.RootMarkers, FirstMatchMarkers: c.FirstMatchMarkers}
 	}
 	return NewDiscoveryFromServers(servers, options)
 }

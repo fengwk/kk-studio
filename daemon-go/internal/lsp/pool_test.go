@@ -25,7 +25,7 @@ func TestPool_ReusesClient(t *testing.T) {
 	if err := os.WriteFile(file, []byte("package main\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	discovery, err := NewDiscovery(map[string]config.LSPServerConfig{"go": {Command: []string{executable}, Extensions: []string{".go"}}}, ResolverOptions{})
+	discovery, err := NewDiscovery([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}, ResolverOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
