@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -24,7 +23,7 @@ class ProviderStreamHandlerTest {
     ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
-            new ProviderReplayAffinity(ProviderType.OPENAI, "openai", UUID.randomUUID(), "gpt-5"),
+            new ProviderReplayAffinity(ProviderType.OPENAI, "openai", "gpt-5"),
             new ObjectMapper().createObjectNode());
     ProviderCompletion completion = new ProviderCompletion(sampleResponse(), replayState);
     AtomicReference<ProviderCompletion> captured = new AtomicReference<>();

@@ -170,10 +170,12 @@ class AnthropicThinkingTest {
         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_think_de\",\"usage\":{\"input_tokens\":14,\"output_tokens\":0}}}");
     accumulator.handleEvent(
         "content_block_start",
-        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Analyzing geography: \"}}");
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Analyzing"
+            + " geography: \"}}");
     accumulator.handleEvent(
         "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Berlin is the capital of Germany.\"}}");
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Berlin"
+            + " is the capital of Germany.\"}}");
     accumulator.handleEvent(
         "content_block_delta",
         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_berlin_valid_token\"}}");
@@ -183,7 +185,8 @@ class AnthropicThinkingTest {
         "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
     accumulator.handleEvent(
         "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"The capital of Germany is Berlin.\"}}");
+        "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"The"
+            + " capital of Germany is Berlin.\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
     accumulator.handleEvent(
         "message_delta",
@@ -311,10 +314,12 @@ class AnthropicThinkingTest {
     // Block 0: thinking
     accumulator.handleEvent(
         "content_block_start",
-        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"User wants weather in Munich. \"}}");
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"User"
+            + " wants weather in Munich. \"}}");
     accumulator.handleEvent(
         "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Calling getWeather tool.\"}}");
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Calling"
+            + " getWeather tool.\"}}");
     accumulator.handleEvent(
         "content_block_delta",
         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_tool_call_munich_999\"}}");
@@ -476,7 +481,8 @@ class AnthropicThinkingTest {
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
     accumulator.handleEvent(
         "content_block_start",
-        "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Quantum mechanics answer.\"}}");
+        "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Quantum"
+            + " mechanics answer.\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
     accumulator.handleEvent(
         "message_delta",
@@ -553,7 +559,8 @@ class AnthropicThinkingTest {
     // thinking block without signature delta
     accumulator.handleEvent(
         "content_block_start",
-        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Thinking without signature.\"}}");
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Thinking"
+            + " without signature.\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
     accumulator.handleEvent(
         "content_block_start",
@@ -616,10 +623,7 @@ class AnthropicThinkingTest {
     // 构造模型不一致的 affinity (例如来自 claude-haiku-4-5-20251001)
     ProviderReplayAffinity mismatchedAffinity =
         new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC,
-            "anthropic-thinking",
-            CONNECTION_GEN_ID,
-            "claude-haiku-4-5-20251001");
+            ProviderType.ANTHROPIC, "anthropic-thinking", "claude-haiku-4-5-20251001");
 
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
@@ -943,10 +947,12 @@ class AnthropicThinkingTest {
         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_minimax_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
     accumulator.handleEvent(
         "content_block_start",
-        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Thinking: \"}}");
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Thinking:"
+            + " \"}}");
     accumulator.handleEvent(
         "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Quantum states...\"}}");
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Quantum"
+            + " states...\"}}");
     accumulator.handleEvent(
         "content_block_delta",
         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_minimax_budget\"}}");
@@ -956,7 +962,8 @@ class AnthropicThinkingTest {
         "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
     accumulator.handleEvent(
         "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Superposition means...\"}}");
+        "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Superposition"
+            + " means...\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
     accumulator.handleEvent(
         "message_delta",

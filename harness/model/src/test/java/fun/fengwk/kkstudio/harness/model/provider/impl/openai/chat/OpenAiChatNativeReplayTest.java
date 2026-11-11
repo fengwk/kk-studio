@@ -90,6 +90,19 @@ class OpenAiChatNativeReplayTest {
   }
 
   @Test
+  void replayAffinityIgnoresConnectionGeneration() {
+    ProviderDescriptor nextConnection =
+        new ProviderDescriptor(
+            "openai",
+            ProviderType.OPENAI,
+            "https://api.openai.com/v1",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
+            UUID.randomUUID());
+
+    assertEquals(descriptor.affinity("gpt-4o-audio"), nextConnection.affinity("gpt-4o-audio"));
+  }
+
+  @Test
   @DisplayName("audio 仅回放 id；function_call / 未来字段可在次轮原样回放")
   void replaysProviderNativeAssistantFieldsThroughNextTurn() throws Exception {
     ProviderMessage turn1User =
@@ -667,15 +680,7 @@ class OpenAiChatNativeReplayTest {
         List.of(
             descriptor.affinity("another-model"),
             new ProviderReplayAffinity(
-                original.providerType(),
-                "other-provider",
-                original.connectionGenerationId(),
-                original.modelId()),
-            new ProviderReplayAffinity(
-                original.providerType(),
-                original.providerName(),
-                new UUID(0L, 1L),
-                original.modelId()))) {
+                original.providerType(), "other-provider", original.modelId()))) {
       JsonNode asst = assistantNode(wire(user, durable, other, payload));
       assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asString(""));
       assertFalse(asst.has("reasoning_content"));

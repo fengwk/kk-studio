@@ -1235,8 +1235,7 @@ class GeminiRequestEncoderTest {
 
     for (ProviderReplayAffinity mismatched :
         List.of(
-            new ProviderReplayAffinity(
-                ProviderType.GOOGLE, "other-provider", UUID.randomUUID(), "gemini-2.5-flash"),
+            new ProviderReplayAffinity(ProviderType.GOOGLE, "other-provider", "gemini-2.5-flash"),
             descriptor().affinity("gemini-2.5-pro"))) {
       ProviderReplayState replayState =
           new ProviderReplayState(ProviderReplayFormat.GEMINI_CONTENT, mismatched, validPayload);
@@ -1254,8 +1253,7 @@ class GeminiRequestEncoderTest {
   void replay_fallsBackToDurableSemanticsForNativeOnlyPartsWhenAffinityMismatches()
       throws Exception {
     ProviderReplayAffinity otherAffinity =
-        new ProviderReplayAffinity(
-            ProviderType.GOOGLE, "other-provider", UUID.randomUUID(), "gemini-2.5-flash");
+        new ProviderReplayAffinity(ProviderType.GOOGLE, "other-provider", "gemini-2.5-flash");
 
     // 1. thought part 携带 thoughtSignature：退回 durable 语义后不携带原生签名
     ObjectNode thoughtPayload = MAPPER.createObjectNode();

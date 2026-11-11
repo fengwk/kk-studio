@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * {@link ProviderReplayState} 的严格、确定性 JSON codec。
@@ -34,7 +33,7 @@ public final class ProviderReplayStateJsonCodec {
 
   private static final Set<String> ROOT_FIELDS = orderedSet("format", "affinity", "payload");
   private static final Set<String> AFFINITY_FIELDS =
-      orderedSet("providerType", "providerName", "connectionGenerationId", "modelId");
+      orderedSet("providerType", "providerName", "modelId");
 
   public String encode(ProviderReplayState state) {
     Objects.requireNonNull(state, "state");
@@ -78,7 +77,6 @@ public final class ProviderReplayStateJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("providerType", affinity.providerType().wireValue());
     node.put("providerName", affinity.providerName());
-    node.put("connectionGenerationId", affinity.connectionGenerationId().toString());
     node.put("modelId", affinity.modelId());
     return node;
   }
@@ -94,34 +92,9 @@ public final class ProviderReplayStateJsonCodec {
       throw new IllegalArgumentException("unsupported provider type");
     }
     String providerName = text(object, "providerName");
-    UUID connectionGenerationId;
-    try {
-      connectionGenerationId = canonicalUuid(object, "connectionGenerationId");
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("affinity.connectionGenerationId must be a valid UUID");
-    }
     String modelId = text(object, "modelId");
 
-    return new ProviderReplayAffinity(providerType, providerName, connectionGenerationId, modelId);
-  }
-
-  /**
-   * 持久化身份只接受 canonical UUID 文本（{@code UUID.toString()} 往返一致）。
-   *
-   * <p>harness-model 不依赖 common，且这里的异常会进入日志与诊断，因此不复用 common 的 {@code Uuids} 消息：错误只回报字段名，绝不回显输入值。
-   */
-  private static UUID canonicalUuid(ObjectNode node, String field) {
-    String value = text(node, field);
-    UUID parsed;
-    try {
-      parsed = UUID.fromString(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
-    }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
-    }
-    return parsed;
+    return new ProviderReplayAffinity(providerType, providerName, modelId);
   }
 
   private static JsonNode parse(String json) {

@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.List;
-import java.util.UUID;
 
 /** {@link ProviderReplayStateJsonCodec} 严格性、深拷贝与 toString 脱敏验证。 */
 class ProviderReplayStateJsonCodecTest {
@@ -45,8 +44,7 @@ class ProviderReplayStateJsonCodecTest {
     ProviderReplayState state =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
             payload);
 
     // 修改传入的原始 ObjectNode，不应影响 state 内部
@@ -64,15 +62,12 @@ class ProviderReplayStateJsonCodecTest {
     String sentinelPayload = "SENTINEL_PAYLOAD_SECRET_TOKEN_42";
     String sentinelProvider = "SENTINEL_PROVIDER_NAME_LEAK";
     String sentinelModel = "SENTINEL_MODEL_NAME_LEAK";
-    UUID sentinelGenerationId = UUID.fromString("12345678-1234-1234-1234-1234567890ab");
-
     ObjectNode payload = NODES.objectNode();
     payload.put("token", sentinelPayload);
     payload.put("data", "sensitive");
 
     ProviderReplayAffinity affinity =
-        new ProviderReplayAffinity(
-            ProviderType.OPENAI_RESPONSES, sentinelProvider, sentinelGenerationId, sentinelModel);
+        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, sentinelProvider, sentinelModel);
 
     ProviderReplayState state =
         new ProviderReplayState(ProviderReplayFormat.OPENAI_RESPONSES, affinity, payload);
@@ -83,9 +78,6 @@ class ProviderReplayStateJsonCodecTest {
     assertFalse(repr.contains("sensitive"), "state.toString() must not leak payload fields");
     assertFalse(repr.contains(sentinelProvider), "state.toString() must not leak providerName");
     assertFalse(repr.contains(sentinelModel), "state.toString() must not leak modelName");
-    assertFalse(
-        repr.contains(sentinelGenerationId.toString()),
-        "state.toString() must not leak connectionGenerationId");
     // 仅允许输出非敏感诊断字段：format 与 payload 大小
     assertTrue(repr.contains("format=" + ProviderReplayFormat.OPENAI_RESPONSES));
     assertTrue(repr.contains("payloadSize=2"));
@@ -96,9 +88,6 @@ class ProviderReplayStateJsonCodecTest {
         affinityRepr.contains(sentinelProvider), "affinity.toString() must not leak providerName");
     assertFalse(
         affinityRepr.contains(sentinelModel), "affinity.toString() must not leak modelName");
-    assertFalse(
-        affinityRepr.contains(sentinelGenerationId.toString()),
-        "affinity.toString() must not leak connectionGenerationId");
     assertTrue(affinityRepr.contains("providerType=" + ProviderType.OPENAI_RESPONSES));
   }
 
@@ -139,7 +128,6 @@ class ProviderReplayStateJsonCodecTest {
           "affinity": {
             "providerType": "anthropic",
             "providerName": "anthropic",
-            "connectionGenerationId": "00000000-0000-0000-0000-000000000001",
             "modelId": "claude-3-5"
           },
           "payload": {"key":"val"},
@@ -160,8 +148,7 @@ class ProviderReplayStateJsonCodecTest {
 
   @Test
   void rejectsMissingAffinityFields() {
-    for (String field :
-        List.of("providerType", "providerName", "connectionGenerationId", "modelId")) {
+    for (String field : List.of("providerType", "providerName", "modelId")) {
       ObjectNode node = (ObjectNode) codec.encodeNode(sampleState());
       ((ObjectNode) node.get("affinity")).remove(field);
       assertThrows(IllegalArgumentException.class, () -> codec.decode(node.toString()));
@@ -170,18 +157,6 @@ class ProviderReplayStateJsonCodecTest {
 
   @Test
   void rejectsInvalidAffinityValues() {
-    // 非法 UUID
-    ObjectNode badUuid = (ObjectNode) codec.encodeNode(sampleState());
-    ((ObjectNode) badUuid.get("affinity")).put("connectionGenerationId", "not-a-valid-uuid");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(badUuid.toString()));
-
-    // 大写变体可被 UUID.fromString 解析，但持久化身份只接受 canonical 文本。
-    ObjectNode nonCanonicalUuid = (ObjectNode) codec.encodeNode(sampleState());
-    ((ObjectNode) nonCanonicalUuid.get("affinity"))
-        .put("connectionGenerationId", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonCanonicalUuid.toString()));
-
-    // affinity 不是 Object
     ObjectNode badAffinityType = (ObjectNode) codec.encodeNode(sampleState());
     badAffinityType.put("affinity", "string");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(badAffinityType.toString()));
@@ -217,32 +192,25 @@ class ProviderReplayStateJsonCodecTest {
       assertEquals(format, ProviderReplayFormat.fromWireValue(format.name().toLowerCase()));
     }
 
-    UUID genId = UUID.randomUUID();
-    ProviderReplayAffinity affinity =
-        new ProviderReplayAffinity(ProviderType.OPENAI, "p", genId, "m");
+    ProviderReplayAffinity affinity = new ProviderReplayAffinity(ProviderType.OPENAI, "p", "m");
     assertTrue(affinity.toString().contains("providerType=OPENAI"));
     assertEquals(ProviderType.OPENAI, affinity.providerType());
     assertEquals("p", affinity.providerName());
-    assertEquals(genId, affinity.connectionGenerationId());
     assertEquals("m", affinity.modelId());
 
-    assertThrows(
-        NullPointerException.class, () -> new ProviderReplayAffinity(null, "p", genId, "m"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "", genId, "m"));
+    assertThrows(NullPointerException.class, () -> new ProviderReplayAffinity(null, "p", "m"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "  p  ", genId, "m"));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", null, "m"));
+        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "", "m"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", genId, ""));
+        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "  p  ", "m"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", genId, "  m  "));
+        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", ""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", "  m  "));
   }
 
   /** 意图：验证 codec 校验失败或 JSON 解析失败时，异常 message、toString 与 cause chain 绝不泄漏敏感字段名、payload 或值。 */
@@ -265,14 +233,6 @@ class ProviderReplayStateJsonCodecTest {
         assertThrows(IllegalArgumentException.class, () -> codec.decode(malformedJson));
     assertDoesNotContainInChain(exMalformed, sensitivePayloadValue);
     assertNull(exMalformed.getCause());
-
-    // 非法 UUID 值也不得原样反射
-    String sensitiveBadUuid = "MALFORMED_UUID_CONTAINING_SECRET_DATA";
-    ObjectNode badUuidNode = (ObjectNode) codec.encodeNode(sampleState());
-    ((ObjectNode) badUuidNode.get("affinity")).put("connectionGenerationId", sensitiveBadUuid);
-    IllegalArgumentException exUuid =
-        assertThrows(IllegalArgumentException.class, () -> codec.decode(badUuidNode.toString()));
-    assertDoesNotContainInChain(exUuid, sensitiveBadUuid);
 
     // 非法 format 值与 providerType 也不得原样反射
     String badFormat = "UNKNOWN_SECRET_FORMAT_XYZ";
@@ -315,11 +275,7 @@ class ProviderReplayStateJsonCodecTest {
     payload.putArray("stop_sequences").add("human:");
     return new ProviderReplayState(
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC,
-            "anthropic",
-            UUID.fromString("11111111-2222-3333-4444-555555555555"),
-            "claude-3-5-sonnet"),
+        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
         payload);
   }
 
@@ -329,7 +285,6 @@ class ProviderReplayStateJsonCodecTest {
     String raw =
         "{\"format\":\"anthropic_messages\",\"affinity\":{"
             + "\"providerType\":\"anthropic\",\"providerName\":\"anthropic\","
-            + "\"connectionGenerationId\":\"11111111-2222-3333-4444-555555555555\","
             + "\"modelId\":\"claude-3-5-sonnet\"},"
             + "\"payload\":{\"big\":1e309,\"tiny\":1e-324}}";
 

@@ -931,8 +931,7 @@ class OpenAiResponsesRequestEncoderTest {
   void test_replayState_thinkingConsistencyValidation() throws Exception {
     ProviderDescriptor desc = createDescriptor();
 
-    // 1. durable 包含 thinking，replay 只有 opaque reasoning（只有 encrypted_content，无 summary）：
-    //    原生 encrypted item 必须原位保留，缺失的 durable 可读思考作为普通 assistant 文本附带。
+    // 1. 同模型回放只发送原生 reasoning item，不额外插入 durable thinking 文本。
     ObjectNode opaquePayload = MAPPER.createObjectNode();
     ArrayNode out1 = opaquePayload.putArray("output");
     ObjectNode r1 = out1.addObject();
@@ -955,25 +954,13 @@ class OpenAiResponsesRequestEncoderTest {
             .readTree(
                 encoder.encode(request(List.of(msgWithDurableThinking)), desc).bodyUtf8Bytes())
             .get("input");
-    JsonNode opaqueReasoning = null;
-    boolean readableThinkingInWire = false;
-    for (JsonNode item : opaqueInput) {
-      if ("reasoning".equals(item.path("type").asString(""))) {
-        opaqueReasoning = item;
-      }
-      if ("message".equals(item.path("type").asString(""))) {
-        for (JsonNode block : item.path("content")) {
-          if (block.path("text").asString("").contains("durable thought")) {
-            readableThinkingInWire = true;
-          }
-        }
-      }
-    }
-    assertNotNull(opaqueReasoning, "native opaque reasoning item must be preserved");
+    JsonNode opaqueReasoning = opaqueInput.get(0);
+    assertEquals("reasoning", opaqueReasoning.path("type").asString(""));
     assertEquals("opaque_blob", opaqueReasoning.path("encrypted_content").asString(""));
     assertFalse(
         opaqueReasoning.has("summary"), "must not forge a reasoning summary from durable thinking");
-    assertTrue(readableThinkingInWire, "durable readable thinking must survive into the wire");
+    assertEquals(2, opaqueInput.size());
+    assertEquals("message", opaqueInput.get(1).path("type").asString(""));
 
     // 2. durable 包含 thinking，但 replay 的 summary 文本不一致：必须被拒绝
     ObjectNode mismatchSummaryPayload = MAPPER.createObjectNode();

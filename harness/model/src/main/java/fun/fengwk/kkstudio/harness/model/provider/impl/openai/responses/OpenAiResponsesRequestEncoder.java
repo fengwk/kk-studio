@@ -308,7 +308,8 @@ public final class OpenAiResponsesRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST,
             "protocolOptions tools["
                 + i
-                + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
+                + "] must be a supported hosted tool; bind client tools through runtime"
+                + " ProviderToolDefinition");
       }
       JsonNode name = tool.get("name");
       if (name != null && name.isString() && !names.add(name.stringValue())) {
@@ -390,12 +391,6 @@ public final class OpenAiResponsesRequestEncoder {
         if (replayState != null
             && canReplay(replayState, descriptor, model.modelId(), msg.contents())) {
           ArrayNode outputArray = extractOutputArray(replayState.payload());
-          // 密文 reasoning 没有可比可读文本时，原生回放会丢失 durable 可读思考：绝不能静默丢弃，
-          // 把缺失的可读思考作为普通 assistant 文本附在原生 item 之前（不伪造 reasoning summary/signature）。
-          String missingReadableThinking = missingReadableThinking(outputArray, msg.contents());
-          if (missingReadableThinking != null) {
-            appendAssistantTextMessage(inputItems, missingReadableThinking);
-          }
           for (JsonNode item : outputArray) {
             inputItems.add(item.deepCopy());
           }
@@ -509,43 +504,6 @@ public final class OpenAiResponsesRequestEncoder {
       fc.put("name", tc.name());
       fc.put("arguments", tc.argumentsJson());
     }
-  }
-
-  /** 普通 assistant 文本 item（output_text），用于承载原生回放无法表达的可读思考。 */
-  private static void appendAssistantTextMessage(ArrayNode inputItems, String text) {
-    ObjectNode msg = inputItems.addObject();
-    msg.put("type", "message");
-    msg.put("role", "assistant");
-    ObjectNode contentBlock = msg.putArray("content").addObject();
-    contentBlock.put("type", "output_text");
-    contentBlock.put("text", text);
-  }
-
-  /**
-   * 判断原位回放是否缺失 durable 可读思考，返回需要作为普通 assistant 文本附带的文本，否则返回 {@code null}。
-   *
-   * <p>仅当 durable 有可读思考、而 replay 的全部 reasoning item 都没有可比可读文本（例如仅携带 {@code
-   * encrypted_content}）时成立；此时原生回放无法表达该可读文本，必须显式附带而不是静默丢弃。
-   */
-  private static String missingReadableThinking(
-      ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
-    StringBuilder durableThinking = new StringBuilder();
-    for (ProviderContentBlock block : durableContents) {
-      if (block instanceof ProviderThinkingBlock thinkingBlock) {
-        durableThinking.append(thinkingBlock.thinking());
-      }
-    }
-    if (durableThinking.isEmpty()) {
-      return null;
-    }
-    StringBuilder replayThinking = new StringBuilder();
-    for (JsonNode item : outputArray) {
-      if ("reasoning".equals(item.path("type").asString(""))) {
-        replayThinking.append(
-            OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_REQUEST));
-      }
-    }
-    return replayThinking.isEmpty() ? durableThinking.toString() : null;
   }
 
   /**
