@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
@@ -128,7 +129,72 @@ describe('process.exec', () => {
     expect(textOf(result)).toContain('out')
     expect(textOf(result)).toContain('err')
     expect(result.details).toMatchObject({ process: { outcome: 'EXITED', exitCode: 0 } })
-    expect(supervisor.started[0]).toMatchObject({ args: ['-lc', 'echo hi'], cwd: dir })
+    expect(supervisor.started[0]).toMatchObject({
+      args: ['-lc', 'cd -- "$1" || exit 1; shift; echo hi', 'bash', dir],
+      cwd: dir,
+    })
+  })
+
+  it('传递包含 shell 元字符的 workdir 为独立参数，而不拼入命令', async () => {
+    const parent = await tempDir()
+    const dir = join(parent, `space ' quote $ 中文`)
+    await mkdir(dir)
+    const supervisor = fakeSupervisor(fakeManagedProcess({ exitCode: 0 }))
+    await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'pwd', workdir: dir },
+      makeContext(parent, { processes: supervisor }),
+    )
+    expect(supervisor.started[0]?.args).toEqual([
+      '-lc',
+      'cd -- "$1" || exit 1; shift; pwd',
+      'bash',
+      dir,
+    ])
+  })
+
+  it.skipIf(process.platform === 'win32')('登录 profile 改变目录后仍在指定的特殊字符 workdir 执行', async () => {
+    const parent = await tempDir()
+    const home = join(parent, 'private-home')
+    const workdir = join(parent, `work ' $ 中文`)
+    await mkdir(home)
+    await mkdir(workdir)
+    await writeFile(join(home, '.bash_profile'), 'cd "$HOME"\n')
+    const supervisor: ProcessSupervisor = {
+      start: async (spec) => {
+        const child = spawn(spec.executable, [...spec.args], {
+          cwd: spec.cwd,
+          env: { ...process.env, HOME: home },
+        })
+        const exit = new Promise<ProcessExit>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('close', (exitCode, signal) => resolve({ exitCode, signal }))
+        })
+        return {
+          pid: child.pid as number,
+          stdin: child.stdin as PassThrough,
+          stdout: child.stdout as Readable,
+          stderr: child.stderr as Readable,
+          exit,
+          terminate: async () => {
+            child.kill('SIGTERM')
+          },
+        }
+      },
+      close: async () => {},
+    }
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'pwd', workdir },
+      makeContext(parent, {
+        processes: supervisor,
+        config: { ...makeContext(parent).config, bashExecutable: 'bash' },
+      }),
+    )
+    expect(result.error).toBe(false)
+    expect(textOf(result)).toContain(workdir)
   })
 
   it('非零退出保留输出并标注退出码', async () => {

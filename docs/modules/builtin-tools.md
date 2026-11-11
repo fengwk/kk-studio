@@ -16,7 +16,6 @@ Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、
 
 ```text
 path: /srv/project/example.ts
-ends_with_newline: yes
 range: 1:1-83:1240
 truncated: yes
 truncation_reason: character_limit
@@ -29,9 +28,9 @@ lsp: supported (typescript)
 [TRUNCATED: More file content remains. Next position: line 83, column 1241.]
 ```
 
-未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 描述整个文件；不得将片段结束当作文件结尾。元数据所需扫描保持有界内存并支持取消。
+未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 仅在读取到文件 EOF 时输出，描述整个文件；窗口已填满且确认还有内容时省略该字段，并停止读取。窗口之后的非法编码不影响当前窗口读取。元数据所需扫描保持有界内存并支持取消。
 
-本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.ts`](../../daemon/src/coding/text.ts)，按同一 offset/column_offset、行数与码点预算和截断判据读取。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；为准确报告文件级元数据仍需扫描到 EOF，超时或取消直接中止连接。受管资源按执行上下文中本次调用所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
+本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.ts`](../../daemon/src/coding/text.ts)，按同一 offset/column_offset、行数与码点预算和截断判据读取。窗口填满并确认还有后续内容后，本地读取立即停止，不扫描到 EOF。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；超时或取消直接中止连接。受管资源按执行上下文中本次调用所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
 
 Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，可信内置 `read` 放宽为 320 KiB / 2020 行，以容纳完整读取窗口及 header/footer，仍受终态 JSON 与资源硬上限约束。目录清单的展示上界为 48 KiB，分页默认和最大 2000；图片与目录维持独立返回语义。
 
@@ -43,7 +42,7 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，由统一的 review 传输预算约束。
 完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
-grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。Daemon 检索调用随包提供的 ripgrep（rg）：`fs.find` 解析 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。超时或取消时终止 rg 进程并等待 stdio 和进程退出；超时与取消保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`；达到结果上限时主动终止进程并保留 partial 结果。
+grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。Daemon 检索调用随包提供的 ripgrep（rg）：`fs.find` 解析 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。超时或取消时终止 rg 进程并等待 stdio 和进程退出；超时与取消保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配会完整输出该匹配展开的所有行，输出总量仍受现有 50 KiB / 2000 行转存保护，截断提示按匹配数说明。
 
 grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、分层规则、否定规则和 .git/info/exclude，支持 .git 文件形式的 worktree。不因调用目录变化而改变同一目标的忽略行为。不引入 Environment 根目录。
 

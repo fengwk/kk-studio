@@ -6,8 +6,8 @@ import { ToolRunFailureError } from './support.js'
  *
  * <p>分页与平台 TextReadWindow 遵循同一契约：offset 与 column_offset 从 1 起，正文至多 2000 行且不超过
  * MAX_BODY_CODE_POINTS 个 Unicode 码点（不计行号、元数据与行分隔符）；LF、CRLF 与孤立 CR 都是行边界；
- * 单行长度不截断；扫描到 EOF 才给出截断结论，但只保留窗口正文；非法 UTF-8、NUL 与孤立代理项一律以明确的
- * “看似二进制”失败，绝不静默替换成替换字符。
+ * 单行长度不截断；窗口填满并确认还有后续内容后停止读取，只保留窗口正文；窗口范围内非法 UTF-8、NUL 与孤立代理项
+ * 一律以明确的“看似二进制”失败，绝不静默替换成替换字符。
  */
 
 /** 缺省返回行数上限。 */
@@ -65,7 +65,7 @@ export function looksBinary(probe: Uint8Array, encoding: Encoding): boolean {
 
 /** 流式解码器：分块推入字节，返回已能完整解码的字符串，未完成的尾部字节留待下一块。 */
 export interface StreamingDecoder {
-  push(bytes: Uint8Array): string
+  push(bytes: Uint8Array, onText?: (text: string) => boolean): string
   finish(): string
 }
 
@@ -81,15 +81,23 @@ function invalidEncoding(): never {
 function createUtf8Decoder(): StreamingDecoder {
   let pending: number[] = []
   return {
-    push(bytes: Uint8Array): string {
+    push(bytes: Uint8Array, onText?: (text: string) => boolean): string {
       const data = pending.length === 0 ? Array.from(bytes) : pending.concat(Array.from(bytes))
       pending = []
       let index = 0
       let out = ''
-      while (index < data.length) {
+      let stopped = false
+      const emit = (text: string): void => {
+        if (onText === undefined) {
+          out += text
+        } else if (!onText(text)) {
+          stopped = true
+        }
+      }
+      while (index < data.length && !stopped) {
         const b0 = data[index] as number
         if (b0 < 0x80) {
-          out += String.fromCharCode(b0)
+          emit(String.fromCharCode(b0))
           index += 1
           continue
         }
@@ -125,7 +133,7 @@ function createUtf8Decoder(): StreamingDecoder {
         if (!isValidCodePoint(codePoint, need)) {
           malformed()
         }
-        out += String.fromCodePoint(codePoint)
+        emit(String.fromCodePoint(codePoint))
         index += need + 1
       }
       return out
@@ -149,9 +157,10 @@ function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
   let pendingByte: number | null = null
   let pendingHigh: number | null = null
   return {
-    push(bytes: Uint8Array): string {
+    push(bytes: Uint8Array, onText?: (text: string) => boolean): string {
       let index = 0
       let out = ''
+      let stopped = false
       if (pendingByte !== null && bytes.length > 0) {
         const low = bytes[0] as number
         const unit = littleEndian ? (low << 8) | pendingByte : (pendingByte << 8) | low
@@ -159,14 +168,14 @@ function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
         index = 1
         out += emit(unit)
       }
-      while (index + 1 < bytes.length) {
+      while (index + 1 < bytes.length && !stopped) {
         const first = bytes[index] as number
         const second = bytes[index + 1] as number
         const unit = littleEndian ? (second << 8) | first : (first << 8) | second
         index += 2
         out += emit(unit)
       }
-      if (index < bytes.length) {
+      if (!stopped && index < bytes.length) {
         pendingByte = bytes[index] as number
       }
       return out
@@ -176,7 +185,7 @@ function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
           if (unit >= 0xdc00 && unit <= 0xdfff) {
             const high = pendingHigh
             pendingHigh = null
-            return String.fromCodePoint(((high - 0xd800) << 10) + (unit - 0xdc00) + 0x10000)
+            return deliver(String.fromCodePoint(((high - 0xd800) << 10) + (unit - 0xdc00) + 0x10000))
           }
           pendingHigh = null
           malformed()
@@ -188,7 +197,17 @@ function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
         if (unit >= 0xdc00 && unit <= 0xdfff) {
           malformed()
         }
-        return String.fromCharCode(unit)
+        return deliver(String.fromCharCode(unit))
+      }
+
+      function deliver(text: string): string {
+        if (onText === undefined) {
+          return text
+        }
+        if (!onText(text)) {
+          stopped = true
+        }
+        return ''
       }
     },
     finish(): string {
@@ -238,6 +257,7 @@ class TextWindowScanner {
   private budgetExhausted = false
   private lastLineCut = false
   private endedWithNewline = false
+  private moreContent = false
   private pendingHigh: number | null = null
   private skipLf = false
 
@@ -255,8 +275,20 @@ class TextWindowScanner {
     this.lspStatus = lspStatus
   }
 
+  get shouldStop(): boolean {
+    return this.moreContent
+  }
+
+  get windowIsFull(): boolean {
+    return this.line >= this.offset && (this.body.length >= this.limit || this.budgetExhausted)
+  }
+
+  markMoreContent(): void {
+    this.moreContent = true
+  }
+
   push(chunk: string): void {
-    for (let index = 0; index < chunk.length; index++) {
+    for (let index = 0; index < chunk.length && !this.moreContent; index++) {
       const value = chunk.charCodeAt(index)
       if (this.pendingHigh !== null) {
         if (value < 0xdc00 || value > 0xdfff) {
@@ -309,6 +341,10 @@ class TextWindowScanner {
   }
 
   private onCodePoint(codePoint: number): void {
+    if (this.line >= this.offset && (this.body.length >= this.limit || this.budgetExhausted)) {
+      this.moreContent = true
+      return
+    }
     if (codePoint === 0) {
       throw new ToolRunFailureError(`${BINARY_MESSAGE}: contains NUL character`, 'CODEC')
     }
@@ -332,6 +368,10 @@ class TextWindowScanner {
   }
 
   private onSeparator(): void {
+    if (this.line >= this.offset && this.body.length >= this.limit) {
+      this.moreContent = true
+      return
+    }
     this.finishLine()
     this.line++
     this.columns = 0
@@ -382,13 +422,16 @@ class TextWindowScanner {
     const lastStartColumn = last.number === this.offset ? this.columnStart : 1
     const codePoints = Array.from(last.content).length
     const endColumn = Math.max(1, lastStartColumn - 1 + codePoints)
-    const truncated = this.lastLineCut || totalLines > last.number
+    const truncated = this.moreContent || this.lastLineCut || totalLines > last.number
     let reason: string | null = null
     let nextLine = 0
     let nextColumn = 0
     if (truncated) {
       reason = this.budgetExhausted ? 'character_limit' : 'line_limit'
-      if (this.lastLineCut) {
+      if (
+        this.lastLineCut ||
+        (this.moreContent && this.budgetExhausted && this.line === last.number)
+      ) {
         nextLine = last.number
         nextColumn = endColumn + 1
       } else {
@@ -397,7 +440,7 @@ class TextWindowScanner {
       }
     }
     return {
-      endsWithNewline: this.endedWithNewline,
+      endsWithNewline: this.moreContent ? null : this.endedWithNewline,
       emptyRange: false,
       startLine: this.offset,
       startColumn: this.columnStart,
@@ -406,7 +449,7 @@ class TextWindowScanner {
       truncationReason: reason,
       nextLine: requireProtocolPosition(nextLine, 'line'),
       nextColumn: requireProtocolPosition(nextColumn, 'column'),
-      width: Math.max(1, String(Math.max(1, totalLines)).length),
+      width: Math.max(1, String(last.number).length),
       body: this.body,
     }
   }
@@ -414,7 +457,9 @@ class TextWindowScanner {
   private format(window: Window): string {
     const output: string[] = []
     output.push(`path: ${this.displayPath}`)
-    output.push(`ends_with_newline: ${window.endsWithNewline ? 'yes' : 'no'}`)
+    if (window.endsWithNewline !== null) {
+      output.push(`ends_with_newline: ${window.endsWithNewline ? 'yes' : 'no'}`)
+    }
     output.push(
       window.emptyRange
         ? 'range: empty'
@@ -447,7 +492,7 @@ class TextWindowScanner {
 }
 
 interface Window {
-  endsWithNewline: boolean
+  endsWithNewline: boolean | null
   emptyRange: boolean
   startLine: number
   startColumn: number
@@ -480,6 +525,15 @@ function requireProtocolPosition(value: number, field: string): number {
  *
  * <p>BOM 已在字节层跳过，绝不在此按字符再剥一次，否则会吞掉正文里真正的 {@code \uFEFF}。
  */
+export interface TextWindowReader {
+  read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }>
+  close(): Promise<void>
+}
+
+function isWindowBoundaryEncodingError(error: unknown, scanner: TextWindowScanner): boolean {
+  return error instanceof ToolRunFailureError && error.code === 'CODEC' && scanner.windowIsFull
+}
+
 export async function readTextWindow(
   path: string,
   encoding: Encoding,
@@ -489,24 +543,49 @@ export async function readTextWindow(
   displayPath: string,
   lspStatus: string | null,
   checkpoint: () => void,
+  suppliedReader: TextWindowReader | null = null,
 ): Promise<string> {
-  const handle = await open(path, 'r')
+  const handle = suppliedReader ?? (await open(path, 'r'))
   try {
     const decoder = createDecoder(encoding)
     const scanner = new TextWindowScanner(offset, limit, columnOffset, displayPath, lspStatus)
     const buffer = Buffer.allocUnsafe(READ_BUFFER_CHARS)
     let position = encoding.bomLength
+    let reachedEof = false
     for (;;) {
       checkpoint()
       const { bytesRead } = await handle.read(buffer, 0, READ_BUFFER_CHARS, position)
       if (bytesRead === 0) {
+        reachedEof = true
         break
       }
       position += bytesRead
       checkpoint()
-      scanner.push(decoder.push(buffer.subarray(0, bytesRead)))
+      try {
+        decoder.push(buffer.subarray(0, bytesRead), (text) => {
+          scanner.push(text)
+          return !scanner.shouldStop
+        })
+      } catch (error) {
+        if (!isWindowBoundaryEncodingError(error, scanner)) {
+          throw error
+        }
+        scanner.markMoreContent()
+      }
+      if (scanner.shouldStop) {
+        break
+      }
     }
-    scanner.push(decoder.finish())
+    if (reachedEof) {
+      try {
+        scanner.push(decoder.finish())
+      } catch (error) {
+        if (!isWindowBoundaryEncodingError(error, scanner)) {
+          throw error
+        }
+        scanner.markMoreContent()
+      }
+    }
     return scanner.finish()
   } finally {
     await handle.close()
