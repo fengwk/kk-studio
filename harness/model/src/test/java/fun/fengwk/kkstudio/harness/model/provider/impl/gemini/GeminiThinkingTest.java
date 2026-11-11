@@ -277,6 +277,17 @@ class GeminiThinkingTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("think", completion.response().thinking());
     assertEquals("answer", completion.response().text());
+    assertEquals(3, completion.response().blocks().size());
+    assertEquals(
+        "think", ((ProviderThinkingBlock) completion.response().blocks().get(0)).thinking());
+    assertEquals(
+        "sig_1",
+        ((ProviderThinkingBlock) completion.response().blocks().get(0))
+            .providerBlockData()
+            .nativeFields()
+            .path("thoughtSignature")
+            .asString(""));
+    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(2)).text());
 
     List<String> thinkingDeltas =
         emittedEvents.stream()

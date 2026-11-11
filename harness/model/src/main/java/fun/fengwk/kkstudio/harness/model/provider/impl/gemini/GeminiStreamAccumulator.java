@@ -7,16 +7,22 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
@@ -556,27 +562,42 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
       effectiveToolCalls = Collections.unmodifiableList(new ArrayList<>(collectedToolCalls));
     }
 
-    StringBuilder fullText = new StringBuilder();
-    StringBuilder fullThinking = new StringBuilder();
-
-    for (TrackedPart tp : trackedParts) {
-      if (tp.thought) {
-        fullThinking.append(tp.text);
-      } else {
-        fullText.append(tp.text);
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
+    int toolCallIndex = 0;
+    for (TrackedPart part : trackedParts) {
+      boolean hasSemanticText = part.hasText || part.thought;
+      if (hasSemanticText) {
+        ProviderBlockData textData = blockData(part.rawPart, Set.of("text"));
+        if (part.thought) {
+          responseBlocks.add(new ProviderThinkingBlock(part.text.toString(), textData));
+        } else {
+          responseBlocks.add(new ProviderTextBlock(part.text.toString(), textData));
+        }
+      }
+      if (part.isFunctionCall()) {
+        if (this.stopReason != GenerationStopReason.FILTERED) {
+          responseBlocks.add(
+              new ProviderToolCallBlock(
+                  effectiveToolCalls.get(toolCallIndex++),
+                  blockData(part.rawPart, Set.of("functionCall", "text"))));
+        }
+      } else if (!hasSemanticText) {
+        responseBlocks.add(
+            new ProviderOpaqueBlock("gemini_part", blockData(part.rawPart, Set.of())));
       }
     }
 
     ProviderResponse response =
         new ProviderResponse(
-            fullText.toString(),
-            fullThinking.toString(),
-            effectiveToolCalls,
+            responseBlocks,
             this.stopReason,
             usage,
             null,
             this.serviceTier,
-            this.rawUsageJson);
+            this.rawUsageJson,
+            List.of(),
+            null,
+            null);
 
     ProviderReplayState replayState = null;
     if (this.stopReason == GenerationStopReason.COMPLETE && this.replayFreezable) {
@@ -584,6 +605,17 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
     }
 
     return new ProviderCompletion(response, replayState);
+  }
+
+  private ProviderBlockData blockData(ObjectNode rawPart, Set<String> semanticFields) {
+    ObjectNode nativeFields = rawPart.deepCopy();
+    for (String field : semanticFields) {
+      nativeFields.remove(field);
+    }
+    return new ProviderBlockData(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        descriptor.affinity(request.model().modelId()),
+        nativeFields);
   }
 
   private ProviderReplayState buildReplayState() {
