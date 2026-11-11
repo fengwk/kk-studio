@@ -309,10 +309,5 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err = os.Rename(temp, path); err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err == nil {
-		err = dir.Sync()
-		_ = dir.Close()
-	}
-	return err
+	return syncParentDirectory(filepath.Dir(path))
 }
