@@ -6,10 +6,12 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceUri;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -23,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.IntSupplier;
 
 /**
  * 基于全局 Blob 存储的 {@link ToolResultHistoryMaterializer}。
@@ -30,9 +33,9 @@ import java.util.UUID;
  * <p>在单工具 terminal 的同一 store 事务内：
  *
  * <ul>
- *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 {@code vfs} 引用，不执行对象 I/O；
+ *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 Resource 引用，不执行对象 I/O；
  *   <li>上传引用走 {@code lockReady → 校验权威事实 → retainRef → delete} 原子转移；
- *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code vfs:/resources/<blobId>}，绝不保留临时 upload URI；
+ *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code resource://files/<blobId>}，绝不保留临时 upload URI；
  *   <li>任一项确定性校验失败抛 {@link ToolOutcomeMaterializationException} 并整体回滚，绝不产生部分 history。
  * </ul>
  */
@@ -41,20 +44,25 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   private final StorageUploadService uploadService;
   private final StorageBlobManager blobManager;
   private final SessionBlobRefManager refManager;
-  private final int resourceMaxBytes;
+  private final IntSupplier outputLimitBytes;
 
   public GlobalStorageToolResultHistoryMaterializer(
       StorageUploadService uploadService,
       StorageBlobManager blobManager,
       SessionBlobRefManager refManager,
       int resourceMaxBytes) {
+    this(uploadService, blobManager, refManager, () -> resourceMaxBytes);
+  }
+
+  public GlobalStorageToolResultHistoryMaterializer(
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager,
+      SessionBlobRefManager refManager,
+      IntSupplier outputLimitBytes) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
-    if (resourceMaxBytes <= 0) {
-      throw new IllegalArgumentException("resourceMaxBytes must be positive");
-    }
-    this.resourceMaxBytes = resourceMaxBytes;
+    this.outputLimitBytes = Objects.requireNonNull(outputLimitBytes, "outputLimitBytes");
   }
 
   @Override
@@ -63,13 +71,18 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(result, "result");
+    int maxOutputBytes = outputLimitBytes.getAsInt();
     List<ResultContent> source = result.contents();
     List<ResultContent> stable = new ArrayList<>(source.size());
     for (ResultContent content : source) {
-      if (content instanceof TextResultContent || content instanceof JsonResultContent) {
+      if (content instanceof TextResultContent text) {
+        retainReferencedResources(sessionId, text.text());
+        stable.add(content);
+      } else if (content instanceof JsonResultContent json) {
+        retainReferencedResources(sessionId, json.json());
         stable.add(content);
       } else if (content instanceof ResourceResultContent resource) {
-        stable.add(stableResource(sessionId, resource));
+        stable.add(stableResource(sessionId, resource, maxOutputBytes));
       } else {
         throw new ToolOutcomeMaterializationException(
             "unsupported tool content kind for stable outcome: "
@@ -80,13 +93,25 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
         result.toolCallId(), List.copyOf(stable), result.error(), result.detailsJson());
   }
 
-  private ResourceResultContent stableResource(UUID sessionId, ResourceResultContent resource) {
+  private void retainReferencedResources(UUID sessionId, String text) {
+    for (UUID blobId : ResourceUri.referencedFiles(text)) {
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+        throw new ToolOutcomeMaterializationException(
+            "tool output references an unavailable resource");
+      }
+      refManager.retainRef(sessionId, blobId);
+    }
+  }
+
+  private ResourceResultContent stableResource(
+      UUID sessionId, ResourceResultContent resource, int maxOutputBytes) {
     ResourceRef ref = resource.resource();
     if (ref.sessionBlobId() != null) {
       return reuseSessionResource(sessionId, resource);
     }
     if (ref.blobUploadId() != null) {
-      return consumeUploadedResource(sessionId, resource);
+      return consumeUploadedResource(sessionId, resource, maxOutputBytes);
     }
     throw new ToolOutcomeMaterializationException(
         "tool resource must be staged or an authorized session resource");
@@ -99,16 +124,16 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
    * 任一步失败都让调用方 事务整体回滚，绝不产生部分 history 或悬空引用。
    */
   private ResourceResultContent consumeUploadedResource(
-      UUID sessionId, ResourceResultContent resource) {
+      UUID sessionId, ResourceResultContent resource, int maxOutputBytes) {
     ResourceRef ref = resource.resource();
     UUID uploadId = ref.blobUploadId();
     if (ref.size() == null || ref.sha256() == null) {
       throw new ToolOutcomeMaterializationException(
           "uploaded resource must declare size and sha256");
     }
-    if (ref.size() > resourceMaxBytes) {
+    if (ref.size() > maxOutputBytes) {
       throw new ToolOutcomeMaterializationException(
-          "uploaded resource must not exceed " + resourceMaxBytes + " bytes");
+          ToolOutputLimit.exceededMessage(ref.size(), maxOutputBytes));
     }
     StorageUploadService.ReadyUpload ready;
     try {

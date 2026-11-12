@@ -42,6 +42,7 @@ import {
 } from './text.js'
 import { acquireFileLock, commitTextFile } from './commit.js'
 import { textOutputStoreFor } from './output.js'
+import { fileOutputExceededMessage } from '../tool-output-limit.js'
 
 /**
  * 文件能力（fs.read / fs.write / fs.edit / fs.edit.preview）。
@@ -128,6 +129,8 @@ async function readExisting(
   const probeBytes = await probe(path)
   const imageMime = detectImageMediaType(probeBytes)
   if (imageMime !== null) {
+    requireMediaSizeWithinLimit(info!.size, context.maxOutputBytes)
+    // 目前按原图片大小计；图片缩放落地后，应改为检查缩放结果大小。
     const bytes = await readAllBytes(path)
     requireActive(context)
     return {
@@ -140,6 +143,7 @@ async function readExisting(
   // 音视频与 PDF 不转码：只凭文件头判型并按原字节上传，扩展名不参与判定。
   const mediaMime = detectMediaMimeType(probeBytes)
   if (mediaMime !== null) {
+    requireMediaSizeWithinLimit(info!.size, context.maxOutputBytes)
     const bytes = await readAllBytes(path)
     requireActive(context)
     return {
@@ -164,6 +168,15 @@ async function readExisting(
     () => requireActive(context),
   )
   return textResult(call.invocationId, text)
+}
+
+function requireMediaSizeWithinLimit(sizeBytes: number, limitBytes: number): void {
+  if (sizeBytes > limitBytes) {
+    throw new ToolRunFailureError(
+      fileOutputExceededMessage(sizeBytes, limitBytes),
+      'OUTPUT_TOO_LARGE',
+    )
+  }
 }
 
 /** 从展示路径取最后一段作为资源名；只剩根时返回 null。 */

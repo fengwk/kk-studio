@@ -15,7 +15,7 @@ type ProcessSpec struct {
 	Env        []string
 }
 
-// ProcessExit is the direct process exit status; it is distinct from scope convergence.
+// ProcessExit is the direct process exit status; nil fields mean the status is unknown.
 type ProcessExit struct {
 	Code   *int
 	Signal *string
@@ -43,5 +43,15 @@ type DescendantTracker interface {
 	TrackDescendant(context.Context, int, int) error
 }
 
-// ErrScopeNotConverged means process-tree termination could not be proven.
+// ProcessScopeNotConvergedError means process scope termination could not be proven.
+type ProcessScopeNotConvergedError struct {
+	Cause error
+}
+
+func (e *ProcessScopeNotConvergedError) Error() string { return ErrScopeNotConverged.Error() }
+func (e *ProcessScopeNotConvergedError) Unwrap() error {
+	return errors.Join(ErrScopeNotConverged, e.Cause)
+}
+
+// ErrScopeNotConverged is the compatibility sentinel for a failed convergence proof.
 var ErrScopeNotConverged = errors.New("process scope termination not converged")

@@ -13,9 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * afterCommit} 成功后回读权威记录并原子替换。其他节点在收到变更通知或 listener 重连后通过 {@link SystemSettingsChangeHandler}
  * 权威回读。带版本替换使用 CAS 门控，较旧的并发回读不能覆盖较新的快照。回滚绝不更新内存。 {@link #get()} 每次返回当前值。
  *
- * <p>live 决策点（aiRuntime compaction/retry/subagent、tool.gateway、environment.runtime、
- * storageMedia.upload 上传 TTL/预签名、storageMedia.canvasMedia、backendNetwork 出站代理，以及 permission）每次现读。
- * 其余 restart-required 配置 bean 仍在装配期读取 {@link #get()}。本类是唯一装配期 DB 读取点，不允许各配置各自再读数据库现读现解。
+ * <p>每个使用点通过 {@link #get()} 读取当前设置；不应在 bean 装配时捕获设置值。本类是唯一启动期 DB 读取点，不允许各配置各自再读数据库现读现解。
  */
 @Component
 public class SystemSettingsSnapshot {

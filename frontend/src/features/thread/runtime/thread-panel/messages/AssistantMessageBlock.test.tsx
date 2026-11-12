@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { AssistantMessageBlock } from '@/features/thread/runtime/thread-panel/messages/AssistantMessageBlock'
 import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
+
+vi.mock('@/shared/lib/clipboard', () => ({
+  copyTextToClipboard: vi.fn(),
+}))
 
 function message(overrides: Partial<TextDialogueMessage> = {}): TextDialogueMessage {
   return {
@@ -26,6 +31,18 @@ describe('AssistantMessageBlock', () => {
     expect(screen.getByText('final answer')).toBeInTheDocument()
     expect(screen.getByText('why')).toBeInTheDocument()
     expect(screen.queryByText('已停止')).not.toBeInTheDocument()
+  })
+
+  it('copies the original markdown source including resource URIs', async () => {
+    const source = '[document](resource://files/12345678-1234-1234-1234-123456789abc)'
+    vi.mocked(copyTextToClipboard).mockResolvedValue(true)
+    render(<AssistantMessageBlock message={message({ text: source })} />)
+
+    fireEvent.click(screen.getAllByRole('button')[0])
+
+    await waitFor(() => {
+      expect(copyTextToClipboard).toHaveBeenCalledWith(source, expect.any(Object))
+    })
   })
 
   it('renders the 已停止 affordance and applies the aborted treatment when aborted is true', () => {

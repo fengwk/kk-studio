@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
@@ -30,6 +31,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.IntSupplier;
 import java.util.regex.Pattern;
 
 /**
@@ -98,14 +100,18 @@ public final class ToolResultFinalizer {
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
 
   private final ToolResourceStager resourceStager;
-  private final int resourceMaxBytes;
+  private final IntSupplier outputLimitBytes;
 
-  public ToolResultFinalizer(ToolResourceStager resourceStager, int resourceMaxBytes) {
+  public ToolResultFinalizer(ToolResourceStager resourceStager, int maxOutputBytes) {
+    this(resourceStager, () -> maxOutputBytes);
+  }
+
+  public ToolResultFinalizer(ToolResourceStager resourceStager, IntSupplier outputLimitBytes) {
     this.resourceStager = Objects.requireNonNull(resourceStager, "resourceStager");
-    if (resourceMaxBytes <= 0) {
-      throw new IllegalArgumentException("resourceMaxBytes must be positive");
+    this.outputLimitBytes = Objects.requireNonNull(outputLimitBytes, "outputLimitBytes");
+    if (outputLimitBytes.getAsInt() <= 0) {
+      throw new IllegalArgumentException("tool output size limit must be positive");
     }
-    this.resourceMaxBytes = resourceMaxBytes;
   }
 
   /**
@@ -119,9 +125,13 @@ public final class ToolResultFinalizer {
     Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(result, "result");
 
+    int maxOutputBytes = outputLimitBytes.getAsInt();
+    if (maxOutputBytes <= 0) {
+      throw new IllegalStateException("tool output size limit must be positive");
+    }
     Plan plan;
     try {
-      plan = plan(toolName, result);
+      plan = plan(toolName, result, maxOutputBytes);
     } catch (OutputTooLargeException tooLarge) {
       return Outcome.outputTooLarge(tooLarge.getMessage());
     } catch (IllegalArgumentException invalid) {
@@ -139,6 +149,9 @@ public final class ToolResultFinalizer {
           returned =
               resourceStager.stage(
                   store.planned().mediaType(), store.planned().name(), store.bytes());
+        } catch (ToolOutputLimitExceededException tooLarge) {
+          discard(stagedResources);
+          return Outcome.outputTooLarge(tooLarge.getMessage());
         } catch (RuntimeException failure) {
           discard(stagedResources);
           return Outcome.storeFailed();
@@ -146,7 +159,7 @@ public final class ToolResultFinalizer {
         if (returned != null && returned.blobUploadId() != null) {
           stagedResources.add(returned);
         }
-        if (!sameContentFacts(store.planned(), returned, resourceMaxBytes)) {
+        if (!sameContentFacts(store.planned(), returned, maxOutputBytes)) {
           discard(stagedResources);
           return Outcome.storeFailed();
         }
@@ -174,7 +187,7 @@ public final class ToolResultFinalizer {
   }
 
   /** 计划阶段：无副作用完成所有内容校验、文本聚合、尺寸与物理行测量、ResourceRef 规划及最终 ToolResult JSON 尺寸核验。 */
-  private Plan plan(String toolName, ToolResult result) {
+  private Plan plan(String toolName, ToolResult result, int maxOutputBytes) {
     List<ResultContent> source = result.contents();
     List<TextPiece> textPieces = new ArrayList<>();
     List<BinaryPiece> binaryPieces = new ArrayList<>();
@@ -190,13 +203,9 @@ public final class ToolResultFinalizer {
         textPieces.add(new TextPiece(index, json.json(), true));
       } else if (content instanceof BinaryResultContent binary) {
         requireCanonicalMediaType(binary.mediaType());
-        if (binary.size() > resourceMaxBytes) {
+        if (binary.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
-              "content at index "
-                  + index
-                  + " must not exceed "
-                  + resourceMaxBytes
-                  + " bytes of stored resource content");
+              ToolOutputLimit.exceededMessage(binary.size(), maxOutputBytes));
         }
         byte[] bytes = binary.content();
         TextArtifact textArtifact =
@@ -228,13 +237,9 @@ public final class ToolResultFinalizer {
           throw new IllegalArgumentException(
               "resource at index " + index + " must be a staged upload or a session resource");
         }
-        if (ref.size() > resourceMaxBytes) {
+        if (ref.size() > maxOutputBytes) {
           throw new OutputTooLargeException(
-              "content at index "
-                  + index
-                  + " must not exceed "
-                  + resourceMaxBytes
-                  + " bytes of stored resource content");
+              ToolOutputLimit.exceededMessage(ref.size(), maxOutputBytes));
         }
         // 已由 Daemon 或插件直传对象存储的上传引用：本阶段只做形状校验并原样透传。
         if (res.textMetadata() != null) {
@@ -268,17 +273,13 @@ public final class ToolResultFinalizer {
       }
       joinedText = sb.toString();
 
-      // 有界测量 UTF-8 长度：超过 resourceMaxBytes 立即抛出
-      if (joinedText.length() > resourceMaxBytes) {
+      // Measure without allocating an encoded copy so the error can report the exact byte count.
+      long utf8Length = utf8Length(joinedText);
+      if (utf8Length > maxOutputBytes) {
         throw new OutputTooLargeException(
-            "tool output exceeded " + resourceMaxBytes + " bytes hard limit");
+            ToolOutputLimit.exceededMessage(utf8Length, maxOutputBytes));
       }
-      int utf8Len = ResourceRef.utf8LengthUpTo(joinedText, "tool output", resourceMaxBytes);
-      if (utf8Len > resourceMaxBytes) {
-        throw new OutputTooLargeException(
-            "tool output exceeded " + resourceMaxBytes + " bytes hard limit");
-      }
-      totalTextBytes = utf8Len;
+      totalTextBytes = utf8Length;
       totalTextLines = countPhysicalLines(joinedText);
 
       if (totalTextBytes > inlineMaxUtf8Bytes(toolName)
@@ -445,15 +446,29 @@ public final class ToolResultFinalizer {
     return 4;
   }
 
+  private static long utf8Length(String text) {
+    long bytes = 0;
+    for (int index = 0; index < text.length(); ) {
+      char current = text.charAt(index);
+      if (Character.isHighSurrogate(current)) {
+        if (index + 1 >= text.length() || !Character.isLowSurrogate(text.charAt(index + 1))) {
+          throw new IllegalArgumentException("tool output must be valid Unicode");
+        }
+      } else if (Character.isLowSurrogate(current)) {
+        throw new IllegalArgumentException("tool output must be valid Unicode");
+      }
+      int codePoint = text.codePointAt(index);
+      bytes += utf8Bytes(codePoint);
+      index += Character.charCount(codePoint);
+    }
+    return bytes;
+  }
+
   private static void validateStrictUnicode(String text, String name) {
     try {
-      StandardCharsets.UTF_8
-          .newEncoder()
-          .onMalformedInput(CodingErrorAction.REPORT)
-          .onUnmappableCharacter(CodingErrorAction.REPORT)
-          .encode(CharBuffer.wrap(text));
-    } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException(name + " must be valid Unicode", error);
+      utf8Length(text);
+    } catch (IllegalArgumentException invalid) {
+      throw new IllegalArgumentException(name + " must be valid Unicode", invalid);
     }
   }
 
@@ -504,11 +519,11 @@ public final class ToolResultFinalizer {
   }
 
   private static boolean sameContentFacts(
-      ResourceRef expected, ResourceRef actual, int resourceMaxBytes) {
+      ResourceRef expected, ResourceRef actual, int maxOutputBytes) {
     return actual != null
         && actual.blobUploadId() != null
         && actual.size() != null
-        && actual.size() <= resourceMaxBytes
+        && actual.size() <= maxOutputBytes
         && Objects.equals(expected.name(), actual.name())
         && Objects.equals(expected.size(), actual.size())
         && expected.sha256().equals(actual.sha256());

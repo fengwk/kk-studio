@@ -6,7 +6,7 @@
     "properties": {
       "input": {
         "type": "string",
-        "description": "Audio to transcribe: a public HTTP(S) audio URL or a vfs:/resources/<blobId> audio resource of the current session."
+        "description": "Audio to transcribe: a public HTTP(S) audio URL or a resource://files/<uuid> audio resource of the current session."
       },
       "prompt": {
         "type": "string",

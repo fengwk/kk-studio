@@ -859,7 +859,7 @@ public final class HarnessRuntime {
           if (tx.sessions().find(sessionId).isEmpty()) {
             throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
-          return tx.threads().listBySession(sessionId);
+          return tx.threads().listUserBySession(sessionId);
         });
   }
 

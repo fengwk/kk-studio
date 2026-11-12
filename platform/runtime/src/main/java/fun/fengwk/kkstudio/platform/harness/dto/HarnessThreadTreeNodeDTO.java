@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 
@@ -21,6 +22,9 @@ import java.time.Instant;
 public class HarnessThreadTreeNodeDTO {
   /** Thread 主键：canonical UUID string。 */
   private String threadId;
+
+  /** Thread 创建时确定的用途。 */
+  private ThreadKind kind;
 
   /** 不可变执行父 Thread；根节点为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)

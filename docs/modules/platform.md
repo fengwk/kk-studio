@@ -366,7 +366,7 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
 检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。
 
-技能归档通过只读 `vfs:/skills/<package>/<skill>/...` 路径按需读取当前发布版本的内容。
+技能归档的规范资源 URI 为 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段使用 UTF-8 百分号编码；当前 `read` 对该命名空间返回明确的不可用错误，实际技能加载由后续能力提供。
 发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
 平台服务端不保留本地 Git 缓存。
 系统提示按 Agent 技能配置顺序列出名称与描述；其内容不会推送到 Environment。
@@ -533,23 +533,15 @@ history materializer 在 mandatory transaction 中锁 READY upload、复验权�
 retain Session 引用并删除 upload owner，整体回滚保留可回收上传。
 Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harness-environment.md)。
 
-## 会话文件与 VFS
+## Resource URI 与 Session 持有
 
-文件工具的 `vfs:` 路径由 [`platform/vfs`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/vfs/) 执行；
-命名空间固定为 `vfs:/sessions/<执行根会话>/`（可读写）、`vfs:/resources/<blobId>` 与
-`vfs:/skills/<package>/<skill>/...`（只读）。执行根会话取自工具执行上下文，其他会话 ID 与不存在的路径一样返回不存在；
-`threads/<线程 ID>/` 只接受当前对话的线程。只读前缀的写入与编辑在网关准入（权限评估与 YOLO 之前）与执行入口各判定一次，
-文案说明拒绝原因与可写位置，声明未执行。
+全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析时也接受未编码的路径段。URI 不含对象存储键、预签名地址或内部网络位置。
 
-会话文件存于 `session_file(session_id, path, blob_id, revision, updated_at)`，目录由路径推导。
-写入先经 `StorageUploadService.stage` 在事务外落新 Blob，再在短事务内 retain Session 引用并按 revision 条件更新；
-成功后释放不再被同会话其他文件引用的旧 Blob。会话文件 Blob 同样进入 `session_blob_ref`，因此 Session 删除沿用既有释放路径，
-`session_file` 行随既有的关系删除回调清理。每会话 2000 个文件、单文件 8 MiB、总计 64 MiB。
-`edit` 用读到的 revision 做条件更新，冲突是确定失败而不是不确定执行。
+`session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：重复登记幂等；Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 
-[`SessionFileQueryService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/vfs/SessionFileQueryService.java)
-为会话文件面板提供只读查询：列会话目录、读取有界文本窗口与下载完整字节，全部先验证 Session 存在；
-HTTP 契约见 [Web](web.md)。
+资源在 `read` 或用户消息／工具输出传递时登记到当前 Session；图片和其他媒体结果引用仍保留原始 `resource://` URI。资源读取与本地文件读取分流：`read` 的 resource URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。skills 命名空间目前返回明确的不可用错误。
+
+前端使用 Session 持有关系调用鉴权的预览／下载接口，接口不返回预签名 URL。读取及持有生命周期测试见 platform storage、Harness command acceptance 与 Session deletion 集成测试。
 
 ## Environment
 
@@ -754,9 +746,9 @@ configurationSchema 归一化普通值，非法值整份拒绝。普通值可随
 
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、backendNetwork、
 storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
-`expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
-`SystemSettingsToolSettingsProvider` 每次 preflight 读取同一内存快照，替换后立即生效，不重复读库。
-`SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
+`expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。设置保存后立即生效；
+每个使用点从内存快照读取当前值，已经开始的调用继续使用启动时取得的值。`SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
+`tool.maxOutputMib`（默认 16，范围 1–100）是所有工具单次调用输出大小上限，单位 MiB，按 1,048,576 字节换算。
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 

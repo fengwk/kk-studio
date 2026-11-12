@@ -32,6 +32,7 @@ function treeNode(
 ) {
   return {
     threadId,
+    kind: parentThreadId == null ? 'USER' as const : 'SUBAGENT' as const,
     parentThreadId,
     name,
     agentName: 'assistant',

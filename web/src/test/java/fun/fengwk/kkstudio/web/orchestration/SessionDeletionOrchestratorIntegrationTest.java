@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -34,9 +35,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
@@ -48,6 +49,7 @@ import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrches
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -105,6 +107,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
   @Autowired private SessionDeletionOrchestrator orchestrator;
   @Autowired private StorageUploadService storageUploadService;
+  @MockitoBean private StorageMaintenance storageMaintenance;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
 
@@ -118,9 +121,9 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     storage = new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc);
   }
 
-  /** 深删只释放目标 owner 的 Blob 引用，另一 owner 的 Session 与对象保留。 */
+  /** 共享 Blob 仅在最后一个持有 Session 删除后进入回收。 */
   @Test
-  void deepDeleteReleasesOnlyTargetOwnerBlobRefs() {
+  void sharedBlobIsReleasedOnlyAfterLastOwningSessionIsDeleted() {
     UUID chat1Id = createChat("delete-chat-1");
     UUID chat2Id = createChat("delete-chat-2");
     byte[] content = "shared blob".getBytes(StandardCharsets.UTF_8);
@@ -156,9 +159,23 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     assertEquals(
         1L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
+    assertEquals(
+        "ACTIVE",
+        jdbc.queryForObject("select state from storage_blob where id = ?", String.class, blobId));
     assertTrue(
         s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobId)),
         "the shared blob must remain while the other Chat Session still references it");
+
+    orchestrator.deleteSessionsByOwner(new SessionOwner("CHAT", chat2Id.toString()));
+
+    assertEquals(0, count("session_blob_ref", "blob_id", blobId));
+    assertEquals(
+        0L,
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
+    assertEquals(
+        "DELETING",
+        jdbc.queryForObject("select state from storage_blob where id = ?", String.class, blobId));
+    assertTrue(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobId)));
   }
 
   /** 归属枚举顺序与 Session、Thread 锁顺序不同时仍按两个 rank 分别全局排序。 */
@@ -437,7 +454,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
                       "thread-" + threadId,
                       parentThreadId == null ? threadId : parentThreadId,
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       status,
                       0L,

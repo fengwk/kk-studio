@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.daemon.server;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
@@ -37,17 +38,24 @@ final class DaemonTransferCoordinator {
       ActiveInvocation active,
       UUID transferId,
       DaemonResourceTicketService.TransferRequest request,
-      UUID commitUploadId) {}
+      UUID commitUploadId,
+      DaemonResourceTicketService.Ticket directTicket) {}
 
   PreparedTransfer prepareUploadReserve(
       DaemonConnectionSession session,
       ActiveInvocation active,
       ResourceUploadRequest request,
-      long maxResourceBytes) {
+      long maxOutputBytes) {
     UUID transferId = UUID.fromString(request.getTransferId());
-    if (request.getSize() > maxResourceBytes) {
-      throw new ControlProtocolException(
-          "resource transfer size exceeds the environment limit: " + transferId);
+    if (request.getSize() > maxOutputBytes) {
+      return new PreparedTransfer(
+          session,
+          active,
+          transferId,
+          null,
+          null,
+          new DaemonResourceTicketService.Ticket.Failed(
+              ToolOutputLimit.exceededMessage(request.getSize(), maxOutputBytes)));
     }
     DaemonResourceTicketService.TransferRequest serviceRequest =
         new DaemonResourceTicketService.TransferRequest(
@@ -63,7 +71,7 @@ final class DaemonTransferCoordinator {
           throw new ControlProtocolException(
               "resource transfer is already bound to a different request: " + transferId);
         }
-        return new PreparedTransfer(session, active, transferId, existing.request, null);
+        return new PreparedTransfer(session, active, transferId, existing.request, null, null);
       }
       if (active.transfers.size() >= MAX_TRANSFERS_PER_INVOCATION) {
         throw new ControlProtocolException(
@@ -75,7 +83,7 @@ final class DaemonTransferCoordinator {
       }
       active.transfers.put(transferId, new TransferBinding(serviceRequest));
     }
-    return new PreparedTransfer(session, active, transferId, serviceRequest, null);
+    return new PreparedTransfer(session, active, transferId, serviceRequest, null, null);
   }
 
   PreparedTransfer prepareUploadCommit(
@@ -100,7 +108,7 @@ final class DaemonTransferCoordinator {
         }
       }
     }
-    return new PreparedTransfer(session, active, transferId, null, commitUploadId);
+    return new PreparedTransfer(session, active, transferId, null, commitUploadId, null);
   }
 
   void executeTransfer(
@@ -109,6 +117,10 @@ final class DaemonTransferCoordinator {
       DaemonInvocationTracker tracker) {
     ActiveInvocation active = prepared.active();
     if (!tracker.isActive(active)) {
+      return;
+    }
+    if (prepared.directTicket() != null) {
+      offerTicket(prepared, tracker, prepared.directTicket());
       return;
     }
     UUID transferId = prepared.transferId();
@@ -159,17 +171,25 @@ final class DaemonTransferCoordinator {
       releaseBinding(active, binding, ticketService);
       return;
     }
-    ResourceUploadTicket wire = toWireTicket(transferId, ticket);
-    if (tracker.isActive(active)) {
-      Envelope ticketEnvelope =
-          Envelope.newBuilder()
-              .setMessageType(MessageType.RESOURCE_UPLOAD_TICKET)
-              .setEnvironmentId(active.environmentId.value().toString())
-              .setInvocationId(active.invocationId.toString())
-              .setResourceUploadTicket(wire)
-              .build();
-      prepared.session().offer(ticketEnvelope);
+    offerTicket(prepared, tracker, ticket);
+  }
+
+  private void offerTicket(
+      PreparedTransfer prepared,
+      DaemonInvocationTracker tracker,
+      DaemonResourceTicketService.Ticket ticket) {
+    ActiveInvocation active = prepared.active();
+    if (!tracker.isActive(active)) {
+      return;
     }
+    Envelope ticketEnvelope =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.RESOURCE_UPLOAD_TICKET)
+            .setEnvironmentId(active.environmentId.value().toString())
+            .setInvocationId(active.invocationId.toString())
+            .setResourceUploadTicket(toWireTicket(prepared.transferId(), ticket))
+            .build();
+    prepared.session().offer(ticketEnvelope);
   }
 
   private static ResourceUploadTicket toWireTicket(

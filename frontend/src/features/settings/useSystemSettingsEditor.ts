@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { isConflictError } from '@/shared/api/client'
+import { ApiError, isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { systemSettingsService } from '@/features/settings/system-settings-service'
 import {
@@ -49,6 +49,7 @@ export function useSystemSettingsEditor() {
 
   const [draftSnapshot, setDraftSnapshot] = useState<DraftSnapshot | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const [draftError, setDraftError] = useState<DraftValidationReason | null>(null)
 
@@ -103,6 +104,7 @@ export function useSystemSettingsEditor() {
         baseVersion: updated.version,
       })
       setSaveError(null)
+      setFieldErrors({})
       setConflict(null)
       setDraftError(null)
       await queryClient.invalidateQueries({ queryKey: queryKeys.systemSettings.all })
@@ -111,15 +113,18 @@ export function useSystemSettingsEditor() {
       if (error instanceof DraftValidationError) {
         setDraftError(error.reason)
         setSaveError(null)
+        setFieldErrors({})
         setConflict(null)
         return
       }
       if (isConflictError(error)) {
         setConflict(presentConflict(error))
         setSaveError(null)
+        setFieldErrors({})
         return
       }
       setConflict(null)
+      setFieldErrors(apiFieldErrors(error))
       setSaveError(toSaveErrorMessage(error, t('settings.error.saveFailed')))
     },
   })
@@ -130,6 +135,7 @@ export function useSystemSettingsEditor() {
     }
     // 每次保存从干净状态开始，呈现本次操作的真实结果。
     setSaveError(null)
+    setFieldErrors({})
     setConflict(null)
     setDraftError(null)
     try {
@@ -152,6 +158,7 @@ export function useSystemSettingsEditor() {
       })
     }
     setSaveError(null)
+    setFieldErrors({})
     setConflict(null)
     setDraftError(null)
   }, [authoritative])
@@ -162,6 +169,7 @@ export function useSystemSettingsEditor() {
 
   const updateDraft = useCallback((sections: SystemSettingsSectionsDraft) => {
     setDraftSnapshot((prev) => (prev ? { ...prev, sections } : prev))
+    setFieldErrors({})
   }, [])
 
   const retryLoad = useCallback(() => {
@@ -200,6 +208,7 @@ export function useSystemSettingsEditor() {
     save,
     reset,
     saveError,
+    fieldErrors,
     conflict,
     dismissConflict,
     draftError,
@@ -211,6 +220,15 @@ export function useSystemSettingsEditor() {
 }
 
 export type SystemSettingsEditor = ReturnType<typeof useSystemSettingsEditor>
+
+function apiFieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError) || error.errors == null) {
+    return {}
+  }
+  return Object.fromEntries(
+    Object.entries(error.errors).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
+}
 
 function toSaveErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {

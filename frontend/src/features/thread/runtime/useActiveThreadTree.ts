@@ -23,6 +23,9 @@ export function useActiveThreadTree(boundThreadId: string | null) {
       const nodes = await harnessService.getThreadTree(boundThreadId ?? '')
       // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
       const tree = projectThreadTree(nodes)
+      if (tree.root == null) {
+        throw new Error('thread tree does not contain an execution root')
+      }
       if (!tree.nodesById.has(boundThreadId ?? '')) {
         throw new Error('thread tree does not contain requested bound thread')
       }

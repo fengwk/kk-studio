@@ -53,8 +53,6 @@ export interface InvocationRuntimeOptions {
   processes: ProcessSupervisor
   outbound: OutboundControl
   maxConcurrentInvocations: number
-  /** 当前连接代际的资源预算；每次新执行开始时读取。 */
-  maxResourceBytes(): number
   /** 资源上传端口；binary 内容与退出确认都依赖它。 */
   uploader(): ResourceUploader | null
   /** 停机开始后不再受理新 INVOKE。 */
@@ -116,7 +114,8 @@ export class InvocationRuntime {
       const callArguments = parsedArgs as Record<string, unknown>
 
       const controller = new AbortController()
-      const invocation = new RunningInvocation(invocationId, controller, this.options.maxResourceBytes(), this.options.config())
+      const maxOutputBytes = Number(invoke.maxOutputBytes)
+      const invocation = new RunningInvocation(invocationId, controller, maxOutputBytes, this.options.config())
       this.running.set(invocationId, invocation)
       this.options.outbound.sendStarted(connection, invocationId, false)
       const timeoutMillis = Number(invoke.timeoutMillis)
@@ -255,7 +254,7 @@ export class InvocationRuntime {
         invocation.finishOwnedCleanup()
         return
       }
-      const completed = await encodeCompletedProto(result, invocation.maxResourceBytes, (content) => {
+      const completed = await encodeCompletedProto(result, invocation.maxOutputBytes, (content) => {
         const resources = this.options.uploader()
         if (resources === null) {
           throw new Error('resource upload is not configured')
@@ -333,6 +332,7 @@ export class InvocationRuntime {
     const resources = this.options.uploader()
     return {
       config: invocation.config,
+      maxOutputBytes: invocation.maxOutputBytes,
       signal: invocation.controller.signal,
       processes: this.options.processes,
       resources: {
@@ -466,7 +466,7 @@ class RunningInvocation {
   constructor(
     readonly invocationId: string,
     readonly controller: AbortController,
-    readonly maxResourceBytes: number,
+    readonly maxOutputBytes: number,
     readonly config: DaemonConfig,
   ) {}
 

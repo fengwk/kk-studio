@@ -13,6 +13,7 @@ import {
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
+  ImageInputTier,
   EnvironmentConfigSchema,
   DaemonConfigurationSchema,
   LspConfigurationSchema,
@@ -155,6 +156,8 @@ function validInvoke() {
     capabilityId: CAPABILITY_ID,
     argumentsJson: ARGUMENTS_JSON,
     timeoutMillis: TIMEOUT_MILLIS,
+    maxOutputBytes: 16n * 1024n * 1024n,
+    imageInputTier: ImageInputTier.P720,
   })
 }
 
@@ -300,6 +303,18 @@ describe('control binary codec', () => {
     expect(() => encodeBinary(envelope(MessageType.INVOKE, missing))).toThrow(/capabilityId/)
   })
 
+  it('requires a supported image input tier on each invoke', () => {
+    const invalidTiers = [
+      undefined,
+      ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED,
+      (ImageInputTier.ORIGINAL + 1) as ImageInputTier,
+    ]
+    for (const imageInputTier of invalidTiers) {
+      const invoke = create(InvokeSchema, { ...validInvoke(), imageInputTier })
+      expect(() => encodeBinary(envelope(MessageType.INVOKE, invoke))).toThrow(/imageInputTier/)
+    }
+  })
+
   it('rejects unsafe integers, UTF-8 overflow and invalid resource metadata', () => {
     expect(() =>
       encodeBinary(
@@ -389,21 +404,13 @@ describe('control binary codec', () => {
     expect(() =>
       encodeBinary(
         create(EnvelopeSchema, {
-          messageType: MessageType.SETTINGS,
+          messageType: MessageType.INVOKE,
           environmentId: ENVIRONMENT_ID,
-          payload: {
-            case: 'settings',
-            value: create(SettingsSchema, {
-              resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 0n,
-                temporaryResourceTtlSeconds: 60n,
-                temporaryResourceCleanupIntervalSeconds: 30n,
-              }),
-            }),
-          },
+          invocationId: INVOCATION_ID,
+          payload: { case: 'invoke', value: create(InvokeSchema, { ...validInvoke(), maxOutputBytes: 0n }) },
         }),
       ),
-    ).toThrow(/maxResourceBytes/)
+    ).toThrow(/maxOutputBytes/)
 
     expect(() =>
       encodeBinary(
@@ -415,7 +422,6 @@ describe('control binary codec', () => {
             case: 'settings',
             value: create(SettingsSchema, {
               resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 1024n,
                 temporaryResourceTtlSeconds: 60n,
                 temporaryResourceCleanupIntervalSeconds: 30n,
               }),
@@ -732,6 +738,8 @@ describe('control binary codec', () => {
               capabilityId: 'fs.read',
               argumentsJson: '{}',
               timeoutMillis: 0n,
+              maxOutputBytes: 16n * 1024n * 1024n,
+              imageInputTier: ImageInputTier.P720,
               expectedFile: create(ExpectedFileSchema, {
                 path: 'test.txt',
                 sha256: 'a'.repeat(64),

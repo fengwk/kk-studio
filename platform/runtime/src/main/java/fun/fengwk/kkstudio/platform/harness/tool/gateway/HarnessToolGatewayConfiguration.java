@@ -15,10 +15,10 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.vfs.VfsEditReviewSource;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.function.IntSupplier;
 
 /** {@link ToolExecutionGateway} 的并发准入与配置 bean 装配。 */
 @Configuration(proxyBeanMethods = false)
@@ -42,23 +42,21 @@ public class HarnessToolGatewayConfiguration {
   public ToolExecutionGateway toolExecutionGateway(
       RuntimeToolCatalogSource runtimeToolCatalogSource,
       EnvironmentCapabilityTransport capabilityTransport,
-      VfsEditReviewSource vfsEditReviewSource,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       StorageUploadService storageUploadService,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolExecutionAdmission") ConcurrencyAdmission admission,
       Clock clock) {
-    int resourceMaxBytes =
-        Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
+    IntSupplier outputLimitBytes =
+        () -> Math.multiplyExact(systemSettingsSnapshot.get().tool().maxOutputMib(), 1_048_576);
     return new ToolExecutionGateway(
         runtimeToolCatalogSource,
         capabilityTransport,
-        vfsEditReviewSource,
         permissionEvaluator,
         toolSettingsProvider,
-        new StorageUploadToolResourceStager(storageUploadService, resourceMaxBytes),
-        resourceMaxBytes,
+        new StorageUploadToolResourceStager(storageUploadService, outputLimitBytes),
+        outputLimitBytes,
         () ->
             Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayOverloadRetryMillis()),
         clock,

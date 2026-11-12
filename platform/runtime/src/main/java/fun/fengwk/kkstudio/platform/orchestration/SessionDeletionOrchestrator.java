@@ -5,7 +5,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.List;
@@ -28,18 +27,14 @@ public class SessionDeletionOrchestrator {
   private final List<SessionOwnership> ownerships;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final SessionBlobRefManager refManager;
-  private final SessionFileRepository sessionFileRepository;
 
   public SessionDeletionOrchestrator(
       List<SessionOwnership> ownerships,
       ObjectProvider<HarnessRuntime> runtimes,
-      SessionBlobRefManager refManager,
-      SessionFileRepository sessionFileRepository) {
+      SessionBlobRefManager refManager) {
     this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
-    this.sessionFileRepository =
-        Objects.requireNonNull(sessionFileRepository, "sessionFileRepository");
   }
 
   /**
@@ -68,13 +63,7 @@ public class SessionDeletionOrchestrator {
             ids ->
                 ids.stream()
                     .filter(ownedSessionIds::contains)
-                    .forEach(
-                        id -> {
-                          // session_file 以 FK RESTRICT 指向 harness_session：行必须先于 Session 删除；
-                          // Blob 引用由既有的 session_blob_ref 释放路径统一处理。
-                          sessionFileRepository.deleteBySession(id);
-                          ownership.beforeSessionDeletion(owner, id);
-                        }),
+                    .forEach(id -> ownership.beforeSessionDeletion(owner, id)),
             ids -> ids.forEach(this::releaseSessionBlobRefs));
   }
 

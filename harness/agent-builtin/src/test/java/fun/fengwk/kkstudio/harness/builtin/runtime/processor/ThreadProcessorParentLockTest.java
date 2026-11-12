@@ -26,9 +26,9 @@ import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.Session;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport;
@@ -61,27 +61,15 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
     UUID siblingId = TestIds.id(200);
 
     UUID rootHead = seedRootSession(fixture.store, rootSession);
-    insertThread(fixture.store, rootId, rootSession, null, rootHead, rootId, SpawnTrigger.USER);
+    insertThread(fixture.store, rootId, rootSession, null, rootHead, rootId, ThreadKind.USER);
     UUID parentHead = seedRootSession(fixture.store, parentSession);
     insertThread(
-        fixture.store,
-        parentId,
-        parentSession,
-        rootId,
-        parentHead,
-        rootId,
-        SpawnTrigger.MODEL_TOOL);
+        fixture.store, parentId, parentSession, rootId, parentHead, rootId, ThreadKind.SUBAGENT);
     UUID childHead = seedRootSession(fixture.store, childSession);
     insertThread(
-        fixture.store, childId, childSession, parentId, childHead, rootId, SpawnTrigger.MODEL_TOOL);
+        fixture.store, childId, childSession, parentId, childHead, rootId, ThreadKind.SUBAGENT);
     insertThread(
-        fixture.store,
-        siblingId,
-        childSession,
-        parentId,
-        childHead,
-        rootId,
-        SpawnTrigger.MODEL_TOOL);
+        fixture.store, siblingId, childSession, parentId, childHead, rootId, ThreadKind.SUBAGENT);
 
     UUID sourceId =
         ThreadProcessorTestSupport.seedCommand(
@@ -101,7 +89,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
             recording,
             new DriverRegistry(
                 List.of(HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
-            new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, () -> COMPACTION_CONFIG));
+            new ThreadProcessorConfig(() -> RESOLVE_FAILURE_DELAY, () -> COMPACTION_CONFIG));
 
     assertEquals(
         ThreadProcessResult.COMPLETED,
@@ -172,7 +160,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
       UUID parentThreadId,
       UUID headEntryId,
       UUID rootThreadId,
-      SpawnTrigger spawnTrigger) {
+      ThreadKind kind) {
     store.transaction(
         tx -> {
           tx.threads()
@@ -186,7 +174,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
                       "thread-" + threadId,
                       rootThreadId,
                       false,
-                      spawnTrigger,
+                      kind,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,

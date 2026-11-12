@@ -1,4 +1,4 @@
-// Package lsp discovers language servers and manages their JSON-RPC sessions and
-// capabilities. It uses native process supervision and exposes capabilities to runtime;
-// transport and session policy are outside this package.
+// Package lsp discovers language servers, manages pooled JSON-RPC sessions, and exposes
+// language-server capabilities to runtime. Native process supervision is supplied through
+// its shared contract; daemon session orchestration remains in runtime.
 package lsp

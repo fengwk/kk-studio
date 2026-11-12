@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -47,7 +47,6 @@ class BuiltinHarnessContributorConfigurationTest {
             SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
             SystemSettingsTestFixture.AI_RUNTIME.compactionModel(),
             SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
-            SystemSettingsTestFixture.AI_RUNTIME.compactionReserveTokens(),
             4,
             7,
             13,
@@ -100,7 +99,8 @@ class BuiltinHarnessContributorConfigurationTest {
   @Test
   void fileToolBeanInstantiatesExactlyTheFiveFileTools() {
     List<Tool> tools =
-        new BuiltinHarnessContributorConfiguration().builtinFileTools(mock(VfsGateway.class));
+        new BuiltinHarnessContributorConfiguration()
+            .builtinFileTools(mock(ResourceReadGateway.class));
     assertEquals(
         List.of("read", "write", "edit", "grep", "find"),
         tools.stream().map(tool -> tool.descriptor().name()).toList());

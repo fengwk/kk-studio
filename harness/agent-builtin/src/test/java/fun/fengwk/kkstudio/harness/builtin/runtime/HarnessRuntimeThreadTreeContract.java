@@ -52,9 +52,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -151,6 +151,60 @@ public abstract class HarnessRuntimeThreadTreeContract {
     assertEquals(3, snapshot.metrics().turnCount());
     assertEquals(2, snapshot.metrics().toolCallCount());
     assertEquals(0L, snapshot.thread().version());
+  }
+
+  @Test
+  protected void treeQueryRetainsCompactionForHttpBoundaryFiltering() {
+    UUID sessionId = TestIds.id(60);
+    UUID rootId = TestIds.id(61);
+    UUID compactionId = TestIds.id(62);
+    UUID rootEntryId = store.transaction(tx -> insertRoot(tx, sessionId));
+    store.transaction(
+        tx -> {
+          tx.threads()
+              .insert(
+                  thread(
+                      rootId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      "root",
+                      T0,
+                      ThreadExecutionControl.RUNNABLE,
+                      null));
+          ThreadState subagent =
+              thread(
+                  compactionId,
+                  sessionId,
+                  rootId,
+                  rootEntryId,
+                  "compaction",
+                  T0,
+                  ThreadExecutionControl.RUNNABLE,
+                  rootId);
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      subagent.id(),
+                      subagent.sessionId(),
+                      subagent.parentThreadId(),
+                      subagent.headEntryId(),
+                      subagent.creationRequestHash(),
+                      subagent.name(),
+                      subagent.rootThreadId(),
+                      subagent.yoloEnabled(),
+                      ThreadKind.COMPACTION,
+                      subagent.constraints(),
+                      subagent.executionControl(),
+                      subagent.inputThroughSequence(),
+                      subagent.nextCommandSequence(),
+                      subagent.version(),
+                      subagent.createdAt(),
+                      subagent.updatedAt()));
+          return null;
+        });
+
+    assertEquals(List.of(rootId, compactionId), ids(runtime.getThreadTree(compactionId)));
   }
 
   @Test
@@ -739,7 +793,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
         name,
         parentId == null ? id : rootThreadId,
         false,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         ThreadConstraints.NONE,
         executionControl,
         0L,

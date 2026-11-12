@@ -103,7 +103,7 @@ class ApplicationEventHubTest {
             canvasVersionSource,
             projectChangeSource,
             environmentChangeSource,
-            BUFFER_CAPACITY);
+            () -> BUFFER_CAPACITY);
   }
 
   /** 公开订阅句柄：release 收敛 handle 的 checked exception，便于断言上游真实关闭。 */

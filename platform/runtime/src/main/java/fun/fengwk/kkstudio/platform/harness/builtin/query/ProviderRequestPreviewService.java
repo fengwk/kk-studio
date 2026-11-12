@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
@@ -260,7 +260,7 @@ public final class ProviderRequestPreviewService {
             && childThread.parentThreadId() != null
             && childThread.parentThreadId().equals(ownerThreadId)
             && !childThread.sessionId().equals(parentSessionId)
-            && childThread.spawnTrigger() == SpawnTrigger.RUNTIME
+            && childThread.kind() == ThreadKind.COMPACTION
             && constraints.maxOutputTokens() != null
             && constraints.maxOutputTokens() <= frozen.outputBudget();
     if (!frozenExecution) {

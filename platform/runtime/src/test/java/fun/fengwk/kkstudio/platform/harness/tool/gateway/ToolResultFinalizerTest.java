@@ -38,6 +38,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntSupplier;
 
 /**
  * {@link ToolResultFinalizer} 单元测试：
@@ -267,6 +268,21 @@ class ToolResultFinalizerTest {
 
     assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.error().kind());
     assertEquals(0, store.puts.size()); // all-or-nothing: 绝不 put
+  }
+
+  @Test
+  void readsOutputLimitAgainForTheNextCall() {
+    RecordingStager store = new RecordingStager();
+    AtomicInteger limit = new AtomicInteger(100);
+    ToolResultFinalizer finalizer = finalizer(store, limit::get);
+    ToolResult result =
+        new ToolResult("call-1", List.of(new TextResultContent("x".repeat(200))), false, "{}");
+
+    assertInstanceOf(
+        ToolResultFinalizer.Outcome.Failed.class, finalizer.finalizeResult(TOOL_NAME, result));
+    limit.set(10_000);
+    assertInstanceOf(
+        ToolResultFinalizer.Outcome.Success.class, finalizer.finalizeResult(TOOL_NAME, result));
   }
 
   @Test
@@ -751,6 +767,11 @@ class ToolResultFinalizerTest {
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store, int resourceMaxBytes) {
+    return finalizer(store, () -> resourceMaxBytes);
+  }
+
+  private static ToolResultFinalizer finalizer(
+      RecordingStager store, IntSupplier outputLimitBytes) {
     ToolResourceStager stager =
         stager(
             (mediaType, name, content) -> {
@@ -762,7 +783,7 @@ class ToolResultFinalizerTest {
                   (long) content.length,
                   sha256Hex(content));
             });
-    return new ToolResultFinalizer(stager, resourceMaxBytes);
+    return new ToolResultFinalizer(stager, outputLimitBytes);
   }
 
   @Test

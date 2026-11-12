@@ -19,6 +19,7 @@ const node = (
   outcome: TurnEndOutcome | null = null,
 ): ActiveThreadTreeNode => ({
   threadId,
+  kind: parentThreadId == null ? 'USER' : 'SUBAGENT',
   parentThreadId,
   agentName,
   name: 'main',
