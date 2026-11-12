@@ -161,9 +161,9 @@ func (*pollingWindowsJobAPI) AwaitJobEmpty(context.Context, windows.Handle, time
 // NAT-T-183 verifies command exit polling retries finite waits until the process is signaled.
 func TestWindowsJobProtocol_PollsUntilCommandExit(t *testing.T) {
 	api := &pollingWindowsJobAPI{statuses: []uint32{uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_OBJECT_0)}}
-	ownerInput, ownerOutput := io.Pipe()
+	ownerInput, ownerWriter := io.Pipe()
 	defer ownerInput.Close()
-	defer ownerOutput.Close()
+	defer ownerWriter.Close()
 	dir := stateTestDir(t)
 	if err := publishText(dir, permitFile, "permit"); err != nil {
 		t.Fatal(err)
@@ -196,9 +196,9 @@ func TestWindowsJobProtocol_PublishesExitBeforeClosingHandles(t *testing.T) {
 	if err := publishText(dir, permitFile, "permit"); err != nil {
 		t.Fatal(err)
 	}
-	ownerInput, ownerOutput := io.Pipe()
+	ownerInput, ownerWriter := io.Pipe()
 	defer ownerInput.Close()
-	defer ownerOutput.Close()
+	defer ownerWriter.Close()
 	api := &observedWindowsJobProtocolAPI{stateDir: dir, fakeWindowsJobProtocolAPI: fakeWindowsJobProtocolAPI{waitStatus: uint32(windows.WAIT_OBJECT_0), exitCode: 7}}
 	result := runWindowsJobProtocolWithAPI(dir, 5, windows.ProcessInformation{Process: 10, Thread: 11, ProcessId: 12}, ownerInput, api)
 	if result != 0 || !reflect.DeepEqual(api.exitPublishedWhen, []bool{true, true, true}) {
