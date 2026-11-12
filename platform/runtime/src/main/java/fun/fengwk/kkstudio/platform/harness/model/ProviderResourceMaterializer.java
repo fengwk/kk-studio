@@ -75,6 +75,7 @@ public final class ProviderResourceMaterializer {
 
   private final StorageBlobManager blobManager;
   private final ProviderInlineBlobReader blobReader;
+  private final ProviderImageModelViewService imageModelViewService;
   private final long maxRequestInlineChars;
   private final Supplier<ImageInputTier> defaultImageTier;
 
@@ -89,6 +90,22 @@ public final class ProviderResourceMaterializer {
         blobManager,
         blobContentService,
         defaultImageTier,
+        null,
+        ProviderInlineBlobReader.Limits.DEFAULT,
+        Ticker.systemTicker(),
+        MAX_REQUEST_INLINE_CHARS);
+  }
+
+  public ProviderResourceMaterializer(
+      StorageBlobManager blobManager,
+      StorageBlobContentService blobContentService,
+      Supplier<ImageInputTier> defaultImageTier,
+      ProviderImageModelViewService imageModelViewService) {
+    this(
+        blobManager,
+        blobContentService,
+        defaultImageTier,
+        Objects.requireNonNull(imageModelViewService, "imageModelViewService"),
         ProviderInlineBlobReader.Limits.DEFAULT,
         Ticker.systemTicker(),
         MAX_REQUEST_INLINE_CHARS);
@@ -102,8 +119,27 @@ public final class ProviderResourceMaterializer {
       ProviderInlineBlobReader.Limits limits,
       Ticker ticker,
       long maxRequestInlineChars) {
+    this(
+        blobManager,
+        blobContentService,
+        defaultImageTier,
+        null,
+        limits,
+        ticker,
+        maxRequestInlineChars);
+  }
+
+  private ProviderResourceMaterializer(
+      StorageBlobManager blobManager,
+      StorageBlobContentService blobContentService,
+      Supplier<ImageInputTier> defaultImageTier,
+      ProviderImageModelViewService imageModelViewService,
+      ProviderInlineBlobReader.Limits limits,
+      Ticker ticker,
+      long maxRequestInlineChars) {
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.defaultImageTier = Objects.requireNonNull(defaultImageTier, "defaultImageTier");
+    this.imageModelViewService = imageModelViewService;
     this.blobReader =
         new ProviderInlineBlobReader(
             Objects.requireNonNull(blobContentService, "blobContentService"), limits, ticker);
@@ -393,6 +429,17 @@ public final class ProviderResourceMaterializer {
     // 未指定图片档位的媒体按系统设置的默认档位；显式档位保持冻结值。
     ImageInputTier tier =
         resource.imageTier() == null ? defaultImageTier.get() : resource.imageTier();
+    if (imageModelViewService != null) {
+      ProviderImageModelViewService.ModelView view =
+          imageModelViewService.resolve(
+              resource.blobId(), blob.getMediaType(), blob.getSizeBytes(), tier);
+      long required =
+          ProviderInlineBlobReader.estimatedDataUriChars(view.mediaType(), view.sizeBytes());
+      budget.reserve(required);
+      String source =
+          blobReader.readDataUri(view.blobId(), view.mediaType(), view.sizeBytes(), required);
+      return new ProviderImageBlock(view.mediaType(), source);
+    }
     boolean original = tier.isOriginal();
     long allowedChars =
         original

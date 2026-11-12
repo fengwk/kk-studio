@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -72,6 +73,73 @@ public class StorageBlobRepository {
         .query(ROW_MAPPER)
         .optional()
         .orElse(null);
+  }
+
+  public ImageModelView getImageModelView(UUID sourceBlobId, ImageInputTier tier) {
+    return jdbcClient
+        .sql(
+            "select source_blob_id, image_tier, view_blob_id, original_width, original_height, "
+                + "display_width, display_height from storage_image_model_view "
+                + "where source_blob_id = :sourceBlobId and image_tier = :imageTier")
+        .param("sourceBlobId", sourceBlobId)
+        .param("imageTier", tier.wireName())
+        .query(
+            (rs, rowNum) ->
+                new ImageModelView(
+                    rs.getObject("source_blob_id", UUID.class),
+                    ImageInputTier.fromWireName(rs.getString("image_tier")),
+                    rs.getObject("view_blob_id", UUID.class),
+                    rs.getInt("original_width"),
+                    rs.getInt("original_height"),
+                    rs.getInt("display_width"),
+                    rs.getInt("display_height")))
+        .optional()
+        .orElse(null);
+  }
+
+  /** 在锁住 ACTIVE 原始 blob 后注册唯一档位视图；成功时由调用方持有一份 view blob 引用。 */
+  public boolean insertImageModelView(ImageModelView view) {
+    UUID sourceBlobId = view.sourceBlobId();
+    boolean sourceActive =
+        jdbcClient
+            .sql(
+                "select id from storage_blob where id = :sourceBlobId and state = 'ACTIVE' "
+                    + "for update")
+            .param("sourceBlobId", sourceBlobId)
+            .query(UUID.class)
+            .optional()
+            .isPresent();
+    if (!sourceActive) {
+      throw new IllegalStateException("source image blob is no longer active: " + sourceBlobId);
+    }
+    return jdbcClient
+        .sql(
+            "insert into storage_image_model_view (source_blob_id, image_tier, view_blob_id, "
+                + "original_width, original_height, display_width, display_height) "
+                + "values (:sourceBlobId, :imageTier, :viewBlobId, :originalWidth, "
+                + ":originalHeight, :displayWidth, :displayHeight) "
+                + "on conflict (source_blob_id, image_tier) do nothing returning source_blob_id")
+        .param("sourceBlobId", sourceBlobId)
+        .param("imageTier", view.tier().wireName())
+        .param("viewBlobId", view.viewBlobId())
+        .param("originalWidth", view.originalWidth())
+        .param("originalHeight", view.originalHeight())
+        .param("displayWidth", view.displayWidth())
+        .param("displayHeight", view.displayHeight())
+        .query(UUID.class)
+        .optional()
+        .isPresent();
+  }
+
+  /** Source进入 DELETING 时移除其视图关系并返回各 relation 所拥有的 view blob 引用。 */
+  public List<UUID> deleteImageModelViews(UUID sourceBlobId) {
+    return jdbcClient
+        .sql(
+            "delete from storage_image_model_view where source_blob_id = :sourceBlobId "
+                + "returning view_blob_id")
+        .param("sourceBlobId", sourceBlobId)
+        .query(UUID.class)
+        .list();
   }
 
   /** 原子插入候选或 retain 同内容的 ACTIVE 行，返回实际取得引用的 blob id。 */
@@ -178,6 +246,15 @@ public class StorageBlobRepository {
         PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
     return blob;
   }
+
+  public record ImageModelView(
+      UUID sourceBlobId,
+      ImageInputTier tier,
+      UUID viewBlobId,
+      int originalWidth,
+      int originalHeight,
+      int displayWidth,
+      int displayHeight) {}
 
   /** {@code width}/{@code height}/{@code duration_ms} 可空，必须保留 NULL 语义而不是退化为 0。 */
   private static Long nullableLong(ResultSet rs, String column) throws SQLException {

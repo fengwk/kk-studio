@@ -85,6 +85,28 @@ create table storage_upload (
 create index idx_storage_upload_cleanup_claim
     on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
 
+create table storage_image_model_view (
+    source_blob_id  uuid         not null,
+    image_tier      varchar(16)  not null,
+    view_blob_id    uuid         not null,
+    original_width  integer      not null,
+    original_height integer      not null,
+    display_width   integer      not null,
+    display_height  integer      not null,
+    constraint pk_storage_image_model_view primary key (source_blob_id, image_tier),
+    constraint ck_storage_image_model_view_tier check (image_tier in ('720P', '1080P')),
+    constraint ck_storage_image_model_view_dimensions check (
+        original_width > 0 and original_height > 0 and display_width > 0 and display_height > 0
+    ),
+    constraint ck_storage_image_model_view_distinct_blobs check (source_blob_id <> view_blob_id),
+    constraint fk_storage_image_model_view_source foreign key (source_blob_id)
+        references storage_blob (id) on delete restrict,
+    constraint fk_storage_image_model_view_blob foreign key (view_blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+comment on table storage_image_model_view is 'Durable resized model view for a plugin image, keyed by original blob and image tier; the row owns one reference to view_blob_id and is removed when its source enters DELETING.';
+
 comment on table storage_blob is 'Deduplicated immutable content address of the global blob storage: one ACTIVE row per (sha256, size_bytes) content, with immutable media facts and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
 
 comment on column storage_blob.id is 'Blob id (uuid): deterministic S3 keys are derived from it (blobs/{id}/original, blobs/{id}/preview.webp), never persisted.';

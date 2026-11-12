@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.configuration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.platform.harness.model.ProviderImageModelViewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -20,9 +21,13 @@ public class HarnessResourceConfiguration {
   public ProviderResourceMaterializer providerResourceMaterializer(
       StorageBlobManager storageBlobManager,
       StorageBlobContentService blobContentService,
+      ProviderImageModelViewService imageModelViewService,
       SystemSettingsSnapshot snapshot) {
     return new ProviderResourceMaterializer(
-        storageBlobManager, blobContentService, () -> snapshot.get().storageMedia().imageTier());
+        storageBlobManager,
+        blobContentService,
+        () -> snapshot.get().storageMedia().imageTier(),
+        imageModelViewService);
   }
 
   /**
