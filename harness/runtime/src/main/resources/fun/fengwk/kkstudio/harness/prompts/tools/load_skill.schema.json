@@ -1,0 +1,12 @@
+{
+  "description": "Load a configured skill's instructions by name.",
+  "properties": {
+    "name": {
+      "description": "The exact skill name shown in available_skills.",
+      "type": "string"
+    }
+  },
+  "required": ["name"],
+  "type": "object",
+  "additionalProperties": false
+}

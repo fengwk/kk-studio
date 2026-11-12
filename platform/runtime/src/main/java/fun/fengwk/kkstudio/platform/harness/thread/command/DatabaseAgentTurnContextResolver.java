@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.contributor.api.ConfiguredSkill;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
@@ -105,7 +106,7 @@ public final class DatabaseAgentTurnContextResolver {
     try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       List<String> toolNames = resolveToolNames(lease.catalog(), agentConfig);
       PlannedTools tools =
-          resolveTools(lease.catalog(), environmentId, selectedEnvironment, toolNames);
+          resolveTools(lease.catalog(), environmentId, selectedEnvironment, toolNames, skills);
       String systemInstruction =
           systemInstruction(
               agent.systemPrompt(),
@@ -172,6 +173,7 @@ public final class DatabaseAgentTurnContextResolver {
     }
     if (!config.getSkills().isEmpty()) {
       toolNames.add(FileTool.READ_NAME);
+      toolNames.add("load_skill");
     }
     if (!config.getSubagents().isEmpty()) {
       // task 只由非空 subagents allowlist 声明：递归深度是调用期 gate，绝不动态裁剪工具面。
@@ -192,7 +194,8 @@ public final class DatabaseAgentTurnContextResolver {
       RuntimeToolCatalog catalog,
       EnvironmentId environmentId,
       Environment selectedEnvironment,
-      List<String> toolNames) {
+      List<String> toolNames,
+      List<LiveTurnPlan.PlannedSkill> skills) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
     List<LiveTurnPlan.CandidateTool> sent = new ArrayList<>(toolNames.size());
     List<LiveTurnPlan.CandidateTool> filtered = new ArrayList<>();
@@ -228,7 +231,15 @@ public final class DatabaseAgentTurnContextResolver {
               contributor,
               environmentSupport,
               boundEnvironmentId,
-              boundEnvironmentName));
+              boundEnvironmentName,
+              "load_skill".equals(toolName)
+                  ? skills.stream()
+                      .map(
+                          skill ->
+                              new ConfiguredSkill(
+                                  skill.name(), skill.packageName(), skill.packageVersion()))
+                      .toList()
+                  : List.of()));
       sent.add(candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
     }
     List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(sent.size() + filtered.size());

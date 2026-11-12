@@ -8,6 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.SkillLoadTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
@@ -17,6 +18,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
+import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -119,8 +121,14 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public SkillLoadTool skillLoadTool(SkillLoadGateway skillLoadGateway) {
+    return new SkillLoadTool(skillLoadGateway);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public BuiltinHarnessContributor builtinHarnessContributor(
-      List<Tool> builtinFileTools, TaskTool taskTool) {
-    return new BuiltinHarnessContributor(builtinFileTools, taskTool);
+      List<Tool> builtinFileTools, TaskTool taskTool, SkillLoadTool skillLoadTool) {
+    return new BuiltinHarnessContributor(builtinFileTools, taskTool, skillLoadTool);
   }
 }

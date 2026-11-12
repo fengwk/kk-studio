@@ -253,7 +253,8 @@ public final class ToolExecutionGateway implements ToolGateway {
               scope.assistantEntryId(),
               clock.instant(),
               scope.mediaCapabilities(),
-              Optional.ofNullable(boundEnvironment));
+              Optional.ofNullable(boundEnvironment),
+              execution.request().binding().configuredSkills());
       // 超时在执行前只解析一次：解析结果原样进入请求，下游直接使用该超时值，不施加额外上限。
       ToolExecutionRequest toolRequest;
       try {

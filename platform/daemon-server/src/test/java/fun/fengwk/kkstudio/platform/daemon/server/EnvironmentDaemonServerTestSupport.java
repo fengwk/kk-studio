@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedGet;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.OperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Progress;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Ready;
 import fun.fengwk.kkstudio.platform.daemon.protocol.RecoverNotFound;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceDownloadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadCommit;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.RuntimeStatus;
@@ -374,6 +376,16 @@ final class EnvironmentDaemonServerTestSupport {
   static Envelope resourceUploadRequestEnvelope(
       String invocationId, UUID uploadId, String name, long size) {
     return resourceUploadRequestEnvelope(UUID.fromString(invocationId), uploadId, name, size);
+  }
+
+  static Envelope resourceDownloadRequestEnvelope(UUID invocationId, UUID transferId) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RESOURCE_DOWNLOAD_REQUEST)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setResourceDownloadRequest(
+            ResourceDownloadRequest.newBuilder().setTransferId(transferId.toString()).build())
+        .build();
   }
 
   static Envelope resourceUploadRequestEnvelope(
@@ -1025,8 +1037,17 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
+  record DownloadRequest(
+      EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {}
+
   static final class FakeTicketService implements DaemonResourceTicketService {
 
+    final List<DownloadRequest> downloads = new ArrayList<>();
+    DownloadTicket downloadTicket =
+        new DownloadTicket.Ready(
+            new DaemonPresignedGet("GET", "https://storage.invalid/archive", Long.MAX_VALUE),
+            10L,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     final List<TransferRequest> reserves = new ArrayList<>();
     final List<UUID> commits = new ArrayList<>();
     final List<UUID> releases = new ArrayList<>();
@@ -1060,6 +1081,13 @@ final class EnvironmentDaemonServerTestSupport {
     public Ticket commit(EnvironmentId environmentId, String invocationId, UUID uploadId) {
       commits.add(uploadId);
       return new Ticket.Ready(uploadId);
+    }
+
+    @Override
+    public DownloadTicket download(
+        EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {
+      downloads.add(new DownloadRequest(environmentId, invocationId, transferId, blobId));
+      return downloadTicket;
     }
 
     @Override
