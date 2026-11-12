@@ -229,7 +229,7 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(captured), output) || !strings.Contains(string(captured), stderr) || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
+	if bytes.Count(captured, []byte("x")) != len(output) || !strings.Contains(string(captured), stderr) || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
 		t.Fatalf("details=%s captured=%d", result.Details, len(captured))
 	}
 	if confirmed != 1 {

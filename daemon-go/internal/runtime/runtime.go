@@ -1348,6 +1348,9 @@ func (r *Runtime) sendFrame(e *protocol.Envelope) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := active.connection.Send(ctx, e); err != nil {
 		r.dropConnection(active)
 		return err
