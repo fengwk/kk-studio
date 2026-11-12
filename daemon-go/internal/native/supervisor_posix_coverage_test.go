@@ -112,6 +112,40 @@ func posixTestProcess(t *testing.T) *posixProcess {
 	}
 }
 
+func TestPOSIXWaitPreservesStreamCloseFailure(t *testing.T) {
+	p := posixTestProcess(t)
+	close(p.done)
+	if err := publishText(p.stateDir, cleanupFile, "true"); err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("stdout close failed")
+	p.stdout = testErrorReadCloser{err: closeErr}
+	_, err := p.Wait(context.Background())
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("Wait error = %v, want stream close failure", err)
+	}
+}
+
+type testErrorReadCloser struct{ err error }
+
+func (r testErrorReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (r testErrorReadCloser) Close() error             { return r.err }
+
+func TestPOSIXAwaitScopePropagatesSessionSnapshotFailure(t *testing.T) {
+	dir := stateTestDir(t)
+	p := &posixProcess{pid: 42, sid: 42, stateDir: dir, done: make(chan struct{})}
+	if err := publishText(dir, scopeFile, "42"); err != nil {
+		t.Fatal(err)
+	}
+	snapshotErr := errors.New("injected session snapshot failure")
+	err := p.awaitScopeWithMembers(context.Background(), func(int) ([]sessionMember, error) {
+		return nil, snapshotErr
+	})
+	if !errors.Is(err, snapshotErr) {
+		t.Fatalf("awaitScope error = %v, want snapshot error", err)
+	}
+}
+
 func TestPOSIXTerminateInjectedFailures(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		p := posixTestProcess(t)

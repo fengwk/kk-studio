@@ -34,6 +34,25 @@ type PosixSupervisor struct {
 	closed                 bool
 	processes              map[int]*posixProcess
 	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
+	startAPI               posixStartAPI
+}
+
+type posixStartAPI struct {
+	createStateDir func() (string, error)
+	publishLaunch  func(string, []byte) error
+	pipe           func() (*os.File, *os.File, error)
+	executable     func() (string, error)
+	start          func(*exec.Cmd) error
+}
+
+func nativePOSIXStartAPI() posixStartAPI {
+	return posixStartAPI{
+		createStateDir: createStateDir,
+		publishLaunch:  func(dir string, payload []byte) error { return publish(dir, launchFile, payload) },
+		pipe:           os.Pipe,
+		executable:     os.Executable,
+		start:          func(cmd *exec.Cmd) error { return cmd.Start() },
+	}
 }
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
@@ -46,6 +65,7 @@ func NewSupervisor() (Supervisor, error) {
 	return &PosixSupervisor{
 		processes:              make(map[int]*posixProcess),
 		snapshotDirectChildren: directChildren,
+		startAPI:               nativePOSIXStartAPI(),
 	}, nil
 }
 
@@ -67,6 +87,10 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, errors.New("the process supervisor is closed")
 	}
 	s.mu.Unlock()
+	api := s.startAPI
+	if api.createStateDir == nil {
+		api = nativePOSIXStartAPI()
+	}
 	var baselinePIDs []int
 	baselineKnown := false
 	if runtime.GOOS == "linux" {
@@ -79,7 +103,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 			baselinePIDs = append(baselinePIDs, child.PID)
 		}
 	}
-	dir, err := createStateDir()
+	dir, err := api.createStateDir()
 	if err != nil {
 		return nil, err
 	}
@@ -94,18 +118,18 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	launch := launchSpec{Cwd: cwd, Args: append([]string{spec.Executable}, spec.Args...)}
 	payload, err := json.Marshal(launch)
 	if err == nil {
-		err = publish(dir, launchFile, payload)
+		err = api.publishLaunch(dir, payload)
 	}
 	if err != nil {
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	ownerReader, ownerWriter, err := os.Pipe()
+	ownerReader, ownerWriter, err := api.pipe()
 	if err != nil {
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	executable, err := os.Executable()
+	executable, err := api.executable()
 	if err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
@@ -116,14 +140,14 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.ExtraFiles = []*os.File{ownerReader}
 	cmd.Env = mergeEnvironment(os.Environ(), spec.Env)
-	stdinReader, stdin, err := os.Pipe()
+	stdinReader, stdin, err := api.pipe()
 	if err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stdout, stdoutWriter, err := os.Pipe()
+	stdout, stdoutWriter, err := api.pipe()
 	if err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
@@ -132,7 +156,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stderr, stderrWriter, err := os.Pipe()
+	stderr, stderrWriter, err := api.pipe()
 	if err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
@@ -144,7 +168,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
-	if err := cmd.Start(); err != nil {
+	if err := api.start(cmd); err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -197,6 +221,10 @@ func (s *PosixSupervisor) Close(ctx context.Context) error {
 }
 
 func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int) error {
+	return s.trackDescendantWithMembers(ctx, rootPID, pid, allProcessMembers)
+}
+
+func (s *PosixSupervisor) trackDescendantWithMembers(ctx context.Context, rootPID, pid int, snapshot func() ([]sessionMember, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -206,7 +234,7 @@ func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int)
 	if p == nil {
 		return errors.New("the process root is not managed by this supervisor")
 	}
-	members, err := allProcessMembers()
+	members, err := snapshot()
 	if err != nil {
 		return err
 	}
@@ -379,6 +407,10 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 }
 
 func (p *posixProcess) awaitScope(ctx context.Context) error {
+	return p.awaitScopeWithMembers(ctx, sessionMembers)
+}
+
+func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSession func(int) ([]sessionMember, error)) error {
 	deadline := time.NewTimer(scopeStartBudget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(scopePollInterval)
@@ -391,7 +423,7 @@ func (p *posixProcess) awaitScope(ctx context.Context) error {
 			if strings.TrimSpace(string(value)) != fmt.Sprint(p.sid) {
 				return errors.New("the process scope helper published an untrusted scope")
 			}
-			members, err := sessionMembers(p.sid)
+			members, err := membersForSession(p.sid)
 			if err != nil {
 				return err
 			}
