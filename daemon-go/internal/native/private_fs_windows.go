@@ -19,10 +19,22 @@ func ensurePrivateDirectory(path string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.Mkdir(path, 0700); err != nil {
+	path16, err := windows.UTF16PtrFromString(path)
+	if err != nil {
 		return err
 	}
-	return setWindowsOwnerOnly(path)
+	securityDescriptor, err := windowsPrivateSecurityDescriptor()
+	if err != nil {
+		return err
+	}
+	security := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: securityDescriptor}
+	if err := windows.CreateDirectory(path16, &security); err != nil {
+		if os.IsExist(err) {
+			return verifyPrivateDirectory(path)
+		}
+		return err
+	}
+	return verifyPrivateDirectory(path)
 }
 
 func verifyPrivateDirectory(path string) error {
@@ -36,6 +48,33 @@ func verifyPrivateDirectory(path string) error {
 	return verifyWindowsOwnerOnly(path)
 }
 
+type windowsPrivateTempFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+type windowsPrivateFileAPI interface {
+	OpenTemp(string, string) (windowsPrivateTempFile, error)
+	Secure(string) error
+	Rename(string, string) error
+	Remove(string) error
+	Verify(string) error
+}
+
+type nativeWindowsPrivateFileAPI struct{}
+
+func (nativeWindowsPrivateFileAPI) OpenTemp(directory, name string) (windowsPrivateTempFile, error) {
+	return os.OpenFile(filepath.Join(directory, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+}
+func (nativeWindowsPrivateFileAPI) Secure(path string) error { return setWindowsOwnerOnly(path) }
+func (nativeWindowsPrivateFileAPI) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+func (nativeWindowsPrivateFileAPI) Remove(path string) error { return os.Remove(path) }
+func (nativeWindowsPrivateFileAPI) Verify(path string) error { return verifyPrivateFile(path) }
+
 func writePrivateFile(path string, data []byte) error {
 	if err := verifyPrivateDirectory(filepath.Dir(path)); err != nil {
 		return err
@@ -47,7 +86,12 @@ func writePrivateFile(path string, data []byte) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	tmp, err := os.OpenFile(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+"."+randomSuffix()+".tmp"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	return writePrivateFileTransaction(path, data, nativeWindowsPrivateFileAPI{})
+}
+
+func writePrivateFileTransaction(path string, data []byte, api windowsPrivateFileAPI) error {
+	directory := filepath.Dir(path)
+	tmp, err := api.OpenTemp(directory, "."+filepath.Base(path)+"."+randomSuffix()+".tmp")
 	if err != nil {
 		return err
 	}
@@ -56,10 +100,10 @@ func writePrivateFile(path string, data []byte) error {
 	defer func() {
 		_ = tmp.Close()
 		if !ok {
-			_ = os.Remove(tmpPath)
+			_ = api.Remove(tmpPath)
 		}
 	}()
-	if err := setWindowsOwnerOnly(tmpPath); err != nil {
+	if err := api.Secure(tmpPath); err != nil {
 		return err
 	}
 	if err := writeAll(tmp, data); err != nil {
@@ -71,11 +115,11 @@ func writePrivateFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := api.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	ok = true
-	return verifyPrivateFile(path)
+	return api.Verify(path)
 }
 
 func createPrivateFile(path string) error {
@@ -103,13 +147,17 @@ func verifyPrivateFile(path string) error {
 	return verifyWindowsOwnerOnly(path)
 }
 
-func setWindowsOwnerOnly(path string) error {
+func windowsPrivateSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sid := user.User.Sid.String()
-	sd, err := windows.SecurityDescriptorFromString("O:" + sid + "D:P(A;;FA;;;" + sid + ")")
+	return windows.SecurityDescriptorFromString("O:" + sid + "D:P(A;;FA;;;" + sid + ")")
+}
+
+func setWindowsOwnerOnly(path string) error {
+	sd, err := windowsPrivateSecurityDescriptor()
 	if err != nil {
 		return err
 	}
@@ -127,32 +175,70 @@ func setWindowsOwnerOnly(path string) error {
 	return verifyWindowsOwnerOnly(path)
 }
 
+type windowsPrivatePathAPI interface {
+	GetFileAttributes(string) (uint32, error)
+	CurrentUserSID() (*windows.SID, error)
+	Security(string) (*windows.SID, *windows.ACL, bool, error)
+}
+
+type nativeWindowsPrivatePathAPI struct{}
+
+func (nativeWindowsPrivatePathAPI) GetFileAttributes(path string) (uint32, error) {
+	return windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+}
+
+func (nativeWindowsPrivatePathAPI) CurrentUserSID() (*windows.SID, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, err
+	}
+	return user.User.Sid, nil
+}
+
+func (nativeWindowsPrivatePathAPI) Security(path string) (*windows.SID, *windows.ACL, bool, error) {
+	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	owner, _, err := current.Owner()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	dacl, _, err := current.DACL()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	control, _, err := current.Control()
+	return owner, dacl, control&windows.SE_DACL_PROTECTED != 0, err
+}
+
 func verifyWindowsOwnerOnly(path string) error {
-	attrs, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+	return verifyWindowsOwnerOnlyWithAPI(path, nativeWindowsPrivatePathAPI{})
+}
+
+func verifyWindowsOwnerOnlyWithAPI(path string, api windowsPrivatePathAPI) error {
+	attrs, err := api.GetFileAttributes(path)
 	if err != nil {
 		return err
 	}
 	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return fmt.Errorf("the private path must not be a reparse point: %s", path)
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := api.CurrentUserSID()
 	if err != nil {
 		return err
 	}
-	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	owner, dacl, protected, err := api.Security(path)
 	if err != nil {
 		return err
 	}
-	owner, _, err := current.Owner()
-	if err != nil || owner == nil || !owner.Equals(user.User.Sid) {
+	if owner == nil || !owner.Equals(user) {
 		return fmt.Errorf("the private path is not owned by the current user: %s", path)
 	}
-	dacl, _, err := current.DACL()
-	if err != nil || dacl == nil || dacl.AceCount != 1 {
+	if dacl == nil || dacl.AceCount != 1 {
 		return fmt.Errorf("the private path DACL is not owner-only: %s", path)
 	}
-	control, _, err := current.Control()
-	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+	if !protected {
 		return fmt.Errorf("the private path DACL is not protected: %s", path)
 	}
 	var ace *windows.ACCESS_ALLOWED_ACE
@@ -160,7 +246,7 @@ func verifyWindowsOwnerOnly(path string) error {
 		return err
 	}
 	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 || ace.Mask != 0x001f01ff || !aceSID.Equals(user.User.Sid) {
+	if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 || ace.Mask != 0x001f01ff || !aceSID.Equals(user) {
 		return fmt.Errorf("the private path DACL is not owner-only: %s", path)
 	}
 	return nil
