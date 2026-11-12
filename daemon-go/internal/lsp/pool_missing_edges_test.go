@@ -138,9 +138,13 @@ func TestPool_NonOverlappingRestart(t *testing.T) {
 	supervisor.terminateGate = cleanupGate
 	ctx, cancel := context.WithCancel(context.Background())
 	ownerDone := make(chan error, 1)
+	confirmation := make(chan struct{}, 1)
 	var confirmed int32
 	go func() {
-		_, err := pool.LeaseWithExit(ctx, file, func() { atomic.AddInt32(&confirmed, 1) })
+		_, err := pool.LeaseWithExit(ctx, file, func() {
+			atomic.AddInt32(&confirmed, 1)
+			confirmation <- struct{}{}
+		})
 		ownerDone <- err
 	}()
 	select {
@@ -191,6 +195,11 @@ func TestPool_NonOverlappingRestart(t *testing.T) {
 			t.Fatal("old boot did not converge")
 		case <-time.After(time.Millisecond):
 		}
+	}
+	select {
+	case <-confirmation:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled owner was not confirmed after boot convergence")
 	}
 	if atomic.LoadInt32(&confirmed) != 1 {
 		t.Fatalf("cancelled owner confirmations=%d", confirmed)
