@@ -4,7 +4,10 @@ package native
 
 import (
 	"context"
+	"errors"
 	"os"
+	"reflect"
+	"syscall"
 	"testing"
 	"time"
 
@@ -28,6 +31,69 @@ func TestDarwinSession_ParentFirst(t *testing.T) {
 	}
 	if positions[10] >= positions[20] || positions[20] >= positions[30] {
 		t.Fatalf("session members are not parent-first: %+v", ordered)
+	}
+}
+
+type fakeDarwinProcessAPI struct {
+	procs       []unix.KinfoProc
+	snapshotErr error
+	sids        map[int]int
+	sidErrors   map[int]error
+	query       string
+	queriedPIDs []int
+}
+
+func (api *fakeDarwinProcessAPI) SysctlKinfoProcSlice(name string) ([]unix.KinfoProc, error) {
+	api.query = name
+	return api.procs, api.snapshotErr
+}
+func (api *fakeDarwinProcessAPI) Getsid(pid int) (int, error) {
+	api.queriedPIDs = append(api.queriedPIDs, pid)
+	return api.sids[pid], api.sidErrors[pid]
+}
+
+func darwinKinfoProc(pid, parent int32, state int8, startSec int64, startUsec int32) unix.KinfoProc {
+	var proc unix.KinfoProc
+	proc.Proc.P_pid = pid
+	proc.Proc.P_stat = state
+	proc.Proc.P_starttime.Sec = startSec
+	proc.Proc.P_starttime.Usec = startUsec
+	proc.Eproc.Ppid = parent
+	return proc
+}
+
+// NAT-F-006 verifies Darwin enumeration fails closed, ignores vanished PIDs, and freezes identity data.
+func TestDarwinProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
+	apiError := errors.New("injected sysctl error")
+	if members, err := darwinProcessMembersWithAPI(&fakeDarwinProcessAPI{snapshotErr: apiError}); !errors.Is(err, apiError) || members != nil {
+		t.Fatalf("sysctl failure = %+v, %v", members, err)
+	}
+
+	queryError := errors.New("injected getsid error")
+	api := &fakeDarwinProcessAPI{
+		procs: []unix.KinfoProc{
+			darwinKinfoProc(-1, 1, 2, 1, 2),
+			darwinKinfoProc(10, 9, 2, 11, 12),
+			darwinKinfoProc(20, 10, 5, 21, 22),
+		},
+		sids:      map[int]int{20: 7},
+		sidErrors: map[int]error{10: syscall.ESRCH, 20: nil},
+	}
+	members, err := darwinProcessMembersWithAPI(api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.query != "kern.proc.all" || !reflect.DeepEqual(api.queriedPIDs, []int{10, 20}) {
+		t.Fatalf("snapshot query/PIDs = %q/%v", api.query, api.queriedPIDs)
+	}
+	want := []sessionMember{{PID: 20, Parent: 10, Session: 7, Identity: "21.22", State: "Z"}}
+	if !reflect.DeepEqual(members, want) {
+		t.Fatalf("snapshot members = %+v, want %+v", members, want)
+	}
+
+	api.sidErrors[20] = queryError
+	if members, err := darwinProcessMembersWithAPI(api); !errors.Is(err, queryError) || members != nil {
+		t.Fatalf("non-ESRCH getsid failure = %+v, %v", members, err)
 	}
 }
 
