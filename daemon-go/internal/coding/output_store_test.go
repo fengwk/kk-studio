@@ -205,6 +205,48 @@ func TestDeleteStagingIsIdempotent(t *testing.T) {
 	}
 }
 
+// COD-T-014
+func TestOutputSpoolCloseRemovesUnpublishedSpill(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "abandoned", defaultCaptureBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
+	staging := spool.staging
+	if staging == "" {
+		t.Fatal("expected staging path")
+	}
+	if err := spool.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging still exists: %v", err)
+	}
+	if err := spool.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+}
+
+// COD-T-015
+func TestOpenOutputStoreRejectsNonDirectoryRoot(t *testing.T) {
+	dataDir := t.TempDir()
+	tmp := filepath.Join(dataDir, "tmp")
+	if err := os.Mkdir(tmp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(tmp, "workspaces")
+	if err := os.WriteFile(root, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenTextOutputStore(dataDir); err == nil {
+		t.Fatal("expected invalid workspace root error")
+	}
+}
+
 // COD-T-013
 func TestWriteAllHandlesShortWritesAndNoProgress(t *testing.T) {
 	writer := &shortWriter{max: 2}

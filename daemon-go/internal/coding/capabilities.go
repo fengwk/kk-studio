@@ -133,7 +133,7 @@ func validateRequiredString(rawJSON json.RawMessage, name string) error {
 		return rejectInput("invalid arguments")
 	}
 	value, ok := raw[name]
-	if !ok {
+	if !ok || strings.TrimSpace(string(value)) == "null" {
 		return rejectInput(name + " must be a string")
 	}
 	var text string
@@ -307,10 +307,10 @@ func formatTextWindow(path string, window TextWindow) string {
 }
 
 func writeCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	args, err := decodeArguments(call)
-	if err == nil {
-		err = validateRequiredString(call.Arguments, "content")
+	if err := validateRequiredString(call.Arguments, "content"); err != nil {
+		return errorResult(call.InvocationID, err), nil
 	}
+	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
@@ -358,10 +358,10 @@ func editPreviewCapability(ctx context.Context, call runtime.CapabilityCall, cap
 }
 
 func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	args, err := decodeArguments(call)
-	if err == nil {
-		err = validateRequiredString(call.Arguments, "content")
+	if err := validateRequiredString(call.Arguments, "content"); err != nil {
+		return errorResult(call.InvocationID, err), nil
 	}
+	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}

@@ -2,6 +2,30 @@ package coding
 
 import "testing"
 
+// COD-F-004, COD-F-006
+func TestDetectImageTypeUsesSupportedMagicBytes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "png", data: []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, want: "image/png"},
+		{name: "jpeg", data: []byte{0xff, 0xd8, 0xff}, want: "image/jpeg"},
+		{name: "gif87a", data: []byte("GIF87a"), want: "image/gif"},
+		{name: "gif89a", data: []byte("GIF89a"), want: "image/gif"},
+		{name: "webp", data: []byte("RIFF0000WEBP"), want: "image/webp"},
+		{name: "bad-riff", data: []byte("RIFF0000WAVE"), want: ""},
+		{name: "short-webp", data: []byte("RIFF0000WEB"), want: ""},
+		{name: "unknown", data: []byte("unknown"), want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := DetectImageType(test.data); got != test.want {
+				t.Fatalf("image type=%q want=%q", got, test.want)
+			}
+		})
+	}
+}
+
 // COD-F-005
 func TestDetectMediaTypeHeaderRules(t *testing.T) {
 	for _, test := range []struct {
