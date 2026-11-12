@@ -19,26 +19,32 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 
-/** ToolBinding 的 definition/contributor/environmentSupport/environmentId/environmentName 契约与不变式。 */
+/** ToolBinding 的 definition/environment/configuredSkills 契约与不变式。 */
 class ToolBindingTest {
 
   private static final EnvironmentId ENV_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   @Test
-  void exposesOnlyDefinitionContributorEnvironmentSupportAndEnvironmentComponents() {
-    // 反射契约锁定 durable binding 的五个组件。
+  void exposesDefinitionContributorEnvironmentAndConfiguredSkillsComponents() {
+    // 反射契约锁定 durable binding 的六个组件。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
         List.of(
-            "definition", "contributor", "environmentSupport", "environmentId", "environmentName"),
+            "definition",
+            "contributor",
+            "environmentSupport",
+            "environmentId",
+            "environmentName",
+            "configuredSkills"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
     assertEquals(ContributorBinding.class, components[1].getType());
     assertEquals(EnvironmentSupport.class, components[2].getType());
     assertEquals(EnvironmentId.class, components[3].getType());
     assertEquals(String.class, components[4].getType());
+    assertEquals(List.class, components[5].getType());
   }
 
   /** 测试意图：验证三种 EnvironmentSupport 级别与其允许的环境路由形态均能正确构造。 */
