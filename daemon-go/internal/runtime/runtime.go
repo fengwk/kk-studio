@@ -1040,6 +1040,10 @@ func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, e
 		}
 		return
 	}
+	if message, failed := failedCapabilityResultMessage(result); failed {
+		_ = r.finish(id, protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(message)}}, InvocationFailed)
+		return
+	}
 	encoded, encodeErr := r.encodeResult(ctx, id, result, budget, false)
 	if encodeErr != nil {
 		var uploadFailure *resourceUploadFailure
@@ -1054,6 +1058,24 @@ func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, e
 	if err := r.finish(id, protocol.MessageType_COMPLETED, &protocol.Envelope_Completed{Completed: &protocol.Completed{Result: encoded}}, InvocationCompleted); err != nil {
 		return
 	}
+}
+
+func failedCapabilityResultMessage(result CapabilityResult) (string, bool) {
+	if !result.Error {
+		return "", false
+	}
+	var details struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil || details.Code != "FAILED" {
+		return "", false
+	}
+	for _, content := range result.Contents {
+		if content.Type == "text" && content.Text != "" {
+			return content.Text, true
+		}
+	}
+	return "capability execution failed", true
 }
 
 func (r *Runtime) encodeResult(ctx context.Context, id string, result CapabilityResult, budget int64, progress bool) (*protocol.CapabilityResult, error) {

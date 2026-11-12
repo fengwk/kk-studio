@@ -140,6 +140,16 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("first runtime response=%v; want READY", ready)
 	}
 
+	const missingInvocation = "123e4567-e89b-42d3-a456-426614174006"
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_RECOVER, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(missingInvocation),
+		Payload: &protocol.Envelope_Recover{Recover: &protocol.Recover{}},
+	})
+	recovered, err := readControlEnvelopeResult(response.Body)
+	if err != nil || recovered.MessageType != protocol.MessageType_RECOVER_NOT_FOUND || recovered.GetInvocationId() != missingInvocation {
+		t.Fatalf("missing invocation recovery=%v err=%v, want RECOVER_NOT_FOUND", recovered, err)
+	}
+
 	cases := []struct {
 		name, capability, arguments, invocation, want string
 	}{
@@ -194,6 +204,35 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 			}
 		})
 	}
+	t.Run("output-limit", func(t *testing.T) {
+		const invocation = "123e4567-e89b-42d3-a456-426614174005"
+		writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+			MessageType: protocol.MessageType_INVOKE, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(invocation),
+			Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{
+				CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(fmt.Sprintf(`{"path":%q}`, file)),
+				TimeoutMillis: proto.Int64(10000), MaxOutputBytes: proto.Int64(1), ImageInputTier: imageTier(protocol.ImageInputTier_P720),
+			}},
+		})
+		for {
+			e, readErr := readControlEnvelopeResult(response.Body)
+			if readErr != nil {
+				t.Fatalf("read over-limit invocation result: %v", readErr)
+			}
+			if e.GetInvocationId() != invocation {
+				continue
+			}
+			if e.MessageType == protocol.MessageType_STARTED || e.MessageType == protocol.MessageType_PROGRESS {
+				continue
+			}
+			if e.MessageType != protocol.MessageType_FAILED {
+				t.Fatalf("over-limit terminal=%v, want FAILED", e)
+			}
+			if message := e.GetFailed().GetMessage(); !strings.Contains(message, "Tool output is ") || !strings.Contains(message, "exceeds the tool output size limit of 0 MiB") {
+				t.Fatalf("over-limit failure message=%q", message)
+			}
+			break
+		}
+	})
 	if got, err := os.ReadFile(file); err != nil || string(got) != "needle edited\n" {
 		t.Fatalf("edited file=%q err=%v", got, err)
 	}
