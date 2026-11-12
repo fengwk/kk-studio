@@ -9,6 +9,60 @@ import (
 )
 
 // RUN-T-087 keeps the session CONNECTING after initial validation failure and becomes READY after a repaired snapshot.
+func TestRuntimeReportsInitialConfigurationFailureBeforeReady(t *testing.T) {
+	initial := initialRuntimeConfig()
+	status := NewStatusTracker()
+	manager, err := NewEnvironmentConfigRuntime(EnvironmentConfigOptions{
+		Initial: initial,
+		Cache:   &testCacheWriter{},
+		Prepare: (&testConfigurationPreparer{}).prepare,
+		Status:  status,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := newTestConnection()
+	r, err := NewRuntime(RuntimeOptions{
+		EnvironmentID:     "env",
+		Connections:       &sequenceConnectionFactory{connections: []Connection{connection}},
+		EnvironmentConfig: manager,
+		Status:            status,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.attachConnection(connection)
+	if err := r.handleSettings(&protocol.Envelope{
+		MessageType:   protocol.MessageType_SETTINGS,
+		EnvironmentId: stringPtr("env"),
+		Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{
+			ResourceBudgets: &protocol.ResourceBudgets{},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	invalid := configurationOf(initial)
+	invalid.BashExecutable = stringPtr(" ")
+	if err := r.handle(context.Background(), &protocol.Envelope{
+		MessageType:   protocol.MessageType_ENVIRONMENT_CONFIG,
+		EnvironmentId: stringPtr("env"),
+		Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{
+			Version: int64Ptr(2),
+			Config:  invalid,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	frames := connection.frames()
+	if len(frames) != 1 || frames[0].MessageType != protocol.MessageType_RUNTIME_STATUS {
+		t.Fatalf("initial configuration failure frames = %v, want one RUNTIME_STATUS", frames)
+	}
+	failure := frames[0].GetRuntimeStatus().GetRuntimeStatus().GetStatus().GetConfiguration().GetError()
+	if failure == nil || failure.GetVersion() != 2 || failure.GetCode() != "VALIDATION_FAILED" {
+		t.Fatalf("initial configuration failure status = %v", failure)
+	}
+}
+
 func TestRuntimeSignalsConfigurationFailureAndAllowsRepair(t *testing.T) {
 	initial := initialRuntimeConfig()
 	status := NewStatusTracker()
