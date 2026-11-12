@@ -356,7 +356,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 	go m.watchExit(process, generation, false)
 	if err := m.waitForHealth(ctx, port, processExit); err != nil {
 		if terminateErr := process.Terminate(context.Background(), 5*time.Second); terminateErr != nil {
-			return nil, NewError("code-server startup failed and could not be terminated", "UNAVAILABLE")
+			return nil, NewError(fmt.Sprintf("code-server startup failed (%s) and could not be terminated", SafeMessage(err)), "UNAVAILABLE")
 		}
 		m.mu.Lock()
 		if m.process == process {
@@ -368,7 +368,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 	cookie, err := m.login(ctx, port, password)
 	if err != nil {
 		if terminateErr := process.Terminate(context.Background(), 5*time.Second); terminateErr != nil {
-			return nil, NewError("code-server startup failed and could not be terminated", "UNAVAILABLE")
+			return nil, NewError(fmt.Sprintf("code-server startup failed (%s) and could not be terminated", SafeMessage(err)), "UNAVAILABLE")
 		}
 		m.mu.Lock()
 		if m.process == process {
