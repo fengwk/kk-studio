@@ -83,7 +83,7 @@ func TestGrepContextReportsResultsAndContextFailures(t *testing.T) {
 	}
 }
 
-// COD-F-010 COD-F-011
+// COD-F-010 COD-F-011 COD-T-165
 func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "plain.txt")

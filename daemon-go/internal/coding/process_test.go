@@ -66,7 +66,7 @@ func (s fakeSupervisor) Start(_ context.Context, spec native.ProcessSpec) (nativ
 }
 func (fakeSupervisor) Close(context.Context) error { return nil }
 
-// COD-F-016 COD-T-128
+// COD-F-016 COD-T-128 COD-T-237
 func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("x", 100*1024)

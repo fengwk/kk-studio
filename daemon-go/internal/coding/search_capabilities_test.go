@@ -139,10 +139,13 @@ func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	}
 }
 
-// COD-F-011 COD-T-042: include filters directory scans but never overrides ignore rules or filters an explicit file.
+// COD-F-011 COD-F-012 COD-T-172 COD-T-173 COD-T-181 COD-T-184: include filtering, direct files, binary errors, and Git metadata are asserted.
 func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "config"), []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.ts\n"), 0o600); err != nil {
@@ -167,6 +170,13 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": file, "pattern": "x", "literal": true, "include": "*.js"}, nil)
 	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(resolvedFile)+":1:x" {
 		t.Fatalf("direct-file result=%#v", direct)
+	}
+
+	for _, metadataPath := range []string{filepath.Join(root, ".git"), filepath.Join(root, ".git", "config")} {
+		metadata := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": metadataPath, "pattern": "x", "literal": true}, nil)
+		if metadata.Error || metadata.Contents[0].Text != "No matches found" {
+			t.Fatalf("Git metadata path %q result=%#v", metadataPath, metadata)
+		}
 	}
 
 	binaryFile := filepath.Join(root, "binary.bin")
