@@ -26,9 +26,9 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			supervisor := &fakeSupervisor{startErr: tc.cause}
-			_, err := Launch(context.Background(), ServerConfig{ID: "broken", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+			_, err := Launch(context.Background(), ServerConfig{ID: "broken", Command: []string{"jdtls"}}, t.TempDir(), "/resolved/path/jdtls", supervisor)
 			var bootstrap *LspBootstrapError
-			if !errors.As(err, &bootstrap) || bootstrap.Converged != tc.converged || !errors.Is(err, tc.cause) || bootstrap.Error() != "LSP server 'broken' cannot be started: fake" {
+			if !errors.As(err, &bootstrap) || bootstrap.Converged != tc.converged || !errors.Is(err, tc.cause) || bootstrap.Error() != "LSP server 'broken' cannot be started: /resolved/path/jdtls" {
 				t.Fatalf("launch error = %#v", err)
 			}
 		})

@@ -76,7 +76,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 	}
 	process, err := processes.Start(ctx, native.ProcessSpec{Executable: executable, Args: append([]string(nil), server.Command[1:]...), Directory: root})
 	if err != nil {
-		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, server.Command[0]), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
+		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
 	}
 	c := &Client{server: server, root: root, process: process, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1), stopDone: make(chan struct{}), exitSignal: make(chan struct{}), transportDone: make(chan struct{}), shutdownGrace: time.Second, positionEncoding: "utf-16", documents: map[string]document{}, jdtls: isJDTLS(server.Command)}
 	go func() {

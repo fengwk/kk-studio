@@ -31,7 +31,7 @@ func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 		id   string
 		args string
 		want string
-	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", string(workspaceArgs), "path does not exist: " + missing}, {"lsp.java-decompile", string(decompileArgs), "path does not exist: " + missing}}
+	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", `{"path":"   ","line":1}`, "path is required"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", string(workspaceArgs), "path does not exist: " + filepath.ToSlash(missing)}, {"lsp.java-decompile", string(decompileArgs), "path does not exist: " + filepath.ToSlash(missing)}}
 	for _, tc := range cases {
 		call := runtime.CapabilityCall{InvocationID: "id", CapabilityID: tc.id, Arguments: json.RawMessage(tc.args)}
 		result, err := facade.Capabilities()[tc.id](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})

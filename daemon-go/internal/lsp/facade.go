@@ -341,21 +341,22 @@ func integerArg(args map[string]any, key string, required bool, fallback int) (i
 	return int(i), nil
 }
 func validatePath(path string) (string, error) {
-	if path == "" {
+	if strings.TrimSpace(path) == "" {
 		return "", &LspError{Message: "path is required"}
 	}
 	if !filepath.IsAbs(path) {
 		return "", &LspError{Message: "path must be an absolute path (a relative or non-absolute value was given)"}
 	}
-	real, err := filepath.Abs(path)
+	candidate, err := filepath.Abs(path)
 	if err != nil {
-		return "", &LspError{Message: "path does not exist: " + path}
+		return "", &LspError{Message: "path does not exist: " + filepath.ToSlash(filepath.Clean(path))}
 	}
-	if _, err = os.Stat(real); err != nil {
-		return "", &LspError{Message: "path does not exist: " + path}
+	if _, err = os.Stat(candidate); err != nil {
+		return "", &LspError{Message: "path does not exist: " + filepath.ToSlash(candidate)}
 	}
-	if _, err = os.Stat(real); err != nil {
-		return "", &LspError{Message: "path must exist: " + real}
+	real, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", &LspError{Message: "path must exist: " + candidate}
 	}
 	return real, nil
 }

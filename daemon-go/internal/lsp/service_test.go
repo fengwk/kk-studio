@@ -79,11 +79,13 @@ func TestService_RequestHelpers(t *testing.T) {
 
 // LSP-F-016 and LSP-F-024 retain stable path validation error text.
 func TestValidatePathErrors(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing")
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	unnormalizedMissing := dir + string(filepath.Separator) + "nested" + string(filepath.Separator) + ".." + string(filepath.Separator) + "missing"
 	cases := []struct {
 		path string
 		want string
-	}{{"", "path is required"}, {"relative", "path must be an absolute path (a relative or non-absolute value was given)"}, {missing, "path does not exist: " + missing}}
+	}{{"", "path is required"}, {"   ", "path is required"}, {"relative", "path must be an absolute path (a relative or non-absolute value was given)"}, {missing, "path does not exist: " + filepath.ToSlash(missing)}, {unnormalizedMissing, "path does not exist: " + filepath.ToSlash(missing)}}
 	for _, tc := range cases {
 		_, err := validatePath(tc.path)
 		if err == nil || err.Error() != tc.want {
