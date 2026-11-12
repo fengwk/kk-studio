@@ -220,7 +220,7 @@ func (r ticketRequester) RequestTicket(ctx context.Context, transferID string) (
 
 type dynamicResourceUploader struct {
 	current func() config.DaemonConfig
-	control *runtimeResourceControl
+	control transport.UploadControl
 }
 
 func (u dynamicResourceUploader) Upload(ctx context.Context, invocationID string, content daemonruntime.ResultContent) (daemonruntime.ResultContent, error) {
