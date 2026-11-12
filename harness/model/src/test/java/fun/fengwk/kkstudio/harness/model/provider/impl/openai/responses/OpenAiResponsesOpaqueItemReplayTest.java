@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -17,9 +18,12 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -80,6 +84,11 @@ class OpenAiResponsesOpaqueItemReplayTest {
         .put("query", "weather");
     ObjectNode messageFields = MAPPER.createObjectNode();
     messageFields.putObject("itemFields").put("status", "completed").put("phase", "final");
+    messageFields
+        .putArray("annotations")
+        .addObject()
+        .put("type", "url_citation")
+        .put("url", "https://example.com");
     ObjectNode imageFields = MAPPER.createObjectNode();
     imageFields.putObject("item").put("status", "completed").put("result", "aGVsbG8=");
 
@@ -159,6 +168,9 @@ class OpenAiResponsesOpaqueItemReplayTest {
     assertEquals("ws_1", input.get(0).path("id").asString(""));
     assertEquals("message", input.get(1).path("type").asString(""));
     assertEquals("sunny", input.get(1).path("content").get(0).path("text").asString(""));
+    assertEquals(
+        "https://example.com",
+        input.get(1).path("content").get(0).path("annotations").get(0).path("url").asString(""));
     assertEquals("image_generation_call", input.get(2).path("type").asString(""));
     assertEquals("aGVsbG8=", input.get(2).path("result").asString(""));
   }
@@ -196,5 +208,211 @@ class OpenAiResponsesOpaqueItemReplayTest {
     assertEquals("message", input.get(0).path("type").asString(""));
     assertEquals("sunny", input.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(input.toString().contains("web_search_call"));
+  }
+
+  @Test
+  void replaysOpaqueMessageContentFromItsOwningBlock() throws Exception {
+    ProviderReplayAffinity affinity = createDescriptor().affinity("gpt-5.4-mini");
+    ObjectNode itemFields = MAPPER.createObjectNode();
+    itemFields.putObject("itemFields").put("status", "completed");
+    ObjectNode contentFields = MAPPER.createObjectNode();
+    contentFields.putObject("content").put("file_id", "file_1");
+    ProviderTextBlock text =
+        new ProviderTextBlock(
+            "hello",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                "msg_1",
+                "message",
+                "output_text",
+                false,
+                null,
+                true,
+                itemFields));
+    ProviderOpaqueBlock content =
+        new ProviderOpaqueBlock(
+            "message_content",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                "msg_1",
+                "message",
+                "image_file",
+                false,
+                null,
+                false,
+                contentFields));
+
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            List.of(
+                                new ProviderMessage(
+                                    ProviderMessageRole.ASSISTANT, List.of(text, content)))),
+                        createDescriptor())
+                    .bodyUtf8Bytes())
+            .path("input");
+
+    assertEquals(1, input.size());
+    assertEquals("hello", input.get(0).path("content").get(0).path("text").asString(""));
+    assertEquals("image_file", input.get(0).path("content").get(1).path("type").asString(""));
+    assertEquals("file_1", input.get(0).path("content").get(1).path("file_id").asString(""));
+  }
+
+  @Test
+  void redactedThinkingUsesSemanticFallbackWhenNoNativeEncodingExists() throws Exception {
+    ProviderReplayAffinity affinity = createDescriptor().affinity("gpt-5.4-mini");
+    ProviderRedactedThinkingBlock redacted =
+        new ProviderRedactedThinkingBlock(
+            "secret",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                "rs_1",
+                "reasoning",
+                null,
+                false,
+                null,
+                true,
+                MAPPER.createObjectNode()));
+
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            List.of(
+                                new ProviderMessage(
+                                    ProviderMessageRole.ASSISTANT, List.of(redacted)))),
+                        createDescriptor())
+                    .bodyUtf8Bytes())
+            .path("input");
+
+    assertEquals(0, input.size());
+  }
+
+  @Test
+  void opaqueMessageContentWithoutPortableFieldsFallsBackSemantically() throws Exception {
+    ProviderReplayAffinity affinity = createDescriptor().affinity("gpt-5.4-mini");
+    ProviderOpaqueBlock content =
+        new ProviderOpaqueBlock(
+            "message_content",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                "msg_1",
+                "message",
+                "image_file",
+                false,
+                null,
+                true,
+                MAPPER.createObjectNode()));
+
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            List.of(
+                                new ProviderMessage(
+                                    ProviderMessageRole.ASSISTANT, List.of(content)))),
+                        createDescriptor())
+                    .bodyUtf8Bytes())
+            .path("input");
+
+    assertEquals(0, input.size());
+  }
+
+  @Test
+  void jsonBlocksWithoutNativeMetadataUseSemanticFallback() throws Exception {
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            List.of(
+                                new ProviderMessage(
+                                    ProviderMessageRole.ASSISTANT,
+                                    List.of(new ProviderJsonBlock("{\"ok\":true}"))))),
+                        createDescriptor())
+                    .bodyUtf8Bytes())
+            .path("input");
+
+    assertEquals("{\"ok\":true}", input.get(0).path("content").get(0).path("text").asString(""));
+  }
+
+  @Test
+  void rejectsSameAffinityBlockWithMissingItemType() {
+    ProviderReplayAffinity affinity = createDescriptor().affinity("gpt-5.4-mini");
+    ProviderTextBlock invalidBlock =
+        new ProviderTextBlock(
+            "answer",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                null,
+                null,
+                "output_text",
+                false,
+                null,
+                true,
+                MAPPER.createObjectNode()));
+
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                request(
+                    List.of(
+                        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(invalidBlock)))),
+                createDescriptor()));
+  }
+
+  @Test
+  void rejectsSameAffinityBlockWithNonObjectNativeItemFields() {
+    ProviderReplayAffinity affinity = createDescriptor().affinity("gpt-5.4-mini");
+    ObjectNode fields = MAPPER.createObjectNode();
+    fields.putArray("itemFields").add("invalid");
+    ProviderTextBlock invalidBlock =
+        new ProviderTextBlock(
+            "answer",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                affinity,
+                null,
+                null,
+                null,
+                "message",
+                "output_text",
+                false,
+                null,
+                true,
+                fields));
+
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                request(
+                    List.of(
+                        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(invalidBlock)))),
+                createDescriptor()));
   }
 }
