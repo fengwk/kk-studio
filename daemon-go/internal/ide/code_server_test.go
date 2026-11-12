@@ -2,6 +2,7 @@ package ide
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,102 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
+
+// IDE-T-031 verifies process creation, health, and login failures never expose a usable session.
+func TestCodeServerStartupFailureBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func(*fakeSupervisor)
+	}{
+		{"process start", func(supervisor *fakeSupervisor) { supervisor.startErr = errors.New("native start failed") }},
+		{"login status", func(supervisor *fakeSupervisor) { supervisor.loginStatus = http.StatusUnauthorized }},
+		{"missing cookie", func(supervisor *fakeSupervisor) { supervisor.omitLoginCookie = true }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			installFakeDistribution(t, root)
+			supervisor := &fakeSupervisor{}
+			test.configure(supervisor)
+			manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if _, err := manager.EnsureStarted(ctx); FailureCode(err) != "UNAVAILABLE" {
+				t.Fatalf("startup error=%v", err)
+			}
+			if manager.Session() != nil {
+				t.Fatal("failed startup retained a session")
+			}
+			if err := manager.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// IDE-T-031 verifies an early process exit aborts startup without leaving a managed process.
+func TestCodeServerExitDuringHealthCheck(t *testing.T) {
+	root := t.TempDir()
+	installFakeDistribution(t, root)
+	supervisor := &fakeSupervisor{healthStatus: http.StatusServiceUnavailable}
+	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{})
+	result := make(chan error, 1)
+	go func() { _, err := manager.EnsureStarted(context.Background()); result <- err }()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		supervisor.mu.Lock()
+		process := supervisor.proc
+		supervisor.mu.Unlock()
+		if process != nil {
+			process.exit <- native.ProcessExit{Code: 7}
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-result:
+		if FailureCode(err) != "UNAVAILABLE" || SafeMessage(err) != "code-server exited during startup" {
+			t.Fatalf("startup exit error=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not observe process exit")
+	}
+	if err := manager.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// IDE-T-031 verifies an unexpected process exit is reported once and the manager can restart.
+func TestCodeServerUnexpectedExitRestart(t *testing.T) {
+	root := t.TempDir()
+	installFakeDistribution(t, root)
+	supervisor := &fakeSupervisor{}
+	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{}).(*codeServerManager)
+	exited := make(chan uint64, 1)
+	manager.OnUnexpectedExit(func(generation uint64) { exited <- generation })
+	first, err := manager.EnsureStarted(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor.mu.Lock()
+	process := supervisor.proc
+	supervisor.mu.Unlock()
+	process.exit <- native.ProcessExit{Code: 5}
+	select {
+	case generation := <-exited:
+		if generation != first.Generation {
+			t.Fatalf("exit generation=%d want %d", generation, first.Generation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unexpected exit was not reported")
+	}
+	second, err := manager.EnsureStarted(context.Background())
+	if err != nil || second.Generation <= first.Generation {
+		t.Fatalf("restart session=%+v err=%v", second, err)
+	}
+	if err := manager.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // IDE-T-030 verifies derived private paths and the fixed bundled Node entrypoint.
 func TestPathsAndLaunchResolution(t *testing.T) {
@@ -115,6 +212,18 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	if got := supervisor.count(); got != 1 {
 		t.Fatalf("process starts = %d", got)
 	}
+	if err := manager.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if manager.Session() != nil {
+		t.Fatal("session remains after stop")
+	}
+	if _, err := manager.EnsureStarted(ctx); err != nil {
+		t.Fatalf("restart after stop: %v", err)
+	}
+	if got := supervisor.count(); got != 2 {
+		t.Fatalf("process starts after restart = %d", got)
+	}
 	if err := manager.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -151,15 +260,26 @@ func installFakeDistribution(t *testing.T, root string) {
 }
 
 type fakeSupervisor struct {
-	mu     sync.Mutex
-	countN int
-	proc   *fakeProcess
-	specs  []native.ProcessSpec
+	mu              sync.Mutex
+	countN          int
+	proc            *fakeProcess
+	specs           []native.ProcessSpec
+	startErr        error
+	startHook       func()
+	healthStatus    int
+	loginStatus     int
+	omitLoginCookie bool
 }
 
 func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.startErr != nil {
+		return nil, s.startErr
+	}
+	if s.startHook != nil {
+		s.startHook()
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -197,14 +317,26 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 		}
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		status := s.healthStatus
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
+	})
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("password") != password {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "code-server-session", Value: "fake", Path: "/"})
+		if s.loginStatus != 0 {
+			w.WriteHeader(s.loginStatus)
+			return
+		}
+		if !s.omitLoginCookie {
+			http.SetCookie(w, &http.Cookie{Name: "code-server-session", Value: "fake", Path: "/"})
+		}
 		w.WriteHeader(http.StatusFound)
 	})
 	server := &http.Server{Handler: mux}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -135,6 +136,224 @@ func TestValidateResultAndPTY(t *testing.T) {
 	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
 	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":0}`)); status != http.StatusBadRequest {
 		t.Fatalf("invalid PTY pid status = %d", status)
+	}
+}
+
+// IDE-T-018 verifies result payload structure and directory fencing before settling an extension command.
+func TestBridgeResultRouteFencing(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	bridge.Assign(viewID, "/managed/view.code-workspace", 1, "/managed/old")
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`null`)); status != http.StatusBadRequest {
+		t.Fatalf("null result status=%d", status)
+	}
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{}`)); status != http.StatusBadRequest {
+		t.Fatalf("missing ID status=%d", status)
+	}
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":3}`)); status != http.StatusBadRequest {
+		t.Fatalf("non-string ID status=%d", status)
+	}
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"unknown","ok":true}`)); status != http.StatusNoContent {
+		t.Fatalf("unknown ID status=%d", status)
+	}
+	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	bridge.views[viewID].hostID = stream.hostID
+	bridge.views[viewID].stream = stream
+	result := make(chan BridgeResult, 1)
+	bridge.pending["change"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: result}
+	bridge.mu.Unlock()
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"change","ok":true,"directory":"/managed/wrong"}`)); status != http.StatusNoContent {
+		t.Fatalf("directory mismatch status=%d", status)
+	}
+	if got := <-result; got.OK || got.Message != "directory change was not applied" {
+		t.Fatalf("mismatched directory result=%+v", got)
+	}
+	bridge.mu.Lock()
+	stale := make(chan BridgeResult, 1)
+	bridge.pending["stale"] = &bridgePending{viewID: viewID, epoch: 1, op: "inspect", stream: stream, result: stale}
+	bridge.views[viewID].stream = &bridgeStream{hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.mu.Unlock()
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"stale","ok":true}`)); status != http.StatusNoContent {
+		t.Fatalf("stale result status=%d", status)
+	}
+	select {
+	case <-stale:
+		t.Fatal("result from a replaced host settled a pending command")
+	default:
+	}
+}
+
+// IDE-T-018 verifies PTY validation and callback errors never disclose implementation failures.
+func TestBridgePTYFailureBoundaries(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	for _, body := range [][]byte{[]byte("{"), []byte(`{"workspacePath":"","pid":1}`), []byte(`{"workspacePath":"/managed/view.code-workspace","pid":1.5}`)} {
+		if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusBadRequest {
+			t.Errorf("invalid PTY body %s status=%d", body, status)
+		}
+	}
+	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
+	bridge.OnPTY(func(string, int) error { return fmt.Errorf("internal path should not cross boundary") })
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":42}`)); status != http.StatusInternalServerError {
+		t.Fatalf("PTY callback failure status=%d", status)
+	}
+}
+
+// IDE-T-014/022 verifies stream query, retired-host, and host-capacity admission rules.
+func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const workspace = "/managed/view.code-workspace"
+	bridge.Assign(viewID, workspace, 1, "/managed")
+	status := func(values url.Values) int {
+		request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+values.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bridge.Secret)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+	if status(url.Values{"workspacePath": {workspace, workspace}}) != http.StatusBadRequest {
+		t.Fatal("duplicate workspace path accepted")
+	}
+	if status(url.Values{"workspacePath": {"/unassigned"}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/managed"}}) != http.StatusForbidden {
+		t.Fatal("unassigned workspace accepted")
+	}
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bad"}, "folder": {"/managed"}}) != http.StatusBadRequest {
+		t.Fatal("invalid host ID accepted")
+	}
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/elsewhere"}}) != http.StatusGone {
+		t.Fatal("unconfirmed folder accepted")
+	}
+	old, stopOld := openTestBridgeStream(t, bridge, viewID, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	defer stopOld()
+	defer old.Body.Close()
+	current, stopCurrent := openTestBridgeStream(t, bridge, viewID, workspace, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	defer stopCurrent()
+	defer current.Body.Close()
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/managed"}}) != http.StatusGone {
+		t.Fatal("retired host reconnected")
+	}
+	pending := make(chan BridgeResult, 1)
+	bridge.mu.Lock()
+	bridge.pending["same-host-transition"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", stream: bridge.views[viewID].stream, expectedDirectory: "/managed/next", result: pending}
+	bridge.mu.Unlock()
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, "folder": {"/managed"}}) != http.StatusGone {
+		t.Fatal("pending transition host reconnected")
+	}
+	if got := <-pending; got.Message != "directory change was not applied" {
+		t.Fatalf("same-host transition=%+v", got)
+	}
+	bridge.mu.Lock()
+	view := bridge.views[viewID]
+	view.hosts = make(map[string]struct{}, bridgeMaxViewHosts)
+	for index := 0; index < bridgeMaxViewHosts; index++ {
+		view.hosts[fmt.Sprintf("%08x-0000-4000-8000-%012x", index+1, index+1)] = struct{}{}
+	}
+	bridge.mu.Unlock()
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}, "folder": {"/managed"}}) != http.StatusServiceUnavailable {
+		t.Fatal("host limit was not enforced")
+	}
+}
+
+// IDE-T-014 verifies the bridge rejects non-loopback, unauthenticated, unknown, and post-close stream requests.
+func TestBridgeHandlerBoundaryResponses(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const workspace = "/managed/view.code-workspace"
+	bridge.Assign(viewID, workspace, 1, "/managed")
+	request := func(remote, path, authorization string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = remote
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		writer := httptest.NewRecorder()
+		bridge.handle(writer, req)
+		return writer
+	}
+	path := "/unknown"
+	if got := request("192.0.2.1:1234", path, "Bearer "+bridge.Secret).Code; got != http.StatusForbidden {
+		t.Fatalf("non-loopback status=%d", got)
+	}
+	if got := request("127.0.0.1:1234", path, "").Code; got != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d", got)
+	}
+	if got := request("127.0.0.1:1234", path, "Bearer "+bridge.Secret).Code; got != http.StatusNotFound {
+		t.Fatalf("unknown route status=%d", got)
+	}
+	key := bridge.pathKey(workspace)
+	if err := bridge.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	bridge.mu.Lock()
+	bridge.byKey[key] = viewID
+	bridge.mu.Unlock()
+	stream := "/bridge/stream?workspacePath=" + url.QueryEscape(workspace) + "&hostId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&folder=%2Fmanaged"
+	if got := request("127.0.0.1:1234", stream, "Bearer "+bridge.Secret).Code; got != http.StatusServiceUnavailable {
+		t.Fatalf("closed bridge status=%d", got)
+	}
+}
+
+// IDE-T-014 verifies canonical path and loopback predicates reject unsafe bridge identities.
+func TestBridgePathAndLoopbackPredicates(t *testing.T) {
+	bridge := &Bridge{}
+	if bridge.pathKey("") != "" {
+		t.Fatal("empty path was canonicalized")
+	}
+	if bridge.pathKey("relative/path") == "" {
+		t.Fatal("relative path did not resolve")
+	}
+	for _, test := range []struct {
+		path, expected string
+		want           bool
+	}{
+		{"/managed", "/managed", true}, {"/managed", "/other", false}, {"relative", "/managed", false}, {"", "/managed", false},
+	} {
+		if got := validDirectoryExpectation(test.path, test.expected); got != test.want {
+			t.Errorf("validDirectoryExpectation(%q,%q)=%v", test.path, test.expected, got)
+		}
+	}
+	for _, test := range []struct {
+		folders   []string
+		directory string
+		want      bool
+	}{
+		{[]string{"/managed"}, "/managed", true}, {[]string{"/managed", "/managed"}, "/managed", false}, {[]string{"relative"}, "/managed", false},
+	} {
+		if got := matchesBridgeDirectory(test.folders, test.directory); got != test.want {
+			t.Errorf("matchesBridgeDirectory(%v,%q)=%v", test.folders, test.directory, got)
+		}
+	}
+	for _, test := range []struct {
+		address string
+		want    bool
+	}{
+		{"127.0.0.1:1234", true}, {"[::1]:1234", true}, {"192.0.2.1:1234", false}, {"not-an-address", false},
+	} {
+		if got := isBridgeLoopback(test.address); got != test.want {
+			t.Errorf("isBridgeLoopback(%q)=%v", test.address, got)
+		}
 	}
 }
 

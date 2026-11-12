@@ -3,14 +3,36 @@ package ide
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
+
+// IDE-T-140 verifies filesystem failures retain stable platform-neutral error codes.
+func TestFilesystemErrorCodeMapping(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		want string
+	}{
+		{fs.ErrNotExist, "ENOENT"},
+		{fs.ErrPermission, "EACCES"},
+		{fmt.Errorf("wrapped: %w", syscall.EACCES), "EACCES"},
+		{syscall.ENOENT, "ENOENT"},
+		{syscall.ENOTDIR, "ENOTDIR"},
+		{syscall.EPERM, "EACCES"},
+		{errors.New("unknown filesystem failure"), "UNKNOWN"},
+	} {
+		if got := fsCode(test.err); got != test.want {
+			t.Errorf("fsCode(%v)=%q want %q", test.err, got, test.want)
+		}
+	}
+}
 
 // IDE-T-140
 func TestIdentityAndEpochValidation(t *testing.T) {
