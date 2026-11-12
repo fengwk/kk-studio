@@ -123,8 +123,8 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	cancel()
 	select {
 	case recovered := <-done:
-		if recovered != nil && recovered != http.ErrAbortHandler {
-			t.Fatalf("unexpected tunnel panic: %v", recovered)
+		if recovered != nil {
+			t.Fatalf("unexpected tunnel panic after cancellation: %v", recovered)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancel did not end websocket tunnel")
