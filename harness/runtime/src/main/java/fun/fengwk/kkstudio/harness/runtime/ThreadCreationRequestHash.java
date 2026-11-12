@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.harness.api.Names;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 
 import java.nio.charset.StandardCharsets;
@@ -44,7 +44,7 @@ public final class ThreadCreationRequestHash {
       BranchSettings rootSettings,
       UUID parentThreadId,
       boolean yoloEnabled,
-      SpawnTrigger trigger,
+      ThreadKind kind,
       ThreadConstraints constraints,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_SESSION");
@@ -57,7 +57,7 @@ public final class ThreadCreationRequestHash {
       envelope.put("parentThreadId", parentThreadId.toString());
     }
     envelope.put("yoloEnabled", yoloEnabled);
-    envelope.put("trigger", requireNonNull(trigger, "trigger").name());
+    envelope.put("kind", requireNonNull(kind, "kind").name());
     envelope.set("constraints", constraintsNode(constraints));
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);

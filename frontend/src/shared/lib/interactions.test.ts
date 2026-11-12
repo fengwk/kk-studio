@@ -32,6 +32,7 @@ const approval: InteractionDTO = {
   ...input,
   type: 'APPROVAL',
   approval: {},
+  queuedSameFileCount: 0,
 }
 
 const environmentWait = (rootThreadId: string, environmentId: string): InteractionDTO => ({

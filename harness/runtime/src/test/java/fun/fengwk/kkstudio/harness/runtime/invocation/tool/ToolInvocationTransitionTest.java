@@ -149,6 +149,14 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
+  void decideApprovalUsesModelVisibleDefaultWhenDenialReasonIsMissing() {
+    // 缺少可选拒绝原因时，终态错误会以固定默认文本进入工具结果。
+    ToolInvocation next =
+        waiting().decideApproval(ToolApprovalDecision.DENIED, id(2L), "actor", null, DECIDED, T1);
+    assertEquals("denied by user", next.error().message());
+  }
+
+  @Test
   void decideApprovalIsExactIdempotentAndConflictsOnRewrites() {
     ToolInvocation decided =
         waiting().decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T1);

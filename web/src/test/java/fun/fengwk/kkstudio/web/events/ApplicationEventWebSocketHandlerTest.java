@@ -118,7 +118,7 @@ class ApplicationEventWebSocketHandlerTest {
             canvasVersionSource,
             projectChangeSource,
             environmentChangeSource,
-            512);
+            () -> 512);
     browserUseRegistry = new IdeBrowserUseRegistry();
     nowNanos = new AtomicLong(1_000_000_000L);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);

@@ -134,6 +134,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         status: 'WAITING_APPROVAL',
         attempt: 1,
         toolCallId: 'call-bash-1',
+        queuedBehindToolCallId: null,
         toolName: 'bash',
         rendererKey: 'bash',
         environmentId: null,
@@ -417,6 +418,7 @@ describe('ThreadWorkspacePage', () => {
         toolName: 'bash',
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
         approval: { reason: '需要确认', decision: null },
+        queuedSameFileCount: 0,
         createdAt: 1785232801000,
       }],
       nextCursor: null,
@@ -542,6 +544,7 @@ describe('ThreadWorkspacePage', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       {
         threadId: rootId,
+        kind: 'USER',
         parentThreadId: null,
         name: 'Root Agent',
         agentName: 'assistant',
@@ -555,6 +558,7 @@ describe('ThreadWorkspacePage', () => {
       },
       {
         threadId: CHILD_THREAD_ID,
+        kind: 'SUBAGENT',
         parentThreadId: rootId,
         name: 'Waiting Parent',
         agentName: 'coder',
@@ -568,6 +572,7 @@ describe('ThreadWorkspacePage', () => {
       },
       {
         threadId: OTHER_CHILD_THREAD_ID,
+        kind: 'SUBAGENT',
         parentThreadId: rootId,
         name: 'Idle Child',
         agentName: 'reviewer',

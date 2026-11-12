@@ -53,10 +53,10 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
@@ -1123,7 +1123,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         null,
         false,
         ThreadConstraints.NONE,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         JoinDelivery.NOTIFY_PARENT,
         taskBudget(maxDepth),
         invocationId,
@@ -1150,7 +1150,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         continuation,
         false,
         ThreadConstraints.NONE,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         JoinDelivery.NOTIFY_PARENT,
         taskBudget(MAX_DEPTH),
         invocationId,

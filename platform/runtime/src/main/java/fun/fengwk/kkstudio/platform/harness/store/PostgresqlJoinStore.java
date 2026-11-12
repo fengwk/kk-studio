@@ -106,7 +106,8 @@ final class PostgresqlJoinStore implements JoinStore {
             select count(*)
             from harness_thread_join
             where parent_thread_id = ? and terminal_entry_id is null
-              and superseded_by_invocation_id is null and delivery = 'NOTIFY_PARENT'
+              and superseded_by_invocation_id is null
+              and delivery in ('NOTIFY_PARENT', 'SETTLE_TOOL_RESULT')
             """,
             Integer.class,
             parentThreadId);
@@ -141,7 +142,8 @@ final class PostgresqlJoinStore implements JoinStore {
             select count(*)
             from harness_thread_join
             where parent_thread_id is not null and terminal_entry_id is null
-              and superseded_by_invocation_id is null and delivery = 'NOTIFY_PARENT'
+              and superseded_by_invocation_id is null
+              and delivery in ('NOTIFY_PARENT', 'SETTLE_TOOL_RESULT')
             """,
             Integer.class);
     return count != null ? count : 0;

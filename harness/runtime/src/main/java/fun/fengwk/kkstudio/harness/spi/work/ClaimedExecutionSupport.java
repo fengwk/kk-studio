@@ -27,14 +27,11 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
 
   private final HarnessStore store;
   private final WorkTargetType targetType;
-  private final ProcessorLeaseConfig leaseConfig;
   private final ClaimAdmissionGuard<E> guard = new ClaimAdmissionGuard<>();
 
-  public ClaimedExecutionSupport(
-      HarnessStore store, WorkTargetType targetType, ProcessorLeaseConfig leaseConfig) {
+  public ClaimedExecutionSupport(HarnessStore store, WorkTargetType targetType) {
     this.store = Objects.requireNonNull(store, "store");
     this.targetType = Objects.requireNonNull(targetType, "targetType");
-    this.leaseConfig = Objects.requireNonNull(leaseConfig, "leaseConfig");
   }
 
   /**
@@ -64,8 +61,9 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
   }
 
   /** 在调用方已锁定 Work 行时确保现有租约至少覆盖权威时间 + leaseDuration。 */
-  public void ensureLeaseMargin(HarnessStore.Transaction tx, ClaimedWork claim) {
-    tx.work().renew(claim, leaseConfig.leaseDuration());
+  public void ensureLeaseMargin(
+      HarnessStore.Transaction tx, ClaimedWork claim, ProcessorLeaseConfig leaseConfig) {
+    tx.work().renew(claim, Objects.requireNonNull(leaseConfig, "leaseConfig").leaseDuration());
   }
 
   /** 定位仍登记为 active 的本地 execution；已 superseded 或不存在时返回 {@code null}。 */

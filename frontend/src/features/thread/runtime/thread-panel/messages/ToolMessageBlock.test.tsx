@@ -63,6 +63,31 @@ const expandButton = () => screen.queryByRole('button', { name: '展开详情' }
 const collapseButton = () => screen.queryByRole('button', { name: '收起详情' })
 
 describe('ToolMessageBlock shell', () => {
+  it('shows the localized waiting suffix only while a READY predecessor is unfinished', () => {
+    const { container, rerender } = render(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: true,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .toHaveTextContent('edit · 等待前一个对此文件的修改')
+
+    setLocale('en-US')
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: true,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .toHaveTextContent('edit · Waiting for the earlier change to this file')
+
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'edit', invocationStatus: 'READY',
+      queuedBehindToolCallId: 'earlier-call', queuedBehindToolCallUnfinished: false,
+    })} />)
+    expect(container.querySelector('.thread-tool-summary'))
+      .not.toHaveTextContent('Waiting for the earlier change to this file')
+    setLocale('zh-CN')
+  })
+
   it('localizes the real environment wait label in English', () => {
     setLocale('en-US')
     render(<ToolMessageBlock message={message({
@@ -92,7 +117,7 @@ describe('ToolMessageBlock shell', () => {
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
   })
 
-  it('waits statically for the frozen environment and task success only means accepted', () => {
+  it('waits statically for the frozen environment and uses invocation state without a task receipt', () => {
     const { container, rerender } = render(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'bash', invocationStatus: 'READY',
       requiredEnvironmentId: 'environment-frozen', requiredEnvironmentName: 'archlinux',
@@ -103,8 +128,7 @@ describe('ToolMessageBlock shell', () => {
     rerender(<ToolMessageBlock message={message({
       phase: 'call', toolName: 'task', invocationStatus: 'SUCCEEDED',
     })} />)
-    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 委派已受理')
-    expect(screen.queryByText('· 委派已受理')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 成功')
     expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
   })
 
@@ -1123,6 +1147,35 @@ describe('ToolMessageBlock per-tool bodies', () => {
     await user.click(expandButton()!)
     expect(screen.getByText('first task prompt')).toBeInTheDocument()
     expect(container.querySelector('.thread-disclosure-preview')).not.toContainElement(link)
+  })
+
+  it('shows synchronous task completion, report, and child navigation', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={message({
+            phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'SUCCEEDED',
+            arguments: JSON.stringify({ subagent_type: 'coder', prompt: 'finish the work' }),
+          })}
+          result={message({
+            phase: 'result', toolName: 'task', rendererKey: 'task',
+            details: {
+              kind: 'task.result', status: 'completed',
+              thread_id: '00000000-0000-0000-0000-000000000002',
+            },
+            contents: [text('subagent report')],
+          })}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', 'task: 已完成')
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    await user.click(expandButton()!)
+    expect(screen.getByText('subagent report')).toBeInTheDocument()
   })
 
   it('shows streaming task arguments once and retains collapse across completed arguments', async () => {

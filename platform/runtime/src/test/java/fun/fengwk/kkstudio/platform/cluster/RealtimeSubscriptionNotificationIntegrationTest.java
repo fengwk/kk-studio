@@ -254,7 +254,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
             """
             insert into harness_thread
                 (id, session_id, head_entry_id, creation_request_hash, name, root_thread_id,
-                 yolo_enabled, spawn_trigger, constraints, execution_control,
+                 yolo_enabled, kind, constraints, execution_control,
                  input_through_sequence, next_command_sequence, version, created_at, updated_at)
             values (?, ?, ?, repeat('a', 64), 'realtime', ?, true, 'USER',
                 '{"maxOutputTokens":null,"allowAutoCompaction":true}',

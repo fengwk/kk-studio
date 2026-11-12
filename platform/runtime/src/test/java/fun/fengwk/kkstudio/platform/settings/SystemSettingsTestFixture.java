@@ -18,6 +18,7 @@ public final class SystemSettingsTestFixture {
               "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
               "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
               "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
+          16,
           5_000L,
           5_000L);
 
@@ -29,7 +30,6 @@ public final class SystemSettingsTestFixture {
           60_000L,
           null,
           20_000,
-          16_384,
           2,
           10,
           0,
@@ -37,7 +37,7 @@ public final class SystemSettingsTestFixture {
           ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES);
 
   public static final SystemSettings.Environment ENVIRONMENT =
-      new SystemSettings.Environment(16L * 1024 * 1024, 60_000L);
+      new SystemSettings.Environment(60_000L);
 
   public static final SystemSettings.BackendNetwork BACKEND_NETWORK =
       new SystemSettings.BackendNetwork(null, "localhost,127.*,::1");
@@ -48,7 +48,6 @@ public final class SystemSettingsTestFixture {
 
   public static final SystemSettings.Advanced ADVANCED =
       new SystemSettings.Advanced(
-          16L * 1024 * 1024,
           30_000L,
           10_000L,
           1_000L,

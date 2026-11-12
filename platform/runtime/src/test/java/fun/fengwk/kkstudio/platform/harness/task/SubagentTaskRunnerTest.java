@@ -36,10 +36,12 @@ import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.Session;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -47,13 +49,20 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 平台侧 task 委派接受的回归基线：权限校验、稳定身份、幂等回放、忙碌子线程追加与错误收敛。
@@ -65,6 +74,8 @@ class SubagentTaskRunnerTest {
   private static final String AGENT = "alpha";
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
   private static final ModelSelection MODEL = new ModelSelection("model", "v1");
+  private static final HarnessThreadChangeSource NO_THREAD_CHANGES =
+      (threadId, onChange) -> () -> {};
 
   private final UUID parentThreadId = UUID.randomUUID();
   private final UUID invocationId = UUID.randomUUID();
@@ -77,7 +88,16 @@ class SubagentTaskRunnerTest {
 
   private SubagentTaskRunner runner(SubagentConfig config) {
     return new SubagentTaskRunner(
-        () -> runtime, new AgentTaskService(provider(runtime)), materializer, () -> config);
+        () -> runtime,
+        NO_THREAD_CHANGES,
+        new AgentTaskService(provider(runtime)),
+        materializer,
+        () -> config);
+  }
+
+  private static SubagentTaskAcceptance acceptAsync(
+      SubagentTaskRunner runner, SubagentTaskRequest request) {
+    return runner.run(request, true, ignored -> {}).acceptance();
   }
 
   @SuppressWarnings("unchecked")
@@ -108,7 +128,7 @@ class SubagentTaskRunnerTest {
                 "main",
                 parentThreadId,
                 true,
-                SpawnTrigger.USER,
+                ThreadKind.USER,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -147,6 +167,83 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
+  void synchronousRunWaitsForJoinChangeAndReturnsFrozenReceipt() throws Exception {
+    stubParent(List.of(AGENT));
+    UUID sessionId = UUID.randomUUID();
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
+    SubagentTaskRequest request = request(null, null);
+    UUID terminalId = UUID.randomUUID();
+    ThreadJoin pending =
+        new ThreadJoin(
+            invocationId,
+            SubagentTaskRunner.requestHash(request),
+            parentThreadId,
+            childThreadId,
+            1L,
+            AGENT,
+            10,
+            0L,
+            null,
+            null,
+            null,
+            NOW,
+            NOW,
+            JoinDelivery.SETTLE_TOOL_RESULT,
+            null);
+    ThreadJoin matched = pending.match(terminalId, null, NOW.plusSeconds(1));
+    ThreadJoinReceipt receipt =
+        new ThreadJoinReceipt(
+            invocationId,
+            childThreadId,
+            AGENT,
+            ThreadJoinOutcome.COMPLETED,
+            "do the work",
+            "done",
+            null,
+            null);
+    when(runtime.findJoin(invocationId))
+        .thenReturn(Optional.empty(), Optional.empty(), Optional.of(pending), Optional.of(matched));
+    when(runtime.projectJoinReceipt(invocationId)).thenReturn(Optional.of(receipt));
+    CountDownLatch subscribed = new CountDownLatch(1);
+    AtomicReference<Runnable> wake = new AtomicReference<>();
+    HarnessThreadChangeSource changes =
+        (threadId, onChange) -> {
+          assertEquals(childThreadId, threadId);
+          wake.set(onChange);
+          subscribed.countDown();
+          return () -> {};
+        };
+    SubagentTaskRunner runner =
+        new SubagentTaskRunner(
+            () -> runtime,
+            changes,
+            new AgentTaskService(provider(runtime)),
+            materializer,
+            SubagentTaskRunnerTest::config);
+
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      CountDownLatch acceptedSignal = new CountDownLatch(1);
+      Future<SubagentTaskResult> running =
+          workers.submit(() -> runner.run(request, false, ignored -> acceptedSignal.countDown()));
+      if (!acceptedSignal.await(1, TimeUnit.SECONDS)) {
+        running.get();
+        throw new AssertionError("task was neither accepted nor failed");
+      }
+      assertTrue(subscribed.await(1, TimeUnit.SECONDS));
+      assertFalse(running.isDone());
+      wake.get().run();
+      assertEquals(receipt, running.get(1, TimeUnit.SECONDS).receipt());
+    }
+    ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(spawn.capture(), any());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, spawn.getValue().delivery());
+    assertEquals(parentHeadEntryId, spawn.getValue().expectedParentHeadEntryId());
+  }
+
+  @Test
   void newDelegationAcceptsAtomicallyWithStableIdentityAndAdmissionLimits() {
     stubParent(List.of(AGENT));
     UUID sessionId = UUID.randomUUID();
@@ -155,7 +252,7 @@ class SubagentTaskRunnerTest {
     AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
     when(runtime.spawn(any(), any())).thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
+    SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, null));
 
     assertEquals(sessionId, acceptance.childSessionId());
     assertEquals(childThreadId, acceptance.childThreadId());
@@ -172,7 +269,7 @@ class SubagentTaskRunnerTest {
     assertEquals(parentThreadId, accepted1.parentThreadId());
     assertEquals(target, accepted1.settings());
     // 模型发起的子代理：通知父 Thread，票据即 invocation。
-    assertEquals(SpawnTrigger.MODEL_TOOL, accepted1.trigger());
+    assertEquals(ThreadKind.SUBAGENT, accepted1.kind());
     assertEquals(JoinDelivery.NOTIFY_PARENT, accepted1.delivery());
     assertEquals(invocationId, accepted1.ticketId());
     // 源 prompt 与票据同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
@@ -195,7 +292,7 @@ class SubagentTaskRunnerTest {
     AcceptedCommands accepted = accepted(UUID.randomUUID(), UUID.randomUUID(), false);
     when(runtime.spawn(any(), any())).thenReturn(accepted);
 
-    runner(config()).accept(request(7, null));
+    acceptAsync(runner(config()), request(7, null));
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
     verify(runtime).spawn(command.capture(), any());
@@ -224,7 +321,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -243,7 +340,7 @@ class SubagentTaskRunnerTest {
                     AGENT,
                     10)));
 
-    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
+    SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, null));
 
     assertTrue(acceptance.replayed());
     assertEquals(childThreadId, acceptance.childThreadId());
@@ -281,7 +378,8 @@ class SubagentTaskRunnerTest {
 
     for (SubagentTaskRequest other : otherDelegations) {
       SubagentTaskRejectedException rejected =
-          assertThrows(SubagentTaskRejectedException.class, () -> runner(config()).accept(other));
+          assertThrows(
+              SubagentTaskRejectedException.class, () -> acceptAsync(runner(config()), other));
       assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
     }
     verify(runtime, never()).spawn(any(), any());
@@ -313,7 +411,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -324,7 +422,8 @@ class SubagentTaskRunnerTest {
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
 
     // 默认值从 10 变成 99：请求 hash 不含运行期默认值，回放仍然成立。
-    assertTrue(runner(new SubagentConfig(3, 4, 0, 99)).accept(request(null, null)).replayed());
+    assertTrue(
+        acceptAsync(runner(new SubagentConfig(3, 4, 0, 99)), request(null, null)).replayed());
     verify(runtime, never()).spawn(any(), any());
   }
 
@@ -338,7 +437,7 @@ class SubagentTaskRunnerTest {
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
     when(runtime.spawn(any(), any())).thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
+    SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, childThreadId));
 
     assertEquals(childThreadId, acceptance.childThreadId());
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
@@ -380,7 +479,7 @@ class SubagentTaskRunnerTest {
 
     SubagentTaskRejectedException rejected =
         assertThrows(
-            SubagentTaskRejectedException.class, () -> runner(config()).accept(changedAgent));
+            SubagentTaskRejectedException.class, () -> acceptAsync(runner(config()), changedAgent));
 
     assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
     verify(runtime, never()).spawn(any(), any());
@@ -400,7 +499,7 @@ class SubagentTaskRunnerTest {
         .thenThrow(DomainException.conflict("STALE_COMMAND_CURSOR", "stale"))
         .thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
+    SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, childThreadId));
 
     assertEquals(childThreadId, acceptance.childThreadId());
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
@@ -420,7 +519,7 @@ class SubagentTaskRunnerTest {
         .thenThrow(DomainException.conflict("STALE_COMMAND_CURSOR", "stale"))
         .thenReturn(accepted(UUID.randomUUID(), childThreadId, false));
     assertEquals(
-        childThreadId, runner(config()).accept(request(null, childThreadId)).childThreadId());
+        childThreadId, acceptAsync(runner(config()), request(null, childThreadId)).childThreadId());
     verify(runtime, times(2)).spawn(any(), any());
 
     DomainException wrongCode =
@@ -429,13 +528,15 @@ class SubagentTaskRunnerTest {
     assertSame(
         wrongCode,
         assertThrows(
-            DomainException.class, () -> runner(config()).accept(request(null, childThreadId))));
+            DomainException.class,
+            () -> acceptAsync(runner(config()), request(null, childThreadId))));
     DomainException wrongReason = DomainException.conflict("OTHER_MODULE_CONFLICT", "other");
     doThrow(wrongReason).when(runtime).spawn(any(), any());
     assertSame(
         wrongReason,
         assertThrows(
-            DomainException.class, () -> runner(config()).accept(request(null, childThreadId))));
+            DomainException.class,
+            () -> acceptAsync(runner(config()), request(null, childThreadId))));
     verify(runtime, times(4)).spawn(any(), any());
   }
 
@@ -449,7 +550,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
 
     assertEquals(failure, rejected.getCause());
     verify(runtime, times(1)).spawn(any(), any());
@@ -469,7 +570,7 @@ class SubagentTaskRunnerTest {
 
     IllegalStateException thrown =
         assertThrows(
-            IllegalStateException.class, () -> runner(config()).accept(request(null, null)));
+            IllegalStateException.class, () -> acceptAsync(runner(config()), request(null, null)));
 
     assertEquals(replayFailure, thrown);
     assertEquals(List.of(submitFailure), List.of(thrown.getSuppressed()));
@@ -484,7 +585,8 @@ class SubagentTaskRunnerTest {
         .thenThrow(DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "different request"));
 
     assertThrows(
-        SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
+        SubagentTaskRejectedException.class,
+        () -> acceptAsync(runner(config()), request(null, null)));
 
     verify(runtime, times(1)).spawn(any(), any());
   }
@@ -520,7 +622,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -530,7 +632,7 @@ class SubagentTaskRunnerTest {
                 NOW));
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
 
-    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
+    SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, null));
 
     // 只提交一次；第二次循环按 join 回放，不产生部分重放也不会重复入队 prompt。
     assertTrue(acceptance.replayed());
@@ -545,7 +647,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException detachedError =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertTrue(
         detachedError.getMessage().contains("no longer attached"), detachedError.getMessage());
 
@@ -555,7 +657,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException missingSibling =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertTrue(
         missingSibling.getMessage().contains("no longer attached"), missingSibling.getMessage());
     verify(runtime, never()).spawn(any(), any());
@@ -569,7 +671,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
 
     assertTrue(rejected.getMessage().contains("is not allowed"), rejected.getMessage());
     assertTrue(rejected.getMessage().contains("beta / gamma"), rejected.getMessage());
@@ -587,7 +689,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException goneChild =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, missingChild)));
+            () -> acceptAsync(runner(config()), request(null, missingChild)));
     assertTrue(goneChild.getMessage().contains("was not found"), goneChild.getMessage());
 
     // 父快照已消失（父线程被删）：同样不得凭 invocationId 继续。
@@ -598,7 +700,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException goneParent =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertTrue(goneParent.getMessage().contains("no longer attached"), goneParent.getMessage());
 
     // 回放路径上子 Thread 已消失：无法解析子 Session，必须报出明确的 not found。
@@ -619,7 +721,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException replayedMissingChild =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertTrue(
         replayedMissingChild.getMessage().contains("was not found"),
         replayedMissingChild.getMessage());
@@ -637,7 +739,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, missingChild)));
+            () -> acceptAsync(runner(config()), request(null, missingChild)));
     assertSame(missing, rejected.getCause());
     assertTrue(rejected.getMessage().contains("was not found"));
 
@@ -646,21 +748,24 @@ class SubagentTaskRunnerTest {
     assertSame(
         validation,
         assertThrows(
-            DomainException.class, () -> runner(config()).accept(request(null, missingChild))));
+            DomainException.class,
+            () -> acceptAsync(runner(config()), request(null, missingChild))));
     doThrow(validation).when(runtime).getThreadSnapshot(parentThreadId);
     assertSame(
         validation,
-        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+        assertThrows(
+            DomainException.class, () -> acceptAsync(runner(config()), request(null, null))));
     DomainException unrelatedMissing = DomainException.notFound("session", "gone");
     doThrow(unrelatedMissing).when(runtime).getThreadSnapshot(parentThreadId);
     assertSame(
         unrelatedMissing,
-        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+        assertThrows(
+            DomainException.class, () -> acceptAsync(runner(config()), request(null, null))));
     doThrow(missing).when(runtime).getThreadSnapshot(parentThreadId);
     rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertSame(missing, rejected.getCause());
     assertTrue(rejected.getMessage().contains("no longer attached"));
   }
@@ -684,13 +789,14 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertSame(missing, rejected.getCause());
     DomainException other = DomainException.validation("thread", "invalid");
     doThrow(other).when(runtime).getThreadSnapshot(childThreadId);
     assertSame(
         other,
-        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+        assertThrows(
+            DomainException.class, () -> acceptAsync(runner(config()), request(null, null))));
   }
 
   @Test
@@ -702,7 +808,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertSame(missing, rejected.getCause());
     assertTrue(rejected.getMessage().contains("parent thread no longer exists"));
 
@@ -711,13 +817,14 @@ class SubagentTaskRunnerTest {
     rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertSame(conflict, rejected.getCause());
     DomainException unrelatedMissing = DomainException.notFound("session", "gone");
     doThrow(unrelatedMissing).when(runtime).spawn(any(), any());
     assertSame(
         unrelatedMissing,
-        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+        assertThrows(
+            DomainException.class, () -> acceptAsync(runner(config()), request(null, null))));
     verify(runtime, times(3)).spawn(any(), any());
   }
 
@@ -729,7 +836,8 @@ class SubagentTaskRunnerTest {
     doThrow(failure).when(materializer).materialize(AGENT);
     assertSame(
         failure,
-        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+        assertThrows(
+            DomainException.class, () -> acceptAsync(runner(config()), request(null, null))));
     verify(runtime, never()).spawn(any(), any());
   }
 
@@ -742,7 +850,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
 
     assertTrue(rejected.getMessage().contains("IllegalArgumentException"), rejected.getMessage());
   }
@@ -758,7 +866,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException rejected =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, childThreadId)));
+            () -> acceptAsync(runner(config()), request(null, childThreadId)));
 
     assertEquals(
         "This subagent thread is no longer valid. Dispatch a new task without thread_id.",
@@ -772,12 +880,13 @@ class SubagentTaskRunnerTest {
     SubagentTaskRunner offline =
         new SubagentTaskRunner(
             () -> null,
+            NO_THREAD_CHANGES,
             new AgentTaskService(provider(null)),
             materializer,
             SubagentTaskRunnerTest::config);
     SubagentTaskRejectedException unavailable =
         assertThrows(
-            SubagentTaskRejectedException.class, () -> offline.accept(request(null, null)));
+            SubagentTaskRejectedException.class, () -> acceptAsync(offline, request(null, null)));
     assertTrue(unavailable.getMessage().contains("not available"), unavailable.getMessage());
 
     // Runtime 的额度/深度等业务拒绝（IllegalArgumentException）必须收敛为 typed task 失败，让 tool 报错而不是抛 NPE。
@@ -788,13 +897,14 @@ class SubagentTaskRunnerTest {
     SubagentTaskRejectedException quota =
         assertThrows(
             SubagentTaskRejectedException.class,
-            () -> runner(config()).accept(request(null, null)));
+            () -> acceptAsync(runner(config()), request(null, null)));
     assertTrue(quota.getMessage().contains("quota exceeded"), quota.getMessage());
 
     // 父线程在提交前消失同样收敛为 typed 失败。
     doThrow(DomainException.notFound("thread", "parent gone")).when(runtime).spawn(any(), any());
     assertThrows(
-        SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
+        SubagentTaskRejectedException.class,
+        () -> acceptAsync(runner(config()), request(null, null)));
   }
 
   @Test
@@ -855,7 +965,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,

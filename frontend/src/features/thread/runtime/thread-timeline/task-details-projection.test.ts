@@ -40,6 +40,7 @@ function toolInvocation(
     status: 'SUCCEEDED',
     attempt: 1,
     toolCallId: 'call-task-live',
+    queuedBehindToolCallId: null,
     toolName: 'task',
     rendererKey: 'task',
     environmentId: null,

@@ -59,9 +59,9 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -812,7 +812,7 @@ class ProviderRequestPreviewServiceTest {
         "compaction-child",
         THREAD_ID,
         false,
-        SpawnTrigger.RUNTIME,
+        ThreadKind.COMPACTION,
         constraints,
         ThreadExecutionControl.RUNNABLE,
         0L,
@@ -917,7 +917,7 @@ class ProviderRequestPreviewServiceTest {
         "thread",
         THREAD_ID,
         false,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

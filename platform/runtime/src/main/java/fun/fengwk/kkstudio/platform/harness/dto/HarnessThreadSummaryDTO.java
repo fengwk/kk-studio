@@ -5,6 +5,7 @@ import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 
@@ -16,6 +17,9 @@ public class HarnessThreadSummaryDTO {
 
   /** Thread 主键：canonical UUID string。 */
   private String threadId;
+
+  /** Thread 创建时确定的用途。 */
+  private ThreadKind kind;
 
   /** 执行父 Thread 的 canonical UUID string；根 Thread 显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)

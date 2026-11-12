@@ -91,6 +91,9 @@ export function toErrorResult(callId: string, error: unknown): CapabilityResult 
     )
   }
   if (error instanceof ToolRunFailureError || error instanceof ToolServiceFailureError) {
+    if (error.code === 'OUTPUT_TOO_LARGE') {
+      return errorResult(callId, error.message, error.code)
+    }
     return errorResult(callId, guide(error.message, 'UNCERTAIN', VERIFY_EFFECT_NEXT_ACTION), error.code)
   }
   if (error instanceof CancelledError) {

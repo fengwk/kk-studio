@@ -365,10 +365,10 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         toolGateway,
         event -> {},
         new ToolProcessorConfig(
-            new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
+            () -> new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
             () -> policy,
-            Duration.ofSeconds(7),
-            Duration.ofSeconds(9),
+            () -> Duration.ofSeconds(7),
+            () -> Duration.ofSeconds(9),
             Duration.ofMinutes(10)),
         Clock.systemUTC(),
         scheduler,
@@ -385,7 +385,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     return new ThreadProcessor(
         store,
         builtinRegistry(store, resolver),
-        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
+        new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   private UUID seedUserEntry(StoreTestSupport.TurnBaseline turn) {

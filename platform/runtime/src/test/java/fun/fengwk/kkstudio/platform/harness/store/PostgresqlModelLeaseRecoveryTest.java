@@ -179,9 +179,9 @@ class PostgresqlModelLeaseRecoveryTest {
         modelGateway,
         event -> {},
         new ModelProcessorConfig(
-            new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
+            () -> new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
             () -> policy,
-            Duration.ofSeconds(5)),
+            () -> Duration.ofSeconds(5)),
         Clock.systemUTC(),
         scheduler,
         Runnable::run,

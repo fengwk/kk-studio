@@ -25,10 +25,10 @@ import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
@@ -247,7 +247,7 @@ class PostgresqlExecutionExitStopReceiptTest {
         name,
         rootThreadId,
         false,
-        parentThreadId == null ? SpawnTrigger.USER : SpawnTrigger.MODEL_TOOL,
+        parentThreadId == null ? ThreadKind.USER : ThreadKind.SUBAGENT,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

@@ -68,6 +68,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLeaseBinding;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Started;
@@ -888,7 +889,8 @@ class EnvironmentDaemonServerTest {
     assertEquals(Duration.ofSeconds(60), firstHandle.terminalDeliveryGrace());
 
     fixture.settings.set(
-        new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(15), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L));
     EnvironmentCapabilityExecutionHandle secondHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
     assertEquals(Duration.ofSeconds(15), secondHandle.terminalDeliveryGrace());
@@ -2491,6 +2493,22 @@ class EnvironmentDaemonServerTest {
     assertThrows(NullPointerException.class, () -> fixture.server.open(admitted, null, null));
   }
 
+  /** 测试意图：在线 Daemon 在系统设置更新后收到新的 SETTINGS。 */
+  @Test
+  void systemSettingsChangeResendsSettingsToConnectedDaemon() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-live-settings");
+    fixture.updateSettings(300L, 30L);
+
+    fixture.server.resyncSettings();
+
+    assertEquals(2L, channel.countOf(MessageType.SETTINGS));
+    assertEquals(
+        300L,
+        channel.lastEnvelope().getSettings().getResourceBudgets().getTemporaryResourceTtlSeconds());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
   /** 测试意图：会话设置每次判定现读，心跳超时变更立即生效。 */
   @Test
   void settingsAreReadOnEveryDecision() {
@@ -2816,22 +2834,43 @@ class EnvironmentDaemonServerTest {
   void settingsRejectNonPositiveBounds() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ZERO, 1024L, ImageInputTier.P720, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 0L, ImageInputTier.P720, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 0L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 259200L, 0L));
     assertThrows(
         NullPointerException.class,
-        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
+        () -> new EnvironmentServerSettings(null, 1024L, ImageInputTier.P720, 259200L, 1800L));
+    assertThrows(
+        NullPointerException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, null, 259200L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1),
+                1024L,
+                ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED,
+                259200L,
+                1800L));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
+        new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 259200L, 1800L)
             .heartbeatTimeout());
   }
 
@@ -3560,17 +3599,42 @@ class EnvironmentDaemonServerTest {
             new ExpectedFile("/srv/repo/README.md", "a".repeat(64)));
     fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());
     assertEquals(1, channel.countOf(MessageType.INVOKE));
+    assertEquals(
+        fixture.settings.get().maxOutputBytes(),
+        channel.lastEnvelope().getInvoke().getMaxOutputBytes());
+    assertEquals(ImageInputTier.P720, channel.lastEnvelope().getInvoke().getImageInputTier());
     assertTrue(channel.lastEnvelope().getInvoke().hasExpectedFile());
     assertEquals(
         "/srv/repo/README.md", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
     assertEquals("a".repeat(64), channel.lastEnvelope().getInvoke().getExpectedFile().getSha256());
   }
 
+  /** 测试意图：每次 INVOKE 读取当前系统图片档位，设置变更只影响后续调用。 */
   @Test
-  void resourceTransferExceedingLimitIsRejected() {
+  void eachInvokeUsesTheCurrentImageInputTier() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-image-input-tier");
+
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    Envelope firstInvoke = channel.lastEnvelope();
+    assertEquals(ImageInputTier.P720, firstInvoke.getInvoke().getImageInputTier());
+
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.ORIGINAL, 259200L, 1800L));
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
+
+    assertEquals(2, channel.countOf(MessageType.INVOKE));
+    assertEquals(ImageInputTier.ORIGINAL, channel.lastEnvelope().getInvoke().getImageInputTier());
+  }
+
+  @Test
+  void resourceTransferExceedingLimitFailsOnlyItsInvocation() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-transfer-limit");
-    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    long actualSize = fixture.settings.get().maxOutputBytes() + 1;
     Envelope request =
         Envelope.newBuilder()
             .setMessageType(MessageType.RESOURCE_UPLOAD_REQUEST)
@@ -3581,12 +3645,22 @@ class EnvironmentDaemonServerTest {
                     .setTransferId(UUID.randomUUID().toString())
                     .setMediaType("text/plain")
                     .setName("big.txt")
-                    .setSize(fixture.settings.get().maxResourceBytes() + 1)
+                    .setSize(actualSize)
                     .setSha256("a".repeat(64))
                     .build())
             .build();
     fixture.receive(channel, request);
-    assertTrue(channel.closed());
+
+    Envelope ticket = ticketEnvelope(channel);
+    assertEquals(TicketState.TICKET_FAILED, ticket.getResourceUploadTicket().getState());
+    assertEquals(
+        "Tool output is 16.000001 MiB, which exceeds the tool output size limit of 16 MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings.",
+        ticket.getResourceUploadTicket().getMessage());
+    fixture.receive(
+        channel,
+        failedEnvelope(CALL_ONE.toString(), ticket.getResourceUploadTicket().getMessage()));
+    assertEquals(ticket.getResourceUploadTicket().getMessage(), listener.error.getMessage());
+    assertFalse(channel.closed());
   }
 
   @Test

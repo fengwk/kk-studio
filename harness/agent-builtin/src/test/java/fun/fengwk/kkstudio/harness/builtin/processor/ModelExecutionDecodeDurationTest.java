@@ -327,9 +327,9 @@ class ModelExecutionDecodeDurationTest {
               false,
               ThreadProcessorTestSupport.plainRequest().toolBindings(),
               new ModelProcessorConfig(
-                  ThreadProcessorTestSupport.LEASE_CONFIG,
+                  () -> ThreadProcessorTestSupport.LEASE_CONFIG,
                   () -> retryPolicy,
-                  FALLBACK_DELAY,
+                  () -> FALLBACK_DELAY,
                   FLUSH_CONFIG),
               "test-provider",
               Clock.fixed(NOW, ZoneOffset.UTC),

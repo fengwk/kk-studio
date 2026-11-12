@@ -1508,6 +1508,7 @@ export interface HarnessThreadStreamCatchupDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO */
 export interface HarnessThreadSummaryDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   createdAt: number
@@ -1521,6 +1522,7 @@ export interface HarnessThreadSummaryDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO */
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   agentName: string
@@ -1665,6 +1667,7 @@ export interface InteractionApproval {
   toolName: string
   argumentsJson: string
   approval?: unknown | null
+  queuedSameFileCount: number
   createdAt: number
 }
 
@@ -2726,7 +2729,6 @@ export const STORAGE_URL_METHOD_VALUES: readonly StorageUrlMethod[] = [
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO */
 export interface SystemSettingsAdvancedDTO {
-  resourceMaxBytes: string
   processorLeaseDurationMillis: string
   processorHeartbeatIntervalMillis: string
   threadResolveFailureDelayMillis: string
@@ -2749,7 +2751,6 @@ export interface SystemSettingsAiRuntimeDTO {
   retryMaxDelayMillis: string
   compactionModel?: HarnessModelSelectionDTO | null
   compactionKeepRecentTokens: number
-  compactionReserveTokens: number
   subagentMaxDepth: number
   subagentMaxConcurrency: number
   subagentMaxTotalConcurrency: number
@@ -2778,21 +2779,8 @@ export interface SystemSettingsDTO {
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO */
 export interface SystemSettingsEnvironmentDTO {
-  maxResourceBytes: string
   heartbeatTimeoutMillis: string
 }
-
-/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming */
-export type SystemSettingsSchemaApplyTiming =
-  | 'NEXT_INVOCATION'
-  | 'NEXT_HTTP_REQUEST'
-  | 'RESTART'
-
-export const SYSTEM_SETTINGS_SCHEMA_APPLY_TIMING_VALUES: readonly SystemSettingsSchemaApplyTiming[] = [
-  'NEXT_INVOCATION',
-  'NEXT_HTTP_REQUEST',
-  'RESTART',
-]
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO */
 export interface SystemSettingsSchemaDTO {
@@ -2838,8 +2826,6 @@ export interface SystemSettingsSchemaGroupDTO {
   key: string
   labelKey: string
   descriptionKey: string
-  restartRequired: boolean
-  applyTiming?: SystemSettingsSchemaApplyTiming | null
   fields: SystemSettingsSchemaFieldDTO[]
 }
 
@@ -2854,7 +2840,6 @@ export interface SystemSettingsSchemaSectionDTO {
   key: string
   labelKey: string
   descriptionKey: string
-  restartRequired: boolean
   groups: SystemSettingsSchemaGroupDTO[]
 }
 
@@ -2874,6 +2859,7 @@ export interface SystemSettingsStorageMediaDTO {
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO */
 export interface SystemSettingsToolDTO {
   permission: Record<string, SystemSettingsToolPermissionRuleDTO[]>
+  maxOutputMib: number
   modelGatewayBusyRetryMillis: string
   toolGatewayOverloadRetryMillis: string
 }
@@ -2935,6 +2921,22 @@ export const THREAD_EXECUTION_CONTROL_VALUES: readonly ThreadExecutionControl[] 
   'STOPPED',
 ]
 
+/** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadKind */
+export type ThreadKind =
+  | 'USER'
+  | 'SUBAGENT'
+  | 'COMPACTION'
+  | 'CONTROLLER_TASK'
+  | 'PLUGIN_TASK'
+
+export const THREAD_KIND_VALUES: readonly ThreadKind[] = [
+  'USER',
+  'SUBAGENT',
+  'COMPACTION',
+  'CONTROLLER_TASK',
+  'PLUGIN_TASK',
+]
+
 /** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus */
 export type ThreadRuntimeStatus =
   | 'RUNNING'
@@ -2967,6 +2969,7 @@ export interface ToolInvocationDTO {
   status: ToolInvocationStatus
   attempt: number
   toolCallId: string
+  queuedBehindToolCallId: string | null
   toolName: string
   rendererKey: string
   environmentId: string | null
@@ -3202,6 +3205,10 @@ export interface ApiRoutes {
   'GET /api/harness/threads/{threadId}/compaction-availability': {
     path: { threadId: string }
     response: HarnessManualCompactionDTO
+  }
+  'GET /api/harness/threads/{threadId}/subagents': {
+    path: { threadId: string }
+    response: HarnessThreadTreeNodeDTO[]
   }
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }

@@ -1,48 +1,24 @@
 import { useId, type ReactNode } from 'react'
 import { Switch } from '@/shared/ui/controls/Switch'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 
-/** 配置生效时机：下次调用、下次 HTTP 请求或进程重启。 */
-export type ApplyTiming = 'nextInvocation' | 'nextHttpRequest' | 'restart'
-
-const APPLY_TIMING_LABEL_KEYS: Record<ApplyTiming, TranslationKey> = {
-  nextInvocation: 'settings.applyTiming.nextInvocation',
-  nextHttpRequest: 'settings.applyTiming.nextHttpRequest',
-  restart: 'settings.applyTiming.restart',
-}
-
-export function ApplyTimingBadge({ timing }: { timing: ApplyTiming }) {
-  const { t } = useI18n()
-  return (
-    <span className="settings-apply-timing" data-timing={timing}>
-      {t(APPLY_TIMING_LABEL_KEYS[timing])}
-    </span>
-  )
-}
-
 export function SettingsCard({
   title,
   description,
-  timing,
   children,
 }: {
   title: string
   description?: string
-  timing?: ApplyTiming
   children: ReactNode
 }) {
   const titleId = useId()
   return (
     <section className="settings-card" aria-labelledby={titleId}>
       <header className="settings-card-header">
-        <div className="settings-card-title-row">
-          <h2 id={titleId}>{title}</h2>
-          {timing ? <ApplyTimingBadge timing={timing} /> : null}
-        </div>
+        <h2 id={titleId}>{title}</h2>
         {description ? <p>{description}</p> : null}
       </header>
       {children}
@@ -151,6 +127,7 @@ export function SettingsNumberField({
   hint,
   fieldPath,
   nullable = false,
+  error,
 }: {
   label: string
   value: string
@@ -163,9 +140,11 @@ export function SettingsNumberField({
   hint?: string
   fieldPath?: string
   nullable?: boolean
+  error?: string
 }) {
   const fieldId = useId()
   const text = description ?? hint
+  const errorId = `${fieldId}-error`
   return (
     <div
       className="settings-field"
@@ -185,8 +164,15 @@ export function SettingsNumberField({
         max={max}
         step={step}
         disabled={disabled}
+        invalid={error != null}
+        aria-describedby={error ? errorId : undefined}
         onChange={onChange}
       />
+      {error ? (
+        <span id={errorId} className="settings-field-error" role="alert">
+          {error}
+        </span>
+      ) : null}
     </div>
   )
 }
