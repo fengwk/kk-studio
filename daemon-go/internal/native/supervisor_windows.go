@@ -349,25 +349,29 @@ type windowsHelperPipes struct {
 }
 
 func createWindowsHelperPipes() (*windowsHelperPipes, error) {
+	return createWindowsHelperPipesWithAPI(nativeWindowsPipeAPI{})
+}
+
+func createWindowsHelperPipesWithAPI(api windowsPipeAPI) (*windowsHelperPipes, error) {
 	pipes := &windowsHelperPipes{}
-	ownerFile, ownerChild, err := windowsPipe(true)
+	ownerFile, ownerChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		return nil, err
 	}
 	pipes.ownerFile, pipes.owner = ownerFile, ownerChild
-	inputFile, inputChild, err := windowsPipe(true)
+	inputFile, inputChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.inputFile, pipes.commandInput = inputFile, inputChild
-	outputFile, outputChild, err := windowsPipe(false)
+	outputFile, outputChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.outputFile, pipes.output = outputFile, outputChild
-	errorFile, errorChild, err := windowsPipe(false)
+	errorFile, errorChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
@@ -377,25 +381,51 @@ func createWindowsHelperPipes() (*windowsHelperPipes, error) {
 	return pipes, nil
 }
 
+type windowsPipeAPI interface {
+	CreatePipe(*windows.Handle, *windows.Handle, *windows.SecurityAttributes, uint32) error
+	SetHandleInformation(windows.Handle, uint32, uint32) error
+	CloseHandle(windows.Handle) error
+	NewFile(uintptr, string) *os.File
+}
+
+type nativeWindowsPipeAPI struct{}
+
+func (nativeWindowsPipeAPI) CreatePipe(readHandle, writeHandle *windows.Handle, attributes *windows.SecurityAttributes, size uint32) error {
+	return windows.CreatePipe(readHandle, writeHandle, attributes, size)
+}
+func (nativeWindowsPipeAPI) SetHandleInformation(handle windows.Handle, mask, flags uint32) error {
+	return windows.SetHandleInformation(handle, mask, flags)
+}
+func (nativeWindowsPipeAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+func (nativeWindowsPipeAPI) NewFile(handle uintptr, name string) *os.File {
+	return os.NewFile(handle, name)
+}
+
 func windowsPipe(parentWrites bool) (*os.File, windows.Handle, error) {
+	return windowsPipeWithAPI(parentWrites, nativeWindowsPipeAPI{})
+}
+
+func windowsPipeWithAPI(parentWrites bool, api windowsPipeAPI) (*os.File, windows.Handle, error) {
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
 	var readHandle, writeHandle windows.Handle
-	if err := windows.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
+	if err := api.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
 		return nil, 0, err
 	}
 	parent, child := readHandle, writeHandle
 	if parentWrites {
 		parent, child = writeHandle, readHandle
 	}
-	if err := windows.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+	if err := api.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, err
 	}
-	file := os.NewFile(uintptr(parent), "native-pipe")
+	file := api.NewFile(uintptr(parent), "native-pipe")
 	if file == nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, errors.New("cannot wrap a native pipe handle")
 	}
 	return file, child, nil

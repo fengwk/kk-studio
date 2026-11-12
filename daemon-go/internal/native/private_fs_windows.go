@@ -213,7 +213,10 @@ func (nativeWindowsPrivatePathAPI) Security(path string) (*windows.SID, *windows
 }
 
 func verifyWindowsOwner(path string) error {
-	api := nativeWindowsPrivatePathAPI{}
+	return verifyWindowsOwnerWithAPI(path, nativeWindowsPrivatePathAPI{})
+}
+
+func verifyWindowsOwnerWithAPI(path string, api windowsPrivatePathAPI) error {
 	user, err := api.CurrentUserSID()
 	if err != nil {
 		return err
