@@ -1,5 +1,6 @@
 {
   "kind": "TRANSIENT",
   "message": "provider temporarily unavailable",
-  "httpStatus": null
+  "httpStatus": null,
+  "providerErrorCode": null
 }

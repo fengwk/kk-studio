@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -81,7 +80,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     return accumulator.response();
   }
 
-  /** Empty reasoning placeholders cannot carry semantic thinking and must not be frozen as native blocks. */
+  /**
+   * Empty reasoning placeholders cannot carry semantic thinking and must not be frozen as native
+   * blocks.
+   */
   @Test
   void emptyReasoningPlaceholderFallsBackToSemanticBlocks() throws Exception {
     ProviderResponse response =
@@ -100,7 +102,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertNull(text.providerBlockData());
   }
 
-  /** Encrypted reasoning data survives the durable message codec and is replayed with its owner block. */
+  /**
+   * Encrypted reasoning data survives the durable message codec and is replayed with its owner
+   * block.
+   */
   @Test
   void encryptedReasoningBlockSurvivesDurableRoundTripAndReplay() throws Exception {
     String event =
@@ -122,7 +127,8 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals("rs_native", data.itemId());
     assertTrue(data.itemStart());
 
-    MessagePayload payload = new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of());
+    MessagePayload payload =
+        new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of());
     HistoryEntryPayloadJsonCodec codec = new HistoryEntryPayloadJsonCodec();
     MessagePayload durable =
         (MessagePayload) codec.decode(EntryType.MESSAGE, codec.encode(payload));
@@ -134,8 +140,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(
                         new AgentMessage(
-                            AgentMessageRole.USER,
-                            List.of(new TextMessageContent("continue")))),
+                            AgentMessageRole.USER, List.of(new TextMessageContent("continue")))),
                     ProviderMessageProjector.ProjectedMessage.of(durable.message())));
     JsonNode encoded =
         MAPPER

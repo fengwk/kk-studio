@@ -434,7 +434,9 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         command(fixture.store, chain.turn().threadId(), queued).state());
   }
 
-  /** Block-native Provider data remains on its owning message content as the tool batch is applied. */
+  /**
+   * Block-native Provider data remains on its owning message content as the tool batch is applied.
+   */
   @Test
   void toolSiblingBatchPreservesAssistantBlockProviderData() {
     Fixture fixture = fixture();
@@ -515,10 +517,12 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     MessagePayload assistantPayload = (MessagePayload) entries.get(3).payload();
     assertEquals(
         providerData,
-        ((TextMessageContent) assistantPayload.message().contents().getFirst()).providerBlockData());
+        ((TextMessageContent) assistantPayload.message().contents().getFirst())
+            .providerBlockData());
     assertEquals(
         providerData,
-        ((ToolCallMessageContent) assistantPayload.message().contents().get(1)).providerBlockData());
+        ((ToolCallMessageContent) assistantPayload.message().contents().get(1))
+            .providerBlockData());
     assertEquals(
         AgentMessageRole.TOOL, ((MessagePayload) entries.get(4).payload()).message().role());
     assertEquals(

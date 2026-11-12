@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
@@ -56,6 +55,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
@@ -326,8 +326,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(3, 2, user("user question")));
     entries.add(
-        new Entry(
-            id(4L), id(100L), id(3L), assistant("assistant answer", providerData), T0));
+        new Entry(id(4L), id(100L), id(3L), assistant("assistant answer", providerData), T0));
 
     ProviderRequest request =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
@@ -350,8 +349,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(3, 2, user("old user")));
     // The cut assistant remains in the retained tail, including its block-native metadata.
     entries.add(
-        new Entry(
-            id(4L), id(100L), id(3L), assistant("old assistant", oldProviderData), T0));
+        new Entry(id(4L), id(100L), id(3L), assistant("old assistant", oldProviderData), T0));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
@@ -367,8 +365,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(10, 9, user("new user")));
     entries.add(
-        new Entry(
-            id(11L), id(100L), id(10L), assistant("new assistant", newProviderData), T0));
+        new Entry(id(11L), id(100L), id(10L), assistant("new assistant", newProviderData), T0));
 
     ProviderRequest request =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));

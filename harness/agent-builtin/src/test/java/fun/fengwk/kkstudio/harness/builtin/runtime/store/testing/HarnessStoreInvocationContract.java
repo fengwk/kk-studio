@@ -75,8 +75,8 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -172,16 +172,23 @@ public abstract class HarnessStoreInvocationContract {
               builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
-          builtin(store, tx)
-              .updateModelInvocation(current.succeed(response, null, T2));
+          builtin(store, tx).updateModelInvocation(current.succeed(response, null, T2));
         });
 
     ModelInvocation foundModel =
         store.transaction(
             tx -> builtin(store, tx).findModelInvocation(TestIds.id(101)).orElseThrow());
     assertEquals(response.blocks(), foundModel.result().blocks());
-    assertEquals(textData, foundModel.result().blocks().get(0) instanceof ProviderTextBlock block ? block.providerBlockData() : null);
-    assertEquals(nativeData, foundModel.result().blocks().get(1) instanceof ProviderOpaqueBlock block ? block.providerBlockData() : null);
+    assertEquals(
+        textData,
+        foundModel.result().blocks().get(0) instanceof ProviderTextBlock block
+            ? block.providerBlockData()
+            : null);
+    assertEquals(
+        nativeData,
+        foundModel.result().blocks().get(1) instanceof ProviderOpaqueBlock block
+            ? block.providerBlockData()
+            : null);
 
     // 2. 将 ordered block 投影成 assistant entry 并检查持久化历史
     UUID userEntryId =
@@ -202,7 +209,7 @@ public abstract class HarnessStoreInvocationContract {
     MessagePayload storedPayload = (MessagePayload) foundEntry.payload();
     assertEquals(
         List.of(
-            new TextMessageContent("assistant reply"),
+            new TextMessageContent("assistant reply", textData),
             new NativeAssistantBlockContent("functionCall", nativeData)),
         storedPayload.message().contents());
 

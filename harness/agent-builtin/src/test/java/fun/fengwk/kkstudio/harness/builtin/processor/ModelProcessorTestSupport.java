@@ -985,9 +985,7 @@ abstract class ModelProcessorTestSupport {
             new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "provider-a", "model-a"),
             JsonNodeFactory.instance.objectNode().put("token", 42));
     return new ProviderResponse(
-        List.of(
-            new ProviderTextBlock(text),
-            new ProviderToolCallBlock(call, providerData)),
+        List.of(new ProviderTextBlock(text), new ProviderToolCallBlock(call, providerData)),
         GenerationStopReason.COMPLETE,
         usage(),
         "req-1",
@@ -1036,7 +1034,6 @@ abstract class ModelProcessorTestSupport {
     return new BranchSettings(
         "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
-
 
   /**
    * 可编排的 fake Gateway：每次 admit 取队列头的一个结果。{@link #queueControlled} 排入一次受测试线程控制的阻塞运行——测试通过 {@link

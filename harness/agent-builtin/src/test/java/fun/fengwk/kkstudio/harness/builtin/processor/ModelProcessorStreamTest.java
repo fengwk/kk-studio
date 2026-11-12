@@ -148,8 +148,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
 
     listener.event(new ProviderStreamEvent.TextDelta("truncated partial"));
     listener.succeed(
-        new ProviderCompletion(
-            response("truncated partial", GenerationStopReason.LENGTH)));
+        new ProviderCompletion(response("truncated partial", GenerationStopReason.LENGTH)));
     awaitExecutionExit(fixture);
 
     ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
@@ -177,8 +176,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.succeed(
-        new ProviderCompletion(
-            response("valid summary", GenerationStopReason.COMPLETE)));
+        new ProviderCompletion(response("valid summary", GenerationStopReason.COMPLETE)));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
@@ -203,9 +201,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     listener.event(new ProviderStreamEvent.TextDelta("partial one"));
-    listener.succeed(
-        new ProviderCompletion(
-            response("partial one", GenerationStopReason.LENGTH)));
+    listener.succeed(new ProviderCompletion(response("partial one", GenerationStopReason.LENGTH)));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
@@ -215,8 +211,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.event(new ProviderStreamEvent.TextDelta("partial two"));
     secondListener.succeed(
-        new ProviderCompletion(
-            response("partial two", GenerationStopReason.LENGTH)));
+        new ProviderCompletion(response("partial two", GenerationStopReason.LENGTH)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -257,7 +252,6 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
             new ProviderResponse(
                 "", null, List.of(), GenerationStopReason.COMPLETE, usage(), "req-1", null, null)));
 
-
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
@@ -285,9 +279,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.succeed(
-        new ProviderCompletion(
-            response(" \n\t", GenerationStopReason.COMPLETE)));
+    listener.succeed(new ProviderCompletion(response(" \n\t", GenerationStopReason.COMPLETE)));
 
     ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, afterFirst.status());
@@ -308,8 +300,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.succeed(
-        new ProviderCompletion(
-            response("valid summary", GenerationStopReason.COMPLETE)));
+        new ProviderCompletion(response("valid summary", GenerationStopReason.COMPLETE)));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
@@ -335,9 +326,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     fixture
         .gateway
         .controlled(fixture.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response(" \n", GenerationStopReason.COMPLETE)));
+        .succeed(new ProviderCompletion(response(" \n", GenerationStopReason.COMPLETE)));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
@@ -348,9 +337,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     fixture
         .gateway
         .controlled(fixture.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("\t \n", GenerationStopReason.COMPLETE)));
+        .succeed(new ProviderCompletion(response("\t \n", GenerationStopReason.COMPLETE)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -379,8 +366,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     listener.succeed(
-        new ProviderCompletion(
-            response("filtered text", GenerationStopReason.FILTERED)));
+        new ProviderCompletion(response("filtered text", GenerationStopReason.FILTERED)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -416,7 +402,6 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
                 null,
                 null)));
 
-
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertEquals(1, terminal.result().toolCalls().size());
@@ -445,7 +430,6 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
                 "req-1",
                 null,
                 null)));
-
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -480,9 +464,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     truncated
         .gateway
         .controlled(truncated.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("partial answer", GenerationStopReason.LENGTH)));
+        .succeed(new ProviderCompletion(response("partial answer", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(truncated.store, truncated.invocationId).status(),
@@ -520,9 +502,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     taskChild
         .gateway
         .controlled(taskChild.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("task partial", GenerationStopReason.LENGTH)));
+        .succeed(new ProviderCompletion(response("task partial", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(taskChild.store, taskChild.invocationId).status(),
@@ -550,9 +530,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     truncated
         .gateway
         .controlled(truncated.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("ordinary partial", GenerationStopReason.LENGTH)));
+        .succeed(new ProviderCompletion(response("ordinary partial", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(truncated.store, truncated.invocationId).status(),
@@ -576,8 +554,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         .gateway
         .controlled(filtered.invocationId)
         .succeed(
-            new ProviderCompletion(
-                response("ordinary filtered", GenerationStopReason.FILTERED)));
+            new ProviderCompletion(response("ordinary filtered", GenerationStopReason.FILTERED)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(filtered.store, filtered.invocationId).status(),
@@ -620,7 +597,10 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     assertEquals(lengthResponse.blocks(), modelLength.result().blocks());
   }
 
-  /** Filtered responses and incomplete tool diagnostics still persist their semantic response blocks. */
+  /**
+   * Filtered responses and incomplete tool diagnostics still persist their semantic response
+   * blocks.
+   */
   @Test
   void modelExecutionPersistsFilteredAndDiagnosticResponseBlocks() {
     // 1. FILTERED 场景
@@ -634,8 +614,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixtureFiltered.gateway.controlled(fixtureFiltered.invocationId);
 
     listenerFiltered.succeed(
-        new ProviderCompletion(
-            response("filtered output", GenerationStopReason.FILTERED)));
+        new ProviderCompletion(response("filtered output", GenerationStopReason.FILTERED)));
 
     ModelInvocation modelFiltered = model(fixtureFiltered.store, fixtureFiltered.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelFiltered.status());

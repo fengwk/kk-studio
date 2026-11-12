@@ -23,11 +23,10 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -207,7 +206,9 @@ class OpenAiResponsesDurableReplayTest {
         "private reasoning text must never reach the wire replay");
   }
 
-  /** Semantic-only history becomes ordinary assistant text and never invents encrypted reasoning. */
+  /**
+   * Semantic-only history becomes ordinary assistant text and never invents encrypted reasoning.
+   */
   @Test
   void durableHistoryWithoutReplayStateFallsBackToSemanticEncoding() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
@@ -249,8 +250,7 @@ class OpenAiResponsesDurableReplayTest {
     assertEquals(4, input.size());
     assertEquals("user", input.get(0).path("role").asString(""));
     assertEquals("message", input.get(1).path("type").asString(""));
-    assertEquals(
-        "durable thought", input.get(1).path("content").get(0).path("text").asString(""));
+    assertEquals("durable thought", input.get(1).path("content").get(0).path("text").asString(""));
     assertFalse(input.get(1).has("encrypted_content"));
     assertEquals("function_call", input.get(2).path("type").asString(""));
     assertTrue(input.get(2).has("arguments"));

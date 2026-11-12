@@ -1107,9 +1107,7 @@ class ModelExecutionStreamFlushTest {
     continuationFixture.start();
 
     ProviderResponse continuationResponse = response("paused", GenerationStopReason.CONTINUE);
-    continuationFixture
-        .listener()
-        .onSucceeded(new ProviderCompletion(continuationResponse));
+    continuationFixture.listener().onSucceeded(new ProviderCompletion(continuationResponse));
 
     ModelInvocation continued = continuationFixture.currentModel();
     assertEquals(ModelInvocationStatus.SUCCEEDED, continued.status());
@@ -1121,9 +1119,7 @@ class ModelExecutionStreamFlushTest {
     filteredFixture.start();
 
     ProviderResponse filteredResponse = response("", GenerationStopReason.FILTERED);
-    filteredFixture
-        .listener()
-        .onSucceeded(new ProviderCompletion(filteredResponse));
+    filteredFixture.listener().onSucceeded(new ProviderCompletion(filteredResponse));
 
     ModelInvocation filtered = filteredFixture.currentModel();
     assertEquals(ModelInvocationStatus.SUCCEEDED, filtered.status());

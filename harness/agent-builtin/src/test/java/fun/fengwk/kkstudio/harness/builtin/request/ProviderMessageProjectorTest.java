@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.List;
 import java.util.Set;
@@ -315,7 +314,8 @@ class ProviderMessageProjectorTest {
                 ProviderMessageProjector.ProjectedMessage.of(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
-                        List.of(toolCall("call-1", "bash", "bash", "{\"secret\":1}", null, null))))));
+                        List.of(
+                            toolCall("call-1", "bash", "bash", "{\"secret\":1}", null, null))))));
 
     // 全部调用降级后 assistant 不再输出，其语义完整进入 USER 上下文。
     assertEquals(
@@ -384,7 +384,12 @@ class ProviderMessageProjectorTest {
                             List.of(
                                 toolCall("call-native", "lookup", "lookup", "{}", null, null),
                                 toolCall(
-                                    "call-legacy", "bash", "bash", "{\"secret\":1}", null, null))))));
+                                    "call-legacy",
+                                    "bash",
+                                    "bash",
+                                    "{\"secret\":1}",
+                                    null,
+                                    null))))));
 
     assertEquals(
         List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL, ProviderMessageRole.USER),

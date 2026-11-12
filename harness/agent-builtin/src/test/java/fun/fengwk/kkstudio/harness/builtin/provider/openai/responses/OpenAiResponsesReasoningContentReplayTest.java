@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -82,7 +81,9 @@ class OpenAiResponsesReasoningContentReplayTest {
         ProviderCacheControl.none());
   }
 
-  /** Known malformed content in terminal output is rejected during capture, without echoing input. */
+  /**
+   * Known malformed content in terminal output is rejected during capture, without echoing input.
+   */
   @ParameterizedTest
   @MethodSource("malformedContentShapes")
   void malformedTerminalReasoningContentRejectedAtCapture(String contentJson) throws Exception {
@@ -129,7 +130,11 @@ class OpenAiResponsesReasoningContentReplayTest {
     ArrayNode output = response.putArray("output");
     output.add(reasoningItem);
     ObjectNode message = MAPPER.createObjectNode().put("type", "message").put("role", "assistant");
-    message.putArray("content").addObject().put("type", "output_text").put("text", "Synthetic answer.");
+    message
+        .putArray("content")
+        .addObject()
+        .put("type", "output_text")
+        .put("text", "Synthetic answer.");
     output.add(message);
     return terminal;
   }
