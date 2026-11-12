@@ -3,6 +3,7 @@
 package native
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func TestWindowsHelper_RejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-// TestWindowsHelper_RejectsPrivateStateAndLaunchFailures verifies private state and launch validation errors are recorded.
+// NAT-F-012 verifies unreadable/foreign Windows state and launch records fail closed before process creation.
 func TestWindowsHelper_RejectsPrivateStateAndLaunchFailures(t *testing.T) {
 	t.Run("unverified state directory", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "not-private")
@@ -40,6 +41,18 @@ func TestWindowsHelper_RejectsPrivateStateAndLaunchFailures(t *testing.T) {
 		t.Setenv(windowsStdinHandleEnv, "1234")
 		if got := runWindowsHelper([]string{path}); got != 1 {
 			t.Fatalf("helper result = %d, want launch failure", got)
+		}
+	})
+	t.Run("real foreign DACL", func(t *testing.T) {
+		dir := stateTestDir(t)
+		setWindowsTestLooseDACL(t, dir)
+		t.Setenv(windowsStdinHandleEnv, "1234")
+		if got := runWindowsHelper([]string{dir}); got != 1 {
+			t.Fatalf("helper result = %d, want private-state failure", got)
+		}
+		if job, err := openWindowsJob(jobNameFor(dir)); err == nil {
+			_ = windows.CloseHandle(job)
+			t.Fatal("helper created a command Job for a foreign-ACL state directory")
 		}
 	})
 	t.Run("invalid launch record", func(t *testing.T) {
@@ -87,7 +100,12 @@ func TestWindowsHelper_RejectsPrivateStateAndLaunchFailures(t *testing.T) {
 // TestWindowsHelper_FailedCommandCreationDrainsJob confirms a failed child launch releases its newly created Job.
 func TestWindowsHelper_FailedCommandCreationDrainsJob(t *testing.T) {
 	dir := stateTestDir(t)
-	if err := publish(dir, launchFile, []byte(`{"cwd":"C:\\work","args":["Z:\\missing\\kk-native-command.exe"]}`)); err != nil {
+	secret := "PRIVATE-LAUNCH-ARG-DO-NOT-LOG"
+	launch, err := json.Marshal(launchSpec{Cwd: `C:\work`, Args: []string{`Z:\missing\kk-native-command.exe`, secret}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publish(dir, launchFile, launch); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(windowsStdinHandleEnv, "1234")
@@ -99,6 +117,11 @@ func TestWindowsHelper_FailedCommandCreationDrainsJob(t *testing.T) {
 	}
 	if cleanup, err := readState(dir, cleanupFile); err != nil || string(cleanup) != "true" {
 		t.Fatalf("Job cleanup = %q, %v", cleanup, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, diagnosticsFile)); err == nil && strings.Contains(string(data), secret) {
+		t.Fatalf("private launch argument leaked in diagnostics: %q", data)
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read diagnostics: %v", err)
 	}
 }
 
