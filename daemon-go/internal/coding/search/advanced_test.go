@@ -90,8 +90,12 @@ func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	if err := os.WriteFile(file, []byte("content"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	resolvedFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	files, err := FindContext(context.Background(), file, "ignored-glob", 0)
-	if err != nil || len(files.Results) != 1 || files.Results[0] != filepath.ToSlash(file) {
+	if err != nil || len(files.Results) != 1 || files.Results[0] != filepath.ToSlash(resolvedFile) {
 		t.Fatalf("direct file result=%#v error=%v", files, err)
 	}
 	if _, err := FindContext(context.Background(), filepath.Join(root, "missing"), "", 0); err == nil {

@@ -160,8 +160,12 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	}
 
 	file := filepath.Join(root, "keep.ts")
+	resolvedFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": file, "pattern": "x", "literal": true, "include": "*.js"}, nil)
-	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(file)+":1:x" {
+	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(resolvedFile)+":1:x" {
 		t.Fatalf("direct-file result=%#v", direct)
 	}
 }
