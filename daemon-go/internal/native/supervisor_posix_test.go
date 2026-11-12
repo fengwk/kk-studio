@@ -197,6 +197,14 @@ func TestPOSIXSupervisor_StartAfterClose(t *testing.T) {
 	}
 }
 
+// A clean helper exit without command-exit evidence must remain an unknown status.
+func TestPOSIXExitFallback_DoesNotInventSuccess(t *testing.T) {
+	exit := readExitFallback(stateTestDir(t), nil)
+	if exit.Code != nil || exit.Signal != nil {
+		t.Fatalf("exit fallback fabricated status: %+v", exit)
+	}
+}
+
 // NAT-T-132
 func TestPOSIXSupervisor_ExecFailureHasUnknownExit(t *testing.T) {
 	supervisor, err := NewSupervisor()

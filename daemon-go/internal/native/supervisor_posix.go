@@ -436,8 +436,7 @@ func readExitFallback(dir string, waitErr error) ProcessExit {
 		return ProcessExit{Code: report.ExitCode, Signal: report.Signal}
 	}
 	if waitErr == nil {
-		code := 0
-		return ProcessExit{Code: &code}
+		return ProcessExit{}
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
