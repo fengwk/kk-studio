@@ -232,28 +232,21 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			return nil, false, false, err
 		}
 	}
-	type scopeKey struct {
-		root string
-		dir  string
+	type directoryScope struct {
+		root    string
+		matcher *ignoreMatcher
+		files   []string
 	}
-	var scopesMu sync.Mutex
-	scopes := map[scopeKey]*ignoreMatcher{{root: rootScope, dir: abs}: rootMatcher}
-	matcherFor := func(scope, dir string) (*ignoreMatcher, error) {
-		key := scopeKey{root: scope, dir: dir}
-		scopesMu.Lock()
-		defer scopesMu.Unlock()
-		if matcher := scopes[key]; matcher != nil {
-			return matcher, nil
-		}
-		matcher, err := newIgnoreMatcherAt(scope, dir)
-		if err != nil {
-			return nil, err
-		}
-		scopes[key] = matcher
-		return matcher, nil
+	// fastwalk calls each directory callback before reading its entries. Files then load their parent state;
+	// each directory owns its result slice, and inherited immutable matchers are shared when possible.
+	var scopes sync.Map
+	scopes.Store(filepath.ToSlash(abs), &directoryScope{root: rootScope, matcher: rootMatcher})
+	rootPath := filepath.ToSlash(abs)
+	rootPrefix := rootPath
+	if !strings.HasSuffix(rootPrefix, "/") {
+		rootPrefix += "/"
 	}
 	var files []string
-	var filesMu sync.Mutex
 	err = fastwalk.Walk(&fastwalk.Config{NumWorkers: workers, ToSlash: true}, abs, func(path string, d fs.DirEntry, walkErr error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -261,11 +254,13 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 		if walkErr != nil || d == nil {
 			return nil
 		}
-		if path == abs {
+		if path == abs || path == rootPath {
 			return nil
 		}
-		rel, _ := filepath.Rel(abs, filepath.FromSlash(path))
-		rel = filepath.ToSlash(rel)
+		rel := strings.TrimPrefix(path, rootPrefix)
+		if rel == path {
+			return fmt.Errorf("walk path %q is outside search root %q", path, rootPath)
+		}
 		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
@@ -275,46 +270,43 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			}
 			return nil
 		}
-		fullPath := filepath.Join(abs, filepath.FromSlash(rel))
-		var scope string
-		var matcher *ignoreMatcher
-		var scopeErr error
-		if d.IsDir() && hasGitMarker(fullPath) {
-			parentDir := filepath.Dir(fullPath)
-			scope = nearestGitRootWithin(parentDir, abs, rootScope)
-			matcher, scopeErr = matcherFor(scope, parentDir)
-			if scopeErr != nil {
-				return scopeErr
-			}
-			if matcher.Ignored(fullPath, true) {
+		fullPath := filepath.FromSlash(path)
+		parentEnd := strings.LastIndexByte(path, '/')
+		parent := path[:parentEnd]
+		if parent == "" {
+			parent = "/"
+		}
+		parentValue, ok := scopes.Load(parent)
+		if !ok {
+			return fmt.Errorf("search scope for parent directory %q is unavailable", parent)
+		}
+		parentScope := parentValue.(*directoryScope)
+		if d.IsDir() {
+			isRepository := hasGitMarker(fullPath)
+			if parentScope.matcher.Ignored(fullPath, true) {
 				return filepath.SkipDir
 			}
-			scope = fullPath
-			matcher, scopeErr = matcherFor(scope, fullPath)
-		} else {
-			dir := fullPath
-			if !d.IsDir() {
-				dir = filepath.Dir(fullPath)
+			scope := parentScope.root
+			matcher := parentScope.matcher
+			if isRepository {
+				scope = fullPath
 			}
-			scope = nearestGitRootWithin(dir, abs, rootScope)
-			matcher, scopeErr = matcherFor(scope, dir)
-		}
-		if scopeErr != nil {
-			return scopeErr
-		}
-		if matcher.Ignored(fullPath, d.IsDir()) {
-			if d.IsDir() {
-				return filepath.SkipDir
+			localIgnore, readErr := os.ReadFile(filepath.Join(fullPath, ".gitignore"))
+			if isRepository || readErr == nil && len(localIgnore) > 0 {
+				nextMatcher, matcherErr := newIgnoreMatcherAt(scope, fullPath)
+				if matcherErr != nil {
+					return matcherErr
+				}
+				matcher = nextMatcher
 			}
+			scopes.Store(path, &directoryScope{root: scope, matcher: matcher})
 			return nil
 		}
-		if d.IsDir() {
+		if parentScope.matcher.Ignored(fullPath, false) {
 			return nil
 		}
 		if glob == "" || globMatch(glob, rel) {
-			filesMu.Lock()
-			files = append(files, rel)
-			filesMu.Unlock()
+			parentScope.files = append(parentScope.files, rel)
 		}
 		return nil
 	})
@@ -325,6 +317,10 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	if err != nil && !timedOut {
 		return nil, false, false, err
 	}
+	scopes.Range(func(_, value any) bool {
+		files = append(files, value.(*directoryScope).files...)
+		return true
+	})
 	sort.Slice(files, func(i, j int) bool { return pathLess(files[i], files[j]) })
 	limitReached := limit > 0 && len(files) > limit
 	if limitReached {
@@ -379,17 +375,6 @@ func nearestGitRoot(path string) string {
 		}
 		if filepath.Dir(p) == p {
 			return ""
-		}
-	}
-}
-
-func nearestGitRootWithin(path, searchRoot, fallback string) string {
-	for p := path; ; p = filepath.Dir(p) {
-		if hasGitMarker(p) {
-			return p
-		}
-		if p == searchRoot || filepath.Dir(p) == p {
-			return fallback
 		}
 	}
 }
