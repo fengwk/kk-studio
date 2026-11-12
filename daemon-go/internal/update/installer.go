@@ -297,7 +297,7 @@ func clientForProxy(client *http.Client, proxyURL *string) (*http.Client, error)
 			return nil, errors.New("invalid platform proxy")
 		}
 		port, portErr := strconv.Atoi(proxy.Port())
-		if proxy.Scheme != "http" || proxy.Host == "" || portErr != nil || port < 1 || port > 65535 || proxy.User != nil || proxy.Path != "" || proxy.RawQuery != "" || proxy.Fragment != "" {
+		if proxy.Scheme != "http" || proxy.Host == "" || proxy.Hostname() == "" || portErr != nil || port < 1 || port > 65535 || proxy.User != nil || proxy.Path != "" || proxy.RawQuery != "" || proxy.ForceQuery || proxy.Fragment != "" || proxy.RawFragment != "" || proxy.Opaque != "" || strings.ContainsAny(*proxyURL, "?#") {
 			return nil, errors.New("invalid platform proxy")
 		}
 		transportCopy.Proxy = http.ProxyURL(proxy)

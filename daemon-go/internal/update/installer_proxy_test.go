@@ -53,7 +53,7 @@ func TestClientForProxySelectsConfiguredProxyOrDirect(t *testing.T) {
 
 // RUN-T-205 rejects malformed proxy settings and custom transports that cannot enforce the configured proxy.
 func TestClientForProxyRejectsInvalidOrUnenforceableProxy(t *testing.T) {
-	for _, value := range []string{"https://proxy.example:8080", "http://proxy.example", "http://user:pass@proxy.example:8080", "http://proxy.example:8080/path", "http://proxy.example:0"} {
+	for _, value := range []string{"https://proxy.example:8080", "http://proxy.example", "http://user:pass@proxy.example:8080", "http://proxy.example:8080/path", "http://proxy.example:8080?", "http://proxy.example:8080#", "http://proxy.example:0"} {
 		t.Run(value, func(t *testing.T) {
 			if _, err := clientForProxy(&http.Client{}, &value); err == nil {
 				t.Fatalf("invalid proxy %q accepted", value)
