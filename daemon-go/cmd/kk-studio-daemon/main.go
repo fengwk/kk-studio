@@ -29,14 +29,20 @@ const h2xconnectBootstrapArg = "__bootstrap-h2xconnect"
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 0 || args[0] != h2xconnectBootstrapArg {
+	if shouldBootstrapH2XConnect(args) {
 		bootstrapH2XConnect(args)
 	}
-	args = args[1:]
+	if len(args) > 0 && args[0] == h2xconnectBootstrapArg {
+		args = args[1:]
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	code := RunCLI(ctx, args, Dependencies{Runtime: productionRuntime{}, HelperMain: runNativeHelper}, os.Stdout, os.Stderr)
 	os.Exit(code)
+}
+
+func shouldBootstrapH2XConnect(args []string) bool {
+	return len(args) == 0 || (args[0] != h2xconnectBootstrapArg && !strings.HasPrefix(args[0], "__") && !strings.HasPrefix(args[0], "--internal-"))
 }
 
 func bootstrapH2XConnect(args []string) {
