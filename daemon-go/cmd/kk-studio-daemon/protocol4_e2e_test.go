@@ -211,6 +211,10 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	if err != nil || ideResult.MessageType != protocol.MessageType_IDE_RESULT || ideResult.GetInvocationId() != ideInvocation || !ideResult.GetIdeResult().GetOk() || ideResult.GetIdeResult().Revision == nil {
 		t.Fatalf("production IDE command result=%v err=%v", ideResult, err)
 	}
+	canonicalDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
 	const directoryInvocation = "123e4567-e89b-42d3-a456-426614174008"
 	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
 		MessageType: protocol.MessageType_IDE_COMMAND, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(directoryInvocation),
@@ -221,8 +225,8 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("read production directory listing result: %v", err)
 	}
 	listing := directoryResult.GetIdeResult().GetDirectoryListing()
-	if directoryResult.MessageType != protocol.MessageType_IDE_RESULT || directoryResult.GetInvocationId() != directoryInvocation || !directoryResult.GetIdeResult().GetOk() || listing == nil || listing.GetPath() != directory {
-		t.Fatalf("production directory listing result=%v", directoryResult)
+	if directoryResult.MessageType != protocol.MessageType_IDE_RESULT || directoryResult.GetInvocationId() != directoryInvocation || !directoryResult.GetIdeResult().GetOk() || listing == nil || listing.GetPath() != canonicalDirectory {
+		t.Fatalf("production directory listing result=%v, canonical path=%q", directoryResult, canonicalDirectory)
 	}
 	foundWorkspace := false
 	for _, child := range listing.GetChildren() {
