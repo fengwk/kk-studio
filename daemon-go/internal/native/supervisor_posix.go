@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	scopePollInterval   = 5 * time.Millisecond
-	scopeStartBudget    = 20 * time.Second
-	scopeConvergeBudget = 4 * time.Second
-	helperGracePeriod   = 600 * time.Millisecond
+	scopePollInterval    = 5 * time.Millisecond
+	scopeStartBudget     = 20 * time.Second
+	scopeConvergeBudget  = 4 * time.Second
+	defaultGracePeriod   = time.Second
+	posixForceKillBudget = time.Second
+	helperGracePeriod    = 600 * time.Millisecond
 )
 
 // PosixSupervisor supervises each command in a private process session.
@@ -187,7 +189,7 @@ func (s *PosixSupervisor) Close(ctx context.Context) error {
 	s.mu.Unlock()
 	var failures []error
 	for _, p := range processes {
-		if err := p.Terminate(ctx, time.Second); err != nil {
+		if err := p.Terminate(ctx, defaultGracePeriod); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -411,7 +413,7 @@ func (p *posixProcess) awaitScope(ctx context.Context) error {
 
 func (p *posixProcess) cleanupFailedStart(cause error) error {
 	cause = errors.Join(cause, p.closeStreams())
-	ctx, cancel := context.WithTimeout(context.Background(), scopeConvergeBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), posixForceKillBudget)
 	defer cancel()
 	if err := convergeSession(ctx, p.sid, 0); err != nil {
 		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
