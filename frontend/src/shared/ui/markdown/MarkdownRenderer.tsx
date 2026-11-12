@@ -1,5 +1,5 @@
 import { memo, type ComponentProps, type ReactNode } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -62,6 +62,10 @@ const REHYPE_PLUGINS: RehypePlugins = [
 const REHYPE_PLUGINS_PRESERVING_RAW_TEXT: RehypePlugins = [...REHYPE_PLUGINS, REHYPE_RAW_TEXT_SPAN]
 const MARKDOWN_COMPONENTS = createMarkdownComponents()
 
+function transformMarkdownUrl(url: string): string | undefined {
+  return url.startsWith('resource:') ? url : defaultUrlTransform(url)
+}
+
 /**
  * 单段 markdown：content 不变则跳过 re-parse（流式时前缀段不再重复解析）。
  * 表格复制按钮需要本段原文来切 offset，因此把 content 一并作为段源上下文下发。
@@ -80,6 +84,7 @@ const MarkdownSegmentView = memo(
           remarkPlugins={REMARK_PLUGINS}
           rehypePlugins={preserveRawText ? REHYPE_PLUGINS_PRESERVING_RAW_TEXT : REHYPE_PLUGINS}
           components={MARKDOWN_COMPONENTS}
+          urlTransform={transformMarkdownUrl}
         >
           {content}
         </ReactMarkdown>
@@ -139,7 +144,7 @@ function createMarkdownComponents(): Components {
   return {
     table: MarkdownTable,
     a: ({ href, children }) => {
-      if (href?.startsWith('resource://')) {
+      if (href?.startsWith('resource:')) {
         return <ResourceUri uri={href} label={nodeText(children)} />
       }
       return (
@@ -148,7 +153,7 @@ function createMarkdownComponents(): Components {
         </a>
       )
     },
-    img: ({ src, alt }) => src?.startsWith('resource://')
+    img: ({ src, alt }) => src?.startsWith('resource:')
       ? <ResourceUri uri={src} label={alt ?? undefined} image />
       : <img src={src} alt={alt ?? ''} />,
     code: ({ className: codeClassName, children, ...props }) => {
