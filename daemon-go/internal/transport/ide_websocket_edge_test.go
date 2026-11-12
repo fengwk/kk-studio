@@ -3,7 +3,9 @@ package transport
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -11,6 +13,15 @@ import (
 	"strings"
 	"testing"
 )
+
+type tunnelTestConn struct {
+	reader   io.Reader
+	writeErr error
+}
+
+func (c *tunnelTestConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *tunnelTestConn) Write([]byte) (int, error)  { return 0, c.writeErr }
+func (*tunnelTestConn) Close() error                 { return nil }
 
 type recordedHTTPWriter struct {
 	header http.Header
@@ -73,6 +84,50 @@ func TestTunnel_WebSocketRejectedHandshakeAndUpstreamFailures(t *testing.T) {
 	if writer.status != http.StatusBadGateway {
 		t.Fatalf("unavailable upstream status=%d", writer.status)
 	}
+}
+
+// TRN-T-060, TRN-T-061 verify a failed downstream write is returned so the HTTP/2 handler can reset its stream.
+func TestBridgeDuplex_ReturnsStreamWriteFailure(t *testing.T) {
+	want := errors.New("stream write failed")
+	client := &tunnelTestConn{reader: strings.NewReader(""), writeErr: want}
+	upstream := &tunnelTestConn{reader: strings.NewReader("response")}
+	if err := bridgeDuplex(t.Context(), client, upstream); !errors.Is(err, want) {
+		t.Fatalf("bridge error=%v, want %v", err, want)
+	}
+}
+
+// TRN-T-040 verifies an upstream body failure after response headers aborts the HTTP/2 stream.
+func TestTunnel_HTTPBodyFailureAfterHeadersAbortsStream(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = http.ReadRequest(bufio.NewReader(conn))
+		_, _ = fmt.Fprint(conn, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nshort")
+	}()
+	host, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordedHTTPWriter{header: make(http.Header)}
+	request := &http.Request{Method: http.MethodGet, URL: &url.URL{RawQuery: ""}, Header: make(http.Header), Body: http.NoBody}
+	defer func() {
+		if recovered := recover(); recovered != http.ErrAbortHandler {
+			t.Fatalf("panic=%v, want http.ErrAbortHandler", recovered)
+		}
+	}()
+	(&ControlConnection{}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"}, "/")
 }
 
 // TRN-T-059

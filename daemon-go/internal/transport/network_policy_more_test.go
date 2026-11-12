@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+// TRN-T-118 verifies the proxy policy rejects malformed host labels before dialing.
+func TestProxyPolicy_ValidBypassHost(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		want bool
+	}{
+		{"", false},
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"bad/name", false},
+		{"bad\\\\host", false},
+		{"a..example", false},
+		{"-bad.example", false},
+		{"bad-.example", false},
+		{strings.Repeat("a", 64) + ".example", false},
+		{"bad_host.example", false},
+	} {
+		if got := validBypassHost(tc.host); got != tc.want {
+			t.Errorf("validBypassHost(%q)=%t want %t", tc.host, got, tc.want)
+		}
+	}
+}
+
 // TRN-T-111, TRN-T-117
 func TestProxy_InvalidConfigurationTable(t *testing.T) {
 	for _, tc := range []struct{ proxy, bypass string }{

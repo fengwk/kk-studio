@@ -1,8 +1,11 @@
 package transport
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,6 +72,22 @@ type failingBody struct{}
 
 func (failingBody) Read([]byte) (int, error) { return 0, errors.New("private body error") }
 func (failingBody) Close() error             { return nil }
+
+// TRN-T-089 verifies a resource download can use the applied network runtime lifecycle.
+func TestDownload_UsesNetworkRuntime(t *testing.T) {
+	body := []byte("download")
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	defer server.Close()
+	downloader := &ResourceDownloader{Network: NewNetworkRuntime(nil)}
+	got, err := downloader.DownloadPresigned(context.Background(), server.URL, nil, int64(len(body)), digest)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("download=%q err=%v", got, err)
+	}
+	if err := downloader.Network.RetireWhenIdle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // TRN-N-002
 func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {

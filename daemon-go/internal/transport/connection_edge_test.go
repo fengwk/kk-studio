@@ -151,6 +151,38 @@ func TestIdleConn_SetDeadlineFailure(t *testing.T) {
 	}
 }
 
+// TRN-T-082 verifies the single-connection listener returns its one connection and terminates waiters.
+func TestSingleConnListener_AcceptAndClose(t *testing.T) {
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	listener := &singleConnListener{conn: left, closed: make(chan struct{})}
+	accepted, err := listener.Accept()
+	if err != nil || accepted != left {
+		t.Fatalf("accepted=%v err=%v", accepted, err)
+	}
+	if listener.Addr().Network() != "websocket" {
+		t.Fatalf("listener address=%v", listener.Addr())
+	}
+	waiter := make(chan error, 1)
+	go func() { _, acceptErr := listener.Accept(); waiter <- acceptErr }()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-waiter; !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("second accept error=%v", err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&controlPipe{}).Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&ControlConnection{}).Send(context.Background(), nil); err == nil {
+		t.Fatal("invalid outbound envelope accepted")
+	}
+}
+
 // TRN-T-011
 func TestControlConnection_CloseBeforeControlWait(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{})}

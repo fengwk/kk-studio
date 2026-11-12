@@ -33,6 +33,66 @@ func uploadTicket(transfer string, state protocol.TicketState, upload string) *p
 	return &protocol.ResourceUploadTicket{TransferId: proto.String(transfer), State: state, UploadId: proto.String(upload)}
 }
 
+type uploadRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f uploadRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type uploadCloseErrorBody struct{ io.Reader }
+
+func (uploadCloseErrorBody) Close() error { return errors.New("private cleanup detail") }
+
+// TRN-T-010 verifies invalid ticket and retry timings fail before sending upload control messages.
+func TestUpload_RejectsNegativeTimingOptions(t *testing.T) {
+	control := uploadExchangeStub{
+		request: func(context.Context, string, *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+			t.Fatal("request with invalid timing")
+			return nil, nil
+		},
+		commit: func(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error) {
+			t.Fatal("commit with invalid timing")
+			return nil, nil
+		},
+	}
+	for _, uploader := range []*ResourceUploader{
+		{Control: control, TicketWait: -time.Second},
+		{Control: control, RetryBackoff: -time.Second},
+	} {
+		_, err := uploader.Upload(context.Background(), "123e4567-e89b-12d3-a456-426614174000", uploadContent())
+		var uploadErr *runtimeapi.ResourceUploadError
+		if !errors.As(err, &uploadErr) || !uploadErr.CleanupConfirmed || uploadErr.Category != "invalid-input" {
+			t.Fatalf("timing error=%v", err)
+		}
+	}
+}
+
+// TRN-T-019 verifies a failed network release remains an explicit unknown cleanup fact.
+func TestUpload_NetworkCleanupFailureIsUnconfirmed(t *testing.T) {
+	control := uploadExchangeStub{
+		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			return ticket, nil
+		},
+		commit: func(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error) {
+			t.Fatal("commit after cleanup failure")
+			return nil, nil
+		},
+	}
+	network := NewNetworkRuntime(nil)
+	network.client = &http.Client{Transport: uploadRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: uploadCloseErrorBody{Reader: strings.NewReader("")}}, nil
+	})}
+	uploader := &ResourceUploader{Control: control, Network: network, RetryBackoff: time.Millisecond}
+	_, err := uploader.Upload(context.Background(), "123e4567-e89b-12d3-a456-426614174000", uploadContent())
+	var uploadErr *runtimeapi.ResourceUploadError
+	if !errors.As(err, &uploadErr) || uploadErr.CleanupConfirmed || uploadErr.Category != "cleanup-failed" {
+		t.Fatalf("upload error=%#v", err)
+	}
+	if strings.Contains(err.Error(), "private cleanup detail") {
+		t.Fatal("cleanup error leaked into user-facing text")
+	}
+}
+
 // TRN-F-005
 func TestUpload_ValidationAndTicketFailures(t *testing.T) {
 	const invocation = "123e4567-e89b-12d3-a456-426614174000"

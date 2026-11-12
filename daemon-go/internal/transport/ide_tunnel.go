@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 func (c *ControlConnection) handleIDE(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +184,9 @@ func (c *ControlConnection) proxyIDEHTTP(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	if _, err = io.Copy(w, resp.Body); err != nil {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 func cloneEndToEndHeaders(src http.Header) http.Header {
@@ -265,7 +266,9 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 			}
 		}
 		w.WriteHeader(response.StatusCode)
-		_, _ = io.Copy(w, response.Body)
+		if _, err = io.Copy(w, response.Body); err != nil {
+			panic(http.ErrAbortHandler)
+		}
 		return
 	}
 	for _, h := range []string{"Sec-WebSocket-Accept", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"} {
@@ -278,7 +281,9 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 		f.Flush()
 	}
 	client := io.ReadWriteCloser(&responseBodyWriter{reader: r.Body, writer: w})
-	bridgeDuplex(r.Context(), client, &bufferedConn{Conn: upstream, reader: br})
+	if err := bridgeDuplex(r.Context(), client, &bufferedConn{Conn: upstream, reader: br}); err != nil {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 type responseBodyWriter struct {
@@ -301,18 +306,21 @@ type bufferedConn struct {
 }
 
 func (c *bufferedConn) Read(b []byte) (int, error) { return c.reader.Read(b) }
-func bridgeDuplex(ctx context.Context, a, b io.ReadWriteCloser) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = io.Copy(a, b); _ = a.Close() }()
-	go func() { defer wg.Done(); _, _ = io.Copy(b, a); _ = b.Close() }()
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = a.Close()
-			_ = b.Close()
-		case <-func() chan struct{} { ch := make(chan struct{}); go func() { wg.Wait(); close(ch) }(); return ch }():
-		}
-	}()
-	wg.Wait()
+func bridgeDuplex(ctx context.Context, a, b io.ReadWriteCloser) error {
+	stopped := context.AfterFunc(ctx, func() { _ = a.Close(); _ = b.Close() })
+	defer stopped()
+	errs := make(chan error, 2)
+	go func() { _, err := io.Copy(a, b); errs <- err; _ = a.Close() }()
+	go func() { _, err := io.Copy(b, a); errs <- err; _ = b.Close() }()
+	first := <-errs
+	_ = a.Close()
+	_ = b.Close()
+	second := <-errs
+	if ctx.Err() != nil {
+		return nil
+	}
+	if first != nil {
+		return first
+	}
+	return second
 }

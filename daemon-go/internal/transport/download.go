@@ -23,6 +23,7 @@ type TicketRequester interface {
 type ResourceDownloader struct {
 	Policy    *ProxyPolicy
 	Client    *http.Client
+	Network   *NetworkRuntime
 	Requester TicketRequester
 }
 
@@ -81,6 +82,21 @@ func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL st
 		}
 		req.Header.Set(k, v)
 	}
+	if d.Network != nil {
+		var body []byte
+		var responseErr error
+		err := d.Network.WithResponse(ctx, req, func(resp *http.Response) error {
+			body, responseErr = verifyDownloadResponse(resp, size, digest)
+			return responseErr
+		})
+		if err != nil {
+			if responseErr != nil {
+				return nil, responseErr
+			}
+			return fail("request")
+		}
+		return body, nil
+	}
 	client := d.Client
 	ownedClient := false
 	if client == nil {
@@ -108,15 +124,19 @@ func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL st
 		return fail("request")
 	}
 	defer resp.Body.Close()
+	body, err := verifyDownloadResponse(resp, size, digest)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func verifyDownloadResponse(resp *http.Response, size int64, digest string) ([]byte, error) {
+	fail := func(stage string) ([]byte, error) { return nil, fmt.Errorf("resource download %s failed", stage) }
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fail(fmt.Sprintf("storage status %d", resp.StatusCode))
 	}
-	var body []byte
-	limit := size + 1
-	if size < 0 {
-		return fail("size")
-	}
-	body, err = io.ReadAll(io.LimitReader(resp.Body, limit))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, size+1))
 	if err != nil {
 		return fail("response")
 	}
