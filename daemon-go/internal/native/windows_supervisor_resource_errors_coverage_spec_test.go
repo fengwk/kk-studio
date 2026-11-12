@@ -151,3 +151,48 @@ func TestWindowsJobCreation_RejectsMalformedName(t *testing.T) {
 		t.Fatal("Job creation accepted an embedded NUL in its name")
 	}
 }
+
+// TestWindowsSupervisor_StartReportsStateDirectoryFailure verifies startup stops before publishing into an invalid temp root.
+func TestWindowsSupervisor_StartReportsStateDirectoryFailure(t *testing.T) {
+	missingTemp := t.TempDir() + "\\missing"
+	t.Setenv("TMP", missingTemp)
+	t.Setenv("TEMP", missingTemp)
+	supervisor := &windowsSupervisor{processes: make(map[int]*windowsProcess)}
+	if _, err := supervisor.Start(context.Background(), ProcessSpec{Executable: "fixture"}); err == nil {
+		t.Fatal("startup succeeded without a usable temporary directory")
+	}
+}
+
+// TestWindowsSupervisor_WaitSettledAndCancellation verifies Wait returns cached results and honors canceled contexts.
+func TestWindowsSupervisor_WaitSettledAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := (&windowsProcess{}).Wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Wait = %v", err)
+	}
+	terminationErr := errors.New("cached termination failure")
+	process := &windowsProcess{done: make(chan struct{}), waitFailure: make(chan struct{}), terminationErr: terminationErr}
+	close(process.done)
+	if _, err := process.Wait(context.Background()); !errors.Is(err, terminationErr) {
+		t.Fatalf("cached termination result = %v", err)
+	}
+	waitErr := errors.New("cached wait failure")
+	closeErr := errors.New("cached close failure")
+	code := 7
+	process = &windowsProcess{done: make(chan struct{}), waitFailure: make(chan struct{}), settled: true, exit: ProcessExit{Code: &code}, waitErr: waitErr, closeErr: closeErr}
+	close(process.done)
+	exit, err := process.Wait(context.Background())
+	if exit.Code == nil || *exit.Code != code || !errors.Is(err, waitErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("cached settled result = %#v, %v", exit, err)
+	}
+}
+
+// TestWindowsSupervisor_CloseAggregatesProcessFailures verifies supervisor closure preserves managed-process errors.
+func TestWindowsSupervisor_CloseAggregatesProcessFailures(t *testing.T) {
+	closeErr := errors.New("cached process close failure")
+	process := &windowsProcess{settled: true, closeErr: closeErr}
+	supervisor := &windowsSupervisor{processes: map[int]*windowsProcess{1: process}}
+	if err := supervisor.Close(context.Background()); !errors.Is(err, closeErr) {
+		t.Fatalf("supervisor close = %v", err)
+	}
+}
