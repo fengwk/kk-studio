@@ -75,7 +75,10 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	body := []byte(`{"workspacePath":"` + opened.GetWorkspacePath() + `","pid":123}`)
+	body, err := json.Marshal(map[string]any{"workspacePath": opened.GetWorkspacePath(), "pid": 123})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusNoContent || tracker.calls != 1 || tracker.pid != 123 {
 		t.Fatalf("PTY status=%d tracker=%+v", status, tracker)
 	}
@@ -861,6 +864,10 @@ func TestIdleStopBoundary(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
+	service.idleTimerFired()
+	if manager.stopCalls != 0 || service.idleTimer != nil {
+		t.Fatalf("idle stop was armed with an open view: stops=%d timer=%v", manager.stopCalls, service.idleTimer)
+	}
 	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
 	defer cancelHost()
 	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
@@ -1049,6 +1056,11 @@ func startBridgeReplyHost(t *testing.T, bridge *Bridge, workspace, viewID, direc
 
 func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, directory string, overrides map[string]map[string]any) (*http.Response, context.CancelFunc) {
 	t.Helper()
+	canonicalDirectory, err := CanonicalDirectory(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory = canonicalDirectory
 	ctx, cancel := context.WithCancel(context.Background())
 	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", directory)
 	if _, err := reader.ReadString('\n'); err != nil {
@@ -1526,7 +1538,11 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 // IDE-T-096 verifies the omitted directory defaults to host HOME and missing HOME is reported safely.
 func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 	root := t.TempDir()
-	child := filepath.Join(root, "projects")
+	canonicalRoot, err := CanonicalDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(canonicalRoot, "projects")
 	if err := os.Mkdir(child, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1543,7 +1559,7 @@ func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 	}
 	defer service.Close(context.Background())
 	listed := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_DIRECTORIES})
-	if !listed.GetOk() || listed.GetDirectoryListing().GetPath() != root || len(listed.GetDirectoryListing().GetChildren()) != 1 {
+	if !listed.GetOk() || listed.GetDirectoryListing().GetPath() != canonicalRoot || len(listed.GetDirectoryListing().GetChildren()) != 1 {
 		t.Fatalf("home listing=%v", listed)
 	}
 	t.Setenv("HOME", "")
@@ -1556,7 +1572,11 @@ func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 // IDE-T-096 verifies directory listing is routed through the IDE command service.
 func TestDirectoryListingCommand(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "workspace"), 0o700); err != nil {
+	canonicalRoot, err := CanonicalDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(canonicalRoot, "workspace"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	bridge, err := NewBridge()
@@ -1571,10 +1591,10 @@ func TestDirectoryListingCommand(t *testing.T) {
 	}
 	defer service.Close(context.Background())
 	result := service.HandleCommand(context.Background(), &protocol.IdeCommand{
-		Action: protocol.IdeAction_LIST_DIRECTORIES, Directory: stringPointer(root),
+		Action: protocol.IdeAction_LIST_DIRECTORIES, Directory: stringPointer(canonicalRoot),
 	})
 	listing := result.GetDirectoryListing()
-	if !result.GetOk() || listing == nil || listing.GetPath() != root || len(listing.GetChildren()) != 1 || listing.GetChildren()[0].GetName() != "workspace" {
+	if !result.GetOk() || listing == nil || listing.GetPath() != canonicalRoot || len(listing.GetChildren()) != 1 || listing.GetChildren()[0].GetName() != "workspace" {
 		t.Fatalf("directory reply = %v", result)
 	}
 }

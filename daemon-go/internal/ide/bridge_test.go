@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -60,11 +61,12 @@ func TestBridgeCommandResultAndPTY(t *testing.T) {
 	defer bridge.Close(context.Background())
 	viewID := "11111111-1111-4111-8111-111111111111"
 	hostID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	workspace := "/managed/view.code-workspace"
-	bridge.Assign(viewID, workspace, 1, "/managed")
+	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
+	directory := filepath.Dir(workspace)
+	bridge.Assign(viewID, workspace, 1, directory)
 	streamCtx, stopStream := context.WithCancel(context.Background())
 	defer stopStream()
-	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {"/managed"}}
+	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {directory}}
 	req, _ := http.NewRequestWithContext(streamCtx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	req.Header.Set("Authorization", "Bearer "+bridge.Secret)
 	response, err := http.DefaultClient.Do(req)
@@ -221,8 +223,9 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	const viewID = "11111111-1111-4111-8111-111111111111"
-	const workspace = "/managed/view.code-workspace"
-	bridge.Assign(viewID, workspace, 1, "/managed")
+	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
+	directory := filepath.Dir(workspace)
+	bridge.Assign(viewID, workspace, 1, directory)
 	status := func(values url.Values) int {
 		request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+values.Encode(), nil)
 		if err != nil {
@@ -242,7 +245,7 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	if status(url.Values{"workspacePath": {"/unassigned"}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/managed"}}) != http.StatusForbidden {
 		t.Fatal("unassigned workspace accepted")
 	}
-	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bad"}, "folder": {"/managed"}}) != http.StatusBadRequest {
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bad"}, "folder": {directory}}) != http.StatusBadRequest {
 		t.Fatal("invalid host ID accepted")
 	}
 	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/elsewhere"}}) != http.StatusGone {
@@ -254,14 +257,14 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	current, stopCurrent := openTestBridgeStream(t, bridge, viewID, workspace, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 	defer stopCurrent()
 	defer current.Body.Close()
-	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/managed"}}) != http.StatusGone {
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {directory}}) != http.StatusGone {
 		t.Fatal("retired host reconnected")
 	}
 	pending := make(chan BridgeResult, 1)
 	bridge.mu.Lock()
-	bridge.pending["same-host-transition"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", stream: bridge.views[viewID].stream, expectedDirectory: "/managed/next", result: pending}
+	bridge.pending["same-host-transition"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", stream: bridge.views[viewID].stream, expectedDirectory: filepath.Join(directory, "next"), result: pending}
 	bridge.mu.Unlock()
-	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, "folder": {"/managed"}}) != http.StatusGone {
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, "folder": {directory}}) != http.StatusGone {
 		t.Fatal("pending transition host reconnected")
 	}
 	if got := <-pending; got.Message != "directory change was not applied" {
@@ -274,7 +277,7 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 		view.hosts[fmt.Sprintf("%08x-0000-4000-8000-%012x", index+1, index+1)] = struct{}{}
 	}
 	bridge.mu.Unlock()
-	if status(url.Values{"workspacePath": {workspace}, "hostId": {"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}, "folder": {"/managed"}}) != http.StatusServiceUnavailable {
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}, "folder": {directory}}) != http.StatusServiceUnavailable {
 		t.Fatal("host limit was not enforced")
 	}
 }
@@ -324,6 +327,8 @@ func TestBridgeHandlerBoundaryResponses(t *testing.T) {
 // IDE-T-014 verifies canonical path and loopback predicates reject unsafe bridge identities.
 func TestBridgePathAndLoopbackPredicates(t *testing.T) {
 	bridge := &Bridge{}
+	managed := filepath.Join(t.TempDir(), "managed")
+	other := filepath.Join(t.TempDir(), "other")
 	if bridge.pathKey("") != "" {
 		t.Fatal("empty path was canonicalized")
 	}
@@ -334,7 +339,7 @@ func TestBridgePathAndLoopbackPredicates(t *testing.T) {
 		path, expected string
 		want           bool
 	}{
-		{"/managed", "/managed", true}, {"/managed", "/other", false}, {"relative", "/managed", false}, {"", "/managed", false},
+		{managed, managed, true}, {managed, other, false}, {"relative", managed, false}, {"", managed, false},
 	} {
 		if got := validDirectoryExpectation(test.path, test.expected); got != test.want {
 			t.Errorf("validDirectoryExpectation(%q,%q)=%v", test.path, test.expected, got)
@@ -345,7 +350,7 @@ func TestBridgePathAndLoopbackPredicates(t *testing.T) {
 		directory string
 		want      bool
 	}{
-		{[]string{"/managed"}, "/managed", true}, {[]string{"/managed", "/managed"}, "/managed", false}, {[]string{"relative"}, "/managed", false},
+		{[]string{managed}, managed, true}, {[]string{managed, managed}, managed, false}, {[]string{"relative"}, managed, false},
 	} {
 		if got := matchesBridgeDirectory(test.folders, test.directory); got != test.want {
 			t.Errorf("matchesBridgeDirectory(%v,%q)=%v", test.folders, test.directory, got)
@@ -371,13 +376,15 @@ func TestConfirmDirectoryOnReconnect(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	viewID := "11111111-1111-4111-8111-111111111111"
-	workspace := "/managed/view.code-workspace"
+	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
+	oldDirectory := filepath.Join(filepath.Dir(workspace), "old")
+	newDirectory := filepath.Join(filepath.Dir(workspace), "new")
 	oldHost := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	newHost := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	bridge.Assign(viewID, workspace, 1, "/managed/old")
+	bridge.Assign(viewID, workspace, 1, oldDirectory)
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	defer cancelStream()
-	oldStream, oldReader := openManualBridgeStream(t, streamCtx, bridge, workspace, oldHost, "/managed/old")
+	oldStream, oldReader := openManualBridgeStream(t, streamCtx, bridge, workspace, oldHost, oldDirectory)
 	defer oldStream.Body.Close()
 	if _, err := oldReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
@@ -386,7 +393,7 @@ func TestConfirmDirectoryOnReconnect(t *testing.T) {
 	defer cancel()
 	resultCh := make(chan BridgeResult, 1)
 	go func() {
-		result, _ := bridge.Request(ctx, viewID, BridgeCommand{Op: "changeDirectory", Directory: "/managed/new"}, BridgeRequestOptions{ExpectedDirectory: "/managed/new"})
+		result, _ := bridge.Request(ctx, viewID, BridgeCommand{Op: "changeDirectory", Directory: newDirectory}, BridgeRequestOptions{ExpectedDirectory: newDirectory})
 		resultCh <- result
 	}()
 	var command struct {
@@ -399,14 +406,14 @@ func TestConfirmDirectoryOnReconnect(t *testing.T) {
 	if command.Op != "changeDirectory" || command.ID == "" {
 		t.Fatalf("command = %#v", command)
 	}
-	newStream, newReader := openManualBridgeStream(t, streamCtx, bridge, workspace, newHost, "/managed/new")
+	newStream, newReader := openManualBridgeStream(t, streamCtx, bridge, workspace, newHost, newDirectory)
 	defer newStream.Body.Close()
 	if _, err := newReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case result := <-resultCh:
-		if !result.OK || result.Directory != "/managed/new" {
+		if !result.OK || result.Directory != newDirectory {
 			t.Fatalf("change result = %#v", result)
 		}
 	case <-ctx.Done():
@@ -422,8 +429,8 @@ func TestBindAndRevokeStream(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	viewID := "11111111-1111-4111-8111-111111111111"
-	workspace := "/managed/view.code-workspace"
-	bridge.Assign(viewID, workspace, 1, "/managed")
+	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
 	stream, stopStream := openTestBridgeStream(t, bridge, viewID, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	defer stopStream()
 	defer stream.Body.Close()
@@ -444,8 +451,8 @@ func TestBridgeCommandCancellation(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	viewID := "11111111-1111-4111-8111-111111111111"
-	workspace := "/managed/view.code-workspace"
-	bridge.Assign(viewID, workspace, 1, "/managed")
+	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
 	stream, stopStream := openTestBridgeStream(t, bridge, viewID, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	defer stopStream()
 	defer stream.Body.Close()
@@ -479,7 +486,14 @@ func openManualBridgeStream(t *testing.T, ctx context.Context, bridge *Bridge, w
 func openTestBridgeStream(t *testing.T, bridge *Bridge, viewID, workspace, hostID string) (*http.Response, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {"/managed"}}
+	bridge.mu.Lock()
+	view := bridge.views[viewID]
+	folder := ""
+	if view != nil {
+		folder = view.directory
+	}
+	bridge.mu.Unlock()
+	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {folder}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		cancel()

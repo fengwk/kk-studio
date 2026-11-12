@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,15 @@ func TestBridgeSnapshotPayloadValidation(t *testing.T) {
 		}
 		return bridgeResultFromJSON(raw)
 	}
-	valid, err := parse(`{"ok":true,"clean":true,"omitted":0,"documents":[{"path":"/workspace/a.txt","text":"saved"}]}`)
+	validPath, err := filepath.Abs(filepath.Join(t.TempDir(), "workspace", "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validJSON, err := json.Marshal(map[string]any{"ok": true, "clean": true, "omitted": 0, "documents": []map[string]string{{"path": validPath, "text": "saved"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := parse(string(validJSON))
 	if err != nil || !valid.OK || valid.Clean == nil || !*valid.Clean || len(valid.Documents) != 1 {
 		t.Fatalf("valid snapshot=%+v err=%v", valid, err)
 	}
@@ -86,7 +95,15 @@ func TestBridgeRequestAdmissionFailures(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	const viewID = "11111111-1111-4111-8111-111111111111"
-	bridge.Assign(viewID, "/managed/view.code-workspace", 2, "/managed")
+	workspacePath, err := filepath.Abs(filepath.Join(t.TempDir(), "managed", "view.code-workspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	managedDirectory, err := filepath.Abs(filepath.Join(filepath.Dir(workspacePath), "managed-root"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.Assign(viewID, workspacePath, 2, managedDirectory)
 	bridge.mu.Lock()
 	view := bridge.views[viewID]
 	view.hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -110,6 +127,7 @@ func TestBridgeRequestAdmissionFailures(t *testing.T) {
 	bridge.mu.Lock()
 	bridge.pending["directory-pending"] = &bridgePending{viewID: viewID, epoch: 2, op: "changeDirectory", stream: stream, result: make(chan BridgeResult, 1)}
 	bridge.mu.Unlock()
+	newDirectory := filepath.Join(managedDirectory, "new")
 	checks = append(checks, struct {
 		name    string
 		ctx     context.Context
@@ -117,7 +135,7 @@ func TestBridgeRequestAdmissionFailures(t *testing.T) {
 		command BridgeCommand
 		options BridgeRequestOptions
 		want    string
-	}{name: "duplicate directory transition", ctx: context.Background(), id: viewID, command: BridgeCommand{Op: "changeDirectory", Directory: "/managed/new"}, options: BridgeRequestOptions{ExpectedDirectory: "/managed/new"}, want: "BUSY"})
+	}{name: "duplicate directory transition", ctx: context.Background(), id: viewID, command: BridgeCommand{Op: "changeDirectory", Directory: newDirectory}, options: BridgeRequestOptions{ExpectedDirectory: newDirectory}, want: "BUSY"})
 	for _, check := range checks {
 		result, err := bridge.Request(check.ctx, check.id, check.command, check.options)
 		if check.want == "" {

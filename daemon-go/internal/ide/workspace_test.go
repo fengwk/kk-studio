@@ -16,6 +16,10 @@ import (
 
 // IDE-T-140 verifies filesystem failures retain stable platform-neutral error codes.
 func TestFilesystemErrorCodeMapping(t *testing.T) {
+	notDirectoryCode := "ENOTDIR"
+	if runtime.GOOS == "windows" {
+		notDirectoryCode = "ENOENT"
+	}
 	for _, test := range []struct {
 		err  error
 		want string
@@ -24,7 +28,7 @@ func TestFilesystemErrorCodeMapping(t *testing.T) {
 		{fs.ErrPermission, "EACCES"},
 		{fmt.Errorf("wrapped: %w", syscall.EACCES), "EACCES"},
 		{syscall.ENOENT, "ENOENT"},
-		{syscall.ENOTDIR, "ENOTDIR"},
+		{syscall.ENOTDIR, notDirectoryCode},
 		{syscall.EPERM, "EACCES"},
 		{errors.New("unknown filesystem failure"), "UNKNOWN"},
 	} {
@@ -315,19 +319,24 @@ func TestRecoveryAggregateQuota(t *testing.T) {
 
 // IDE-T-150 verifies recovery record validation rejects invalid metadata and document fields.
 func TestValidateRecoveryBackupFields(t *testing.T) {
-	valid := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}}
+	workspace, err := filepath.Abs(filepath.Join(t.TempDir(), "workspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentPath := filepath.Join(workspace, "a")
+	valid := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: workspace, CreatedAt: "now", Documents: []RecoveryDocument{}}
 	if err := validateBackup(valid); err != nil {
 		t.Fatalf("valid backup rejected: %v", err)
 	}
 	invalid := []RecoveryBackup{
-		{ViewID: "bad", BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}},
-		{ViewID: valid.ViewID, BindingEpoch: "0", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}},
+		{ViewID: "bad", BindingEpoch: "1", Directory: workspace, CreatedAt: "now", Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "0", Directory: workspace, CreatedAt: "now", Documents: []RecoveryDocument{}},
 		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "relative", CreatedAt: "now", Documents: []RecoveryDocument{}},
-		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", Documents: []RecoveryDocument{}},
-		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now"},
-		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: make([]RecoveryDocument, 257)},
-		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "relative", Text: "x"}}},
-		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "/workspace/a", Text: string([]byte{0xff})}}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: workspace, Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: workspace, CreatedAt: "now"},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: workspace, CreatedAt: "now", Documents: make([]RecoveryDocument, 257)},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: workspace, CreatedAt: "now", Documents: []RecoveryDocument{{Path: "relative", Text: "x"}}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: workspace, CreatedAt: "now", Documents: []RecoveryDocument{{Path: documentPath, Text: string([]byte{0xff})}}},
 	}
 	for index, backup := range invalid {
 		if err := validateBackup(backup); err == nil {

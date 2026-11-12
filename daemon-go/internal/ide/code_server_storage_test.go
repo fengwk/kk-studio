@@ -18,7 +18,7 @@ func TestPrivateStorageHelpers(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(directory)
-	if err != nil || info.Mode().Perm() != 0o700 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("directory mode=%v err=%v", info, err)
 	}
 	file := filepath.Join(root, "file")
@@ -33,7 +33,7 @@ func TestPrivateStorageHelpers(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err = os.Stat(secret)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode=%v err=%v", info, err)
 	}
 	if err := writePrivateFile(directory, []byte("not a file")); err == nil {
