@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -63,6 +64,24 @@ type CapabilityResult struct {
 type ResourceUploader interface {
 	Upload(ctx context.Context, invocationID string, content ResultContent) (ResultContent, error)
 }
+
+// ResourceUploadError carries an explicit cleanup fact across the uploader boundary. Cause is
+// retained for local inspection but is deliberately excluded from Error to avoid leaking tickets.
+type ResourceUploadError struct {
+	Stage            string
+	Category         string
+	CleanupConfirmed bool
+	Cause            error
+}
+
+func (e *ResourceUploadError) Error() string {
+	if e.Category == "ticket-failed" {
+		return "resource upload ticket failed"
+	}
+	return fmt.Sprintf("resource upload failed during %s (%s); cleanupConfirmed=%t", e.Stage, e.Category, e.CleanupConfirmed)
+}
+
+func (e *ResourceUploadError) Unwrap() error { return e.Cause }
 
 // Progress reports a non-terminal capability result to runtime.
 type Progress func(CapabilityResult) error
