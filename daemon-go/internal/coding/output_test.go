@@ -123,7 +123,7 @@ func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	}
 	call.ImageInputTier = ""
 	missingTier, err := Provider{}.Capabilities()["fs.read"](context.Background(), call, runtime.CapabilityContext{})
-	if err != nil || !missingTier.Error || missingTier.Contents[0].Text != "image input tier is required for fs.read" {
+	if err != nil || !missingTier.Error || !strings.Contains(missingTier.Contents[0].Text, "image input tier is required for fs.read") {
 		t.Fatalf("missing tier result=%#v err=%v", missingTier, err)
 	}
 }

@@ -17,8 +17,8 @@ type ProcessSpec struct {
 
 // ProcessExit is the direct process exit status; it is distinct from scope convergence.
 type ProcessExit struct {
-	Code   int
-	Signal string
+	Code   *int
+	Signal *string
 }
 
 // ManagedProcess exposes pipes and permits convergent process-tree termination.

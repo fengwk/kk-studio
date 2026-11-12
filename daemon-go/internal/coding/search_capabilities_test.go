@@ -70,7 +70,7 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	}
 	call := runtime.CapabilityCall{InvocationID: "cancel", Arguments: arguments}
 	result, err := findCapability(ctx, call, runtime.CapabilityContext{})
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "context canceled") {
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "Operation cancelled") {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	var details map[string]any
@@ -116,6 +116,26 @@ func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 				t.Fatalf("grep returned beyond limit: %q", result.Contents[0].Text)
 			}
 		})
+	}
+}
+
+// COD-F-012, COD-F-014
+func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
+	arguments, err := json.Marshal(map[string]any{"path": t.TempDir(), "pattern": "[", "literal": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := grepCapability(context.Background(), runtime.CapabilityCall{InvocationID: "invalid-regex", Arguments: arguments}, runtime.CapabilityContext{})
+	if err != nil || !result.Error {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	text := result.Contents[0].Text
+	if details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, "Invalid regex:") || !strings.Contains(text, "Use literal=true for exact text, or escape regex metacharacters.") || !strings.Contains(text, "The tool was not executed.") {
+		t.Fatalf("details=%v text=%q", details, text)
 	}
 }
 

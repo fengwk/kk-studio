@@ -28,26 +28,25 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	}
 	var request arguments
 	if err = json.Unmarshal(call.Arguments, &request); err != nil {
-		return errorResult(call.InvocationID, errors.New("invalid arguments")), nil
+		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
 	}
 	var raw map[string]json.RawMessage
 	if err = json.Unmarshal(call.Arguments, &raw); err != nil {
-		return errorResult(call.InvocationID, errors.New("invalid arguments")), nil
+		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
 	}
 	if _, ok := raw["old_string"]; !ok {
-		return errorResult(call.InvocationID, errors.New("old_string must be a string")), nil
+		return errorResult(call.InvocationID, rejectInput("old_string must be a string")), nil
 	}
 	if _, ok := raw["new_string"]; !ok {
-		return errorResult(call.InvocationID, errors.New("new_string must be a string")), nil
+		return errorResult(call.InvocationID, rejectInput("new_string must be a string")), nil
 	}
 	if request.OldString == "" {
-		return errorResult(call.InvocationID, errors.New("old_string must not be empty")), nil
+		return errorResult(call.InvocationID, rejectInput("old_string must not be empty")), nil
 	}
 	oldText := normalizeEOL(request.OldString)
 	newText := normalizeEOL(request.NewString)
 	if oldText == newText {
-		//lint:ignore ST1005 This message is model-visible and must match the established capability contract.
-		return errorResult(call.InvocationID, errors.New("No changes to apply: old_string and new_string must differ after line-ending normalization")), nil
+		return errorResult(call.InvocationID, rejectInput("No changes to apply: old_string and new_string must differ after line-ending normalization")), nil
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -63,10 +62,10 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 		return errorResult(call.InvocationID, err), nil
 	}
 	if info.IsDir() {
-		return errorResult(call.InvocationID, fmt.Errorf("path must be a file: %s", path)), nil
+		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("path must be a file: %s", path))), nil
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return errorResult(call.InvocationID, fmt.Errorf("path is not a regular file: %s", path)), nil
+		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("path is not a regular file: %s", path))), nil
 	}
 	original, err := os.ReadFile(path)
 	if err != nil {
@@ -75,26 +74,22 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	originalHash := sha256.Sum256(original)
 	hash := hex.EncodeToString(originalHash[:])
 	if call.ExpectedFile != nil && (call.ExpectedFile.Path != path || call.ExpectedFile.SHA256 != hash) {
-		//lint:ignore ST1005 The stale-review text is a fixed model-visible contract.
-		return errorResult(call.InvocationID, errors.New(staleWriteReviewMessage)), nil
+		return errorResult(call.InvocationID, rejectInput(staleWriteReviewMessage)), nil
 	}
 	decoded, err := DecodeText(original)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
 	}
 	source := normalizeEOL(decoded.Text)
 	occurrences := strings.Count(source, oldText)
 	if occurrences == 0 {
-		//lint:ignore ST1005 This message is model-visible and follows the existing capability contract.
-		return errorResult(call.InvocationID, fmt.Errorf("Could not find old_string in %s", path)), nil
+		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("Could not find old_string in %s", path))), nil
 	}
 	if !request.ReplaceAll && occurrences > 1 {
-		//lint:ignore ST1005 This message is model-visible and follows the existing capability contract.
-		return errorResult(call.InvocationID, fmt.Errorf("Found %d exact matches; use replace_all to change every match or provide more context", occurrences)), nil
+		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("Found %d exact matches; use replace_all to change every match or provide more context", occurrences))), nil
 	}
 	if request.ReplaceAll && hasOverlappingText(source, oldText) {
-		//lint:ignore ST1005 This message is model-visible and follows the existing capability contract.
-		return errorResult(call.InvocationID, fmt.Errorf("Found overlapping exact matches for old_string in %s; replace_all cannot safely apply overlapping replacements", path)), nil
+		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("Found overlapping exact matches for old_string in %s; replace_all cannot safely apply overlapping replacements", path))), nil
 	}
 	count := 1
 	if request.ReplaceAll {
@@ -107,11 +102,10 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	updated = preserveLineEndings(updated, decoded.Text)
 	encoded, err := EncodeText(updated, decoded.Charset, decoded.BOMBytes)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
 	}
 	if string(encoded) == string(original) {
-		//lint:ignore ST1005 This message is model-visible and follows the existing capability contract.
-		return errorResult(call.InvocationID, errors.New("No changes to apply: edit would not change the file")), nil
+		return errorResult(call.InvocationID, rejectInput("No changes to apply: edit would not change the file")), nil
 	}
 	diff, err := numberedDiff(source, normalizeEOL(updated))
 	if err != nil {
@@ -121,8 +115,7 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	completed := textResult(call.InvocationID, fmt.Sprintf("Edited successfully.\nReplacements: %d", count))
 	resultJSON := mustJSON(map[string]any{"toolCallId": completed.CallID, "contents": completed.Contents, "error": completed.Error, "details": map[string]any{"editReview": review}})
 	if len(resultJSON) > maxReviewBytes {
-		//lint:ignore ST1005 This message is model-visible and follows the existing capability contract.
-		return errorResult(call.InvocationID, errors.New("Complete edit diff exceeds the review transport limit; split this edit into smaller changes.")), nil
+		return errorResult(call.InvocationID, rejectInput("Complete edit diff exceeds the review transport limit; split this edit into smaller changes.")), nil
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -131,7 +124,8 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 		return runtime.CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`), Contents: []runtime.ResultContent{{Type: "json", JSON: mustJSON(review)}}}, nil
 	}
 	if err = atomicWrite(path, encoded, info.Mode().Perm()); err != nil {
-		return errorResult(call.InvocationID, err), nil
+		code, message := classifyFileSystemError(err)
+		return errorResult(call.InvocationID, failRun(message, code)), nil
 	}
 	if capability.FileChanged != nil {
 		capability.FileChanged(path)

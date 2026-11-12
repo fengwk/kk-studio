@@ -85,7 +85,7 @@ func limitOutput(handler runtime.CapabilityExecutor) runtime.CapabilityExecutor 
 		}
 		if size > call.MaxOutputBytes {
 			message := fmt.Sprintf("Tool output is %s MiB, which exceeds the tool output size limit of %d MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings.", formatMiB(size, call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
-			return errorResult(call.InvocationID, errors.New(message)), nil
+			return codedErrorResult(call.InvocationID, "FAILED", message), nil
 		}
 		return result, nil
 	}
@@ -121,22 +121,22 @@ func parseImageTier(value runtime.ImageInputTier) (imagescaler.Tier, error) {
 	case runtime.ImageInputTierOriginal:
 		return imagescaler.Original, nil
 	case "":
-		return 0, errors.New("image input tier is required for fs.read")
+		return 0, rejectInput("image input tier is required for fs.read")
 	default:
-		return 0, fmt.Errorf("invalid image input tier %q", value)
+		return 0, rejectInput(fmt.Sprintf("invalid image input tier %q", value))
 	}
 }
 
 func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 	var args arguments
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return args, errors.New("invalid arguments")
+		return args, rejectInput("invalid arguments")
 	}
 	if args.Path == "" {
-		return args, errors.New("path must be a non-empty string")
+		return args, rejectInput("path must be a non-empty string")
 	}
 	if !filepath.IsAbs(args.Path) {
-		return args, errors.New("path must be absolute")
+		return args, rejectInput("path must be absolute")
 	}
 	return args, nil
 }
@@ -148,7 +148,7 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(call.Arguments, &raw); err != nil {
-		return errorResult(call.InvocationID, errors.New("invalid arguments")), nil
+		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
 	}
 	if _, exists := raw["offset"]; !exists {
 		args.Offset = 1
@@ -157,14 +157,14 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		args.Limit = DefaultReadLimit
 	}
 	if args.Offset < 1 || args.Offset > 2147483647 {
-		return errorResult(call.InvocationID, errors.New("offset must be a positive integer")), nil
+		return errorResult(call.InvocationID, rejectInput("offset must be a positive integer")), nil
 	}
 	if args.Limit < 1 || args.Limit > MaxReadLimit {
-		return errorResult(call.InvocationID, errors.New("limit must be a positive integer no greater than 2000")), nil
+		return errorResult(call.InvocationID, rejectInput("limit must be a positive integer no greater than 2000")), nil
 	}
 	if column, exists := raw["column_offset"]; exists && string(column) != "null" {
 		if err := json.Unmarshal(column, &args.ColumnOffset); err != nil || args.ColumnOffset < 1 {
-			return errorResult(call.InvocationID, errors.New("column_offset must be a positive integer")), nil
+			return errorResult(call.InvocationID, rejectInput("column_offset must be a positive integer")), nil
 		}
 	} else {
 		args.ColumnOffset = 1
@@ -201,7 +201,7 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		return textResult(call.InvocationID, strings.Join(names, "\n")), nil
 	}
 	if !info.Mode().IsRegular() {
-		return errorResult(call.InvocationID, errors.New("path is not a regular file")), nil
+		return errorResult(call.InvocationID, failRun("path is not a regular file", "INVALID_ARGUMENT")), nil
 	}
 	file, err := os.Open(args.Path)
 	if err != nil {
@@ -219,7 +219,7 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if imageType == "" && mediaType != "" && call.MaxOutputBytes > 0 && info.Size() > call.MaxOutputBytes {
 		file.Close()
 		message := fmt.Sprintf("File is %s MiB, which exceeds the tool output size limit of %d MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.", formatMiB(info.Size(), call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
-		return errorResult(call.InvocationID, errors.New(message)), nil
+		return codedErrorResult(call.InvocationID, "INVALID_ARGUMENT", message), nil
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		file.Close()
@@ -252,11 +252,11 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	decoded, err := DecodeText(data)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
 	}
 	window, err := ReadTextWindow(decoded.Text, WindowOptions{Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, rejectInput(err.Error())), nil
 	}
 	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
 }
@@ -296,7 +296,7 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, capabilit
 		var raw map[string]json.RawMessage
 		_ = json.Unmarshal(call.Arguments, &raw)
 		if _, ok := raw["content"]; !ok {
-			err = errors.New("content must be a string")
+			err = rejectInput("content must be a string")
 		}
 	}
 	if err != nil {
@@ -304,6 +304,18 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, capabilit
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
+	}
+	if _, err := os.Lstat(args.Path); err == nil {
+		info, statErr := os.Lstat(args.Path)
+		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return errorResult(call.InvocationID, rejectInput("path is a symbolic link: "+filepath.ToSlash(args.Path))), nil
+		}
+		if statErr == nil && !info.Mode().IsRegular() {
+			if info.IsDir() {
+				return errorResult(call.InvocationID, rejectInput("path is a directory: "+filepath.ToSlash(args.Path))), nil
+			}
+			return errorResult(call.InvocationID, rejectInput("path is not a regular file: "+filepath.ToSlash(args.Path))), nil
+		}
 	}
 	var expected *ExpectedFile
 	if call.ExpectedFile != nil {
@@ -339,7 +351,7 @@ func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ 
 		var raw map[string]json.RawMessage
 		_ = json.Unmarshal(call.Arguments, &raw)
 		if _, ok := raw["content"]; !ok {
-			err = errors.New("content must be a string")
+			err = rejectInput("content must be a string")
 		}
 	}
 	if err != nil {
@@ -364,11 +376,11 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		args.Limit = defaultFindLimit
 	}
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
-		return errorResult(call.InvocationID, errors.New("limit must be between 1 and 100000")), nil
+		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
 	outcome, err := search.FindContext(ctx, args.Path, args.Pattern, args.Limit)
 	if err != nil {
-		result := errorResult(call.InvocationID, err)
+		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
 			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
@@ -387,11 +399,11 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		args.Limit = defaultGrepLimit
 	}
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
-		return errorResult(call.InvocationID, errors.New("limit must be between 1 and 100000")), nil
+		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
 	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
 	if err != nil {
-		result := errorResult(call.InvocationID, err)
+		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
 			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
@@ -423,11 +435,11 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 	if exceedsInlineOutput(text) {
 		store, err := TextOutputStoreForDataDir(dataDir)
 		if err != nil {
-			return errorResult(call.InvocationID, err)
+			return errorResult(call.InvocationID, failService("temporary output storage is unavailable"))
 		}
 		spool, err := NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
 		if err != nil {
-			return errorResult(call.InvocationID, err)
+			return errorResult(call.InvocationID, failService("temporary output storage is unavailable"))
 		}
 		spool.Write([]byte(text))
 		result = spool.Finish(false, "")
@@ -465,10 +477,10 @@ func exceedsInlineOutput(text string) bool {
 func processCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	var args arguments
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
-		return errorResult(call.InvocationID, errors.New("invalid arguments")), nil
+		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
 	}
 	if strings.TrimSpace(args.Command) == "" {
-		return errorResult(call.InvocationID, errors.New("command must be a non-empty string")), nil
+		return errorResult(call.InvocationID, rejectInput("command must be a non-empty string")), nil
 	}
 	if args.Workdir == "" {
 		args.Workdir = "."
@@ -481,7 +493,7 @@ func processCapability(ctx context.Context, call runtime.CapabilityCall, capabil
 		args.Workdir = absolute
 	}
 	if info, err := os.Stat(args.Workdir); err != nil || !info.IsDir() {
-		return errorResult(call.InvocationID, errors.New("workdir is not a directory")), nil
+		return errorResult(call.InvocationID, rejectInput("workdir is not a directory")), nil
 	}
 	return ExecuteProcess(ctx, call, capability, args.Command, args.Workdir)
 }
@@ -491,14 +503,11 @@ func textResult(id, text string) runtime.CapabilityResult {
 }
 
 func errorResult(id string, err error) runtime.CapabilityResult {
-	code := "FAILED"
-	if errors.Is(err, context.Canceled) {
-		code = "CANCELLED"
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		code = "TIMEOUT"
-	}
-	return runtime.CapabilityResult{CallID: id, Error: true, Details: mustJSON(map[string]string{"code": code}), Contents: []runtime.ResultContent{{Type: "text", Text: err.Error()}}}
+	return toCapabilityErrorResult(id, err)
+}
+
+func codedErrorResult(id, code, message string) runtime.CapabilityResult {
+	return runtime.CapabilityResult{CallID: id, Error: true, Details: mustJSON(map[string]string{"code": code}), Contents: []runtime.ResultContent{{Type: "text", Text: message}}}
 }
 
 func mustJSON(v any) json.RawMessage {

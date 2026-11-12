@@ -30,24 +30,24 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		}
 	}()
 	if strings.TrimSpace(command) == "" {
-		return errorResult(call.InvocationID, errors.New("command must be a non-empty string")), nil
+		return errorResult(call.InvocationID, rejectInput("command must be a non-empty string")), nil
 	}
 	if !filepath.IsAbs(workdir) {
-		return errorResult(call.InvocationID, errors.New("workdir must be absolute")), nil
+		return errorResult(call.InvocationID, rejectInput("workdir must be absolute")), nil
 	}
 	if err := ctx.Err(); err != nil {
 		return terminatedBeforeStart(call, err)
 	}
 	if capability.Processes == nil {
-		return errorResult(call.InvocationID, errors.New("process supervisor is unavailable")), nil
+		return errorResult(call.InvocationID, failService("process supervisor is unavailable")), nil
 	}
 	store, err := TextOutputStoreForDataDir(capability.Config.DataDir)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
 	}
 	spool, err := NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
 	}
 	defer spool.Close()
 	shell := "bash"
@@ -57,7 +57,7 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	process, err := capability.Processes.Start(ctx, native.ProcessSpec{Executable: shell, Args: []string{"-lc", `cd -- "$1" || exit 1; shift; ` + command, "bash", workdir}, Directory: workdir})
 	if err != nil {
 		executionExited = !errors.Is(err, native.ErrScopeNotConverged)
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, failRun(err.Error(), "FAILED")), nil
 	}
 	executionExited = false
 	_ = process.Stdin().Close()
@@ -128,22 +128,24 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	select {
 	case <-readErrors:
-		result := spool.Finish(true, "[the process output stream failed while reading]")
+		result := spool.Finish(true, "")
 		result.Error = true
+		result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
 		var details map[string]any
 		if err := json.Unmarshal(result.Details, &details); err != nil {
 			details = make(map[string]any)
 		}
+		details["code"] = "FAILED"
 		details["process"] = map[string]string{"outcome": "EXITED"}
 		result.Details = mustJSON(details)
 		return result, nil
 	default:
 	}
 	if terminationResult != nil {
-		return errorResult(call.InvocationID, errors.New("process scope did not converge; processes may still be running")), nil
+		return errorResult(call.InvocationID, failRun("the process scope did not converge; processes may still be running", "FAILED")), nil
 	}
 	if waitErr != nil && ctx.Err() == nil {
-		return errorResult(call.InvocationID, waitErr), nil
+		return errorResult(call.InvocationID, failRun(waitErr.Error(), "FAILED")), nil
 	}
 	outcome := "EXITED"
 	naturalExit := ctx.Err() == nil && waitErr == nil
@@ -160,11 +162,11 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		note = "[Operation cancelled by the caller. Captured output above may be incomplete; side effects already performed are not rolled back.]"
 	} else if waitErr != nil {
 		failed = true
-	} else if exit.Signal != "" {
+	} else if exit.Signal != nil {
 		failed = true
-		note = fmt.Sprintf("[Command was terminated by signal %s.]", exit.Signal)
-	} else {
-		code := exit.Code
+		note = fmt.Sprintf("[Command was terminated by signal %s.]", *exit.Signal)
+	} else if exit.Code != nil {
+		code := *exit.Code
 		exitCode = &code
 		if code != 0 {
 			failed = true
@@ -177,11 +179,20 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		details = make(map[string]any)
 	}
 	processDetails := map[string]any{"outcome": outcome}
+	if failed {
+		code := "FAILED"
+		if outcome == "CANCELLED" {
+			code = "CANCELLED"
+		} else if outcome == "TIMED_OUT" {
+			code = "TIMEOUT"
+		}
+		details["code"] = code
+	}
 	if naturalExit && exitCode != nil {
 		processDetails["exitCode"] = *exitCode
 	}
-	if naturalExit && exit.Signal != "" {
-		processDetails["signal"] = exit.Signal
+	if naturalExit && exit.Signal != nil {
+		processDetails["signal"] = *exit.Signal
 	}
 	details["process"] = processDetails
 	result.Details = mustJSON(details)
@@ -257,6 +268,10 @@ func terminatedBeforeStart(call runtime.CapabilityCall, reason error) (runtime.C
 	}
 	result := textResult(call.InvocationID, note)
 	result.Error = true
-	result.Details = mustJSON(map[string]any{"process": map[string]string{"outcome": outcome}})
+	code := "CANCELLED"
+	if outcome == "TIMED_OUT" {
+		code = "TIMEOUT"
+	}
+	result.Details = mustJSON(map[string]any{"code": code, "process": map[string]string{"outcome": outcome}})
 	return result, nil
 }

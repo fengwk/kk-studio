@@ -47,21 +47,21 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	defer unlock()
 	linkInfo, linkErr := os.Lstat(resolved)
 	if linkErr == nil && linkInfo.Mode()&os.ModeSymlink != 0 {
-		return WriteReview{}, fmt.Errorf("path is a symbolic link: %s", resolved)
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
 	}
 	if linkErr != nil && !errors.Is(linkErr, os.ErrNotExist) {
 		return WriteReview{}, linkErr
 	}
 	if linkErr == nil && !linkInfo.Mode().IsRegular() {
 		if linkInfo.IsDir() {
-			return WriteReview{}, fmt.Errorf("path is a directory: %s", resolved)
+			return WriteReview{}, rejectInput(fmt.Sprintf("path is a directory: %s", resolved))
 		}
-		return WriteReview{}, fmt.Errorf("path is not a regular file: %s", resolved)
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
 	}
 	current, err := os.ReadFile(resolved)
 	if errors.Is(err, os.ErrNotExist) {
 		if isSymlink(resolved) {
-			return WriteReview{}, fmt.Errorf("path is a symbolic link: %s", resolved)
+			return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
 		}
 		return WriteReview{Path: resolved, NewFile: true, Content: content}, nil
 	}
@@ -73,7 +73,7 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 		return WriteReview{}, err
 	}
 	if !info.Mode().IsRegular() {
-		return WriteReview{}, fmt.Errorf("path is not a regular file: %s", resolved)
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
 	}
 	decoded, err := decodeFileText(current)
 	if err != nil {
@@ -102,13 +102,13 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 		return WriteReview{}, statErr
 	}
 	if exists && info.Mode()&os.ModeSymlink != 0 {
-		return WriteReview{}, fmt.Errorf("path is a symbolic link: %s", resolved)
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
 	}
 	if exists && !info.Mode().IsRegular() {
 		if info.IsDir() {
-			return WriteReview{}, fmt.Errorf("path is a directory: %s", resolved)
+			return WriteReview{}, rejectInput(fmt.Sprintf("path is a directory: %s", resolved))
 		}
-		return WriteReview{}, fmt.Errorf("path is not a regular file: %s", resolved)
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
 	}
 	var original []byte
 	var review WriteReview
@@ -121,8 +121,7 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 		if expected != nil {
 			hash := sha256.Sum256(original)
 			if expected.Path != resolved || expected.SHA256 != hex.EncodeToString(hash[:]) {
-				//lint:ignore ST1005 The message is a model-visible contract and retains its prescribed capitalization.
-				return WriteReview{}, errors.New(staleWriteReviewMessage)
+				return WriteReview{}, rejectInput(staleWriteReviewMessage)
 			}
 		}
 		charset, bom = charsetOf(original)
@@ -151,14 +150,15 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 		mode = info.Mode().Perm()
 	}
 	if err = atomicWrite(resolved, encoded, mode); err != nil {
-		return WriteReview{}, err
+		code, message := classifyFileSystemError(err)
+		return WriteReview{}, failRun(message, code)
 	}
 	return review, nil
 }
 
 func resolveWritePath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return "", errors.New("path must be absolute")
+		return "", rejectInput("path must be absolute")
 	}
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -222,12 +222,12 @@ func decodeFileText(data []byte) (string, error) {
 	data = data[bom:]
 	if charset == "UTF-8" {
 		if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
-			return "", errors.New("file appears to be binary")
+			return "", failRun("file appears to be binary", "CODEC")
 		}
 		return string(data), nil
 	}
 	if len(data)%2 != 0 {
-		return "", errors.New("file appears to be binary")
+		return "", failRun("file appears to be binary", "CODEC")
 	}
 	units := make([]uint16, len(data)/2)
 	for i := range units {
@@ -240,10 +240,10 @@ func decodeFileText(data []byte) (string, error) {
 	for i, unit := range units {
 		if unit >= 0xd800 && unit <= 0xdbff {
 			if i+1 == len(units) || units[i+1] < 0xdc00 || units[i+1] > 0xdfff {
-				return "", errors.New("file appears to be binary")
+				return "", failRun("file appears to be binary", "CODEC")
 			}
 		} else if unit >= 0xdc00 && unit <= 0xdfff && (i == 0 || units[i-1] < 0xd800 || units[i-1] > 0xdbff) {
-			return "", errors.New("file appears to be binary")
+			return "", failRun("file appears to be binary", "CODEC")
 		}
 	}
 	return string(utf16.Decode(units)), nil
@@ -251,7 +251,7 @@ func decodeFileText(data []byte) (string, error) {
 
 func encodeFileText(text, charset string, bom int) ([]byte, error) {
 	if !utf8.ValidString(text) {
-		return nil, errors.New("text cannot be losslessly encoded in charset " + charset)
+		return nil, failRun("text cannot be losslessly encoded in charset "+charset, "CODEC")
 	}
 	var out []byte
 	switch charset {
@@ -266,7 +266,7 @@ func encodeFileText(text, charset string, bom int) ([]byte, error) {
 			}
 		}
 	default:
-		return nil, errors.New("text cannot be losslessly encoded in charset " + charset)
+		return nil, failRun("text cannot be losslessly encoded in charset "+charset, "CODEC")
 	}
 	if bom == 0 {
 		return out, nil

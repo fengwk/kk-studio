@@ -65,7 +65,7 @@ func (fakeSupervisor) Close(context.Context) error { return nil }
 func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("x", 100*1024)
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{Code: 0}, nil }}
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }}
 	var progress []runtime.CapabilityResult
 	confirmed := 0
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "call"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(r runtime.CapabilityResult) error { progress = append(progress, r); return nil }, ConfirmExecutionExit: func() { confirmed++ }}, "printf output", dataDir)
@@ -110,6 +110,24 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	}
 	if partial.Kind != "process.output" || partial.Mode != "APPEND" || partial.Start != 0 || partial.End <= 0 || partial.Observed < int64(len(progress[0].Contents[0].Text)) {
 		t.Fatalf("partial=%#v", partial)
+	}
+}
+
+// COD-F-016
+func TestProcessUnknownExitStatusDoesNotAssumeZero(t *testing.T) {
+	dataDir := t.TempDir()
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("output")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{}, nil }}
+	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "unknown-exit"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}}, "true", dataDir)
+	if err != nil || result.Error || result.Contents[0].Text != "output" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	processDetails := details["process"].(map[string]any)
+	if processDetails["outcome"] != "EXITED" || processDetails["exitCode"] != nil || processDetails["signal"] != nil {
+		t.Fatalf("unknown status was reported as known: %v", processDetails)
 	}
 }
 
@@ -201,7 +219,7 @@ func TestProcessCapabilityRejectsInvalidWorkdirBeforeStarting(t *testing.T) {
 func TestProcessProgressFailureDoesNotStopOutputCapture(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("progress-failure\n", 6000)
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{Code: 0}, nil }}
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }}
 	progressCalls := 0
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "progress-failure"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(runtime.CapabilityResult) error {
 		progressCalls++
@@ -257,10 +275,10 @@ func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 
 // COD-T-150
 func TestProcessConvergenceFailureDoesNotConfirmExecutionExit(t *testing.T) {
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{Code: 0}, nil }, terminateErr: errors.New("scope still active")}
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, terminateErr: errors.New("scope still active")}
 	confirmed := 0
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "not-converged"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: t.TempDir()}, Processes: fakeSupervisor{process}, ConfirmExecutionExit: func() { confirmed++ }}, "true", t.TempDir())
-	if err != nil || !result.Error || result.Contents[0].Text != "process scope did not converge; processes may still be running" {
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "process scope did not converge; processes may still be running") {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	if confirmed != 0 {
@@ -274,14 +292,18 @@ func TestProcessReadErrorPreservesCapturedPrefix(t *testing.T) {
 	process := &fakeProcess{
 		stdout: &failingReadCloser{data: []byte("captured prefix")},
 		stderr: io.NopCloser(strings.NewReader("")),
-		wait:   func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{Code: 0}, nil },
+		wait:   func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil },
 	}
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "read-error"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}}, "true", dataDir)
 	if err != nil || !result.Error {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	text := result.Contents[0].Text
-	if !strings.HasPrefix(text, "captured prefix") || !strings.Contains(text, "[the process output stream failed while reading]") {
+	if !strings.HasPrefix(text, "captured prefix") || !strings.Contains(text, "the process output stream failed while reading.") {
 		t.Fatalf("text=%q", text)
 	}
+}
+
+func testProcessExit(code int) native.ProcessExit {
+	return native.ProcessExit{Code: &code}
 }
