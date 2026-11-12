@@ -66,7 +66,8 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 		t.Fatal(err)
 	}
 	tracker := &fakeDescendantTracker{}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, tracker, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, tracker, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +80,14 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusNoContent || tracker.calls != 1 || tracker.pid != 123 {
-		t.Fatalf("PTY status=%d tracker=%+v", status, tracker)
+	if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusNoContent || tracker.calls != 1 || tracker.pid != 123 || tracker.rootPID != manager.Session().PID {
+		t.Fatalf("PTY status=%d tracker=%+v session=%+v", status, tracker, manager.Session())
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusInternalServerError {
+		t.Fatalf("PTY was accepted without a live process supervisor, status=%d", status)
 	}
 }
 
@@ -1487,12 +1494,14 @@ func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 }
 
 type fakeDescendantTracker struct {
-	calls int
-	pid   int
+	calls   int
+	rootPID int
+	pid     int
 }
 
-func (tracker *fakeDescendantTracker) TrackDescendant(_ context.Context, _ int, pid int) error {
+func (tracker *fakeDescendantTracker) TrackDescendant(_ context.Context, rootPID int, pid int) error {
 	tracker.calls++
+	tracker.rootPID = rootPID
 	tracker.pid = pid
 	return nil
 }
