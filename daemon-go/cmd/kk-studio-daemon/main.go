@@ -5,12 +5,31 @@ import (
 	"os"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	args := os.Args[1:]
+	if code, handled := runInternalCommand(args); handled {
+		os.Exit(code)
+	}
+	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func runInternalCommand(args []string) (int, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch args[0] {
+	case "__native-helper":
+		return native.HelperMain(args[1:]), true
+	case "__lock-helper":
+		return native.LockHelperMain(args[1:]), true
+	default:
+		return 0, false
 	}
 }
 

@@ -1,0 +1,136 @@
+//go:build linux || darwin
+
+package native
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"syscall"
+)
+
+func secureNewPrivateDirectory(path string) error { return ensurePrivateDirectory(path) }
+
+func ensurePrivateDirectory(path string) error {
+	st, err := os.Lstat(path)
+	if err == nil {
+		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("the private directory path is not a real directory: %s", path)
+		}
+		if !ownedByCurrentUser(st) {
+			return fmt.Errorf("the private directory is not owned by the current user: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return err
+		}
+	}
+	if err := os.Chmod(path, 0700); err != nil {
+		return err
+	}
+	return verifyPrivateDirectory(path)
+}
+
+func verifyPrivateDirectory(path string) error {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("the private directory path is not a real directory: %s", path)
+	}
+	if !ownedByCurrentUser(st) {
+		return fmt.Errorf("the private directory is not owned by the current user: %s", path)
+	}
+	if st.Mode().Perm() != 0700 {
+		return fmt.Errorf("the private directory permissions are not owner-only: %s", path)
+	}
+	return nil
+}
+
+func writePrivateFile(path string, data []byte) error {
+	if err := verifyPrivateDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	if st, err := os.Lstat(path); err == nil {
+		if !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 || !ownedByCurrentUser(st) {
+			return fmt.Errorf("the private file path is not a real owned file: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	tmp, err := os.OpenFile(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+"."+randomSuffix()+".tmp"), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	ok := false
+	defer func() {
+		_ = tmp.Close()
+		if !ok {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	for len(data) > 0 {
+		n, writeErr := tmp.Write(data)
+		if writeErr != nil {
+			return writeErr
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	ok = true
+	return verifyPrivateFile(path)
+}
+
+func createPrivateFile(path string) error {
+	if err := verifyPrivateDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func verifyPrivateFile(path string) error {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("the private file path is not a real file: %s", path)
+	}
+	if !ownedByCurrentUser(st) {
+		return fmt.Errorf("the private file is not owned by the current user: %s", path)
+	}
+	if st.Mode().Perm() != 0600 {
+		return fmt.Errorf("the private file permissions are not owner-only: %s", path)
+	}
+	return nil
+}
+
+func ownedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	return uint32(stat.Uid) == uint32(os.Getuid())
+}
