@@ -547,6 +547,7 @@ type windowsProcess struct {
 	waitErr          error
 	terminationErr   error
 	closeErr         error
+	terminationAPI   windowsProcessTerminationAPI
 }
 
 func (p *windowsProcess) PID() int              { return p.pid }
@@ -730,6 +731,10 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	api := p.terminationAPI
+	if api == nil {
+		api = nativeWindowsProcessTerminationAPI{}
+	}
 	var resourceErrors []error
 	if p.owner != nil {
 		if err := p.owner.Close(); err != nil {
@@ -740,20 +745,20 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	var convergenceErrors []error
 	converged := false
 	if p.job != 0 {
-		_ = windows.TerminateJobObject(p.job, 1)
-		err := awaitWindowsJobEmpty(context.Background(), p.job, windowsDrainBudget)
+		_ = api.TerminateJobObject(p.job, 1)
+		err := api.AwaitJobEmpty(context.Background(), p.job, windowsDrainBudget)
 		if err != nil {
 			convergenceErrors = append(convergenceErrors, err)
 		} else {
 			converged = true
 		}
-	} else if err := terminateWindowsProcess(context.Background(), p.helper); err != nil {
+	} else if err := terminateWindowsProcessWithAPI(context.Background(), p.helper, windowsForceKillBudget, api); err != nil {
 		convergenceErrors = append(convergenceErrors, err)
 	} else {
 		converged = true
 	}
 	if p.job != 0 {
-		if err := windows.CloseHandle(p.job); err != nil {
+		if err := api.CloseHandle(p.job); err != nil {
 			resourceErrors = append(resourceErrors, fmt.Errorf("cannot close process scope job: %w", err))
 		}
 		p.job = 0
@@ -761,7 +766,7 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if converged {
 		if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 			if p.helper != 0 {
-				_ = windows.TerminateProcess(p.helper, 1)
+				_ = api.TerminateProcess(p.helper, 1)
 			}
 			if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 				convergenceErrors = append(convergenceErrors, err)
@@ -963,6 +968,9 @@ func (p *windowsProcess) awaitHelperExit(ctx context.Context, budget time.Durati
 type windowsProcessTerminationAPI interface {
 	TerminateProcess(windows.Handle, uint32) error
 	WaitForSingleObject(windows.Handle, uint32) (uint32, error)
+	TerminateJobObject(windows.Handle, uint32) error
+	AwaitJobEmpty(context.Context, windows.Handle, time.Duration) error
+	CloseHandle(windows.Handle) error
 }
 
 type nativeWindowsProcessTerminationAPI struct{}
@@ -973,9 +981,14 @@ func (nativeWindowsProcessTerminationAPI) TerminateProcess(process windows.Handl
 func (nativeWindowsProcessTerminationAPI) WaitForSingleObject(process windows.Handle, milliseconds uint32) (uint32, error) {
 	return windows.WaitForSingleObject(process, milliseconds)
 }
-
-func terminateWindowsProcess(ctx context.Context, process windows.Handle) error {
-	return terminateWindowsProcessWithAPI(ctx, process, windowsForceKillBudget, nativeWindowsProcessTerminationAPI{})
+func (nativeWindowsProcessTerminationAPI) TerminateJobObject(job windows.Handle, code uint32) error {
+	return windows.TerminateJobObject(job, code)
+}
+func (nativeWindowsProcessTerminationAPI) AwaitJobEmpty(ctx context.Context, job windows.Handle, budget time.Duration) error {
+	return awaitWindowsJobEmpty(ctx, job, budget)
+}
+func (nativeWindowsProcessTerminationAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
 }
 
 func terminateWindowsProcessWithAPI(ctx context.Context, process windows.Handle, budget time.Duration, api windowsProcessTerminationAPI) error {
