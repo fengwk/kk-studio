@@ -39,6 +39,63 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     await openHarness(page)
   })
 
+  test('uploads a browser-scaled JPEG and reports dimensions matching the stored bytes', async ({ page }) => {
+    await page.route('**/api/platform/settings', (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ storageMedia: { imageTier: '720P' } }),
+    }))
+    const jpegDataUrl = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 2000
+      canvas.height = 1000
+      const context = canvas.getContext('2d')!
+      context.fillStyle = '#315b7d'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((value) => resolve(value!), 'image/jpeg', 0.95))
+      const jpeg = new Uint8Array(await blob.arrayBuffer())
+      const exif = new Uint8Array([
+        0xff, 0xe1, 0x00, 0x22,
+        0x45, 0x78, 0x69, 0x66, 0, 0,
+        0x49, 0x49, 0x2a, 0, 8, 0, 0, 0,
+        1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0,
+        0, 0, 0, 0,
+      ])
+      const orientedJpeg = new Uint8Array(jpeg.length + exif.length)
+      orientedJpeg.set(jpeg.subarray(0, 2))
+      orientedJpeg.set(exif, 2)
+      orientedJpeg.set(jpeg.subarray(2), 2 + exif.length)
+      return Array.from(orientedJpeg)
+    })
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'large.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from(jpegDataUrl),
+    })
+    await expect.poll(() => page.evaluate(() => window.imageUploadTestResult.uploaded != null)).toBe(true)
+    const result = await page.evaluate(async () => {
+      const uploaded = window.imageUploadTestResult.uploaded!
+      const bitmap = await createImageBitmap(uploaded)
+      const dimensions = { width: bitmap.width, height: bitmap.height }
+      bitmap.close()
+      return {
+        dimensions,
+        mediaType: uploaded.type,
+        request: window.imageUploadTestResult.request,
+      }
+    })
+    expect(result.dimensions).toEqual({ width: 640, height: 1280 })
+    expect(result.mediaType).toBe('image/jpeg')
+    expect(result.request).toMatchObject({
+      mediaType: 'image/jpeg',
+      format: 'jpeg',
+      originalWidth: 1000,
+      originalHeight: 2000,
+      storedWidth: 640,
+      storedHeight: 1280,
+    })
+  })
+
   test('真实输入回流 ordered parts，Enter 提交一次并清空草稿', async ({ page }) => {
     const editor = page.locator('.composer-editor')
     await editor.click()

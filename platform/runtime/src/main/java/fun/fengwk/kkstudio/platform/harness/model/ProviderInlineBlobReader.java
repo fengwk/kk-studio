@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
-import java.time.Duration;
 import java.util.Base64;
 import java.util.Objects;
 import java.util.UUID;
@@ -32,7 +31,7 @@ import java.util.regex.Pattern;
  *
  * <p>本类不判断 ACTIVE 状态、不判断模态与 Provider 能力，也不产生任何 URL：状态与能力判定在每次 attempt 的 {@link
  * ProviderResourceMaterializer} 中完成，本类只负责已确认可读的 Blob。缓存条目是源数据与档位的纯函数（同一 key 必有同一值），因此不需要失效 通知，只受
- * TTL 与权重上限约束；不同档位的转化结果绝不互相复用缓存条目。
+ * 权重上限约束；不同档位的转化结果绝不互相复用缓存条目。
  */
 final class ProviderInlineBlobReader {
 
@@ -62,7 +61,6 @@ final class ProviderInlineBlobReader {
             .weigher(
                 (BlobKey key, InlineBlob value) ->
                     (int) Math.min(Integer.MAX_VALUE, accountedWeight(value.dataUri().length())))
-            .expireAfterWrite(limits.cacheTtl())
             .ticker(ticker)
             .build();
     this.downloads = new Semaphore(limits.maxConcurrentDownloads());
@@ -85,7 +83,7 @@ final class ProviderInlineBlobReader {
   /**
    * 读取 blob 原始内容并按 {@code tier} 物化图片后生成内联 data URI：命中档位框保留原字节，超出时按显示方向等比缩小。
    *
-   * <p>{@link ImageInputTier#ORIGINAL} 与未指定档位等价（都是原字节），共用同一缓存 key；其他档位各自独立记账，绝不互相复用转化结果。
+   * <p>{@link ImageInputTier#ORIGINAL} 与未指定档位都保留原字节；显式档位各自独立缓存，以保留缩放尺寸事实。
    * 转化后的字符数只有在读取完成后才知道，因此这里在取值后再次校验调用方预算（缓存命中同样受本次调用约束）。
    *
    * @param tier 目标档位，不能为空
@@ -125,7 +123,7 @@ final class ProviderInlineBlobReader {
               + limits.maxBlobBytes()
               + " bytes");
     }
-    // ORIGINAL 与未指定档位都是原字节，共用同一缓存 key；缩放档位各自独立，绝不把某一档位的转化结果当作另一档位。
+    // ORIGINAL 与未指定档位都表示原字节，其他档位独立缓存其转换结果。
     BlobKey key =
         new BlobKey(
             blobId, safeMediaType, sizeBytes, tier == null || tier.isOriginal() ? null : tier);
@@ -185,7 +183,7 @@ final class ProviderInlineBlobReader {
       ProviderImageScaler.Scaled scaled =
           ProviderImageScaler.scale(key.mediaType(), bytes, key.tier(), limits.maxBlobBytes());
       // 转化后的字符数由实际编码结果决定，调用方预算由 readImage 在拿到产物后统一校验。
-      return toInline(key.blobId(), scaled.mediaType(), scaled.bytes(), Long.MAX_VALUE);
+      return toInline(key.blobId(), scaled, Long.MAX_VALUE);
     } finally {
       downloads.release();
     }
@@ -238,7 +236,21 @@ final class ProviderInlineBlobReader {
     if (dataUri.length() > maxDataUriChars) {
       throw new IllegalStateException("blob content exceeds the inline size allowed for " + blobId);
     }
-    return new InlineBlob(mediaType, dataUri);
+    return new InlineBlob(mediaType, dataUri, null);
+  }
+
+  private static InlineBlob toInline(
+      UUID blobId, ProviderImageScaler.Scaled scaled, long maxDataUriChars) {
+    InlineBlob inline = toInline(blobId, scaled.mediaType(), scaled.bytes(), maxDataUriChars);
+    return new InlineBlob(
+        inline.mediaType(),
+        inline.dataUri(),
+        new ImageDimensions(
+            scaled.originalWidth(),
+            scaled.originalHeight(),
+            scaled.width(),
+            scaled.height(),
+            scaled.resized()));
   }
 
   private static String requireSafeMediaType(String mediaType) {
@@ -266,8 +278,16 @@ final class ProviderInlineBlobReader {
   /** 不可变 Blob 事实：UUID + MIME + 大小 + 图片档位，任一变化都对应新的 key（档位为 null 表示原字节）。 */
   private record BlobKey(UUID blobId, String mediaType, long sizeBytes, ImageInputTier tier) {}
 
-  /** 内联产物：{@code mediaType} 与 data URI header 一致（按档位缩放后可能与权威 MIME 不同）。 */
-  record InlineBlob(String mediaType, String dataUri) {
+  /** 原图与实际提供给模型的显示尺寸，以及是否缩小。 */
+  record ImageDimensions(
+      int originalWidth,
+      int originalHeight,
+      int displayWidth,
+      int displayHeight,
+      boolean resized) {}
+
+  /** 内联产物：图片档位路径同时携带用于模型可读标签的权威缩放尺寸。 */
+  record InlineBlob(String mediaType, String dataUri, ImageDimensions dimensions) {
 
     InlineBlob {
       Objects.requireNonNull(mediaType, "mediaType");
@@ -281,24 +301,17 @@ final class ProviderInlineBlobReader {
    * @param maxBlobBytes 单文件原始字节上限，同时作为 {@link StorageBlobContentService} 的读取上限
    * @param maxCacheEntryWeightBytes 单条目记账上限，超过则不缓存
    * @param maxCacheWeightBytes 缓存总记账上限
-   * @param cacheTtl 条目写入后的存活时间
    * @param maxConcurrentDownloads 同时在途的下载数（含不缓存的读取）
    */
   record Limits(
       long maxBlobBytes,
       long maxCacheEntryWeightBytes,
       long maxCacheWeightBytes,
-      Duration cacheTtl,
       int maxConcurrentDownloads) {
 
-    /** 单文件 100 MiB、单条目 8 MiB、总缓存 64 MiB、TTL 5 分钟、并发下载 2。 */
+    /** 单文件 100 MiB、单条目 8 MiB、总缓存 100 MiB、并发下载 2。 */
     static final Limits DEFAULT =
-        new Limits(
-            100L * 1024L * 1024L,
-            8L * 1024L * 1024L,
-            64L * 1024L * 1024L,
-            Duration.ofMinutes(5),
-            2);
+        new Limits(100L * 1024L * 1024L, 8L * 1024L * 1024L, 100L * 1024L * 1024L, 2);
 
     Limits {
       if (maxBlobBytes <= 0L) {
@@ -309,9 +322,6 @@ final class ProviderInlineBlobReader {
       }
       if (maxCacheWeightBytes <= 0L) {
         throw new IllegalArgumentException("maxCacheWeightBytes must be positive");
-      }
-      if (cacheTtl == null || cacheTtl.isZero() || cacheTtl.isNegative()) {
-        throw new IllegalArgumentException("cacheTtl must be positive");
       }
       if (maxConcurrentDownloads <= 0) {
         throw new IllegalArgumentException("maxConcurrentDownloads must be positive");

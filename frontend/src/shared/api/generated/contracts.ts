@@ -2667,6 +2667,11 @@ export interface StorageUploadPendingDTO {
   id: string
   presignedPut: StoragePresignedUrlDTO
   expiresAt: number
+  format: string | null
+  originalWidth: number | null
+  originalHeight: number | null
+  storedWidth: number | null
+  storedHeight: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO */
@@ -2675,6 +2680,11 @@ export interface StorageUploadReadyDTO {
   id: string
   blobId: string
   expiresAt: number
+  format: string | null
+  originalWidth: number | null
+  originalHeight: number | null
+  storedWidth: number | null
+  storedHeight: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO */
@@ -2688,6 +2698,11 @@ export interface StorageUploadReserveRequestDTO {
   mediaType: string
   sizeBytes: string
   sha256: string
+  format?: string | null
+  originalWidth?: number | null
+  originalHeight?: number | null
+  storedWidth?: number | null
+  storedHeight?: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod */
@@ -2827,6 +2842,7 @@ export interface SystemSettingsStorageMediaDTO {
   imageTier: string
   temporaryResourceTtlSeconds: string
   temporaryResourceCleanupIntervalSeconds: string
+  maxImagesPerRequest: number
 }
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO */

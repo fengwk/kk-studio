@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.platform.storage.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -15,4 +17,24 @@ public final class StorageUploadPendingDTO implements StorageUploadDTO {
   private StoragePresignedUrlDTO presignedPut;
 
   private Instant expiresAt;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable String format;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable Integer originalWidth;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable Integer originalHeight;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable Integer storedWidth;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable Integer storedHeight;
+
+  public StorageUploadPendingDTO(
+      String id, StoragePresignedUrlDTO presignedPut, Instant expiresAt) {
+    this(id, presignedPut, expiresAt, null, null, null, null, null);
+  }
 }

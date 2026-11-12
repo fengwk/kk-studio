@@ -117,15 +117,18 @@ export function AttachmentStrip({
                   </Button>
                 ) : null}
                 {isImage && (
-                  <Select
-                    compact
-                    className="attachment-reference-tier-select"
-                    aria-label={t('ai.runtime.composer.imageTier', { name: displayName })}
-                    value={upload.imageTier ?? '720P'}
-                    disabled={disabled}
-                    options={tierOptions}
-                    onChange={(tier) => onTierChange?.(upload, tier as ImageInputTier)}
-                  />
+                  <span title={t('ai.runtime.composer.imageTierHelp')}>
+                    <Select
+                      compact
+                      className="attachment-reference-tier-select"
+                      aria-label={t('ai.runtime.composer.imageTier', { name: displayName })}
+                      value={upload.imageTier ?? ''}
+                      placeholder={t('ai.runtime.composer.imageTierLoading')}
+                      disabled={disabled || !upload.imageTier || !upload.sourceFileAvailable}
+                      options={tierOptions}
+                      onChange={(tier) => onTierChange?.(upload, tier as ImageInputTier)}
+                    />
+                  </span>
                 )}
               </span>
             </span>

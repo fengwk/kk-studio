@@ -115,7 +115,7 @@ class StrictJacksonConfigurationTest {
               "{\"agentName\":\"code-assistant\",\"execution\":{"
                   + "\"driver\":\"builtin\","
                   + "\"settings\":{\"modelName\":\"claude-3-5-sonnet\",\"variant\":\"default\"}},"
-                  + "\"environmentName\":null,\"goal\":null}";
+                  + "\"environmentName\":null}";
           assertEquals(expectedWithNullEnvironment, mapper.writeValueAsString(settings));
 
           settings.setEnvironmentName("local");
@@ -123,7 +123,7 @@ class StrictJacksonConfigurationTest {
               "{\"agentName\":\"code-assistant\",\"execution\":{"
                   + "\"driver\":\"builtin\","
                   + "\"settings\":{\"modelName\":\"claude-3-5-sonnet\",\"variant\":\"default\"}},"
-                  + "\"environmentName\":\"local\",\"goal\":null}";
+                  + "\"environmentName\":\"local\"}";
           assertEquals(expectedWithEnvironment, mapper.writeValueAsString(settings));
 
           // 往返必须保留 null 与非 null 两种形态。

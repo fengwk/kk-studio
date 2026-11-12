@@ -221,7 +221,8 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
                 base.thumbnailQuality(),
                 base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
-                base.temporaryResourceCleanupIntervalSeconds()),
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()),
             SystemSettingsTestFixture.DEFAULT.advanced()));
   }
 

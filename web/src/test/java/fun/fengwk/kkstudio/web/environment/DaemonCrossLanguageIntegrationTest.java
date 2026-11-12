@@ -1111,6 +1111,12 @@ class DaemonCrossLanguageIntegrationTest {
 
     @Override
     public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {}
+
+    @Override
+    public DownloadTicket download(
+        EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {
+      return new DownloadTicket.Failed("not supported in test");
+    }
   }
 
   /** 收集 capability 异步执行结果的监听器。 */

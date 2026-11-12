@@ -114,7 +114,7 @@ class HarnessRuntimeJoinAcceptanceTest {
                 runtime,
                 child(26, 27, first.thread().id()),
                 secondJoin,
-                (current, commands, copiedEntries) -> {
+                (current, commands, copiedEntries, branchSettings) -> {
                   throw new IllegalStateException("reject");
                 }));
     assertTrue(runtime.findJoin(secondJoin.invocationId()).isEmpty());

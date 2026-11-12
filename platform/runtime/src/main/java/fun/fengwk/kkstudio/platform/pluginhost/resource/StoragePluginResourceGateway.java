@@ -236,7 +236,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     String filename = filename(baseName, media.mediaType());
     StorageUploadDTO reserved;
     try {
-      reserved = storageUploadService.reserve(reserveRequest(filename, media));
+      reserved = storageUploadService.reserveStaged(reserveRequest(filename, media));
     } catch (RuntimeException error) {
       throw new PluginResourceUnavailableException("cannot reserve a staging upload", error);
     }

@@ -167,7 +167,10 @@ class HarnessRuntimeAcceptInitialTest {
     AcceptedCommands result =
         runtime.acceptCommands(
             newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
-            AcceptancePreflight.IDENTITY);
+            (session, commands, copiedEntries, branchSettings) -> {
+              assertEquals(settings(), branchSettings);
+              return commands;
+            });
 
     assertFalse(result.replayed());
     assertEquals(TestIds.id(101), result.session().id());
@@ -217,7 +220,7 @@ class HarnessRuntimeAcceptInitialTest {
         () ->
             runtime.acceptCommands(
                 newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
-                (session, commands, copiedEntries) -> {
+                (session, commands, copiedEntries, branchSettings) -> {
                   assertTrue(copiedEntries.isEmpty());
                   throw new IllegalStateException("preflight failed");
                 }));
@@ -233,17 +236,17 @@ class HarnessRuntimeAcceptInitialTest {
     assertPreflightContractViolation(
         TestIds.id(130),
         TestIds.id(131),
-        (session, commands, copiedEntries) -> null,
+        (session, commands, copiedEntries, branchSettings) -> null,
         "command preflight returned null");
     assertPreflightContractViolation(
         TestIds.id(132),
         TestIds.id(133),
-        (session, commands, copiedEntries) -> List.of(),
+        (session, commands, copiedEntries, branchSettings) -> List.of(),
         "command preflight must return exactly 1 commands, got 0");
     assertPreflightContractViolation(
         TestIds.id(134),
         TestIds.id(135),
-        (session, commands, copiedEntries) -> {
+        (session, commands, copiedEntries, branchSettings) -> {
           NewThreadCommand command = commands.getFirst();
           return List.of(
               new NewThreadCommand(command.payload(), TestIds.id(999), command.requestHash()));

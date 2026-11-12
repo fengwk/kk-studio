@@ -6,6 +6,30 @@ import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/thread/composer/composer-parts'
 import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/thread/composer/composer-draft'
 import { createWorkerHasher } from '@/shared/lib/upload-file'
+import { scaleImageFile } from '@/features/thread/composer/image-scaler'
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return {
+    ...actual,
+    request: vi.fn((route: string) => {
+      if (route === 'GET /api/platform/settings') {
+        return Promise.resolve({ storageMedia: { imageTier: '720P' } })
+      }
+      return actual.request(route as never, {} as never)
+    }),
+  }
+})
+vi.mock('./image-scaler', () => ({
+  scaleImageFile: vi.fn(async (file: File) => ({
+    file,
+    format: file.type.slice('image/'.length),
+    originalWidth: 1,
+    originalHeight: 1,
+    storedWidth: 1,
+    storedHeight: 1,
+  })),
+}))
+
 import {
   isAmbiguousUploadOutcome,
   useAttachmentUploads,
@@ -28,12 +52,22 @@ function createFakeStorageService(overrides?: Partial<StorageService>): StorageS
         sizeBytes: null,
       },
       expiresAt: 1767225600000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })),
     completeUpload: vi.fn().mockImplementation(async (id: string): Promise<StorageUploadDTO> => ({
       id,
       blobId: 'blob-1',
       type: 'READY',
       expiresAt: 1767225600000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -51,6 +85,63 @@ describe('Attachment uploads lifecycle & safety', () => {
 
   afterEach(() => {
     localStorage.clear()
+  })
+
+  it('uploads scaled image bytes with consistent image facts and resizes tier changes from the source file', async () => {
+    const service = createFakeStorageService()
+    const source = new File(['source-image'], 'photo.png', { type: 'image/png' })
+    const storedFiles = [
+      new File(['720P-bytes'], 'photo.jpg', { type: 'image/jpeg' }),
+      new File(['1080P-bytes'], 'photo.jpg', { type: 'image/jpeg' }),
+    ]
+    vi.mocked(scaleImageFile)
+      .mockResolvedValueOnce({
+        file: storedFiles[0], format: 'jpeg', originalWidth: 2000, originalHeight: 1000,
+        storedWidth: 1280, storedHeight: 640,
+      })
+      .mockResolvedValueOnce({
+        file: storedFiles[1], format: 'jpeg', originalWidth: 2000, originalHeight: 1000,
+        storedWidth: 1920, storedHeight: 960,
+      })
+    const { result } = renderHook(() => useAttachmentUploads({
+      storageService: service,
+      hashFile: async () => 'same-source-hash',
+    }))
+
+    act(() => result.current.addFiles([source, new File(['doc'], 'note.txt', { type: 'text/plain' })]))
+    await vi.waitFor(() => expect(result.current.uploads.every((upload) => upload.status === 'ready')).toBe(true))
+    const imageUpload = result.current.uploads.find((upload) => upload.filename === source.name)!
+    const localId = imageUpload.localId
+    const firstImageRequest = vi.mocked(service.reserveUpload).mock.calls
+      .map(([request]) => request)
+      .find((request) => request.mediaType === 'image/jpeg')
+    const documentRequest = vi.mocked(service.reserveUpload).mock.calls
+      .map(([request]) => request)
+      .find((request) => request.mediaType === 'text/plain')
+    expect(firstImageRequest).toMatchObject({
+      mediaType: 'image/jpeg',
+      format: 'jpeg',
+      originalWidth: 2000,
+      originalHeight: 1000,
+      storedWidth: 1280,
+      storedHeight: 640,
+      sizeBytes: String(storedFiles[0]!.size),
+    })
+    expect(documentRequest).toMatchObject({
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
+    })
+    expect(service.uploadFile).toHaveBeenCalledWith(expect.anything(), storedFiles[0], expect.anything())
+
+    act(() => result.current.updateImageTier(localId, '1080P'))
+    await vi.waitFor(() => expect(result.current.uploads[0]?.status).toBe('ready'))
+    expect(scaleImageFile).toHaveBeenNthCalledWith(2, source, '1080P')
+    expect(service.reserveUpload).toHaveBeenCalledTimes(3)
+    expect(service.deleteUpload).toHaveBeenCalledWith('res-1')
+    expect(service.uploadFile).toHaveBeenLastCalledWith(expect.anything(), storedFiles[1], expect.anything())
   })
 
   describe('H06: Worker hashing error handling & abort', () => {
@@ -567,6 +658,11 @@ describe('Attachment uploads lifecycle & safety', () => {
           blobId: 'b',
           type: 'READY',
           expiresAt: 1767225600000,
+          format: null,
+          originalWidth: null,
+          originalHeight: null,
+          storedWidth: null,
+          storedHeight: null,
         })
       })
 
@@ -714,6 +810,11 @@ describe('Attachment uploads lifecycle & safety', () => {
           blobId: 'blob-a-1',
           type: 'READY',
           expiresAt: 1767225600000,
+          format: null,
+          originalWidth: null,
+          originalHeight: null,
+          storedWidth: null,
+          storedHeight: null,
         })
       })
 
@@ -792,6 +893,11 @@ describe('Attachment uploads lifecycle & safety', () => {
           blobId: 'blob-cancel-1',
           type: 'READY',
           expiresAt: 1767225600000,
+          format: null,
+          originalWidth: null,
+          originalHeight: null,
+          storedWidth: null,
+          storedHeight: null,
         })
       })
 

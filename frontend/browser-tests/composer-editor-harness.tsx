@@ -5,9 +5,20 @@ import { setLocale } from '@/shared/i18n'
 import { ThreadComposer } from '@/features/thread/runtime/thread-panel/ThreadComposer'
 import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
 import type { ComposerPart, StorageService } from '@/features/thread/composer'
+import type { StorageUploadReserveRequestDTO } from '@/shared/api/generated/contracts'
 import type { HashFile } from '@/shared/lib/upload-file'
 
 setLocale('zh-CN')
+
+declare global {
+  interface Window {
+    imageUploadTestResult: {
+      request: StorageUploadReserveRequestDTO | null
+      uploaded: Blob | null
+    }
+  }
+}
+window.imageUploadTestResult = { request: null, uploaded: null }
 
 /** 浏览器回归可控失败开关：下一次 reserve 在延迟后失败，便于在异步失败前发起 IME 组合。 */
 let failNextUpload = false
@@ -19,7 +30,8 @@ let uploadCounter = 0
  */
 function createFakeStorage(): StorageService {
   return {
-    reserveUpload: async (): Promise<Awaited<ReturnType<StorageService['reserveUpload']>>> => {
+    reserveUpload: async (request: StorageUploadReserveRequestDTO): Promise<Awaited<ReturnType<StorageService['reserveUpload']>>> => {
+      window.imageUploadTestResult.request = request
       uploadCounter += 1
       const id = `up-${uploadCounter}`
       if (failNextUpload) {
@@ -40,6 +52,11 @@ function createFakeStorage(): StorageService {
           sizeBytes: null,
         },
         expiresAt: 0,
+        format: null,
+        originalWidth: null,
+        originalHeight: null,
+        storedWidth: null,
+        storedHeight: null,
       }
     },
     completeUpload: async (uploadId: string) => ({
@@ -47,11 +64,18 @@ function createFakeStorage(): StorageService {
       type: 'READY',
       blobId: `blob-${uploadId}`,
       expiresAt: 0,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     }),
     deleteUpload: async () => undefined,
     getBlobDownloadUrl: async () => ({ url: 'https://s3.test/orig', expiresAt: null }),
     getBlobPreviewUrl: async () => ({ url: 'https://s3.test/prev', expiresAt: null }),
-    uploadFile: async () => undefined,
+    uploadFile: async (_put: Parameters<StorageService['uploadFile']>[0], file: Blob) => {
+      window.imageUploadTestResult.uploaded = file
+    },
   } as unknown as StorageService
 }
 

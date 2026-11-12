@@ -232,11 +232,9 @@ final class AcceptCommandsValidation {
   }
 
   static void validateExecutionCommandsOnThread(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
+      BranchSettings currentSettings,
       List<NewThreadCommand> commands,
       DriverRegistry driverRegistry) {
-    BranchSettings currentSettings = tx.entries().loadBranchSettings(thread.headEntryId());
     for (NewThreadCommand command : commands) {
       if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
         driverRegistry.validate(setExecution.execution());

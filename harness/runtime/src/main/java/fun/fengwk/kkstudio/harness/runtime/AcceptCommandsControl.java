@@ -172,7 +172,7 @@ final class AcceptCommandsControl {
             now,
             now);
     tx.threads().insert(thread);
-    return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+    return acceptNewCommandsOnThread(tx, thread, commands, preflight, now, rootSettings);
   }
 
   /**
@@ -269,7 +269,7 @@ final class AcceptCommandsControl {
                   now,
                   now);
           tx.threads().insert(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now, sourceSettings);
         });
   }
 
@@ -393,7 +393,8 @@ final class AcceptCommandsControl {
                   now,
                   now);
           tx.threads().insert(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now, copiedEntries);
+          return acceptNewCommandsOnThread(
+              tx, thread, commands, preflight, now, copiedEntries, rootSettings);
         });
   }
 
@@ -461,15 +462,17 @@ final class AcceptCommandsControl {
     }
     AcceptCommandsValidation.validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     AcceptCommandsValidation.validateBatchShape(target, commands, false);
+    BranchSettings currentSettings = tx.entries().loadBranchSettings(thread.headEntryId());
     if (driverRegistry != null) {
       AcceptCommandsValidation.validateExecutionCommandsOnThread(
-          tx, thread, commands, driverRegistry);
+          currentSettings, commands, driverRegistry);
     }
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(session, commands, List.of());
+    List<NewThreadCommand> prepared =
+        preflight.prepare(session, commands, List.of(), currentSettings);
     AcceptCommandsValidation.requirePreflightShape(commands, prepared);
     AcceptCommandsValidation.requireRootForEnvironment(thread, prepared);
     long nextSeq = thread.nextCommandSequence();
@@ -579,8 +582,10 @@ final class AcceptCommandsControl {
       ThreadState thread,
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
-      Instant now) {
-    return acceptNewCommandsOnThread(tx, thread, requests, preflight, now, List.of());
+      Instant now,
+      BranchSettings branchSettings) {
+    return acceptNewCommandsOnThread(
+        tx, thread, requests, preflight, now, List.of(), branchSettings);
   }
 
   private static AcceptedCommands acceptNewCommandsOnThread(
@@ -589,9 +594,11 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now,
-      List<Entry> copiedEntries) {
+      List<Entry> copiedEntries,
+      BranchSettings branchSettings) {
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(session, requests, copiedEntries);
+    List<NewThreadCommand> prepared =
+        preflight.prepare(session, requests, copiedEntries, branchSettings);
     AcceptCommandsValidation.requirePreflightShape(requests, prepared);
     AcceptCommandsValidation.requireRootForEnvironment(thread, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());

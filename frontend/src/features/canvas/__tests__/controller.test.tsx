@@ -438,6 +438,11 @@ describe('useCanvasController real snapshot runtime', () => {
         sizeBytes: null,
       },
       expiresAt: 1786320900000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     vi.mocked(storageService.uploadFile).mockResolvedValue()
     vi.mocked(storageService.completeUpload).mockResolvedValue({
@@ -445,6 +450,11 @@ describe('useCanvasController real snapshot runtime', () => {
       type: 'READY',
       blobId: 'blob-upload',
       expiresAt: 1786320900000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -864,12 +874,22 @@ describe('useCanvasController real snapshot runtime', () => {
       type: 'READY',
       blobId: 'blob-existing',
       expiresAt: 1786320900000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
       id: uploadId,
       type: 'READY',
       blobId: 'blob-dedup',
       expiresAt: 1786320900000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     }))
 
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })

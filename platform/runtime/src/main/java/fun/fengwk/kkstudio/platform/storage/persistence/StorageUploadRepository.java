@@ -26,7 +26,8 @@ public class StorageUploadRepository {
 
   private static final String COLUMNS =
       "id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
-          + "declared_sha256, cleanup_requested_at, cleanup_token, cleanup_until, created_at";
+          + "declared_sha256, image_format, original_width, original_height, stored_width, "
+          + "stored_height, cleanup_requested_at, cleanup_token, cleanup_until, created_at";
 
   private static final String SELECT_SQL = "select " + COLUMNS + " from storage_upload";
 
@@ -34,10 +35,12 @@ public class StorageUploadRepository {
       """
       insert into storage_upload (
           id, candidate_blob_id, blob_id, filename, declared_media_type,
-          declared_size, declared_sha256, created_at
+          declared_size, declared_sha256, image_format, original_width, original_height,
+          stored_width, stored_height, created_at
       ) values (
           :id, :candidateBlobId, :blobId, :filename, :declaredMediaType,
-          :declaredSize, :declaredSha256, :createdAt
+          :declaredSize, :declaredSha256, :format, :originalWidth, :originalHeight,
+          :storedWidth, :storedHeight, :createdAt
       )
       """;
 
@@ -69,6 +72,11 @@ public class StorageUploadRepository {
             .param("declaredMediaType", upload.getDeclaredMediaType())
             .param("declaredSize", upload.getDeclaredSize())
             .param("declaredSha256", upload.getDeclaredSha256())
+            .param("format", upload.getFormat())
+            .param("originalWidth", upload.getOriginalWidth())
+            .param("originalHeight", upload.getOriginalHeight())
+            .param("storedWidth", upload.getStoredWidth())
+            .param("storedHeight", upload.getStoredHeight())
             .param("createdAt", PostgresJdbcTypes.toOffsetDateTime(upload.getCreatedAt()))
             .update()
         == 1;
@@ -202,6 +210,11 @@ public class StorageUploadRepository {
     upload.setDeclaredMediaType(rs.getString("declared_media_type"));
     upload.setDeclaredSize(rs.getLong("declared_size"));
     upload.setDeclaredSha256(rs.getString("declared_sha256"));
+    upload.setFormat(rs.getString("image_format"));
+    upload.setOriginalWidth(rs.getObject("original_width", Integer.class));
+    upload.setOriginalHeight(rs.getObject("original_height", Integer.class));
+    upload.setStoredWidth(rs.getObject("stored_width", Integer.class));
+    upload.setStoredHeight(rs.getObject("stored_height", Integer.class));
     upload.setCleanupRequestedAt(
         PostgresJdbcTypes.toInstant(rs.getObject("cleanup_requested_at", OffsetDateTime.class)));
     upload.setCleanupToken(rs.getObject("cleanup_token", UUID.class));

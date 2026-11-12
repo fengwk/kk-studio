@@ -257,7 +257,11 @@ public final class ProviderMessageProjector {
           value.totalBytes(),
           value.totalLines(),
           value.preview() == null ? "" : value.preview(),
-          value.imageTier());
+          value.imageTier(),
+          value.originalWidth(),
+          value.originalHeight(),
+          value.displayWidth(),
+          value.displayHeight());
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
   }

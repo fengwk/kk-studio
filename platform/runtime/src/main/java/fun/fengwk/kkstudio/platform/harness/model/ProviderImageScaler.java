@@ -49,7 +49,14 @@ final class ProviderImageScaler {
   private ProviderImageScaler() {}
 
   /** 缩放产物：{@code mediaType} 与编码格式严格一致，用于 data URI header。 */
-  record Scaled(String mediaType, byte[] bytes) {
+  record Scaled(
+      String mediaType,
+      byte[] bytes,
+      int originalWidth,
+      int originalHeight,
+      int width,
+      int height,
+      boolean resized) {
 
     Scaled {
       Objects.requireNonNull(mediaType, "mediaType");
@@ -89,11 +96,13 @@ final class ProviderImageScaler {
         int displayHeight =
             JpegExifOrientation.swapsAxes(orientation) ? facts.width() : facts.height();
         if (tier.isOriginal()) {
-          return new Scaled(mediaType, bytes);
+          return new Scaled(
+              mediaType, bytes, displayWidth, displayHeight, displayWidth, displayHeight, false);
         }
         Box box = box(tier, displayWidth, displayHeight);
         if (displayWidth <= box.maxWidth() && displayHeight <= box.maxHeight()) {
-          return new Scaled(mediaType, bytes);
+          return new Scaled(
+              mediaType, bytes, displayWidth, displayHeight, displayWidth, displayHeight, false);
         }
         // 只有在确实需要缩放时才解码像素：命中档位框的图片逐字节直通，不存在「取第一帧」的语义损失。
         if (facts.frames() > 1) {
@@ -123,7 +132,7 @@ final class ProviderImageScaler {
                 displayHeight,
                 targetWidth,
                 targetHeight);
-        return encode(resized, mediaType, maxOutputBytes);
+        return encode(resized, mediaType, maxOutputBytes, displayWidth, displayHeight);
       } finally {
         reader.dispose();
       }
@@ -245,7 +254,12 @@ final class ProviderImageScaler {
   }
 
   /** 含 alpha 的产物必须无损 PNG；不含 alpha 时 JPEG 源保持 JPEG，其余源无损 PNG。 */
-  private static Scaled encode(BufferedImage image, String sourceMediaType, long maxOutputBytes) {
+  private static Scaled encode(
+      BufferedImage image,
+      String sourceMediaType,
+      long maxOutputBytes,
+      int originalWidth,
+      int originalHeight) {
     byte[] bytes;
     String mediaType;
     if (hasAlpha(image)) {
@@ -265,7 +279,8 @@ final class ProviderImageScaler {
       throw new IllegalArgumentException(
           "resized image exceeds " + maxOutputBytes + " bytes (" + bytes.length + " bytes)");
     }
-    return new Scaled(mediaType, bytes);
+    return new Scaled(
+        mediaType, bytes, originalWidth, originalHeight, image.getWidth(), image.getHeight(), true);
   }
 
   /** 像素级 alpha 判定：存在任一非全不透明像素即需要无损 PNG。 */

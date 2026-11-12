@@ -10,6 +10,9 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
@@ -43,6 +46,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
+  private final ModelImageCountLimitResolver modelImageCountLimitResolver;
   private final UserMessageContentPreparer contentPreparer;
 
   public HarnessCommandAcceptanceOrchestrator(
@@ -51,17 +55,21 @@ public class HarnessCommandAcceptanceOrchestrator {
       StorageUploadService uploadService,
       SessionBlobRefManager refManager,
       StorageBlobManager blobManager,
-      SystemSettingsSnapshot settingsSnapshot) {
+      SystemSettingsSnapshot settingsSnapshot,
+      ModelImageCountLimitResolver modelImageCountLimitResolver) {
     this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
+    this.modelImageCountLimitResolver =
+        Objects.requireNonNull(modelImageCountLimitResolver, "modelImageCountLimitResolver");
     this.contentPreparer =
         new UserMessageContentPreparer(
             this.refManager,
             Objects.requireNonNull(blobManager, "blobManager"),
             this::consumeAttachment,
-            () -> settingsSnapshot.get().storageMedia().imageTier());
+            () -> settingsSnapshot.get().storageMedia().imageTier(),
+            () -> settingsSnapshot.get().storageMedia().maxImagesPerRequest());
   }
 
   /** 接受一次 owner-aware 的命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
@@ -101,9 +109,11 @@ public class HarnessCommandAcceptanceOrchestrator {
     if (!(command.target() instanceof AcceptCommandsTarget.Thread)) {
       throw new IllegalArgumentException("thread command acceptance requires a THREAD target");
     }
+    HarnessRuntime runtime = requireRuntime();
     AcceptancePreflight preflight =
-        (session, commands, copiedEntries) -> prepareUserContents(session.id(), commands);
-    return requireRuntime().acceptCommands(command, preflight);
+        (session, commands, copiedEntries, branchSettings) ->
+            prepareUserContents(session.id(), commands, branchSettings);
+    return runtime.acceptCommands(command, preflight);
   }
 
   /**
@@ -181,7 +191,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** 全新 Session 的 preflight 调用产品归属钩子并物化 USER_MESSAGE 附件；精确 replay 不重复执行。 */
   private AcceptancePreflight preflight(
       SessionOwnership ownership, SessionOwner owner, AcceptCommandsTarget target) {
-    return (session, commands, copiedEntries) -> {
+    return (session, commands, copiedEntries, branchSettings) -> {
       if (target instanceof AcceptCommandsTarget.NewRootSession
           || target instanceof AcceptCommandsTarget.NewForkedSession) {
         ownership.sessionCreated(owner, session.id());
@@ -189,7 +199,7 @@ public class HarnessCommandAcceptanceOrchestrator {
       if (target instanceof AcceptCommandsTarget.NewForkedSession) {
         retainCopiedResources(copiedEntries, session.id());
       }
-      return prepareUserContents(session.id(), commands);
+      return prepareUserContents(session.id(), commands, branchSettings);
     };
   }
 
@@ -237,8 +247,18 @@ public class HarnessCommandAcceptanceOrchestrator {
    * READY upload 的取得方式不同。
    */
   private List<NewThreadCommand> prepareUserContents(
-      UUID sessionId, List<NewThreadCommand> commands) {
-    return contentPreparer.prepare(sessionId, commands);
+      UUID sessionId, List<NewThreadCommand> commands, BranchSettings branchSettings) {
+    if (commands.stream()
+        .noneMatch(command -> command.payload() instanceof UserMessageCommandPayload)) {
+      return contentPreparer.prepare(sessionId, commands);
+    }
+    for (NewThreadCommand command : commands) {
+      if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
+        branchSettings = branchSettings.withExecution(setExecution.execution());
+      }
+    }
+    Integer protocolMaxImages = modelImageCountLimitResolver.resolve(branchSettings);
+    return contentPreparer.prepare(sessionId, commands, protocolMaxImages);
   }
 
   /**
@@ -259,7 +279,13 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    return new UserMessageContentPreparer.ReadyAttachment(ready.blobId(), ready.filename());
+    return new UserMessageContentPreparer.ReadyAttachment(
+        ready.blobId(),
+        ready.filename(),
+        ready.originalWidth(),
+        ready.originalHeight(),
+        ready.storedWidth(),
+        ready.storedHeight());
   }
 
   private HarnessRuntime requireRuntime() {

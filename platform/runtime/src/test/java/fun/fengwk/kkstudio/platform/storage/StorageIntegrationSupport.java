@@ -39,6 +39,13 @@ public class StorageIntegrationSupport {
     request.setMediaType(mediaType);
     request.setSizeBytes(size);
     request.setSha256(sha256);
+    if (mediaType.startsWith("image/")) {
+      request.setFormat(mediaType.substring("image/".length()));
+      request.setOriginalWidth(1);
+      request.setOriginalHeight(1);
+      request.setStoredWidth(1);
+      request.setStoredHeight(1);
+    }
     return storageUploadService.reserve(request);
   }
 

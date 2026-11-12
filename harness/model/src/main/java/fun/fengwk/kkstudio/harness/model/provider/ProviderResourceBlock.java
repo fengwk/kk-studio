@@ -22,7 +22,11 @@ public record ProviderResourceBlock(
     Long totalBytes,
     Long totalLines,
     String preview,
-    ImageInputTier imageTier)
+    ImageInputTier imageTier,
+    Integer originalWidth,
+    Integer originalHeight,
+    Integer displayWidth,
+    Integer displayHeight)
     implements ProviderContentBlock {
 
   public ProviderResourceBlock {
@@ -40,10 +44,39 @@ public record ProviderResourceBlock(
       if (totalLines < 0) {
         throw new IllegalArgumentException("totalLines must not be negative");
       }
-      if (imageTier != null) {
-        throw new IllegalArgumentException("externalized text must not carry an image input tier");
+      if (imageTier != null
+          || originalWidth != null
+          || originalHeight != null
+          || displayWidth != null
+          || displayHeight != null) {
+        throw new IllegalArgumentException(
+            "externalized text must not carry image tier or dimensions");
       }
     }
+    validateDimensions("original", originalWidth, originalHeight);
+    validateDimensions("display", displayWidth, displayHeight);
+    if ((displayWidth != null || displayHeight != null) && originalWidth == null) {
+      throw new IllegalArgumentException("display dimensions require original dimensions");
+    }
+  }
+
+  private static void validateDimensions(String name, Integer width, Integer height) {
+    if ((width == null) != (height == null)) {
+      throw new IllegalArgumentException(name + " width and height must both be present or null");
+    }
+    if (width != null && (width <= 0 || height <= 0)) {
+      throw new IllegalArgumentException(name + " dimensions must be positive");
+    }
+  }
+
+  public ProviderResourceBlock(
+      UUID blobId,
+      String name,
+      Long totalBytes,
+      Long totalLines,
+      String preview,
+      ImageInputTier imageTier) {
+    this(blobId, name, totalBytes, totalLines, preview, imageTier, null, null, null, null);
   }
 
   public ProviderResourceBlock(UUID blobId, String name, String preview) {
@@ -59,6 +92,29 @@ public record ProviderResourceBlock(
   public static ProviderResourceBlock media(
       UUID blobId, String name, String preview, ImageInputTier imageTier) {
     return new ProviderResourceBlock(blobId, name, null, null, preview, imageTier);
+  }
+
+  /** 普通媒体便利工厂（携带原始与显示尺寸）。 */
+  public static ProviderResourceBlock media(
+      UUID blobId,
+      String name,
+      String preview,
+      ImageInputTier imageTier,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer displayWidth,
+      Integer displayHeight) {
+    return new ProviderResourceBlock(
+        blobId,
+        name,
+        null,
+        null,
+        preview,
+        imageTier,
+        originalWidth,
+        originalHeight,
+        displayWidth,
+        displayHeight);
   }
 
   /** 外部化文本便利工厂（文本工件不携带图片输入档位）。 */
