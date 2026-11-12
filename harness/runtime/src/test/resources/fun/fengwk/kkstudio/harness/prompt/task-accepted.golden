@@ -1,5 +1,4 @@
-Task accepted. thread_id: 00000000-0000-0000-0000-000000000001.
-The subagent runs asynchronously in an isolated session and reports back later as a separate message; it can complete, fail, or be cancelled, so do not wait or poll for it.
-Continue other independent work now, or yield if none remains.
-To continue this subagent later, call task with thread_id 00000000-0000-0000-0000-000000000001, subagent_type, and prompt.
-This continuation replaces the previous pending wait on this subagent thread; only one consolidated result will be reported for the latest prompt.
+Task result. thread_id: 00000000-0000-0000-0000-000000000001.
+The subagent runs in an isolated thread. This call waits for it to finish and returns its final report with status (completed, failed, or cancelled); failures include the error and partial result separately.
+To continue this subagent, call task with thread_id 00000000-0000-0000-0000-000000000001, subagent_type, and prompt.
+This continuation supersedes earlier queued prompts; only the latest prompt receives a result.
