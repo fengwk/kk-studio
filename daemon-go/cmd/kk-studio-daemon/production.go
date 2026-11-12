@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/fengwk/kk-studio/daemon/internal/capability"
 	"github.com/fengwk/kk-studio/daemon/internal/coding"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/ide"
@@ -24,51 +25,51 @@ import (
 
 type productionRuntime struct{}
 
-func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) error {
+func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (runErr error) {
 	if _, err := config.ReleaseKey(runtime.GOOS, runtime.GOARCH); err != nil {
-		return errors.New("daemon platform is unsupported")
+		return productionFailure("daemon platform is unsupported", err)
 	}
 	processes, err := native.NewSupervisor()
 	if err != nil {
-		return errors.New("native process supervision is unavailable")
+		return productionFailure("native process supervision is unavailable", err)
 	}
-	defer processes.Close(context.Background())
+	defer func() {
+		recordCleanupFailure(&runErr, "native process supervision shutdown failed", processes.Close(context.Background()))
+	}()
 	if err := native.EnsurePrivateDirectory(initial.DataDir); err != nil {
-		return errors.New("daemon data directory is unavailable")
+		return productionFailure("daemon data directory is unavailable", err)
 	}
 	directoryLock, err := native.AcquireDirectoryLock(initial.DataDir, native.DaemonLockFileName)
 	if err != nil {
-		return errors.New("daemon directory lock is unavailable")
+		return productionFailure("daemon directory lock is unavailable", err)
 	}
-	defer directoryLock.Close()
+	defer func() { recordCleanupFailure(&runErr, "daemon directory lock release failed", directoryLock.Close()) }()
 	tracker, ok := processes.(native.DescendantTracker)
 	if !ok {
-		return errors.New("native descendant tracking is unavailable")
+		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
 	}
 	instanceID, err := newInstanceID()
 	if err != nil {
-		return errors.New("daemon instance identity could not be created")
+		return productionFailure("daemon instance identity could not be created", err)
 	}
 	lspFacade := lsp.NewFacade(processes, lsp.PoolOptions{})
 	initialLSP, err := lspFacade.Prepare(initial.LSP)
 	if err != nil {
-		return errors.New("initial language-server configuration is invalid")
+		return productionFailure("initial language-server configuration is invalid", err)
 	}
 	if err := initialLSP.Publish(); err != nil {
-		return errors.New("initial language-server configuration could not be published")
+		return productionFailure("initial language-server configuration could not be published", err)
 	}
-	defer lspFacade.Close()
+	defer func() { recordCleanupFailure(&runErr, "language-server shutdown failed", lspFacade.Close()) }()
 
 	ideService, err := ide.NewService(initial, processes, tracker, ide.ServiceOptions{DaemonInstanceID: instanceID})
 	if err != nil {
-		return errors.New("managed IDE service could not be initialized")
+		return productionFailure("managed IDE service could not be initialized", err)
 	}
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := ideService.Close(closeCtx); err != nil {
-			slog.Error("managed IDE shutdown failed")
-		}
+		recordCleanupFailure(&runErr, "managed IDE shutdown failed", ideService.Close(closeCtx))
 	}()
 
 	status := daemonruntime.NewStatusTracker()
@@ -78,7 +79,7 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) e
 		Prepare: func(_ context.Context, candidate config.DaemonConfig, _ *config.DaemonConfig) (daemonruntime.PreparedConfiguration, error) {
 			resolvedBash, err := config.ResolveBash(candidate.BashExecutable)
 			if err != nil {
-				return nil, errors.New("configured Bash executable is unavailable")
+				return nil, fmt.Errorf("configured Bash executable is unavailable: %w", err)
 			}
 			candidate.BashExecutable = &resolvedBash
 			proxyURL := ""
@@ -86,7 +87,7 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) e
 				proxyURL = *candidate.ProxyURL
 			}
 			if _, err := transport.NewProxyPolicy(proxyURL); err != nil {
-				return nil, errors.New("configured proxy is invalid")
+				return nil, fmt.Errorf("configured proxy is invalid: %w", err)
 			}
 			generation, err := lspFacade.Prepare(candidate.LSP)
 			if err != nil {
@@ -94,10 +95,10 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) e
 			}
 			return &preparedEnvironment{config: candidate, lsp: generation}, nil
 		},
-		Report: func(error) { slog.Error("environment configuration could not be applied") },
+		Report: func(err error) { slog.Error("environment configuration could not be applied", "error", err) },
 	})
 	if err != nil {
-		return errors.New("environment configuration runtime could not be initialized")
+		return productionFailure("environment configuration runtime could not be initialized", err)
 	}
 
 	connections := connectionFactory(func(ctx context.Context) (daemonruntime.Connection, error) {
@@ -113,6 +114,14 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) e
 		capabilities[id] = handler
 	}
 	capabilities["skill.install"] = skillCapability(environmentConfig.Current, resourceControl)
+	declarations, err := capability.Declare(capabilities)
+	if err != nil {
+		return productionFailure("daemon capability declarations are incomplete", err)
+	}
+	capabilities = make(map[string]daemonruntime.CapabilityExecutor, len(declarations))
+	for _, declaration := range declarations {
+		capabilities[declaration.ID] = declaration.Execute
+	}
 	updateRunner := &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
 		return processes.Close(ctx)
 	}}
@@ -129,13 +138,32 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) e
 		Status:            status,
 		Update:            updateRunner,
 		IDE:               ideService,
-		ReportError:       func(error) { slog.Error("daemon runtime operation failed") },
+		ReportError:       func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
 	})
 	if err != nil {
-		return errors.New("daemon runtime could not be initialized")
+		return productionFailure("daemon runtime could not be initialized", err)
 	}
 	resourceControl.runtime = core
-	return core.Run(ctx)
+	if err := core.Run(ctx); err != nil {
+		return productionFailure("daemon runtime execution failed", err)
+	}
+	return nil
+}
+
+func productionFailure(message string, cause error) error {
+	if cause == nil {
+		cause = errors.New("unspecified failure")
+	}
+	slog.Error("daemon production setup failed", "operation", message, "error", cause)
+	return fmt.Errorf("%s: %w", message, cause)
+}
+
+func recordCleanupFailure(runErr *error, message string, cause error) {
+	if cause == nil {
+		return
+	}
+	slog.Error("daemon resource cleanup failed", "operation", message, "error", cause)
+	*runErr = errors.Join(*runErr, fmt.Errorf("%s: %w", message, cause))
 }
 
 type connectionFactory func(context.Context) (daemonruntime.Connection, error)
