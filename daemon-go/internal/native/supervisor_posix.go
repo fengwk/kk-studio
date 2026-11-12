@@ -237,18 +237,43 @@ func (p *posixProcess) Wait(ctx context.Context) (ProcessExit, error) {
 	}
 	clean, err := readCleanup(p.stateDir)
 	if err != nil || clean == nil || !*clean {
-		return ProcessExit{}, &ProcessScopeNotConvergedError{Cause: errors.New("the process scope helper did not prove cleanup")}
+		cause := errors.New("the process scope helper did not prove cleanup")
+		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(cause, p.closeStreams())}
+		return ProcessExit{}, p.termErr
+	}
+	if err := p.closeStreams(); err != nil {
+		p.termErr = err
+		return ProcessExit{}, p.termErr
 	}
 	exit := readExitFallback(p.stateDir, p.waitErr)
-	p.settled = true
-	_ = p.owner.Close()
 	if err := removeStateDir(p.stateDir); err != nil {
-		return ProcessExit{}, err
+		p.termErr = err
+		return ProcessExit{}, p.termErr
 	}
+	p.settled = true
 	p.supervisor.mu.Lock()
 	delete(p.supervisor.processes, p.pid)
 	p.supervisor.mu.Unlock()
 	return exit, nil
+}
+
+func (p *posixProcess) closeStreams() error {
+	streams := []struct {
+		name string
+		file io.Closer
+	}{
+		{name: "stdin", file: p.stdin},
+		{name: "stdout", file: p.stdout},
+		{name: "stderr", file: p.stderr},
+		{name: "owner", file: p.owner},
+	}
+	var failures []error
+	for _, stream := range streams {
+		if err := stream.file.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			failures = append(failures, fmt.Errorf("cannot close process %s: %w", stream.name, err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func (p *posixProcess) convergeAdoptedChildren(ctx context.Context, grace time.Duration) error {
@@ -273,29 +298,33 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 	if p.settled {
 		return nil
 	}
-	_ = p.owner.Close()
+	streamErr := p.closeStreams()
 	if grace < 0 {
 		grace = 0
 	}
 	if err := convergeSession(ctx, p.sid, grace); err != nil {
-		p.termErr = &ProcessScopeNotConvergedError{Cause: err}
+		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, err)}
 		return p.termErr
 	}
 	select {
 	case <-ctx.Done():
-		p.termErr = &ProcessScopeNotConvergedError{Cause: ctx.Err()}
+		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, ctx.Err())}
 		return p.termErr
 	case <-p.done:
 	}
 	if err := p.convergeAdoptedChildren(ctx, grace); err != nil {
-		p.termErr = &ProcessScopeNotConvergedError{Cause: err}
+		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, err)}
 		return p.termErr
 	}
-	p.settled = true
+	if streamErr != nil {
+		p.termErr = streamErr
+		return p.termErr
+	}
 	if err := removeStateDir(p.stateDir); err != nil {
 		p.termErr = err
 		return err
 	}
+	p.settled = true
 	p.supervisor.mu.Lock()
 	delete(p.supervisor.processes, p.pid)
 	p.supervisor.mu.Unlock()
@@ -344,7 +373,7 @@ func (p *posixProcess) awaitScope(ctx context.Context) error {
 }
 
 func (p *posixProcess) cleanupFailedStart(cause error) error {
-	_ = p.owner.Close()
+	cause = errors.Join(cause, p.closeStreams())
 	ctx, cancel := context.WithTimeout(context.Background(), scopeConvergeBudget)
 	defer cancel()
 	if err := convergeSession(ctx, p.sid, 0); err != nil {
