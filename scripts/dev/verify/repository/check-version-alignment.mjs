@@ -66,7 +66,7 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
     sources['frontend/package.json version'] = frontendVersion.trim()
   }
   if (goConfig === undefined) {
-    throw new Error('cannot read Go daemon version source')
+    throw new Error('cannot read Go daemon version from daemon-go/internal/config/version.go')
   }
   sources['daemon-go/internal/config/version.go DaemonVersion'] = requiredGoDaemonVersion(goConfig)
   if (tag !== undefined) {
@@ -117,9 +117,9 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   const sourceList = [
     'pom.xml',
     'kk-studio.version',
-    'daemon-go/internal/config/version.go',
     ...(ideExtensionChecked ? ['daemon-go/ide-extension/package.json'] : []),
     ...(frontendChecked ? ['frontend/package.json'] : []),
+    'daemon-go/internal/config/version.go',
   ]
   const sources = `${sourceList.slice(0, -1).join(', ')} and ${sourceList[sourceList.length - 1]}`
   const tagSuffix = tag === undefined ? '' : ` and release tag ${tag}`
