@@ -30,15 +30,11 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if err = json.Unmarshal(call.Arguments, &request); err != nil {
 		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
 	}
-	var raw map[string]json.RawMessage
-	if err = json.Unmarshal(call.Arguments, &raw); err != nil {
-		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
+	if err := validateRequiredString(call.Arguments, "old_string"); err != nil {
+		return errorResult(call.InvocationID, err), nil
 	}
-	if _, ok := raw["old_string"]; !ok {
-		return errorResult(call.InvocationID, rejectInput("old_string must be a string")), nil
-	}
-	if _, ok := raw["new_string"]; !ok {
-		return errorResult(call.InvocationID, rejectInput("new_string must be a string")), nil
+	if err := validateRequiredString(call.Arguments, "new_string"); err != nil {
+		return errorResult(call.InvocationID, err), nil
 	}
 	if request.OldString == "" {
 		return errorResult(call.InvocationID, rejectInput("old_string must not be empty")), nil

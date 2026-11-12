@@ -120,14 +120,12 @@ func classifyFileSystemError(err error) (string, string) {
 	switch {
 	case errors.Is(err, os.ErrPermission), errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return "PERMISSION_DENIED", "permission denied while accessing the path"
-	case errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ENOENT):
-		return "NOT_FOUND", "path does not exist"
-	case errors.Is(err, os.ErrExist), errors.Is(err, syscall.EEXIST):
-		return "ALREADY_EXISTS", "path already exists"
-	case errors.Is(err, syscall.EISDIR):
-		return "INVALID_ARGUMENT", "path is a directory"
 	case errors.Is(err, syscall.ENOTDIR):
 		return "INVALID_ARGUMENT", "path is not a directory"
+	case errors.Is(err, syscall.EISDIR):
+		return "INVALID_ARGUMENT", "path is a directory"
+	case errors.Is(err, syscall.ENOENT), errors.Is(err, os.ErrNotExist):
+		return "NOT_FOUND", "path does not exist"
 	case errors.Is(err, os.ErrExist), errors.Is(err, syscall.EEXIST):
 		return "ALREADY_EXISTS", "path already exists"
 	case errors.Is(err, syscall.ENOSPC):

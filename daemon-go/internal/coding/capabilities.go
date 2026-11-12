@@ -127,6 +127,22 @@ func parseImageTier(value runtime.ImageInputTier) (imagescaler.Tier, error) {
 	}
 }
 
+func validateRequiredString(rawJSON json.RawMessage, name string) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rawJSON, &raw); err != nil {
+		return rejectInput("invalid arguments")
+	}
+	value, ok := raw[name]
+	if !ok {
+		return rejectInput(name + " must be a string")
+	}
+	var text string
+	if err := json.Unmarshal(value, &text); err != nil {
+		return rejectInput(name + " must be a string")
+	}
+	return nil
+}
+
 func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 	var args arguments
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
@@ -292,12 +308,8 @@ func formatTextWindow(path string, window TextWindow) string {
 
 func writeCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
-	if err == nil && args.Content == "" { // Empty content is a valid file; distinguish absent from present.
-		var raw map[string]json.RawMessage
-		_ = json.Unmarshal(call.Arguments, &raw)
-		if _, ok := raw["content"]; !ok {
-			err = rejectInput("content must be a string")
-		}
+	if err == nil {
+		err = validateRequiredString(call.Arguments, "content")
 	}
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -347,12 +359,8 @@ func editPreviewCapability(ctx context.Context, call runtime.CapabilityCall, cap
 
 func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
-	if err == nil && args.Content == "" {
-		var raw map[string]json.RawMessage
-		_ = json.Unmarshal(call.Arguments, &raw)
-		if _, ok := raw["content"]; !ok {
-			err = rejectInput("content must be a string")
-		}
+	if err == nil {
+		err = validateRequiredString(call.Arguments, "content")
 	}
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
