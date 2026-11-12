@@ -77,31 +77,34 @@ func NewFacade(processes native.Supervisor, options PoolOptions) *Facade {
 	return f
 }
 func (f *Facade) Capabilities() map[string]runtime.CapabilityExecutor { return f.capabilities }
-func (f *Facade) Support(path string) Support {
+func (f *Facade) currentService() (*Service, func()) {
 	f.mu.RLock()
-	g := f.current
+	service, release := f.current.acquire()
 	f.mu.RUnlock()
-	if g.service == nil {
+	return service, release
+}
+func (f *Facade) Support(path string) Support {
+	service, release := f.currentService()
+	defer release()
+	if service == nil {
 		return Support{}
 	}
-	return g.service.Support(path)
+	return service.Support(path)
 }
 func (f *Facade) FileChanged(path string) {
-	f.mu.RLock()
-	g := f.current
-	f.mu.RUnlock()
-	if g.service != nil {
-		g.service.FileChanged(path)
+	service, release := f.currentService()
+	defer release()
+	if service != nil {
+		service.FileChanged(path)
 	}
 }
 func (f *Facade) ActiveClientCount() int {
-	f.mu.RLock()
-	g := f.current
-	f.mu.RUnlock()
-	if g.service == nil {
+	service, release := f.currentService()
+	defer release()
+	if service == nil {
 		return 0
 	}
-	return g.service.ActiveClientCount()
+	return service.ActiveClientCount()
 }
 
 // PreparedGeneration separates candidate construction from the atomic publish step.
@@ -240,10 +243,7 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 			return fail("target must not be blank"), nil
 		}
 	}
-	f.mu.RLock()
-	g := f.current
-	f.mu.RUnlock()
-	service, release := g.acquire()
+	service, release := f.currentService()
 	defer release()
 	if service == nil {
 		return fail("LSP is not configured for this environment"), nil

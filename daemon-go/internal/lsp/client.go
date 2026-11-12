@@ -26,10 +26,15 @@ type Client struct {
 	exited           chan native.ProcessExit
 	exitErr          chan error
 	closed           atomic.Bool
+	exitReported     atomic.Bool
 	requestID        atomic.Uint64
 	stopOnce         sync.Once
 	stopDone         chan struct{}
 	stopErr          error
+	stopping         atomic.Bool
+	transportDone    chan struct{}
+	transportErr     error
+	shutdownGrace    time.Duration
 	mu               sync.RWMutex
 	capabilities     map[string]json.RawMessage
 	positionEncoding string
@@ -69,7 +74,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 	if err != nil {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, server.Command[0]), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
 	}
-	c := &Client{server: server, root: root, process: process, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1), stopDone: make(chan struct{}), positionEncoding: "utf-16", documents: map[string]document{}, jdtls: isJDTLS(server.Command)}
+	c := &Client{server: server, root: root, process: process, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1), stopDone: make(chan struct{}), transportDone: make(chan struct{}), shutdownGrace: time.Second, positionEncoding: "utf-16", documents: map[string]document{}, jdtls: isJDTLS(server.Command)}
 	go func() {
 		result, e := process.Wait(context.Background())
 		if e != nil {
@@ -77,6 +82,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 			c.closed.Store(true)
 			return
 		}
+		c.exitReported.Store(true)
 		c.exited <- result
 		c.closed.Store(true)
 	}()
@@ -95,6 +101,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 	}
 	stream := &stdio{in: process.Stdin(), out: process.Stdout()}
 	c.conn = jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(stream, newLSPCodec()), rpcHandler(c.handleRequest))
+	go c.watchTransport()
 	return c, nil
 }
 
@@ -140,6 +147,17 @@ func (c *Client) handleRequest(ctx context.Context, conn *jsonrpc2.Conn, req *js
 func pathURI(path string) string {
 	abs, _ := filepath.Abs(path)
 	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+}
+
+func (c *Client) watchTransport() {
+	<-c.conn.DisconnectNotify()
+	defer close(c.transportDone)
+	if c.stopping.Load() || c.closed.Load() {
+		return
+	}
+	if err := c.process.Terminate(context.Background(), 0); err != nil {
+		c.transportErr = &LspAggregateError{Message: "LSP transport failure and cleanup failure", Errors: []error{errors.New("LSP transport failure"), err}}
+	}
 }
 
 // Initialize performs LSP initialize and initialized.
@@ -197,6 +215,20 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 	select {
 	case err := <-done:
 		if err != nil {
+			if errors.Is(err, jsonrpc2.ErrClosed) {
+				<-c.transportDone
+				if c.transportErr != nil {
+					return &LspError{Message: "LSP request failed (" + method + ")", Cause: c.transportErr}
+				}
+				if !c.stopping.Load() {
+					exitErr := c.exitError()
+					var lspErr *LspError
+					if errors.As(exitErr, &lspErr) && lspErr.Message != "LSP client stopped" {
+						c.confirmProcessExit(onFinished)
+						return exitErr
+					}
+				}
+			}
 			var rpcErr *jsonrpc2.Error
 			if onFinished != nil && errors.As(err, &rpcErr) {
 				onFinished()
@@ -219,8 +251,11 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 			return &LspTimeoutError{Message: message, Cause: ctx.Err()}
 		}
 		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
-	case <-c.exited:
-		return c.exitError()
+	case exit := <-c.exited:
+		c.exited <- exit
+		exitErr := c.exitError()
+		c.confirmProcessExit(onFinished)
+		return exitErr
 	case err := <-c.exitErr:
 		c.exitErr <- err
 		return &LspError{Message: "LSP client stopped", Cause: err}
@@ -244,14 +279,22 @@ func (c *Client) exitError() error {
 		return &LspError{Message: "LSP client stopped"}
 	}
 }
+func (c *Client) confirmProcessExit(onFinished func()) {
+	if !c.stopping.Load() && c.Stop(c.shutdownGrace) == nil && onFinished != nil {
+		onFinished()
+	}
+}
+
 func (c *Client) IsAlive() bool {
 	if c.closed.Load() {
 		return false
 	}
 	select {
-	case <-c.exited:
+	case exit := <-c.exited:
+		c.exited <- exit
 		return false
-	case <-c.exitErr:
+	case err := <-c.exitErr:
+		c.exitErr <- err
 		return false
 	default:
 		return true
@@ -284,6 +327,7 @@ func (c *Client) Stop(grace time.Duration) error {
 }
 func (c *Client) finishStop(grace time.Duration) {
 	defer close(c.stopDone)
+	c.stopping.Store(true)
 	c.closed.Store(true)
 	ctx := context.Background()
 	if grace > 0 {
@@ -291,9 +335,14 @@ func (c *Client) finishStop(grace time.Duration) {
 		ctx, cancel = context.WithTimeout(ctx, grace)
 		defer cancel()
 	}
-	_ = c.conn.Call(ctx, "shutdown", map[string]any{}, nil)
-	_ = c.conn.Notify(context.Background(), "exit", map[string]any{})
+	if !c.exitReported.Load() {
+		_ = c.conn.Call(ctx, "shutdown", map[string]any{}, nil)
+		_ = c.conn.Notify(context.Background(), "exit", map[string]any{})
+	}
 	disposeErr := c.conn.Close()
+	if errors.Is(disposeErr, jsonrpc2.ErrClosed) {
+		disposeErr = nil
+	}
 	terminateErr := c.process.Terminate(context.Background(), grace)
 	if disposeErr != nil && terminateErr != nil {
 		c.stopErr = errors.Join(&LspError{Message: "LSP connection disposal failed during shutdown", Cause: disposeErr}, &LspError{Message: "LSP server process termination failed during shutdown", Cause: terminateErr})

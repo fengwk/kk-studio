@@ -43,6 +43,22 @@ func TestCodec_Decode(t *testing.T) {
 	}
 }
 
+// LSP-T-023 and LSP-T-024 cover malformed UTF-16 and NUL detection after BOM decoding.
+func TestCodec_BOMControlAndMalformedUTF16(t *testing.T) {
+	control, err := DecodeTextFile([]byte{0xef, 0xbb, 0xbf, 1})
+	if err != nil || control.Text != string([]byte{1}) {
+		t.Fatalf("BOM control bytes = %#v, %v", control, err)
+	}
+	for _, data := range [][]byte{{0xff, 0xfe, 0x00}, {0xff, 0xfe, 0x00, 0xd8}, {0xfe, 0xff, 0xdc, 0x00}} {
+		if _, err := DecodeTextFile(data); err == nil || err.Error() != "file appears to be binary: invalid text encoding" {
+			t.Errorf("DecodeTextFile(%x) error = %v", data, err)
+		}
+	}
+	if _, err := DecodeTextFile([]byte{0xff, 0xfe, 0, 0}); err == nil || err.Error() != "file appears to be binary: contains NUL character" {
+		t.Fatalf("BOM text NUL error = %v", err)
+	}
+}
+
 // LSP-T-026 ensures control-byte probing excludes byte offset 8192.
 func TestCodec_ProbeBoundary(t *testing.T) {
 	data := make([]byte, 8193)

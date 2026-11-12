@@ -73,6 +73,15 @@ func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
 }
 
 func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*Lease, error) {
+	if ctx.Err() != nil {
+		if onExit != nil {
+			onExit()
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+		}
+		return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+	}
 	server, err := p.discovery.RequireServer(path)
 	if err != nil {
 		if onExit != nil {
@@ -214,6 +223,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root, executable string, b *boot) {
 	client, err := Launch(ctx, server, root, executable, p.processes)
 	if err == nil {
+		client.shutdownGrace = p.options.ShutdownGrace
 		b.client = client
 		err = client.Initialize(ctx, p.options.InitializeTimeout)
 	}
