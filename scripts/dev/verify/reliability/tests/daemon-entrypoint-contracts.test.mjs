@@ -1,4 +1,4 @@
-/** Permanent guards for the reliability stack's Node daemon bootstrap and token boundary. */
+/** Permanent guards for the reliability stack's Go daemon bootstrap and token boundary. */
 
 import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -35,28 +35,28 @@ async function withTempDir(body) {
 }
 
 /**
- * 按发行布局写一个最小 Daemon 目录：根目录入口 + 冻结运行时。
- *
- * 默认运行时是一个可执行包装脚本：配置 helper 交给真实 Node，其它调用被记录成 daemon 启动
- * 参数，因此断言的是入口真实的 exec 行为而不是静态文本。
+ * 按 Go 发行布局写一个最小 Daemon 目录：静态可执行文件与 code-server 自带的 Node runtime。
+ * Node runtime 执行配置缓存 helper；Go 可执行文件作为 stub 记录入口传入的参数与环境，
+ * 因此测试覆盖真实 entrypoint 的文件校验、配置生成及直接 exec 行为。
  */
-function writeNodeDist(temporary, { realNode = false } = {}) {
+function writeGoDist(temporary) {
   const dist = path.join(temporary, 'daemon-dist')
   mkdirSync(path.join(dist, 'runtime/code-server/lib'), { recursive: true })
-  writeFileSync(path.join(dist, 'main.js'), '// daemon entry\n')
+  mkdirSync(path.join(dist, 'runtime/code-server/out/node'), { recursive: true })
+  writeFileSync(path.join(dist, 'runtime/code-server/out/node/entry.js'), '// IDE runtime entry\n')
   const runtime = path.join(dist, 'runtime/code-server/lib/node')
+  const daemon = path.join(dist, 'kk-studio-daemon')
   const argvFile = path.join(temporary, 'argv.txt')
   const environFile = path.join(temporary, 'environ.txt')
+  writeFileSync(runtime, `#!/bin/bash\nexec '${process.execPath}' "$@"\n`)
   writeFileSync(
-    runtime,
-    realNode
-      ? `#!/bin/bash\nexec '${process.execPath}' "$@"\n`
-      : '#!/bin/bash\n' +
-          `if [ "$1" = "-e" ] || [[ "$1" == *"/daemon-config-cache.mjs" ]]; then exec '${process.execPath}' "$@"; fi\n` +
-          'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n' +
-          'env >"$PROBE_ENVIRON"\n',
+    daemon,
+    '#!/bin/bash\n' +
+      'if [ -n "$PROBE_ARGV" ]; then printf \'%s\\n\' "$@" >"$PROBE_ARGV"; fi\n' +
+      'if [ -n "$PROBE_ENVIRON" ]; then env >"$PROBE_ENVIRON"; fi\n',
   )
   chmodSync(runtime, 0o755)
+  chmodSync(daemon, 0o755)
   return { dist, argvFile, environFile }
 }
 
@@ -89,8 +89,8 @@ test('test intent: compose injects only environment; the entrypoint materializes
   assert.ok(compose.includes('daemon-workspace:/workspace'))
 })
 
-test('test intent: the daemon image runs the frozen Node distribution only', () => {
-  // Daemon 镜像只带冻结 Node 发行目录：没有 JRE/Maven，也没有第二个 Node。
+test('test intent: the daemon image runs a Go executable with the bundled code-server runtime', () => {
+  // The daemon is static Go; its Node dependency belongs only to the bundled code-server runtime.
   const dockerfile = text(RELIABILITY_DOCKERFILE)
 
   assert.ok(dockerfile.includes('daemon-entrypoint.sh'))
@@ -101,12 +101,13 @@ test('test intent: the daemon image runs the frozen Node distribution only', () 
     '配置 helper 只能被 COPY 一次',
   )
   assert.ok(dockerfile.includes('/usr/local/bin/daemon-config-cache.mjs'))
-  // 发行目录由真实打包脚本产出，运行入口是归档根的 main.js。
+  // The distribution is produced by the shared archive builder and contains the Go daemon directly.
   assert.ok(dockerfile.includes('scripts/daemon/prepare-release.sh'))
-  assert.ok(dockerfile.includes('/distribution/main.js'))
+  assert.ok(dockerfile.includes('/distribution/kk-studio-daemon'))
   assert.ok(dockerfile.includes('runtime/code-server/lib/node'))
   assert.ok(dockerfile.includes('FROM debian:bookworm-slim'))
-  // 只有一个 Node 二进制：/usr/local/bin/node 指向冻结运行时，npm/npx 跑在同一个 Node 上。
+  assert.ok(!dockerfile.includes('/distribution/main.js'))
+  // Node is only exposed for the packaged code-server runtime and the config-cache helper.
   assert.ok(
     dockerfile.includes('ln -s /opt/kk-studio/daemon/runtime/code-server/lib/node /usr/local/bin/node'),
   )
@@ -120,11 +121,11 @@ test('test intent: runtime user creation uses absolute system commands', () => {
   assert.ok(runtime.includes('/usr/sbin/useradd --uid 10001'))
 })
 
-test('test intent: the entrypoint launches the distribution entry with --config only', async () => {
+test('test intent: the entrypoint launches the Go executable with --config only', async () => {
   const server = await startCardServer({ name: 'docker-reliability', version: '0', daemonConfig: DAEMON_CONFIG })
   try {
     await withTempDir(async (temporary) => {
-      const { dist, argvFile, environFile } = writeNodeDist(temporary)
+      const { dist, argvFile, environFile } = writeGoDist(temporary)
       const root = path.join(temporary, 'daemon-root')
       const secret = 'probe-secret-token'
 
@@ -142,7 +143,7 @@ test('test intent: the entrypoint launches the distribution entry with --config 
       const argv = text(argvFile).split('\n').filter(Boolean)
       assert.ok(argv.includes('--config'))
       const configPath = argv[argv.indexOf('--config') + 1]
-      assert.deepEqual(argv.slice(0, 2), [path.join(dist, 'main.js'), '--config'])
+      assert.deepEqual(argv, ['--config', configPath])
       assert.ok(path.isAbsolute(configPath))
       assert.equal(configPath, path.join(root, 'daemon.json'))
       assert.ok(!argv.includes(secret))
@@ -196,7 +197,7 @@ test('test intent: the entrypoint does not rewrite an already reachable card', a
     server.calls.length = 0
 
     await withTempDir(async (temporary) => {
-      const { dist } = writeNodeDist(temporary, { realNode: true })
+      const { dist } = writeGoDist(temporary)
       const root = path.join(temporary, 'daemon-root')
       const result = await runEntrypoint(baseEnv({
         KK_STUDIO_DAEMON_DIST: dist,
@@ -256,10 +257,10 @@ test('test intent: the entrypoint rejects a relative root', async () => {
   assert.ok(result.stderr.includes('absolute'))
 })
 
-test('test intent: a distribution without entry or frozen runtime is rejected, never replaced by PATH node', async () => {
-  for (const missing of ['main.js', 'runtime/code-server/lib/node']) {
+test('test intent: a distribution without the Go daemon or bundled runtime is rejected', async () => {
+  for (const missing of ['kk-studio-daemon', 'runtime/code-server/lib/node']) {
     await withTempDir(async (temporary) => {
-      const { dist } = writeNodeDist(temporary)
+      const { dist } = writeGoDist(temporary)
       unlinkSync(path.join(dist, missing))
       const result = await runEntrypoint(baseEnv({
         KK_STUDIO_DAEMON_DIST: dist,
@@ -283,7 +284,7 @@ test('test intent: the config is created owner-only without relying on chmod', a
       // chmod 桩为 no-op：只有写目录的 umask 与写文件的显式 mode 能收敛权限。
       writeFileSync(path.join(probeDir, 'chmod'), '#!/bin/bash\nexit 0\n')
       chmodSync(path.join(probeDir, 'chmod'), 0o755)
-      const { dist } = writeNodeDist(temporary, { realNode: true })
+      const { dist } = writeGoDist(temporary)
 
       const root = path.join(temporary, 'daemon-root')
       const result = await runEntrypoint(

@@ -504,9 +504,11 @@ test('runs sbom, audit, and image into one report for all', () => {
         assert.equal(summary.mode, 'all')
         assert.equal(summary.status, 'PASS')
         assert.equal(summary.checks.length, 12)
-        for (const check of summary.checks) {
+        for (const check of summary.checks.filter(check => !['daemon-sbom', 'daemon-audit'].includes(check.name))) {
             assert.equal(check.status, 'PASS', check.name)
         }
+        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'SKIPPED')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').status, 'SKIPPED')
         assert.equal(existsSync(path.join(reportRoot, 'latest/backend-sbom/bom.json')), true)
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
@@ -538,9 +540,11 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.equal(summary.mode, 'sbom')
         assert.equal(summary.checks.find(check => check.name === 'backend-sbom').status, 'PASS')
         assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
-        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'PASS')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'SKIPPED')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').artifact, null)
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
-        assert.match(summaryMarkdown, /requested backend, frontend and daemon SBOM checks completed/i)
+        assert.match(summaryMarkdown, /backend and frontend CycloneDX reports are non-empty/i)
+        assert.match(summaryMarkdown, /standalone Go Daemon SBOM is not produced/i)
         assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
         assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
     } finally {

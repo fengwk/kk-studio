@@ -1,16 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# kk-studio reliability / distributed Daemon 镜像（Node 产品）。
-#
-# builder：官方 Node 24.21.0 编译 `daemon/`，再用 `scripts/daemon/prepare-release.sh` 生成与发行
-#   归档**同一份布局**的发行目录，因此镜像运行的就是真实发行产物，而不是另装一套源码。
-#   归档根布局：`main.js`、`node_modules/`、`runtime/code-server/`、`resources/`、
-#   `ide-extension/`、`package.json`、`runtime-manifest.json`。入口是根目录的 `main.js`。
-#
-# runtime：debian bookworm-slim + bash/ca-certificates/git/libstdc++，不装系统 Node、不装 JRE。
-#   容器里唯一的 Node 二进制是发行归档自带、按 SHA256 冻结校验过的
-#   `runtime/code-server/lib/node`；`/usr/local/bin/node` 只是指向它的链接，`npm`/`npx` 是跑在
-#   同一个 Node 上的 JS CLI（reliability 用例的 `npm ci` 需要 npm），因此不存在第二个 Node 运行时。
+# kk-studio reliability / distributed Go Daemon image.
+# Build the static Go daemon and package the same code-server/IDE runtime as the official archive.
+# Node is included only as part of the managed code-server distribution and its bundled npm CLI.
 
 ARG NODE_IMAGE=node:24.21.0-bookworm-slim
 
@@ -23,6 +15,9 @@ RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl git; \
+    curl -fsSL "https://go.dev/dl/go1.27.4.linux-$(dpkg --print-architecture).tar.gz" -o /tmp/go.tar.gz; \
+    tar -xzf /tmp/go.tar.gz -C /usr/local; \
+    rm -f /tmp/go.tar.gz; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
@@ -40,7 +35,7 @@ RUN set -eux; \
     git -C /build -c user.name=kk-studio-builder -c user.email=builder@kk-studio.invalid \
       commit -q -m "docker build context"
 
-# 目标架构决定打包哪个平台的预编译原生产物（koffi）与冻结 code-server 归档。
+# 目标架构决定静态 Go 二进制与冻结 code-server 归档的目标平台。
 # buildx 提供 TARGETARCH；普通 `docker build` 缺省时按构建主机架构推导，二者都只接受
 # amd64/arm64，其它架构显式失败而不是产出一个假跨平台镜像。
 RUN set -eux; \
@@ -56,14 +51,13 @@ RUN set -eux; \
       amd64 | arm64) ;; \
       *) echo "ERROR: unsupported target architecture: $arch" >&2; exit 1 ;; \
     esac; \
-    npm --prefix daemon ci; \
-    npm --prefix daemon run build; \
-    version=$(node -p 'require("/build/daemon/package.json").version'); \
-    scripts/daemon/prepare-release.sh "v$version" linux "$arch"; \
+    version=$(sed -n 's/^var DaemonVersion = "\([^"]*\)"$/\1/p' daemon-go/internal/config/version.go); \
+    test -n "$version"; \
+    GO_BIN=/usr/local/go/bin/go scripts/daemon/prepare-release.sh "v$version" linux "$arch"; \
     mkdir -p /distribution; \
-    tar -xzf "daemon/release/linux-$arch/kk-studio-daemon-v$version-linux-$arch.tar.gz" \
+    tar -xzf "daemon-go/release/linux-$arch/kk-studio-daemon-v$version-linux-$arch.tar.gz" \
       -C /distribution; \
-    test -f /distribution/main.js; \
+    test -x /distribution/kk-studio-daemon; \
     test -x /distribution/runtime/code-server/lib/node
 
 # npm CLI 取自官方 Node 镜像，运行期由冻结 Node 执行，因此不在镜像里引入第二个 Node；
@@ -130,7 +124,7 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/npm /usr/local/bin/npx; \
     node --version; \
     npm --version; \
-    test -f /opt/kk-studio/daemon/main.js; \
+    test -x /opt/kk-studio/daemon/kk-studio-daemon; \
     test -w /workspace
 
 WORKDIR /workspace

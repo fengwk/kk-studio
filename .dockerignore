@@ -12,10 +12,9 @@ frontend/node_modules/
 frontend/dist/
 frontend/coverage/
 
-# Daemon caches / outputs
-daemon/node_modules/
-daemon/dist/
-daemon/release/
+# Daemon release and staging outputs (rebuilt from source)
+daemon-go/release/
+daemon-go/.kk-studio-daemon-stage.*/
 
 # Local reports and artifacts (never required for build)
 reports/

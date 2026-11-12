@@ -338,10 +338,11 @@ uid="$(id -u)"
 user="$(id -un)"
 printf 'uid=%s user=%s\n' "$uid" "$user"
 test "$uid" -ne 0
+daemon=/opt/kk-studio/daemon/kk-studio-daemon
 frozen=/opt/kk-studio/daemon/runtime/code-server/lib/node
-entry=/opt/kk-studio/daemon/main.js
+test -x "$daemon"
+test -f /opt/kk-studio/daemon/runtime/code-server/out/node/entry.js
 test -x "$frozen"
-test -f "$entry"
 test "$(readlink -f "$(command -v node)")" = "$(readlink -f "$frozen")"
 node_version="$(node --version)"
 printf 'node=%s\n' "$node_version"
@@ -363,11 +364,10 @@ command -v bash
 command -v git
 bash --version
 git --version
-expected_version="kk-studio-daemon $(node -p 'require("/opt/kk-studio/daemon/package.json").version')"
-reported_version="$(node "$entry" --version)"
+reported_version="$("$daemon" --version)"
 printf 'daemon=%s\n' "$reported_version"
-if [[ "$reported_version" != "$expected_version" ]]; then
-    printf 'daemon --version mismatch: expected %s, got %s\n' "$expected_version" "$reported_version" >&2
+if [[ ! "$reported_version" =~ ^kk-studio-daemon\ [0-9A-Za-z._+-]+$ ]]; then
+    printf 'unexpected Go daemon --version output: %s\n' "$reported_version" >&2
     exit 1
 fi
 smoke_dir="$(mktemp -d /workspace/kk-studio-supply-chain-smoke.XXXXXX)"
