@@ -115,8 +115,8 @@ func TestWindowsSupervisor_UnprovenTerminationPreservesScopeAndAggregatesCleanup
 	if !errors.As(first, &notConverged) {
 		t.Fatalf("termination error = %v, want ProcessScopeNotConvergedError", first)
 	}
-	if !strings.Contains(first.Error(), "could not be proven empty") || !strings.Contains(first.Error(), "cannot close process scope job") {
-		t.Fatalf("termination error did not aggregate drain and close errors: %v", first)
+	if !strings.Contains(notConverged.Cause.Error(), "could not be proven empty") || !strings.Contains(notConverged.Cause.Error(), "cannot close process scope job") {
+		t.Fatalf("termination cause did not aggregate drain and close errors: %v", notConverged.Cause)
 	}
 	if _, err := os.Stat(process.stateDir); err != nil {
 		t.Fatalf("state directory was removed despite unproven termination: %v", err)

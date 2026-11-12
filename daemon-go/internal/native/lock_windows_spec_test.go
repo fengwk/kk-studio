@@ -27,8 +27,8 @@ func TestWindowsDirectoryLock_ExternalHolderCrash(t *testing.T) {
 		}
 	}
 
-	directory := t.TempDir()
-	ready := filepath.Join(directory, "holder.ready")
+	directory := filepath.Join(t.TempDir(), "lock-dir")
+	ready := filepath.Join(t.TempDir(), "holder.ready")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsDirectoryLock_ExternalHolderCrash$")
 	cmd.Env = append(os.Environ(), "KK_NATIVE_LOCK_HOLDER_DIR="+directory, "KK_NATIVE_LOCK_HOLDER_READY="+ready)
 	if err := cmd.Start(); err != nil {
