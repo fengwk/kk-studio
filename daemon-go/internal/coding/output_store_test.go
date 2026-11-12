@@ -1,0 +1,232 @@
+package coding
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+)
+
+// COD-T-004
+func TestSpillFailureFallsBackToBoundedPreview(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "spill-failure", defaultCaptureBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
+	if spool.file == nil || spool.staging == "" {
+		t.Fatal("expected spill file")
+	}
+	if err := spool.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	spool.Write([]byte("extra"))
+	result := spool.Finish(false, "")
+	if !strings.Contains(result.Contents[0].Text, "could not be saved to local storage") || !strings.Contains(string(result.Details), `"captureFailed":true`) {
+		t.Fatalf("result=%#v", result)
+	}
+	if err := spool.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// COD-T-005
+func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "note", defaultCaptureBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
+	result := spool.Finish(false, "[Command exited with code 2.]")
+	if !strings.HasSuffix(result.Contents[0].Text, "[Command exited with code 2.]") || !strings.Contains(result.Contents[0].Text, "[Full output:") {
+		t.Fatalf("preview=%q", result.Contents[0].Text)
+	}
+}
+
+// COD-T-006
+func TestListFilesWithSuffixSkipsNonWorkspaceEntries(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Root(), "plain.log"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, part, err := store.CreateStagingFile("call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	paths, err := store.ListFilesWithSuffix(".part")
+	if err != nil || len(paths) != 1 || paths[0] != part {
+		t.Fatalf("paths=%v err=%v", paths, err)
+	}
+	if err := store.DeleteStaging(part); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// COD-T-007
+func TestPublishUnregisteredPartFile(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(store.Root(), "12345678-1234-4234-8234-123456789abc")
+	if err := os.Mkdir(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	part := filepath.Join(workspace, "unregistered.part")
+	if err := os.WriteFile(part, []byte("output"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	published, err := store.Publish(part)
+	if err != nil || published != strings.TrimSuffix(part, ".part")+".log" {
+		t.Fatalf("published=%q err=%v", published, err)
+	}
+	if data, err := os.ReadFile(published); err != nil || string(data) != "output" {
+		t.Fatalf("data=%q err=%v", data, err)
+	}
+}
+
+// COD-T-010
+func TestRepeatedAcquireLeasesShareWorkspaceCount(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, path, err := store.CreateStagingFile("shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	path, err = store.Publish(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "created-at"), []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	releaseFirst := store.Acquire(path)
+	releaseSecond := store.Acquire(path)
+	releaseFirst()
+	if removed, err := store.Sweep(time.Second); err != nil || removed != 0 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	releaseSecond()
+	if removed, err := store.Sweep(time.Second); err != nil || removed != 1 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+}
+
+// COD-T-008
+func TestAcquireLeaseNoOpsForUnownedPath(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := store.Acquire(filepath.Join(t.TempDir(), "outside.log"))
+	release()
+	if len(store.leases) != 0 {
+		t.Fatalf("leases=%v", store.leases)
+	}
+}
+
+// COD-T-009
+func TestSweepRejectsInvalidTTLAndSkipsMalformedWorkspace(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Sweep(0); err == nil {
+		t.Fatal("expected invalid TTL error")
+	}
+	if err := os.Mkdir(filepath.Join(store.Root(), "not-a-uuid"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := store.Sweep(time.Second)
+	if err != nil || removed != 0 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+}
+
+// COD-T-011
+func TestUTF8PreviewBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		cut   int
+		full  int
+	}{
+		{value: "a¢z", cut: 2, full: 3},
+		{value: "a€z", cut: 3, full: 4},
+		{value: "a𐍈z", cut: 4, full: 5},
+	} {
+		data := []byte(tc.value)
+		if end := alignUTF8(data, tc.cut); end != 1 {
+			t.Fatalf("incomplete value=%q aligned=%d want=1", tc.value, end)
+		}
+		if end := alignUTF8(data, tc.full); end != tc.full || !utf8.Valid(data[:end]) {
+			t.Fatalf("complete value=%q aligned=%d want=%d", tc.value, end, tc.full)
+		}
+	}
+}
+
+// COD-T-012
+func TestDeleteStagingIsIdempotent(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, path, err := store.CreateStagingFile("twice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if err := store.DeleteStaging(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteStaging(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("workspace stat error=%v", err)
+	}
+}
+
+// COD-T-013
+func TestWriteAllHandlesShortWritesAndNoProgress(t *testing.T) {
+	writer := &shortWriter{max: 2}
+	if err := writeAll(writer, []byte("abcdef")); err != nil || string(writer.bytes) != "abcdef" {
+		t.Fatalf("bytes=%q err=%v", writer.bytes, err)
+	}
+	if err := writeAll(zeroWriter{}, []byte("x")); err == nil {
+		t.Fatal("expected no-progress error")
+	}
+}
+
+type shortWriter struct {
+	max   int
+	bytes []byte
+}
+
+func (w *shortWriter) Write(data []byte) (int, error) {
+	n := min(w.max, len(data))
+	w.bytes = append(w.bytes, data[:n]...)
+	return n, nil
+}
+
+type zeroWriter struct{}
+
+func (zeroWriter) Write([]byte) (int, error) { return 0, nil }

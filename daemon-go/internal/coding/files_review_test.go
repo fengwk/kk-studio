@@ -32,6 +32,18 @@ func TestWriteReviewAndExpectedFile(t *testing.T) {
 	}
 }
 
+// COD-F-007
+func TestWriteCreatesMissingParentDirectories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "deeper", "new.txt")
+	if _, err := Write(path, "new contents\n", nil); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != "new contents\n" {
+		t.Fatalf("contents=%q err=%v", contents, err)
+	}
+}
+
 // COD-N-018
 func TestWriteReviewForNewFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")

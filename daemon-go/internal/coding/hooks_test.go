@@ -25,14 +25,20 @@ func TestMutationFileChangedHookRunsAfterSuccessfulWriteAndEdit(t *testing.T) {
 			}
 			call := runtime.CapabilityCall{InvocationID: "hook", Arguments: mustJSON(args)}
 			calls := 0
+			changedPath := ""
 			result, err := Provider{}.Capabilities()[capabilityID](context.Background(), call, runtime.CapabilityContext{FileChanged: func(changed string) {
 				calls++
-				if changed != path {
-					t.Errorf("hook path=%q want=%q", changed, path)
-				}
+				changedPath = changed
 			}})
 			if err != nil || result.Error {
 				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			resolvedPath, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if changedPath != resolvedPath {
+				t.Errorf("hook path=%q want=%q", changedPath, resolvedPath)
 			}
 			if calls != 1 {
 				t.Fatalf("hook calls=%d want=1", calls)

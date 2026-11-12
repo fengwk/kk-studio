@@ -24,14 +24,18 @@ func TestSearchTimeoutEmptyResultsAreNonError(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		executor runtime.CapabilityExecutor
-		args     string
+		args     map[string]any
 		empty    string
 	}{
-		{name: "find", executor: findCapability, args: `{"path":"` + root + `","pattern":"*.zzz","limit":10}`, empty: "No files found matching pattern"},
-		{name: "grep", executor: grepCapability, args: `{"path":"` + root + `","pattern":"zzz","literal":true,"limit":10}`, empty: "No matches found"},
+		{name: "find", executor: findCapability, args: map[string]any{"path": root, "pattern": "*.zzz", "limit": 10}, empty: "No files found matching pattern"},
+		{name: "grep", executor: grepCapability, args: map[string]any{"path": root, "pattern": "zzz", "literal": true, "limit": 10}, empty: "No matches found"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			call := runtime.CapabilityCall{InvocationID: test.name, Arguments: json.RawMessage(test.args), TimeoutMillis: 2000}
+			arguments, err := json.Marshal(test.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := runtime.CapabilityCall{InvocationID: test.name, Arguments: arguments, TimeoutMillis: 2000}
 			result, err := test.executor(ctx, call, runtime.CapabilityContext{})
 			if err != nil || result.Error {
 				t.Fatalf("result=%#v err=%v", result, err)
@@ -60,7 +64,11 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	call := runtime.CapabilityCall{InvocationID: "cancel", Arguments: json.RawMessage(`{"path":"` + root + `","pattern":"x"}`)}
+	arguments, err := json.Marshal(map[string]any{"path": root, "pattern": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := runtime.CapabilityCall{InvocationID: "cancel", Arguments: arguments}
 	result, err := findCapability(ctx, call, runtime.CapabilityContext{})
 	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "context canceled") {
 		t.Fatalf("result=%#v err=%v", result, err)
@@ -72,6 +80,42 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	searchDetails := details["search"].(map[string]any)
 	if searchDetails["outcome"] != "CANCELLED" || searchDetails["incomplete"] != true {
 		t.Fatalf("details=%v", details)
+	}
+}
+
+// COD-F-010, COD-T-178
+func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{"a.txt": "x\nx\nx\n", "b.txt": "x\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		name     string
+		executor runtime.CapabilityExecutor
+		args     map[string]any
+		want     string
+	}{
+		{name: "find", executor: findCapability, args: map[string]any{"path": root, "pattern": "*.txt", "limit": 1}, want: "[1 results limit reached. Refine the pattern or raise limit.]"},
+		{name: "grep", executor: grepCapability, args: map[string]any{"path": root, "pattern": "x", "literal": true, "limit": 2}, want: "[2 matches limit reached. Refine the pattern or raise limit.]"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			arguments, err := json.Marshal(test.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := test.executor(context.Background(), runtime.CapabilityCall{InvocationID: test.name, Arguments: arguments}, runtime.CapabilityContext{})
+			if err != nil || result.Error || !strings.HasSuffix(result.Contents[0].Text, test.want) {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			if test.name == "find" && strings.Contains(result.Contents[0].Text, "b.txt") {
+				t.Fatalf("find returned beyond limit: %q", result.Contents[0].Text)
+			}
+			if test.name == "grep" && strings.Contains(result.Contents[0].Text, "a.txt:3:x") {
+				t.Fatalf("grep returned beyond limit: %q", result.Contents[0].Text)
+			}
+		})
 	}
 }
 

@@ -61,6 +61,9 @@ func TestCaptureBudgetPublishesCapturedPrefixAndKeepsPreview(t *testing.T) {
 	if !spool.IsCaptureTruncated() {
 		t.Fatal("expected capture to stop at budget")
 	}
+	if spool.TotalBytes() != int64(len(data)) || spool.CaptureTruncatedTailPreview() != string(data[len(data)-previewTailBytes:]) {
+		t.Fatal("total bytes or truncated tail preview mismatch")
+	}
 	result := spool.Finish(false, "")
 	if !strings.Contains(result.Contents[0].Text, "Capture stopped at the local 71680-byte daemon budget") {
 		t.Fatalf("preview=%s", result.Contents[0].Text)
@@ -86,7 +89,7 @@ func TestCaptureBudgetPublishesCapturedPrefixAndKeepsPreview(t *testing.T) {
 	}
 }
 
-// COD-T-010
+// COD-T-125
 func TestOutputLeaseProtectsWorkspaceFromSweep(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
