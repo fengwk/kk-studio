@@ -11,8 +11,25 @@ import (
 // JSONLimits configures optional strict JSON limits. A zero limit is unlimited.
 type JSONLimits struct{ MaxBytes, MaxNestingDepth, MaxNumberLength int }
 
+// UTF8ByteLength returns the byte length of valid UTF-8 text.
+func UTF8ByteLength(value string) (int, error) {
+	if !utf8.ValidString(value) {
+		return 0, fmt.Errorf("must be valid Unicode")
+	}
+	return len(value), nil
+}
+
 // ValidateJSON validates JSON text without changing its original representation.
-func ValidateJSON(data []byte, limits JSONLimits) error {
+func ValidateJSON(input any, limits JSONLimits) error {
+	var data []byte
+	switch value := input.(type) {
+	case string:
+		data = []byte(value)
+	case []byte:
+		data = value
+	default:
+		return fmt.Errorf("must be a string")
+	}
 	if limits.MaxBytes > 0 && len(data) > limits.MaxBytes {
 		return fmt.Errorf("exceeds %d UTF-8 bytes", limits.MaxBytes)
 	}
@@ -86,8 +103,18 @@ func strictValue(dec *json.Decoder, limits JSONLimits, depth int) error {
 }
 
 func hasUnpairedSurrogate(data []byte) bool {
-	for i := 0; i+5 < len(data); i++ {
-		if data[i] != '\\' || data[i+1] != 'u' {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		if i+1 >= len(data) {
+			return false
+		}
+		if data[i+1] != 'u' {
+			i++
+			continue
+		}
+		if i+5 >= len(data) {
 			continue
 		}
 		code := hex4(data[i+2 : i+6])
@@ -95,18 +122,19 @@ func hasUnpairedSurrogate(data []byte) bool {
 			continue
 		}
 		if code >= 0xD800 && code <= 0xDBFF {
-			i += 5
-			if i+6 >= len(data) || data[i+1] != '\\' || data[i+2] != 'u' {
+			if i+11 >= len(data) || data[i+6] != '\\' || data[i+7] != 'u' {
 				return true
 			}
-			next := hex4(data[i+3 : i+7])
+			next := hex4(data[i+8 : i+12])
 			if next < 0xDC00 || next > 0xDFFF {
 				return true
 			}
-			i += 6
+			i += 11
+			continue
 		} else if code >= 0xDC00 && code <= 0xDFFF {
 			return true
 		}
+		i += 5
 	}
 	return false
 }

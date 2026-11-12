@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -23,7 +24,7 @@ func MarshalEnvelope(e *Envelope) ([]byte, error) {
 		return nil, fmt.Errorf("encode control envelope: %w", err)
 	}
 	if len(b) < 1 || len(b) > MaxFrameSize {
-		return nil, fmt.Errorf("control envelope exceeds %d bytes", MaxFrameSize)
+		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
 	}
 	return b, nil
 }
@@ -31,16 +32,30 @@ func MarshalEnvelope(e *Envelope) ([]byte, error) {
 // UnmarshalEnvelope decodes, rejects unknown fields and validates one control envelope.
 func UnmarshalEnvelope(b []byte) (*Envelope, error) {
 	if len(b) < 1 || len(b) > MaxFrameSize {
-		return nil, fmt.Errorf("invalid control envelope length")
+		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
 	}
 	e := new(Envelope)
-	if err := proto.Unmarshal(b, e); err != nil {
+	if err := (proto.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(b, e); err != nil {
 		return nil, fmt.Errorf("decode control envelope: %w", err)
 	}
 	if err := ValidateEnvelope(e); err != nil {
 		return nil, err
 	}
 	return e, nil
+}
+
+// ValidateUpgrade validates the optional daemon version advertised in HTTP 426 responses.
+func ValidateUpgrade(upgrade *UpgradeRequired) error {
+	if upgrade == nil {
+		return fmt.Errorf("upgradeRequired is required")
+	}
+	if err := checkUnknownAt(upgrade.ProtoReflect(), "upgradeRequired"); err != nil {
+		return err
+	}
+	if upgrade.TargetVersion == nil || !versionPattern.MatchString(upgrade.GetTargetVersion()) {
+		return fmt.Errorf("upgradeRequired.targetVersion has invalid syntax")
+	}
+	return nil
 }
 
 // ValidateEnvelope enforces protocol version, payload, scope, and protobuf unknown-field rules.
@@ -61,74 +76,73 @@ func ValidateEnvelope(e *Envelope) error {
 	if payload == nil || payload.Name() != fd.Name() {
 		return fmt.Errorf("message_type and payload mismatch")
 	}
+	payloadValue := reflect.ValueOf(e.Payload)
+	if payloadValue.Kind() != reflect.Pointer || payloadValue.IsNil() || payloadValue.Elem().Field(0).IsNil() {
+		return fmt.Errorf("envelope.%s is required", payload.Name())
+	}
 	if e.EnvironmentId == nil || !canonicalUUID.MatchString(e.GetEnvironmentId()) {
 		return fmt.Errorf("environment_id must be a canonical lowercase UUID")
 	}
-	invocationRequired := map[MessageType]bool{MessageType_INVOKE: true, MessageType_STARTED: true, MessageType_PROGRESS: true, MessageType_COMPLETED: true, MessageType_FAILED: true, MessageType_CANCEL: true, MessageType_CANCELLED: true, MessageType_RECOVER: true, MessageType_RECOVER_NOT_FOUND: true, MessageType_EXECUTION_EXITED: true}
-	if invocationRequired[e.MessageType] {
-		if e.InvocationId == nil || !canonicalUUID.MatchString(e.GetInvocationId()) {
-			return fmt.Errorf("invocation_id must be a canonical lowercase UUID")
-		}
-	} else if e.InvocationId != nil {
-		return fmt.Errorf("invocation_id is not allowed for %s", messageName)
+	if err := validateScope(e); err != nil {
+		return err
 	}
 	if err := checkUnknown(e.ProtoReflect()); err != nil {
 		return err
 	}
-	return validateJSONFields(e.ProtoReflect())
+	return validateMessage(e)
 }
 
 func toSnake(s string) string { return strings.ToLower(s) }
 
-func checkUnknown(m protoreflect.Message) error {
+func validateScope(e *Envelope) error {
+	switch e.MessageType {
+	case MessageType_SETTINGS, MessageType_READY, MessageType_HEARTBEAT, MessageType_RUNTIME_STATUS, MessageType_TEMPORARY_RESOURCE_POLICY, MessageType_UPDATE, MessageType_UPDATE_RESULT, MessageType_IDE_LEASE, MessageType_ENVIRONMENT_CONFIG:
+		if e.InvocationId != nil {
+			return fmt.Errorf("%s must not declare invocationId", e.MessageType)
+		}
+	case MessageType_INVOKE, MessageType_STARTED, MessageType_PROGRESS, MessageType_COMPLETED, MessageType_FAILED, MessageType_CANCEL, MessageType_CANCELLED, MessageType_RECOVER, MessageType_RECOVER_NOT_FOUND, MessageType_EXECUTION_EXITED, MessageType_RESOURCE_UPLOAD_REQUEST, MessageType_RESOURCE_UPLOAD_TICKET, MessageType_RESOURCE_UPLOAD_COMMIT, MessageType_RESOURCE_DOWNLOAD_REQUEST, MessageType_RESOURCE_DOWNLOAD_TICKET, MessageType_IDE_COMMAND, MessageType_IDE_RESULT:
+		if e.InvocationId == nil {
+			return fmt.Errorf("%s requires invocationId", e.MessageType)
+		}
+	}
+	if e.InvocationId != nil && (strings.TrimSpace(e.GetInvocationId()) == "" || utf16Length(e.GetInvocationId()) > 256) {
+		return fmt.Errorf("invocationId must be non-blank and at most 256 characters")
+	}
+	return nil
+}
+
+func checkUnknown(m protoreflect.Message) error { return checkUnknownAt(m, "envelope") }
+
+func checkUnknownAt(m protoreflect.Message, path string) error {
 	if len(m.GetUnknown()) != 0 {
-		return fmt.Errorf("unknown protobuf fields are not allowed")
+		return fmt.Errorf("%s contains unknown protobuf fields", path)
 	}
 	var err error
 	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		if fd.Kind() != protoreflect.MessageKind {
 			return true
 		}
-		if fd.IsList() {
+		next := path + "." + string(fd.Name())
+		if fd.IsMap() {
+			if fd.MapValue().Kind() != protoreflect.MessageKind {
+				return true
+			}
+			v.Map().Range(func(key protoreflect.MapKey, mv protoreflect.Value) bool {
+				err = checkUnknownAt(mv.Message(), fmt.Sprintf("%s[%v]", next, key.Interface()))
+				return err == nil
+			})
+		} else if fd.IsList() {
 			l := v.List()
 			for i := 0; i < l.Len(); i++ {
-				if e := checkUnknown(l.Get(i).Message()); e != nil {
+				if e := checkUnknownAt(l.Get(i).Message(), fmt.Sprintf("%s[%d]", next, i)); e != nil {
 					err = e
 					return false
 				}
 			}
-		} else if fd.IsMap() {
-			v.Map().Range(func(_ protoreflect.MapKey, mv protoreflect.Value) bool {
-				err = checkUnknown(mv.Message())
-				return err == nil
-			})
 		} else {
-			err = checkUnknown(v.Message())
+			err = checkUnknownAt(v.Message(), next)
 		}
 		return err == nil
-	})
-	return err
-}
-
-func validateJSONFields(m protoreflect.Message) error {
-	var err error
-	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-		if fd.Kind() == protoreflect.StringKind && strings.HasSuffix(string(fd.Name()), "_json") {
-			text := v.String()
-			if text == "" {
-				err = fmt.Errorf("%s must be valid JSON", fd.Name())
-				return false
-			}
-			if e := ValidateJSON([]byte(text), JSONLimits{MaxBytes: 1 << 20}); e != nil {
-				err = fmt.Errorf("%s: %w", fd.Name(), e)
-				return false
-			}
-		}
-		if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() {
-			err = validateJSONFields(v.Message())
-			return err == nil
-		}
-		return true
 	})
 	return err
 }

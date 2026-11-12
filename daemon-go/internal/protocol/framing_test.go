@@ -31,3 +31,29 @@ func TestFrame_BoundsAndRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TRN-T-156
+func TestFrame_StreamIO(t *testing.T) {
+	payload := []byte{0x7b, 0x7d}
+	var framed bytes.Buffer
+	if err := WriteFrame(&framed, payload); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFrame(&framed)
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Fatalf("ReadFrame=%x err=%v", got, err)
+	}
+	if _, err = ReadFrame(bytes.NewReader([]byte{0, 0, 0})); err == nil {
+		t.Fatal("truncated prefix accepted")
+	}
+	if _, err = ReadFrame(bytes.NewReader([]byte{0, 0, 0, 2, 0})); err == nil {
+		t.Fatal("truncated payload accepted")
+	}
+	if err = WriteFrame(zeroWriter{}, payload); err == nil {
+		t.Fatal("short write accepted")
+	}
+}
+
+type zeroWriter struct{}
+
+func (zeroWriter) Write([]byte) (int, error) { return 0, nil }

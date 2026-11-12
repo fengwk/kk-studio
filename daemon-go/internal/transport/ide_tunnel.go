@@ -25,6 +25,10 @@ func (c *ControlConnection) handleIDE(w http.ResponseWriter, r *http.Request) {
 	}
 	mode := "http"
 	if r.Method == http.MethodConnect {
+		if r.Header.Get(":protocol") != "websocket" {
+			http.Error(w, "unsupported CONNECT protocol", http.StatusBadRequest)
+			return
+		}
 		mode = "websocket"
 	}
 	up, err := c.resolver.ResolveView(r.Context(), ViewRequest{ViewID: id, BindingEpoch: epoch, Mode: mode, Method: r.Method, Path: subpath, Headers: r.Header.Clone()})
@@ -35,6 +39,9 @@ func (c *ControlConnection) handleIDE(w http.ResponseWriter, r *http.Request) {
 	if up.Release != nil {
 		defer up.Release()
 	}
+	upCtx, cancel := upstreamContext(r.Context(), up.Context)
+	defer cancel()
+	r = r.WithContext(upCtx)
 	if err := validateViewUpstream(up); err != nil {
 		http.Error(w, "invalid IDE upstream", http.StatusBadGateway)
 		return
@@ -75,15 +82,29 @@ func resolverStatus(err error) int {
 	return http.StatusBadGateway
 }
 
+func upstreamContext(parent, upstream context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	if upstream == nil {
+		return ctx, cancel
+	}
+	stop := context.AfterFunc(upstream, cancel)
+	return ctx, func() { stop(); cancel() }
+}
+
 func validateViewUpstream(up ViewUpstream) error {
-	ip := net.ParseIP(strings.Trim(up.Host, "[]"))
-	if ip == nil || !ip.IsLoopback() || (ip.To4() == nil && !ip.Equal(net.ParseIP("::1"))) || up.Port < 1 || up.Port > 65535 {
+	host := up.Host
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	ip := net.ParseIP(host)
+	loopback := host == "::1" || ip != nil && !strings.Contains(host, ":") && ip.To4() != nil && ip.IsLoopback()
+	if !loopback || up.Port < 1 || up.Port > 65535 {
 		return fmt.Errorf("invalid loopback upstream")
 	}
 	if up.Path == "" || !strings.HasPrefix(up.Path, "/") || strings.HasPrefix(up.Path, "//") {
 		return fmt.Errorf("invalid upstream path")
 	}
-	if strings.ContainsAny(up.Path, "\r\n\\") {
+	if hasUnsafeHeaderCharacter(up.Path) {
 		return fmt.Errorf("invalid upstream path")
 	}
 	for k, values := range up.Headers {
@@ -91,20 +112,29 @@ func validateViewUpstream(up ViewUpstream) error {
 			return fmt.Errorf("invalid upstream header")
 		}
 		for _, v := range values {
-			if strings.ContainsAny(v, "\r\n") {
+			if hasUnsafeHeaderCharacter(v) {
 				return fmt.Errorf("invalid upstream header")
 			}
 		}
 	}
-	if strings.ContainsAny(up.Cookie, "\r\n") {
+	if hasUnsafeHeaderCharacter(up.Cookie) {
 		return fmt.Errorf("invalid upstream cookie")
 	}
 	for _, p := range up.Protocols {
-		if p == "" || strings.ContainsAny(p, " \t\r\n,") {
+		if !validHeaderName(p) {
 			return fmt.Errorf("invalid protocol")
 		}
 	}
 	return nil
+}
+
+func hasUnsafeHeaderCharacter(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 func validHeaderName(s string) bool {
@@ -194,21 +224,29 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 	if r.URL.RawQuery != "" {
 		path += "?" + r.URL.RawQuery
 	}
-	var req strings.Builder
-	fmt.Fprintf(&req, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n", path, addr)
-	for k, vs := range up.Headers {
-		for _, v := range vs {
-			fmt.Fprintf(&req, "%s: %s\r\n", k, v)
+	targetURL := "http://" + addr + path
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+	if err != nil {
+		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
+		return
+	}
+	req.Host = addr
+	req.Header = cloneEndToEndHeaders(up.Headers)
+	req.Header.Del("Host")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	if up.Cookie != "" {
+		req.Header.Set("Cookie", up.Cookie)
+	}
+	for _, name := range []string{"Sec-WebSocket-Key", "Sec-WebSocket-Version", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"} {
+		if values := r.Header.Values(name); len(values) > 0 {
+			req.Header[name] = append([]string(nil), values...)
 		}
 	}
-	if up.Cookie != "" {
-		fmt.Fprintf(&req, "Cookie: %s\r\n", up.Cookie)
+	if len(up.Protocols) > 0 && req.Header.Get("Sec-WebSocket-Protocol") == "" {
+		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(up.Protocols, ", "))
 	}
-	if len(up.Protocols) > 0 {
-		fmt.Fprintf(&req, "Sec-WebSocket-Protocol: %s\r\n", strings.Join(up.Protocols, ", "))
-	}
-	req.WriteString("\r\n")
-	if _, err = io.WriteString(upstream, req.String()); err != nil {
+	if err = req.Write(upstream); err != nil {
 		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
 		return
 	}
@@ -250,7 +288,12 @@ type responseBodyWriter struct {
 
 func (p *responseBodyWriter) Read(b []byte) (int, error)  { return p.reader.Read(b) }
 func (p *responseBodyWriter) Write(b []byte) (int, error) { return p.writer.Write(b) }
-func (*responseBodyWriter) Close() error                  { return nil }
+func (p *responseBodyWriter) Close() error {
+	if closer, ok := p.reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
 
 type bufferedConn struct {
 	net.Conn

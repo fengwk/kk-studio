@@ -11,7 +11,7 @@ const MaxFrameSize = 16 << 20
 // EncodeFrame encodes one non-empty control envelope payload with its wire prefix.
 func EncodeFrame(payload []byte) ([]byte, error) {
 	if len(payload) < 1 || len(payload) > MaxFrameSize {
-		return nil, fmt.Errorf("control frame length must be in 1..%d bytes", MaxFrameSize)
+		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
 	}
 	frame := make([]byte, 4+len(payload))
 	binary.BigEndian.PutUint32(frame, uint32(len(payload)))
@@ -22,14 +22,14 @@ func EncodeFrame(payload []byte) ([]byte, error) {
 // DecodeFrame accepts exactly one complete control frame.
 func DecodeFrame(frame []byte) ([]byte, error) {
 	if len(frame) < 4 {
-		return nil, fmt.Errorf("incomplete control frame prefix")
+		return nil, fmt.Errorf("control frame must contain a 4-byte length prefix")
 	}
 	n := binary.BigEndian.Uint32(frame[:4])
 	if n < 1 || n > MaxFrameSize {
-		return nil, fmt.Errorf("invalid control frame length %d", n)
+		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
 	}
 	if uint64(len(frame)) != uint64(n)+4 {
-		return nil, fmt.Errorf("control frame length mismatch")
+		return nil, fmt.Errorf("control frame length does not match its prefix")
 	}
 	return frame[4:], nil
 }
@@ -42,7 +42,7 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 	}
 	n := binary.BigEndian.Uint32(prefix[:])
 	if n < 1 || n > MaxFrameSize {
-		return nil, fmt.Errorf("invalid control frame length %d", n)
+		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
 	}
 	payload := make([]byte, int(n))
 	if _, err := io.ReadFull(r, payload); err != nil {

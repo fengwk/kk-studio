@@ -23,7 +23,10 @@ import (
 type DialConfig struct {
 	Applied              config.DaemonConfig
 	InstanceID, Platform string
+	NoProxyHosts         string
 	ReadToken            func(string) (string, error)
+	OnUpgradeFailed      func(int, *protocol.UpgradeRequired)
+	OnGoaway             func(uint32)
 	Resolver             ViewResolver
 }
 
@@ -34,13 +37,15 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 		return nil, err
 	}
 	studio, err := url.Parse(c.Applied.StudioURL)
-	if err != nil {
+	if err != nil || studio.Host == "" || studio.Opaque != "" {
 		return nil, fmt.Errorf("invalid studio URL")
 	}
 	scheme := "ws"
-	if studio.Scheme == "https" {
+	switch strings.ToLower(studio.Scheme) {
+	case "https":
 		scheme = "wss"
-	} else if studio.Scheme != "http" {
+	case "http":
+	default:
 		return nil, fmt.Errorf("invalid studio URL")
 	}
 	wsURL := scheme + "://" + studio.Host + "/ws/daemon"
@@ -48,7 +53,7 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	if c.Applied.ProxyURL != nil {
 		proxyText = *c.Applied.ProxyURL
 	}
-	policy, err := NewProxyPolicy(proxyText, "")
+	policy, err := NewProxyPolicy(proxyText, c.NoProxyHosts)
 	if err != nil {
 		return nil, err
 	}
@@ -64,13 +69,26 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	ws, resp, err := websocket.Dial(ctx, wsURL, options)
 	if err != nil {
 		if resp != nil {
+			var upgrade *protocol.UpgradeRequired
+			if resp.StatusCode == http.StatusUpgradeRequired && resp.Body != nil {
+				body, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+				if readErr == nil && len(body) > 0 && len(body) <= 1<<20 {
+					candidate := new(protocol.UpgradeRequired)
+					if proto.Unmarshal(body, candidate) == nil && protocol.ValidateUpgrade(candidate) == nil {
+						upgrade = candidate
+					}
+				}
+			}
+			if c.OnUpgradeFailed != nil {
+				c.OnUpgradeFailed(resp.StatusCode, upgrade)
+			}
 			return nil, fmt.Errorf("daemon websocket handshake failed with status %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("daemon websocket handshake failed: %w", err)
 	}
-	ws.SetReadLimit(1 << 20)
 	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
-	cc := newControlConnection(conn, c.Resolver)
+	ws.SetReadLimit(int64(protocol.MaxFrameSize + 4))
+	cc := newControlConnection(conn, c.Resolver, c.OnGoaway)
 	return cc, nil
 }
 
@@ -89,6 +107,11 @@ func readRegistrationToken(path string, read func(string) (string, error)) (stri
 	return strings.TrimSpace(string(b)), nil
 }
 
+const (
+	controlStreamTimeout = 10 * time.Second
+	inboundIdleTimeout   = 45 * time.Second
+)
+
 type ControlConnection struct {
 	conn          net.Conn
 	server        *http.Server
@@ -97,14 +120,23 @@ type ControlConnection struct {
 	readMu        sync.Mutex
 	writeMu       sync.Mutex
 	closed        chan struct{}
+	stopControl   chan struct{}
 	closeOnce     sync.Once
+	closeErr      error
 	controlReady  chan struct{}
 	controlStream io.ReadWriteCloser
 	resolver      ViewResolver
+	goaway        chan uint32
+	onGoaway      func(uint32)
 }
 
-func newControlConnection(conn net.Conn, resolver ViewResolver) *ControlConnection {
-	cc := &ControlConnection{conn: conn, closed: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver}
+func newControlConnection(conn net.Conn, resolver ViewResolver, onGoaway func(uint32)) *ControlConnection {
+	cc := &ControlConnection{closed: make(chan struct{}), stopControl: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver, onGoaway: onGoaway}
+	cc.conn = &idleConn{Conn: conn, timeout: inboundIdleTimeout, observer: &h2FrameObserver{}, onGoaway: cc.signalGoaway}
+	if onGoaway != nil {
+		cc.goaway = make(chan uint32, 1)
+		go cc.forwardGoaway()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/control", cc.handleControl)
 	mux.HandleFunc("/ide/", cc.handleIDE)
@@ -113,8 +145,9 @@ func newControlConnection(conn net.Conn, resolver ViewResolver) *ControlConnecti
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	cc.server.Protocols = protocols
-	cc.listener = &singleConnListener{conn: conn}
+	cc.listener = &singleConnListener{conn: cc.conn, closed: make(chan struct{})}
 	go func() { _ = cc.server.Serve(cc.listener) }()
+	go cc.awaitInitialControlStream(controlStreamTimeout)
 	return cc
 }
 
@@ -138,7 +171,52 @@ func (c *ControlConnection) handleControl(w http.ResponseWriter, r *http.Request
 	close(c.controlReady)
 	c.mu.Unlock()
 	pipe.flush()
-	<-r.Context().Done()
+	select {
+	case <-r.Context().Done():
+		go c.Close()
+	case <-c.stopControl:
+	case <-c.closed:
+	}
+}
+
+func (c *ControlConnection) signalGoaway(code uint32) {
+	if c.goaway == nil {
+		return
+	}
+	select {
+	case c.goaway <- code:
+	default:
+	}
+}
+
+func (c *ControlConnection) forwardGoaway() {
+	for {
+		select {
+		case code := <-c.goaway:
+			c.onGoaway(code)
+		case <-c.closed:
+			return
+		}
+	}
+}
+
+func (c *ControlConnection) awaitInitialControlStream(timeout time.Duration) {
+	if !waitForControlStream(timeout, c.controlReady, c.closed) {
+		_ = c.Close()
+	}
+}
+
+func waitForControlStream(timeout time.Duration, ready, closed <-chan struct{}) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		return true
+	case <-closed:
+		return false
+	case <-timer.C:
+		return false
+	}
 }
 
 // Receive reads and validates the next control envelope.
@@ -157,9 +235,15 @@ func (c *ControlConnection) Receive(ctx context.Context) (*protocol.Envelope, er
 	}
 	b, err := protocol.ReadFrame(stream)
 	if err != nil {
+		_ = c.Close()
 		return nil, err
 	}
-	return protocol.UnmarshalEnvelope(b)
+	e, err := protocol.UnmarshalEnvelope(b)
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return e, nil
 }
 
 // Send validates and writes one control envelope.
@@ -194,17 +278,22 @@ func (c *ControlConnection) awaitControl(ctx context.Context) error {
 	}
 }
 
-// Close shuts down HTTP/2 before terminating the WebSocket transport.
+// Close gracefully ends HTTP/2 before terminating the WebSocket transport.
 func (c *ControlConnection) Close() error {
-	var err error
 	c.closeOnce.Do(func() {
+		close(c.stopControl)
 		close(c.closed)
-		err = c.server.Close()
-		if e := c.conn.Close(); err == nil {
-			err = e
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		c.closeErr = c.server.Shutdown(ctx)
+		if c.closeErr != nil {
+			c.closeErr = c.server.Close()
+		}
+		if err := c.conn.Close(); c.closeErr == nil {
+			c.closeErr = err
 		}
 	})
-	return err
+	return c.closeErr
 }
 
 type controlPipe struct {
@@ -218,9 +307,10 @@ func (p *controlPipe) Write(b []byte) (int, error) { n, e := p.writer.Write(b); 
 func (*controlPipe) Close() error                  { return nil }
 
 type singleConnListener struct {
-	conn   net.Conn
-	once   sync.Once
-	closed chan struct{}
+	conn      net.Conn
+	once      sync.Once
+	closeOnce sync.Once
+	closed    chan struct{}
 }
 
 func (l *singleConnListener) Accept() (net.Conn, error) {
@@ -233,14 +323,7 @@ func (l *singleConnListener) Accept() (net.Conn, error) {
 	return nil, net.ErrClosed
 }
 func (l *singleConnListener) Close() error {
-	if l.closed == nil {
-		l.closed = make(chan struct{})
-	}
-	select {
-	case <-l.closed:
-	default:
-		close(l.closed)
-	}
+	l.closeOnce.Do(func() { close(l.closed) })
 	return nil
 }
 func (*singleConnListener) Addr() net.Addr { return dummyAddr("websocket") }
@@ -250,4 +333,45 @@ type dummyAddr string
 func (a dummyAddr) Network() string { return string(a) }
 func (a dummyAddr) String() string  { return string(a) }
 
-var _ = proto.Size
+type idleConn struct {
+	net.Conn
+	timeout      time.Duration
+	mu           sync.Mutex
+	readDeadline time.Time
+	observer     *h2FrameObserver
+	onGoaway     func(uint32)
+}
+
+func (c *idleConn) SetReadDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.readDeadline = deadline
+	defer c.mu.Unlock()
+	return c.updateReadDeadline()
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	c.mu.Lock()
+	err := c.updateReadDeadline()
+	c.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	n, err := c.Conn.Read(p)
+	if n > 0 && c.observer != nil {
+		c.observer.feed(p[:n], c.onGoaway)
+	}
+	if n > 0 {
+		c.mu.Lock()
+		_ = c.updateReadDeadline()
+		c.mu.Unlock()
+	}
+	return n, err
+}
+
+func (c *idleConn) updateReadDeadline() error {
+	deadline := time.Now().Add(c.timeout)
+	if !c.readDeadline.IsZero() && c.readDeadline.Before(deadline) {
+		deadline = c.readDeadline
+	}
+	return c.Conn.SetReadDeadline(deadline)
+}

@@ -17,6 +17,7 @@ type ViewRequest struct {
 
 // ViewUpstream is a validated loopback destination returned by the authoritative IDE service.
 type ViewUpstream struct {
+	Context   context.Context
 	Host      string
 	Port      int
 	Path      string
