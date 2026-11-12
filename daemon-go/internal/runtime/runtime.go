@@ -349,7 +349,7 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		return r.handleEnvironmentConfig(ctx, e)
 	case protocol.MessageType_INVOKE:
 		if !ready {
-			return r.sendError(e.InvocationId, "INVOKE requires a READY bound connection")
+			return r.sendBoundError(e.InvocationId, "INVOKE requires a READY bound connection")
 		}
 		return r.handleInvoke(ctx, e)
 	case protocol.MessageType_CANCEL:
@@ -358,11 +358,11 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		return r.handleRecover(e)
 	case protocol.MessageType_UPDATE:
 		if !ready || e.EnvironmentId == nil || *e.EnvironmentId == "" {
-			return r.sendError(e.InvocationId, "UPDATE requires a READY bound connection")
+			return r.sendBoundError(e.InvocationId, "UPDATE requires a READY bound connection")
 		}
 		return r.handleUpdate(ctx, e)
 	default:
-		return r.sendError(e.InvocationId, "unsupported inbound message type")
+		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
 }
 
@@ -394,11 +394,11 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envelope) error {
 	payload, ok := e.Payload.(*protocol.Envelope_EnvironmentConfig)
 	if !ok || payload.EnvironmentConfig == nil || payload.EnvironmentConfig.Config == nil || payload.EnvironmentConfig.Version == nil {
-		return r.sendError(nil, "environment configuration is invalid")
+		return r.sendBoundError(nil, "environment configuration is invalid")
 	}
 	version := payload.EnvironmentConfig.GetVersion()
 	if version < 0 {
-		return r.sendError(nil, "environment configuration is invalid")
+		return r.sendBoundError(nil, "environment configuration is invalid")
 	}
 	r.mu.RLock()
 	previous := r.config
@@ -436,10 +436,10 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		candidate, err = r.options.ApplyConfig(ctx, version, payload.EnvironmentConfig.Config)
 		if err != nil {
 			if !ready {
-				_ = r.sendError(nil, "environment configuration could not be applied")
+				_ = r.sendBoundError(nil, "environment configuration could not be applied")
 				return nil
 			}
-			return r.sendError(nil, "environment configuration could not be applied")
+			return r.sendBoundError(nil, "environment configuration could not be applied")
 		}
 	}
 	if candidate.EnvironmentID != "" && candidate.EnvironmentID != r.options.EnvironmentID {
@@ -1067,6 +1067,9 @@ func (r *Runtime) sendExecutionExited(id string) error {
 	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_EXECUTION_EXITED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_ExecutionExited{ExecutionExited: &protocol.ExecutionExited{}}}, false)
 }
 func (r *Runtime) sendError(id *string, message string) error {
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_ERROR, InvocationId: id, Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: stringPtr(message)}}}, true)
+}
+func (r *Runtime) sendBoundError(id *string, message string) error {
 	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_ERROR, InvocationId: id, Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: stringPtr(message)}}}, false)
 }
 func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {

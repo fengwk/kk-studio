@@ -36,8 +36,11 @@ func TestRuntimeOutboundFrameReadinessClasses(t *testing.T) {
 	if err := runtime.sendStarted("call", false); err != nil {
 		t.Fatalf("bound invocation frame was blocked before READY: %v", err)
 	}
-	if err := runtime.sendError(nil, "configuration is invalid"); err != nil {
-		t.Fatalf("bound error frame was blocked before READY: %v", err)
+	if err := runtime.sendError(nil, "extension failed"); err == nil {
+		t.Fatal("READY-only extension error was sent before READY")
+	}
+	if err := runtime.sendBoundError(nil, "configuration is invalid"); err != nil {
+		t.Fatalf("protocol error was blocked before READY: %v", err)
 	}
 	if err := runtime.sendStatus(); err != nil {
 		t.Fatalf("bound status frame was blocked before READY: %v", err)
@@ -63,6 +66,13 @@ func TestRuntimeOutboundFrameReadinessClasses(t *testing.T) {
 	}
 	cancel()
 	<-done
+	runtime.mu.Lock()
+	runtime.ready = true
+	runtime.mu.Unlock()
+	runtime.gate.MarkReady()
+	if err := runtime.sendError(nil, "extension failed"); err != nil {
+		t.Fatalf("READY extension error was blocked: %v", err)
+	}
 }
 
 // RUN-T-106 limits pre-READY recovery to real in-flight calls while still accepting cancellation of those calls.
