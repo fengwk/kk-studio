@@ -328,6 +328,7 @@ create table harness_entry (
     constraint ck_harness_entry_type check (
         entry_type in (
             'ROOT',
+            'SYSTEM',
             'TURN_START',
             'MESSAGE',
             'MODEL_ATTEMPT_FAILURE',
@@ -355,7 +356,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/SYSTEM/TURN_START/MESSAGE/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
 comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';

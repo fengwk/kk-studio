@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -94,6 +95,8 @@ class HistoryEntryPayloadJsonCodecTest {
   void roundTripsAllPayloadTypes() {
     BranchSettings settings = settings();
     EntryPayload root = new RootPayload(settings);
+    EntryPayload system =
+        new SystemPayload(Map.of("agent", "<agent>hello</agent>"), List.of(), List.of(), true);
     EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings, OWNER_THREAD_ID);
     EntryPayload user =
         new MessagePayload(
@@ -149,6 +152,7 @@ class HistoryEntryPayloadJsonCodecTest {
     for (EntryPayload payload :
         List.of(
             root,
+            system,
             turnStart,
             user,
             assistant,

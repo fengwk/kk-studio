@@ -7,6 +7,7 @@ package fun.fengwk.kkstudio.harness.api.history;
  */
 public sealed interface EntryPayload
     permits RootPayload,
+        SystemPayload,
         TurnStartPayload,
         MessagePayload,
         ModelAttemptFailurePayload,

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -55,8 +56,10 @@ import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -81,6 +84,8 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> ROOT_FIELDS = orderedSet("settings");
+  private static final Set<String> SYSTEM_FIELDS =
+      orderedSet("sections", "addedTools", "removedTools", "baseline");
   private static final Set<String> TURN_START_FIELDS =
       orderedSet(
           "reason",
@@ -155,6 +160,7 @@ public final class HistoryEntryPayloadJsonCodec {
     Objects.requireNonNull(payload, "payload");
     return switch (payload) {
       case RootPayload value -> encodeRoot(value);
+      case SystemPayload value -> encodeSystem(value);
       case TurnStartPayload value -> encodeTurnStart(value);
       case MessagePayload value -> encodeMessage(value);
       case ModelAttemptFailurePayload value -> encodeModelAttemptFailure(value);
@@ -196,6 +202,7 @@ public final class HistoryEntryPayloadJsonCodec {
     Objects.requireNonNull(value, "value");
     return switch (type) {
       case ROOT -> decodeRoot(value);
+      case SYSTEM -> decodeSystem(value);
       case TURN_START -> decodeTurnStart(value);
       case MESSAGE -> decodeMessage(value);
       case MODEL_ATTEMPT_FAILURE -> decodeModelAttemptFailure(value);
@@ -216,6 +223,18 @@ public final class HistoryEntryPayloadJsonCodec {
   private static ObjectNode encodeRoot(RootPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
+    return node;
+  }
+
+  private static ObjectNode encodeSystem(SystemPayload value) {
+    ObjectNode node = NODES.objectNode();
+    ObjectNode sections = node.putObject("sections");
+    value.sections().forEach(sections::put);
+    ArrayNode added = node.putArray("addedTools");
+    value.addedTools().forEach(binding -> added.add(TOOL_BINDING_CODEC.encodeNode(binding)));
+    ArrayNode removed = node.putArray("removedTools");
+    value.removedTools().forEach(removed::add);
+    node.put("baseline", value.baseline());
     return node;
   }
 
@@ -476,6 +495,44 @@ public final class HistoryEntryPayloadJsonCodec {
     JsonCodecSupport.requireFields(node, ROOT_FIELDS, "ROOT");
     return new RootPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "ROOT.settings"));
+  }
+
+  private static SystemPayload decodeSystem(JsonNode value) {
+    String context = "SYSTEM";
+    ObjectNode node = HistoryValueCodecs.requireObject(value, context);
+    JsonCodecSupport.requireFields(node, SYSTEM_FIELDS, context);
+    ObjectNode sectionNode =
+        HistoryValueCodecs.requireObject(node.get("sections"), context + ".sections");
+    Map<String, String> sections = new LinkedHashMap<>();
+    sectionNode
+        .properties()
+        .forEach(
+            entry -> {
+              if (!entry.getValue().isString() || entry.getValue().stringValue().isBlank()) {
+                throw new IllegalArgumentException("SYSTEM.sections values must be non-blank text");
+              }
+              sections.put(entry.getKey(), entry.getValue().stringValue());
+            });
+    ArrayNode added =
+        HistoryValueCodecs.requireArray(node.get("addedTools"), context + ".addedTools");
+    List<ToolBinding> addedTools = new ArrayList<>(added.size());
+    for (JsonNode item : added) {
+      addedTools.add(TOOL_BINDING_CODEC.decodeNode(item));
+    }
+    ArrayNode removed =
+        HistoryValueCodecs.requireArray(node.get("removedTools"), context + ".removedTools");
+    List<String> removedTools = new ArrayList<>(removed.size());
+    for (JsonNode item : removed) {
+      if (!item.isString()) {
+        throw new IllegalArgumentException("SYSTEM.removedTools[] must be text");
+      }
+      removedTools.add(item.stringValue());
+    }
+    if (!node.get("baseline").isBoolean()) {
+      throw new IllegalArgumentException("SYSTEM.baseline must be boolean");
+    }
+    return new SystemPayload(
+        sections, addedTools, removedTools, node.get("baseline").booleanValue());
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {
