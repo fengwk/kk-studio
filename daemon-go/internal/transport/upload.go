@@ -45,6 +45,9 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 	if u.Control == nil {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "control-unavailable", true, nil)
 	}
+	if err := ctx.Err(); err != nil {
+		return runtimeapi.ResultContent{}, uploadFailure("request", "cancelled", true, err)
+	}
 	if !transferIDPattern.MatchString(invocationID) {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
 	}
