@@ -330,7 +330,14 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 	}
 	if len(s.views)+len(s.reservations) >= s.maxViews {
 		s.mu.Unlock()
-		return nil, NewError("IDE view limit reached", "IDE_CAPACITY_EXCEEDED")
+		if err := s.awaitReady(ctx); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		if len(s.views)+len(s.reservations) >= s.maxViews {
+			s.mu.Unlock()
+			return nil, NewError("IDE view limit reached", "IDE_CAPACITY_EXCEEDED")
+		}
 	}
 	s.reservations[parsed.viewID] = struct{}{}
 	s.cancelIdleLocked()
@@ -386,7 +393,9 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 	registered, registerErr := s.manager.RegisterView(ctx, parsed.viewID, epoch, workspacePath)
 	if registerErr != nil || registered == nil || registered.State != ManagedViewOpen || registered.BindingEpoch != strconv.FormatInt(epoch, 10) || registered.WorkspacePath != workspacePath || s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
 		reason := registerErr
-		if reason == nil {
+		if s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
+			reason = NewError("code-server generation changed during view registration", "BUSY")
+		} else if reason == nil {
 			reason = NewError("managed view registration drifted", "CLEANUP_FAILED")
 		}
 		cleanupFailed := false
@@ -396,14 +405,16 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 		} else if s.currentCrashEpoch() == crashAtStart {
 			cleanupFailed = true
 		}
-		if cleanupFailed {
+		s.mu.Lock()
+		retainForCrash := s.crashEpoch != crashAtStart && (s.crashRecovery != nil || s.crashUnconverged)
+		if cleanupFailed || retainForCrash {
 			view := &viewRecord{viewID: parsed.viewID, browserSession: parsed.browserSession, eventNode: parsed.eventNode, connectionID: parsed.connectionID, claimID: parsed.claimID, bindingEpoch: epoch, directory: directory, workspacePath: workspacePath, state: viewClosing, cleanupFailed: true, createdAt: s.scheduler.Now(), streams: make(map[*activeIdeStream]struct{}), sessionGeneration: session.Generation}
-			s.mu.Lock()
 			_, _ = s.commitRevisionLocked()
 			s.views[view.viewID] = view
 			s.mu.Unlock()
 			s.emit(IdeServiceEvent{Kind: "cleanup-failed", ViewID: view.viewID, Message: "failed view registration could not be cleaned up"})
 		} else {
+			s.mu.Unlock()
 			_ = os.Remove(workspacePath)
 		}
 		return nil, reason
@@ -1422,6 +1433,19 @@ func (s *Service) processExited(_ uint64) {
 }
 
 func (s *Service) releaseInvalidatedViews(views []*viewRecord) {
+	s.mu.Lock()
+	seen := make(map[*viewRecord]struct{}, len(views))
+	for _, view := range views {
+		seen[view] = struct{}{}
+	}
+	for _, view := range s.views {
+		if view.state == viewClosing {
+			if _, ok := seen[view]; !ok {
+				views = append(views, view)
+			}
+		}
+	}
+	s.mu.Unlock()
 	for _, view := range views {
 		s.mu.Lock()
 		present := s.views[view.viewID] == view
