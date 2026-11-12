@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.ModelImageCountLimitResolver;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -148,7 +149,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             uploadService,
             refManager,
             blobManager,
-            SYSTEM_SETTINGS);
+            SYSTEM_SETTINGS,
+            unknownImageCountLimitResolver());
   }
 
   /** Chat NEW_SESSION preflight 建立归属边并保留命令；Issue+Agent 直接命令被拒绝。 */
@@ -163,7 +165,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight chatPreflight = acceptAndCapturePreflight(CHAT_OWNER, chatCommand);
     List<NewThreadCommand> chatPrepared =
         chatPreflight.prepare(
-            new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of());
+            new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of(), SETTINGS);
 
     assertSame(setAgent, chatPrepared.getFirst());
     assertEquals(user.idempotencyKey(), chatPrepared.get(1).idempotencyKey());
@@ -257,7 +259,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     List<NewThreadCommand> prepared =
         captor
             .getValue()
-            .prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
+            .prepare(
+                new Session(SESSION_ID, "session", NOW), command.commands(), List.of(), SETTINGS);
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     ResourceMessageContent resource =
@@ -370,7 +373,10 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () ->
             chatPreflight.prepare(
-                new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
+                new Session(SESSION_ID, "session", NOW),
+                chatCommand.commands(),
+                List.of(),
+                SETTINGS));
 
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID))
         .thenThrow(new DataIntegrityViolationException("duplicate session owner"));
@@ -378,7 +384,10 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () ->
             chatPreflight.prepare(
-                new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
+                new Session(SESSION_ID, "session", NOW),
+                chatCommand.commands(),
+                List.of(),
+                SETTINGS));
   }
 
   @Test
@@ -392,7 +401,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     List<NewThreadCommand> prepared =
-        preflight.prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
+        preflight.prepare(
+            new Session(SESSION_ID, "session", NOW), command.commands(), List.of(), SETTINGS);
 
     NewThreadCommand durable = prepared.getFirst();
     assertEquals(raw.idempotencyKey(), durable.idempotencyKey());
@@ -491,7 +501,10 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 DomainException.class,
                 () ->
                     preflight.prepare(
-                        new Session(SESSION_ID, "session", NOW), command.commands(), List.of()))
+                        new Session(SESSION_ID, "session", NOW),
+                        command.commands(),
+                        List.of(),
+                        SETTINGS))
             .code());
 
     doThrow(DomainException.conflict("STORAGE_VERIFICATION", "upload is pending"))
@@ -502,7 +515,10 @@ class HarnessCommandAcceptanceOrchestratorTest {
             DomainException.class,
             () ->
                 preflight.prepare(
-                    new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
+                    new Session(SESSION_ID, "session", NOW),
+                    command.commands(),
+                    List.of(),
+                    SETTINGS));
     assertEquals(DomainErrorCode.CONFLICT, conflict.code());
     assertEquals("STORAGE_VERIFICATION", conflict.reason());
     verify(refManager, never()).retainRef(any(), any());
@@ -525,12 +541,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 DomainException.class,
                 () ->
                     preflight.prepare(
-                        new Session(SESSION_ID, "session", NOW), command.commands(), List.of()))
+                        new Session(SESSION_ID, "session", NOW),
+                        command.commands(),
+                        List.of(),
+                        SETTINGS))
             .code());
 
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(true);
     List<NewThreadCommand> prepared =
-        preflight.prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
+        preflight.prepare(
+            new Session(SESSION_ID, "session", NOW), command.commands(), List.of(), SETTINGS);
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     assertSame(resource, payload.message().contents().getFirst());
@@ -567,7 +587,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             uploadService,
             refManager,
             blobManager,
-            SYSTEM_SETTINGS);
+            SYSTEM_SETTINGS,
+            unknownImageCountLimitResolver());
     assertThrows(IllegalStateException.class, () -> ambiguous.accept(ISSUE_AGENT_OWNER, command));
     verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
     verify(duplicate, never()).lockForAcceptance(any(), any());
@@ -581,7 +602,13 @@ class HarnessCommandAcceptanceOrchestratorTest {
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                null, runtimes, uploadService, refManager, blobManager, SYSTEM_SETTINGS));
+                null,
+                runtimes,
+                uploadService,
+                refManager,
+                blobManager,
+                SYSTEM_SETTINGS,
+                unknownImageCountLimitResolver()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -591,7 +618,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 null,
                 refManager,
                 blobManager,
-                SYSTEM_SETTINGS));
+                SYSTEM_SETTINGS,
+                unknownImageCountLimitResolver()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -601,7 +629,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 uploadService,
                 refManager,
                 null,
-                SYSTEM_SETTINGS));
+                SYSTEM_SETTINGS,
+                unknownImageCountLimitResolver()));
     assertThrows(
         NullPointerException.class,
         () -> service.accept(null, newSession(THREAD_ID, user(new TextMessageContent("null")))));
@@ -622,7 +651,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
         preflight.prepare(
             new Session(NEW_SESSION_ID, "forked", NOW),
             command.commands(),
-            List.of(copiedResourceEntry(), copiedToolResultEntry()));
+            List.of(copiedResourceEntry(), copiedToolResultEntry()),
+            SETTINGS);
 
     assertEquals(1, prepared.size());
     verify(chatSessionRepository).insert(NEW_SESSION_ID, CHAT_ID);
@@ -645,7 +675,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
         reusePreflight.prepare(
             new Session(NEW_SESSION_ID, "forked", NOW),
             reuse.commands(),
-            List.of(copiedResourceEntry()));
+            List.of(copiedResourceEntry()),
+            SETTINGS);
     assertEquals(1, prepared.size());
 
     AcceptCommandsCommand foreign =
@@ -659,7 +690,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
                     foreignPreflight.prepare(
                         new Session(NEW_SESSION_ID, "forked", NOW),
                         foreign.commands(),
-                        List.of(copiedResourceEntry())))
+                        List.of(copiedResourceEntry()),
+                        SETTINGS))
             .code());
 
     verify(refManager, never()).retainRef(NEW_SESSION_ID, FOREIGN_BLOB_ID);
@@ -787,7 +819,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     return assertInstanceOf(
         UserMessageCommandPayload.class,
         preflight
-            .prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of())
+            .prepare(
+                new Session(SESSION_ID, "session", NOW), command.commands(), List.of(), SETTINGS)
             .getFirst()
             .payload());
   }
@@ -846,6 +879,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
     return new UUID(0L, value);
   }
 
+  private static ModelImageCountLimitResolver unknownImageCountLimitResolver() {
+    ModelImageCountLimitResolver resolver = mock(ModelImageCountLimitResolver.class);
+    when(resolver.resolve(any(BranchSettings.class))).thenReturn(null);
+    return resolver;
+  }
+
   private static SystemSettings withDefaultImageTier(ImageInputTier imageTier) {
     SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
     SystemSettings.StorageMedia media = defaults.storageMedia();
@@ -863,7 +902,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             media.thumbnailQuality(),
             imageTier,
             media.temporaryResourceTtlSeconds(),
-            media.temporaryResourceCleanupIntervalSeconds()),
+            media.temporaryResourceCleanupIntervalSeconds(),
+            media.maxImagesPerRequest()),
         defaults.advanced());
   }
 }

@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -68,6 +70,7 @@ public final class UserMessageContentPreparer {
   private final StorageBlobManager blobManager;
   private final ReadyAttachmentSource attachmentSource;
   private final Supplier<ImageInputTier> defaultImageTier;
+  private final IntSupplier maxImagesPerRequest;
 
   /**
    * @param defaultImageTier 未显式选择档位的图片使用的档位（系统设置 {@code media.imageTier} 的当前值）
@@ -76,15 +79,23 @@ public final class UserMessageContentPreparer {
       SessionBlobRefManager refManager,
       StorageBlobManager blobManager,
       ReadyAttachmentSource attachmentSource,
-      Supplier<ImageInputTier> defaultImageTier) {
+      Supplier<ImageInputTier> defaultImageTier,
+      IntSupplier maxImagesPerRequest) {
     this.refManager = Objects.requireNonNull(refManager, "refManager");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.attachmentSource = Objects.requireNonNull(attachmentSource, "attachmentSource");
     this.defaultImageTier = Objects.requireNonNull(defaultImageTier, "defaultImageTier");
+    this.maxImagesPerRequest = Objects.requireNonNull(maxImagesPerRequest, "maxImagesPerRequest");
   }
 
   /** 转换整个 batch 的 USER_MESSAGE 内容；非 USER_MESSAGE 命令原样保留。 */
   public List<NewThreadCommand> prepare(UUID sessionId, List<NewThreadCommand> commands) {
+    return prepare(sessionId, commands, null);
+  }
+
+  /** Applies the stricter of the user setting and known protocol limit to each incoming message. */
+  public List<NewThreadCommand> prepare(
+      UUID sessionId, List<NewThreadCommand> commands, Integer protocolMaxImages) {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(commands, "commands");
     List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
@@ -94,6 +105,17 @@ public final class UserMessageContentPreparer {
         continue;
       }
       AgentMessage message = user.message();
+      int imageLimit = maxImagesPerRequest.getAsInt();
+      if (imageLimit <= 0) {
+        throw new IllegalStateException("maxImagesPerRequest must be positive");
+      }
+      if (protocolMaxImages != null) {
+        if (protocolMaxImages <= 0) {
+          throw new IllegalArgumentException("protocolMaxImages must be positive");
+        }
+        imageLimit = Math.min(imageLimit, protocolMaxImages);
+      }
+      ImageLimitBudget imageBudget = new ImageLimitBudget(imageLimit);
       List<AgentMessageContent> contents = new ArrayList<>(message.contents().size());
       for (AgentMessageContent content : message.contents()) {
         if (content instanceof AttachmentMessageContent attachment) {
@@ -107,11 +129,66 @@ public final class UserMessageContentPreparer {
           contents.add(content);
         }
       }
+      List<AgentMessageContent> keptContents = truncateImages(contents, imageBudget);
+      if (imageBudget.dropped > 0) {
+        keptContents = new ArrayList<>(keptContents);
+        keptContents.add(
+            new TextMessageContent(
+                "Image limit: kept the first "
+                    + imageBudget.limit
+                    + " images and omitted "
+                    + imageBudget.dropped
+                    + " additional image(s) from this message before saving it to history."));
+      }
       prepared.add(
           command.withPayload(
-              new UserMessageCommandPayload(new AgentMessage(AgentMessageRole.USER, contents))));
+              new UserMessageCommandPayload(
+                  new AgentMessage(AgentMessageRole.USER, keptContents))));
     }
     return List.copyOf(prepared);
+  }
+
+  private static List<AgentMessageContent> truncateImages(
+      List<AgentMessageContent> contents, ImageLimitBudget budget) {
+    List<AgentMessageContent> kept = new ArrayList<>(contents.size());
+    for (AgentMessageContent content : contents) {
+      if (content instanceof ResourceMessageContent resource && resource.imageTier() != null) {
+        if (budget.kept < budget.limit) {
+          budget.kept++;
+          kept.add(content);
+        } else {
+          budget.dropped++;
+        }
+      } else if (content instanceof ToolResultMessageContent result) {
+        List<AgentMessageContent> resultContents = truncateImages(result.contents(), budget);
+        if (resultContents.isEmpty()) {
+          resultContents =
+              List.of(
+                  new TextMessageContent("Image content was omitted by the message image limit."));
+        }
+        kept.add(
+            new ToolResultMessageContent(
+                result.toolCallId(),
+                result.toolName(),
+                result.rendererKey(),
+                resultContents,
+                result.error(),
+                result.detailsJson()));
+      } else {
+        kept.add(content);
+      }
+    }
+    return kept;
+  }
+
+  private static final class ImageLimitBudget {
+    private final int limit;
+    private int kept;
+    private int dropped;
+
+    private ImageLimitBudget(int limit) {
+      this.limit = limit;
+    }
   }
 
   /** 瞬时 ATTACHMENT 换算为 durable RESOURCE：blobId/filename 只来自权威上传事实。 */

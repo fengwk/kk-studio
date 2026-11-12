@@ -248,7 +248,7 @@ class HarnessRuntimeAcceptThreadTest {
                         ResourceMessageContent.media(TestIds.id(88), "photo.png"),
                         new TextMessageContent("please summarize")))));
     AcceptancePreflight materialize =
-        (session, commands, copiedEntries) -> {
+        (session, commands, copiedEntries, branchSettings) -> {
           assertTrue(copiedEntries.isEmpty());
           return List.of(durable);
         };

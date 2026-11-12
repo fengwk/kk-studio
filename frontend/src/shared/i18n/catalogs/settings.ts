@@ -957,6 +957,14 @@ export const settingsCatalog = {
     'zh-CN':
       '上传有效期与 S3 预签名 URL 预算。上传有效期在下次判断时作用于存量未 claim 上传，而不只是新上传。',
   },
+  'settings.section.storageMedia.imageInput.title': {
+    'en-US': 'Model request images',
+    'zh-CN': '模型请求图片',
+  },
+  'settings.section.storageMedia.imageInput.description': {
+    'en-US': 'Default image size and maximum image count for each model request.',
+    'zh-CN': '每次模型请求的默认图片尺寸与图片数量上限。',
+  },
   'settings.section.storageMedia.canvasMedia.title': {
     'en-US': 'Canvas media processing',
     'zh-CN': '画布媒体处理',
@@ -1032,6 +1040,14 @@ export const settingsCatalog = {
   'settings.field.storageMedia.imageTier.hint': {
     'en-US': 'Default size for images without a size of their own. Images are only scaled down for the request; the original file is kept.',
     'zh-CN': '未单独选择尺寸的图片按此发送。仅在请求时缩小，原文件保持不变。',
+  },
+  'settings.field.storageMedia.maxImagesPerRequest': {
+    'en-US': 'Maximum images per request',
+    'zh-CN': '每次请求的图片数量上限',
+  },
+  'settings.field.storageMedia.maxImagesPerRequest.hint': {
+    'en-US': 'New messages keep at most this many images, further limited by the selected model protocol. Images already in history are preserved.',
+    'zh-CN': '新消息最多保留此数量的图片，并受所选模型协议限制。历史中已有的图片不会被删除。',
   },
   'settings.field.storageMedia.temporaryResourceTtlSeconds': {
     'en-US': 'Temporary resource retention (s)',

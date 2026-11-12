@@ -32,6 +32,11 @@ export function fakeStorage(overrides: {
         : {
             type: 'PENDING' as const,
             id,
+            format: null,
+            originalWidth: null,
+            originalHeight: null,
+            storedWidth: null,
+            storedHeight: null,
             presignedPut: {
               method: 'PUT' as const,
               url: `https://s3.test/${id}`,
@@ -53,6 +58,11 @@ export function fakeStorage(overrides: {
       type: 'READY',
       id: uploadId,
       blobId: `blob-${uploadId}`,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
       expiresAt: 0,
     }
   })

@@ -2842,6 +2842,7 @@ export interface SystemSettingsStorageMediaDTO {
   imageTier: string
   temporaryResourceTtlSeconds: string
   temporaryResourceCleanupIntervalSeconds: string
+  maxImagesPerRequest: number
 }
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO */
