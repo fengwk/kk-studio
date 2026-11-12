@@ -4,12 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
@@ -75,8 +79,9 @@ class PlatformResourceReadGatewayTest {
     when(archive.readFile(blobId, "skill/guide file.md"))
         .thenReturn("skill contents".getBytes(StandardCharsets.UTF_8));
     SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
+    PlatformTransactionManager transactions = transactionManager();
     PlatformResourceReadGateway gateway =
-        new PlatformResourceReadGateway(reader, packages, archive, refManager);
+        new PlatformResourceReadGateway(reader, packages, archive, refManager, transactions);
 
     ToolResult result =
         gateway.read(
@@ -90,6 +95,10 @@ class PlatformResourceReadGatewayTest {
         ((TextResultContent) result.contents().getFirst()).text().contains("skill contents"));
     verify(archive).readFile(blobId, "skill/guide file.md");
     verify(refManager).retainRef(ROOT_SESSION_ID, blobId);
+    // The session hold commits before archive access can perform S3 I/O.
+    var order = inOrder(transactions, archive);
+    order.verify(transactions).commit(any());
+    order.verify(archive).readFile(blobId, "skill/guide file.md");
   }
 
   @Test
@@ -99,7 +108,7 @@ class PlatformResourceReadGatewayTest {
     SkillArchiveFileReader archive = mock(SkillArchiveFileReader.class);
     PlatformResourceReadGateway gateway =
         new PlatformResourceReadGateway(
-            reader, packages, archive, mock(SessionBlobRefManager.class));
+            reader, packages, archive, mock(SessionBlobRefManager.class), transactionManager());
 
     ToolResult result =
         gateway.read(request("resource://skills/pkg/1.0.0/skill/guide.md", null), ignored -> {});
@@ -211,7 +220,15 @@ class PlatformResourceReadGatewayTest {
         reader,
         mock(SkillPackageRepository.class),
         mock(SkillArchiveFileReader.class),
-        mock(SessionBlobRefManager.class));
+        mock(SessionBlobRefManager.class),
+        transactionManager());
+  }
+
+  private static PlatformTransactionManager transactionManager() {
+    PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+        .thenReturn(new SimpleTransactionStatus());
+    return transactionManager;
   }
 
   private static ToolExecutionRequest request(String path, ToolExecutionContext context) {

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.ResourceDownload;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -43,10 +42,6 @@ public record ToolExecutionRequest(
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must not be negative");
-    }
-    if ((resourceDownload != null)
-        != EnvironmentCapabilityIds.SKILL_INSTALL.value().equals(descriptor.rendererKey())) {
-      throw new IllegalArgumentException("resourceDownload is required only for skill.install");
     }
   }
 }

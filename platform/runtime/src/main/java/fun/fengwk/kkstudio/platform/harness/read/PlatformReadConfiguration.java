@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.read;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
@@ -36,9 +37,14 @@ public class PlatformReadConfiguration {
       PlatformResourceContentReader reader,
       SkillPackageRepository skillPackageRepository,
       SkillArchiveFileReader skillArchiveFileReader,
-      SessionBlobRefManager sessionBlobRefManager) {
+      SessionBlobRefManager sessionBlobRefManager,
+      PlatformTransactionManager transactionManager) {
     return new PlatformResourceReadGateway(
-        reader, skillPackageRepository, skillArchiveFileReader, sessionBlobRefManager);
+        reader,
+        skillPackageRepository,
+        skillArchiveFileReader,
+        sessionBlobRefManager,
+        transactionManager);
   }
 
   @Bean

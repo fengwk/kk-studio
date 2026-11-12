@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.json.ToolArguments;
@@ -26,18 +28,20 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /** Platform reader for durable {@code resource://} references. */
-public class PlatformResourceReadGateway implements ResourceReadGateway {
+public final class PlatformResourceReadGateway implements ResourceReadGateway {
 
   private final PlatformResourceContentReader reader;
   private final SkillPackageRepository skillPackageRepository;
   private final SkillArchiveFileReader skillArchiveFileReader;
   private final SessionBlobRefManager sessionBlobRefManager;
+  private final TransactionTemplate retainTransaction;
 
   public PlatformResourceReadGateway(
       PlatformResourceContentReader reader,
       SkillPackageRepository skillPackageRepository,
       SkillArchiveFileReader skillArchiveFileReader,
-      SessionBlobRefManager sessionBlobRefManager) {
+      SessionBlobRefManager sessionBlobRefManager,
+      PlatformTransactionManager transactionManager) {
     this.reader = Objects.requireNonNull(reader, "reader");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
@@ -45,10 +49,12 @@ public class PlatformResourceReadGateway implements ResourceReadGateway {
         Objects.requireNonNull(skillArchiveFileReader, "skillArchiveFileReader");
     this.sessionBlobRefManager =
         Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
+    retainTransaction =
+        new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
+    retainTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   @Override
-  @Transactional
   public ToolResult read(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     String callId = request.call().id();
     try {
@@ -99,7 +105,8 @@ public class PlatformResourceReadGateway implements ResourceReadGateway {
     if (skillPackage.findSkill(resource.skill()) == null) {
       return ToolResult.error(callId, "skill is not available: " + resource.skill());
     }
-    sessionBlobRefManager.retainRef(sessionId, skillPackage.artifactBlobId());
+    retainTransaction.executeWithoutResult(
+        status -> sessionBlobRefManager.retainRef(sessionId, skillPackage.artifactBlobId()));
     String archivePath = resource.skill() + "/" + resource.path();
     byte[] content = skillArchiveFileReader.readFile(skillPackage.artifactBlobId(), archivePath);
     String imageType = imageMediaType(archivePath);
