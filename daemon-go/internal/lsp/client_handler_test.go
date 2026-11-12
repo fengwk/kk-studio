@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -82,6 +83,18 @@ func TestProtocol_ServerRequests(t *testing.T) {
 	}
 }
 
+// LSP-T-078 and LSP-T-097 verify static capabilities and JDTLS-specific support.
+func TestClient_StaticAndJDTLSSupport(t *testing.T) {
+	plain := &Client{capabilities: map[string]json.RawMessage{"definitionProvider": json.RawMessage("true")}}
+	if !plain.Supports("textDocument/definition") || plain.Supports("textDocument/unknown") {
+		t.Fatal("plain server capability selection is incorrect")
+	}
+	java := &Client{jdtls: true}
+	if !java.Supports("workspace/executeCommand") {
+		t.Fatal("JDTLS-specific capability was not enabled")
+	}
+}
+
 // LSP-F-025 verifies exit reports are stable and distinguish live clients.
 func TestClient_ExitErrorAndAliveStates(t *testing.T) {
 	client := &Client{server: ServerConfig{ID: "fake"}, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1)}
@@ -94,5 +107,10 @@ func TestClient_ExitErrorAndAliveStates(t *testing.T) {
 	}
 	if got := client.exitError(); got.Error() != "LSP server 'fake' exited (exit code 7)" {
 		t.Fatalf("exit error = %v", got)
+	}
+	stopped := &Client{exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1)}
+	stopped.exitErr <- errors.New("wait failed")
+	if stopped.IsAlive() {
+		t.Fatal("client whose process wait failed is alive")
 	}
 }

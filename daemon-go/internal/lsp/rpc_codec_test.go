@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -20,6 +22,47 @@ func TestLSPCodec_ReadFramedMessages(t *testing.T) {
 	if !bytes.Equal(first, []byte(body)) {
 		t.Fatalf("decoded %s", first)
 	}
+}
+
+// LSP-T-080 through LSP-T-082 validate malformed headers, bodies, and write failures.
+func TestLSPCodec_FramesRejectInvalidInputAndWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name, wire, want string
+	}{{"invalid length", "Content-Length: x\r\n\r\n", "invalid LSP Content-Length"}, {"missing length", "Content-Type: application/json\r\n\r\n{}", "missing LSP Content-Length"}, {"truncated body", "Content-Length: 3\r\n\r\n{}", "unexpected EOF"}, {"invalid JSON", "Content-Length: 1\r\n\r\nx", "invalid character"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := &lspCodec{first: false}
+			var value any
+			err := codec.ReadObject(bufio.NewReader(strings.NewReader(tc.wire)), &value)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("read error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+	codec := newLSPCodec()
+	if err := codec.WriteObject(io.Discard, make(chan int)); err == nil {
+		t.Fatal("unsupported JSON value unexpectedly encoded")
+	}
+	if err := codec.WriteObject(failingWriter{}, map[string]any{}); err == nil || err.Error() != "writer failed" {
+		t.Fatalf("header write error = %v", err)
+	}
+	bodyWriter := &secondWriteFails{}
+	if err := codec.WriteObject(bodyWriter, map[string]any{}); err == nil || err.Error() != "writer failed" {
+		t.Fatalf("body write error = %v", err)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("writer failed") }
+
+type secondWriteFails struct{ writes int }
+
+func (w *secondWriteFails) Write(data []byte) (int, error) {
+	w.writes++
+	if w.writes == 2 {
+		return 0, errors.New("writer failed")
+	}
+	return len(data), nil
 }
 
 // LSP-T-082 verifies that excessive bytes before the first protocol header fail closed.

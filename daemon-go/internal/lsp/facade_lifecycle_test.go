@@ -49,3 +49,32 @@ func TestFacade_GenerationSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// LSP-T-038 validates prepared-generation retirement and rejects duplicate configurations.
+func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
+	var nilGeneration *PreparedGeneration
+	if err := nilGeneration.Publish(); err == nil || err.Error() != "invalid LSP generation" {
+		t.Fatalf("nil generation publish error = %v", err)
+	}
+	if err := nilGeneration.Retire(); err != nil {
+		t.Fatalf("nil generation retire error = %v", err)
+	}
+
+	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
+	if err := facade.Update([]config.LSPServerConfig{{ID: "same", Command: []string{"a"}}, {ID: "same", Command: []string{"b"}}}); err == nil || err.Error() != "duplicate lsp server id: same" {
+		t.Fatalf("duplicate update error = %v", err)
+	}
+	prepared, err := facade.Prepare(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = prepared.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err = prepared.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err = facade.Close(); err != nil {
+		t.Fatal(err)
+	}
+}

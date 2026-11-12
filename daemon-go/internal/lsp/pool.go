@@ -105,6 +105,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 	}
 	key := poolKey(root, server)
 	for {
+		rejectedBySettledBoot := false
 		p.mu.Lock()
 		if p.closing {
 			done := p.closeDone
@@ -154,6 +155,12 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 			b = &boot{done: make(chan struct{}), cancel: cancel}
 			p.boots[key] = b
 			go p.start(bootCtx, key, server, root, executable, b)
+		} else {
+			select {
+			case <-b.done:
+				rejectedBySettledBoot = true
+			default:
+			}
 		}
 		b.waiters++
 		p.mu.Unlock()
@@ -191,7 +198,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 				var bootstrap *LspBootstrapError
 				converged := (errors.As(b.err, &bootstrap) && bootstrap.Converged) || b.retryable
 				p.mu.Unlock()
-				if onExit != nil && converged {
+				if onExit != nil && (converged || rejectedBySettledBoot) {
 					onExit()
 				}
 				return nil, b.err

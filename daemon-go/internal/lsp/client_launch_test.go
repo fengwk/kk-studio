@@ -13,6 +13,11 @@ import (
 
 // LSP-T-091 through LSP-T-094 verify launch exit and convergence error reporting.
 func TestProtocol_LaunchFailureStates(t *testing.T) {
+	_, emptyErr := Launch(context.Background(), ServerConfig{ID: "empty"}, t.TempDir(), "", nil)
+	var emptyBootstrap *LspBootstrapError
+	if !errors.As(emptyErr, &emptyBootstrap) || !emptyBootstrap.Converged || emptyBootstrap.Error() != "LSP server 'empty' cannot be started: " {
+		t.Fatalf("empty command error = %#v", emptyErr)
+	}
 	cases := []struct {
 		name      string
 		cause     error
@@ -165,6 +170,45 @@ func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 	}
 	if err = client.Stop(time.Millisecond); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// LSP-T-094 retains both the early-exit launch failure and managed cleanup failure.
+func TestProtocol_LaunchCleanupFailure(t *testing.T) {
+	cleanupErr := errors.New("termination did not converge")
+	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: 9}, terminateErr: cleanupErr}
+	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	var bootstrap *LspBootstrapError
+	if !errors.As(err, &bootstrap) || bootstrap.Converged || !errors.Is(err, cleanupErr) || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 9)" {
+		t.Fatalf("launch cleanup error = %#v", err)
+	}
+}
+
+// LSP-T-108 rejects already-cancelled and already-expired requests before sending JSON-RPC.
+func TestProtocol_PreAbortedRequest(t *testing.T) {
+	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", &fakeSupervisor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.Initialize(context.Background(), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sent := false
+	if err = client.call(ctx, "textDocument/definition", map[string]any{}, nil, func() { sent = true }, nil); err == nil || err.Error() != "Operation cancelled" || sent {
+		t.Fatalf("cancelled request error=%v sent=%v", err, sent)
+	}
+	deadline, expire := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer expire()
+	if err = client.call(deadline, "textDocument/definition", map[string]any{}, nil, func() { sent = true }, nil); err == nil || err.Error() != "Operation timed out" || sent {
+		t.Fatalf("expired request error=%v sent=%v", err, sent)
+	}
+	if err = client.Stop(time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if err = client.call(context.Background(), "textDocument/definition", map[string]any{}, nil, nil, nil); err == nil || err.Error() != "LSP client stopped" {
+		t.Fatalf("request after stop error=%v", err)
 	}
 }
 

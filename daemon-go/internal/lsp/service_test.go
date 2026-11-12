@@ -27,6 +27,10 @@ func TestService_ActiveClientCount(t *testing.T) {
 	}
 	supervisor := &fakeSupervisor{}
 	service := NewService(discovery, supervisor, PoolOptions{IdleTimeout: time.Hour})
+	support := service.Support(file)
+	if !support.Supported || !support.Available || support.Language == nil || *support.Language != "go" {
+		t.Fatalf("support = %#v", support)
+	}
 	if service.ActiveClientCount() != 0 {
 		t.Fatal("new service has an active client")
 	}
@@ -44,6 +48,32 @@ func TestService_ActiveClientCount(t *testing.T) {
 	}
 	if service.ActiveClientCount() != 0 {
 		t.Fatal("closed service still reports active clients")
+	}
+}
+
+// LSP-T-015 covers optional callback selection and request timeout construction.
+func TestService_RequestHelpers(t *testing.T) {
+	if firstCallback(nil) != nil {
+		t.Fatal("missing callback returned a function")
+	}
+	firstCalls, secondCalls := 0, 0
+	selected := firstCallback([]func(){func() { firstCalls++ }, func() { secondCalls++ }})
+	selected()
+	if firstCalls != 1 || secondCalls != 0 {
+		t.Fatalf("callback counts = %d, %d", firstCalls, secondCalls)
+	}
+	ctx, cancel := requestContext(context.Background(), 25)
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("positive timeout did not set a deadline")
+	}
+	noTimeout, noCancel := requestContext(context.Background(), 0)
+	defer noCancel()
+	if _, ok := noTimeout.Deadline(); ok {
+		t.Fatal("zero timeout unexpectedly set a deadline")
+	}
+	if got := joinItems([]string{"one", "two"}); got != "one\ntwo" {
+		t.Fatalf("joined items = %q", got)
 	}
 }
 

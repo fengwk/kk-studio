@@ -23,10 +23,12 @@ type fakeSupervisor struct {
 	starts       int
 	blockMethod  string
 	errorMethod  string
+	emptyMethod  string
 	startEntered chan struct{}
 	startGate    chan struct{}
 	startErr     error
 	earlyExit    *native.ProcessExit
+	terminateErr error
 }
 
 func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
@@ -39,6 +41,8 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	}
 	process := newFakeProcess(s.blockMethod)
 	process.errorMethod = s.errorMethod
+	process.emptyMethod = s.emptyMethod
+	process.terminateErr = s.terminateErr
 	s.process = process
 	s.mu.Unlock()
 	if earlyExit != nil {
@@ -57,6 +61,7 @@ func (*fakeSupervisor) Close(context.Context) error { return nil }
 type fakeProcess struct {
 	blockMethod  string
 	errorMethod  string
+	emptyMethod  string
 	requests     chan string
 	cancelled    chan struct{}
 	stdinR       *io.PipeReader
@@ -148,6 +153,9 @@ func (p *fakeProcess) serve() {
 		response := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": result}
 		if req.Method == p.errorMethod {
 			response = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "error": map[string]any{"code": -1, "message": "secret server details"}}
+		}
+		if req.Method == p.emptyMethod {
+			response = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": ""}
 		}
 		if err := codec.WriteObject(p.stdoutW, response); err != nil {
 			return

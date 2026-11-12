@@ -13,6 +13,23 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
+// LSP-T-050 and LSP-T-051 protect structured keys and default initialization timeout.
+func TestPool_StructuredKeyAndDefaults(t *testing.T) {
+	first := ServerConfig{ID: "a|b", Command: []string{"x", "y"}, Extensions: []string{".go"}}
+	second := ServerConfig{ID: "a", Command: []string{"b|x", "y"}, Extensions: []string{".go"}}
+	if poolKey("root", first) == poolKey("root", second) {
+		t.Fatal("distinct configuration tuples collided")
+	}
+	copyOfFirst := cloneServer(first)
+	if poolKey("root", first) != poolKey("root", copyOfFirst) {
+		t.Fatal("identical configuration tuples produced different keys")
+	}
+	pool := NewPool(&Discovery{}, &fakeSupervisor{}, PoolOptions{})
+	if pool.options.InitializeTimeout != 180*time.Second || pool.options.IdleTimeout != 5*time.Minute || pool.options.ShutdownGrace != time.Second {
+		t.Fatalf("pool defaults = %#v", pool.options)
+	}
+}
+
 func testPool(t *testing.T, options PoolOptions) (*Pool, *fakeSupervisor, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -310,6 +327,29 @@ func TestPool_InitializeFailureCleanup(t *testing.T) {
 	}
 }
 
+// LSP-T-007 and LSP-T-066 keep a key isolated when initialize and cleanup both fail.
+func TestPool_InitializeCleanupFailure(t *testing.T) {
+	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: 20 * time.Millisecond, ShutdownGrace: time.Second})
+	cleanupErr := errors.New("managed process cleanup failed")
+	supervisor.blockMethod = "initialize"
+	supervisor.terminateErr = cleanupErr
+	confirmed := 0
+	_, firstErr := pool.LeaseWithExit(context.Background(), file, func() { confirmed++ })
+	var bootstrap *LspBootstrapError
+	if !errors.As(firstErr, &bootstrap) || bootstrap.Converged || !errors.Is(firstErr, cleanupErr) || confirmed != 0 {
+		t.Fatalf("initialize cleanup error=%v confirmed=%d", firstErr, confirmed)
+	}
+	_, secondErr := pool.LeaseWithExit(context.Background(), file, func() { confirmed++ })
+	if secondErr != firstErr || supervisor.starts != 1 || confirmed != 1 {
+		t.Fatalf("second error=%v starts=%d confirmed=%d", secondErr, supervisor.starts, confirmed)
+	}
+	closeErr := pool.Close()
+	var cleanup *LspCleanupError
+	if !errors.As(closeErr, &cleanup) || !errors.Is(closeErr, cleanupErr) {
+		t.Fatalf("pool close error=%v", closeErr)
+	}
+}
+
 // LSP-T-047 verifies a converged process-start failure can be retried.
 func TestPool_ConvergedRetry(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
@@ -346,7 +386,7 @@ func TestPool_UnconvergedIsolation(t *testing.T) {
 		t.Fatalf("first lease error=%v confirmed=%d", firstErr, confirmed)
 	}
 	_, secondErr := pool.LeaseWithExit(context.Background(), file, func() { confirmed++ })
-	if secondErr != firstErr || supervisor.starts != 1 || confirmed != 0 {
+	if secondErr != firstErr || supervisor.starts != 1 || confirmed != 1 {
 		t.Fatalf("second error=%v starts=%d confirmed=%d", secondErr, supervisor.starts, confirmed)
 	}
 	if err := pool.Close(); err == nil {
