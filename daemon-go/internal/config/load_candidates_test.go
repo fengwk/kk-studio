@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,11 @@ import (
 func TestLoadOptionalLSPAndUnavailableBash(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	configured := filepath.Join(t.TempDir(), "missing-bash")
-	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"https://studio.example","bashExecutable":"`+configured+`"}}`)
+	configuredJSON, err := json.Marshal(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"https://studio.example","bashExecutable":`+string(configuredJSON)+`}}`)
 	got, err := LoadDaemonConfig(path)
 	if err != nil {
 		t.Fatal(err)
