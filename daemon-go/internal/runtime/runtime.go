@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -94,6 +95,7 @@ type Runtime struct {
 	calls                  map[string]*runningCall
 	exitRequested          map[string]bool
 	exitCleanupUnconfirmed map[string]bool
+	ideCommandCount        atomic.Int32
 	resourceMu             sync.Mutex
 	resourceRequests       map[resourceExchangeKey]chan *protocol.Envelope
 	wg                     sync.WaitGroup
@@ -173,6 +175,14 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 		return nil, err
 	}
 	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
+	if options.IDECommandCount == nil {
+		runtime.options.IDECommandCount = func() int { return int(runtime.ideCommandCount.Load()) }
+	}
+	if options.IDECanStartUpdate == nil {
+		if admission, ok := options.IDE.(IDEUpdateAdmission); ok {
+			runtime.options.IDECanStartUpdate = admission.CanStartUpdate
+		}
+	}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(
 			func(previous, candidate config.DaemonConfig) {
@@ -409,7 +419,7 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		if !ok || request.IdeCommand == nil {
 			return errors.New("IDE command payload is invalid")
 		}
-		result := r.options.IDE.HandleCommand(ctx, request.IdeCommand)
+		result := r.handleIDECommand(ctx, request.IdeCommand)
 		return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_IDE_RESULT, InvocationId: e.InvocationId, Payload: &protocol.Envelope_IdeResult{IdeResult: result}}, true)
 	case protocol.MessageType_IDE_LEASE:
 		if !ready || r.options.IDE == nil {
@@ -434,6 +444,12 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 	default:
 		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
+}
+
+func (r *Runtime) handleIDECommand(ctx context.Context, command *protocol.IdeCommand) *protocol.IdeResult {
+	r.ideCommandCount.Add(1)
+	defer r.ideCommandCount.Add(-1)
+	return r.options.IDE.HandleCommand(ctx, command)
 }
 
 // RequestTicket requests one binary upload ticket and waits for its correlated control response.
