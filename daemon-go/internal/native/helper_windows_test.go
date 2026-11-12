@@ -219,7 +219,7 @@ func TestCreateSuspendedWindowsCommand_CleansUpOnAPIAndResultFailures(t *testing
 				if len(api.closed) == 0 {
 					t.Fatal("partial process information was not cleaned up")
 				}
-				if test.name == "missing process handle" && !reflect.DeepEqual(api.terminated, []windows.Handle{40}) {
+				if test.name == "missing thread handle" && !reflect.DeepEqual(api.terminated, []windows.Handle{40}) {
 					t.Fatalf("terminated handles = %v, want [40]", api.terminated)
 				}
 			}
