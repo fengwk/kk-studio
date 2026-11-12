@@ -356,8 +356,8 @@ func TestRunWindowsJobProtocolWithAPI(t *testing.T) {
 		{name: "wait failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.waitErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
 		{name: "unexpected wait status", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.waitStatus = 0x80 }, wantResult: 1, wantError: true, wantCleanup: "true"},
 		{name: "exit code failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.exitErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
-		{name: "drain failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.drainErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "false"},
-		{name: "close failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.closeErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "drain failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.drainErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "false", wantExitCode: func() *int { v := 0; return &v }()},
+		{name: "close failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.closeErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true", wantExitCode: func() *int { v := 0; return &v }()},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
