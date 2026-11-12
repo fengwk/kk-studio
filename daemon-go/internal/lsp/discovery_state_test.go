@@ -56,7 +56,7 @@ func TestDiscovery_EmptyConfig(t *testing.T) {
 	}
 }
 
-// LSP-T-031 verifies first-match markers are a fallback behind root markers.
+// LSP-F-028 verifies executable results are cached under their original command string.
 func TestDiscovery_ExecutableCacheUsesOriginalCommand(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "cached-tool")
@@ -68,8 +68,12 @@ func TestDiscovery_ExecutableCacheUsesOriginalCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := ServerConfig{ID: "tool", Command: []string{binary}}
+	canonicalBinary, err := filepath.EvalSymlinks(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
 	first, ok := discovery.Executable(server)
-	if !ok || first != binary {
+	if !ok || first != canonicalBinary {
 		t.Fatalf("first executable = %q, %v", first, ok)
 	}
 	if err := os.Remove(binary); err != nil {
