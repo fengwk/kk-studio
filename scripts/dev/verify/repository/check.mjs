@@ -1073,7 +1073,6 @@ const platformDomainRoots = [
   'secret',
   'settings',
   'storage',
-  'vfs',
 ]
 /** 平台契约的子域根保持精确，新增子域必须显式更新这里。 */
 function checkPackageRoots() {
