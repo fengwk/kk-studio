@@ -83,13 +83,26 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 	if err != nil {
 		return nil, err
 	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	directFile := !rootInfo.IsDir()
 	results := parallel(files, func(rel string) []string {
-		data, release, e := readPooled(filepath.Join(root, filepath.FromSlash(rel)))
+		data, release, e := readPooled(searchFilePath(root, rel, directFile))
 		if e != nil {
 			return nil
 		}
 		defer release()
-		return grepFile(data, filepath.ToSlash(rel), pattern, literal, ignoreCase, re, required)
+		display := filepath.ToSlash(rel)
+		if directFile {
+			display = filepath.ToSlash(root)
+		}
+		return grepFile(data, display, pattern, literal, ignoreCase, re, required)
 	})
 	flat := flatten(results)
 	if limit > 0 && len(flat) > limit {
@@ -99,15 +112,15 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 }
 
 // GrepContext processes files in sorted order and never opens a later file after reaching limit.
-func GrepContext(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int) (SearchOutcome, error) {
-	return grepContextWithReader(ctx, root, pattern, literal, ignoreCase, glob, limit, readPooledContext)
+func GrepContext(ctx context.Context, root, pattern string, literal, ignoreCase bool, include string, limit int) (SearchOutcome, error) {
+	return grepContextWithReader(ctx, root, pattern, literal, ignoreCase, include, limit, readPooledContext)
 }
 
-func grepContextWithReader(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int, read func(context.Context, string) ([]byte, func(), bool, error)) (SearchOutcome, error) {
+func grepContextWithReader(ctx context.Context, root, pattern string, literal, ignoreCase bool, include string, limit int, read func(context.Context, string) ([]byte, func(), bool, error)) (SearchOutcome, error) {
 	if limit < 0 {
 		return SearchOutcome{}, errors.New("limit cannot be negative")
 	}
-	files, timedOut, _, err := findWithContext(ctx, root, glob, 0, min(runtime.NumCPU(), 8))
+	files, timedOut, _, err := findWithContext(ctx, root, include, 0, min(runtime.NumCPU(), 8))
 	if err != nil {
 		return SearchOutcome{}, err
 	}
@@ -135,6 +148,15 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 	if err != nil {
 		return SearchOutcome{}, err
 	}
+	absoluteRoot, err = filepath.EvalSymlinks(absoluteRoot)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	rootInfo, err := os.Stat(absoluteRoot)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	directFile := !rootInfo.IsDir()
 	outcome := SearchOutcome{Incomplete: timedOut}
 	if timedOut {
 		outcome.StopReason = "TIMED_OUT"
@@ -148,14 +170,18 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			}
 			return outcome, ctxErr
 		}
-		data, release, readTimedOut, readErr := read(ctx, filepath.Join(absoluteRoot, filepath.FromSlash(rel)))
+		data, release, readTimedOut, readErr := read(ctx, searchFilePath(absoluteRoot, rel, directFile))
 		if readErr != nil {
 			if errors.Is(readErr, context.Canceled) {
 				return outcome, readErr
 			}
 			continue
 		}
-		matches := grepFile(data, filepath.ToSlash(rel), pattern, literal, ignoreCase, re, required)
+		display := filepath.ToSlash(rel)
+		if directFile {
+			display = filepath.ToSlash(absoluteRoot)
+		}
+		matches := grepFile(data, display, pattern, literal, ignoreCase, re, required)
 		release()
 		limitReached := limit > 0 && len(matches) >= limit-len(outcome.Results)
 		if limitReached {
@@ -186,6 +212,13 @@ func findWith(root, glob string, limit, workers int) ([]string, error) {
 	return files, err
 }
 
+func searchFilePath(root, rel string, directFile bool) string {
+	if directFile {
+		return root
+	}
+	return filepath.Join(root, filepath.FromSlash(rel))
+}
+
 func findWithContext(ctx context.Context, root, glob string, limit, workers int) ([]string, bool, bool, error) {
 	if limit < 0 {
 		return nil, false, false, errors.New("limit cannot be negative")
@@ -209,7 +242,7 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 		return nil, false, false, err
 	}
 	if !info.IsDir() {
-		return nil, false, false, errors.New("root is not a directory")
+		return []string{filepath.ToSlash(abs)}, false, false, nil
 	}
 	if glob != "" {
 		if _, err = doublestar.Match(glob, "probe"); err != nil {

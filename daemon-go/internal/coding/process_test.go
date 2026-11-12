@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ func (testWriteCloser) Close() error { return nil }
 type fakeProcess struct {
 	stdout, stderr io.ReadCloser
 	wait           func(context.Context) (native.ProcessExit, error)
+	spec           *native.ProcessSpec
 	mu             sync.Mutex
 	terminated     int
 	terminateErr   error
@@ -56,19 +58,28 @@ func (r *failingReadCloser) Read(p []byte) (int, error) {
 }
 func (*failingReadCloser) Close() error { return nil }
 
-func (s fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
+func (s fakeSupervisor) Start(_ context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
+	if s.process.spec != nil {
+		*s.process.spec = spec
+	}
 	return s.process, nil
 }
 func (fakeSupervisor) Close(context.Context) error { return nil }
 
-// COD-T-128
+// COD-F-016 COD-T-128
 func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("x", 100*1024)
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }}
+	var processSpec native.ProcessSpec
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, spec: &processSpec}
 	var progress []runtime.CapabilityResult
 	confirmed := 0
-	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "call"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(r runtime.CapabilityResult) error { progress = append(progress, r); return nil }, ConfirmExecutionExit: func() { confirmed++ }}, "printf output", dataDir)
+	workdir := filepath.Join(t.TempDir(), "working dir")
+	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "call"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(r runtime.CapabilityResult) error { progress = append(progress, r); return nil }, ConfirmExecutionExit: func() { confirmed++ }}, "printf output", workdir)
+	wantArgs := []string{"-lc", `cd -- "$1" || exit 1; shift; printf output`, "bash", workdir}
+	if processSpec.Executable != "bash" || processSpec.Directory != workdir || !reflect.DeepEqual(processSpec.Args, wantArgs) {
+		t.Fatalf("process spec=%#v args=%#v", processSpec, processSpec.Args)
+	}
 	if err != nil || result.Error {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}

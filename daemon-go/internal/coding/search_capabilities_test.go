@@ -139,6 +139,33 @@ func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	}
 }
 
+// COD-F-011 COD-T-042: include filters directory scans but never overrides ignore rules or filters an explicit file.
+func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.ts\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"keep.ts": "x\n", "ignored.ts": "x\n", "other.js": "x\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := map[string]any{"path": root, "pattern": "x", "literal": true, "include": "*.ts"}
+	included := invokeCoding(t, Provider{}, "fs.grep", args, nil)
+	if included.Error || included.Contents[0].Text != "keep.ts:1:x" {
+		t.Fatalf("include result=%#v", included)
+	}
+
+	file := filepath.Join(root, "keep.ts")
+	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": file, "pattern": "x", "literal": true, "include": "*.js"}, nil)
+	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(file)+":1:x" {
+		t.Fatalf("direct-file result=%#v", direct)
+	}
+}
+
 // COD-F-015
 func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
 	dataDir := t.TempDir()

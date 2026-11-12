@@ -83,15 +83,16 @@ func TestGrepContextReportsResultsAndContextFailures(t *testing.T) {
 	}
 }
 
-// COD-F-010
+// COD-F-010 COD-F-011
 func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "plain.txt")
 	if err := os.WriteFile(file, []byte("content"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FindContext(context.Background(), file, "", 0); err == nil || err.Error() != "root is not a directory" {
-		t.Fatalf("file root error=%v", err)
+	files, err := FindContext(context.Background(), file, "ignored-glob", 0)
+	if err != nil || len(files.Results) != 1 || files.Results[0] != filepath.ToSlash(file) {
+		t.Fatalf("direct file result=%#v error=%v", files, err)
 	}
 	if _, err := FindContext(context.Background(), filepath.Join(root, "missing"), "", 0); err == nil {
 		t.Fatal("missing root accepted")

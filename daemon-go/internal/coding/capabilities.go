@@ -34,6 +34,7 @@ type arguments struct {
 	Preview      bool   `json:"preview"`
 	Pattern      string `json:"pattern"`
 	Glob         string `json:"glob"`
+	Include      string `json:"include"`
 	Limit        int    `json:"limit"`
 	Offset       int    `json:"offset"`
 	ColumnOffset int    `json:"column_offset"`
@@ -417,7 +418,7 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
-	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
+	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Include, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
