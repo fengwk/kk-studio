@@ -15,6 +15,7 @@ const (
 	DefaultReadLimit  = 2000
 	MaxReadLimit      = 2000
 	MaxReadCodePoints = 60000
+	binaryProbeBytes  = 8192
 )
 
 type DecodedText struct {
@@ -115,6 +116,9 @@ func EncodeText(text, charset string, bomBytes int) ([]byte, error) {
 func LooksBinary(data []byte, utf16Encoded bool) bool {
 	if utf16Encoded {
 		return false
+	}
+	if len(data) > binaryProbeBytes {
+		data = data[:binaryProbeBytes]
 	}
 	for _, b := range data {
 		if b == 0 || (b < 0x20 && b != '\t' && b != '\n' && b != '\r' && b != '\f' && b != 0x1b) {
