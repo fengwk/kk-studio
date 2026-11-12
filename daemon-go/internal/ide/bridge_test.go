@@ -46,9 +46,107 @@ func TestBridgeAuthAndRoutes(t *testing.T) {
 		t.Fatalf("missing workspace status = %d", status)
 	}
 	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
-	invalidHost := "/bridge/stream?workspacePath=%2Fmanaged%2Fview.code-workspace&hostId=UPPER&folder=%2Fmanaged"
-	if status := request(invalidHost, bridge.Secret); status != http.StatusBadRequest {
-		t.Fatalf("invalid host status = %d", status)
+	for _, path := range []string{
+		"/bridge/stream?workspacePath=%2Fmanaged%2Fview.code-workspace&hostId=&folder=%2Fmanaged",
+		"/bridge/stream?workspacePath=%2Fmanaged%2Fview.code-workspace&folder=%2Fmanaged",
+		"/bridge/stream?workspacePath=%2Fmanaged%2Fview.code-workspace&hostId=UPPER&folder=%2Fmanaged",
+		"/bridge/stream?workspacePath=%2Fmanaged%2Fview.code-workspace&hostId=bad&folder=%2Fmanaged",
+	} {
+		if status := request(path, bridge.Secret); status != http.StatusBadRequest {
+			t.Errorf("invalid host request %q status = %d", path, status)
+		}
+	}
+}
+
+// IDE-T-002 verifies native close prompts have no bridge command timer and remain answerable.
+func TestNativeClosePromptHasNoTimeout(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
+	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte, 1), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	view := bridge.views[viewID]
+	view.hostID, view.stream = stream.hostID, stream
+	bridge.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	requestResult := make(chan BridgeResult, 1)
+	go func() {
+		result, _ := bridge.Request(ctx, viewID, BridgeCommand{Op: "closeView"}, BridgeRequestOptions{ExpectedEpoch: 1})
+		requestResult <- result
+	}()
+	var command struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(<-stream.messages, &command); err != nil || command.ID == "" {
+		t.Fatalf("close command=%+v err=%v", command, err)
+	}
+	bridge.mu.Lock()
+	pending := bridge.pending[command.ID]
+	noTimer := pending != nil && pending.timer == nil
+	bridge.mu.Unlock()
+	if !noTimer {
+		t.Fatal("native close prompt unexpectedly has a command timeout")
+	}
+	bridge.resolvePending(command.ID, BridgeResult{OK: true})
+	select {
+	case result := <-requestResult:
+		if !result.OK {
+			t.Fatalf("native close result=%+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal("native close prompt did not remain answerable")
+	}
+}
+
+// IDE-T-003 verifies a disconnected host identity remains retired after a replacement is admitted.
+func TestLostRegistrationAckRetiresOldHost(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const oldHost = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const replacementHost = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	directory, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(directory, "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, directory)
+	oldCtx, cancelOld := context.WithCancel(context.Background())
+	oldResponse, _ := openManualBridgeStream(t, oldCtx, bridge, workspace, oldHost, directory)
+	cancelOld()
+	_ = oldResponse.Body.Close()
+	deadline := time.Now().Add(time.Second)
+	for bridge.IsConnected(viewID, 1) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if bridge.IsConnected(viewID, 1) {
+		t.Fatal("disconnected host remained the active stream")
+	}
+	current, stopCurrent := openTestBridgeStream(t, bridge, viewID, workspace, replacementHost)
+	defer stopCurrent()
+	defer current.Body.Close()
+	params := url.Values{"workspacePath": {workspace}, "hostId": {oldHost}, "folder": {directory}}
+	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+bridge.Secret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusGone {
+		t.Fatalf("retired host reconnect status=%d", response.StatusCode)
 	}
 }
 
