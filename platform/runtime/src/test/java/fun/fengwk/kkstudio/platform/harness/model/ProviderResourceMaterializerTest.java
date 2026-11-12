@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
-import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
@@ -1296,8 +1295,7 @@ class ProviderResourceMaterializerTest {
 
   /** 测试用上限：原始字节上限足够小，避免测试分配大对象。 */
   private static ProviderInlineBlobReader.Limits limits(long maxBlobBytes) {
-    return new ProviderInlineBlobReader.Limits(
-        maxBlobBytes, 1024L * 1024L, 4L * 1024L * 1024L, Duration.ofMinutes(5), 2);
+    return new ProviderInlineBlobReader.Limits(maxBlobBytes, 1024L * 1024L, 4L * 1024L * 1024L, 2);
   }
 
   private static void stubContent(

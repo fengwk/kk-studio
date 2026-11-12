@@ -523,7 +523,7 @@ DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fen
 
 [`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
 用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
-`kk-studio.storage.media` 配置。
+`kk-studio.storage.media` 配置。模型请求中的图片视图由平台按冻结档位生成，并由 Caffeine 缓存复用；缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期。
 
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。

@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
-import java.time.Duration;
 import java.util.Base64;
 import java.util.Objects;
 import java.util.UUID;
@@ -32,7 +31,7 @@ import java.util.regex.Pattern;
  *
  * <p>本类不判断 ACTIVE 状态、不判断模态与 Provider 能力，也不产生任何 URL：状态与能力判定在每次 attempt 的 {@link
  * ProviderResourceMaterializer} 中完成，本类只负责已确认可读的 Blob。缓存条目是源数据与档位的纯函数（同一 key 必有同一值），因此不需要失效 通知，只受
- * TTL 与权重上限约束；不同档位的转化结果绝不互相复用缓存条目。
+ * 权重上限约束；不同档位的转化结果绝不互相复用缓存条目。
  */
 final class ProviderInlineBlobReader {
 
@@ -62,7 +61,6 @@ final class ProviderInlineBlobReader {
             .weigher(
                 (BlobKey key, InlineBlob value) ->
                     (int) Math.min(Integer.MAX_VALUE, accountedWeight(value.dataUri().length())))
-            .expireAfterWrite(limits.cacheTtl())
             .ticker(ticker)
             .build();
     this.downloads = new Semaphore(limits.maxConcurrentDownloads());
@@ -281,24 +279,17 @@ final class ProviderInlineBlobReader {
    * @param maxBlobBytes 单文件原始字节上限，同时作为 {@link StorageBlobContentService} 的读取上限
    * @param maxCacheEntryWeightBytes 单条目记账上限，超过则不缓存
    * @param maxCacheWeightBytes 缓存总记账上限
-   * @param cacheTtl 条目写入后的存活时间
    * @param maxConcurrentDownloads 同时在途的下载数（含不缓存的读取）
    */
   record Limits(
       long maxBlobBytes,
       long maxCacheEntryWeightBytes,
       long maxCacheWeightBytes,
-      Duration cacheTtl,
       int maxConcurrentDownloads) {
 
-    /** 单文件 100 MiB、单条目 8 MiB、总缓存 64 MiB、TTL 5 分钟、并发下载 2。 */
+    /** 单文件 100 MiB、单条目 8 MiB、总缓存 100 MiB、并发下载 2。 */
     static final Limits DEFAULT =
-        new Limits(
-            100L * 1024L * 1024L,
-            8L * 1024L * 1024L,
-            64L * 1024L * 1024L,
-            Duration.ofMinutes(5),
-            2);
+        new Limits(100L * 1024L * 1024L, 8L * 1024L * 1024L, 100L * 1024L * 1024L, 2);
 
     Limits {
       if (maxBlobBytes <= 0L) {
@@ -309,9 +300,6 @@ final class ProviderInlineBlobReader {
       }
       if (maxCacheWeightBytes <= 0L) {
         throw new IllegalArgumentException("maxCacheWeightBytes must be positive");
-      }
-      if (cacheTtl == null || cacheTtl.isZero() || cacheTtl.isNegative()) {
-        throw new IllegalArgumentException("cacheTtl must be positive");
       }
       if (maxConcurrentDownloads <= 0) {
         throw new IllegalArgumentException("maxConcurrentDownloads must be positive");
