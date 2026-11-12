@@ -134,19 +134,13 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(50L, rawUsage.path("output_tokens").asLong(0L));
     assertEquals(150L, rawUsage.path("total_tokens").asLong(0L));
 
-    // 验证 replayState 生成
-    assertNotNull(accumulator.replayState());
-    assertEquals(
-        "Hello World",
-        accumulator
-            .replayState()
-            .payload()
-            .get("output")
-            .get(0)
-            .get("content")
-            .get(0)
-            .get("text")
-            .asString(""));
+    // The completed text block owns the Responses item and content metadata.
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(0);
+    assertEquals("Hello World", textBlock.text());
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, textBlock.providerBlockData().protocol());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
+    assertTrue(textBlock.providerBlockData().itemStart());
 
     // 验证事件分发
     assertEquals(2, emittedEvents.size());
@@ -201,10 +195,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) emittedEvents.get(0)).text());
     assertEquals(" help with that.", ((ProviderStreamEvent.TextDelta) emittedEvents.get(1)).text());
 
-    JsonNode replayContent =
-        accumulator.replayState().payload().path("output").get(0).path("content").get(0);
-    assertEquals("refusal", replayContent.path("type").asString(""));
-    assertEquals("I cannot help with that.", replayContent.path("refusal").asString(""));
+    ProviderTextBlock refusalBlock = (ProviderTextBlock) response.blocks().get(0);
+    assertEquals("I cannot help with that.", refusalBlock.text());
+    assertTrue(refusalBlock.providerBlockData().refusal());
+    assertEquals("refusal", refusalBlock.providerBlockData().contentType());
   }
 
   /** 测试意图：终态后的已知语义事件拒绝，空帧和 [DONE] 仍可忽略，且原生事件已经记录。 */

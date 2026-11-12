@@ -556,15 +556,7 @@ class AnthropicModelProviderIntegrationTest {
                 history,
                 tools,
                 cache));
-    assertNotNull(first.replayState());
-    List<ProviderContentBlock> assistantContents = new ArrayList<>();
-    assistantContents.add(new ProviderThinkingBlock(first.response().thinking()));
-    first
-        .response()
-        .toolCalls()
-        .forEach(call -> assistantContents.add(new ProviderToolCallBlock(call)));
-    history.add(
-        new ProviderMessage(ProviderMessageRole.ASSISTANT, assistantContents, first.replayState()));
+    history.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, first.response().blocks()));
     history.add(
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -591,11 +583,7 @@ class AnthropicModelProviderIntegrationTest {
                 history,
                 tools,
                 cache));
-    history.add(
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock(second.response().text())),
-            second.replayState()));
+    history.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, second.response().blocks()));
     history.add(
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("third"))));
     complete(
@@ -622,7 +610,7 @@ class AnthropicModelProviderIntegrationTest {
     assertFalse(roundThree.get(0).path("content").get(0).has("cache_control"));
     assertTrue(roundThree.get(3).path("content").get(24).has("cache_control"));
     assertTrue(roundThree.get(5).path("content").get(0).has("cache_control"));
-    assertEquals(first.replayState().payload().path("content"), roundThree.get(1).path("content"));
+    assertEquals(roundTwo.get(1).path("content"), roundThree.get(1).path("content"));
   }
 
   private static ProviderCompletion complete(

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
@@ -91,9 +92,17 @@ class OpenAiResponsesPrecisionRegressionTest {
     feedSseFrames(accumulator, "fixtures/precision/opaque-item-precision-frames.json");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode opaque =
-        firstWithField(completion.replayState().payload().path("output"), "vendor_opaque")
-            .path("vendor_opaque");
+    ProviderOpaqueBlock opaqueBlock =
+        completion
+            .response()
+            .blocks()
+            .stream()
+            .filter(ProviderOpaqueBlock.class::isInstance)
+            .map(ProviderOpaqueBlock.class::cast)
+            .filter(block -> block.blockType().equals("vendor_opaque"))
+            .findFirst()
+            .orElseThrow();
+    JsonNode opaque = opaqueBlock.providerBlockData().nativeFields().path("item").path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");
@@ -101,10 +110,7 @@ class OpenAiResponsesPrecisionRegressionTest {
     assertPreservedScale(opaque.path("ratio"), "1.10");
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("hi")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     JsonNode replayed =
         firstWithField(wire(request(List.of(assistant), List.of())).path("input"), "vendor_opaque")
             .path("vendor_opaque");
@@ -125,18 +131,23 @@ class OpenAiResponsesPrecisionRegressionTest {
     feedSseFrames(accumulator, "fixtures/precision/wide-output-index-items.json");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode output = completion.replayState().payload().path("output");
+    List<ProviderOpaqueBlock> output =
+        completion.response().blocks().stream()
+            .filter(ProviderOpaqueBlock.class::isInstance)
+            .map(ProviderOpaqueBlock.class::cast)
+            .toList();
     assertEquals(2, output.size());
-    assertEquals("wide_a", output.get(0).path("id").asString(""));
-    assertExactNumber(output.get(0).path("payload").path("n"), "2147483648");
-    assertEquals("wide_b", output.get(1).path("id").asString(""));
-    assertExactNumber(output.get(1).path("payload").path("n"), "4294967296");
+    assertEquals("wide_a", output.get(0).providerBlockData().itemId());
+    assertExactNumber(
+        output.get(0).providerBlockData().nativeFields().path("item").path("payload").path("n"),
+        "2147483648");
+    assertEquals("wide_b", output.get(1).providerBlockData().itemId());
+    assertExactNumber(
+        output.get(1).providerBlockData().nativeFields().path("item").path("payload").path("n"),
+        "4294967296");
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     JsonNode input = wire(request(List.of(assistant), List.of())).path("input");
     assertEquals(2, input.size());
     assertEquals("wide_a", input.get(0).path("id").asString(""));

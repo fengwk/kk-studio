@@ -319,20 +319,13 @@ class OpenAiResponsesStreamingDecoderTest {
     ProviderCompletion comp1 = streamAndAwait(provider, req1);
     assertEquals("Round 1 reasoning summary", comp1.response().thinking());
     assertEquals(2, comp1.response().toolCalls().size());
-    assertNotNull(comp1.replayState());
-    JsonNode replay1 = comp1.replayState().payload().get("output");
+    assertEquals(3, comp1.response().blocks().size());
 
     // Round 2: 追加 ASSISTANT 1 及两个并行 TOOL
     String t1Text = "{\"name\":\"Alice\",\"status\":\"VIP\"}";
     String t2Text = "{\"orders\":[\"ord_999\"]}";
     ProviderMessage asstMsg1 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock(comp1.response().thinking()),
-                new ProviderToolCallBlock(comp1.response().toolCalls().get(0)),
-                new ProviderToolCallBlock(comp1.response().toolCalls().get(1))),
-            comp1.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, comp1.response().blocks());
     ProviderMessage toolMsg1 =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -365,18 +358,12 @@ class OpenAiResponsesStreamingDecoderTest {
     ProviderCompletion comp2 = streamAndAwait(provider, req2);
     assertEquals("Round 2 reasoning summary", comp2.response().thinking());
     assertEquals(1, comp2.response().toolCalls().size());
-    assertNotNull(comp2.replayState());
-    JsonNode replay2 = comp2.replayState().payload().get("output");
+    assertEquals(2, comp2.response().blocks().size());
 
     // Round 3: 追加 ASSISTANT 2 及 TOOL 3
     String t3Text = "{\"discount_percent\":15}";
     ProviderMessage asstMsg2 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock(comp2.response().thinking()),
-                new ProviderToolCallBlock(comp2.response().toolCalls().get(0))),
-            comp2.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, comp2.response().blocks());
     ProviderMessage toolMsg3 =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -399,7 +386,7 @@ class OpenAiResponsesStreamingDecoderTest {
     ProviderCompletion comp3 = streamAndAwait(provider, req3);
     assertEquals("The discount is applied successfully.", comp3.response().text());
     assertEquals(GenerationStopReason.COMPLETE, comp3.response().stopReason());
-    assertNotNull(comp3.replayState());
+    assertFalse(comp3.response().blocks().isEmpty());
 
     assertEquals(3, capturedRequests.size());
     assertNull(serverError.get(), "local HTTP server must complete all fixture responses");
@@ -424,22 +411,22 @@ class OpenAiResponsesStreamingDecoderTest {
     // 3. Request 2: native replay 原样全等，工具结果保持 string 形态
     JsonNode input2 = capturedRequests.get(1).get("input");
     assertEquals(6, input2.size());
-    assertEquals(replay1.get(0), input2.get(1));
-    assertEquals(replay1.get(1), input2.get(2));
-    assertEquals(replay1.get(2), input2.get(3));
+    assertEquals("reasoning", input2.get(1).path("type").asString(""));
+    assertEquals("function_call", input2.get(2).path("type").asString(""));
+    assertEquals("function_call", input2.get(3).path("type").asString(""));
     assertToolResultItem(input2.get(4), "call_round1_1", t1Text);
     assertToolResultItem(input2.get(5), "call_round1_2", t2Text);
 
     // 4. Request 3: native replay 原样全等，工具结果保持 string 形态
     JsonNode input3 = capturedRequests.get(2).get("input");
     assertEquals(9, input3.size());
-    assertEquals(replay1.get(0), input3.get(1));
-    assertEquals(replay1.get(1), input3.get(2));
-    assertEquals(replay1.get(2), input3.get(3));
+    assertEquals(input2.get(1), input3.get(1));
+    assertEquals(input2.get(2), input3.get(2));
+    assertEquals(input2.get(3), input3.get(3));
     assertToolResultItem(input3.get(4), "call_round1_1", t1Text);
     assertToolResultItem(input3.get(5), "call_round1_2", t2Text);
-    assertEquals(replay2.get(0), input3.get(6));
-    assertEquals(replay2.get(1), input3.get(7));
+    assertEquals("reasoning", input3.get(6).path("type").asString(""));
+    assertEquals("function_call", input3.get(7).path("type").asString(""));
     assertToolResultItem(input3.get(8), "call_round2_1", t3Text);
   }
 }
