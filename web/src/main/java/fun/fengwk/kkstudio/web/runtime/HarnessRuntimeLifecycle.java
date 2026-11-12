@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Harness worker dispatcher 生命周期与节点优雅退出排空编排。
@@ -39,13 +40,13 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
   private final ToolProcessor toolProcessor;
   private final ObjectProvider<EnvironmentDaemonServer> daemonServerProvider;
   private final Duration drainTimeout;
-  private final Duration leaseDuration;
+  private final Supplier<Duration> leaseDurationProvider;
 
   private final Object lifecycleLock = new Object();
   private boolean started;
   private boolean running;
 
-  /** {@code drainTimeout} 等待本地执行自然完成；{@code leaseDuration} 是该等待之后用于取消、远端移交与退出确认的剩余预算。 */
+  /** {@code drainTimeout} 等待本地执行自然完成；关闭时使用当前租约时长作为剩余预算。 */
   HarnessRuntimeLifecycle(
       boolean workersEnabled,
       HarnessWorkDispatcher dispatcher,
@@ -53,7 +54,7 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
       ToolProcessor toolProcessor,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider,
       Duration drainTimeout,
-      Duration leaseDuration) {
+      Supplier<Duration> leaseDurationProvider) {
     this.workersEnabled = workersEnabled;
     this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
     this.executionLifecycle = Objects.requireNonNull(executionLifecycle, "executionLifecycle");
@@ -61,15 +62,12 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
     this.daemonServerProvider =
         Objects.requireNonNull(daemonServerProvider, "daemonServerProvider");
     Objects.requireNonNull(drainTimeout, "drainTimeout");
-    Objects.requireNonNull(leaseDuration, "leaseDuration");
+    this.leaseDurationProvider =
+        Objects.requireNonNull(leaseDurationProvider, "leaseDurationProvider");
     if (drainTimeout.isNegative()) {
       throw new IllegalArgumentException("drainTimeout must not be negative");
     }
-    if (leaseDuration.isNegative()) {
-      throw new IllegalArgumentException("leaseDuration must not be negative");
-    }
     this.drainTimeout = drainTimeout;
-    this.leaseDuration = leaseDuration;
   }
 
   @Override
@@ -108,6 +106,10 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
         running = false;
       }
       long stopStartedAt = System.nanoTime();
+      Duration leaseDuration = Objects.requireNonNull(leaseDurationProvider.get(), "leaseDuration");
+      if (leaseDuration.isNegative()) {
+        throw new IllegalArgumentException("leaseDuration must not be negative");
+      }
       long deadlineNanos = stopStartedAt + drainTimeout.plus(leaseDuration).toNanos();
       AtomicReference<Throwable> stopFailure = new AtomicReference<>();
 

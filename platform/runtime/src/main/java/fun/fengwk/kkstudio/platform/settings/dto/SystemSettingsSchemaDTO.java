@@ -26,8 +26,6 @@ public class SystemSettingsSchemaDTO {
 
     private String descriptionKey;
 
-    private boolean restartRequired;
-
     private List<GroupDTO> groups;
   }
 
@@ -39,10 +37,6 @@ public class SystemSettingsSchemaDTO {
     private String labelKey;
 
     private String descriptionKey;
-
-    private boolean restartRequired;
-
-    private @Nullable ApplyTiming applyTiming;
 
     private List<FieldDTO> fields;
   }
@@ -74,12 +68,6 @@ public class SystemSettingsSchemaDTO {
     private String value;
 
     private String labelKey;
-  }
-
-  public enum ApplyTiming {
-    NEXT_INVOCATION,
-    NEXT_HTTP_REQUEST,
-    RESTART
   }
 
   public enum FieldType {

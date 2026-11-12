@@ -19,8 +19,7 @@ const LONG_REASON =
 const LONG_ARGUMENTS = JSON.stringify({
   command: 'npm --prefix frontend run test -- src/features/thread/runtime/thread-panel/messages/tool-message.view.test.tsx',
   workdir: '/srv/kk-studio/frontend/browser-tests/nested/deeply/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  env: { NODE_ENV: 'test', CI: 'true' },
-  timeoutMs: 120000,
+  timeout_seconds: 120,
 })
 
 interface RecordedRequest {
@@ -63,6 +62,7 @@ function buildItems(): InteractionDTO[] {
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
       approval: { required: true, reason: LONG_REASON },
+      queuedSameFileCount: 0,
       createdAt: 1791194220000,
     },
     {
@@ -334,19 +334,21 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
       await expect(card.locator('time')).toHaveCount(0)
       await expect(card.locator('.interaction-approval-reason-text')).toContainText('bash requires approval')
-      await expect(card.locator('.interaction-raw-pre')).toContainText('npm --prefix frontend run test')
+      await expect(card.locator('.thread-tool-approval-field')).toHaveCount(3)
+      await expect(card.locator('.thread-tool-approval-field').filter({ has: page.locator('dt', { hasText: 'command' }) }).locator('pre'))
+        .toContainText('npm --prefix frontend run test')
+      await expect(page.getByRole('heading', { name: '迁移审批' })).toBeVisible()
+      await expect(page.getByRole('link', { name: '会话: 迁移审批' })).toHaveAttribute('href', `/threads/${APPROVAL_ROOT_ID}`)
 
       const [
         surface,
         border,
-        bg,
         fg,
         fgMuted,
         warning,
       ] = await Promise.all([
         tokenColor(page, '--surface'),
         tokenColor(page, '--border'),
-        tokenColor(page, '--bg'),
         tokenColor(page, '--fg'),
         tokenColor(page, '--fg-muted'),
         tokenColor(page, '--warning'),
@@ -356,7 +358,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       const cardStyle = await card.evaluate((el) => {
         const style = window.getComputedStyle(el)
         const reason = el.querySelector<HTMLElement>('.interaction-approval-reason-text')!
-        const pre = el.querySelector<HTMLElement>('.interaction-raw-pre')!
+        const pre = el.querySelector<HTMLElement>('.thread-tool-approval-field pre')!
         const icon = el.querySelector<HTMLElement>('.interaction-approval-icon')!
         return {
           cardBackground: style.backgroundColor,
@@ -372,17 +374,18 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(cardStyle.cardBorder).toBe(border)
       expect(cardStyle.reasonColor).toBe(fgMuted)
       expect(cardStyle.preColor).toBe(fg)
-      expect(cardStyle.preBackground).toBe(bg)
+      expect(cardStyle.preBackground).toBe('rgba(0, 0, 0, 0)')
       // 权限语义保留在唯一工具行的静态图标，不叠第二份状态标题。
       expect(cardStyle.iconColor).toBe(warning)
 
       // 正文对比度必须达到可读水平，这正是截图里失效的部分。
-      expect(contrastRatio(cardStyle.preColor, cardStyle.preBackground)).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(cardStyle.preColor, cardStyle.cardBackground)).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(cardStyle.reasonColor, cardStyle.cardBackground)).toBeGreaterThanOrEqual(4.5)
 
-      // 长原因与长 JSON 必须完整保留（真实审批所需信息）而不是被截断。
+      // 长原因、完整 command 与 workdir 必须可读，未展示原始 JSON。
       await expect(card.locator('.interaction-approval-reason-text')).toHaveText(LONG_REASON)
-      await expect(card.locator('.interaction-raw-pre')).toHaveText(LONG_ARGUMENTS)
+      await expect(card.locator('.thread-tool-approval-field').filter({ has: page.locator('dt', { hasText: 'command' }) }).locator('pre'))
+        .toHaveText(JSON.parse(LONG_ARGUMENTS).command)
       expect((await card.textContent())?.split('/srv/kk-studio/frontend/browser-tests/nested/deeply/')).toHaveLength(2)
 
       const optionLabel = page.locator('.interaction-option-label').first()
@@ -537,6 +540,22 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     )
     expect(approvals[0].body).toMatchObject({ decision: 'DENY', reason: null })
     expect(String(approvals[0].body.decisionId)).not.toHaveLength(0)
+  })
+
+  test('optional denial reason is submitted with Enter at a narrow viewport', async ({ page }) => {
+    const approvals: RecordedRequest[] = []
+    await mockPendingApi(page, { approvals })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(HARNESS_URL)
+
+    const card = page.locator('.interaction-feed-item').first()
+    const reason = card.getByRole('textbox', { name: '拒绝原因（可选）' })
+    await reason.fill('请先检查命令范围')
+    await reason.press('Enter')
+    await expect(card.locator('.interaction-approval-tool-name')).toHaveCount(0)
+    expect(approvals).toHaveLength(1)
+    expect(approvals[0].body).toMatchObject({ decision: 'DENY', reason: '请先检查命令范围' })
+    await expectNoHorizontalOverflow(page)
   })
 
   test('retrying an approval reuses one decision id and never rewrites the target thread', async ({

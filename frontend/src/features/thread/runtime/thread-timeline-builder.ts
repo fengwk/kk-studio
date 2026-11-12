@@ -416,6 +416,12 @@ function projectInvocationOverlays(
       ?? terminalResult?.editReview
       ?? extractResultEditReview(invocation.result)
       ?? undefined
+    const queuedPredecessor = invocation.queuedBehindToolCallId == null
+      ? null
+      : toolInvocations.find((candidate) =>
+        candidate.assistantEntryId === invocation.assistantEntryId
+        && candidate.toolCallId === invocation.queuedBehindToolCallId,
+      ) ?? null
     const projected: ToolDialogueMessage = {
       ...message,
       callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
@@ -426,6 +432,9 @@ function projectInvocationOverlays(
         : (failed ? 'error' : 'done'),
       invocationId: invocation.id,
       invocationStatus: invocation.status,
+      queuedBehindToolCallId: invocation.queuedBehindToolCallId,
+      queuedBehindToolCallUnfinished:
+        queuedPredecessor != null && !isTerminalInvocationStatus(queuedPredecessor.status),
       requiredEnvironmentId: invocation.requiredEnvironmentId,
       waitingForEnvironment: invocation.waitingForEnvironment,
       requiredEnvironmentName: invocation.requiredEnvironmentName,
@@ -498,6 +507,10 @@ function terminalInvocationResult(
 
 function isFailedInvocationStatus(status: string): boolean {
   return status === 'FAILED' || status === 'UNKNOWN' || status === 'CANCELLED'
+}
+
+function isTerminalInvocationStatus(status: string): boolean {
+  return status === 'SUCCEEDED' || isFailedInvocationStatus(status)
 }
 
 /** durable result 到达后是唯一展示源；transient overlay 不得再重复输出。 */

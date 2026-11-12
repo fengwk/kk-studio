@@ -29,9 +29,9 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -129,6 +129,53 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertEquals(before.deliveryCommandSequence(), after.deliveryCommandSequence());
     assertEquals(before.terminalEntryId(), after.terminalEntryId());
     assertEquals(1, rootCommandCount());
+  }
+
+  /** 同步 task Join 冻结结果时唤醒父 Work，但不创建异步通知命令。 */
+  @Test
+  void synchronousTaskSettlementWakesParentWithoutNotification() {
+    UUID syncChildId = UUID.randomUUID();
+    SeededChild syncChild = seedQuiescentChild(syncChildId, root.threadId(), 81L);
+    UUID syncJoinId = UUID.randomUUID();
+    insertUnmatchedJoin(syncJoinId, root.threadId(), syncChildId, JoinDelivery.SETTLE_TOOL_RESULT);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(syncChildId);
+          tx.commands().loadQueued(syncChildId);
+          ThreadCommand source = tx.commands().find(syncChildId, 1L).orElseThrow();
+          tx.commands().update(List.of(source.markApplied(syncChild.turnStartId())));
+          return null;
+        });
+
+    store.transaction(
+        tx -> {
+          ThreadTreeLocks.lockForThread(tx, syncChildId);
+          for (UUID threadId :
+              List.of(syncChildId, root.threadId()).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            tx.threads().lock(threadId);
+          }
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx,
+              tx.threads().find(syncChildId).orElseThrow(),
+              syncChild.turnEndId(),
+              null,
+              T1,
+              false);
+          return null;
+        });
+
+    ThreadJoin matched = join(syncJoinId);
+    assertTrue(matched.matched());
+    assertNull(matched.deliveryCommandSequence());
+    assertEquals(0, rootCommandCount());
+    assertTrue(
+        store.<Boolean>transaction(
+            tx ->
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
+                    .isPresent()));
   }
 
   /** J3：本 Thread 仍有 QUEUED 输入时不得结算上游 Join。 */
@@ -367,7 +414,7 @@ class ThreadLifecycleCoordinatorJoinTest {
                       "thread-" + threadId,
                       root.threadId(),
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
@@ -397,6 +444,11 @@ class ThreadLifecycleCoordinatorJoinTest {
 
   /** 在给定父 Thread 下插入一个尚未冻结结果的直接子 Join。 */
   private void insertUnmatchedJoin(UUID newJoinId, UUID parentThreadId, UUID childThreadId) {
+    insertUnmatchedJoin(newJoinId, parentThreadId, childThreadId, JoinDelivery.NOTIFY_PARENT);
+  }
+
+  private void insertUnmatchedJoin(
+      UUID newJoinId, UUID parentThreadId, UUID childThreadId, JoinDelivery delivery) {
     store.transaction(
         tx -> {
           tx.threads().lock(childThreadId);
@@ -416,7 +468,7 @@ class ThreadLifecycleCoordinatorJoinTest {
                       null,
                       T0,
                       T0,
-                      JoinDelivery.NOTIFY_PARENT,
+                      delivery,
                       null));
           return null;
         });

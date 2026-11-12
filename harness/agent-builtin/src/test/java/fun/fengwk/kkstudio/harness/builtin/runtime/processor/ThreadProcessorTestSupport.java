@@ -34,9 +34,9 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -178,7 +178,7 @@ public final class ThreadProcessorTestSupport {
         name,
         threadId,
         false,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         constraints,
         ThreadExecutionControl.RUNNABLE,
         0L,
@@ -700,6 +700,39 @@ public final class ThreadProcessorTestSupport {
     return toolId;
   }
 
+  static UUID seedReadyToolInvocation(
+      InMemoryBuiltinHarnessStore store,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID assistantEntryId,
+      int callIndex,
+      ToolCall call,
+      ToolBinding binding) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          id,
+                          threadId,
+                          turnStartEntryId,
+                          assistantEntryId,
+                          callIndex,
+                          call,
+                          binding,
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          NOW,
+                          NOW)));
+          return id;
+        });
+  }
+
   public static ClaimedWork claimThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return claimThreadWork(store, threadId, NOW);
   }
@@ -935,6 +968,23 @@ public final class ThreadProcessorTestSupport {
             null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
+  }
+
+  static ToolBinding environmentBinding(String name) {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            name,
+            "description of " + name,
+            name,
+            new InputSchema("arguments", Map.of(), Set.of(), true),
+            ToolSideEffect.IDEMPOTENT,
+            Duration.ofSeconds(30));
+    return new ToolBinding(
+        new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
+        new ContributorBinding("core", name),
+        EnvironmentSupport.ROUTED,
+        ENV_ID,
+        "dev");
   }
 
   static ModelRequestSpec tooledRequest(List<String> toolNames) {
@@ -1361,7 +1411,7 @@ public final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               targetStore,
               registry,
-              new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, configProvider));
+              new ThreadProcessorConfig(() -> RESOLVE_FAILURE_DELAY, configProvider));
     }
 
     /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */

@@ -35,7 +35,7 @@ public final class AgentSpawner {
   public static void lockForSpawn(HarnessStore.Transaction tx, SpawnRequest request) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
-    if (request.parentThreadId() != null && request.delivery() == JoinDelivery.NOTIFY_PARENT) {
+    if (request.parentThreadId() != null && countsAsSubagent(request.delivery())) {
       tx.joins().lockAdmission();
     }
     if (request.continuation() != null) {
@@ -82,7 +82,7 @@ public final class AgentSpawner {
             request.settings(),
             parentId,
             request.yoloEnabled(),
-            request.trigger(),
+            request.kind(),
             request.constraints(),
             request.commands());
     ThreadState existing = tx.threads().find(request.threadId()).orElse(null);
@@ -109,7 +109,7 @@ public final class AgentSpawner {
             rootThreadId,
             request.settings(),
             request.yoloEnabled(),
-            request.trigger(),
+            request.kind(),
             effective,
             creationRequestHash,
             request.commands(),
@@ -139,5 +139,9 @@ public final class AgentSpawner {
         request.commands(),
         preflight,
         request);
+  }
+
+  private static boolean countsAsSubagent(JoinDelivery delivery) {
+    return delivery == JoinDelivery.NOTIFY_PARENT || delivery == JoinDelivery.SETTLE_TOOL_RESULT;
   }
 }

@@ -109,7 +109,7 @@ final class InMemoryJoinStore implements JoinStore {
                     parentThreadId.equals(join.parentThreadId())
                         && !join.matched()
                         && join.supersededByInvocationId() == null
-                        && join.delivery() == JoinDelivery.NOTIFY_PARENT)
+                        && isSubagentDelivery(join.delivery()))
             .count();
   }
 
@@ -126,6 +126,10 @@ final class InMemoryJoinStore implements JoinStore {
                     && join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
   }
 
+  private static boolean isSubagentDelivery(JoinDelivery delivery) {
+    return delivery == JoinDelivery.NOTIFY_PARENT || delivery == JoinDelivery.SETTLE_TOOL_RESULT;
+  }
+
   @Override
   public int countIncompleteSubagent() {
     tx.checkOpen();
@@ -134,7 +138,7 @@ final class InMemoryJoinStore implements JoinStore {
             .filter(
                 join ->
                     join.parentThreadId() != null
-                        && join.delivery() == JoinDelivery.NOTIFY_PARENT
+                        && isSubagentDelivery(join.delivery())
                         && !join.matched()
                         && join.supersededByInvocationId() == null)
             .count();

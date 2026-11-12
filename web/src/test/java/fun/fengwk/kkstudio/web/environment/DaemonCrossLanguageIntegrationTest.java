@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.protocol.DaemonConfiguration;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
@@ -175,7 +176,7 @@ class DaemonCrossLanguageIntegrationTest {
     networkSettings =
         new AtomicReference<>(
             new EnvironmentServerSettings(
-                Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L));
+                Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L));
     Supplier<EnvironmentServerSettings> settingsSupplier = networkSettings::get;
     environmentConfig = new AtomicReference<>();
     EnvironmentConfigSource configSource = environmentId -> Optional.of(environmentConfig.get());
@@ -649,7 +650,7 @@ class DaemonCrossLanguageIntegrationTest {
             new FakeTicketService(),
             () ->
                 new EnvironmentServerSettings(
-                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L),
+                    Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L),
             Runnable::run);
     recordingSessions.setDelegate(newServer);
 

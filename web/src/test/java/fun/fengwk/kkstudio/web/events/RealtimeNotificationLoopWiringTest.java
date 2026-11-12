@@ -95,7 +95,11 @@ class RealtimeNotificationLoopWiringTest {
     HarnessStreamCatchupService catchupService = mock(HarnessStreamCatchupService.class);
     PostgresqlNotificationLoop loop =
         ApplicationEventConfiguration.createRealtimeNotificationLoop(
-            dataSource, bus, catchupService, Duration.ofMillis(10), Duration.ofMillis(1));
+            dataSource,
+            bus,
+            catchupService,
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(1));
     loop.start();
     assertTrue(delivered.await(5, TimeUnit.SECONDS));
     loop.close();
@@ -157,7 +161,11 @@ class RealtimeNotificationLoopWiringTest {
 
     PostgresqlNotificationLoop loop =
         ApplicationEventConfiguration.createRealtimeNotificationLoop(
-            dataSource, bus, catchupService, Duration.ofMillis(10), Duration.ofMillis(1));
+            dataSource,
+            bus,
+            catchupService,
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(1));
     loop.start();
     verify(catchupService, timeout(5_000)).onNotification(payload);
     loop.close();

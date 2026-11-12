@@ -876,7 +876,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
   it('rejects an existing root name but allows a subagent name', async () => {
     const user = userEvent.setup()
     const summary = {
-      threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
+      threadId: 'subagent', kind: 'USER' as const, parentThreadId: null as string | null, name: 'duplicate',
       createdAt: 0, updatedAt: 0, status: 'IDLE' as const, executionControl: 'RUNNABLE' as const,
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } }, headMessagePreview: null,
     }
@@ -889,7 +889,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await confirmBranch(user)
     expect(await screen.findByText('此 Session 已有同名 thread 或草稿，请换一个名称。')).toBeInTheDocument()
     expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
-    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{ ...summary, parentThreadId: 'root' }])
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{ ...summary, kind: 'SUBAGENT', parentThreadId: 'root' }])
     await confirmBranch(user)
     await waitFor(() => expect(storedPaneTarget('pane-3')).toMatchObject({
       kind: 'NEW_THREAD_DRAFT',
@@ -1055,7 +1055,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     }
     if (scenario === 'root' || scenario === 'subagent') {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
-        threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
+        threadId: 'existing', kind: scenario === 'root' ? 'USER' : 'SUBAGENT', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
         createdAt: 0, updatedAt: 0, status: 'IDLE' as const, executionControl: 'RUNNABLE' as const,
         execution: thread().branchSettings.execution, headMessagePreview: null,
       }])

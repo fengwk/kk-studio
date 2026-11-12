@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -52,7 +53,13 @@ public class SystemSettingsService {
     try {
       settings = systemSettingsCodec.fromDto(updateDTO);
     } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
+      String message = error.getMessage();
+      int separator = message == null ? -1 : message.indexOf(' ');
+      if (separator > 0 && message.substring(0, separator).contains(".")) {
+        String field = message.substring(0, separator);
+        throw DomainException.validationFields(RESOURCE, message, Map.of(field, message));
+      }
+      throw DomainException.validation(RESOURCE, message, error);
     }
 
     SystemSettingsRepository.SystemSettingsRecord current = requireRecord();

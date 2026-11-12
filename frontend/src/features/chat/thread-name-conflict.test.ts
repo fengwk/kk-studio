@@ -4,7 +4,7 @@ import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
 const summary: HarnessThreadSummaryDTO = {
-  threadId: 'root', parentThreadId: null, name: 'main', createdAt: 0, updatedAt: 0,
+  threadId: 'root', kind: 'USER', parentThreadId: null, name: 'main', createdAt: 0, updatedAt: 0,
   status: 'IDLE', executionControl: 'RUNNABLE',
   execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } }, headMessagePreview: null,
 }

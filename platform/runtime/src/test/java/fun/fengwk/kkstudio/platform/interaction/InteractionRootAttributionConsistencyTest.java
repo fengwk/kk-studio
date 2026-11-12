@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -161,7 +161,7 @@ class InteractionRootAttributionConsistencyTest {
     UUID session = id(2);
     stubSingleRoot(root, session);
     ThreadState thread = mock(ThreadState.class);
-    when(thread.spawnTrigger()).thenReturn(SpawnTrigger.PLUGIN);
+    when(thread.kind()).thenReturn(ThreadKind.PLUGIN_TASK);
     when(thread.name()).thenReturn("root name");
     BranchSettings settings = mock(BranchSettings.class);
     EntryCurrentState entry = mock(EntryCurrentState.class);

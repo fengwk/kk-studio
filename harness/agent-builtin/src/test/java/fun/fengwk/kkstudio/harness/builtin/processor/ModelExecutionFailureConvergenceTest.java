@@ -444,7 +444,8 @@ class ModelExecutionFailureConvergenceTest {
     final ClaimedWork claim;
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     final ModelProcessorConfig config =
-        new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, FLUSH_CONFIG);
+        new ModelProcessorConfig(
+            () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, FLUSH_CONFIG);
     final ModelGateway gateway =
         SingleModelGateway.of(
             execution -> {

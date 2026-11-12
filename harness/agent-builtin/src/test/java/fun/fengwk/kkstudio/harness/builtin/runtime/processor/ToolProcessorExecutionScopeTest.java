@@ -218,10 +218,10 @@ class ToolProcessorExecutionScopeTest {
         fixture.gateway,
         fixture.sink,
         new ToolProcessorConfig(
-            ToolProcessorTestSupport.LEASE_CONFIG,
+            ToolProcessorTestSupport.LEASE_CONFIG_PROVIDER,
             () -> ToolProcessorTestSupport.NO_RETRY,
-            ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-            ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+            ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY_PROVIDER,
+            ToolProcessorTestSupport.BUSY_FALLBACK_DELAY_PROVIDER,
             ToolProcessorTestSupport.REATTACH_WINDOW),
         fixture.clock,
         fixture.scheduler,

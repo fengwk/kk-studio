@@ -462,6 +462,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       status: 'RUNNING',
       attempt: 1,
       toolCallId,
+      queuedBehindToolCallId: null,
       toolName: 'edit',
       rendererKey: 'edit',
       environmentId: null,

@@ -122,7 +122,7 @@ class PostgresqlAssistantErrorSettlementTest {
               new AssistantError("TEST_REJECTED", "must not resolve on terminal settlement"));
         };
     ThreadProcessorConfig config =
-        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000));
+        new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000));
     Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {

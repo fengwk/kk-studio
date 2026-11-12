@@ -39,10 +39,10 @@ import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
@@ -367,8 +367,19 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID parentId = parent.thread().id();
     UUID parentHead = parent.thread().headEntryId();
 
-    // child1 占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
-    Ticket join1 = Ticket.task(TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
+    // SETTLE_TOOL_RESULT 子任务同样占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
+    Ticket join1 =
+        new Ticket(
+            TestIds.id(72),
+            parentId,
+            parentHead,
+            HASH,
+            "assistant",
+            3,
+            3,
+            1,
+            5,
+            JoinDelivery.SETTLE_TOOL_RESULT);
     AcceptedCommands child1 =
         acceptAndJoin(runtime, child(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
     UUID child1Id = child1.thread().id();
@@ -877,14 +888,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             false,
             new ThreadConstraints(1_000, false),
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4003),
             rootCommand.requestHash());
     AcceptedCommands root = runtime.spawn(rootRequest, AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadConstraints(1_000, false), root.thread().constraints());
-    assertEquals(SpawnTrigger.CONTROLLER, root.thread().spawnTrigger());
+    assertEquals(ThreadKind.CONTROLLER_TASK, root.thread().kind());
 
     NewThreadCommand childCommand = userMessageCommand(TestIds.id(4004), "child");
     SpawnRequest childRequest =
@@ -898,14 +909,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             false,
             new ThreadConstraints(2_000, true),
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             JoinDelivery.NOTIFY_PARENT,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4007),
             childCommand.requestHash());
     AcceptedCommands child = runtime.spawn(childRequest, AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadConstraints(1_000, false), child.thread().constraints());
-    assertEquals(SpawnTrigger.MODEL_TOOL, child.thread().spawnTrigger());
+    assertEquals(ThreadKind.SUBAGENT, child.thread().kind());
     ThreadJoin childJoin = runtime.findJoin(TestIds.id(4007)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, childJoin.delivery());
 
@@ -922,14 +933,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             new SpawnRequest.Continuation(current.headEntryId(), current.nextCommandSequence()),
             false,
             ThreadConstraints.NONE,
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.NOTIFY_PARENT,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4009),
             resumedCommand.requestHash());
     AcceptedCommands resumed = runtime.spawn(resumedRequest, AcceptancePreflight.IDENTITY);
 
-    assertEquals(SpawnTrigger.MODEL_TOOL, resumed.thread().spawnTrigger());
+    assertEquals(ThreadKind.SUBAGENT, resumed.thread().kind());
     assertEquals(new ThreadConstraints(1_000, false), resumed.thread().constraints());
     ThreadJoin resumedJoin = runtime.findJoin(TestIds.id(4009)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
@@ -952,7 +963,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             new SpawnRequest.Continuation(TestIds.id(4903), 1),
             false,
             ThreadConstraints.NONE,
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             ticket,
@@ -998,7 +1009,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             false,
             ThreadConstraints.NONE,
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             ticketId,

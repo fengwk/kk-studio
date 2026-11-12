@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -262,6 +262,69 @@ class InteractionQueryServiceTest {
     // 列表和计数共用请求级缓存。
     verify(ownership, times(1)).findOwner(threadId1, sessionId1);
     verify(ownership, times(1)).findOwner(threadId2, sessionId2);
+  }
+
+  /** 测试意图：只统计同一 Assistant、同一 Environment、同一归一化文件路径上仍未结束的后继审批调用。 */
+  @Test
+  void approvalProjectsUnfinishedSameFileSuccessorsOnly() {
+    UUID sessionId = id(60);
+    UUID threadId = id(61);
+    Instant createdAt = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction row =
+        new PendingInteraction(
+            id(64),
+            threadId,
+            sessionId,
+            ToolInvocationStatus.WAITING_APPROVAL,
+            "call-1",
+            "edit",
+            "{\"path\":\"/a/b\"}",
+            "{}",
+            createdAt);
+    stubRoot(threadId);
+    stubOwner(threadId, sessionId, "CHAT", id(65), "chat");
+
+    when(runtime.countQueuedSameFileMutationsAfter(id(64))).thenReturn(1);
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
+
+    InteractionDTO.Approval approval =
+        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+
+    assertEquals(1, approval.queuedSameFileCount());
+    verify(runtime).countQueuedSameFileMutationsAfter(id(64));
+    verify(runtime, never()).getThreadSnapshot(threadId);
+  }
+
+  /** 非文件修改审批无需读取 Thread 快照或查询同文件排队项。 */
+  @Test
+  void nonFileMutationApprovalSkipsQueueCountQuery() {
+    UUID sessionId = id(80);
+    UUID threadId = id(81);
+    PendingInteraction row =
+        new PendingInteraction(
+            id(82),
+            threadId,
+            sessionId,
+            ToolInvocationStatus.WAITING_APPROVAL,
+            "call",
+            "deploy_service",
+            "{}",
+            "{}",
+            Instant.parse("2026-03-01T10:00:00Z"));
+    stubRoot(threadId);
+    stubOwner(threadId, sessionId, "CHAT", id(83), "chat");
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
+
+    InteractionDTO.Approval dto =
+        approval(service.listInteractions(null, null, 10).getItems().getFirst());
+
+    assertEquals(0, dto.queuedSameFileCount());
+    verify(runtime, never()).countQueuedSameFileMutationsAfter(any());
+    verify(runtime, never()).getThreadSnapshot(threadId);
   }
 
   /**
@@ -856,7 +919,7 @@ class InteractionQueryServiceTest {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
     when(thread.name()).thenReturn("nightly report");
-    when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
+    when(thread.kind()).thenReturn(ThreadKind.CONTROLLER_TASK);
     EntryCurrentState entryState = mock(EntryCurrentState.class);
     when(entryState.baseSettings())
         .thenReturn(

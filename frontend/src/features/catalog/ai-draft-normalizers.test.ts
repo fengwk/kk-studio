@@ -9,8 +9,8 @@ import {
   normalizeEditModelDraftProvider,
   normalizeModelDraftDefaultVariant,
   variantOptionsFromDraft,
-  variantOptionsFromModel,
 } from '@/features/catalog/ai-draft-normalizers'
+import { variantOptionsFromModel } from '@/shared/lib/model-variant-options'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
 import type {

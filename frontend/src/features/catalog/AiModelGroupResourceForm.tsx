@@ -1,13 +1,13 @@
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import type { ModelGroupDraft } from '@/features/catalog/ai-console-types'
 import type { SingleModelDTO, ModelDTO } from '@/shared/api/generated/contracts'
-import { variantOptionsFromModel } from '@/features/catalog/ai-draft-variant-options'
+import { variantOptionsFromModel } from '@/shared/lib/model-variant-options'
+import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
 import { newGroupMemberDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
-import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
@@ -101,26 +101,26 @@ export function ModelGroupForm({
             return (
               <div className="group-member-row" key={member.draftId}>
                 <span className="group-member-index">{index + 1}</span>
-                <Select
-                  value={member.modelName}
-                  aria-label={t('ai.catalog.form.groupMemberModel', { index: index + 1 })}
-                  placeholder={t('ai.catalog.form.groupMemberModelPlaceholder')}
-                  options={candidates.map((model) => ({ value: model.name, label: model.name }))}
-                  onChange={(modelName) => {
+                <ModelSelectionPicker
+                  models={candidates}
+                  modelName={member.modelName}
+                  variant={member.variant}
+                  modelLabel={t('ai.catalog.form.groupMemberModel', { index: index + 1 })}
+                  variantLabel={t('ai.catalog.form.groupMemberVariant', { index: index + 1 })}
+                  modelPlaceholder={t('ai.catalog.form.groupMemberModelPlaceholder')}
+                  variantPlaceholder={t('ai.catalog.form.groupMemberVariantPlaceholder')}
+                  allowModelGroup={false}
+                  showVariant
+                  variantDisabled={!selected}
+                  variantUnavailable={Boolean(member.variant) && !variants.includes(member.variant)}
+                  onModelChange={(modelName) => {
                     const nextModel = candidates.find((model) => model.name === modelName)
                     const defaultVariant = nextModel?.config?.defaultVariant
                       ?? variantOptionsFromModel(nextModel)[0]
                       ?? ''
                     updateMember(index, { modelName, variant: defaultVariant })
                   }}
-                />
-                <Select
-                  value={member.variant}
-                  aria-label={t('ai.catalog.form.groupMemberVariant', { index: index + 1 })}
-                  disabled={!selected}
-                  placeholder={t('ai.catalog.form.groupMemberVariantPlaceholder')}
-                  options={variants.map((variant) => ({ value: variant, label: variant }))}
-                  onChange={(variant) => updateMember(index, { variant })}
+                  onVariantChange={(variant) => updateMember(index, { variant })}
                 />
                 <div className="group-member-actions">
                   <Button

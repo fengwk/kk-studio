@@ -220,7 +220,7 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
 select pg_temp.assert_true('fork entry is an accepted history fact',
     (select entry_type = 'FORK' from harness_entry where id = pg_temp.uid(9700)));
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
-    root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
+    root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
     (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', pg_temp.uid(300), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
     (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', pg_temp.uid(301), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
     (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', pg_temp.uid(302), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
@@ -913,12 +913,12 @@ select pg_temp.rejects('a Chat Session blocks deleting its Chat',
 -- edge, atomic source-prompt receipt and delivery shape.
 -- ---------------------------------------------------------------------------
 insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
-    root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
+    root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
     (pg_temp.uid(310), pg_temp.uid(102), null, pg_temp.uid(202), repeat('1', 64), 'join-child', pg_temp.uid(310), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'RUNNABLE', 0, 2, 0, now(), now()),
     (pg_temp.uid(311), pg_temp.uid(102), null, pg_temp.uid(202), repeat('2', 64), 'join-parent', pg_temp.uid(311), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'STOPPED', 0, 2, 0, now(), now()),
-    (pg_temp.uid(312), pg_temp.uid(102), pg_temp.uid(311), pg_temp.uid(202), repeat('0', 64), 'tree-child', pg_temp.uid(311), false, 'MODEL_TOOL', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
+    (pg_temp.uid(312), pg_temp.uid(102), pg_temp.uid(311), pg_temp.uid(202), repeat('0', 64), 'tree-child', pg_temp.uid(311), false, 'SUBAGENT', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'RUNNABLE', 0, 1, 0, now(), now());
 select pg_temp.assert_true('a child Thread records its real execution root',
     (select root_thread_id = pg_temp.uid(311) and not yolo_enabled
@@ -974,7 +974,7 @@ select pg_temp.rejects('a Thread cannot be its own execution parent',
     $$update harness_thread set parent_thread_id = id where id = pg_temp.uid(310)$$, '23514',
     'ck_harness_thread_parent_not_self');
 select pg_temp.rejects('the execution parent must be a real Thread',
-    $$update harness_thread set parent_thread_id = pg_temp.uid(399), yolo_enabled = false, spawn_trigger = 'MODEL_TOOL',
+    $$update harness_thread set parent_thread_id = pg_temp.uid(399), yolo_enabled = false, kind = 'SUBAGENT',
         root_thread_id = pg_temp.uid(300) where id = pg_temp.uid(311)$$,
     '23503', 'fk_harness_thread_parent');
 -- An unknown child Thread breaks both its Thread edge and its source command edge,
@@ -1021,9 +1021,9 @@ select pg_temp.rejects('an unknown join delivery is rejected',
       values(pg_temp.uid(1510),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,now(),now(),
         'other')$$,
     '23514', 'ck_harness_thread_join_delivery_kind');
-select pg_temp.rejects('a thread needs a known spawn trigger',
-    $$update harness_thread set spawn_trigger = 'OTHER' where id = pg_temp.uid(310)$$,
-    '23514', 'ck_harness_thread_spawn_trigger');
+select pg_temp.rejects('a thread needs a known kind',
+    $$update harness_thread set kind = 'OTHER' where id = pg_temp.uid(310)$$,
+    '23514', 'ck_harness_thread_kind');
 select pg_temp.rejects('thread constraints are a json object',
     $$update harness_thread set constraints = '[]'::jsonb where id = pg_temp.uid(310)$$,
     '23514', 'ck_harness_thread_constraints');

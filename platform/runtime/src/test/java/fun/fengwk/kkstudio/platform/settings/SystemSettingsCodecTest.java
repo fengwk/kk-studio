@@ -308,7 +308,7 @@ class SystemSettingsCodecTest {
     SystemSettings withModel =
         new SystemSettings(
             SystemSettingsTestFixture.DEFAULT.tool(),
-            aiRuntimeWithCompactionModel(ModelSelection.model("m", "v"), 20_000, 16_384),
+            aiRuntimeWithCompactionModel(ModelSelection.model("m", "v"), 20_000),
             SystemSettingsTestFixture.DEFAULT.environment(),
             SystemSettingsTestFixture.DEFAULT.backendNetwork(),
             SystemSettingsTestFixture.DEFAULT.storageMedia(),
@@ -322,7 +322,7 @@ class SystemSettingsCodecTest {
     SystemSettings withGroup =
         new SystemSettings(
             SystemSettingsTestFixture.DEFAULT.tool(),
-            aiRuntimeWithCompactionModel(ModelSelection.group("g"), 20_000, 16_384),
+            aiRuntimeWithCompactionModel(ModelSelection.group("g"), 20_000),
             SystemSettingsTestFixture.DEFAULT.environment(),
             SystemSettingsTestFixture.DEFAULT.backendNetwork(),
             SystemSettingsTestFixture.DEFAULT.storageMedia(),
@@ -364,7 +364,7 @@ class SystemSettingsCodecTest {
     }
   }
 
-  /** DTO 边界：缺 required token 字段给出 field 级错误；压缩模型引用沿用领域校验。 */
+  /** DTO 边界：缺少必填 token 字段给出字段级错误；压缩模型引用沿用领域校验。 */
   @Test
   void fromDtoRequiresCompactionTokenFieldsAndValidatesModelSelection() {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
@@ -374,18 +374,6 @@ class SystemSettingsCodecTest {
     assertEquals("aiRuntime.compactionKeepRecentTokens is required", missingKeep.getMessage());
     sections.getAiRuntime().setCompactionKeepRecentTokens(20_000);
 
-    sections.getAiRuntime().setCompactionReserveTokens(null);
-    IllegalArgumentException missingReserve =
-        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
-    assertEquals("aiRuntime.compactionReserveTokens is required", missingReserve.getMessage());
-    sections.getAiRuntime().setCompactionReserveTokens(0);
-    IllegalArgumentException zeroReserve =
-        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
-    assertTrue(
-        zeroReserve.getMessage().contains("aiRuntime.compactionReserveTokens"),
-        zeroReserve.getMessage());
-
-    sections.getAiRuntime().setCompactionReserveTokens(16_384);
     // 组引用没有 variant；wire 形状与 Agent 执行选择的 HarnessModelSelectionDTO 一致。
     HarnessModelSelectionDTO groupSelection = new HarnessModelSelectionDTO();
     groupSelection.setModelName("g");
@@ -520,7 +508,10 @@ class SystemSettingsCodecTest {
     SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
-            permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
+            permission,
+            base.maxOutputMib(),
+            base.modelGatewayBusyRetryMillis(),
+            base.toolGatewayOverloadRetryMillis()),
         SystemSettingsTestFixture.DEFAULT.aiRuntime(),
         SystemSettingsTestFixture.DEFAULT.environment(),
         SystemSettingsTestFixture.DEFAULT.backendNetwork(),
@@ -563,9 +554,9 @@ class SystemSettingsCodecTest {
     return mapper.writeValueAsString(root);
   }
 
-  /** 以默认 aiRuntime 为基座替换压缩模型引用与压缩预算，减少逐字段构造噪音。 */
+  /** 以默认 aiRuntime 为基座替换压缩模型引用与保留 token 预算，减少逐字段构造噪音。 */
   private static SystemSettings.AiRuntime aiRuntimeWithCompactionModel(
-      ModelSelection compactionModel, int keepRecentTokens, int reserveTokens) {
+      ModelSelection compactionModel, int keepRecentTokens) {
     SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
     return new SystemSettings.AiRuntime(
         base.retryMaxRetries(),
@@ -574,7 +565,6 @@ class SystemSettingsCodecTest {
         base.retryMaxDelayMillis(),
         compactionModel,
         keepRecentTokens,
-        reserveTokens,
         base.subagentMaxDepth(),
         base.subagentMaxConcurrency(),
         base.subagentMaxTotalConcurrency(),

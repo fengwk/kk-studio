@@ -47,6 +47,10 @@ public class ToolInvocationDTO {
   /** Provider 侧 tool call id（冻结的调用标识），恒来自 durable ToolCall。 */
   private String toolCallId;
 
+  /** 同批同文件最近前序调用的 toolCallId；不存在时为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable String queuedBehindToolCallId;
+
   /** 冻结 ToolCall 的工具名（canonical tool name），恒有值（不依赖 binding）。 */
   private String toolName;
 

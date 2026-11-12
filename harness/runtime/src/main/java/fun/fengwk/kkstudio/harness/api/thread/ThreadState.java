@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * 持久化 Thread 当前状态。
  *
  * <p>持久化 Thread 自身拥有的字段：所属 Session、不可变父 Thread、creation request hash 身份键、head Entry cursor、Thread
- * 显示名称、执行根与根的 YOLO 开关、创建来源 {@link SpawnTrigger} 与冻结的 {@link ThreadConstraints}、执行控制（{@link
+ * 显示名称、执行根与根的 YOLO 开关、创建来源 {@link ThreadKind} 与冻结的 {@link ThreadConstraints}、执行控制（{@link
  * ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code inputThroughSequence}（初值 0）、下一条 Command
  * sequence 以及对外可见的 snapshot version。{@code sessionId}、{@code parentThreadId}、{@code
  * creationRequestHash} 与 {@code createdAt} 创建后不可变； environment、open turn、execution epoch 与
@@ -37,7 +37,7 @@ public record ThreadState(
     String name,
     UUID rootThreadId,
     boolean yoloEnabled,
-    SpawnTrigger spawnTrigger,
+    ThreadKind kind,
     ThreadConstraints constraints,
     ThreadExecutionControl executionControl,
     long inputThroughSequence,
@@ -68,9 +68,9 @@ public record ThreadState(
     if (yoloEnabled && parentThreadId != null) {
       throw new IllegalArgumentException("only an execution root carries the yolo switch");
     }
-    Objects.requireNonNull(spawnTrigger, "spawnTrigger");
+    Objects.requireNonNull(kind, "kind");
     Objects.requireNonNull(constraints, "constraints");
-    if (spawnTrigger == SpawnTrigger.USER && parentThreadId != null) {
+    if (kind == ThreadKind.USER && parentThreadId != null) {
       throw new IllegalArgumentException("a user-created thread cannot have a parent");
     }
     Objects.requireNonNull(executionControl, "executionControl");
@@ -93,9 +93,9 @@ public record ThreadState(
 
   /**
    * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / parentThreadId /
-   * rootThreadId / spawnTrigger / constraints / creationRequestHash / createdAt）不可变，{@code
-   * headEntryId} / {@code inputThroughSequence} / {@code nextCommandSequence} / {@code version} /
-   * {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
+   * rootThreadId / kind / constraints / creationRequestHash / createdAt）不可变，{@code headEntryId} /
+   * {@code inputThroughSequence} / {@code nextCommandSequence} / {@code version} / {@code
+   * updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -118,8 +118,8 @@ public record ThreadState(
     if (!stored.rootThreadId().equals(next.rootThreadId())) {
       throw new IllegalArgumentException("thread rootThreadId must not change");
     }
-    if (stored.spawnTrigger() != next.spawnTrigger()) {
-      throw new IllegalArgumentException("thread spawnTrigger must not change");
+    if (stored.kind() != next.kind()) {
+      throw new IllegalArgumentException("thread kind must not change");
     }
     if (!stored.constraints().equals(next.constraints())) {
       throw new IllegalArgumentException("thread constraints must not change");
@@ -237,7 +237,7 @@ public record ThreadState(
             name,
             id,
             enabled,
-            spawnTrigger,
+            kind,
             constraints,
             executionControl,
             inputThroughSequence,
@@ -264,7 +264,7 @@ public record ThreadState(
             newName,
             rootThreadId,
             yoloEnabled,
-            spawnTrigger,
+            kind,
             constraints,
             executionControl,
             inputThroughSequence,
@@ -297,7 +297,7 @@ public record ThreadState(
             name,
             rootThreadId,
             yoloEnabled,
-            spawnTrigger,
+            kind,
             constraints,
             executionControl,
             inputThroughSequence,

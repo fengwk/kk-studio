@@ -31,8 +31,6 @@ public class SystemSettingsAiRuntimeDTO {
 
   private Integer compactionKeepRecentTokens;
 
-  private Integer compactionReserveTokens;
-
   private Integer subagentMaxDepth;
 
   private Integer subagentMaxConcurrency;

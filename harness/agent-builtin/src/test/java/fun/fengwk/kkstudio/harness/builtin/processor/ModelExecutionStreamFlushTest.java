@@ -937,7 +937,8 @@ class ModelExecutionStreamFlushTest {
             1,
             false,
             List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -1009,7 +1010,8 @@ class ModelExecutionStreamFlushTest {
             1,
             false,
             List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -1070,7 +1072,8 @@ class ModelExecutionStreamFlushTest {
             1,
             false,
             List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -1282,7 +1285,8 @@ class ModelExecutionStreamFlushTest {
             1,
             false,
             requestSpec.toolBindings(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG, () -> retryPolicy, () -> FALLBACK_DELAY, flushConfig),
             "provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,

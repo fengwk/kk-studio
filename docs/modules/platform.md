@@ -754,9 +754,9 @@ configurationSchema 归一化普通值，非法值整份拒绝。普通值可随
 
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、backendNetwork、
 storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
-`expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
-`SystemSettingsToolSettingsProvider` 每次 preflight 读取同一内存快照，替换后立即生效，不重复读库。
-`SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
+`expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。设置保存后立即生效；
+每个使用点从内存快照读取当前值，已经开始的调用继续使用启动时取得的值。`SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
+`tool.maxOutputMib`（默认 16，范围 1–100）是所有工具单次调用输出大小上限，单位 MiB，按 1,048,576 字节换算。
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 
