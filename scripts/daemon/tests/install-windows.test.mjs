@@ -6,22 +6,20 @@
  * shipped `install.ps1` so per-card isolation, the operation-lock helper, update-without-config
  * and stop/publication ordering stay verifiable everywhere.
  *
- * The companion PowerShell suite (`test_daemon_install_windows.ps1`) exercises the real
- * ScheduledTasks objects and the direct `node.exe` argv round-trip on Windows; it is executed by
- * the Windows CI leg, so no Java toolchain is needed on any leg.
+ * The release workflow executes the actual Windows Go archive on a Windows host; these source
+ * contracts keep installer ownership, permissions and direct Go-daemon argv behavior verifiable on
+ * every development host.
  */
 
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import { REPOSITORY_ROOT } from './support/release-fixture.mjs'
 import { assertIncludesAll, assertIncludesNone, assertInOrder } from './support/source-order.mjs'
 
 const INSTALL_SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/daemon/install.ps1')
-const NATIVE_TEST = path.join(REPOSITORY_ROOT, 'scripts/daemon/tests/test_daemon_install_windows.ps1')
 
 const scriptBytes = () => readFileSync(INSTALL_SCRIPT)
 /** The script text without its UTF-8 BOM. */
@@ -63,7 +61,7 @@ describe('Windows installer surface: public entry, UUID helper and PowerShell 5.
       'daemon.json, daemon.token, daemon.lock, install.lock, lib, ide, skills, .work',
       'last-operation.json',
       'install.lock',
-      'No user Node is required',
+      'static Go daemon executable',
       'no mutable "latest" release',
       'no backup',
       'no automatic rollback',
@@ -95,17 +93,14 @@ describe('Windows installer surface: public entry, UUID helper and PowerShell 5.
     assert.ok(!scriptText().includes('releases/latest'))
   })
 
-  it('needs no user JRE or Node', () => {
+  it('needs no user JRE or Node to execute the Go daemon', () => {
     const text = scriptText()
-    // Only the archive's own frozen runtime may be executed.
     assert.ok(!text.includes('Get-Command "node.exe"'))
-    assert.ok(text.includes('runtime\\code-server\\lib\\node.exe'))
+    assert.ok(text.includes('kk-studio-daemon.exe'))
   })
 
-  it('can be dot-sourced without running main', () => {
-    // Native tests must load pure helpers without installing or registering anything.
+  it('can be dot-sourced without running the installer entrypoint', () => {
     assert.ok(scriptText().includes('if ($MyInvocation.InvocationName -ne ".")'))
-    assert.ok(existsSync(NATIVE_TEST), 'native Windows contract test must be shipped')
   })
 })
 
@@ -182,16 +177,11 @@ describe('Windows installer security: card isolation, credentials and task owner
     ])
     const envelope = functionBody('Assert-ConfigEnvelope')
     assertIncludesAll(envelope, [
-      '$script:EnvelopeScript',
-      '$result.ExitCode -eq 3',
+      'ConvertFrom-Json -ErrorAction Stop',
+      '$keys -cne "daemonConfig,environmentId,version"',
+      '$value.environmentId -cne $script:TargetEnvironmentId',
       '配置属于另一张环境卡片',
       '配置格式不是当前版本',
-    ])
-    assertIncludesAll(scriptText(), [
-      'const keys = Object.keys(value).sort().join(",");',
-      'if (keys !== "daemonConfig,environmentId,version") process.exit(2);',
-      'value.environmentId !== process.argv[2]',
-      '/^(0|[1-9][0-9]*)$/',
     ])
   })
 
@@ -230,7 +220,7 @@ describe('Windows installer security: card isolation, credentials and task owner
       '$principalSid -ne $script:CurrentSid',
       '$Task.TaskName -ne $script:TaskName',
       '$Task.Description -ne $script:TaskDescription',
-      '$script:InstalledNode',
+      '$script:InstalledDaemon',
       '拒绝操作非受管计划任务',
       '不要伪造所有权标记',
     ])
@@ -240,10 +230,10 @@ describe('Windows installer security: card isolation, credentials and task owner
     assertIncludesNone(body, ['Stop-ScheduledTask', 'Unregister-ScheduledTask', 'Remove-Item', 'Register-ScheduledTask'])
   })
 
-  it('executes node directly in the scheduled action, without wrapper or redirection', () => {
+  it('executes the Go daemon directly in the scheduled action, without wrapper or redirection', () => {
     const body = functionBody('New-DaemonScheduledTaskDefinition')
     assertIncludesAll(body, [
-      'New-ScheduledTaskAction -Execute $NodeExecutable',
+      'New-ScheduledTaskAction -Execute $DaemonExecutable',
       '-Argument $serializedArguments',
       '-WorkingDirectory $WorkingDirectory',
       'New-ScheduledTaskTrigger -AtLogOn -User $UserSid',
@@ -266,10 +256,10 @@ describe('Windows installer security: card isolation, credentials and task owner
     assertIncludesNone(serializer, ['notmatch', 'return $Argument'])
   })
 
-  it('runs main.js without encoding and uses the installed lib as working directory', () => {
-    assertIncludesAll(functionBody('New-DaemonArgumentList'), ['return @("main.js", "--config", $script:InstalledConfig)'])
-    assertIncludesNone(functionBody('New-DaemonArgumentList'), ['ToBase64String', '$script:InstalledNode'])
-    assertIncludesAll(functionBody('Invoke-InstallCommon'), ['-WorkingDirectory $script:InstalledLib', '-NodeExecutable $script:InstalledNode'])
+  it('passes the config path directly to the Go executable without a wrapper', () => {
+    assertIncludesAll(functionBody('New-DaemonArgumentList'), ['return @("--config", $script:InstalledConfig)'])
+    assertIncludesNone(functionBody('New-DaemonArgumentList'), ['ToBase64String', 'main.js'])
+    assertIncludesAll(functionBody('Invoke-InstallCommon'), ['-WorkingDirectory $script:InstalledLib', '-DaemonExecutable $script:InstalledDaemon'])
   })
 
   it('captures natively without encoding and can set a working directory', () => {
@@ -288,7 +278,7 @@ describe('Windows installer security: card isolation, credentials and task owner
     )
   })
 
-  it('unpacks the archive privately and verifies the helper layout', () => {
+  it('unpacks the Go archive privately and verifies its daemon and runtime layout', () => {
     const body = functionBody('Assert-DownloadedArchive')
     assertIncludesAll(body, [
       'Get-Command "tar.exe"',
@@ -296,11 +286,12 @@ describe('Windows installer security: card isolation, credentials and task owner
       '$archiveName = Split-Path -Leaf $script:DownloadedArchive',
       '-Arguments @("-xzf", $archiveName, "-C", "lib")',
       'exit code $($unpack.ExitCode)',
-      'is missing main.js',
-      'native\\lock-helper.js',
-      'node_modules\\koffi',
-      'is missing the bundled node.exe runtime',
-      '@("main.js", "--version")',
+      'kk-studio-daemon.exe',
+      'runtime\\code-server\\lib\\node.exe',
+      'runtime\\code-server\\out\\node\\entry.js',
+      'ide-extension\\extension.cjs',
+      'runtime-manifest.json',
+      '@("--version")',
       'daemon --version does not match resolved release tag',
     ])
     assert.ok(scriptText().includes('$script:StagedLib = Join-Path $script:DownloadDirectory "lib"'))
@@ -355,7 +346,7 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
     const start = functionBody('Start-InstallLockHelper')
     assertIncludesAll(start, [
       'ConvertTo-WindowsCommandLine -Arguments @(',
-      '$helper, "hold", $script:EnvironmentRoot',
+      '"__lock-helper", "hold", $script:EnvironmentRoot',
       'RedirectStandardInput = $true',
       '$process.StandardOutput.ReadLineAsync()',
       '$code -eq 75',
@@ -367,15 +358,13 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
       '$process.WaitForExit',
       '锁由进程退出释放',
     ])
-    assertIncludesAll(functionBody('Invoke-LockWait'), ['$helper, "wait", $script:EnvironmentRoot', '76 {'])
+    assertIncludesAll(functionBody('Invoke-LockWait'), [
+      '"__lock-helper", "wait", $script:EnvironmentRoot',
+      '76 {',
+    ])
     const copy = functionBody('New-ManagementCopy')
     assertIncludesAll(copy, [
-      'native\\lock-helper.js',
-      'node.exe',
-      'package.json',
-      'delay.js',
-      'node_modules\\koffi',
-      '@koromix\\koffi-win32-x64',
+      'kk-studio-daemon.exe',
       '独立管理副本不完整',
     ])
     // The helper copy is cleaned only by a bounded temporary-directory remover after it exits.
@@ -481,51 +470,18 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
   })
 })
 
-describe('Windows installer native contracts: native tests run only where Windows and PowerShell are genuinely available', () => {
-  it('needs no Java and asserts a direct argv round trip', () => {
-    const native = readFileSync(NATIVE_TEST, 'latin1')
-    assert.doesNotMatch(readFileSync(NATIVE_TEST, 'utf8'), /[^\x00-\x7f]/u, 'the native suite stays ASCII')
-    assertIncludesAll(native, [
-      'ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)',
-      'Assert-DirectArgumentRoundTrip',
-      'real node.exe',
-      '$script:TarFailureStderrLimit = 4096',
-      'Write-TarFailureContext',
-      'tar failure: operation={0} exitCode={1} stderrChars={2}',
-      'Write-Host "tar stderr (bounded): $stderr"',
-      'stage tar archive argument is ASCII',
-      'stage tar destination argument is ASCII',
-      'stage failure does not stop the old service',
-      'stage failure does not write config',
-      'stage failure keeps the old program',
-      'Arguments = $Argument',
-      'Actions = @($Action)',
-      'Principal = $Principal',
-      'UserId = $UserId',
-      '$registered.Actions',
-      '@($taskBeforeStageFailure.Actions)',
-      '@($taskAfterStageFailure.Actions)',
-      'Assert-ControlledTaskRejected',
-      'other principal',
-      'multiple actions',
-    ])
-    assert.doesNotMatch(native, /Argument = \$Argument|Action = \$Action|\.Action\.(?:Argument|Execute)/u)
-    assertInOrder(
-      native,
-      '$script:RealInvokeNativeProcess = ${function:Invoke-NativeProcess}',
-      'function Invoke-NativeProcess {',
-      'Write-TarFailureContext -Operation $operation',
-    )
-  })
-
-  it('runs the native PowerShell contracts', { skip: process.platform !== 'win32' && 'native ScheduledTasks contracts require Windows' }, () => {
-    const probe = spawnSync('powershell', ['-NoLogo', '-Command', 'exit 0'])
-    const executable = probe.error ? 'pwsh' : 'powershell'
-    const result = spawnSync(
-      executable,
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', NATIVE_TEST],
-      { cwd: REPOSITORY_ROOT, encoding: 'utf8', timeout: 300_000 },
-    )
-    assert.equal(result.status, 0, result.stdout + result.stderr)
-  })
+test('Windows installer fails closed on missing archive members and directly launches the Go executable', () => {
+  const archive = functionBody('Assert-DownloadedArchive')
+  assertIncludesAll(archive, [
+    'kk-studio-daemon.exe',
+    'runtime\\code-server\\lib\\node.exe',
+    'runtime\\code-server\\out\\node\\entry.js',
+    'ide-extension\\extension.cjs',
+    'runtime-manifest.json',
+    'Invoke-NativeProcess -Executable $daemon -Arguments @("--version")',
+  ])
+  assertIncludesAll(functionBody('Start-InstallLockHelper'), [
+    '$startInfo.FileName = $daemon',
+    '"__lock-helper", "hold", $script:EnvironmentRoot',
+  ])
 })

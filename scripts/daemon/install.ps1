@@ -8,7 +8,7 @@ card for the current Windows user.
 The canonical environment UUID scopes the installation directory, the scheduled task, the
 operation lock and the staged work directory; two cards of the same user never share a service,
 a program directory or an operation lock. The daemon runs as a per-user Scheduled Task while the
-installing user is logged in. The task executes the frozen bundled node.exe directly: no cmd.exe,
+installing user is logged in. The task executes the bundled Go daemon executable directly: no cmd.exe,
 PowerShell runner, wrapper script, environment file or registry entry is created.
 #>
 [CmdletBinding(PositionalBinding = $false)]
@@ -47,7 +47,7 @@ $script:InstallRoot = $null
 $script:EnvironmentsRoot = $null
 $script:EnvironmentRoot = $null
 $script:InstalledLib = $null
-$script:InstalledNode = $null
+$script:InstalledDaemon = $null
 $script:InstalledConfig = $null
 $script:InstalledToken = $null
 $script:WorkDirectory = $null
@@ -75,19 +75,6 @@ $script:WorkOwned = $false
 # only that bounded marker is surfaced, never raw diagnostics that could echo secrets.
 $script:ConfigFailureMarker = "Invalid daemon configuration: "
 $script:ConfigFailureMaxLength = 512
-$script:EnvelopeScript = @'
-const fs = require("node:fs");
-let value;
-try { value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(2); }
-if (value === null || typeof value !== "object" || Array.isArray(value)) process.exit(2);
-const keys = Object.keys(value).sort().join(",");
-if (keys !== "daemonConfig,environmentId,version") process.exit(2);
-if (typeof value.environmentId !== "string" || value.environmentId !== process.argv[2]) process.exit(3);
-if (typeof value.version !== "string" || !/^(0|[1-9][0-9]*)$/.test(value.version)) process.exit(2);
-if (value.daemonConfig === null || typeof value.daemonConfig !== "object" ||
-    Array.isArray(value.daemonConfig)) process.exit(2);
-'@
-
 function Write-Usage {
     @'
 Usage: .\install.ps1 install -EnvironmentId <UUID> -Version <version> -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
@@ -111,7 +98,7 @@ Task: kk-studio-daemon-<current-user-SID>-<environment-id>
 
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs. Token
 bytes are copied only; they never enter task arguments or environment variables.
-No user Node is required: the release archive bundles a frozen node.exe runtime.
+The release archive bundles a static Go daemon executable; code-server retains its own Node runtime.
 
 Installation operations are serialized by a kernel lock (install.lock) held by a separate
 temporary helper copy: no PID guessing, stale lock directory or loaded library is reused. A busy
@@ -120,7 +107,7 @@ operation log history and no automatic rollback: a failure after publication can
 service unavailable and is recovered by running install again. .work is the only staging area
 and last-operation.json holds at most one bounded diagnostic record without secrets.
 
-The task executes the frozen runtime node.exe directly with only main.js and --config.
+The task executes kk-studio-daemon.exe directly with only --config and its absolute path.
 It uses AtLogOn, Interactive logon and Limited run level: only while this user is logged in.
 Task Scheduler does not capture daemon stdout/stderr; task state is not connection health.
 RestartCount/RestartInterval are best effort settings, not Windows Service/systemd supervision.
@@ -472,7 +459,7 @@ function Initialize-HostContext {
     $script:EnvironmentsRoot = Join-Path $script:InstallRoot "environments"
     $script:EnvironmentRoot = Join-Path $script:EnvironmentsRoot $script:TargetEnvironmentId
     $script:InstalledLib = Join-Path $script:EnvironmentRoot "lib"
-    $script:InstalledNode = Join-Path $script:InstalledLib "runtime\code-server\lib\node.exe"
+    $script:InstalledDaemon = Join-Path $script:InstalledLib "kk-studio-daemon.exe"
     $script:InstalledConfig = Join-Path $script:EnvironmentRoot "daemon.json"
     $script:InstalledToken = Join-Path $script:EnvironmentRoot "daemon.token"
     $script:WorkDirectory = Join-Path $script:EnvironmentRoot ".work"
@@ -592,15 +579,13 @@ function ConvertTo-WindowsCommandLine {
 }
 
 function New-DaemonArgumentList {
-    # The task runs `node.exe main.js --config <path>`; main.js is an ASCII leaf resolved
-    # against the working directory, so a non-ASCII install path never enters argv.
-    # Node receives Unicode arguments directly; no pre-encoding is applied.
-    return @("main.js", "--config", $script:InstalledConfig)
+    # The executable receives the absolute config path directly, without a shell or wrapper.
+    return @("--config", $script:InstalledConfig)
 }
 
 function New-DaemonScheduledTaskDefinition {
     param(
-        [Parameter(Mandatory = $true)][string] $NodeExecutable,
+        [Parameter(Mandatory = $true)][string] $DaemonExecutable,
         [Parameter(Mandatory = $true)][string[]] $DaemonArguments,
         [Parameter(Mandatory = $true)][string] $WorkingDirectory,
         [Parameter(Mandatory = $true)][string] $UserSid,
@@ -608,7 +593,7 @@ function New-DaemonScheduledTaskDefinition {
     )
     $serializedArguments =
         ConvertTo-WindowsCommandLine -Arguments $DaemonArguments
-    $action = New-ScheduledTaskAction -Execute $NodeExecutable `
+    $action = New-ScheduledTaskAction -Execute $DaemonExecutable `
         -Argument $serializedArguments -WorkingDirectory $WorkingDirectory
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserSid
     $principal = New-ScheduledTaskPrincipal -UserId $UserSid `
@@ -656,7 +641,7 @@ function Assert-ManagedTask {
             $arguments = [string] $action.Arguments
             $workingDirectory = [string] $action.WorkingDirectory
             $expectedArguments = ConvertTo-WindowsCommandLine -Arguments (New-DaemonArgumentList)
-            if (-not $execute.Equals($script:InstalledNode, [StringComparison]::OrdinalIgnoreCase) -or
+            if (-not $execute.Equals($script:InstalledDaemon, [StringComparison]::OrdinalIgnoreCase) -or
                 -not $arguments.Equals($expectedArguments, [StringComparison]::Ordinal) -or
                 -not $workingDirectory.Equals($script:InstalledLib, [StringComparison]::OrdinalIgnoreCase)) {
                 $foreign = $true
@@ -773,17 +758,23 @@ function Assert-OptionSet {
 # 配置信封检查：旧平铺 JSON 与其它卡片的配置都必须在停止服务前被拒绝。退出码 3 专门表示
 # UUID 不匹配；daemonConfig 的内部规则由发行归档的 --check-config 负责。
 function Assert-ConfigEnvelope {
-    param(
-        [Parameter(Mandatory = $true)][string] $NodeExecutable,
-        [Parameter(Mandatory = $true)][string] $ConfigPath
-    )
-    $result = Invoke-NativeProcess -Executable $NodeExecutable `
-        -Arguments @("-e", $script:EnvelopeScript, $ConfigPath, $script:TargetEnvironmentId)
-    if ($result.ExitCode -eq 0) { return }
-    if ($result.ExitCode -eq 3) {
-        Throw-Failure "配置属于另一张环境卡片；未改动现有安装。"
+    param([Parameter(Mandatory = $true)][string] $ConfigPath)
+    try {
+        $value = [IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json -ErrorAction Stop
+        $keys = @($value.PSObject.Properties.Name | Sort-Object) -join ","
+        if ($null -eq $value -or $keys -cne "daemonConfig,environmentId,version" -or
+            $value.daemonConfig -isnot [pscustomobject] -or
+            $value.version -cnotmatch "^(0|[1-9][0-9]*)$") {
+            Throw-Failure "配置格式不是当前版本；未改动现有安装。"
+        }
+        if ($value.environmentId -cne $script:TargetEnvironmentId) {
+            Throw-Failure "配置属于另一张环境卡片；未改动现有安装。"
+        }
     }
-    Throw-Failure "配置格式不是当前版本；未改动现有安装。"
+    catch {
+        if ($_.Exception.Message -like "配置属于另一张环境卡片*") { throw }
+        Throw-Failure "配置格式不是当前版本；未改动现有安装。"
+    }
 }
 
 function Assert-EarlyEnvelope {
@@ -827,9 +818,9 @@ function Invoke-CheckConfig {
         [Parameter(Mandatory = $true)][string] $ConfigPath,
         [Parameter(Mandatory = $true)][string] $StagedLib
     )
-    $node = Join-Path $StagedLib "runtime\code-server\lib\node.exe"
-    $result = Invoke-NativeProcess -Executable $node `
-        -Arguments @("main.js", "--check-config", $ConfigPath) `
+    $daemon = Join-Path $StagedLib "kk-studio-daemon.exe"
+    $result = Invoke-NativeProcess -Executable $daemon `
+        -Arguments @("--check-config", $ConfigPath) `
         -WorkingDirectory $StagedLib
     if ($result.ExitCode -eq 0 -and
         $result.Stdout.TrimEnd([char[]] @("`r", "`n")) -ceq "Daemon configuration is valid") {
@@ -945,7 +936,7 @@ function Assert-DownloadedArchive {
         (Get-Item -LiteralPath $script:DownloadedArchive).Length -le 0) {
         Throw-Failure "downloaded daemon archive not found or empty: $($script:DownloadedArchive)"
     }
-    # Windows 10/11 ship tar.exe; it unpacks the release archive without a user Node.
+    # Windows 10/11 ship tar.exe; it unpacks the release archive without extra tools.
     $tar = Get-Command "tar.exe" -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($null -eq $tar) {
@@ -961,24 +952,22 @@ function Assert-DownloadedArchive {
     if ($unpack.ExitCode -ne 0) {
         Throw-Failure "downloaded daemon archive could not be unpacked (exit code $($unpack.ExitCode))"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib "main.js") -PathType Leaf)) {
-        Throw-Failure "downloaded daemon archive is missing main.js"
+    $daemon = Join-Path $script:StagedLib "kk-studio-daemon.exe"
+    if (-not (Test-Path -LiteralPath $daemon -PathType Leaf)) {
+        Throw-Failure "downloaded daemon archive is missing kk-studio-daemon.exe"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib "native\lock-helper.js") -PathType Leaf)) {
-        Throw-Failure "downloaded daemon archive is missing the install lock helper"
+    foreach ($requiredPath in @(
+        "runtime\code-server\lib\node.exe",
+        "runtime\code-server\out\node\entry.js",
+        "ide-extension\extension.cjs",
+        "runtime-manifest.json"
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib $requiredPath) -PathType Leaf)) {
+            Throw-Failure "downloaded daemon archive is missing $requiredPath"
+        }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib "node_modules\koffi") -PathType Container)) {
-        Throw-Failure "downloaded daemon archive is missing the helper native dependency"
-    }
-    $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
-    if (-not (Test-Path -LiteralPath $node -PathType Leaf)) {
-        Throw-Failure "downloaded daemon archive is missing the bundled node.exe runtime"
-    }
-    # Probe the archive's own frozen runtime exactly as the task runs it: the ASCII leaf
-    # main.js is resolved against the working directory, so a non-ASCII install path can
-    # never corrupt the argument. Node receives the Unicode argv directly.
-    $result = Invoke-NativeProcess -Executable $node `
-        -Arguments @("main.js", "--version") `
+    # The Go executable receives the Unicode config path directly through argv.
+    $result = Invoke-NativeProcess -Executable $daemon -Arguments @("--version") `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -ne 0) {
         Throw-Failure "downloaded daemon archive failed its --version check (exit code $($result.ExitCode))"
@@ -998,8 +987,7 @@ function Prepare-StagedArchive {
     Copy-PrivateFile -Source $ConfigFile -Destination (Join-Path $script:DownloadDirectory "daemon.json")
     Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
     $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
-    $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
-    Assert-ConfigEnvelope -NodeExecutable $node -ConfigPath $stagedConfig
+    Assert-ConfigEnvelope -ConfigPath $stagedConfig
     Invoke-CheckConfig -ConfigPath $stagedConfig -StagedLib $script:StagedLib
 }
 
@@ -1009,23 +997,9 @@ function New-ManagementCopy {
         "kk-studio-managed-" + [Guid]::NewGuid().ToString("N"))
     New-PrivateDirectory -Path $directory
     try {
-        Copy-Item -LiteralPath (Join-Path $SourceRoot "runtime\code-server\lib\node.exe") `
-            -Destination (Join-Path $directory "node.exe")
-        Copy-Item -LiteralPath (Join-Path $SourceRoot "package.json") `
-            -Destination (Join-Path $directory "package.json")
-        Copy-Item -LiteralPath (Join-Path $SourceRoot "delay.js") `
-            -Destination (Join-Path $directory "delay.js")
-        New-PrivateDirectory -Path (Join-Path $directory "native")
-        Copy-Item -Path (Join-Path $SourceRoot "native\*.js") `
-            -Destination (Join-Path $directory "native")
-        New-PrivateDirectory -Path (Join-Path $directory "node_modules\koffi")
-        Copy-Item -Path (Join-Path $SourceRoot "node_modules\koffi\*") `
-            -Destination (Join-Path $directory "node_modules\koffi") -Recurse
-        New-PrivateDirectory -Path (Join-Path $directory "node_modules\@koromix\koffi-win32-x64")
-        Copy-Item -Path (Join-Path $SourceRoot "node_modules\@koromix\koffi-win32-x64\*") `
-            -Destination (Join-Path $directory "node_modules\@koromix\koffi-win32-x64") -Recurse
-        if (-not (Test-Path -LiteralPath (Join-Path $directory "native\lock-helper.js") -PathType Leaf) -or
-            -not (Test-Path -LiteralPath (Join-Path $directory "node.exe") -PathType Leaf)) {
+        Copy-Item -LiteralPath (Join-Path $SourceRoot "kk-studio-daemon.exe") `
+            -Destination (Join-Path $directory "kk-studio-daemon.exe")
+        if (-not (Test-Path -LiteralPath (Join-Path $directory "kk-studio-daemon.exe") -PathType Leaf)) {
             Throw-Failure "独立管理副本不完整。"
         }
         $script:ManagementDirectory = $directory
@@ -1041,12 +1015,11 @@ function New-ManagementCopy {
 
 function Start-InstallLockHelper {
     param([Parameter(Mandatory = $true)][string] $HelperRoot)
-    $node = Join-Path $HelperRoot "node.exe"
-    $helper = Join-Path $HelperRoot "native\lock-helper.js"
+    $daemon = Join-Path $HelperRoot "kk-studio-daemon.exe"
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $node
+    $startInfo.FileName = $daemon
     $startInfo.Arguments = ConvertTo-WindowsCommandLine -Arguments @(
-        $helper, "hold", $script:EnvironmentRoot)
+        "__lock-helper", "hold", $script:EnvironmentRoot)
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -1116,10 +1089,9 @@ function Stop-InstallLockHelper {
 
 function Invoke-LockWait {
     param([Parameter(Mandatory = $true)][string] $HelperRoot)
-    $node = Join-Path $HelperRoot "node.exe"
-    $helper = Join-Path $HelperRoot "native\lock-helper.js"
-    $result = Invoke-NativeProcess -Executable $node -Arguments @(
-        $helper, "wait", $script:EnvironmentRoot, [string] $script:VerifyTimeoutSeconds)
+    $daemon = Join-Path $HelperRoot "kk-studio-daemon.exe"
+    $result = Invoke-NativeProcess -Executable $daemon -Arguments @(
+        "__lock-helper", "wait", $script:EnvironmentRoot, [string] $script:VerifyTimeoutSeconds)
     switch ($result.ExitCode) {
         0 { return }
         76 { Throw-Failure "服务停止后仍持有运行锁，未替换或删除任何受管文件。" }
@@ -1218,8 +1190,7 @@ function Stage-WorkProgram {
     if ($unpack.ExitCode -ne 0) {
         Throw-Failure "无法在卡片暂存区解包发行归档（exit code $($unpack.ExitCode)）。"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $lib "main.js") -PathType Leaf) -or
-        -not (Test-Path -LiteralPath (Join-Path $lib "runtime\code-server\lib\node.exe") -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $lib "kk-studio-daemon.exe") -PathType Leaf)) {
         Throw-Failure "暂存程序不完整。"
     }
     return $lib
@@ -1285,12 +1256,11 @@ function Invoke-InstallCommon {
         Prepare-StagedArchive
     }
     else {
-        Assert-ConfigEnvelope -NodeExecutable (Join-Path $script:StagedLib "runtime\code-server\lib\node.exe") `
-            -ConfigPath $script:InstalledConfig
+        Assert-ConfigEnvelope -ConfigPath $script:InstalledConfig
     }
     $helperRoot = New-ManagementCopy -SourceRoot $script:StagedLib
     $definition = New-DaemonScheduledTaskDefinition `
-        -NodeExecutable $script:InstalledNode -DaemonArguments (New-DaemonArgumentList) `
+        -DaemonExecutable $script:InstalledDaemon -DaemonArguments (New-DaemonArgumentList) `
         -WorkingDirectory $script:InstalledLib `
         -UserSid $script:CurrentSid -Description $script:TaskDescription
 
@@ -1324,13 +1294,11 @@ function Invoke-InstallCommon {
     $script:PhaseCode = "validate"
     if ($Operation -eq "install") {
         $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
-        Assert-ConfigEnvelope -NodeExecutable (Join-Path $stagedLib "runtime\code-server\lib\node.exe") `
-            -ConfigPath $stagedConfig
+        Assert-ConfigEnvelope -ConfigPath $stagedConfig
         Invoke-CheckConfig -ConfigPath $stagedConfig -StagedLib $stagedLib
     }
     else {
-        Assert-ConfigEnvelope -NodeExecutable (Join-Path $stagedLib "runtime\code-server\lib\node.exe") `
-            -ConfigPath $script:InstalledConfig
+        Assert-ConfigEnvelope -ConfigPath $script:InstalledConfig
         Invoke-CheckConfig -ConfigPath $script:InstalledConfig -StagedLib $stagedLib
     }
 

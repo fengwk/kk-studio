@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Official-release-only, per-environment installer for the Node Environment Daemon.
+# Official-release-only, per-environment installer for the Go Environment Daemon.
 # One installation is one Studio card: every managed path and OS service is scoped by its
 # canonical environment UUID. Bash 3.2 / GNU and BSD utilities. JSON semantics belong to the
 # downloaded daemon preflight; this script enforces the installation envelope only.
@@ -39,8 +39,7 @@ LAUNCHD_DOMAIN=
 LAUNCHD_TARGET=
 BOOTSTRAP_DIR=
 MGMT_DIR=
-STAGED_NODE=
-STAGED_MAIN=
+STAGED_BINARY=
 DOWNLOADED_ARCHIVE=
 OPERATION_ID=
 PHASE='1/7 检查环境与输入'
@@ -332,9 +331,7 @@ require_ownership() {
     case "$mode" in '' | *[!0-7]*) ownership_conflict "cannot interpret definition permissions" ;; esac
     (( (8#$mode & 8#022) == 0 )) || ownership_conflict "definition is group/other writable"
     check_file "$SERVICE_PATH" false
-    grep -Fq -- "$INSTALLED_LIB/runtime/code-server/lib/node" "$SERVICE_PATH" ||
-      ownership_conflict "definition does not run this environment program"
-    grep -Fq -- "$INSTALLED_LIB/main.js" "$SERVICE_PATH" ||
+    grep -Fq -- "$INSTALLED_LIB/kk-studio-daemon" "$SERVICE_PATH" ||
       ownership_conflict "definition does not run this environment program"
     grep -Fq -- "$INSTALLED_CONFIG" "$SERVICE_PATH" ||
       ownership_conflict "definition does not use this environment configuration"
@@ -418,24 +415,11 @@ download_daemon() {
 # 配置信封检查：旧平铺 JSON 与其它卡片的配置都必须在停止服务前被拒绝。退出码 3 专门表示
 # UUID 不匹配；daemonConfig 的内部规则由发行归档的 --check-config 负责。
 check_config_envelope() {
-  local file=$1 status=0
-  "$STAGED_NODE" -e '
-    const fs = require("node:fs");
-    let value;
-    try { value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(2); }
-    if (value === null || typeof value !== "object" || Array.isArray(value)) process.exit(2);
-    const keys = Object.keys(value).sort().join(",");
-    if (keys !== "daemonConfig,environmentId,version") process.exit(2);
-    if (typeof value.environmentId !== "string" || value.environmentId !== process.argv[2]) process.exit(3);
-    if (typeof value.version !== "string" || !/^(0|[1-9][0-9]*)$/.test(value.version)) process.exit(2);
-    if (value.daemonConfig === null || typeof value.daemonConfig !== "object" ||
-        Array.isArray(value.daemonConfig)) process.exit(2);
-  ' "$file" "$ENV_ID" || status=$?
-  case "$status" in
-    0) ;;
-    3) fail "配置属于另一张环境卡片；未改动现有安装。" ;;
-    *) fail "配置格式不是当前版本；未改动现有安装。" ;;
-  esac
+  local file=$1
+  "$STAGED_BINARY" --check-config "$file" >/dev/null 2>&1 ||
+    fail "配置格式不是当前版本；未改动现有安装。"
+  grep -Eq "\"environmentId\"[[:space:]]*:[[:space:]]*\"$ENV_ID\"" "$file" ||
+    fail "配置属于另一张环境卡片；未改动现有安装。"
 }
 early_input_check() {
   local file=$1
@@ -459,8 +443,8 @@ preflight_failure_detail() {
   return 1
 }
 run_check_config() {
-  local node=$1 main=$2 config=$3 output detail
-  if ! "$node" "$main" --check-config "$config" >"$BOOTSTRAP_DIR/preflight.log" 2>&1; then
+  local binary=$1 config=$2 output detail
+  if ! "$binary" --check-config "$config" >"$BOOTSTRAP_DIR/preflight.log" 2>&1; then
     detail=$(preflight_failure_detail) &&
       fail "配置校验失败：$detail 现有安装未改动。"
     fail "配置校验失败：daemon.json 与同目录 daemon.token 未通过校验。现有安装未改动。"
@@ -470,7 +454,7 @@ run_check_config() {
     fail "配置校验失败：--check-config 输出无法识别。现有安装未改动。"
 }
 extract_release() {
-  local paths path manifest_platform version_output
+  local paths path version_output
   [ -s "$DOWNLOADED_ARCHIVE" ] || fail "校验失败：下载的发行归档为空。"
   paths=$(tar -tzf "$DOWNLOADED_ARCHIVE") || fail "校验失败：发行归档无法列出。"
   while IFS= read -r path; do
@@ -480,32 +464,13 @@ extract_release() {
   done <<<"$paths"
   mkdir -p "$BOOTSTRAP_DIR/extract"
   tar -xzf "$DOWNLOADED_ARCHIVE" -C "$BOOTSTRAP_DIR/extract" || fail "校验失败：发行归档无法解包。"
-  STAGED_NODE="$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node"
-  STAGED_MAIN="$BOOTSTRAP_DIR/extract/main.js"
-  [ -x "$STAGED_NODE" ] || fail "校验失败：发行归档缺少运行时。"
-  [ -f "$BOOTSTRAP_DIR/extract/native/lock-helper.js" ] ||
-    fail "校验失败：发行归档缺少安装操作锁 helper。"
-  [ -d "$BOOTSTRAP_DIR/extract/node_modules/koffi" ] ||
-    fail "校验失败：发行归档缺少 helper 的 native 依赖。"
+  STAGED_BINARY="$BOOTSTRAP_DIR/extract/kk-studio-daemon"
+  [ -x "$STAGED_BINARY" ] || fail "校验失败：发行归档缺少 Go daemon。"
   [ -f "$BOOTSTRAP_DIR/extract/runtime/code-server/out/node/entry.js" ] ||
     fail "校验失败：发行归档缺少 code-server 入口。"
-  [ -f "$STAGED_MAIN" ] || fail "校验失败：发行归档缺少程序入口。"
   [ -f "$BOOTSTRAP_DIR/extract/runtime-manifest.json" ] || fail "校验失败：发行归档缺少运行时清单。"
-  manifest_platform=$(
-    "$STAGED_NODE" -e '
-      const fs = require("fs");
-      const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const key = process.argv[2];
-      const asset = manifest.codeServer && manifest.codeServer[key];
-      if (!asset || typeof asset !== "object") process.exit(2);
-      process.stdout.write(key);
-    ' "$BOOTSTRAP_DIR/extract/runtime-manifest.json" "$RELEASE_OS-$RELEASE_ARCH" 2>/dev/null
-  ) || fail "校验失败：发行清单不是本机平台。"
-  [ "$manifest_platform" = "$RELEASE_OS-$RELEASE_ARCH" ] || fail "校验失败：发行清单不是本机平台。"
-  version_output=$("$STAGED_NODE" "$STAGED_MAIN" --version 2>&1) ||
-    fail "校验失败：下载的发行归档无法执行。"
-  [ "$version_output" = "kk-studio-daemon $VERSION" ] ||
-    fail "daemon --version does not match resolved release tag"
+  version_output=$("$STAGED_BINARY" --version 2>&1) || fail "校验失败：下载的发行归档无法执行。"
+  [ "$version_output" = "kk-studio-daemon $VERSION" ] || fail "daemon --version does not match resolved release tag"
 }
 stage_release_inputs() {
   local source_config=$1 source_token=$2
@@ -521,29 +486,18 @@ stage_release_inputs() {
   check_input_size "$STAGED_CONFIG" 1048576
   check_input_size "$STAGED_TOKEN" 16384
   check_config_envelope "$STAGED_CONFIG"
-  run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
-    "$BOOTSTRAP_DIR/extract/main.js" "$STAGED_CONFIG"
+  run_check_config "$STAGED_BINARY" "$STAGED_CONFIG"
 }
-# 独立管理副本：只复制冻结 Node、锁 helper 及其 native 依赖。它不加载即将删除的旧 lib，
-# 也不加载即将 rename 的新 lib，因此 Windows 上被加载的 node/native 文件不会被移动或删除。
+# 独立管理副本让安装操作锁 helper 在可执行文件被替换时仍能存活。
 prepare_management_copy() {
-  local source=$1 koffi_arch
-  koffi_arch="koffi-${KO_OS}-${KO_ARCH}"
+  local source=$1 binary=kk-studio-daemon
+  if [ "$RELEASE_OS" = windows ]; then binary=kk-studio-daemon.exe; fi
   MGMT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-managed.XXXXXXXX") ||
     fail "无法创建独立管理副本。"
   chmod 0700 "$MGMT_DIR"
-  cp "$source/runtime/code-server/lib/node" "$MGMT_DIR/node" || fail "无法复制冻结运行时。"
-  chmod 0700 "$MGMT_DIR/node"
-  cp "$source/package.json" "$MGMT_DIR/package.json" || fail "无法复制 helper 模块清单。"
-  cp "$source/delay.js" "$MGMT_DIR/delay.js" || fail "无法复制 helper 依赖。"
-  mkdir -p "$MGMT_DIR/native" "$MGMT_DIR/node_modules/@koromix"
-  cp "$source/native/"*.js "$MGMT_DIR/native/" || fail "无法复制安装操作锁 helper。"
-  cp -R "$source/node_modules/koffi" "$MGMT_DIR/node_modules/koffi" ||
-    fail "无法复制 helper 的 native 依赖。"
-  cp -R "$source/node_modules/@koromix/$koffi_arch" "$MGMT_DIR/node_modules/@koromix/$koffi_arch" ||
-    fail "无法复制 helper 的 native 预编译模块。"
-  [ -f "$MGMT_DIR/native/lock-helper.js" ] && [ -x "$MGMT_DIR/node" ] ||
-    fail "独立管理副本不完整。"
+  cp "$source/$binary" "$MGMT_DIR/$binary" || fail "无法复制独立管理程序。"
+  chmod 0700 "$MGMT_DIR/$binary"
+  [ -x "$MGMT_DIR/$binary" ] || fail "独立管理副本不完整。"
 }
 # 安装操作锁：helper 先取得内核 install.lock，再在 stdout 报一行 locked。脚本保持管道打开直到
 # 受管发布与启动验证结束；脚本异常退出时管道关闭，helper 随之释放内核锁。
@@ -554,7 +508,7 @@ hold_install_lock() {
   errors="$BOOTSTRAP_DIR/helper.err"
   HELPER_FIFO="$BOOTSTRAP_DIR/helper.stdin"
   mkfifo -m 600 "$HELPER_FIFO" || fail "无法创建安装操作锁管道。"
-  "$MGMT_DIR/node" "$MGMT_DIR/native/lock-helper.js" hold "$ENV_ROOT" \
+  "$MGMT_DIR/kk-studio-daemon" __lock-helper hold "$ENV_ROOT" \
     <"$HELPER_FIFO" >"$ready" 2>"$errors" &
   HELPER_PID=$!
   exec 9>"$HELPER_FIFO" || fail "无法打开安装操作锁管道。"
@@ -608,7 +562,7 @@ stop_service_and_wait() {
     fi
   fi
   PHASE_CODE=wait-lock
-  "$MGMT_DIR/node" "$MGMT_DIR/native/lock-helper.js" wait "$ENV_ROOT" "$VERIFY_TIMEOUT_SECONDS" ||
+  "$MGMT_DIR/kk-studio-daemon" __lock-helper wait "$ENV_ROOT" "$VERIFY_TIMEOUT_SECONDS" ||
     status=$?
   case "$status" in
     0) ;;
@@ -637,8 +591,8 @@ escape_exec_argument() {
   printf '"%s"' "$value"
 }
 stage_service() {
-  local node_bin="$INSTALLED_LIB/runtime/code-server/lib/node"
-  local arguments=("$node_bin" "$INSTALLED_LIB/main.js" --config "$INSTALLED_CONFIG") argument line=
+  local daemon_binary="$INSTALLED_LIB/kk-studio-daemon"
+  local arguments=("$daemon_binary" --config "$INSTALLED_CONFIG") argument line=
   if [ "$HOST_OS" = Linux ]; then
     for argument in "${arguments[@]}"; do line="$line $(escape_exec_argument "$argument")"; done
     cat >"$BOOTSTRAP_DIR/service" <<EOF
@@ -714,7 +668,7 @@ stage_program() {
   tar -xzf "$WORK_DIR/archive.tar.gz" -C "$WORK_DIR/lib" ||
     fail "无法在卡片暂存区解包发行归档。"
   rm -f "$WORK_DIR/archive.tar.gz"
-  [ -f "$WORK_DIR/lib/main.js" ] && [ -x "$WORK_DIR/lib/runtime/code-server/lib/node" ] ||
+  [ -x "$WORK_DIR/lib/kk-studio-daemon" ] ||
     fail "暂存程序不完整。"
 }
 publish_program() {
@@ -870,12 +824,10 @@ cmd_install_or_update() {
   PHASE_CODE=validate
   if [ "$operation" = install ]; then
     check_config_envelope "$staged_config"
-    run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
-      "$BOOTSTRAP_DIR/extract/main.js" "$staged_config"
+    run_check_config "$STAGED_BINARY" "$staged_config"
   else
     check_config_envelope "$INSTALLED_CONFIG"
-    run_check_config "$BOOTSTRAP_DIR/extract/runtime/code-server/lib/node" \
-      "$BOOTSTRAP_DIR/extract/main.js" "$INSTALLED_CONFIG"
+    run_check_config "$STAGED_BINARY" "$INSTALLED_CONFIG"
   fi
   PHASE_CODE=publish
   publish_program
