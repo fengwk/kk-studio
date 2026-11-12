@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // COD-N-007: exactly two scaling slots can be occupied before further work must wait.
@@ -32,6 +34,28 @@ func TestScalingConcurrencyLimitTwo(t *testing.T) {
 	}
 }
 
+// COD-N-007: a third resize waits for an occupied slot and then completes when capacity opens.
+func TestScaleContextWaitsForSlot(t *testing.T) {
+	scalingSlots <- struct{}{}
+	scalingSlots <- struct{}{}
+	done := make(chan error, 1)
+	data := tinyPNG(t)
+	go func() {
+		_, err := ScaleContext(context.Background(), "image/png", data, Original, 0)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("resize completed while both slots were occupied: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-scalingSlots
+	if err := <-done; err != nil {
+		t.Fatalf("waiting resize failed after a slot opened: %v", err)
+	}
+	<-scalingSlots
+}
+
 // COD-N-003
 func TestTierBoxesAndNoUpscale(t *testing.T) {
 	cases := []struct {
@@ -44,6 +68,7 @@ func TestTierBoxesAndNoUpscale(t *testing.T) {
 		{"portrait720", P720, 1000, 2000, 640, 1280},
 		{"square720", P720, 2000, 2000, 720, 720},
 		{"landscape1080", P1080, 4000, 2000, 1920, 960},
+		{"portrait1080", P1080, 2000, 4000, 960, 1920},
 		{"square1080", P1080, 4000, 4000, 1080, 1080},
 		{"edgeNoUpscale", P720, 1280, 720, 1280, 720},
 		{"smallNoUpscale", P1080, 300, 200, 300, 200},
@@ -78,11 +103,18 @@ func TestScaleContextAppliesOutputLimitOnlyToResizedImage(t *testing.T) {
 	if err := png.Encode(&source, patternImage(2000, 1000, false)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ScaleContext(context.Background(), "image/png", source.Bytes(), P720, 1); err == nil || !strings.Contains(err.Error(), "resized image exceeds 1 bytes") {
-		t.Fatalf("oversized resized image error=%v", err)
+	wantResized, err := Scale("image/png", source.Bytes(), P720, ImagingLanczos)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := ScaleContext(context.Background(), "image/png", source.Bytes(), Original, 1); err != nil {
-		t.Fatalf("ORIGINAL must pass through without resize budget: %v", err)
+	_, err = ScaleContext(context.Background(), "image/png", source.Bytes(), P720, 1)
+	wantError := fmt.Sprintf("resized image exceeds 1 bytes (%d bytes)", len(wantResized.Bytes))
+	if err == nil || err.Error() != wantError {
+		t.Fatalf("oversized resized image error=%v want=%q", err, wantError)
+	}
+	original, err := ScaleContext(context.Background(), "image/png", source.Bytes(), Original, 1)
+	if err != nil || original.Resized || !bytes.Equal(original.Bytes, source.Bytes()) {
+		t.Fatalf("ORIGINAL must pass through without resize or byte limit: result=%#v err=%v", original, err)
 	}
 }
 
@@ -223,6 +255,10 @@ func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	if after.TotalAlloc-before.TotalAlloc > 1<<20 {
 		t.Fatalf("budget preflight allocated %d bytes", after.TotalAlloc-before.TotalAlloc)
 	}
+	nonPositive := pngWithDeclaredDimensions(t, 0, 4)
+	if _, err := Scale("image/png", nonPositive, Original, CatmullRom); err == nil {
+		t.Fatal("non-positive declared image dimensions were accepted")
+	}
 	exactBudget := pngWithDeclaredDimensions(t, 10_000, 4_000)
 	if _, err := Scale("image/png", exactBudget, Original, CatmullRom); err != nil {
 		t.Fatalf("exactly %d pixels must be allowed: %v", MaxPixels, err)
@@ -240,6 +276,27 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	if err != nil || result.MediaType != "image/jpeg" {
 		t.Fatalf("JPEG result=%s err=%v", result.MediaType, err)
 	}
+	decoded, err := jpeg.Decode(bytes.NewReader(jpegBytes.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resized, err := resize(oriented{src: decoded, orientation: 1}, 1152, 720, ImagingLanczos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputConfig, format, err := image.DecodeConfig(bytes.NewReader(result.Bytes))
+	if err != nil || format != "jpeg" || outputConfig.Width != 1152 || outputConfig.Height != 720 {
+		t.Fatalf("opaque JPEG config=%#v format=%q err=%v", outputConfig, format, err)
+	}
+	var quality92, quality50 bytes.Buffer
+	for quality, out := range map[int]*bytes.Buffer{92: &quality92, 50: &quality50} {
+		if err := jpeg.Encode(out, toOpaque(resized), &jpeg.Options{Quality: quality}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(result.Bytes) != quality92.Len() || quality92.Len() <= quality50.Len() {
+		t.Fatalf("quality-dependent JPEG sizes: result=%d q92=%d q50=%d", len(result.Bytes), quality92.Len(), quality50.Len())
+	}
 	alpha := patternImage(1600, 1000, true)
 	var pngBytes bytes.Buffer
 	if err := png.Encode(&pngBytes, alpha); err != nil {
@@ -249,7 +306,7 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	if err != nil || result.MediaType != "image/png" {
 		t.Fatalf("alpha result=%s err=%v", result.MediaType, err)
 	}
-	decoded, err := png.Decode(bytes.NewReader(result.Bytes))
+	decoded, err = png.Decode(bytes.NewReader(result.Bytes))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +324,52 @@ func TestMultiFrameGIFCanPassThroughButCannotBeResized(t *testing.T) {
 	}
 	if got, err := Scale("image/gif", data, Original, CatmullRom); err != nil || !bytes.Equal(got.Bytes, data) {
 		t.Fatalf("original animation passthrough err=%v", err)
+	}
+}
+
+// COD-N-004: a static GIF is decoded and resized to the PNG output format.
+func TestStaticGIFResizesToPNG(t *testing.T) {
+	frame := image.NewPaletted(image.Rect(0, 0, 1600, 1000), color.Palette{color.Black, color.White})
+	frame.SetColorIndex(0, 0, 1)
+	var source bytes.Buffer
+	if err := gif.Encode(&source, frame, nil); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Scale("image/gif", source.Bytes(), P720, CatmullRom)
+	if err != nil || result.MediaType != "image/png" {
+		t.Fatalf("static GIF result=%#v err=%v", result, err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(result.Bytes))
+	if err != nil || format != "png" || cfg.Width != 1152 || cfg.Height != 720 {
+		t.Fatalf("resized GIF config=%#v format=%q err=%v", cfg, format, err)
+	}
+}
+
+// COD-N-004: a static WebP is decoded, resized, and encoded as PNG.
+func TestStaticWebPResizesToPNG(t *testing.T) {
+	data, err := os.ReadFile("testdata/large-static.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Scale("image/webp", data, P720, CatmullRom)
+	if err != nil || result.MediaType != "image/png" || !result.Resized {
+		t.Fatalf("static WebP result=%#v err=%v", result, err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(result.Bytes))
+	if err != nil || format != "png" || cfg.Width != 1280 || cfg.Height != 640 {
+		t.Fatalf("resized WebP config=%#v format=%q err=%v", cfg, format, err)
+	}
+}
+
+// COD-N-004: WebP metadata is recognized and an original-tier image passes through unchanged.
+func TestWebPOriginalPassThrough(t *testing.T) {
+	data, err := os.ReadFile("testdata/animated-2000x1000.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Scale("image/webp", data, Original, CatmullRom)
+	if err != nil || result.MediaType != "image/webp" || result.OriginalWidth != 2000 || result.OriginalHeight != 1000 || !bytes.Equal(result.Bytes, data) {
+		t.Fatalf("WebP original result=%#v err=%v", result, err)
 	}
 }
 

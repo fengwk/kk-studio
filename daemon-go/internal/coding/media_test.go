@@ -33,8 +33,11 @@ func TestDetectMediaTypeHeaderRules(t *testing.T) {
 		head string
 		want string
 	}{
+		{name: "empty", head: "", want: ""},
 		{name: "short", head: "pdf", want: ""},
+		{name: "jpeg-prefix", head: string([]byte{0xff, 0xd8, 0xff, 0}), want: ""},
 		{name: "pdf", head: "%PDF", want: "application/pdf"},
+		{name: "mp3-frame-fa", head: string([]byte{0xff, 0xfa, 0x90, 0}), want: ""},
 		{name: "wav", head: "RIFF0000WAVE", want: "audio/wav"},
 		{name: "id3", head: "ID3-tag", want: "audio/mpeg"},
 		{name: "m4a", head: "0000ftypM4A ", want: ""},

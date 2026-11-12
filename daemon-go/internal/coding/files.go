@@ -287,6 +287,10 @@ func encodeFileText(text, charset string, bom int) ([]byte, error) {
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	return atomicWriteWithSync(path, data, mode, func(file *os.File) error { return file.Sync() })
+}
+
+func atomicWriteWithSync(path string, data []byte, mode os.FileMode, syncFile func(*os.File) error) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".kk-studio-*.part")
 	if err != nil {
 		return err
@@ -297,7 +301,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 		_, err = file.Write(data)
 	}
 	if err == nil {
-		err = file.Sync()
+		err = syncFile(file)
 	}
 	closeErr := file.Close()
 	if err != nil {

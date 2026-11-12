@@ -249,6 +249,25 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 	}
 }
 
+// COD-F-011 COD-N-018: repository discovery intentionally ignores GIT_CEILING_DIRECTORIES.
+func TestRepositoryDiscoveryIgnoresGitCeilingDirectories(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	put(t, repo, ".gitignore", "hidden.tmp\n")
+	searchRoot := filepath.Join(repo, "sub", "search")
+	put(t, repo, "sub/search/hidden.tmp", "")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Join(repo, "sub"))
+	got, err := Find(searchRoot, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("repository above GIT_CEILING_DIRECTORIES was not discovered: %v", got)
+	}
+}
+
 // COD-F-011, COD-N-011
 // This test verifies local ignore rules, explicit ignored roots, and symlink traversal.
 func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {

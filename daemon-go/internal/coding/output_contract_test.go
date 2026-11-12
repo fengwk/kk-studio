@@ -65,10 +65,14 @@ func TestOutputStoreDataDirRootIsTTLCleanupRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	removed, err := store.Sweep(10 * time.Second)
+	if err != nil || removed != 0 {
+		t.Fatalf("recent workspace removed=%d err=%v want=0", removed, err)
+	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(published), "created-at"), []byte("0"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := store.Sweep(time.Second)
+	removed, err = store.Sweep(10 * time.Second)
 	if err != nil || removed != 1 {
 		t.Fatalf("sweep removed=%d err=%v want=1", removed, err)
 	}

@@ -24,12 +24,15 @@ func readPooled(path string) ([]byte, func(), error) {
 }
 
 func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, error) {
-	buf := (*fileBuffers.Get().(*[]byte))[:0]
 	f, err := os.Open(path)
 	if err != nil {
-		fileBuffers.Put(&buf)
 		return nil, func() {}, false, err
 	}
+	return readPooledReader(ctx, f, f.Close)
+}
+
+func readPooledReader(ctx context.Context, reader io.Reader, closeReader func() error) ([]byte, func(), bool, error) {
+	buf := (*fileBuffers.Get().(*[]byte))[:0]
 	released := false
 	release := func() {
 		if !released {
@@ -39,7 +42,7 @@ func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, 
 	}
 	for {
 		if contextErr := ctx.Err(); contextErr != nil {
-			closeErr := f.Close()
+			closeErr := closeReader()
 			if contextErr == context.DeadlineExceeded {
 				return buf, release, true, closeErr
 			}
@@ -55,13 +58,13 @@ func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, 
 			copy(grown, buf)
 			buf = grown
 		}
-		n, readErr := f.Read(buf[len(buf):cap(buf)])
+		n, readErr := reader.Read(buf[len(buf):cap(buf)])
 		buf = buf[:len(buf)+n]
 		if readErr == io.EOF {
 			break
 		}
 		if readErr != nil {
-			_ = f.Close()
+			_ = closeReader()
 			release()
 			return nil, func() {}, false, readErr
 		}
@@ -69,7 +72,7 @@ func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, 
 			break
 		}
 	}
-	if err := f.Close(); err != nil {
+	if err := closeReader(); err != nil {
 		release()
 		return nil, func() {}, false, err
 	}

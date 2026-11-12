@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,8 +61,17 @@ func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
 	}
 	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
 	result := spool.Finish(false, "[Command exited with code 2.]")
-	if !strings.HasSuffix(result.Contents[0].Text, "[Command exited with code 2.]") || !strings.Contains(result.Contents[0].Text, "[Full output:") {
-		t.Fatalf("preview=%q", result.Contents[0].Text)
+	var details struct {
+		TextOutput struct {
+			Path string `json:"path"`
+		} `json:"textOutput"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	wantFooter := fmt.Sprintf("[Full output: %d bytes, 1 lines. Saved to: %s\nUse read with offset/limit to page through the file, or grep to search it.]\n[Command exited with code 2.]", inlineOutputBytes+1, details.TextOutput.Path)
+	if !strings.HasSuffix(result.Contents[0].Text, wantFooter) {
+		t.Fatalf("preview=%q want suffix=%q", result.Contents[0].Text, wantFooter)
 	}
 }
 

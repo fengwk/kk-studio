@@ -38,6 +38,9 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if result.Error {
 		t.Fatalf("preview failed: %#v", result)
 	}
+	if string(result.Details) != "{}" {
+		t.Fatalf("preview details=%q want empty object", result.Details)
+	}
 	var review struct{ Path, Diff, SHA256 string }
 	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
@@ -63,9 +66,12 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if details.EditReview.Diff != review.Diff {
 		t.Fatalf("preview/commit diff differ: %q vs %q", review.Diff, details.EditReview.Diff)
 	}
+	if entries, err := os.ReadDir(filepath.Dir(path)); err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
+		t.Fatalf("edit left staging files behind: entries=%v err=%v", entries, err)
+	}
 }
 
-// COD-T-073
+// COD-T-108
 func TestEditMultihunkDiffContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "multi.txt")
 	lines := []string{"old A"}
@@ -80,9 +86,14 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	if result.Error {
 		t.Fatal(result.Contents)
 	}
-	got := string(result.Contents[0].JSON)
-	if !strings.Contains(got, "...") || strings.Contains(got, "middle\"\n  6") {
-		t.Fatalf("expected elided middle context: %s", got)
+	var review struct {
+		Diff string `json:"diff"`
+	}
+	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(review.Diff, "...") || strings.Contains(review.Diff, "6|middle") {
+		t.Fatalf("expected elided middle context: %s", review.Diff)
 	}
 }
 

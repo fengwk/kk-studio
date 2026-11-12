@@ -121,6 +121,7 @@ func TestReadTextWindowReaderValidatesRangesAndEncoding(t *testing.T) {
 		{"offset", []byte("x"), WindowOptions{Offset: 0}, "offset must be a positive integer"},
 		{"limit", []byte("x"), WindowOptions{Offset: 1, Limit: MaxReadLimit + 1}, "limit must be a positive integer no greater than 2000"},
 		{"column", []byte("x\n"), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 2}, "column_offset 2 is out of range: line 1 has 1 columns"},
+		{"column exact contract", []byte("a\n"), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 5}, "column_offset 5 is out of range: line 1 has 1 columns"},
 		{"utf8", []byte{0xff}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
 		{"control byte", []byte{'x', 1}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
 		{"utf16 odd", []byte{0xff, 0xfe, 'x'}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
@@ -191,9 +192,11 @@ func TestReadWindowEmptyRangeForEmptyFile(t *testing.T) {
 	if err != nil || !window.Empty || window.Body != "" || window.EndsWithNewline == nil || *window.EndsWithNewline {
 		t.Fatalf("window=%#v err=%v", window, err)
 	}
+	if formatted := formatTextWindow("empty.txt", window); !strings.Contains(formatted, "range: empty") {
+		t.Fatalf("formatted empty window=%q", formatted)
+	}
 }
 
-// COD-T-117
 func TestMediaSniffIgnoresExtensionAndDetectsMagic(t *testing.T) {
 	if got := DetectMediaType([]byte("%PDF-anything")); got != "application/pdf" {
 		t.Fatalf("got %q", got)
