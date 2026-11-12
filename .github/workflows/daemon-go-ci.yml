@@ -62,9 +62,26 @@ jobs:
           go-version-file: daemon-go/go.mod
       - name: Test
         working-directory: daemon-go
+        shell: bash
         env:
           CGO_ENABLED: '0'
-        run: go test ./...
+        run: |
+          test_json="$RUNNER_TEMP/go-test.json"
+          if ! go test -json ./... > "$test_json"; then
+            cat "$test_json"
+            exit 1
+          fi
+          awk '
+            /"Action":"(pass|skip)"/ && /"Test":/ {
+              total++
+              if ($0 ~ /"Package":"[^"]*\/internal\/native"/) {
+                native++
+              }
+            }
+            END {
+              printf "test events (pass/skip, including subtests): total=%d, internal/native=%d\\n", total, native
+            }
+          ' "$test_json"
       - name: Native coverage
         working-directory: daemon-go
         shell: bash
