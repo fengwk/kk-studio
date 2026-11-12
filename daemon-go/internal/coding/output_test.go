@@ -65,8 +65,9 @@ func TestReadMediaRejectsBeforeReadingWholeFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "The file was not read.") {
-		t.Fatalf("result=%#v", result)
+	want := "File is 1.000004 MiB, which exceeds the tool output size limit of 1 MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings."
+	if !result.Error || result.Contents[0].Text != want {
+		t.Fatalf("result=%#v want message=%q", result, want)
 	}
 }
 

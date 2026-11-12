@@ -554,7 +554,12 @@ func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	confirmed := 0
-	result, err := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "cancel"}, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }}, "true", filepath.Clean(t.TempDir()))
+	started := 0
+	supervisor := startSupervisor{start: func(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
+		started++
+		return nil, errors.New("unexpected start")
+	}}
+	result, err := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "cancel"}, runtime.CapabilityContext{Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ }}, "true", filepath.Clean(t.TempDir()))
 	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "[Operation cancelled by the caller.") {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
@@ -570,8 +575,8 @@ func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	if details.Process.Outcome != "CANCELLED" || details.Process.ExitCode != nil {
 		t.Fatalf("details=%s", result.Details)
 	}
-	if confirmed != 1 {
-		t.Fatalf("execution exit confirmations=%d want=1", confirmed)
+	if confirmed != 1 || started != 0 {
+		t.Fatalf("execution exit confirmations=%d starts=%d want=1/0", confirmed, started)
 	}
 }
 
@@ -695,6 +700,27 @@ func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 	}
 	if snapshotDetails["mode"] != "SNAPSHOT" || snapshotDetails["startOffset"] != float64(6) || snapshotDetails["endOffset"] != float64(6) || partials[1].Contents[0].Text != "bounded tail" {
 		t.Fatalf("snapshot=%v content=%q", snapshotDetails, partials[1].Contents[0].Text)
+	}
+}
+
+// COD-F-017: a write after the 150ms idle interval flushes pending live output.
+func TestProcessEmitterFlushesAfterInterval(t *testing.T) {
+	if liveFlushInterval != 150*time.Millisecond {
+		t.Fatalf("live flush interval=%s want=150ms", liveFlushInterval)
+	}
+	var partials []runtime.CapabilityResult
+	emitter := &processEmitter{callID: "interval", progress: func(result runtime.CapabilityResult) error {
+		partials = append(partials, result)
+		return nil
+	}, stopped: func() bool { return false }, lastFlush: time.Now()}
+	emitter.Write([]byte("pending"))
+	if len(partials) != 0 {
+		t.Fatalf("unexpired interval flushed early: %d partials", len(partials))
+	}
+	emitter.lastFlush = time.Now().Add(-liveFlushInterval)
+	emitter.Write([]byte(" tail"))
+	if len(partials) != 1 || partials[0].Contents[0].Text != "pending tail" {
+		t.Fatalf("interval flush partials=%#v", partials)
 	}
 }
 

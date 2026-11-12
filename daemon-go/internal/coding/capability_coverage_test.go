@@ -55,7 +55,7 @@ func TestReadCapabilityListsDirectoryAndRejectsMissingPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, err := readCapability(context.Background(), capabilityCall(t, "list", map[string]string{"path": root}), runtime.CapabilityContext{})
-	wantListing := "path: " + filepath.ToSlash(root) + "\nkind: directory\n\na-dir/\nz-file"
+	wantListing := "path: " + filepath.ToSlash(resolvedTestPath(t, root)) + "\nkind: directory\n\na-dir/\nz-file"
 	if err != nil || listed.Error || listed.Contents[0].Text != wantListing {
 		t.Fatalf("directory listing=%#v err=%v want=%q", listed, err, wantListing)
 	}
