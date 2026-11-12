@@ -9,6 +9,45 @@ import (
 
 const maxSessionTreeDepth = 64
 
+type trackedSession struct {
+	ChildPID int
+	Session  int
+	Identity string
+}
+
+func isDescendantOf(members []sessionMember, childPID, ancestorPID int) bool {
+	if childPID <= 0 || ancestorPID <= 0 || childPID == ancestorPID {
+		return false
+	}
+	parents := make(map[int]int, len(members))
+	for _, member := range members {
+		if member.PID <= 0 {
+			return false
+		}
+		if _, exists := parents[member.PID]; exists {
+			return false
+		}
+		parents[member.PID] = member.Parent
+	}
+	seen := make(map[int]struct{}, maxSessionTreeDepth)
+	current := childPID
+	for depth := 0; depth < maxSessionTreeDepth; depth++ {
+		if _, exists := seen[current]; exists {
+			return false
+		}
+		seen[current] = struct{}{}
+		parent, exists := parents[current]
+		if !exists || parent <= 0 {
+			return false
+		}
+		if parent == ancestorPID {
+			return true
+		}
+		current = parent
+	}
+	return false
+}
+
 func parentsBeforeChildren(members []sessionMember) ([]sessionMember, error) {
 	byPID := make(map[int]sessionMember, len(members))
 	children := make(map[int][]sessionMember, len(members))

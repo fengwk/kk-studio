@@ -29,6 +29,8 @@ func (m sessionMember) isLive() bool {
 	return m.Threads > 1 || (m.State != "Z" && m.State != "X" && m.State != "x")
 }
 
+func allProcessMembers() ([]sessionMember, error) { return linuxProcessMembers() }
+
 func sessionMembers(sid int) ([]sessionMember, error) {
 	all, err := linuxProcessMembers()
 	if err != nil {
