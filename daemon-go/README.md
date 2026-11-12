@@ -25,14 +25,18 @@ CGO_ENABLED=0 go test ./...
 
 The standard-library protobuf representation is also tested against all 28 binary fixtures under `platform/daemon-server/src/main/protocol/golden/`. Linux/macOS CI additionally runs `go test -race ./...`. The six cross-build targets are Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64. The GitHub Actions workflow `.github/workflows/daemon-go-ci.yml` runs these checks on the supported platform matrix.
 
-During this skeleton phase the executable supports `--help` and `--version`; `--config` and `--check-config` return explicit not-implemented errors until the runtime partition implements their behavior.
+The runtime partition implements CLI parsing, `--help`, `--version`, read-only `--check-config`, configuration validation, and an injected `RuntimeRunner` boundary for service execution. `internal/runtime` provides an injected reconnecting control session, an environment-configuration candidate pipeline with version arbitration and injected cache/resource preparation, SETTINGS/ENVIRONMENT_CONFIG readiness, heartbeats, capability invocation, cancellation/replay, result encoding, and host facts. Platform-private cache writing, concrete resource preparation, managed updates, and final service assembly remain integration work.
+
+### Runtime-partition behavior change
+
+**RUN-N-004 — `skill.install` contract.** Arguments are exactly `{"transferId":"<lowercase UUID>","package":"<name>","version":"<version>","skill":"<skill name>"}`. `package`, `version`, and `skill` must each be one safe path segment: nonempty, not `.` or `..`, no path separator, and no control character. The runtime requests a `DownloadTicket` through `skill.ResourceDownloader.RequestTicket(ctx, transferId)`; the ticket contains the declared size, SHA-256, and opaque transport data. The installer reuses `<dataDir>/skills/<package>/<version>/<sha256-prefix-12>/` when it already exists, without downloading the archive. Otherwise it calls `Download(ctx, ticket)`, verifies archive size and SHA-256, extracts to a temporary directory in the same parent, validates the requested skill, and renames the staging directory to the content-addressed target. If another installer publishes that target first, the loser removes its staging directory and reuses the existing valid target. Extraction rejects absolute/traversal paths, backslashes, and symlink entries. Limits are 10,000 archive entries, 128 MiB compressed bytes, and 512 MiB expanded bytes. Require `<content-addressed dir>/<skill>/SKILL.md`; return details `{"skill_dir":"<absolute installed skill directory>"}` and one English sentence. Failures return explicit English errors and must not report success.
 
 ## Package boundaries
 
 | Package | Responsibility and boundary |
 |---|---|
 | `cmd/kk-studio-daemon` | Executable entry point and CLI dispatch only. |
-| `internal/config` | Configuration boundary and daemon release version. |
+| `internal/config` | Startup configuration checks, environment snapshot validation, and daemon release version. |
 | `internal/protocol` | Generated protobuf messages; schema is `control.proto`, never edit generated Go directly. |
 | `internal/transport` | Network control channel, IDE data routing, and resource clients; implements runtime connection/resource ports and consumes IDE's view resolver. |
 | `internal/runtime` | Session/capability orchestration and contracts consumed by feature packages and implemented by transport. |
