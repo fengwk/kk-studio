@@ -1,11 +1,6 @@
 import type { SystemSettingsDTO, SystemSettingsSchemaDTO } from '@/shared/api/generated/contracts'
 
 /**
- * 平台环境与资源默认字节上限：16 MiB (16777216)。
- */
-export const DEFAULT_MAX_RESOURCE_BYTES = '16777216'
-
-/**
  * 默认模型 HTTP 重试状态码列表。
  */
 export const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
@@ -24,6 +19,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
         'edit': [{ pattern: '*', action: 'ask' }],
         'bash': [{ pattern: '*', action: 'ask' }],
       },
+      maxOutputMib: 16,
       modelGatewayBusyRetryMillis: '5000',
       toolGatewayOverloadRetryMillis: '5000',
     },
@@ -34,7 +30,6 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       retryMaxDelayMillis: '60000',
       compactionModel: null,
       compactionKeepRecentTokens: 20000,
-      compactionReserveTokens: 16384,
       subagentMaxDepth: 2,
       subagentMaxConcurrency: 10,
       subagentMaxTotalConcurrency: 0,
@@ -42,7 +37,6 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       modelHttpRetryStatusCodes: [...DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES],
     },
     environment: {
-      maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
       heartbeatTimeoutMillis: '60000',
     },
     backendNetwork: {
@@ -61,7 +55,6 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       temporaryResourceCleanupIntervalSeconds: '1800',
     },
     advanced: {
-      resourceMaxBytes: DEFAULT_MAX_RESOURCE_BYTES,
       processorLeaseDurationMillis: '30000',
       processorHeartbeatIntervalMillis: '10000',
       threadResolveFailureDelayMillis: '1000',
@@ -93,14 +86,11 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'aiRuntime',
         labelKey: 'settings.tabs.aiRuntime',
         descriptionKey: 'settings.section.aiRuntime.description',
-        restartRequired: false,
         groups: [
           {
             key: 'aiRuntime.retry',
             labelKey: 'settings.section.aiRuntime.retry.title',
             descriptionKey: 'settings.section.aiRuntime.retry.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.retryMaxRetries',
@@ -151,8 +141,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'aiRuntime.httpErrors',
             labelKey: 'settings.section.aiRuntime.httpErrors.title',
             descriptionKey: 'settings.section.aiRuntime.httpErrors.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.modelHttpRetryStatusCodes',
@@ -170,8 +158,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'aiRuntime.compaction',
             labelKey: 'settings.section.aiRuntime.compaction.title',
             descriptionKey: 'settings.section.aiRuntime.compaction.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.compactionModel',
@@ -193,24 +179,12 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 max: null,
                 options: null,
               },
-              {
-                path: 'aiRuntime.compactionReserveTokens',
-                labelKey: 'settings.field.aiRuntime.compactionReserveTokens',
-                hintKey: 'settings.field.aiRuntime.compactionReserveTokens.hint',
-                type: 'INTEGER',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
             ],
           },
           {
             key: 'aiRuntime.subagent',
             labelKey: 'settings.section.aiRuntime.subagent.title',
             descriptionKey: 'settings.section.aiRuntime.subagent.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.subagentMaxDepth',
@@ -260,14 +234,11 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'tool',
         labelKey: 'settings.tabs.toolsPermissions',
         descriptionKey: 'settings.section.tool.description',
-        restartRequired: false,
         groups: [
           {
             key: 'tool.permission',
             labelKey: 'settings.section.tool.permission.title',
             descriptionKey: 'settings.section.tool.permission.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'tool.permission',
@@ -289,9 +260,17 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'tool.gateway',
             labelKey: 'settings.section.tool.gateway.title',
             descriptionKey: 'settings.section.tool.gateway.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
+              {
+                path: 'tool.maxOutputMib',
+                labelKey: 'settings.field.tool.maxOutputMib',
+                hintKey: 'settings.field.tool.maxOutputMib.hint',
+                type: 'INTEGER',
+                nullable: false,
+                min: 1,
+                max: 100,
+                options: null,
+              },
               {
                 path: 'tool.modelGatewayBusyRetryMillis',
                 labelKey: 'settings.field.tool.modelGatewayBusyRetryMillis',
@@ -320,32 +299,19 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'environment',
         labelKey: 'settings.tabs.environment',
         descriptionKey: 'settings.section.environment.description',
-        restartRequired: false,
         groups: [
           {
             key: 'environment.runtime',
             labelKey: 'settings.section.environment.runtime.title',
             descriptionKey: 'settings.section.environment.runtime.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
-              {
-                path: 'environment.maxResourceBytes',
-                labelKey: 'settings.field.environment.maxResourceBytes',
-                hintKey: 'settings.field.environment.maxResourceBytes.hint',
-                type: 'LONG',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
               {
                 path: 'environment.heartbeatTimeoutMillis',
                 labelKey: 'settings.field.environment.heartbeatTimeoutMillis',
                 hintKey: 'settings.field.environment.heartbeatTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
-                min: 1,
+                min: 30000,
                 max: null,
                 options: null,
               },
@@ -357,15 +323,12 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'backendNetwork',
         labelKey: 'settings.tabs.backendNetwork',
         descriptionKey: 'settings.section.backendNetwork.description',
-        restartRequired: false,
         groups: [
           {
             key: 'backendNetwork.proxy',
             labelKey: 'settings.section.backendNetwork.proxy.title',
             descriptionKey: 'settings.section.backendNetwork.proxy.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_HTTP_REQUEST',
-            fields: [
+               fields: [
               {
                 path: 'backendNetwork.proxyUrl',
                 labelKey: 'settings.field.backendNetwork.proxyUrl',
@@ -394,14 +357,11 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'storageMedia',
         labelKey: 'settings.tabs.storageMedia',
         descriptionKey: 'settings.section.storageMedia.description',
-        restartRequired: true,
         groups: [
           {
             key: 'storageMedia.upload',
             labelKey: 'settings.section.storageMedia.upload.title',
             descriptionKey: 'settings.section.storageMedia.upload.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.uploadExpiresSeconds',
@@ -439,8 +399,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'storageMedia.canvasMedia',
             labelKey: 'settings.section.storageMedia.canvasMedia.title',
             descriptionKey: 'settings.section.storageMedia.canvasMedia.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.canvasMediaProcessTimeoutMillis',
@@ -492,8 +450,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'storageMedia.temporaryResource',
             labelKey: 'settings.section.storageMedia.temporaryResource.title',
             descriptionKey: 'settings.section.storageMedia.temporaryResource.description',
-            restartRequired: false,
-            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.temporaryResourceTtlSeconds',
@@ -524,33 +480,11 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'advanced',
         labelKey: 'settings.tabs.advanced',
         descriptionKey: 'settings.section.advanced.description',
-        restartRequired: true,
         groups: [
-          {
-            key: 'advanced.resource',
-            labelKey: 'settings.section.advanced.resource.title',
-            descriptionKey: 'settings.section.advanced.resource.description',
-            restartRequired: true,
-            applyTiming: null,
-            fields: [
-              {
-                path: 'advanced.resourceMaxBytes',
-                labelKey: 'settings.field.advanced.resourceMaxBytes',
-                hintKey: 'settings.field.advanced.resourceMaxBytes.hint',
-                type: 'LONG',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
-            ],
-          },
           {
             key: 'advanced.processor',
             labelKey: 'settings.section.advanced.processor.title',
             descriptionKey: 'settings.section.advanced.processor.description',
-            restartRequired: true,
-            applyTiming: null,
             fields: [
               {
                 path: 'advanced.processorLeaseDurationMillis',
@@ -618,8 +552,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'advanced.applicationEvent',
             labelKey: 'settings.section.advanced.applicationEvent.title',
             descriptionKey: 'settings.section.advanced.applicationEvent.description',
-            restartRequired: true,
-            applyTiming: null,
             fields: [
               {
                 path: 'advanced.applicationEventQueueCapacity',
@@ -667,8 +599,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'advanced.workNotification',
             labelKey: 'settings.section.advanced.workNotification.title',
             descriptionKey: 'settings.section.advanced.workNotification.description',
-            restartRequired: true,
-            applyTiming: null,
             fields: [
               {
                 path: 'advanced.postgresqlWorkNotificationPollMillis',

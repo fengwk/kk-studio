@@ -58,7 +58,6 @@ export interface ControlSessionOptions {
 export class ControlSession {
   private heartbeatTimer: NodeJS.Timeout | null = null
   private sweepTimer: NodeJS.Timeout | null = null
-  private maxResourceBytesValue = 0
   private temporaryResourceTtlSeconds = 0
   private scheduledCleanupIntervalSeconds = 0
   private activeIdeLeaseRound: ActiveIdeLeaseRound | null = null
@@ -69,11 +68,6 @@ export class ControlSession {
   private candidateSuspension: boolean | null = null
 
   constructor(private readonly options: ControlSessionOptions) {}
-
-  /** 当前连接代际的资源预算；新执行开始时读取。 */
-  get maxResourceBytes(): number {
-    return this.maxResourceBytesValue
-  }
 
   /** 启动连接生命周期并立即尝试连接；首次真正启动后开始心跳。 */
   start(): void {
@@ -131,10 +125,9 @@ export class ControlSession {
     }
   }
 
-  /** 连接失效不影响 invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与资源预算。 */
+  /** 连接失效不影响 invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与连接内状态。 */
   onConnectionLost(): void {
     this.options.resources.onConnectionLost()
-    this.maxResourceBytesValue = 0
     this.options.outbound.unbind()
     this.activeIdeLeaseRound = null
     this.admissionSuspended = false
@@ -225,7 +218,7 @@ export class ControlSession {
   }
 
   /**
-   * SETTINGS 只建立固定 UUID 的 scope 绑定并装载平台资源预算；READY 由完整配置应用完成。
+   * SETTINGS 只建立固定 UUID 的 scope 绑定并装载临时资源策略；READY 由完整配置应用完成。
    *
    * <p>SETTINGS 是本连接唯一能建立绑定的帧，因此环境标识校验就在这里完成一次，不再由通用 scope 校验重复。
    */
@@ -247,7 +240,6 @@ export class ControlSession {
     if (budgets === undefined) {
       throw new Error('settings.resourceBudgets is required')
     }
-    this.maxResourceBytesValue = Number(budgets.maxResourceBytes)
     const ttl = Number(budgets.temporaryResourceTtlSeconds)
     const cleanup = Number(budgets.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)

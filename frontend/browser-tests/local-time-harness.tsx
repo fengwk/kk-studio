@@ -50,7 +50,7 @@ export function Harness() {
           <SelectionPanel
             title="Thread"
             items={dates.map(({ id, value }) => threadSelectionItem({
-              threadId: id, name: id, parentThreadId: null, createdAt: value,
+              threadId: id, name: id, kind: 'USER', parentThreadId: null, createdAt: value,
               updatedAt: value, status: 'IDLE', executionControl: 'RUNNABLE',
               execution: { driver: 'builtin', settings: { modelName: 'offline', variant: 'default' } },
               headMessagePreview: null,

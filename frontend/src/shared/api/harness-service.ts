@@ -111,6 +111,9 @@ export const harnessService = {
   getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
     request('GET /api/harness/threads/{threadId}/tree', { path: { threadId } }),
 
+  getThreadSubagents: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
+    request('GET /api/harness/threads/{threadId}/subagents', { path: { threadId } }),
+
   renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
     request('PUT /api/harness/threads/{threadId}/name', {
       path: { threadId },

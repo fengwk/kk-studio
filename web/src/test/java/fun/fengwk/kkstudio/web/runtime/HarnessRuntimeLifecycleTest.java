@@ -62,7 +62,7 @@ class HarnessRuntimeLifecycleTest {
         toolProcessor,
         daemonServerProvider,
         drainTimeout,
-        LEASE_DURATION);
+        () -> LEASE_DURATION);
   }
 
   @Test
@@ -329,7 +329,7 @@ class HarnessRuntimeLifecycleTest {
             toolProcessor,
             provider(daemonServer),
             Duration.ZERO,
-            Duration.ofMillis(200));
+            () -> Duration.ofMillis(200));
     lifecycle.start();
 
     Thread cleanup = null;
@@ -413,7 +413,7 @@ class HarnessRuntimeLifecycleTest {
             toolProcessor,
             provider(daemonServer),
             DRAIN_TIMEOUT,
-            LEASE_DURATION);
+            () -> LEASE_DURATION);
 
     lifecycle.start();
 
@@ -504,7 +504,7 @@ class HarnessRuntimeLifecycleTest {
   }
 
   @Test
-  void negativeDurationsThrow() {
+  void negativeDrainTimeoutAndCurrentLeaseDurationThrow() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
     LocalExecutionLifecycle executionLifecycle = mock(LocalExecutionLifecycle.class);
     ToolProcessor toolProcessor = mock(ToolProcessor.class);
@@ -520,18 +520,18 @@ class HarnessRuntimeLifecycleTest {
                 toolProcessor,
                 daemonServerProvider,
                 Duration.ofSeconds(-1),
-                LEASE_DURATION));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new HarnessRuntimeLifecycle(
-                true,
-                dispatcher,
-                executionLifecycle,
-                toolProcessor,
-                daemonServerProvider,
-                DRAIN_TIMEOUT,
-                Duration.ofSeconds(-1)));
+                () -> LEASE_DURATION));
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            executionLifecycle,
+            toolProcessor,
+            daemonServerProvider,
+            DRAIN_TIMEOUT,
+            () -> Duration.ofSeconds(-1));
+    lifecycle.start();
+    assertThrows(IllegalArgumentException.class, lifecycle::stop);
   }
 
   @Test

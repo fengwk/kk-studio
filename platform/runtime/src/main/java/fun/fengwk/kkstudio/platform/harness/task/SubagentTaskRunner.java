@@ -14,9 +14,11 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
@@ -24,8 +26,10 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigPr
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
@@ -37,6 +41,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -61,16 +67,19 @@ public class SubagentTaskRunner implements SubagentRunner {
       "This subagent thread is no longer valid. Dispatch a new task without thread_id.";
 
   private final Supplier<HarnessRuntime> runtimeProvider;
+  private final HarnessThreadChangeSource threadChanges;
   private final AgentTaskService agentTasks;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final SubagentConfigProvider configProvider;
 
   public SubagentTaskRunner(
       Supplier<HarnessRuntime> runtimeProvider,
+      HarnessThreadChangeSource threadChanges,
       AgentTaskService agentTasks,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider configProvider) {
     this.runtimeProvider = Objects.requireNonNull(runtimeProvider, "runtimeProvider");
+    this.threadChanges = Objects.requireNonNull(threadChanges, "threadChanges");
     this.agentTasks = Objects.requireNonNull(agentTasks, "agentTasks");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
@@ -78,13 +87,21 @@ public class SubagentTaskRunner implements SubagentRunner {
   }
 
   @Override
-  public SubagentTaskAcceptance accept(SubagentTaskRequest request) {
+  public SubagentTaskResult run(
+      SubagentTaskRequest request, boolean async, Consumer<SubagentTaskAcceptance> accepted) {
     Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(accepted, "accepted");
+    SubagentTaskAcceptance child = accept(request, async);
+    accepted.accept(child);
+    return new SubagentTaskResult(child, async ? null : awaitResult(request, child));
+  }
+
+  private SubagentTaskAcceptance accept(SubagentTaskRequest request, boolean async) {
     HarnessRuntime runtime = requireRuntime();
     UUID childThreadId = childThreadId(request);
     String requestHash = requestHash(request);
     // 已接受的回放不依赖父调用是否仍在执行，因此先于父快照校验完成。
-    SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash);
+    SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash, async);
     if (replayed != null) {
       return replayed;
     }
@@ -98,7 +115,35 @@ public class SubagentTaskRunner implements SubagentRunner {
         request.maxTurns() != null
             ? request.maxTurns()
             : configProvider.subagentConfig().maxTurns();
-    return submit(runtime, request, parent, settings, childThreadId, requestHash, maxTurns);
+    return submit(runtime, request, parent, settings, childThreadId, requestHash, maxTurns, async);
+  }
+
+  private ThreadJoinReceipt awaitResult(
+      SubagentTaskRequest request, SubagentTaskAcceptance acceptance) {
+    HarnessRuntime runtime = requireRuntime();
+    LinkedBlockingQueue<Boolean> changes = new LinkedBlockingQueue<>();
+    try (HarnessThreadChangeSource.Subscription ignored =
+        threadChanges.subscribe(acceptance.childThreadId(), () -> changes.offer(Boolean.TRUE))) {
+      while (true) {
+        ThreadJoin join =
+            runtime
+                .findJoin(request.invocationId())
+                .orElseThrow(() -> new IllegalStateException("subagent task Join disappeared"));
+        if (join.supersededByInvocationId() != null) {
+          throw new IllegalStateException("subagent task was superseded before completion");
+        }
+        if (join.matched()) {
+          return runtime
+              .projectJoinReceipt(request.invocationId())
+              .orElseThrow(
+                  () -> new IllegalStateException("matched subagent task Join has no result"));
+        }
+        changes.take();
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("subagent task wait was cancelled", interrupted);
+    }
   }
 
   /**
@@ -114,10 +159,11 @@ public class SubagentTaskRunner implements SubagentRunner {
       BranchSettings settings,
       UUID childThreadId,
       String requestHash,
-      int maxTurns) {
+      int maxTurns,
+      boolean async) {
     RuntimeException lastFailure = null;
     for (int attempt = 0; attempt < ACCEPT_ATTEMPTS; attempt++) {
-      SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash);
+      SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash, async);
       if (replayed != null) {
         return replayed;
       }
@@ -125,7 +171,15 @@ public class SubagentTaskRunner implements SubagentRunner {
         AcceptedCommands accepted =
             agentTasks
                 .submit(
-                    task(runtime, request, parent, settings, childThreadId, requestHash, maxTurns))
+                    task(
+                        runtime,
+                        request,
+                        parent,
+                        settings,
+                        childThreadId,
+                        requestHash,
+                        maxTurns,
+                        async))
                 .accepted();
         return new SubagentTaskAcceptance(
             accepted.session().id(),
@@ -146,7 +200,7 @@ public class SubagentTaskRunner implements SubagentRunner {
         // 并发胜者可能已经接受票据；先回放，但不能把任意失败当成可重试的游标冲突。
         SubagentTaskAcceptance concurrent;
         try {
-          concurrent = replay(runtime, request, childThreadId, requestHash);
+          concurrent = replay(runtime, request, childThreadId, requestHash, async);
         } catch (RuntimeException replayFailure) {
           // 回放自身失败时保留提交失败，避免诊断只剩回放错误。
           replayFailure.addSuppressed(failure);
@@ -165,7 +219,7 @@ public class SubagentTaskRunner implements SubagentRunner {
         lastFailure = failure;
       }
     }
-    SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash);
+    SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash, async);
     if (replayed != null) {
       return replayed;
     }
@@ -174,12 +228,19 @@ public class SubagentTaskRunner implements SubagentRunner {
 
   /** 既有 join 回放：只有父、目标子 Thread、请求 hash（含 agent/prompt/maxTurns 语义）与显式 maxTurns 全部一致才算同一次委派。 */
   private SubagentTaskAcceptance replay(
-      HarnessRuntime runtime, SubagentTaskRequest request, UUID childThreadId, String requestHash) {
+      HarnessRuntime runtime,
+      SubagentTaskRequest request,
+      UUID childThreadId,
+      String requestHash,
+      boolean async) {
     ThreadJoin existing = runtime.findJoin(request.invocationId()).orElse(null);
     if (existing == null) {
       return null;
     }
+    JoinDelivery expectedDelivery =
+        async ? JoinDelivery.NOTIFY_PARENT : JoinDelivery.SETTLE_TOOL_RESULT;
     if (!Objects.equals(existing.parentThreadId(), request.parentThreadId())
+        || existing.delivery() != expectedDelivery
         || !existing.childThreadId().equals(childThreadId)
         || !existing.requestHash().equals(requestHash)
         || !existing.agent().equals(request.subagentType())
@@ -204,7 +265,8 @@ public class SubagentTaskRunner implements SubagentRunner {
       BranchSettings settings,
       UUID childThreadId,
       String requestHash,
-      int maxTurns) {
+      int maxTurns,
+      boolean async) {
     SubagentConfig config = parent.config();
     SpawnRequest.Budget budget =
         new SpawnRequest.Budget(
@@ -224,11 +286,12 @@ public class SubagentTaskRunner implements SubagentRunner {
                   0,
                   new CustomMessageCommandPayload(AgentMessage.user(request.prompt())))),
           AcceptancePreflight.IDENTITY,
-          SpawnTrigger.MODEL_TOOL,
+          ThreadKind.SUBAGENT,
           parent.threadId(),
           parent.headEntryId(),
           null,
           false,
+          async,
           budget,
           requestHash);
     }
@@ -249,12 +312,13 @@ public class SubagentTaskRunner implements SubagentRunner {
         settings,
         List.copyOf(commands),
         AcceptancePreflight.IDENTITY,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         parent.threadId(),
         parent.headEntryId(),
         new SpawnRequest.Continuation(
             child.thread().headEntryId(), child.thread().nextCommandSequence()),
         false,
+        async,
         budget,
         requestHash);
   }

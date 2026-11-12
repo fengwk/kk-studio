@@ -9,7 +9,7 @@ export interface TaskToolArguments {
 }
 
 export interface TaskToolReceipt {
-  status: 'accepted'
+  status: 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled'
   threadId: string
 }
 
@@ -38,13 +38,23 @@ export function parseTaskArguments(json: string): TaskToolArguments {
 }
 
 /**
- * 只读取规范 task.accepted details，不从自然语言正文推断线程身份。
+ * 只读取规范 task.accepted / task.result details，不从自然语言正文推断线程身份。
  */
 export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
   if (!isRecord(value)) {
     return null
   }
-  if (value.kind !== 'task.accepted') {
+  if (value.kind !== 'task.accepted' && value.kind !== 'task.result') {
+    return null
+  }
+  const status = value.kind === 'task.accepted' ? 'accepted' : value.status
+  if (
+    status !== 'accepted'
+    && status !== 'running'
+    && status !== 'completed'
+    && status !== 'failed'
+    && status !== 'cancelled'
+  ) {
     return null
   }
   if (typeof value.thread_id !== 'string') {
@@ -55,7 +65,7 @@ export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
     return null
   }
   return {
-    status: 'accepted',
+    status,
     threadId,
   }
 }

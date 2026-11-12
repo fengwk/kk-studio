@@ -1,0 +1,73 @@
+name: daemon-go-ci
+
+on:
+  push:
+    paths:
+      - 'daemon-go/**'
+      - '.github/workflows/daemon-go-ci.yml'
+  pull_request:
+    paths:
+      - 'daemon-go/**'
+      - '.github/workflows/daemon-go-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon-go/go.mod
+      - name: Install protoc and generator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          curl -fsSL -o /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v36.1/protoc-36.1-linux-x86_64.zip
+          sudo unzip -oq /tmp/protoc.zip -d /usr
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Verify generated protocol
+        run: daemon-go/scripts/check-generated.sh
+      - name: Verify formatting
+        run: test -z "$(gofmt -l $(find daemon-go -name '*.go'))"
+      - name: Vet
+        working-directory: daemon-go
+        run: go vet ./...
+      - name: Staticcheck
+        working-directory: daemon-go
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: Version alignment
+        run: node scripts/dev/verify/repository/check-version-alignment.mjs
+      - name: Cross-compile six targets
+        working-directory: daemon-go
+        run: |
+          set -eu
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /tmp/kk-studio-daemon-${target%/*}-${target#*/} ./cmd/kk-studio-daemon
+          done
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon-go/go.mod
+      - name: Test
+        working-directory: daemon-go
+        env:
+          CGO_ENABLED: '0'
+        run: go test ./...
+      - name: Race test
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        working-directory: daemon-go
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race ./...

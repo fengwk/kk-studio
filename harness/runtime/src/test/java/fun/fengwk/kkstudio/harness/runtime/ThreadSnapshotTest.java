@@ -1326,7 +1326,7 @@ class ThreadSnapshotTest {
                       thread.name(),
                       thread.rootThreadId(),
                       thread.yoloEnabled(),
-                      thread.spawnTrigger(),
+                      thread.kind(),
                       thread.constraints(),
                       status,
                       thread.inputThroughSequence(),

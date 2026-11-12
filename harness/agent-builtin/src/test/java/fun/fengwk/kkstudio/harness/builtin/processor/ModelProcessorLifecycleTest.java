@@ -490,7 +490,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             failing,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -520,7 +520,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -583,7 +583,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -647,7 +647,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -726,7 +726,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -781,7 +781,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             gated,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -864,7 +864,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixtureA.store,
             gatewayB,
             fixtureA.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixtureA.clock,
             newScheduler(),
             Runnable::run,
@@ -905,7 +905,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             hooked,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -951,7 +951,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             hooked,
             Runnable::run,
@@ -1031,19 +1031,18 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
     assertFalse(heartbeat.start(claimed));
   }
 
-  /** ModelProcessorConfig：fallback delay 必须为正的整毫秒。 */
+  /** ModelProcessorConfig 要求提供非空的动态 fallback-delay provider。 */
   @Test
-  void processorConfigValidatesDurations() {
+  void processorConfigRequiresDelayProvider() {
     Fixture fixture = fixture();
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, Duration.ofNanos(500)));
+        NullPointerException.class,
+        () -> new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, null));
     assertEquals(
         FALLBACK_DELAY,
-        new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY).admitFailureDelay());
+        new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY)
+            .admitFailureDelayProvider()
+            .get());
     assertThrows(
         NullPointerException.class,
         () ->
@@ -1064,7 +1063,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                 fixture.store,
                 fixture.gateway,
                 fixture.sink,
-                new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+                new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
                 fixture.clock,
                 newScheduler(),
                 null,
@@ -1077,7 +1076,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
                 fixture.store,
                 fixture.gateway,
                 fixture.sink,
-                new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+                new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
                 fixture.clock,
                 newScheduler(),
                 Runnable::run,
@@ -1172,9 +1171,9 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             gateway,
             sink,
             new ModelProcessorConfig(
-                new ProcessorLeaseConfig(Duration.ofMillis(400), Duration.ofMillis(100)),
+                () -> new ProcessorLeaseConfig(Duration.ofMillis(400), Duration.ofMillis(100)),
                 () -> NO_RETRY,
-                FALLBACK_DELAY),
+                () -> FALLBACK_DELAY),
             Clock.systemUTC(),
             newScheduler(),
             Runnable::run,
@@ -1222,7 +1221,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             dead,
             Runnable::run,
@@ -1329,7 +1328,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             hooked,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -1364,7 +1363,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             hooked,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -1404,7 +1403,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
             recording,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,

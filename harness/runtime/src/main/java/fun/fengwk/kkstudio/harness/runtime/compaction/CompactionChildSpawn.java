@@ -9,8 +9,8 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
@@ -26,7 +26,7 @@ import java.util.UUID;
  * 压缩子执行的启动：自动压缩与手动压缩共用，经统一的 {@link AgentSpawner} 创建子 Thread 与 {@link
  * JoinDelivery#SETTLE_OWNER_TURN} 票据。
  *
- * <p>压缩子 Thread 以 {@link SpawnTrigger#RUNTIME} 创建，不计入子任务并发额度；其冻结约束为：输出上限等于父压缩 turn 冻结的
+ * <p>压缩子 Thread 以 {@link ThreadKind#COMPACTION} 创建，不计入子任务并发额度；其冻结约束为：输出上限等于父压缩 turn 冻结的
  * outputBudget、不允许自动压缩（后代经约束合并同样不允许）。调用方已持有父执行树的锁（含父 Thread）。
  */
 public final class CompactionChildSpawn {
@@ -75,7 +75,7 @@ public final class CompactionChildSpawn {
             null,
             false,
             new ThreadConstraints(outputCap, false),
-            SpawnTrigger.RUNTIME,
+            ThreadKind.COMPACTION,
             JoinDelivery.SETTLE_OWNER_TURN,
             SpawnRequest.Budget.unlimited(),
             ticketId,

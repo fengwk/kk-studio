@@ -6,15 +6,18 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProces
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.command;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.environmentBinding;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.insertAssistantPayload;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.requestWithBindings;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedReadyToolInvocation;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedSucceededToolPhase;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedToolChain;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedToolInvocation;
@@ -60,8 +63,11 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -77,21 +83,209 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 /**
  * ThreadProcessor Tool sibling batch：每个 claim 恰执行一个动作的原子 callIndex 回写、错误 payload、blocker 与不变量违反回滚。
  */
 class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
+
+  /** 同文件只预派发首项；结束事务中的 THREAD wake 在下次 claim 中派发后继。 */
+  @Test
+  void sameFileEditsDispatchInOrderAndOtherFilesDispatchImmediately() {
+    Fixture fixture = fixture();
+    MutationBatch batch =
+        seedMutationBatch(fixture, List.of("/a/b", "/a/./b", "/a/x/../b", "/other"));
+    List<UUID> invocationIds = batch.invocationIds();
+
+    requestThreadWork(fixture.store, batch.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(0))));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(1))));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(2))));
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(3))));
+
+    // The preceding call's terminal state and durable THREAD wake commit together.
+    fixture.store.transaction(
+        tx -> {
+          tx.threads().lock(batch.threadId());
+          ToolInvocation first = tx.tools().lock(invocationIds.get(0)).orElseThrow();
+          first = first.markApprovalNotRequired(NOW);
+          tx.tools().update(List.of(first));
+          first = first.markRunning(NOW);
+          tx.tools().update(List.of(first));
+          first =
+              first.succeed(
+                  new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}"),
+                  NOW);
+          tx.tools().update(List.of(first));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, batch.threadId()));
+          return null;
+        });
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(1))));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationIds.get(2))));
+  }
+
+  /** 第二次 preflight 在第一次写入及其 THREAD wake 后发生，预览读取到新文件内容。 */
+  @Test
+  void successorEditPreflightObservesPreviousWrite() throws InterruptedException {
+    Fixture fixture = fixture();
+    MutationBatch batch = seedMutationBatch(fixture, List.of("/a/file", "/a/./file"));
+    UUID firstId = batch.invocationIds().getFirst();
+    UUID secondId = batch.invocationIds().get(1);
+    requestThreadWork(fixture.store, batch.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+
+    AtomicReference<String> fileContents = new AtomicReference<>("before");
+    ToolProcessorTestSupport.FakeToolGateway gateway =
+        new ToolProcessorTestSupport.FakeToolGateway();
+    gateway.queuePreflightAllow();
+    gateway.queueRun(
+        progress -> {
+          fileContents.set("after first write");
+          return ToolProcessorTestSupport.succeeded("call-1");
+        });
+    var scheduler = ToolProcessorTestSupport.newScheduler();
+    try (ToolProcessor processor =
+        new ToolProcessor(
+            fixture.store,
+            gateway,
+            new ToolProcessorTestSupport.RecordingSink(),
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG_PROVIDER,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY_PROVIDER,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY_PROVIDER,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
+            fixture.clock,
+            scheduler,
+            Runnable::run,
+            ToolProcessorTestSupport.testLifecycle(fixture.store, fixture.clock),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
+            ToolProcessorTestSupport.STABLE_MATERIALIZER)) {
+      assertEquals(
+          ProcessResult.STARTED,
+          processor.process(ToolProcessorTestSupport.claim(fixture.store, firstId, NOW)));
+      ToolProcessorTestSupport.awaitTrue(
+          () -> tool(fixture.store, firstId).status() == ToolInvocationStatus.SUCCEEDED,
+          Duration.ofSeconds(5));
+      // ToolExecution's successful terminal transaction creates the durable THREAD wake.
+      assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, batch.threadId())));
+      assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+      assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, secondId)));
+
+      gateway.queuePreflightAsk("review");
+      AtomicReference<String> previewObservedContents = new AtomicReference<>();
+      gateway.preflightHook = ignored -> previewObservedContents.set(fileContents.get());
+      assertEquals(
+          ProcessResult.TERMINATED,
+          processor.process(ToolProcessorTestSupport.claim(fixture.store, secondId, NOW)));
+      assertEquals(2, gateway.preflightCallsCount);
+      assertEquals("after first write", previewObservedContents.get());
+    } finally {
+      scheduler.shutdownNow();
+    }
+  }
+
+  /** 每种终态都释放同键后继；拒绝按 FAILED 处理，唤醒检查不会卡住该文件队列。 */
+  @Test
+  void everyTerminalOutcomeReleasesTheNextSameFileMutation() {
+    for (MutationOutcome outcome : MutationOutcome.values()) {
+      Fixture fixture = fixture();
+      MutationBatch batch = seedMutationBatch(fixture, List.of("/a/file", "/a/./file"));
+      UUID firstId = batch.invocationIds().getFirst();
+      switch (outcome) {
+        case SUCCESS -> {
+          transitionTool(fixture.store, firstId, tool -> tool.markApprovalNotRequired(NOW));
+          transitionTool(fixture.store, firstId, tool -> tool.markRunning(NOW));
+          transitionTool(
+              fixture.store,
+              firstId,
+              tool ->
+                  tool.succeed(
+                      new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}"),
+                      NOW));
+        }
+        case FAILURE -> {
+          transitionTool(fixture.store, firstId, tool -> tool.markApprovalNotRequired(NOW));
+          transitionTool(fixture.store, firstId, tool -> tool.markRunning(NOW));
+          transitionTool(
+              fixture.store,
+              firstId,
+              tool -> tool.fail(new ToolInvocationError("FAILED", "failed"), NOW));
+        }
+        case REJECTION -> {
+          transitionTool(fixture.store, firstId, tool -> tool.requestApproval("review", NOW));
+          transitionTool(
+              fixture.store,
+              firstId,
+              tool ->
+                  tool.decideApproval(
+                      ToolApprovalDecision.DENIED,
+                      UUID.randomUUID(),
+                      "tester",
+                      "rejected",
+                      NOW,
+                      NOW));
+        }
+        case CANCELLATION -> transitionTool(
+            fixture.store,
+            firstId,
+            tool -> tool.cancel(new ToolInvocationError("CANCELLED", "stopped"), NOW));
+      }
+
+      requestThreadWork(fixture.store, batch.threadId());
+      assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+      assertNotNull(
+          work(fixture.store, new WorkTarget(WorkTargetType.TOOL, batch.invocationIds().get(1))),
+          outcome.toString());
+    }
+  }
+
+  /** Stop 在同文件后继仍排队时取消所有调用；没有为排队项留下 TOOL Work。 */
+  @Test
+  void stopCancelsQueuedSameFileMutationsWithoutLeavingWorkRows() {
+    Fixture fixture = fixture();
+    MutationBatch batch =
+        seedMutationBatch(fixture, List.of("/a/file", "/a/file", "/a/file", "/other"));
+    requestThreadWork(fixture.store, batch.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(batch.threadId()));
+    assertNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.TOOL, batch.invocationIds().get(1))));
+    assertNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.TOOL, batch.invocationIds().get(2))));
+
+    fixture.runtime.stop(
+        new StopCommand(
+            batch.threadId(),
+            UUID.randomUUID(),
+            thread(fixture.store, batch.threadId()).version()));
+
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, batch.threadId())));
+    for (UUID invocationId : batch.invocationIds()) {
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocationId)));
+      assertTrue(fixture.store.transaction(tx -> tx.tools().find(invocationId)).isEmpty());
+    }
+  }
 
   /** 全部 terminal 的 sibling batch：一个 claim 完成 apply，下一 claim 才做 continuation。 */
   @Test
@@ -642,4 +836,66 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         ToolInvocationStatus.SUCCEEDED, tool(real, chain.toolInvocationIds().get(1)).status());
     assertEquals(chain.assistantEntryId(), thread(real, chain.turn().threadId()).headEntryId());
   }
+
+  private static MutationBatch seedMutationBatch(Fixture fixture, List<String> paths) {
+    ToolBinding editBinding = environmentBinding("edit");
+    ModelRequestSpec requestSpec = requestWithBindings(List.of(editBinding));
+    List<ProviderToolCall> calls =
+        IntStream.range(0, paths.size())
+            .mapToObj(
+                index ->
+                    new ProviderToolCall(
+                        "call-" + (index + 1), "edit", "{\"path\":\"" + paths.get(index) + "\"}"))
+            .toList();
+    ProviderResponse response = successResponse(calls);
+    var turn = seedOpenInputTurn(fixture.store, requestSpec.toolBindings());
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            turn.threadId(),
+            turn.turnStartEntryId(),
+            turn.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            requestSpec,
+            response,
+            null);
+    UUID assistantEntryId =
+        insertAssistantPayload(
+            fixture.store,
+            turn,
+            new BuiltinHistoryPayloadMapper()
+                .assistantPayload(
+                    response,
+                    requestSpec.toolBindings(),
+                    ModelSelection.model(
+                        requestSpec.model().modelName(), requestSpec.variant().id()),
+                    NOW));
+    transitionModel(
+        fixture.store, modelId, model -> model.attachResultEntry(assistantEntryId, NOW));
+    List<UUID> invocationIds =
+        IntStream.range(0, calls.size())
+            .mapToObj(
+                index -> {
+                  ProviderToolCall call = calls.get(index);
+                  return seedReadyToolInvocation(
+                      fixture.store,
+                      turn.threadId(),
+                      turn.turnStartEntryId(),
+                      assistantEntryId,
+                      index,
+                      new ToolCall(call.id(), call.name(), call.argumentsJson()),
+                      editBinding);
+                })
+            .toList();
+    return new MutationBatch(turn.threadId(), assistantEntryId, invocationIds);
+  }
+
+  private enum MutationOutcome {
+    SUCCESS,
+    FAILURE,
+    REJECTION,
+    CANCELLATION
+  }
+
+  private record MutationBatch(UUID threadId, UUID assistantEntryId, List<UUID> invocationIds) {}
 }

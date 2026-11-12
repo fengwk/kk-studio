@@ -1,22 +1,24 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
 
+import java.util.function.Consumer;
+
 /**
- * 持久接受 Subagent 委派的运行时端口。
+ * Subagent 委派的运行时端口。接受必须持久化子 Session/Thread 的源命令与 Join；同步调用继续等待冻结结果，异步调用只返回受理回执。
  *
- * <p>本端口只有「接受」没有「等待」：实现必须在一个事务内完成子 Session/Thread 的命令接受与本次委派的持久记录，然后立即返回子 Thread 身份。
- * 子执行的终态结果不经过本端口回传，而是由运行时在结清后作为父 Thread 的一条独立消息交付。
- *
- * <p>实现必须保证幂等：同一个 {@link SubagentTaskRequest#invocationId()} 重试返回同一个子 Thread。参数被拒或接受失败以异常表达，由调用方收敛为
- * 错误结果。
+ * <p>等待由工具执行线程完成，不在事务或调度线程中等待。实现必须保证幂等：同一个 {@link SubagentTaskRequest#invocationId()} 重试返回同一子
+ * Thread。
  */
 @FunctionalInterface
 public interface SubagentRunner {
 
   /**
-   * 持久接受一次 Subagent 委派。
+   * 接受一次 Subagent 委派，并按内部模式同步等待 Join 或返回异步受理回执。
    *
    * @param request 解析出的 Subagent 任务参数
-   * @return 持久接受结果（子 Session/Thread 身份）
+   * @param async 异步模式；模型调用固定传 {@code false}
+   * @param accepted 在持久受理后调用，供前端展示子代理运行中
+   * @return 子 Session/Thread 身份及同步模式下冻结的 Join 结果
    */
-  SubagentTaskAcceptance accept(SubagentTaskRequest request);
+  SubagentTaskResult run(
+      SubagentTaskRequest request, boolean async, Consumer<SubagentTaskAcceptance> accepted);
 }

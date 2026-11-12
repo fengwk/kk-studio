@@ -65,10 +65,10 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -308,10 +308,10 @@ class PostgresqlCompactionChildTest {
         gateway,
         event -> {},
         new ToolProcessorConfig(
-            new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+            () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             () -> NO_RETRY,
-            Duration.ofSeconds(5),
-            Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(5),
             Duration.ofMinutes(10)),
         Clock.fixed(T1, ZoneOffset.UTC),
         scheduler,
@@ -468,7 +468,7 @@ class PostgresqlCompactionChildTest {
         new ThreadProcessor(
             store,
             builtinRegistry(store, resolver),
-            new ThreadProcessorConfig(Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
     gateway = new ScriptedChildGateway();
     modelProcessor =
         new ModelProcessor(
@@ -476,9 +476,9 @@ class PostgresqlCompactionChildTest {
             gateway,
             event -> {},
             new ModelProcessorConfig(
-                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 () -> retryPolicy,
-                Duration.ofSeconds(5)),
+                () -> Duration.ofSeconds(5)),
             clock,
             scheduler,
             Runnable::run,
@@ -560,7 +560,7 @@ class PostgresqlCompactionChildTest {
           ThreadJoin join = tx.joins().find(joinInvocationId).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
-          assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
+          assertEquals(ThreadKind.COMPACTION, childThread.kind());
           assertEquals(false, childThread.constraints().allowAutoCompaction());
           assertEquals(
               compaction.outputBudget().intValue(), childThread.constraints().maxOutputTokens());
@@ -1020,9 +1020,9 @@ class PostgresqlCompactionChildTest {
               holdingGateway,
               event -> {},
               new ModelProcessorConfig(
-                  new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                  () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   () -> NO_RETRY,
-                  Duration.ofSeconds(5)),
+                  () -> Duration.ofSeconds(5)),
               Clock.fixed(T1, ZoneOffset.UTC),
               scheduler,
               Runnable::run,
@@ -1055,7 +1055,7 @@ class PostgresqlCompactionChildTest {
               null,
               false,
               ThreadConstraints.NONE,
-              SpawnTrigger.CONTROLLER,
+              ThreadKind.CONTROLLER_TASK,
               JoinDelivery.NOTIFY_PARENT,
               SpawnRequest.Budget.unlimited(),
               outerJoinId,
@@ -1733,7 +1733,7 @@ class PostgresqlCompactionChildTest {
                       "main",
                       threadId,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,

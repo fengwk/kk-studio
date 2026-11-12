@@ -19,6 +19,8 @@ public class SystemSettingsToolDTO {
 
   private Map<String, List<PermissionRuleDTO>> permission;
 
+  private Integer maxOutputMib;
+
   private Long modelGatewayBusyRetryMillis;
 
   private Long toolGatewayOverloadRetryMillis;

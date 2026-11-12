@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { syncBuiltinESMExports } from 'node:module'
+import { promises as fsPromises } from 'node:fs'
 import { fileCapabilities } from '../../src/coding/files.js'
 import type { CapabilityContext } from '../../src/contracts.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
@@ -137,7 +139,7 @@ describe('fs.read', () => {
     expect(text).toContain('2|文')
   })
 
-  it('目录清单按分页与 '/' 标记目录', async () => {
+  it("目录清单按分页与 '/' 标记目录", async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'b.txt'), 'x')
     await mkdir(join(dir, 'sub'))
@@ -154,6 +156,54 @@ describe('fs.read', () => {
     await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]))
     const result = await callCapability(read, 'fs.read', { path: file }, makeContext(dir))
     expect(result.contents[0]).toMatchObject({ type: 'binary', mediaType: 'image/png' })
+  })
+
+  it('rejects oversized media before reading content and accepts an exact-limit image', async () => {
+    const dir = await tempDir()
+    const oversized = join(dir, 'oversized.png')
+    const limit = 16 * 1_048_576
+    const bytes = Buffer.alloc(limit + 1)
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    await writeFile(oversized, bytes)
+
+    const originalReadFile = fsPromises.readFile
+    let wholeFileReads = 0
+    Object.defineProperty(fsPromises, 'readFile', {
+      configurable: true,
+      value: (...args: Parameters<typeof fsPromises.readFile>) => {
+        wholeFileReads += 1
+        return Reflect.apply(originalReadFile, fsPromises, args)
+      },
+    })
+    syncBuiltinESMExports()
+    try {
+      const rejected = await callCapability(
+        read,
+        'fs.read',
+        { path: oversized },
+        { ...makeContext(dir), maxOutputBytes: limit },
+      )
+      expect(rejected.error).toBe(true)
+      expect(textOf(rejected)).toBe(
+        'File is 16.000001 MiB, which exceeds the tool output size limit of 16 MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.',
+      )
+      expect(wholeFileReads).toBe(0)
+    } finally {
+      Object.defineProperty(fsPromises, 'readFile', { configurable: true, value: originalReadFile })
+      syncBuiltinESMExports()
+    }
+
+    const atLimit = join(dir, 'at-limit.png')
+    bytes.fill(0, 8)
+    await writeFile(atLimit, bytes.subarray(0, limit))
+    const accepted = await callCapability(
+      read,
+      'fs.read',
+      { path: atLimit },
+      { ...makeContext(dir), maxOutputBytes: limit },
+    )
+    expect(accepted.error).toBe(false)
+    expect(accepted.contents[0]).toMatchObject({ type: 'binary', mediaType: 'image/png' })
   })
 
   it('音视频与 PDF 按原字节返回并带嗅探出的媒体类型与文件名', async () => {

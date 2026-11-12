@@ -19,9 +19,9 @@ import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.Session;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -92,7 +92,7 @@ final class PostgresqlHarnessRows {
               resultSet.getString("name"),
               uuid(resultSet, "root_thread_id"),
               resultSet.getBoolean("yolo_enabled"),
-              SpawnTrigger.valueOf(resultSet.getString("spawn_trigger")),
+              ThreadKind.valueOf(resultSet.getString("kind")),
               decodeConstraints(resultSet.getString("constraints")),
               ThreadExecutionControl.valueOf(resultSet.getString("execution_control")),
               resultSet.getLong("input_through_sequence"),

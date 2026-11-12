@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +45,7 @@ class SpawnRequestTest {
             null,
             null,
             true,
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.RECEIPT_ONLY,
             new SpawnRequest.Budget(10, 4, 8, 16),
             commands,
@@ -60,15 +60,15 @@ class SpawnRequestTest {
     assertNull(root.continuation());
     assertTrue(root.yoloEnabled());
     assertEquals(ThreadConstraints.NONE, root.constraints());
-    assertEquals(SpawnTrigger.CONTROLLER, root.trigger());
+    assertEquals(ThreadKind.CONTROLLER_TASK, root.kind());
     assertEquals(JoinDelivery.RECEIPT_ONLY, root.delivery());
     assertEquals(10, root.budget().maxTurns());
     assertEquals(TICKET, root.ticketId());
     assertEquals(HASH, root.requestHash());
     assertEquals("agent", root.agent());
 
-    for (SpawnTrigger trigger : SpawnTrigger.values()) {
-      if (trigger == SpawnTrigger.USER) {
+    for (ThreadKind trigger : ThreadKind.values()) {
+      if (trigger == ThreadKind.USER) {
         continue;
       }
       SpawnRequest ticket =
@@ -83,7 +83,7 @@ class SpawnRequestTest {
               SpawnRequest.Budget.unlimited(),
               List.of(command(11, "trigger")),
               HASH);
-      assertEquals(trigger, ticket.trigger());
+      assertEquals(trigger, ticket.kind());
     }
 
     // 子 Thread：通知父并冻结父 head。
@@ -94,7 +94,7 @@ class SpawnRequestTest {
             PARENT,
             HEAD,
             false,
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             JoinDelivery.NOTIFY_PARENT,
             new SpawnRequest.Budget(5, 3, 2, 4),
             List.of(command(12, "child")),
@@ -110,7 +110,7 @@ class SpawnRequestTest {
             PARENT,
             null,
             false,
-            SpawnTrigger.RUNTIME,
+            ThreadKind.COMPACTION,
             JoinDelivery.SETTLE_OWNER_TURN,
             SpawnRequest.Budget.unlimited(),
             List.of(command(13, "compact")),
@@ -125,7 +125,7 @@ class SpawnRequestTest {
             PARENT,
             HEAD,
             false,
-            SpawnTrigger.PLUGIN,
+            ThreadKind.PLUGIN_TASK,
             JoinDelivery.NOTIFY_PARENT,
             SpawnRequest.Budget.unlimited(),
             List.of(command(14, "more")),
@@ -147,7 +147,7 @@ class SpawnRequestTest {
                     null,
                     null,
                     false,
-                    SpawnTrigger.USER,
+                    ThreadKind.USER,
                     JoinDelivery.RECEIPT_ONLY,
                     SpawnRequest.Budget.unlimited(),
                     List.of(command(20, "user")),
@@ -169,7 +169,7 @@ class SpawnRequestTest {
                   null,
                   null,
                   false,
-                  SpawnTrigger.CONTROLLER,
+                  ThreadKind.CONTROLLER_TASK,
                   JoinDelivery.RECEIPT_ONLY,
                   SpawnRequest.Budget.unlimited(),
                   List.of(command(21, "hash")),
@@ -194,7 +194,7 @@ class SpawnRequestTest {
 
   @Test
   void enforcesDeliveryParentAndHeadConsistency() {
-    // RECEIPT_ONLY 只能无父；NOTIFY_PARENT 与 SETTLE_OWNER_TURN 必须有父。
+    // RECEIPT_ONLY 只能无父；两种子任务交付与 SETTLE_OWNER_TURN 都必须有父。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -204,7 +204,7 @@ class SpawnRequestTest {
                 PARENT,
                 null,
                 false,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 JoinDelivery.RECEIPT_ONLY,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(40, "receipt-with-parent")),
@@ -218,7 +218,7 @@ class SpawnRequestTest {
                 null,
                 null,
                 false,
-                SpawnTrigger.RUNTIME,
+                ThreadKind.COMPACTION,
                 JoinDelivery.SETTLE_OWNER_TURN,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(41, "settle-without-parent")),
@@ -232,13 +232,13 @@ class SpawnRequestTest {
                 null,
                 null,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 JoinDelivery.NOTIFY_PARENT,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(42, "notify-without-parent")),
                 HASH));
 
-    // 只有 NOTIFY_PARENT 携带父 head。
+    // 两种子任务交付都必须携带父 head；owner 结算与 root receipt 不携带。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -248,7 +248,7 @@ class SpawnRequestTest {
                 PARENT,
                 null,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 JoinDelivery.NOTIFY_PARENT,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(43, "notify-without-head")),
@@ -260,9 +260,36 @@ class SpawnRequestTest {
                 SESSION,
                 null,
                 PARENT,
+                null,
+                false,
+                ThreadKind.SUBAGENT,
+                JoinDelivery.SETTLE_TOOL_RESULT,
+                SpawnRequest.Budget.unlimited(),
+                List.of(command(46, "sync-without-head")),
+                HASH));
+    SpawnRequest synchronous =
+        request(
+            SESSION,
+            null,
+            PARENT,
+            HEAD,
+            false,
+            ThreadKind.SUBAGENT,
+            JoinDelivery.SETTLE_TOOL_RESULT,
+            SpawnRequest.Budget.unlimited(),
+            List.of(command(47, "sync-with-head")),
+            HASH);
+    assertEquals(HEAD, synchronous.expectedParentHeadEntryId());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            request(
+                SESSION,
+                null,
+                PARENT,
                 HEAD,
                 false,
-                SpawnTrigger.RUNTIME,
+                ThreadKind.COMPACTION,
                 JoinDelivery.SETTLE_OWNER_TURN,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(44, "settle-with-head")),
@@ -276,7 +303,7 @@ class SpawnRequestTest {
                 null,
                 HEAD,
                 false,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 JoinDelivery.RECEIPT_ONLY,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(45, "receipt-with-head")),
@@ -295,7 +322,7 @@ class SpawnRequestTest {
                 PARENT,
                 HEAD,
                 true,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 JoinDelivery.NOTIFY_PARENT,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(60, "child-yolo")),
@@ -309,7 +336,7 @@ class SpawnRequestTest {
                 null,
                 null,
                 true,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 JoinDelivery.RECEIPT_ONLY,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(61, "continued-yolo")),
@@ -328,7 +355,7 @@ class SpawnRequestTest {
                 null,
                 null,
                 false,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 JoinDelivery.RECEIPT_ONLY,
                 SpawnRequest.Budget.unlimited(),
                 null,
@@ -342,7 +369,7 @@ class SpawnRequestTest {
                 null,
                 null,
                 false,
-                SpawnTrigger.CONTROLLER,
+                ThreadKind.CONTROLLER_TASK,
                 JoinDelivery.RECEIPT_ONLY,
                 SpawnRequest.Budget.unlimited(),
                 List.of(),
@@ -358,7 +385,7 @@ class SpawnRequestTest {
                     null,
                     null,
                     false,
-                    SpawnTrigger.CONTROLLER,
+                    ThreadKind.CONTROLLER_TASK,
                     JoinDelivery.RECEIPT_ONLY,
                     SpawnRequest.Budget.unlimited(),
                     List.of(duplicate, duplicate),
@@ -378,7 +405,7 @@ class SpawnRequestTest {
             null,
             null,
             false,
-            SpawnTrigger.CONTROLLER,
+            ThreadKind.CONTROLLER_TASK,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             commands,
@@ -440,7 +467,7 @@ class SpawnRequestTest {
         null,
         null,
         false,
-        SpawnTrigger.CONTROLLER,
+        ThreadKind.CONTROLLER_TASK,
         JoinDelivery.RECEIPT_ONLY,
         SpawnRequest.Budget.unlimited(),
         commands,
@@ -453,7 +480,7 @@ class SpawnRequestTest {
       UUID parentThreadId,
       UUID expectedParentHeadEntryId,
       boolean yoloEnabled,
-      SpawnTrigger trigger,
+      ThreadKind trigger,
       JoinDelivery delivery,
       SpawnRequest.Budget budget,
       List<NewThreadCommand> commands,

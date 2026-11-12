@@ -137,6 +137,40 @@
   gap: 20px;
 }
 
+.interactions-session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.interactions-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.interactions-session-header h2 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+
+.interactions-session-link {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: var(--font-size-xs);
+}
+
+.interactions-session-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
 .interaction-feed-item {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -409,9 +443,30 @@
   color: var(--fg-muted);
 }
 
-.interaction-approval-arguments {
-  max-height: 160px;
-  overflow: auto;
+.interaction-approval-deny-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.interaction-approval-deny-reason input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+.interaction-approval-deny-reason input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 pre.interaction-raw-pre {

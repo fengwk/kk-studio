@@ -2,15 +2,18 @@ package fun.fengwk.kkstudio.platform.harness.http;
 
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.NOW;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.environmentToolBinding;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.fileMutationInvocation;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.generation;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.id;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idText;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolInvocation;
 import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.withToolSiblings;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -268,6 +271,29 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(NOW, dto.getGenerationFailures().getFirst().getFailedAt());
     assertEquals(NOW.plusSeconds(2), dto.getGenerationFailures().getFirst().getRetryAt());
     assertNull(dto.getBaseEntryId());
+  }
+
+  /** 测试意图：快照投影按同批最近的同键前序调用填写静态 toolCallId，其他调用保持 null。 */
+  @Test
+  void projectsNearestSameFilePredecessorInToolBatch() {
+    ThreadSnapshot snapshot =
+        withToolSiblings(
+            toolSnapshot(ToolInvocationStatus.READY),
+            List.of(
+                fileMutationInvocation(0, "call-1", "edit", "{\"path\":\"/a/b\"}"),
+                fileMutationInvocation(1, "call-2", "edit", "{\"path\":\"/other\"}"),
+                fileMutationInvocation(2, "call-3", "edit", "{\"path\":\"/a/x/../b\"}"),
+                fileMutationInvocation(3, "call-4", "write", "{\"path\":\"/a/b\"}"),
+                fileMutationInvocation(4, "call-5", "edit", "{\"path\":\"/a/b\"}")));
+    when(snapshot.toolSiblings().get(4).assistantEntryId()).thenReturn(id(9));
+
+    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, Map.of());
+
+    assertNull(dto.getToolInvocations().get(0).getQueuedBehindToolCallId());
+    assertNull(dto.getToolInvocations().get(1).getQueuedBehindToolCallId());
+    assertEquals("call-1", dto.getToolInvocations().get(2).getQueuedBehindToolCallId());
+    assertEquals("call-3", dto.getToolInvocations().get(3).getQueuedBehindToolCallId());
+    assertNull(dto.getToolInvocations().get(4).getQueuedBehindToolCallId());
   }
 
   @Test

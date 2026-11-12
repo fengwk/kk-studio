@@ -31,8 +31,8 @@ import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -331,7 +331,7 @@ class HarnessRuntimeApiRecordsTest {
                 thread.name(),
                 thread.id(),
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 thread.executionControl(),
                 0L,
@@ -350,7 +350,7 @@ class HarnessRuntimeApiRecordsTest {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
-            thread.spawnTrigger(),
+            thread.kind(),
             thread.constraints(),
             thread.executionControl(),
             0L,
@@ -373,7 +373,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.rootThreadId(),
                     thread.yoloEnabled(),
-                    thread.spawnTrigger(),
+                    thread.kind(),
                     thread.constraints(),
                     thread.executionControl(),
                     0L,
@@ -395,7 +395,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.rootThreadId(),
                     thread.yoloEnabled(),
-                    thread.spawnTrigger(),
+                    thread.kind(),
                     thread.constraints(),
                     thread.executionControl(),
                     0L,
@@ -422,7 +422,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.id(),
                     true,
-                    SpawnTrigger.MODEL_TOOL,
+                    ThreadKind.SUBAGENT,
                     ThreadConstraints.NONE,
                     thread.executionControl(),
                     0L,
