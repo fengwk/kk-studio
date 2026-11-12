@@ -6,6 +6,8 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -232,6 +234,46 @@ func TestPOSIXSupervisor_Terminate(t *testing.T) {
 	defer cancel()
 	if err := process.Terminate(ctx, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// NAT-T-129, NAT-T-130 verify descendant tracking rejects unknown roots and foreign processes.
+func TestPOSIXSupervisor_TrackDescendantRejectsForeignProcess(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	if err := supervisor.(DescendantTracker).TrackDescendant(context.Background(), 99999999, os.Getpid()); err == nil {
+		t.Fatal("unknown root was accepted")
+	}
+	process, err := supervisor.Start(context.Background(), ProcessSpec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := supervisor.(DescendantTracker).TrackDescendant(context.Background(), process.PID(), os.Getpid()); err == nil {
+		t.Fatal("foreign process was accepted as a managed descendant")
+	}
+}
+
+// NAT-T-138 verifies that a descendant already in the managed session is accepted.
+func TestPOSIXSupervisor_TrackExistingMember(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "sleep 30 & echo $! > " + strconv.Quote(pidFile) + "; wait"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPID := waitPIDFile(t, pidFile)
+	if err := supervisor.(DescendantTracker).TrackDescendant(context.Background(), process.PID(), childPID); err != nil {
+		t.Fatalf("TrackDescendant(%d) error = %v", childPID, err)
 	}
 }
 

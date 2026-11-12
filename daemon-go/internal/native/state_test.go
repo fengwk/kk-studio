@@ -15,6 +15,38 @@ func stateTestDir(t *testing.T) string {
 	return dir
 }
 
+// NAT-T-139..141 verify unreadable and non-object state payloads fail closed.
+func TestState_ProtocolFailures(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(dir, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLaunch(dir); err == nil {
+		t.Fatal("launch from a non-directory state path was readable")
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLaunch(dir); err != nil {
+		t.Fatalf("missing launch spec should remain a distinct absent state: %v", err)
+	}
+	if err := publishText(dir, launchFile, `[]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLaunch(dir); err == nil {
+		t.Fatal("non-object launch payload accepted")
+	}
+	if err := publishText(dir, exitFile, `[]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExit(dir); err == nil {
+		t.Fatal("non-object exit payload accepted")
+	}
+}
+
 // NAT-T-142
 func TestState_CreatePrivateDirectory(t *testing.T) {
 	dir, err := createStateDir()

@@ -114,6 +114,28 @@ func TestPrivateFS_RejectLooseFileMode(t *testing.T) {
 	}
 }
 
+// NAT-T-102 verifies private-file validation rejects a symlink.
+func TestPrivateFS_VerifyRejectsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated Windows privileges")
+	}
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPrivateFile(link); err == nil {
+		t.Fatal("symlink verified as a private file")
+	}
+}
+
 // NAT-T-101
 func TestPrivateFS_RejectSymlinkTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -129,6 +151,21 @@ func TestPrivateFS_RejectSymlinkTarget(t *testing.T) {
 	}
 	if err := writePrivateFile(link, []byte("unsafe")); err == nil {
 		t.Fatal("symlink target accepted")
+	}
+}
+
+// NAT-T-107 verifies private-file publication rejects a directory target.
+func TestPrivateFS_RejectDirectoryTarget(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePrivateFile(target, []byte("unsafe")); err == nil {
+		t.Fatal("directory target accepted as a private file")
 	}
 }
 
