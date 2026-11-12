@@ -25,6 +25,10 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
 })
 
+test('reusable Go CI does not invoke the stale Node-daemon interoperability fixture', () => {
+  assert.doesNotMatch(goCi, /DaemonCrossLanguageIntegrationTest|daemon\/package\.json/)
+})
+
 test('release dispatch stages Go archives and cannot publish', () => {
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon-go\/release/)
