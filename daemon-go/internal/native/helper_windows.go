@@ -74,15 +74,60 @@ func runWindowsHelper(args []string) int {
 	return runWindowsJobProtocol(stateDir, job, processInfo)
 }
 
+type windowsProcThreadAttributes interface {
+	Update(uintptr, unsafe.Pointer, uintptr) error
+	Delete()
+	List() *windows.ProcThreadAttributeList
+}
+
+type windowsCommandAPI interface {
+	GetStdHandle(uint32) (windows.Handle, error)
+	SetHandleInformation(windows.Handle, uint32, uint32) error
+	NewProcThreadAttributeList(uint32) (windowsProcThreadAttributes, error)
+	CreateProcess(*uint16, *uint16, *windows.SecurityAttributes, *windows.SecurityAttributes, bool, uint32, *uint16, *uint16, *windows.StartupInfo, *windows.ProcessInformation) error
+	TerminateProcess(windows.Handle, uint32) error
+	CloseHandle(windows.Handle) error
+}
+
+type nativeWindowsCommandAPI struct{}
+
+func (nativeWindowsCommandAPI) GetStdHandle(which uint32) (windows.Handle, error) {
+	return windows.GetStdHandle(which)
+}
+
+func (nativeWindowsCommandAPI) SetHandleInformation(handle windows.Handle, mask uint32, flags uint32) error {
+	return windows.SetHandleInformation(handle, mask, flags)
+}
+
+func (nativeWindowsCommandAPI) NewProcThreadAttributeList(count uint32) (windowsProcThreadAttributes, error) {
+	return windows.NewProcThreadAttributeList(count)
+}
+
+func (nativeWindowsCommandAPI) CreateProcess(appName *uint16, commandLine *uint16, procSecurity *windows.SecurityAttributes, threadSecurity *windows.SecurityAttributes, inheritHandles bool, creationFlags uint32, env *uint16, currentDir *uint16, startupInfo *windows.StartupInfo, outProcInfo *windows.ProcessInformation) error {
+	return windows.CreateProcess(appName, commandLine, procSecurity, threadSecurity, inheritHandles, creationFlags, env, currentDir, startupInfo, outProcInfo)
+}
+
+func (nativeWindowsCommandAPI) TerminateProcess(process windows.Handle, exitCode uint32) error {
+	return windows.TerminateProcess(process, exitCode)
+}
+
+func (nativeWindowsCommandAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+
 func createSuspendedWindowsCommand(job windows.Handle, launch *launchSpec, stdin windows.Handle) (windows.ProcessInformation, error) {
+	return createSuspendedWindowsCommandWithAPI(nativeWindowsCommandAPI{}, job, launch, stdin)
+}
+
+func createSuspendedWindowsCommandWithAPI(api windowsCommandAPI, job windows.Handle, launch *launchSpec, stdin windows.Handle) (windows.ProcessInformation, error) {
 	if len(launch.Args) == 0 || launch.Args[0] == "" {
 		return windows.ProcessInformation{}, errors.New("empty command")
 	}
-	stdout, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+	stdout, err := api.GetStdHandle(windows.STD_OUTPUT_HANDLE)
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
-	stderr, err := windows.GetStdHandle(windows.STD_ERROR_HANDLE)
+	stderr, err := api.GetStdHandle(windows.STD_ERROR_HANDLE)
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
@@ -91,11 +136,11 @@ func createSuspendedWindowsCommand(job windows.Handle, launch *launchSpec, stdin
 	}
 	handles := uniqueWindowsHandles([]windows.Handle{stdin, stdout, stderr})
 	for _, handle := range handles {
-		if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
+		if err := api.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
 			return windows.ProcessInformation{}, err
 		}
 	}
-	attributes, err := windows.NewProcThreadAttributeList(2)
+	attributes, err := api.NewProcThreadAttributeList(2)
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
@@ -127,16 +172,16 @@ func createSuspendedWindowsCommand(job windows.Handle, launch *launchSpec, stdin
 	startup.ProcThreadAttributeList = attributes.List()
 	var information windows.ProcessInformation
 	flags := uint32(windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
-	if err := windows.CreateProcess(app, commandLine, nil, nil, true, flags, &environment[0], cwd, &startup.StartupInfo, &information); err != nil {
+	if err := api.CreateProcess(app, commandLine, nil, nil, true, flags, &environment[0], cwd, &startup.StartupInfo, &information); err != nil {
 		return windows.ProcessInformation{}, fmt.Errorf("cannot create suspended command process: %w", err)
 	}
 	if information.Process == 0 || information.Thread == 0 || information.ProcessId == 0 {
 		if information.Process != 0 {
-			_ = windows.TerminateProcess(information.Process, 1)
-			_ = windows.CloseHandle(information.Process)
+			_ = api.TerminateProcess(information.Process, 1)
+			_ = api.CloseHandle(information.Process)
 		}
 		if information.Thread != 0 {
-			_ = windows.CloseHandle(information.Thread)
+			_ = api.CloseHandle(information.Thread)
 		}
 		return windows.ProcessInformation{}, errors.New("the command process was created without process handles")
 	}
