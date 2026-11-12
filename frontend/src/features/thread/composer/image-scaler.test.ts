@@ -15,7 +15,7 @@ describe('computeScaledDimensions', () => {
     expect(computeScaledDimensions(4000, 3000, 'ORIGINAL')).toEqual({ width: 4000, height: 3000 })
   })
 
-  it('enforces the backend decoded pixel budget before scaling', () => {
+  it('enforces the backend decoded pixel budget', () => {
     expect(() => computeScaledDimensions(8000, 5001, 'ORIGINAL')).toThrow(
       'image of 8000x5001 pixels exceeds the decodable pixel budget 40000000',
     )
