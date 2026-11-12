@@ -158,7 +158,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
 	_ = ownerReader.Close()
-	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, done: make(chan struct{})}
+	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, trackedSessions: make(map[int]trackedSession), done: make(chan struct{})}
 	go func() { p.waitErr = cmd.Wait(); close(p.done) }()
 	if err := p.awaitScope(ctx); err != nil {
 		failure := p.cleanupFailedStart(err)
@@ -204,35 +204,49 @@ func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int)
 	if p == nil {
 		return errors.New("the process root is not managed by this supervisor")
 	}
-	members, err := sessionMembers(p.sid)
+	members, err := allProcessMembers()
 	if err != nil {
 		return err
 	}
+	if !isDescendantOf(members, pid, rootPID) {
+		return errors.New("the process is not a verified descendant of the managed process")
+	}
 	for _, member := range members {
-		if member.PID == pid && member.Session == p.sid && member.Identity != "" {
+		if member.PID != pid {
+			continue
+		}
+		if member.Session <= 0 || member.Identity == "" {
+			return errors.New("the process session identity is unknown")
+		}
+		if member.Session == p.sid {
 			return nil
 		}
+		p.mu.Lock()
+		p.trackedSessions[member.Session] = trackedSession{ChildPID: member.PID, Session: member.Session, Identity: member.Identity}
+		p.mu.Unlock()
+		return nil
 	}
-	return errors.New("the process is not a verified member of the managed session")
+	return errors.New("the descendant process could not be verified")
 }
 
 type posixProcess struct {
-	supervisor    *PosixSupervisor
-	cmd           *exec.Cmd
-	pid           int
-	sid           int
-	stateDir      string
-	owner         *os.File
-	stdin         io.WriteCloser
-	stdout        io.ReadCloser
-	stderr        io.ReadCloser
-	baselinePIDs  []int
-	baselineKnown bool
-	done          chan struct{}
-	waitErr       error
-	mu            sync.Mutex
-	settled       bool
-	termErr       error
+	supervisor      *PosixSupervisor
+	cmd             *exec.Cmd
+	pid             int
+	sid             int
+	stateDir        string
+	owner           *os.File
+	stdin           io.WriteCloser
+	stdout          io.ReadCloser
+	stderr          io.ReadCloser
+	baselinePIDs    []int
+	baselineKnown   bool
+	trackedSessions map[int]trackedSession
+	done            chan struct{}
+	waitErr         error
+	mu              sync.Mutex
+	settled         bool
+	termErr         error
 }
 
 func (p *posixProcess) PID() int              { return p.pid }
@@ -335,6 +349,10 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, err)}
 		return p.termErr
 	}
+	if err := p.convergeTrackedSessions(ctx, grace); err != nil {
+		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, err)}
+		return p.termErr
+	}
 	if streamErr != nil {
 		p.termErr = streamErr
 		return p.termErr
@@ -418,8 +436,7 @@ func readExitFallback(dir string, waitErr error) ProcessExit {
 		return ProcessExit{Code: report.ExitCode, Signal: report.Signal}
 	}
 	if waitErr == nil {
-		code := 0
-		return ProcessExit{Code: &code}
+		return ProcessExit{}
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
@@ -438,7 +455,20 @@ func convergeSession(ctx context.Context, sid int, grace time.Duration) error {
 	return convergeSessionExcept(ctx, sid, grace, 0)
 }
 
+func (p *posixProcess) convergeTrackedSessions(ctx context.Context, grace time.Duration) error {
+	for _, tracked := range p.trackedSessions {
+		if err := convergeSessionFenced(ctx, tracked.Session, grace, 0, &tracked); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, excludedPID int) error {
+	return convergeSessionFenced(ctx, sid, grace, excludedPID, nil)
+}
+
+func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, excludedPID int, anchor *trackedSession) error {
 	deadline := time.NewTimer(scopeConvergeBudget)
 	defer deadline.Stop()
 	started := time.Now()
@@ -459,6 +489,9 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 		if len(active) == 0 {
 			return nil
 		}
+		if anchor != nil && !containsTrackedAnchor(members, *anchor) {
+			return errors.New("tracked process identity changed before session convergence")
+		}
 		active, err = parentsBeforeChildren(active)
 		if err != nil {
 			return err
@@ -474,6 +507,9 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 			current, err := sessionMembers(sid)
 			if err != nil {
 				return err
+			}
+			if anchor != nil && !containsTrackedAnchor(current, *anchor) {
+				return errors.New("tracked process identity changed before session signal")
 			}
 			verified := false
 			for _, item := range current {
@@ -497,6 +533,15 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 		case <-time.After(scopePollInterval):
 		}
 	}
+}
+
+func containsTrackedAnchor(members []sessionMember, tracked trackedSession) bool {
+	for _, member := range members {
+		if member.PID == tracked.ChildPID && member.Session == tracked.Session && member.Identity == tracked.Identity {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeEnvironment(base, overrides []string) []string {

@@ -32,7 +32,23 @@ func convergeAdoptedChildren(ctx context.Context, ownerPID int, grace time.Durat
 	return nil
 }
 
+func allProcessMembers() ([]sessionMember, error) { return darwinProcessMembers() }
+
 func sessionMembers(sid int) ([]sessionMember, error) {
+	all, err := darwinProcessMembers()
+	if err != nil {
+		return nil, err
+	}
+	members := make([]sessionMember, 0)
+	for _, member := range all {
+		if member.Session == sid {
+			members = append(members, member)
+		}
+	}
+	return members, nil
+}
+
+func darwinProcessMembers() ([]sessionMember, error) {
 	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
 		return nil, fmt.Errorf("cannot enumerate process scope members: %w", err)
@@ -49,9 +65,6 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("cannot inspect process scope member: %w", err)
-		}
-		if got != sid {
-			continue
 		}
 		start := proc.Proc.P_starttime
 		identity := fmt.Sprintf("%d.%d", start.Sec, start.Usec)

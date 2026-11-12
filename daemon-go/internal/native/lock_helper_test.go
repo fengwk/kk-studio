@@ -147,4 +147,23 @@ func TestLockCommand_Usage(t *testing.T) {
 			}
 		})
 	}
+
+	originalStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	defer func() { os.Stderr = originalStderr }()
+	if code := LockHelperMain(nil); code != 2 {
+		t.Fatalf("LockHelperMain usage exit = %d", code)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil || string(usage) != lockHelperUsage {
+		t.Fatalf("LockHelperMain usage = %q, %v", usage, err)
+	}
 }

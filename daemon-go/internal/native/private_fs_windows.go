@@ -4,7 +4,6 @@ package native
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -15,8 +14,14 @@ import (
 func secureNewPrivateDirectory(path string) error { return setWindowsOwnerOnly(path) }
 
 func ensurePrivateDirectory(path string) error {
-	if _, err := os.Lstat(path); err == nil {
-		return verifyPrivateDirectory(path)
+	if st, err := os.Lstat(path); err == nil {
+		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("the private directory path is not a real directory: %s", path)
+		}
+		if err := verifyWindowsOwner(path); err != nil {
+			return err
+		}
+		return setWindowsOwnerOnly(path)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -53,37 +58,12 @@ func writePrivateFile(path string, data []byte) error {
 		return err
 	}
 	tmpPath := tmp.Name()
-	ok := false
-	defer func() {
-		_ = tmp.Close()
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
 	if err := setWindowsOwnerOnly(tmpPath); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		return err
 	}
-	for len(data) > 0 {
-		n, writeErr := tmp.Write(data)
-		if writeErr != nil {
-			return writeErr
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	ok = true
-	return verifyPrivateFile(path)
+	return publishPrivateFileTransaction(tmp, path, data, os.Rename, os.Remove, verifyPrivateFile)
 }
 
 func createPrivateFile(path string) error {
@@ -135,6 +115,22 @@ func setWindowsOwnerOnly(path string) error {
 	return verifyWindowsOwnerOnly(path)
 }
 
+func verifyWindowsOwner(path string) error {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return err
+	}
+	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	owner, _, err := current.Owner()
+	if err != nil || owner == nil || !owner.Equals(user.User.Sid) {
+		return fmt.Errorf("the private path is not owned by the current user: %s", path)
+	}
+	return nil
+}
+
 func verifyWindowsOwnerOnly(path string) error {
 	attrs, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
 	if err != nil {
@@ -143,17 +139,12 @@ func verifyWindowsOwnerOnly(path string) error {
 	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return fmt.Errorf("the private path must not be a reparse point: %s", path)
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
+	if err := verifyWindowsOwner(path); err != nil {
 		return err
 	}
-	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
-	}
-	owner, _, err := current.Owner()
-	if err != nil || owner == nil || !owner.Equals(user.User.Sid) {
-		return fmt.Errorf("the private path is not owned by the current user: %s", path)
 	}
 	dacl, _, err := current.DACL()
 	if err != nil || dacl == nil || dacl.AceCount != 1 {
@@ -165,6 +156,10 @@ func verifyWindowsOwnerOnly(path string) error {
 	}
 	var ace *windows.ACCESS_ALLOWED_ACE
 	if err := windows.GetAce(dacl, 0, &ace); err != nil {
+		return err
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
 		return err
 	}
 	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
