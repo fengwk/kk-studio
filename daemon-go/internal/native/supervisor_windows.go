@@ -349,25 +349,29 @@ type windowsHelperPipes struct {
 }
 
 func createWindowsHelperPipes() (*windowsHelperPipes, error) {
+	return createWindowsHelperPipesWithAPI(nativeWindowsPipeAPI{})
+}
+
+func createWindowsHelperPipesWithAPI(api windowsPipeAPI) (*windowsHelperPipes, error) {
 	pipes := &windowsHelperPipes{}
-	ownerFile, ownerChild, err := windowsPipe(true)
+	ownerFile, ownerChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		return nil, err
 	}
 	pipes.ownerFile, pipes.owner = ownerFile, ownerChild
-	inputFile, inputChild, err := windowsPipe(true)
+	inputFile, inputChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.inputFile, pipes.commandInput = inputFile, inputChild
-	outputFile, outputChild, err := windowsPipe(false)
+	outputFile, outputChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.outputFile, pipes.output = outputFile, outputChild
-	errorFile, errorChild, err := windowsPipe(false)
+	errorFile, errorChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
@@ -377,25 +381,51 @@ func createWindowsHelperPipes() (*windowsHelperPipes, error) {
 	return pipes, nil
 }
 
+type windowsPipeAPI interface {
+	CreatePipe(*windows.Handle, *windows.Handle, *windows.SecurityAttributes, uint32) error
+	SetHandleInformation(windows.Handle, uint32, uint32) error
+	CloseHandle(windows.Handle) error
+	NewFile(uintptr, string) *os.File
+}
+
+type nativeWindowsPipeAPI struct{}
+
+func (nativeWindowsPipeAPI) CreatePipe(readHandle, writeHandle *windows.Handle, attributes *windows.SecurityAttributes, size uint32) error {
+	return windows.CreatePipe(readHandle, writeHandle, attributes, size)
+}
+func (nativeWindowsPipeAPI) SetHandleInformation(handle windows.Handle, mask, flags uint32) error {
+	return windows.SetHandleInformation(handle, mask, flags)
+}
+func (nativeWindowsPipeAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+func (nativeWindowsPipeAPI) NewFile(handle uintptr, name string) *os.File {
+	return os.NewFile(handle, name)
+}
+
 func windowsPipe(parentWrites bool) (*os.File, windows.Handle, error) {
+	return windowsPipeWithAPI(parentWrites, nativeWindowsPipeAPI{})
+}
+
+func windowsPipeWithAPI(parentWrites bool, api windowsPipeAPI) (*os.File, windows.Handle, error) {
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
 	var readHandle, writeHandle windows.Handle
-	if err := windows.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
+	if err := api.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
 		return nil, 0, err
 	}
 	parent, child := readHandle, writeHandle
 	if parentWrites {
 		parent, child = writeHandle, readHandle
 	}
-	if err := windows.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+	if err := api.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, err
 	}
-	file := os.NewFile(uintptr(parent), "native-pipe")
+	file := api.NewFile(uintptr(parent), "native-pipe")
 	if file == nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, errors.New("cannot wrap a native pipe handle")
 	}
 	return file, child, nil
@@ -547,6 +577,7 @@ type windowsProcess struct {
 	waitErr          error
 	terminationErr   error
 	closeErr         error
+	terminationAPI   windowsProcessTerminationAPI
 }
 
 func (p *windowsProcess) PID() int              { return p.pid }
@@ -730,6 +761,10 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	api := p.terminationAPI
+	if api == nil {
+		api = nativeWindowsProcessTerminationAPI{}
+	}
 	var resourceErrors []error
 	if p.owner != nil {
 		if err := p.owner.Close(); err != nil {
@@ -740,20 +775,20 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	var convergenceErrors []error
 	converged := false
 	if p.job != 0 {
-		_ = windows.TerminateJobObject(p.job, 1)
-		err := awaitWindowsJobEmpty(context.Background(), p.job, windowsDrainBudget)
+		_ = api.TerminateJobObject(p.job, 1)
+		err := api.AwaitJobEmpty(context.Background(), p.job, windowsDrainBudget)
 		if err != nil {
 			convergenceErrors = append(convergenceErrors, err)
 		} else {
 			converged = true
 		}
-	} else if err := terminateWindowsProcess(context.Background(), p.helper); err != nil {
+	} else if err := terminateWindowsProcessWithAPI(context.Background(), p.helper, windowsForceKillBudget, api); err != nil {
 		convergenceErrors = append(convergenceErrors, err)
 	} else {
 		converged = true
 	}
 	if p.job != 0 {
-		if err := windows.CloseHandle(p.job); err != nil {
+		if err := api.CloseHandle(p.job); err != nil {
 			resourceErrors = append(resourceErrors, fmt.Errorf("cannot close process scope job: %w", err))
 		}
 		p.job = 0
@@ -761,7 +796,7 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if converged {
 		if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 			if p.helper != 0 {
-				_ = windows.TerminateProcess(p.helper, 1)
+				_ = api.TerminateProcess(p.helper, 1)
 			}
 			if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 				convergenceErrors = append(convergenceErrors, err)
@@ -963,6 +998,9 @@ func (p *windowsProcess) awaitHelperExit(ctx context.Context, budget time.Durati
 type windowsProcessTerminationAPI interface {
 	TerminateProcess(windows.Handle, uint32) error
 	WaitForSingleObject(windows.Handle, uint32) (uint32, error)
+	TerminateJobObject(windows.Handle, uint32) error
+	AwaitJobEmpty(context.Context, windows.Handle, time.Duration) error
+	CloseHandle(windows.Handle) error
 }
 
 type nativeWindowsProcessTerminationAPI struct{}
@@ -973,9 +1011,14 @@ func (nativeWindowsProcessTerminationAPI) TerminateProcess(process windows.Handl
 func (nativeWindowsProcessTerminationAPI) WaitForSingleObject(process windows.Handle, milliseconds uint32) (uint32, error) {
 	return windows.WaitForSingleObject(process, milliseconds)
 }
-
-func terminateWindowsProcess(ctx context.Context, process windows.Handle) error {
-	return terminateWindowsProcessWithAPI(ctx, process, windowsForceKillBudget, nativeWindowsProcessTerminationAPI{})
+func (nativeWindowsProcessTerminationAPI) TerminateJobObject(job windows.Handle, code uint32) error {
+	return windows.TerminateJobObject(job, code)
+}
+func (nativeWindowsProcessTerminationAPI) AwaitJobEmpty(ctx context.Context, job windows.Handle, budget time.Duration) error {
+	return awaitWindowsJobEmpty(ctx, job, budget)
+}
+func (nativeWindowsProcessTerminationAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
 }
 
 func terminateWindowsProcessWithAPI(ctx context.Context, process windows.Handle, budget time.Duration, api windowsProcessTerminationAPI) error {
