@@ -459,7 +459,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
-                      .succeed(response, null, null, T3));
+                      .succeed(response, null, T3));
           builtin(store, tx)
               .updateModelInvocation(
                   builtin(store, tx)
@@ -548,7 +548,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
-                      .succeed(response, null, null, T3));
+                      .succeed(response, null, T3));
           builtin(store, tx)
               .updateModelInvocation(
                   builtin(store, tx)

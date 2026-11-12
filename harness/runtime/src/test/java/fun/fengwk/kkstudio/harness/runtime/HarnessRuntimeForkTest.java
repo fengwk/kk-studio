@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
@@ -58,6 +59,8 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -73,6 +76,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -253,7 +257,9 @@ class HarnessRuntimeForkTest {
                               List.of(
                                   new TextMessageContent("answer"),
                                   new NativeAssistantBlockContent("signature", blockData))),
-                          null,
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(0L, 0L, 0L, 0L, Map.of(), null, null)),
                           null),
                       T1));
           tx.entries().insert(turnEndEntry(turnEnd, sessionId, assistant, T1, turnStart, false));

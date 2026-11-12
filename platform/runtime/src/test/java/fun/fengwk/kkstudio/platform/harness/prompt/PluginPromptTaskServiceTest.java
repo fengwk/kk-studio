@@ -581,7 +581,7 @@ class PluginPromptTaskServiceTest {
     BranchSettings settings =
         new BranchSettings(
             "prompt-agent", BuiltinExecution.of(ModelSelection.group("gpt-4o")), "default");
-    Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW, null);
+    Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW);
     ThreadState thread =
         new ThreadState(
             threadId,

@@ -109,13 +109,26 @@ class PostgresqlThreadProcessorReplayTest {
                 new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
             null);
 
-    UUID entryId =
+    UUID userEntryId =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
               tx.entries()
                   .insert(
-                      new Entry(id, baseline.sessionId(), baseline.turnStartEntryId(), payload, T2));
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          baseline.turnStartEntryId(),
+                          StoreTestSupport.userMessagePayload(),
+                          T2));
+              return id;
+            });
+    UUID entryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.entries()
+                  .insert(new Entry(id, baseline.sessionId(), userEntryId, payload, T3));
               return id;
             });
 
