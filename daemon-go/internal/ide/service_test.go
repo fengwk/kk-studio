@@ -1626,11 +1626,10 @@ func TestBoundViewCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if !closed.GetOk() {
-		upstream.Release()
-		t.Fatalf("close reply=%v", closed)
-	}
+	closeResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		closeResult <- service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	}()
 	select {
 	case <-upstream.Context.Done():
 	case <-time.After(time.Second):
@@ -1638,6 +1637,14 @@ func TestBoundViewCommands(t *testing.T) {
 		t.Fatal("close did not cancel the active stream context")
 	}
 	upstream.Release()
+	select {
+	case closed := <-closeResult:
+		if !closed.GetOk() {
+			t.Fatalf("close reply=%v", closed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after stream release")
+	}
 	if service.ActiveStreamCount() != 0 {
 		t.Fatalf("streams after close=%d", service.ActiveStreamCount())
 	}
@@ -1684,7 +1691,10 @@ func TestUnknownNativeClosePreservesStream(t *testing.T) {
 func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 	for _, scenario := range []string{"caller abort", "bridge disconnect"} {
 		t.Run(scenario, func(t *testing.T) {
-			root := t.TempDir()
+			root, err := CanonicalDirectory(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			bridge, err := NewBridge()
 			if err != nil {
 				t.Fatal(err)

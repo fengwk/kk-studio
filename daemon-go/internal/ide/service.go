@@ -1156,8 +1156,8 @@ func (s *Service) ResolveViewWithContext(ctx context.Context, request IDEViewReq
 	s.activeStreams[stream] = struct{}{}
 	s.cancelIdleLocked()
 	s.mu.Unlock()
+	// Wait for the transport's Release after cancellation so idle stop follows actual stream teardown.
 	upstream.Release = func() { s.releaseStream(stream) }
-	go func() { <-streamCtx.Done(); s.releaseStream(stream) }()
 	return IDEViewUpstream{Context: streamCtx, ViewUpstream: upstream}, nil
 }
 
