@@ -3,7 +3,11 @@ Find files by glob pattern in an explicit path.
 Usage:
 - Use `find` to discover files by name or path pattern, not to search file contents.
 - `path` is required; there is no implicit search root.
-- The file search respects `.gitignore`: rules are resolved from `path` upward, including ancestor `.gitignore` files and the repository's `.git/info/exclude`.
+- `.gitignore` handling follows Git. Inside a repository, the `.gitignore` files from the repository root down to each file and the repository's `.git/info/exclude` apply; a nested repository uses only its own rules; `.gitignore` files above the repository root never apply. Outside any repository, only `.gitignore` files at or below `path` apply. Global Git excludes are not used.
+- Ignored files are left out of the results without any notice, so "not found" does not prove a file or text does not exist in an ignored location.
+- Hidden files are included, `.git` is skipped, and symbolic links are not followed.
+- To search an ignored directory, pass that directory as `path`; rules from above it then no longer apply.
+- If no matches are found because ignore rules skipped entries, the result adds a hint such as `[No matches. Not searched because of ignore rules: /repo/node_modules/, /repo/.env.local, … and N more]` (up to 10 absolute paths).
 - Use `grep` after `find` when you need content search inside the discovered scope.
 - `timeout_seconds` is optional and only needed when a broad file discovery may legitimately take longer than expected.
 - Do not search from broad roots such as `/`, `~`, or `$HOME`.

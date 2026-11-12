@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 重新生成前端传输契约与 Daemon 协议代码。会写文件，提交前必须人工审阅 diff；
-# 日常校验用 read-only 的 check.sh（mvn verify 也执行同一 check）。
+# 重新生成前端传输契约与 Go Daemon 协议代码。会写文件，提交前必须人工审阅 diff；
+# 日常校验用 check.sh。
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -16,7 +16,7 @@ fi
 
 cd "$REPO_ROOT"
 node "$SCRIPT_DIR/capabilities.mjs"
-node "$REPO_ROOT/platform/daemon-server/src/main/protocol/ts/generate.mjs"
+"$REPO_ROOT/daemon-go/scripts/generate-protocol.sh"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
   -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
