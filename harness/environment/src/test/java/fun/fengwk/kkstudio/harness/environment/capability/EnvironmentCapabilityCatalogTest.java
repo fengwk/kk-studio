@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -314,6 +316,22 @@ class EnvironmentCapabilityCatalogTest {
             daemonSchema, javaSchema, "Java and daemon schemas must match for " + fileName);
       }
     }
+  }
+
+  /** 测试意图：schema 资源缺失时 catalog 必须显式失败，不能静默接受空 schema。 */
+  @Test
+  void missingSchemaResourceFailsFast() throws Exception {
+    Method loadText =
+        EnvironmentCapabilityCatalog.class.getDeclaredMethod("loadText", String.class);
+    loadText.setAccessible(true);
+
+    InvocationTargetException failure =
+        assertThrows(
+            InvocationTargetException.class,
+            () -> loadText.invoke(null, "missing-capability.schema.json"));
+
+    assertTrue(failure.getCause() instanceof IllegalStateException);
+    assertTrue(failure.getCause().getMessage().contains("missing Environment capability schema"));
   }
 
   private static Path findProjectRootDir() {
