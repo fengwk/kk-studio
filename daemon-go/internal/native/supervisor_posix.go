@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -35,6 +36,8 @@ type PosixSupervisor struct {
 	processes              map[int]*posixProcess
 	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
 	startAPI               posixStartAPI
+	publishLaunch          func(string, string, []byte) error
+	startHelper            func(*exec.Cmd) error
 }
 
 type posixStartAPI struct {
@@ -57,8 +60,12 @@ func nativePOSIXStartAPI() posixStartAPI {
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
 func NewSupervisor() (Supervisor, error) {
+	return newPOSIXSupervisor(enableChildSubreaper)
+}
+
+func newPOSIXSupervisor(enableSubreaper func() error) (Supervisor, error) {
 	if runtime.GOOS == "linux" {
-		if err := enableChildSubreaper(); err != nil {
+		if err := enableSubreaper(); err != nil {
 			return nil, fmt.Errorf("cannot enable process subreaper: %w", err)
 		}
 	}
@@ -118,7 +125,12 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	launch := launchSpec{Cwd: cwd, Args: append([]string{spec.Executable}, spec.Args...)}
 	payload, err := json.Marshal(launch)
 	if err == nil {
-		err = api.publishLaunch(dir, payload)
+		publishLaunch := s.publishLaunch
+		if publishLaunch != nil {
+			err = publishLaunch(dir, launchFile, payload)
+		} else {
+			err = api.publishLaunch(dir, payload)
+		}
 	}
 	if err != nil {
 		_ = removeStateDir(dir)
@@ -168,7 +180,11 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
-	if err := api.start(cmd); err != nil {
+	startHelper := s.startHelper
+	if startHelper == nil {
+		startHelper = api.start
+	}
+	if err := startHelper(cmd); err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -184,13 +200,14 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
 	_ = ownerReader.Close()
-	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, trackedSessions: make(map[int]trackedSession), done: make(chan struct{})}
+	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, trackedSessions: make(map[int]trackedSession), processGroupID: syscall.Getpgid, done: make(chan struct{})}
 	go func() { p.waitErr = cmd.Wait(); close(p.done) }()
 	if err := p.awaitScope(ctx); err != nil {
 		failure := p.cleanupFailedStart(err)
 		return nil, failure
 	}
-	if err := publishText(dir, permitFile, "true"); err != nil {
+	p.scopeConfirmed = true
+	if err := publishPOSIXPermit(ctx, dir); err != nil {
 		return nil, p.cleanupFailedStart(err)
 	}
 	s.mu.Lock()
@@ -201,6 +218,13 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	s.processes[p.pid] = p
 	s.mu.Unlock()
 	return p, nil
+}
+
+func publishPOSIXPermit(ctx context.Context, stateDir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return publishText(stateDir, permitFile, "true")
 }
 
 func (s *PosixSupervisor) Close(ctx context.Context) error {
@@ -272,6 +296,9 @@ type posixProcess struct {
 	baselinePIDs    []int
 	baselineKnown   bool
 	trackedSessions map[int]trackedSession
+	processGroupID  func(int) (int, error)
+	scopeConfirmed  bool
+	killHelper      func() error
 	convergeScope   func(context.Context, int, time.Duration) error
 	done            chan struct{}
 	waitErr         error
@@ -429,6 +456,17 @@ func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSess
 			}
 			for _, member := range members {
 				if member.PID == p.pid && member.Session == p.sid && member.Identity != "" {
+					getpgid := p.processGroupID
+					if getpgid == nil {
+						getpgid = syscall.Getpgid
+					}
+					pgid, err := getpgid(p.pid)
+					if err != nil {
+						return fmt.Errorf("cannot verify the process scope helper process group: %w", err)
+					}
+					if pgid != p.pid {
+						return errors.New("the process scope helper is not the process group leader")
+					}
 					return nil
 				}
 			}
@@ -451,11 +489,32 @@ func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSess
 	}
 }
 
+func (p *posixProcess) killUnestablishedHelper() error {
+	if p.killHelper != nil {
+		return p.killHelper()
+	}
+	if p.cmd == nil || p.cmd.Process == nil {
+		return errors.New("the process scope helper has no process handle")
+	}
+	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("cannot kill process scope helper: %w", err)
+	}
+	return nil
+}
+
 func (p *posixProcess) cleanupFailedStart(cause error) error {
 	cause = errors.Join(cause, p.closeStreams())
 	ctx, cancel := context.WithTimeout(context.Background(), posixForceKillBudget)
 	defer cancel()
-	if err := p.converge(ctx, p.sid, 0); err != nil {
+	if p.scopeConfirmed {
+		if err := p.converge(ctx, p.sid, 0); err != nil {
+			return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
+		}
+	} else if p.cmd != nil {
+		if err := p.killUnestablishedHelper(); err != nil {
+			return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
+		}
+	} else if err := p.converge(ctx, p.sid, 0); err != nil {
 		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
 	}
 	select {
@@ -670,12 +729,16 @@ func completeHelperCommandLifecycle(publishExit func() error, converge func() er
 }
 
 func helperMain(args []string) int {
+	return helperMainWithSubreaper(args, runtime.GOOS, enableChildSubreaper)
+}
+
+func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() error) int {
 	if len(args) != 1 || !filepath.IsAbs(args[0]) || hasControl(args[0]) {
 		_, _ = fmt.Fprintln(os.Stderr, "helper-launch-failure")
 		return 2
 	}
-	if runtime.GOOS == "linux" {
-		if err := enableChildSubreaper(); err != nil {
+	if goos == "linux" {
+		if err := enableSubreaper(); err != nil {
 			publishQuietly(args[0], errorFile, "helper-posix-failure")
 			return 1
 		}
@@ -689,6 +752,9 @@ func helperMain(args []string) int {
 		publishQuietly(args[0], errorFile, "helper-launch-failure")
 		return 1
 	}
+	terminated := make(chan os.Signal, 1)
+	signal.Notify(terminated, syscall.SIGTERM)
+	defer signal.Stop(terminated)
 	if err := publishText(args[0], scopeFile, fmt.Sprint(os.Getpid())); err != nil {
 		publishQuietly(args[0], errorFile, "helper-posix-failure")
 		return 1
@@ -708,6 +774,7 @@ func helperMain(args []string) int {
 		permit, permitErr := readState(args[0], permitFile)
 		if permitErr == nil {
 			if strings.TrimSpace(string(permit)) == "true" {
+				signal.Stop(terminated)
 				break
 			}
 			publishQuietly(args[0], errorFile, "helper-permit-failure")
@@ -724,6 +791,15 @@ func helperMain(args []string) int {
 		}
 		select {
 		case <-ownerClosed:
+			if err := convergeSessionExcept(context.Background(), os.Getpid(), 0, os.Getpid()); err != nil {
+				publishQuietly(args[0], cleanupFile, "false")
+				return 1
+			}
+			if err := publishText(args[0], cleanupFile, "true"); err != nil {
+				return 1
+			}
+			return 0
+		case <-terminated:
 			if err := convergeSessionExcept(context.Background(), os.Getpid(), 0, os.Getpid()); err != nil {
 				publishQuietly(args[0], cleanupFile, "false")
 				return 1
