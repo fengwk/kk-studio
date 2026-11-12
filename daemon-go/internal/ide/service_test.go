@@ -1978,19 +1978,26 @@ func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{
+	resume := openCommandForTest(root, "11111111-1111-4111-8111-111111111111", opened.GetViewId())
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	resumed := service.HandleCommand(context.Background(), resume)
+	if !resumed.GetOk() || resumed.GetBindingEpoch() == opened.GetBindingEpoch() {
+		t.Fatalf("resume reply=%v", resumed)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, resumed.GetWorkspacePath(), resumed.GetViewId(), root, map[string]map[string]any{
 		"restore":  {"restored": float64(1), "skipped": float64(0)},
 		"snapshot": {"documents": []map[string]string{{"path": file, "text": "unsaved"}}, "complete": true},
 	})
 	defer cancelHost()
-	restored, skipped, err := service.RestoreBackup(context.Background(), opened.GetViewId())
+	restored, skipped, err := service.RestoreBackup(context.Background(), resumed.GetViewId())
 	if err != nil || restored != 1 || skipped != 0 {
 		t.Fatalf("restore=(%d,%d), err=%v", restored, skipped, err)
 	}
 	service.mu.Lock()
-	service.views[opened.GetViewId()].forceAllowed = true
+	service.views[resumed.GetViewId()].forceAllowed = true
 	service.mu.Unlock()
-	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, resumed, true))
 	if !closed.GetOk() {
 		t.Fatalf("force close=%v", closed)
 	}
