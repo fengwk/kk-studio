@@ -150,3 +150,25 @@ func TestWindowsPrivatePath_OwnerVerificationFailures(t *testing.T) {
 		})
 	}
 }
+
+// TestWindowsPrivatePath_RejectsMalformedACL verifies malformed native ACL records fail closed.
+func TestWindowsPrivatePath_RejectsMalformedACL(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := coverageWindowsPrivatePathAPI{
+		attrs: windows.FILE_ATTRIBUTE_NORMAL, user: user.User.Sid, owner: user.User.Sid,
+		dacl: &windows.ACL{AceCount: 1}, protected: true,
+	}
+	if err := verifyWindowsOwnerOnlyWithAPI("private", api); err == nil {
+		t.Fatal("malformed ACL ACE was accepted")
+	}
+}
+
+// TestWindowsPrivateFS_NativeACLMutationRejectsMissingPath verifies native ACL updates surface missing-path errors.
+func TestWindowsPrivateFS_NativeACLMutationRejectsMissingPath(t *testing.T) {
+	if err := setWindowsOwnerOnly(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("ACL mutation succeeded for a missing path")
+	}
+}

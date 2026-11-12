@@ -62,6 +62,21 @@ func darwinKinfoProc(pid, parent int32, state int8, startSec int64, startUsec in
 	return proc
 }
 
+// NAT-F-006 verifies a PID that vanishes after the process snapshot is excluded rather than treated as a live member.
+func TestDarwinProcessMembersWithAPI_SnapshotRaceIgnoresVanishedPID(t *testing.T) {
+	api := &fakeDarwinProcessAPI{
+		procs:     []unix.KinfoProc{darwinKinfoProc(42, 9, 2, 11, 12)},
+		sidErrors: map[int]error{42: syscall.ESRCH},
+	}
+	members, err := darwinProcessMembersWithAPI(api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 0 || !reflect.DeepEqual(api.queriedPIDs, []int{42}) {
+		t.Fatalf("raced snapshot result = %+v, queried PIDs %v", members, api.queriedPIDs)
+	}
+}
+
 // NAT-F-006 verifies Darwin enumeration fails closed, ignores vanished PIDs, and freezes identity data.
 func TestDarwinProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
 	apiError := errors.New("injected sysctl error")

@@ -478,12 +478,40 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 	return convergeSessionFenced(ctx, sid, grace, excludedPID, nil)
 }
 
+type posixConvergenceAPI struct {
+	members func(int) ([]sessionMember, error)
+	kill    func(int, syscall.Signal) error
+	now     func() time.Time
+	wait    func(context.Context, time.Duration) error
+}
+
+func nativePOSIXConvergenceAPI() posixConvergenceAPI {
+	return posixConvergenceAPI{
+		members: sessionMembers,
+		kill:    syscall.Kill,
+		now:     time.Now,
+		wait: func(ctx context.Context, interval time.Duration) error {
+			timer := time.NewTimer(interval)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+	}
+}
+
 func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, excludedPID int, anchor *trackedSession) error {
-	deadline := time.NewTimer(scopeConvergeBudget)
-	defer deadline.Stop()
-	started := time.Now()
+	return convergeSessionFencedWithAPI(ctx, sid, grace, excludedPID, anchor, nativePOSIXConvergenceAPI())
+}
+
+func convergeSessionFencedWithAPI(ctx context.Context, sid int, grace time.Duration, excludedPID int, anchor *trackedSession, api posixConvergenceAPI) error {
+	deadline := api.now().Add(scopeConvergeBudget)
+	started := api.now()
 	for {
-		members, err := sessionMembers(sid)
+		members, err := api.members(sid)
 		if err != nil {
 			return err
 		}
@@ -507,14 +535,14 @@ func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, ex
 			return err
 		}
 		signal := syscall.SIGTERM
-		if time.Since(started) >= grace {
+		if api.now().Sub(started) >= grace {
 			signal = syscall.SIGKILL
 		}
 		for _, m := range active {
 			if m.Identity == "" {
 				return errors.New("process scope member identity is unknown")
 			}
-			current, err := sessionMembers(sid)
+			current, err := api.members(sid)
 			if err != nil {
 				return err
 			}
@@ -531,16 +559,24 @@ func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, ex
 			if !verified {
 				continue
 			}
-			if err := syscall.Kill(m.PID, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := api.kill(m.PID, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
 				return fmt.Errorf("cannot signal process scope member: %w", err)
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
+		remaining := deadline.Sub(api.now())
+		if remaining <= 0 {
 			return errors.New("process scope did not converge within its deadline")
-		case <-time.After(scopePollInterval):
+		}
+		interval := scopePollInterval
+		deadlineWait := remaining <= interval
+		if deadlineWait {
+			interval = remaining
+		}
+		if err := api.wait(ctx, interval); err != nil {
+			return err
+		}
+		if deadlineWait {
+			return errors.New("process scope did not converge within its deadline")
 		}
 	}
 }
@@ -576,6 +612,29 @@ func mergeEnvironment(base, overrides []string) []string {
 		result = append(result, key+"="+values[key])
 	}
 	return result
+}
+
+func completeHelperCommandLifecycle(publishExit func() error, converge func() error, reapAdopted func() error, publishCleanup func(string) error, publishFailure func()) int {
+	if err := publishExit(); err != nil {
+		_ = converge()
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := converge(); err != nil {
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := reapAdopted(); err != nil {
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := publishCleanup("true"); err != nil {
+		return 1
+	}
+	return 0
 }
 
 func helperMain(args []string) int {
@@ -697,24 +756,15 @@ func helperMain(args []string) int {
 		publishQuietly(args[0], errorFile, "helper-posix-failure")
 		return 1
 	}
-	if err := publishText(args[0], exitFile, string(payload)); err != nil {
-		_ = convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid())
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid()); err != nil {
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil); err != nil {
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := publishText(args[0], cleanupFile, "true"); err != nil {
-		return 1
-	}
-	return 0
+	return completeHelperCommandLifecycle(
+		func() error { return publishText(args[0], exitFile, string(payload)) },
+		func() error {
+			return convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid())
+		},
+		func() error {
+			return convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil)
+		},
+		func(value string) error { return publishText(args[0], cleanupFile, value) },
+		func() { publishQuietly(args[0], errorFile, "helper-posix-failure") },
+	)
 }

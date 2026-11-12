@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,6 +24,230 @@ func TestMain(m *testing.M) {
 		os.Exit(HelperMain(os.Args[2:]))
 	}
 	goleak.VerifyTestMain(m)
+}
+
+// NAT-F-005 verifies completed command wait and exit publication precede session convergence and adopted-child reaping.
+func TestPOSIXHelper_ExitBeforeAdoptedReaper(t *testing.T) {
+	events := []string{"command-wait-complete"}
+	status := completeHelperCommandLifecycle(
+		func() error {
+			events = append(events, "publish-exit")
+			return nil
+		},
+		func() error {
+			events = append(events, "converge-session")
+			return nil
+		},
+		func() error {
+			events = append(events, "reap-adopted")
+			return nil
+		},
+		func(value string) error {
+			events = append(events, "publish-cleanup-"+value)
+			return nil
+		},
+		func() { events = append(events, "publish-error") },
+	)
+	if status != 0 {
+		t.Fatalf("helper completion status = %d, want 0", status)
+	}
+	want := []string{"command-wait-complete", "publish-exit", "converge-session", "reap-adopted", "publish-cleanup-true"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("helper completion events = %v, want %v", events, want)
+	}
+}
+
+func TestPOSIXHelper_CompletionFailureStopsLifecycle(t *testing.T) {
+	exitFailure := errors.New("exit publication failed")
+	sessionFailure := errors.New("session convergence failed")
+	reaperFailure := errors.New("adopted reaping failed")
+	cleanupFailure := errors.New("cleanup publication failed")
+	for _, testCase := range []struct {
+		name       string
+		exitErr    error
+		sessionErr error
+		reaperErr  error
+		cleanupErr error
+		want       []string
+	}{
+		{name: "exit publication", exitErr: exitFailure, want: []string{"exit", "session", "cleanup-false", "error"}},
+		{name: "session convergence", sessionErr: sessionFailure, want: []string{"exit", "session", "cleanup-false", "error"}},
+		{name: "adopted reaper", reaperErr: reaperFailure, want: []string{"exit", "session", "reaper", "cleanup-false", "error"}},
+		{name: "cleanup publication", cleanupErr: cleanupFailure, want: []string{"exit", "session", "reaper", "cleanup-true"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var events []string
+			status := completeHelperCommandLifecycle(
+				func() error { events = append(events, "exit"); return testCase.exitErr },
+				func() error { events = append(events, "session"); return testCase.sessionErr },
+				func() error { events = append(events, "reaper"); return testCase.reaperErr },
+				func(value string) error { events = append(events, "cleanup-"+value); return testCase.cleanupErr },
+				func() { events = append(events, "error") },
+			)
+			if status != 1 || !reflect.DeepEqual(events, testCase.want) {
+				t.Fatalf("helper status/events = %d/%v, want 1/%v", status, events, testCase.want)
+			}
+		})
+	}
+}
+
+func TestPOSIXConvergence_InjectedFailureBranches(t *testing.T) {
+	active := []sessionMember{{PID: 42, Parent: 1, Session: 42, Identity: "identity", State: "S", Threads: 1}}
+	queryFailure := errors.New("snapshot failure")
+	signalFailure := errors.New("signal failure")
+	for _, testCase := range []struct {
+		name         string
+		snapshots    [][]sessionMember
+		queryErrorAt int
+		queryError   error
+		anchor       *trackedSession
+		killError    error
+		waitError    error
+		wantError    error
+		wantSignals  int
+	}{
+		{name: "snapshot error", queryErrorAt: 1, queryError: queryFailure, wantError: queryFailure},
+		{name: "duplicate process identity", snapshots: [][]sessionMember{{active[0], active[0]}}, wantError: errors.New("process scope snapshot contains a duplicate PID")},
+		{name: "tracked anchor missing", snapshots: [][]sessionMember{active}, anchor: &trackedSession{ChildPID: 99, Session: 42, Identity: "stale"}, wantError: errors.New("tracked process identity changed before session convergence")},
+		{name: "unknown member identity", snapshots: [][]sessionMember{{{PID: 42, Parent: 1, Session: 42, State: "S", Threads: 1}}}, wantError: errors.New("process scope member identity is unknown")},
+		{name: "verification snapshot error", snapshots: [][]sessionMember{active}, queryErrorAt: 2, queryError: queryFailure, wantError: queryFailure},
+		{name: "identity changes before signal", snapshots: [][]sessionMember{active, {{PID: 42, Parent: 1, Session: 42, Identity: "reused", State: "S", Threads: 1}}, nil}},
+		{name: "signal failure", snapshots: [][]sessionMember{active, active}, killError: signalFailure, wantError: signalFailure, wantSignals: 1},
+		{name: "vanished process signal", snapshots: [][]sessionMember{active, active, nil}, killError: syscall.ESRCH, wantSignals: 1},
+		{name: "cancelled poll", snapshots: [][]sessionMember{active, active}, waitError: context.Canceled, wantError: context.Canceled, wantSignals: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var snapshotIndex, queryCalls int
+			var signals []syscall.Signal
+			api := posixConvergenceAPI{
+				members: func(int) ([]sessionMember, error) {
+					queryCalls++
+					if queryCalls == testCase.queryErrorAt {
+						return nil, testCase.queryError
+					}
+					if snapshotIndex >= len(testCase.snapshots) {
+						return nil, nil
+					}
+					members := testCase.snapshots[snapshotIndex]
+					snapshotIndex++
+					return members, nil
+				},
+				kill: func(_ int, signal syscall.Signal) error {
+					signals = append(signals, signal)
+					return testCase.killError
+				},
+				now:  func() time.Time { return time.Unix(100, 0) },
+				wait: func(context.Context, time.Duration) error { return testCase.waitError },
+			}
+			err := convergeSessionFencedWithAPI(context.Background(), 42, 0, 0, testCase.anchor, api)
+			if testCase.wantError != nil {
+				if err == nil || (testCase.wantError == queryFailure || testCase.wantError == signalFailure || testCase.wantError == context.Canceled) && !errors.Is(err, testCase.wantError) {
+					t.Fatalf("convergence error = %v, want %v", err, testCase.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("convergence error = %v", err)
+			}
+			if len(signals) != testCase.wantSignals {
+				t.Fatalf("signals = %v, want %d", signals, testCase.wantSignals)
+			}
+		})
+	}
+}
+
+// NAT-F-008 verifies convergence returns a distinct error when its independent four-second budget expires.
+func TestPOSIXConvergence_IndependentBudgetExpires(t *testing.T) {
+	start := time.Unix(200, 0)
+	current := start
+	active := []sessionMember{{PID: 42, Parent: 1, Session: 42, Identity: "identity", State: "S", Threads: 1}}
+	queries, clockReads := 0, 0
+	waits := 0
+	api := posixConvergenceAPI{
+		members: func(int) ([]sessionMember, error) {
+			queries++
+			return active, nil
+		},
+		kill: func(int, syscall.Signal) error { return nil },
+		now: func() time.Time {
+			clockReads++
+			if clockReads == 4 {
+				return start.Add(scopeConvergeBudget - time.Millisecond)
+			}
+			return current
+		},
+		wait: func(_ context.Context, duration time.Duration) error {
+			waits++
+			if duration != time.Millisecond {
+				t.Fatalf("wait duration = %s, want remaining budget 1ms", duration)
+			}
+			current = start.Add(scopeConvergeBudget)
+			return nil
+		},
+	}
+	err := convergeSessionFencedWithAPI(context.Background(), 42, 0, 0, nil, api)
+	if err == nil || err.Error() != "process scope did not converge within its deadline" {
+		t.Fatalf("convergence error = %v, want internal budget expiration", err)
+	}
+	if queries != 2 || waits != 1 {
+		t.Fatalf("snapshot queries/waits = %d/%d, want 2/1", queries, waits)
+	}
+}
+
+// NAT-F-008 verifies the deadline-driven transition from TERM through grace to KILL and re-observation.
+func TestPOSIXConvergence_TermGraceKillAndReobserve(t *testing.T) {
+	start := time.Unix(100, 0)
+	current := start
+	active := []sessionMember{{PID: 42, Parent: 1, Session: 42, Identity: "identity", State: "S", Threads: 1}}
+	snapshots := [][]sessionMember{active, active, active, active, nil}
+	snapshotIndex := 0
+	var signals []syscall.Signal
+	var waits []time.Duration
+	var events []string
+	api := posixConvergenceAPI{
+		members: func(sid int) ([]sessionMember, error) {
+			if sid != 42 {
+				t.Fatalf("session query SID = %d, want 42", sid)
+			}
+			events = append(events, "observe")
+			members := snapshots[snapshotIndex]
+			snapshotIndex++
+			return members, nil
+		},
+		kill: func(pid int, signal syscall.Signal) error {
+			if pid != 42 {
+				t.Fatalf("signalled PID = %d, want 42", pid)
+			}
+			signals = append(signals, signal)
+			if signal == syscall.SIGTERM {
+				events = append(events, "TERM")
+			} else if signal == syscall.SIGKILL {
+				events = append(events, "KILL")
+			}
+			return nil
+		},
+		now: func() time.Time { return current },
+		wait: func(_ context.Context, duration time.Duration) error {
+			waits = append(waits, duration)
+			events = append(events, "wait")
+			current = current.Add(duration)
+			return nil
+		},
+	}
+	if err := convergeSessionFencedWithAPI(context.Background(), 42, 5*time.Millisecond, 0, nil, api); err != nil {
+		t.Fatal(err)
+	}
+	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != syscall.SIGKILL {
+		t.Fatalf("signals = %v, want [TERM KILL]", signals)
+	}
+	if len(waits) != 2 || waits[0] != 5*time.Millisecond || waits[1] != 5*time.Millisecond {
+		t.Fatalf("wait intervals = %v, want grace and post-kill observation intervals", waits)
+	}
+	wantEvents := []string{"observe", "observe", "TERM", "wait", "observe", "observe", "KILL", "wait", "observe"}
+	if !reflect.DeepEqual(events, wantEvents) {
+		t.Fatalf("convergence events = %v, want %v", events, wantEvents)
+	}
+	if snapshotIndex != len(snapshots) {
+		t.Fatalf("snapshot observations = %d, want %d", snapshotIndex, len(snapshots))
+	}
 }
 
 // NAT-N-001, NAT-T-115
