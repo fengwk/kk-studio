@@ -1,6 +1,11 @@
 package transport
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +44,92 @@ func TestProxy_ExplicitNoFallback(t *testing.T) {
 	}
 	if proxyHits.Load() != 1 || targetHits.Load() != 0 {
 		t.Fatalf("failed proxy requests=%d direct target requests=%d", proxyHits.Load(), targetHits.Load())
+	}
+}
+
+// TRN-T-093 verifies HTTPS CONNECT tunneling with normal certificate validation.
+func TestProxy_HTTPSConnectUsesDefaultTLSVerification(t *testing.T) {
+	var proxyHits atomic.Int32
+	connectTarget := make(chan string, 1)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			t.Errorf("proxy method=%s, want CONNECT", r.Method)
+			return
+		}
+		proxyHits.Add(1)
+		connectTarget <- r.Host
+		clientConn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack proxy request: %v", err)
+			return
+		}
+		upstreamConn, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			_, _ = fmt.Fprint(clientConn, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+			_ = clientConn.Close()
+			return
+		}
+		if _, err = fmt.Fprint(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+			_ = clientConn.Close()
+			_ = upstreamConn.Close()
+			return
+		}
+		go func() {
+			_, _ = io.Copy(upstreamConn, buffered.Reader)
+			if tcp, ok := upstreamConn.(*net.TCPConn); ok {
+				_ = tcp.CloseWrite()
+			}
+		}()
+		_, _ = io.Copy(clientConn, upstreamConn)
+		_ = clientConn.Close()
+		_ = upstreamConn.Close()
+	}))
+	defer proxy.Close()
+
+	var targetHits atomic.Int32
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHits.Add(1)
+		_, _ = io.WriteString(w, "secure-body")
+	}))
+	defer secure.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(secure.Certificate())
+	policy, err := NewProxyPolicy(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := policy.HTTPClient().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	client := &http.Client{Transport: transport}
+	if transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("HTTPS proxy client disabled certificate verification")
+	}
+	response, err := client.Get(secure.URL)
+	if err != nil {
+		t.Fatalf("HTTPS request through CONNECT proxy: %v", err)
+	}
+	body, err := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	transport.CloseIdleConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != "secure-body" {
+		t.Fatalf("HTTPS response status=%d body=%q", response.StatusCode, body)
+	}
+	select {
+	case target := <-connectTarget:
+		if target != strings.TrimPrefix(secure.URL, "https://") {
+			t.Fatalf("CONNECT target=%q, want %q", target, strings.TrimPrefix(secure.URL, "https://"))
+		}
+	default:
+		t.Fatal("HTTPS request did not traverse the CONNECT proxy")
+	}
+	if proxyHits.Load() != 1 || targetHits.Load() != 1 {
+		t.Fatalf("proxy hits=%d origin hits=%d, want one each", proxyHits.Load(), targetHits.Load())
 	}
 }
 

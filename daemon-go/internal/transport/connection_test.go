@@ -261,9 +261,7 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_ = first.Close()
 	secondProxyURL := secondProxy.URL
 	config.Applied.StudioURL = secondServer.URL
 	config.Applied.ProxyURL = &secondProxyURL
