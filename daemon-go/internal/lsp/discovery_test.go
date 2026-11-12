@@ -44,6 +44,21 @@ func TestDiscovery_MatchesAndResolves(t *testing.T) {
 	}
 }
 
+// LSP-T-032 verifies the file's parent is the workspace fallback when no marker exists.
+func TestDiscovery_WorkspaceRootFallsBackToFileParent(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "nested", "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Discovery{}).WorkspaceRoot(ServerConfig{}, file)
+	if err != nil || got != filepath.Dir(file) {
+		t.Fatalf("workspace root = %q, %v; want %q", got, err, filepath.Dir(file))
+	}
+}
+
 // LSP-T-028 verifies duplicate IDs are rejected rather than silently replaced.
 func TestDiscovery_DuplicateID(t *testing.T) {
 	_, err := NewDiscoveryFromServers([]ServerConfig{{ID: "x"}, {ID: "x"}}, ResolverOptions{})

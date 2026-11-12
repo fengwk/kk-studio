@@ -69,9 +69,19 @@ func (w *secondWriteFails) Write(data []byte) (int, error) {
 func TestLSPCodec_BoundedBanner(t *testing.T) {
 	codec := newLSPCodec()
 	var value any
-	// A newline ensures the reader returns the complete banner line to the codec.
-	input := strings.Repeat("x", maxBannerBytes+1) + "\n"
-	if err := codec.ReadObject(bufio.NewReader(strings.NewReader(input)), &value); err == nil || !strings.Contains(err.Error(), "more than 8192 bytes") {
+	body := `{}`
+	valid := strings.Repeat("x", maxBannerBytes) + "Content-Length: 2\r\n\r\n" + body
+	if err := codec.ReadObject(bufio.NewReader(strings.NewReader(valid)), &value); err != nil {
+		t.Fatalf("exact-limit banner error = %v", err)
+	}
+	if got, ok := value.(map[string]any); !ok || len(got) != 0 {
+		t.Fatalf("exact-limit message = %#v", value)
+	}
+
+	codec = newLSPCodec()
+	value = nil
+	input := strings.Repeat("x", maxBannerBytes+1) + "Content-Length: 2\r\n\r\n" + body
+	if err := codec.ReadObject(bufio.NewReader(strings.NewReader(input)), &value); err == nil || err.Error() != "LSP server produced more than 8192 bytes of non-protocol output before the first message" {
 		t.Fatalf("error = %v", err)
 	}
 }

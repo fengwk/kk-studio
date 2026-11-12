@@ -20,31 +20,58 @@ type lspCodec struct{ first bool }
 
 func newLSPCodec() *lspCodec { return &lspCodec{first: true} }
 
+func prefixSuffixLength(suffix []byte, marker string) int {
+	maximum := len(suffix)
+	if maximum >= len(marker) {
+		maximum = len(marker) - 1
+	}
+	for length := maximum; length > 0; length-- {
+		if strings.EqualFold(string(suffix[len(suffix)-length:]), marker[:length]) {
+			return length
+		}
+	}
+	return 0
+}
+
+type recordingCodec struct {
+	codec       jsonrpc2.ObjectCodec
+	onReadError func(error)
+}
+
+func (c *recordingCodec) ReadObject(reader *bufio.Reader, value any) error {
+	err := c.codec.ReadObject(reader, value)
+	if err != nil && c.onReadError != nil {
+		c.onReadError(err)
+	}
+	return err
+}
+
+func (c *recordingCodec) WriteObject(writer io.Writer, value any) error {
+	return c.codec.WriteObject(writer, value)
+}
+
 func (c *lspCodec) ReadObject(r *bufio.Reader, value any) error {
 	var header []byte
 	if c.first {
 		const marker = "content-length:"
 		window := make([]byte, 0, len(marker))
-		bannerBytes := 0
+		readBytes := 0
 		for {
 			b, err := r.ReadByte()
 			if err != nil {
-				if bannerBytes+len(window) > maxBannerBytes {
-					return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
-				}
 				return err
 			}
+			readBytes++
 			window = append(window, b)
 			if len(window) > len(marker) {
 				window = window[1:]
-				bannerBytes++
-				if bannerBytes > maxBannerBytes {
-					return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
-				}
 			}
 			if strings.EqualFold(string(window), marker) {
 				header = append(header, window...)
 				break
+			}
+			if readBytes-prefixSuffixLength(window, marker) > maxBannerBytes {
+				return errors.New("LSP server produced more than 8192 bytes of non-protocol output before the first message")
 			}
 		}
 		c.first = false

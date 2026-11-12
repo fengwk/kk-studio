@@ -18,17 +18,22 @@ import (
 )
 
 type fakeSupervisor struct {
-	mu           sync.Mutex
-	process      *fakeProcess
-	starts       int
-	blockMethod  string
-	errorMethod  string
-	emptyMethod  string
-	startEntered chan struct{}
-	startGate    chan struct{}
-	startErr     error
-	earlyExit    *native.ProcessExit
-	terminateErr error
+	mu               sync.Mutex
+	process          *fakeProcess
+	starts           int
+	blockMethod      string
+	errorMethod      string
+	emptyMethod      string
+	exitBlocks       bool
+	exitSeen         chan struct{}
+	allowProcessExit chan struct{}
+	shutdownParams   chan json.RawMessage
+	startEntered     chan struct{}
+	startGate        chan struct{}
+	startErr         error
+	earlyExit        *native.ProcessExit
+	terminateErr     error
+	waitErr          error
 }
 
 func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
@@ -42,7 +47,12 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	process := newFakeProcess(s.blockMethod)
 	process.errorMethod = s.errorMethod
 	process.emptyMethod = s.emptyMethod
+	process.exitBlocks = s.exitBlocks
+	process.exitSeen = s.exitSeen
+	process.allowProcessExit = s.allowProcessExit
+	process.shutdownParams = s.shutdownParams
 	process.terminateErr = s.terminateErr
+	process.waitErr = s.waitErr
 	s.process = process
 	s.mu.Unlock()
 	if earlyExit != nil {
@@ -59,22 +69,28 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 func (*fakeSupervisor) Close(context.Context) error { return nil }
 
 type fakeProcess struct {
-	blockMethod  string
-	errorMethod  string
-	emptyMethod  string
-	requests     chan string
-	cancelled    chan struct{}
-	stdinR       *io.PipeReader
-	stdinW       *io.PipeWriter
-	stdoutR      *io.PipeReader
-	stdoutW      *io.PipeWriter
-	stderrR      *io.PipeReader
-	stderrW      *io.PipeWriter
-	done         chan native.ProcessExit
-	once         sync.Once
-	exitOnce     sync.Once
-	terminates   atomic.Int32
-	terminateErr error
+	blockMethod      string
+	errorMethod      string
+	emptyMethod      string
+	exitBlocks       bool
+	exitSeen         chan struct{}
+	allowProcessExit chan struct{}
+	shutdownParams   chan json.RawMessage
+	requests         chan string
+	cancelled        chan struct{}
+	stdinR           *io.PipeReader
+	stdinW           *io.PipeWriter
+	stdoutR          *io.PipeReader
+	stdoutW          *io.PipeWriter
+	stderrR          *io.PipeReader
+	stderrW          *io.PipeWriter
+	done             chan native.ProcessExit
+	once             sync.Once
+	exitOnce         sync.Once
+	terminates       atomic.Int32
+	terminateErr     error
+	terminateGate    <-chan struct{}
+	waitErr          error
 }
 
 func newFakeProcess(blockMethod string) *fakeProcess {
@@ -90,6 +106,9 @@ func (p *fakeProcess) Stdin() io.WriteCloser { return p.stdinW }
 func (p *fakeProcess) Stdout() io.ReadCloser { return p.stdoutR }
 func (p *fakeProcess) Stderr() io.ReadCloser { return p.stderrR }
 func (p *fakeProcess) Wait(ctx context.Context) (native.ProcessExit, error) {
+	if p.waitErr != nil {
+		return native.ProcessExit{}, p.waitErr
+	}
 	select {
 	case result := <-p.done:
 		p.done <- result
@@ -100,6 +119,9 @@ func (p *fakeProcess) Wait(ctx context.Context) (native.ProcessExit, error) {
 }
 func (p *fakeProcess) Terminate(context.Context, time.Duration) error {
 	p.terminates.Add(1)
+	if p.terminateGate != nil {
+		<-p.terminateGate
+	}
 	p.once.Do(func() {
 		_ = p.stdinW.Close()
 		_ = p.stdoutW.Close()
@@ -131,6 +153,23 @@ func (p *fakeProcess) serve() {
 		if req.Method == "$/cancelRequest" {
 			p.cancelled <- struct{}{}
 			continue
+		}
+		if req.Method == "shutdown" && p.shutdownParams != nil {
+			select {
+			case p.shutdownParams <- append(json.RawMessage(nil), req.Params...):
+			default:
+			}
+		}
+		if req.Method == "exit" && p.exitBlocks {
+			if p.exitSeen != nil {
+				select {
+				case p.exitSeen <- struct{}{}:
+				default:
+				}
+			}
+			if p.allowProcessExit != nil {
+				<-p.allowProcessExit
+			}
 		}
 		if req.Method == p.blockMethod || len(req.ID) == 0 {
 			continue

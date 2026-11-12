@@ -174,6 +174,20 @@ func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 }
 
 // LSP-T-094 retains both the early-exit launch failure and managed cleanup failure.
+func TestProtocol_LaunchWaitFailure(t *testing.T) {
+	waitErr := errors.New("supervisor wait failed")
+	supervisor := &fakeSupervisor{waitErr: waitErr}
+	_, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	var bootstrap *LspBootstrapError
+	if !errors.As(err, &bootstrap) || bootstrap.Error() != "LSP server 'fake' failed to start" || !errors.Is(err, waitErr) || bootstrap.Converged {
+		t.Fatalf("launch error = %#v", err)
+	}
+	if supervisor.process.terminates.Load() != 0 {
+		t.Fatalf("unexpected cleanup attempt count = %d", supervisor.process.terminates.Load())
+	}
+	_ = supervisor.process.Terminate(context.Background(), 0)
+}
+
 func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 	cleanupErr := errors.New("termination did not converge")
 	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: 9}, terminateErr: cleanupErr}

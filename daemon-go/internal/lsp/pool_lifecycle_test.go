@@ -124,7 +124,7 @@ func TestPool_CoalescesBoot(t *testing.T) {
 
 // LSP-T-041 evicts only an idle client and terminates its managed process.
 func TestPool_IdleEviction(t *testing.T) {
-	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond})
+	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 10 * time.Millisecond})
 	lease, err := pool.Lease(context.Background(), file)
 	if err != nil {
 		t.Fatal(err)
