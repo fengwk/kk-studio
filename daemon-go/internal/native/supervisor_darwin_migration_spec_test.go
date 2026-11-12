@@ -47,7 +47,7 @@ func TestMacSupervisor_UntrackedEscapeBoundary(t *testing.T) {
 	process, err := supervisor.Start(context.Background(), ProcessSpec{
 		Executable: os.Args[0],
 		Args:       []string{"-test.run=^TestMacUntrackedEscapeFixture$"},
-		Env:        map[string]string{macEscapedChildPIDFile: pidFile},
+		Env:        []string{macEscapedChildPIDFile + "=" + pidFile},
 	})
 	if err != nil {
 		t.Fatal(err)

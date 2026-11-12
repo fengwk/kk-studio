@@ -483,6 +483,23 @@ func TestPOSIXSupervisor_TerminateNested(t *testing.T) {
 	t.Fatalf("nested child %d survived scope termination", childPID)
 }
 
+const posixGroupFixturePIDFile = "KK_STUDIO_NATIVE_GROUP_FIXTURE_PID_FILE"
+
+// TestPOSIXProcessGroupFixture is re-executed as a same-session child with its own process group.
+func TestPOSIXProcessGroupFixture(t *testing.T) {
+	pidFile := os.Getenv(posixGroupFixturePIDFile)
+	if pidFile == "" {
+		return
+	}
+	if err := unix.Setpgid(0, 0); err != nil {
+		t.Fatalf("create child process group: %v", err)
+	}
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Second)
+}
+
 // NAT-T-117 verifies session termination reaches a child in a distinct process group.
 func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 	supervisor, err := NewSupervisor()
@@ -492,8 +509,9 @@ func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 	defer supervisor.Close(context.Background())
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	process, err := supervisor.Start(context.Background(), ProcessSpec{
-		Executable: "/bin/sh",
-		Args:       []string{"-c", "set -m; sleep 30 & echo $! > " + strconv.Quote(pidFile) + "; wait"},
+		Executable: os.Args[0],
+		Args:       []string{"-test.run=^TestPOSIXProcessGroupFixture$"},
+		Env:        []string{posixGroupFixturePIDFile + "=" + pidFile},
 	})
 	if err != nil {
 		t.Fatal(err)
