@@ -55,32 +55,49 @@ func TestRuntimeCancelReplaysStoredExitAfterTerminal(t *testing.T) {
 }
 
 type waitingUploader struct {
-	started chan struct{}
+	started   chan struct{}
+	cancelled chan error
 }
 
 func (u waitingUploader) Upload(ctx context.Context, _ string, _ ResultContent) (ResultContent, error) {
 	close(u.started)
 	<-ctx.Done()
+	u.cancelled <- ctx.Err()
 	return ResultContent{}, ctx.Err()
 }
 
-// RUN-T-077 ensures result delivery passes the invocation deadline into resource upload.
+// RUN-T-077 ensures execution timeout remains active through result resource delivery.
 func TestRuntimeResourceUploadUsesInvocationDeadline(t *testing.T) {
-	uploader := waitingUploader{started: make(chan struct{})}
-	r := newEncodingRuntime(t, uploader)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	_, err := r.encodeResult(ctx, testInvocationID, CapabilityResult{CallID: testInvocationID, Contents: []ResultContent{{Type: "binary", Bytes: []byte("payload")}}}, 1024, false)
-	if err == nil || err.Error() != "resource upload failed" {
-		t.Fatalf("upload result error = %v, want resource upload failure after deadline", err)
-	}
+	c := newTestConnection()
+	queueHandshake(c)
+	invoke := invocationEnvelope()
+	invoke.GetInvoke().TimeoutMillis = int64Ptr(100)
+	c.in <- invoke
+	uploader := waitingUploader{started: make(chan struct{}), cancelled: make(chan error, 1)}
+	r := newInvocationRuntime(t, c, func(_ context.Context, call CapabilityCall, _ CapabilityContext) (CapabilityResult, error) {
+		return CapabilityResult{CallID: call.InvocationID, Contents: []ResultContent{{Type: "binary", Bytes: []byte("payload")}}}, nil
+	})
+	r.options.Resources = uploader
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	c.waitFor(t, func(frames []*protocol.Envelope) bool { return countFrames(frames, protocol.MessageType_FAILED) == 1 })
 	select {
 	case <-uploader.started:
 	default:
 		t.Fatal("resource upload did not start")
 	}
-	if err := ctx.Err(); err != context.DeadlineExceeded {
-		t.Fatalf("invocation context error = %v, want deadline exceeded", err)
+	select {
+	case err := <-uploader.cancelled:
+		if err != context.DeadlineExceeded {
+			t.Fatalf("uploader context error = %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("invocation deadline did not cancel resource upload")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
