@@ -245,7 +245,7 @@ func TestRuntimeIDECommandCancelsOnDisconnect(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, options)
 	active := r.connection
 	invocationID := "123e4567-e89b-42d3-a456-426614174000"
-	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_IDE_COMMAND, InvocationId: stringPtr(invocationID), Payload: &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{Action: protocol.IdeAction_LIST_VIEWS}}}); err != nil {
+	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_IDE_COMMAND, InvocationId: stringPtr(invocationID), Payload: &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{Action: protocol.IdeAction_CLOSE_VIEW, Discard: boolPtr(false)}}}); err != nil {
 		t.Fatal(err)
 	}
 	select {

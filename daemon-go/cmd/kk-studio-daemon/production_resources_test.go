@@ -22,7 +22,8 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	previous := config.DaemonConfig{BashExecutable: &executable, ProxyURL: &proxyA, LSP: []config.LSPServerConfig{server}}
 	candidate := cloneProductionConfig(previous)
 	facade := lsp.NewFacade(nil, lsp.PoolOptions{})
-	networks := newNetworkRuntimeStore(networkForTest(t, proxyA))
+	initialNetwork := networkForTest(t, proxyA)
+	networks := newNetworkRuntimeStore(initialNetwork)
 	defer func() {
 		if err := networks.close(); err != nil {
 			t.Errorf("close network store: %v", err)
@@ -37,6 +38,21 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	noChange := prepared.(*preparedEnvironment)
 	if noChange.network != nil || noChange.lsp != nil {
 		t.Fatalf("unchanged resource candidates = network %t, LSP %t", noChange.network != nil, noChange.lsp != nil)
+	}
+
+	bash, err := config.ResolveBash(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bashOnly := cloneProductionConfig(previous)
+	bashOnly.BashExecutable = &bash
+	prepared, err = prepare(context.Background(), bashOnly, &previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bashChange := prepared.(*preparedEnvironment)
+	if bashChange.network != nil || bashChange.lsp != nil {
+		t.Fatalf("bash-only candidates = network %t, LSP %t", bashChange.network != nil, bashChange.lsp != nil)
 	}
 
 	candidate.ProxyURL = &proxyB
@@ -67,6 +83,24 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	}
 	if err := lspChange.Retire(); err != nil {
 		t.Fatal(err)
+	}
+
+	failedCandidate := cloneProductionConfig(previous)
+	failedCandidate.ProxyURL = &proxyB
+	failedCandidate.LSP = []config.LSPServerConfig{
+		{ID: "text", Command: []string{executable}, Extensions: []string{".txt"}},
+		{ID: "text", Command: []string{executable}, Extensions: []string{".md"}},
+	}
+	if _, err := prepare(context.Background(), failedCandidate, &previous); err == nil {
+		t.Fatal("invalid LSP candidate was prepared")
+	}
+	current, release, err := networks.acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if current != initialNetwork {
+		t.Fatal("failed LSP preparation published the network candidate")
 	}
 }
 

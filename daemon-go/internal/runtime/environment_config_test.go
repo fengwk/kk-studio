@@ -35,14 +35,18 @@ func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.
 		initial.LSP = nil
 		initial.ProxyURL = nil
 		manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+		cachedResult, err := manager.Submit(context.Background(), initial.ConfigVersion, configurationOf(initial))
+		if err != nil || cachedResult.Kind != ConfigApplied {
+			t.Fatalf("startup cache snapshot = %+v, %v", cachedResult, err)
+		}
 		platformSnapshot := &protocol.DaemonConfiguration{
 			StudioUrl:      initial.StudioURL,
 			BashExecutable: cloneConfigString(initial.BashExecutableSetting),
 			Lsp:            &protocol.LspConfiguration{},
 		}
 		result, err := manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
-		if err != nil || result.Kind != ConfigApplied {
-			t.Fatalf("initial platform snapshot = %+v, %v", result, err)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("same-version platform snapshot = %+v, %v", result, err)
 		}
 		result, err = manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
 		if err != nil || result.Kind != ConfigConfirmed {
@@ -55,6 +59,10 @@ func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.
 		initial.LSP = []config.LSPServerConfig{{ID: "go", Command: append([]string(nil), initial.LSP[0].Command...), Extensions: []string{".go"}}}
 		initial.ProxyURL = nil
 		manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+		cachedResult, err := manager.Submit(context.Background(), initial.ConfigVersion, configurationOf(initial))
+		if err != nil || cachedResult.Kind != ConfigApplied {
+			t.Fatalf("startup cache snapshot = %+v, %v", cachedResult, err)
+		}
 		platformSnapshot := &protocol.DaemonConfiguration{
 			StudioUrl:      initial.StudioURL,
 			BashExecutable: cloneConfigString(initial.BashExecutableSetting),
@@ -63,12 +71,12 @@ func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.
 			}}},
 		}
 		result, err := manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
-		if err != nil || result.Kind != ConfigApplied {
-			t.Fatalf("initial platform snapshot with LSP entry = %+v, %v", result, err)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("same-version platform snapshot with LSP entry = %+v, %v", result, err)
 		}
 		result, err = manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
 		if err != nil || result.Kind != ConfigConfirmed {
-			t.Fatalf("same-version platform snapshot with LSP entry = %+v, %v", result, err)
+			t.Fatalf("repeated same-version platform snapshot with LSP entry = %+v, %v", result, err)
 		}
 	})
 }

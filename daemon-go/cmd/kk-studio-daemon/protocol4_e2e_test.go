@@ -97,6 +97,9 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	if err := os.WriteFile(file, []byte("needle original\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(directory, "workspace"), 0700); err != nil {
+		t.Fatal(err)
+	}
 
 	runtimeDone := make(chan error, 1)
 	go func() { runtimeDone <- (productionRuntime{}).Run(ctx, initial) }()
@@ -207,6 +210,29 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	ideResult, err := readControlEnvelopeResult(response.Body)
 	if err != nil || ideResult.MessageType != protocol.MessageType_IDE_RESULT || ideResult.GetInvocationId() != ideInvocation || !ideResult.GetIdeResult().GetOk() || ideResult.GetIdeResult().Revision == nil {
 		t.Fatalf("production IDE command result=%v err=%v", ideResult, err)
+	}
+	const directoryInvocation = "123e4567-e89b-42d3-a456-426614174008"
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_IDE_COMMAND, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(directoryInvocation),
+		Payload: &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{Action: protocol.IdeAction_LIST_DIRECTORIES, Directory: proto.String(directory)}},
+	})
+	directoryResult, err := readControlEnvelopeResult(response.Body)
+	if err != nil {
+		t.Fatalf("read production directory listing result: %v", err)
+	}
+	listing := directoryResult.GetIdeResult().GetDirectoryListing()
+	if directoryResult.MessageType != protocol.MessageType_IDE_RESULT || directoryResult.GetInvocationId() != directoryInvocation || !directoryResult.GetIdeResult().GetOk() || listing == nil || listing.GetPath() != directory {
+		t.Fatalf("production directory listing result=%v", directoryResult)
+	}
+	foundWorkspace := false
+	for _, child := range listing.GetChildren() {
+		if child.GetName() == "workspace" {
+			foundWorkspace = true
+			break
+		}
+	}
+	if !foundWorkspace {
+		t.Fatalf("production directory listing omitted workspace: %v", listing.GetChildren())
 	}
 
 	cases := []struct {
