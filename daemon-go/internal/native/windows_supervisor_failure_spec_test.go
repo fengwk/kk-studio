@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,10 +98,41 @@ func TestWindowsSupervisor_FailedStartCleanupPreservesUnprovenScope(t *testing.T
 	}
 }
 
-// NAT-T-231..232,237..238 verify unproven termination is cached and includes both convergence and close failures.
+type failingWindowsProcessTerminationAPI struct {
+	drainErr        error
+	closeErr        error
+	terminatedJobs  []windows.Handle
+	drainedJobs     []windows.Handle
+	closedResources []windows.Handle
+}
+
+func (*failingWindowsProcessTerminationAPI) TerminateProcess(windows.Handle, uint32) error {
+	return nil
+}
+func (*failingWindowsProcessTerminationAPI) WaitForSingleObject(windows.Handle, uint32) (uint32, error) {
+	return uint32(windows.WAIT_OBJECT_0), nil
+}
+func (api *failingWindowsProcessTerminationAPI) TerminateJobObject(job windows.Handle, _ uint32) error {
+	api.terminatedJobs = append(api.terminatedJobs, job)
+	return nil
+}
+func (api *failingWindowsProcessTerminationAPI) AwaitJobEmpty(_ context.Context, job windows.Handle, _ time.Duration) error {
+	api.drainedJobs = append(api.drainedJobs, job)
+	return api.drainErr
+}
+func (api *failingWindowsProcessTerminationAPI) CloseHandle(handle windows.Handle) error {
+	api.closedResources = append(api.closedResources, handle)
+	return api.closeErr
+}
+
+// NAT-T-231..232,237..238 verify unproven termination is cached and aggregates injected drain/close errors.
 func TestWindowsSupervisor_UnprovenTerminationPreservesScopeAndAggregatesCleanupFailure(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
-	process.job = windows.InvalidHandle
+	process.job = 42
+	drainError := errors.New("injected Job drain failure")
+	closeError := errors.New("injected Job close failure")
+	api := &failingWindowsProcessTerminationAPI{drainErr: drainError, closeErr: closeError}
+	process.terminationAPI = api
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
@@ -115,8 +147,11 @@ func TestWindowsSupervisor_UnprovenTerminationPreservesScopeAndAggregatesCleanup
 	if !errors.As(first, &notConverged) {
 		t.Fatalf("termination error = %v, want ProcessScopeNotConvergedError", first)
 	}
-	if !strings.Contains(notConverged.Cause.Error(), "could not be proven empty") || !strings.Contains(notConverged.Cause.Error(), "cannot close process scope job") {
-		t.Fatalf("termination cause did not aggregate drain and close errors: %v", notConverged.Cause)
+	if !errors.Is(first, drainError) || !errors.Is(first, closeError) || !strings.Contains(notConverged.Cause.Error(), "cannot close process scope job") {
+		t.Fatalf("termination cause did not aggregate injected drain and close errors: %v", notConverged.Cause)
+	}
+	if !reflect.DeepEqual(api.terminatedJobs, []windows.Handle{42}) || !reflect.DeepEqual(api.drainedJobs, []windows.Handle{42}) || !reflect.DeepEqual(api.closedResources, []windows.Handle{42}) {
+		t.Fatalf("termination API calls = terminate %v, drain %v, close %v", api.terminatedJobs, api.drainedJobs, api.closedResources)
 	}
 	if _, err := os.Stat(process.stateDir); err != nil {
 		t.Fatalf("state directory was removed despite unproven termination: %v", err)
@@ -134,6 +169,11 @@ func (survivingWindowsProcessAPI) TerminateProcess(windows.Handle, uint32) error
 func (survivingWindowsProcessAPI) WaitForSingleObject(windows.Handle, uint32) (uint32, error) {
 	return uint32(windows.WAIT_TIMEOUT), nil
 }
+func (survivingWindowsProcessAPI) TerminateJobObject(windows.Handle, uint32) error { return nil }
+func (survivingWindowsProcessAPI) AwaitJobEmpty(context.Context, windows.Handle, time.Duration) error {
+	return nil
+}
+func (survivingWindowsProcessAPI) CloseHandle(windows.Handle) error { return nil }
 
 // NAT-T-229 verifies descendant membership fails closed when a managed state has no open Job.
 func TestWindowsSupervisor_TrackDescendantWithoutJob(t *testing.T) {

@@ -45,8 +45,17 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 	return members, nil
 }
 
+type linuxProcessSnapshotAPI struct {
+	readDir  func(string) ([]os.DirEntry, error)
+	readFile func(string) ([]byte, error)
+}
+
 func linuxProcessMembers() ([]sessionMember, error) {
-	entries, err := os.ReadDir("/proc")
+	return linuxProcessMembersWithAPI("/proc", linuxProcessSnapshotAPI{readDir: os.ReadDir, readFile: os.ReadFile})
+}
+
+func linuxProcessMembersWithAPI(root string, api linuxProcessSnapshotAPI) ([]sessionMember, error) {
+	entries, err := api.readDir(root)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +65,7 @@ func linuxProcessMembers() ([]sessionMember, error) {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		data, err := api.readFile(filepath.Join(root, entry.Name(), "stat"))
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.ESRCH) {
 			continue
 		}
