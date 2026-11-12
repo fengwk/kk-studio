@@ -95,3 +95,40 @@ func TestDirectoryLockPreservesSingleCloseFailure(t *testing.T) {
 		t.Fatalf("unlock/close calls = %d/%d, want one each", handle.unlockCalls, handle.closeCalls)
 	}
 }
+
+func TestUnixLockHandleRejectsMissingPath(t *testing.T) {
+	if _, err := openPlatformLockHandle(filepath.Join(t.TempDir(), "missing.lock")); err == nil {
+		t.Fatal("missing lock file opened successfully")
+	}
+}
+
+func TestSessionMembersFiltersByCurrentSession(t *testing.T) {
+	all, err := allProcessMembers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var own sessionMember
+	for _, member := range all {
+		if member.PID == os.Getpid() {
+			own = member
+			break
+		}
+	}
+	if own.PID == 0 {
+		t.Fatal("current process was absent from process snapshot")
+	}
+	members, err := sessionMembers(own.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundSelf := false
+	for _, member := range members {
+		if member.Session != own.Session {
+			t.Fatalf("sessionMembers returned unrelated session member %+v", member)
+		}
+		foundSelf = foundSelf || member.PID == own.PID
+	}
+	if !foundSelf {
+		t.Fatalf("sessionMembers omitted current process %d", own.PID)
+	}
+}
