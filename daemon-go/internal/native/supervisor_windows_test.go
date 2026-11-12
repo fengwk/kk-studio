@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/goleak"
 	"golang.org/x/sys/windows"
 )
 
@@ -27,7 +28,7 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "__native-owner" {
 		os.Exit(windowsOwner(os.Args[2:]))
 	}
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 func windowsFixture(args []string) int {

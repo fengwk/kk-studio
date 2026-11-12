@@ -8,13 +8,15 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "__native-helper" {
 		os.Exit(HelperMain(os.Args[2:]))
 	}
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 // NAT-N-001, NAT-T-115, NAT-T-118
