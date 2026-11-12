@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -317,6 +319,9 @@ func TestTransport_HandshakeRejection(t *testing.T) {
 			}})
 			if err == nil {
 				t.Fatal("handshake rejection unexpectedly succeeded")
+			}
+			if tc.status == http.StatusUnauthorized && !errors.Is(err, runtimeapi.ErrRegistrationRejected) {
+				t.Fatalf("unauthorized handshake error = %v, want registration rejection", err)
 			}
 			result := <-called
 			if result.status != tc.status {

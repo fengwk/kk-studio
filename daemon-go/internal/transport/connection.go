@@ -82,6 +82,9 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 			if c.OnUpgradeFailed != nil {
 				c.OnUpgradeFailed(resp.StatusCode, upgrade)
 			}
+			if resp.StatusCode == http.StatusUnauthorized {
+				return nil, runtimeapi.ErrRegistrationRejected
+			}
 			return nil, fmt.Errorf("daemon websocket handshake failed with status %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("daemon websocket handshake failed: %w", err)
