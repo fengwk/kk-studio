@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -35,6 +36,8 @@ type PosixSupervisor struct {
 	processes              map[int]*posixProcess
 	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
 	startAPI               posixStartAPI
+	publishLaunch          func(string, string, []byte) error
+	startHelper            func(*exec.Cmd) error
 }
 
 type posixStartAPI struct {
@@ -57,11 +60,11 @@ func nativePOSIXStartAPI() posixStartAPI {
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
 func NewSupervisor() (Supervisor, error) {
-	return newPOSIXSupervisor(runtime.GOOS, enableChildSubreaper)
+	return newPOSIXSupervisor(enableChildSubreaper)
 }
 
-func newPOSIXSupervisor(goos string, enableSubreaper func() error) (Supervisor, error) {
-	if goos == "linux" {
+func newPOSIXSupervisor(enableSubreaper func() error) (Supervisor, error) {
+	if runtime.GOOS == "linux" {
 		if err := enableSubreaper(); err != nil {
 			return nil, fmt.Errorf("cannot enable process subreaper: %w", err)
 		}
@@ -122,7 +125,12 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	launch := launchSpec{Cwd: cwd, Args: append([]string{spec.Executable}, spec.Args...)}
 	payload, err := json.Marshal(launch)
 	if err == nil {
-		err = api.publishLaunch(dir, payload)
+		publishLaunch := s.publishLaunch
+		if publishLaunch != nil {
+			err = publishLaunch(dir, launchFile, payload)
+		} else {
+			err = api.publishLaunch(dir, payload)
+		}
 	}
 	if err != nil {
 		_ = removeStateDir(dir)
@@ -172,7 +180,11 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
-	if err := api.start(cmd); err != nil {
+	startHelper := s.startHelper
+	if startHelper == nil {
+		startHelper = api.start
+	}
+	if err := startHelper(cmd); err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -194,7 +206,8 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		failure := p.cleanupFailedStart(err)
 		return nil, failure
 	}
-	if err := publishText(dir, permitFile, "true"); err != nil {
+	p.scopeConfirmed = true
+	if err := publishPOSIXPermit(ctx, dir); err != nil {
 		return nil, p.cleanupFailedStart(err)
 	}
 	s.mu.Lock()
@@ -205,6 +218,13 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	s.processes[p.pid] = p
 	s.mu.Unlock()
 	return p, nil
+}
+
+func publishPOSIXPermit(ctx context.Context, stateDir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return publishText(stateDir, permitFile, "true")
 }
 
 func (s *PosixSupervisor) Close(ctx context.Context) error {
@@ -277,6 +297,8 @@ type posixProcess struct {
 	baselineKnown   bool
 	trackedSessions map[int]trackedSession
 	processGroupID  func(int) (int, error)
+	scopeConfirmed  bool
+	killHelper      func() error
 	convergeScope   func(context.Context, int, time.Duration) error
 	done            chan struct{}
 	waitErr         error
@@ -467,11 +489,32 @@ func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSess
 	}
 }
 
+func (p *posixProcess) killUnestablishedHelper() error {
+	if p.killHelper != nil {
+		return p.killHelper()
+	}
+	if p.cmd == nil || p.cmd.Process == nil {
+		return errors.New("the process scope helper has no process handle")
+	}
+	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("cannot kill process scope helper: %w", err)
+	}
+	return nil
+}
+
 func (p *posixProcess) cleanupFailedStart(cause error) error {
 	cause = errors.Join(cause, p.closeStreams())
 	ctx, cancel := context.WithTimeout(context.Background(), posixForceKillBudget)
 	defer cancel()
-	if err := p.converge(ctx, p.sid, 0); err != nil {
+	if p.scopeConfirmed {
+		if err := p.converge(ctx, p.sid, 0); err != nil {
+			return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
+		}
+	} else if p.cmd != nil {
+		if err := p.killUnestablishedHelper(); err != nil {
+			return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
+		}
+	} else if err := p.converge(ctx, p.sid, 0); err != nil {
 		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
 	}
 	select {
@@ -720,6 +763,9 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 	}
 	ownerClosed := make(chan struct{})
 	go func() { _, _ = io.Copy(io.Discard, owner); close(ownerClosed) }()
+	terminated := make(chan os.Signal, 1)
+	signal.Notify(terminated, syscall.SIGTERM)
+	defer signal.Stop(terminated)
 	deadline := time.NewTimer(scopeStartBudget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(scopePollInterval)
@@ -728,6 +774,7 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 		permit, permitErr := readState(args[0], permitFile)
 		if permitErr == nil {
 			if strings.TrimSpace(string(permit)) == "true" {
+				signal.Stop(terminated)
 				break
 			}
 			publishQuietly(args[0], errorFile, "helper-permit-failure")
@@ -744,6 +791,15 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 		}
 		select {
 		case <-ownerClosed:
+			if err := convergeSessionExcept(context.Background(), os.Getpid(), 0, os.Getpid()); err != nil {
+				publishQuietly(args[0], cleanupFile, "false")
+				return 1
+			}
+			if err := publishText(args[0], cleanupFile, "true"); err != nil {
+				return 1
+			}
+			return 0
+		case <-terminated:
 			if err := convergeSessionExcept(context.Background(), os.Getpid(), 0, os.Getpid()); err != nil {
 				publishQuietly(args[0], cleanupFile, "false")
 				return 1

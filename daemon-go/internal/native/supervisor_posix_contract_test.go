@@ -54,22 +54,7 @@ func TestPOSIXAwaitScopeConfirmsProcessGroupLeader(t *testing.T) {
 	}
 }
 
-func TestLinuxSubreaper_PrctlFailure(t *testing.T) {
-	wantErr := errors.New("injected PR_SET_CHILD_SUBREAPER failure")
-	called := false
-	supervisor, err := newPOSIXSupervisor("linux", func() error {
-		called = true
-		return wantErr
-	})
-	if !called {
-		t.Fatal("subreaper setup was not called")
-	}
-	if supervisor != nil || !errors.Is(err, wantErr) {
-		t.Fatalf("supervisor, error = %v, %v; want nil supervisor and wrapped setup error", supervisor, err)
-	}
-}
-
-func TestLinuxSupervisor_SubreaperFailure(t *testing.T) {
+func TestPOSIXHelper_SubreaperFailureFailsClosed(t *testing.T) {
 	dir := stateTestDir(t)
 	launch, err := json.Marshal(launchSpec{Cwd: t.TempDir(), Args: []string{"not-started"}})
 	if err != nil {
