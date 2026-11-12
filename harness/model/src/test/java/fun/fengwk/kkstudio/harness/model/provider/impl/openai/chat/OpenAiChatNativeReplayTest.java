@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -88,6 +90,78 @@ class OpenAiChatNativeReplayTest {
               @Override
               public void onError(ProviderException error) {}
             });
+  }
+
+  @Test
+  void blockNativeRefusalReplaysAsRefusalField() throws Exception {
+    ProviderBlockData refusalData =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity(modelDesc.modelId()),
+            null,
+            null,
+            null,
+            null,
+            null,
+            true,
+            MAPPER.createObjectNode());
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("I cannot help", refusalData)));
+
+    JsonNode message =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            new ProviderMessage(
+                                ProviderMessageRole.USER,
+                                List.of(new ProviderTextBlock("question"))),
+                            assistant),
+                        descriptor)
+                    .bodyUtf8Bytes())
+            .path("messages")
+            .get(2);
+
+    assertEquals("I cannot help", message.path("refusal").asString(""));
+    assertFalse(message.has("content"));
+  }
+
+  @Test
+  void crossModelBlockReplayDropsEmptyAndRedactedThinkingAndUsesPlainText() throws Exception {
+    ProviderBlockData sourceData =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("old-model"),
+            MAPPER.createObjectNode());
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("", sourceData),
+                new ProviderRedactedThinkingBlock("redacted", sourceData),
+                new ProviderThinkingBlock("readable thought", sourceData),
+                new ProviderTextBlock("answer", sourceData)));
+
+    JsonNode message =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            new ProviderMessage(
+                                ProviderMessageRole.USER,
+                                List.of(new ProviderTextBlock("question"))),
+                            assistant),
+                        descriptor)
+                    .bodyUtf8Bytes())
+            .path("messages")
+            .get(2);
+
+    assertEquals("readable thoughtanswer", message.path("content").asString(""));
+    assertFalse(message.path("content").asString("").contains("<thinking>"));
   }
 
   @Test
@@ -186,10 +260,7 @@ class OpenAiChatNativeReplayTest {
 
     // 次轮请求：原生字段与 known 字段一起原样回放到 wire
     ProviderMessage turn1Asst =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Hello world")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage turn2User =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Again")));
     JsonNode wireRoot =
@@ -562,8 +633,7 @@ class OpenAiChatNativeReplayTest {
                 List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
                 other,
                 reasoningPayload));
-    assertEquals(
-        "<thinking>\nhidden chain\n</thinking>\nHello", reasoningAsst.path("content").asString(""));
+    assertEquals("hidden chainHello", reasoningAsst.path("content").asString(""));
     assertFalse(reasoningAsst.has("reasoning_content"));
 
     // 4. refusal 属于 native 事实：affinity 失配时退回纯文本
@@ -694,7 +764,7 @@ class OpenAiChatNativeReplayTest {
             new ProviderReplayAffinity(
                 original.providerType(), "other-provider", original.modelId()))) {
       JsonNode asst = assistantNode(wire(user, durable, other, payload));
-      assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asString(""));
+      assertEquals("reasoningHello", asst.path("content").asString(""));
       assertFalse(asst.has("reasoning_content"));
     }
   }

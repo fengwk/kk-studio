@@ -691,7 +691,18 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
       for (String field : KNOWN_ASSISTANT_FIELDS) {
         messageFields.remove(field);
       }
+      messageFields.remove("role");
       messageFields.remove("annotations");
+      JsonNode audio = messageFields.get("audio");
+      if (audio != null) {
+        JsonNode audioId = audio.path("id");
+        messageFields.remove("audio");
+        if (audioId.isString() && !audioId.stringValue().isBlank()) {
+          ObjectNode replayAudio = NODES.objectNode();
+          replayAudio.set("id", audioId.deepCopy());
+          messageFields.set("audio", replayAudio);
+        }
+      }
       if (!messageFields.isEmpty()) {
         responseBlocks.add(
             new ProviderOpaqueBlock("openai_chat_message", blockData(messageFields, true)));
