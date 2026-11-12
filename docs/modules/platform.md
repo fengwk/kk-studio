@@ -535,7 +535,7 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 ## Resource URI 与 Session 持有
 
-全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析兼容未编码文本。URI 不含对象存储键、预签名地址或内部网络位置。
+全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析时也接受未编码的路径段。URI 不含对象存储键、预签名地址或内部网络位置。
 
 `session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：重复登记幂等；Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 
