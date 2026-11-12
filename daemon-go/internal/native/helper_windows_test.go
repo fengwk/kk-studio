@@ -14,17 +14,18 @@ import (
 )
 
 type fakeWindowsAttributes struct {
-	failAt  int
-	updates int
-	deleted bool
-	job     windows.Handle
-	handles []windows.Handle
+	failAt    int
+	updateErr error
+	updates   int
+	deleted   bool
+	job       windows.Handle
+	handles   []windows.Handle
 }
 
 func (a *fakeWindowsAttributes) Update(attribute uintptr, value unsafe.Pointer, size uintptr) error {
 	a.updates++
 	if a.failAt == a.updates {
-		return errors.New("attribute update failed")
+		return a.updateErr
 	}
 	switch attribute {
 	case procThreadAttributeJobList:
@@ -41,27 +42,29 @@ func (a *fakeWindowsAttributes) List() *windows.ProcThreadAttributeList {
 }
 
 type fakeWindowsCommandAPI struct {
-	stdout        windows.Handle
-	stderr        windows.Handle
-	getErrors     map[uint32]error
-	setError      error
-	attributeErr  error
-	attributeFail int
-	attributes    *fakeWindowsAttributes
-	createError   error
-	information   windows.ProcessInformation
-	app           string
-	commandLine   string
-	cwd           string
-	flags         uint32
-	inherit       bool
-	attributesSet bool
-	stdin         windows.Handle
-	stdoutUsed    windows.Handle
-	stderrUsed    windows.Handle
-	environment   []uint16
-	terminated    []windows.Handle
-	closed        []windows.Handle
+	stdout             windows.Handle
+	stderr             windows.Handle
+	getErrors          map[uint32]error
+	setError           error
+	attributeErr       error
+	attributeFail      int
+	attributeUpdateErr error
+	attributes         *fakeWindowsAttributes
+	createError        error
+	information        windows.ProcessInformation
+	app                string
+	commandLine        string
+	cwd                string
+	flags              uint32
+	inherit            bool
+	attributesSet      bool
+	inheritedHandles   []windows.Handle
+	stdin              windows.Handle
+	stdoutUsed         windows.Handle
+	stderrUsed         windows.Handle
+	environment        []uint16
+	terminated         []windows.Handle
+	closed             []windows.Handle
 }
 
 func (api *fakeWindowsCommandAPI) GetStdHandle(which uint32) (windows.Handle, error) {
@@ -74,7 +77,8 @@ func (api *fakeWindowsCommandAPI) GetStdHandle(which uint32) (windows.Handle, er
 	return api.stderr, nil
 }
 
-func (api *fakeWindowsCommandAPI) SetHandleInformation(windows.Handle, uint32, uint32) error {
+func (api *fakeWindowsCommandAPI) SetHandleInformation(handle windows.Handle, _, _ uint32) error {
+	api.inheritedHandles = append(api.inheritedHandles, handle)
 	return api.setError
 }
 
@@ -85,7 +89,7 @@ func (api *fakeWindowsCommandAPI) NewProcThreadAttributeList(count uint32) (wind
 	if api.attributeErr != nil {
 		return nil, api.attributeErr
 	}
-	api.attributes = &fakeWindowsAttributes{failAt: api.attributeFail}
+	api.attributes = &fakeWindowsAttributes{failAt: api.attributeFail, updateErr: api.attributeUpdateErr}
 	return api.attributes, nil
 }
 
@@ -146,6 +150,9 @@ func TestCreateSuspendedWindowsCommand_UsesJobAndHandleLists(t *testing.T) {
 	if len(api.environment) < 2 || api.environment[len(api.environment)-1] != 0 || api.environment[len(api.environment)-2] != 0 {
 		t.Fatalf("environment block is not double-NUL terminated: %#v", api.environment)
 	}
+	if !reflect.DeepEqual(api.inheritedHandles, []windows.Handle{19, 20, 21}) {
+		t.Fatalf("inheritable handles = %v, want [19 20 21]", api.inheritedHandles)
+	}
 	if api.attributes.job != 10 || !reflect.DeepEqual(api.attributes.handles, []windows.Handle{19, 20, 21}) || !api.attributes.deleted {
 		t.Fatalf("attributes: job=%d handles=%v deleted=%t", api.attributes.job, api.attributes.handles, api.attributes.deleted)
 	}
@@ -173,35 +180,62 @@ func TestWindowsEnvironmentBlock_FiltersAndSortsEntries(t *testing.T) {
 func TestCreateSuspendedWindowsCommand_CleansUpOnAPIAndResultFailures(t *testing.T) {
 	apiError := errors.New("Win32 API failed")
 	tests := []struct {
-		name  string
-		setup func(*fakeWindowsCommandAPI) *launchSpec
+		name          string
+		wantAPIError  bool
+		overrideStdin bool
+		stdin         windows.Handle
+		setup         func(*fakeWindowsCommandAPI) *launchSpec
 	}{
-		{name: "stdout", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "stdout", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.getErrors[windows.STD_OUTPUT_HANDLE] = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "stderr", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "stderr", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.getErrors[windows.STD_ERROR_HANDLE] = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "handle inheritance", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "handle inheritance", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.setError = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "attribute creation", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "attribute creation", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.attributeErr = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "first attribute", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "first attribute", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.attributeFail = 1
+			api.attributeUpdateErr = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "second attribute", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "second attribute", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.attributeFail = 2
+			api.attributeUpdateErr = apiError
 			return &launchSpec{Args: []string{"x"}}
 		}},
-		{name: "CreateProcess", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+		{name: "CreateProcess", wantAPIError: true, setup: func(api *fakeWindowsCommandAPI) *launchSpec {
 			api.createError = apiError
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "zero stdout handle", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+			api.stdout = 0
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "invalid stdout handle", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+			api.stdout = windows.InvalidHandle
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "zero stderr handle", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+			api.stderr = 0
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "invalid stderr handle", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
+			api.stderr = windows.InvalidHandle
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "zero stdin handle", overrideStdin: true, stdin: 0, setup: func(*fakeWindowsCommandAPI) *launchSpec {
+			return &launchSpec{Args: []string{"x"}}
+		}},
+		{name: "invalid stdin handle", overrideStdin: true, stdin: windows.InvalidHandle, setup: func(*fakeWindowsCommandAPI) *launchSpec {
 			return &launchSpec{Args: []string{"x"}}
 		}},
 		{name: "missing process handle", setup: func(api *fakeWindowsCommandAPI) *launchSpec {
@@ -224,12 +258,16 @@ func TestCreateSuspendedWindowsCommand_CleansUpOnAPIAndResultFailures(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			api := &fakeWindowsCommandAPI{stdout: 20, stderr: 21, getErrors: make(map[uint32]error)}
 			launch := test.setup(api)
-			_, err := createSuspendedWindowsCommandWithAPI(api, 10, launch, 19)
+			stdin := windows.Handle(19)
+			if test.overrideStdin {
+				stdin = test.stdin
+			}
+			_, err := createSuspendedWindowsCommandWithAPI(api, 10, launch, stdin)
 			if err == nil {
 				t.Fatal("expected an error")
 			}
-			if test.name == "CreateProcess" && !errors.Is(err, apiError) {
-				t.Fatalf("CreateProcess error = %v, want wrapped %v", err, apiError)
+			if test.wantAPIError && !errors.Is(err, apiError) {
+				t.Fatalf("API error = %v, want wrapped %v", err, apiError)
 			}
 			if api.attributes != nil && !api.attributes.deleted {
 				t.Fatal("attribute list was not deleted after failure")

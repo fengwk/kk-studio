@@ -266,6 +266,25 @@ func TestPOSIXExitFallback_PreservesExitEvidence(t *testing.T) {
 	}
 }
 
+func TestPOSIXSupervisor_RejectsInvalidStartSpec(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+
+	for _, spec := range []ProcessSpec{
+		{},
+		{Executable: "cmd\x00bad"},
+		{Executable: "cmd", Directory: "dir\x00bad"},
+		{Executable: "cmd", Args: []string{"arg\x00bad"}},
+	} {
+		if _, err := supervisor.Start(context.Background(), spec); err == nil {
+			t.Fatalf("invalid process spec was accepted: %+v", spec)
+		}
+	}
+}
+
 // NAT-T-132
 func TestPOSIXSupervisor_ExecFailureHasUnknownExit(t *testing.T) {
 	supervisor, err := NewSupervisor()
