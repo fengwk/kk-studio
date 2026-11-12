@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Current system-prompt sections and tools reduced from SYSTEM entries on an Entry path. */
 public record SystemContext(Map<String, String> sections, List<ToolBinding> tools) {
@@ -56,13 +57,15 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
     return String.join("\n\n", sections.values());
   }
 
-  /** Produce one delta containing only changed sections and tool definitions. */
-  public SystemPayload changeTo(SystemContext next) {
+  /** Produce a delta containing only changed sections and tool definitions when context differs. */
+  public Optional<SystemPayload> changesTo(SystemContext next) {
     Objects.requireNonNull(next, "next");
     Map<String, String> changed = new LinkedHashMap<>();
+    boolean sectionOrderChanged =
+        !new ArrayList<>(sections.keySet()).equals(new ArrayList<>(next.sections.keySet()));
     next.sections.forEach(
         (name, text) -> {
-          if (!Objects.equals(sections.get(name), text)) {
+          if (sectionOrderChanged || !Objects.equals(sections.get(name), text)) {
             changed.put(name, text);
           }
         });
@@ -86,7 +89,10 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
             removed.add(binding.descriptor().name());
           }
         });
-    return new SystemPayload(changed, removedSections, added, removed, false);
+    if (changed.isEmpty() && removedSections.isEmpty() && added.isEmpty() && removed.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(new SystemPayload(changed, removedSections, added, removed, false));
   }
 
   private static Map<String, ToolBinding> byName(List<ToolBinding> bindings) {
