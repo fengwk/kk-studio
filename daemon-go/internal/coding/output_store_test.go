@@ -247,6 +247,54 @@ func TestOpenOutputStoreRejectsNonDirectoryRoot(t *testing.T) {
 	}
 }
 
+// COD-F-015
+func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
+	if _, err := NewOutputSpool(nil, "invalid", 1); err == nil {
+		t.Fatal("nil output store accepted")
+	}
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewOutputSpool(store, "invalid", 0); err == nil {
+		t.Fatal("nonpositive capture budget accepted")
+	}
+	rootFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(rootFile, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store.root = rootFile
+	spool, err := NewOutputSpool(store, "failed-call", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
+	result := spool.Finish(false, "")
+	if result.Error || !strings.Contains(result.Contents[0].Text, "could not be saved to local storage") {
+		t.Fatalf("storage failure result=%#v", result)
+	}
+	if details := string(result.Details); !strings.Contains(details, `"captureFailed":true`) {
+		t.Fatalf("capture details=%s", details)
+	}
+}
+
+// COD-F-015
+func TestOutputStoreRejectsInvalidPublishPathAndSanitizesName(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Publish(filepath.Join(store.Root(), "not-staging")); err == nil {
+		t.Fatal("non-staging path published")
+	}
+	if got := sanitizeOutputName("!!!"); got != "___" {
+		t.Fatalf("sanitized name=%q", got)
+	}
+	if got := sanitizeOutputName("\\u2603"); got != "_u2603" {
+		t.Fatalf("unicode name=%q", got)
+	}
+}
+
 // COD-T-013
 func TestWriteAllHandlesShortWritesAndNoProgress(t *testing.T) {
 	writer := &shortWriter{max: 2}

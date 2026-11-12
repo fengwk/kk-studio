@@ -154,8 +154,10 @@ func scanASCIIInsensitive(data, needle []byte, emit func(int)) {
 		folded[i] = asciiFold(b)
 	}
 	var fixed [256]byte
-	foldNeedle := fixed[:len(needle)]
-	if len(needle) > len(fixed) {
+	var foldNeedle []byte
+	if len(needle) <= len(fixed) {
+		foldNeedle = fixed[:len(needle)]
+	} else {
 		foldNeedle = make([]byte, len(needle))
 	}
 	for i, b := range needle {
