@@ -197,6 +197,7 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			if errors.Is(readErr, context.Canceled) {
 				return outcome, readErr
 			}
+			outcome.Skipped = append(outcome.Skipped, display)
 			continue
 		}
 		if directFile && binary(data) {

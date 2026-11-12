@@ -162,7 +162,7 @@ func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 		return args, rejectInput("path must be a non-empty string")
 	}
 	if !filepath.IsAbs(args.Path) {
-		return args, rejectInput("path must be absolute")
+		return args, rejectInput("path must be an absolute path")
 	}
 	return args, nil
 }
@@ -447,12 +447,19 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
+	info, err := os.Stat(args.Path)
+	if err != nil {
+		return errorResult(call.InvocationID, err), nil
+	}
+	if !info.IsDir() {
+		return errorResult(call.InvocationID, rejectInput("path must be a directory")), nil
+	}
 	outcome, err := search.FindContext(ctx, args.Path, args.Pattern, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
-			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+			result.Contents = []runtime.ResultContent{{Type: "text", Text: "[Search cancelled; results are incomplete.]"}}
 		}
 		return result, nil
 	}
@@ -479,12 +486,18 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
+	if strings.ContainsRune(args.Pattern, '\u0000') {
+		return errorResult(call.InvocationID, rejectInput("pattern must not contain NUL")), nil
+	}
+	if strings.ContainsRune(args.Glob, '\u0000') {
+		return errorResult(call.InvocationID, rejectInput("glob must not contain NUL")), nil
+	}
 	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
-			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+			result.Contents = []runtime.ResultContent{{Type: "text", Text: "[Search cancelled; results are incomplete.]"}}
 		}
 		return result, nil
 	}

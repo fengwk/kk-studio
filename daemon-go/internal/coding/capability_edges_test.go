@@ -22,7 +22,7 @@ func TestReadRejectsInvalidWindowsBeforeOpeningFiles(t *testing.T) {
 		want string
 	}{
 		{name: "missing-path", args: map[string]any{}, want: "path must be a non-empty string"},
-		{name: "relative-path", args: map[string]any{"path": "relative"}, want: "path must be absolute"},
+		{name: "relative-path", args: map[string]any{"path": "relative"}, want: "absolute path"},
 		{name: "zero-limit", args: map[string]any{"path": filepath.Join(t.TempDir(), "missing"), "limit": 0}, want: "limit must be a positive integer"},
 		{name: "bad-column", args: map[string]any{"path": filepath.Join(t.TempDir(), "missing"), "column_offset": 0}, want: "column_offset must be a positive integer"},
 	} {

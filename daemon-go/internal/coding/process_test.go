@@ -63,8 +63,24 @@ type shellManagedProcess struct {
 	command        *exec.Cmd
 	stdin          io.WriteCloser
 	stdout, stderr io.ReadCloser
+	streamsDone    chan struct{}
+	remainingReads int
 	mu             sync.Mutex
 	waited         bool
+}
+
+type shellPipeReader struct {
+	io.ReadCloser
+	onEOF func()
+	once  sync.Once
+}
+
+func (r *shellPipeReader) Read(data []byte) (int, error) {
+	n, err := r.ReadCloser.Read(data)
+	if errors.Is(err, io.EOF) {
+		r.once.Do(r.onEOF)
+	}
+	return n, err
 }
 
 func (s shellSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
@@ -91,15 +107,28 @@ func (s shellSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 	if err := command.Start(); err != nil {
 		return nil, err
 	}
-	return &shellManagedProcess{command: command, stdin: stdin, stdout: stdout, stderr: stderr}, nil
+	return &shellManagedProcess{command: command, stdin: stdin, stdout: stdout, stderr: stderr, streamsDone: make(chan struct{}), remainingReads: 2}, nil
 }
 func (shellSupervisor) Close(context.Context) error { return nil }
 
 func (p *shellManagedProcess) PID() int              { return p.command.Process.Pid }
 func (p *shellManagedProcess) Stdin() io.WriteCloser { return p.stdin }
-func (p *shellManagedProcess) Stdout() io.ReadCloser { return p.stdout }
-func (p *shellManagedProcess) Stderr() io.ReadCloser { return p.stderr }
+func (p *shellManagedProcess) Stdout() io.ReadCloser {
+	return &shellPipeReader{ReadCloser: p.stdout, onEOF: p.streamReadDone}
+}
+func (p *shellManagedProcess) Stderr() io.ReadCloser {
+	return &shellPipeReader{ReadCloser: p.stderr, onEOF: p.streamReadDone}
+}
+func (p *shellManagedProcess) streamReadDone() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.remainingReads--
+	if p.remainingReads == 0 {
+		close(p.streamsDone)
+	}
+}
 func (p *shellManagedProcess) Wait(context.Context) (native.ProcessExit, error) {
+	<-p.streamsDone
 	err := p.command.Wait()
 	p.mu.Lock()
 	p.waited = true
