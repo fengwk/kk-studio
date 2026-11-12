@@ -66,10 +66,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 生产链路验收：真实 Server ↔ 生产 Node 24 Daemon ↔ 已构建的受管 code-server。
+ * 生产链路验收：真实 Server ↔ 生产 Go Daemon ↔ 已构建的受管 code-server。
  *
- * <p>本类自身不注入任何 mock 桩：Studio 是真实 Spring Boot 上下文（临时 PostgreSQL），Daemon 是生产构建的 {@code
- * daemon/dist/main.js} 子进程，code-server 是只读工作区里已构建的真实发行产物。
+ * <p>本类自身不注入任何 mock 桩：Studio 是真实 Spring Boot 上下文（临时 PostgreSQL），Daemon 是本测试构建的 Go 二进制子进程，
+ * code-server 是只读工作区里已构建的真实发行产物。
  *
  * <p><b>覆盖范围：</b>
  *
@@ -928,8 +928,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             configVersion,
             daemonConfig.toString(),
             registrationToken,
-            recordsDir(),
-            nodeBinary());
+            recordsDir());
     awaitReady(environmentId);
     return environmentId;
   }
@@ -1471,7 +1470,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private static Path repoRoot() {
     Path current = Path.of("").toAbsolutePath().normalize();
     while (current != null) {
-      if (Files.isRegularFile(current.resolve("daemon").resolve("package.json"))) {
+      if (Files.isDirectory(current.resolve("daemon-go"))
+          && Files.isDirectory(current.resolve("web"))) {
         return current;
       }
       current = current.getParent();
