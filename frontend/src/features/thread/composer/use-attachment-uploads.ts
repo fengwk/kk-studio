@@ -15,6 +15,9 @@ import {
   removeStoredUnknownUpload,
 } from '@/features/thread/composer/composer-draft'
 import { createWorkerHasher, mediaKindOf, validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
+import { request } from '@/shared/api/client'
+import { scaleImageFile } from '@/features/thread/composer/image-scaler'
+import { isImageTier } from '@/features/thread/runtime/agent-pane/pane-target'
 
 export type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown'
 
@@ -58,8 +61,15 @@ export interface AttachmentUpload {
   previewUrl: string | null
   /** 提交后等待发送结果期间隐藏（发送失败恢复时重新挂载）。 */
   detached: boolean
-  /** 图片输入档位（仅图片有效；默认 720P，可选 1080P/ORIGINAL；其它媒体为 undefined）。 */
+  /** 图片输入档位（仅图片有效；读取系统默认设置；其它媒体为 undefined）。 */
   imageTier?: ImageInputTier
+  format?: string
+  originalWidth?: number
+  originalHeight?: number
+  storedWidth?: number
+  storedHeight?: number
+  /** 原始文件仅在当前 composer 生命周期内可用时才能支持重新缩放。 */
+  sourceFileAvailable?: boolean
 }
 
 const defaultHashFile: HashFile = createWorkerHasher()
@@ -108,6 +118,7 @@ export function useAttachmentUploads(options?: {
   const uploadsRef = useRef<AttachmentUpload[]>(uploads)
   const filesRef = useRef(new Map<string, File>())
   const previewUrlsRef = useRef(new Map<string, string>())
+  const defaultImageTierRef = useRef<Promise<ImageInputTier> | null>(null)
   const activeRef = useRef(new Set<string>())
   const abortControllersRef = useRef(new Map<string, AbortController>())
   const isMountedRef = useRef(true)
@@ -251,22 +262,73 @@ export function useAttachmentUploads(options?: {
         isMountedRef.current
         && generationRef.current === capturedGeneration
         && activeRef.current.has(localId)
+        && abortControllersRef.current.get(localId) === controller
         && scopeRef.current === capturedScope
       )
       const controller = abortControllersRef.current.get(localId)
       let reservedUploadId: string | null = null
       try {
         patchUpload(localId, { status: 'uploading', progress: 0.1 })
-        const sha256 = record.sha256 ?? (await hashFile(file, controller?.signal))
+        let uploadFile = file
+        let uploadRecord = record
+        if (mediaKindOf(record.mediaType) === 'image') {
+          let imageTier = record.imageTier
+          if (!imageTier) {
+            if (!defaultImageTierRef.current) {
+              const pendingTier = request('GET /api/platform/settings', {}).then((settings) => {
+                if (!isImageTier(settings.storageMedia.imageTier)) {
+                  throw new Error(`Unsupported default image tier: ${settings.storageMedia.imageTier}`)
+                }
+                return settings.storageMedia.imageTier
+              })
+              defaultImageTierRef.current = pendingTier
+              void pendingTier.catch(() => {
+                if (defaultImageTierRef.current === pendingTier) {
+                  defaultImageTierRef.current = null
+                }
+              })
+            }
+            imageTier = await defaultImageTierRef.current
+          }
+          const scaled = await scaleImageFile(file, imageTier)
+          if (!active()) {
+            return
+          }
+          uploadFile = scaled.file
+          uploadRecord = {
+            ...record,
+            mediaType: scaled.file.type,
+            sizeBytes: scaled.file.size,
+            imageTier,
+            format: scaled.format,
+            originalWidth: scaled.originalWidth,
+            originalHeight: scaled.originalHeight,
+            storedWidth: scaled.storedWidth,
+            storedHeight: scaled.storedHeight,
+            sourceFileAvailable: true,
+          }
+          revokePreviewUrl(localId, previewUrlsRef.current)
+          const previewUrl = createPreviewUrl(uploadFile)
+          if (previewUrl) {
+            previewUrlsRef.current.set(localId, previewUrl)
+          }
+          patchUpload(localId, { ...uploadRecord, previewUrl, progress: 0.1 })
+        }
+        const sha256 = uploadRecord.sha256 ?? (await hashFile(uploadFile, controller?.signal))
         if (!active()) {
           return
         }
         patchUpload(localId, { sha256, progress: 0.25 })
         const reservation = await service.reserveUpload({
-          filename: record.filename,
-          mediaType: record.mediaType,
-          sizeBytes: String(record.sizeBytes),
+          filename: uploadRecord.filename,
+          mediaType: uploadRecord.mediaType,
+          sizeBytes: String(uploadRecord.sizeBytes),
           sha256,
+          format: uploadRecord.format ?? null,
+          originalWidth: uploadRecord.originalWidth ?? null,
+          originalHeight: uploadRecord.originalHeight ?? null,
+          storedWidth: uploadRecord.storedWidth ?? null,
+          storedHeight: uploadRecord.storedHeight ?? null,
         })
         reservedUploadId = reservation.id
         if (!active()) {
@@ -276,7 +338,7 @@ export function useAttachmentUploads(options?: {
         patchUpload(localId, { uploadId: reservation.id, progress: 0.4 })
         if (reservation.type === 'PENDING') {
           // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
-          await service.uploadFile(reservation.presignedPut, file, controller?.signal)
+          await service.uploadFile(reservation.presignedPut, uploadFile, controller?.signal)
           if (!active()) {
             void service.deleteUpload(reservation.id).catch(() => undefined)
             return
@@ -291,11 +353,11 @@ export function useAttachmentUploads(options?: {
           persistPendingUnknownUpload(capturedScope, {
             localId,
             uploadId: reservation.id,
-            filename: record.filename,
-            mediaType: record.mediaType,
-            sizeBytes: record.sizeBytes,
-            sha256: sha256 ?? record.sha256,
-            imageTier: record.imageTier,
+            filename: uploadRecord.filename,
+            mediaType: uploadRecord.mediaType,
+            sizeBytes: uploadRecord.sizeBytes,
+            sha256,
+            imageTier: uploadRecord.imageTier,
           })
         }
 
@@ -321,7 +383,7 @@ export function useAttachmentUploads(options?: {
             return
           }
           // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
-          if (capturedScope) {
+          if (capturedScope && active()) {
             removeStoredUnknownUpload(capturedScope, localId)
           }
           throw completeError
@@ -348,7 +410,7 @@ export function useAttachmentUploads(options?: {
         if (reservedUploadId && active()) {
           void service.deleteUpload(reservedUploadId).catch(() => undefined)
         }
-        if (capturedScope) {
+        if (capturedScope && active()) {
           removeStoredUnknownUpload(capturedScope, localId)
         }
         if (!active()) {
@@ -454,12 +516,10 @@ export function useAttachmentUploads(options?: {
           })
           continue
         }
-        const previewUrl = createPreviewUrl(file)
+        const previewUrl = mediaKindOf(file.type) === 'video' ? createPreviewUrl(file) : null
         if (previewUrl) {
           previewUrlsRef.current.set(localId, previewUrl)
         }
-        const isImage = mediaKindOf(file.type) === 'image'
-        const imageTier: ImageInputTier | undefined = isImage ? '720P' : undefined
         const record: AttachmentUpload = {
           localId,
           uploadId: null,
@@ -471,7 +531,7 @@ export function useAttachmentUploads(options?: {
           progress: 0,
           previewUrl,
           detached: false,
-          ...(imageTier ? { imageTier } : {}),
+          sourceFileAvailable: mediaKindOf(file.type) === 'image',
         }
         created.push(record)
         fresh.push(record)
@@ -506,12 +566,48 @@ export function useAttachmentUploads(options?: {
     [updateUploads],
   )
 
-  /** 更新指定条目的图片输入档位。 */
+  /** 更新档位时总是从保留的源文件重新缩放并上传，旧句柄走既有 discard 路径。 */
   const updateImageTier = useCallback(
     (localId: string, imageTier: ImageInputTier) => {
-      patchUpload(localId, { imageTier })
+      const record = uploadsRef.current.find((upload) => upload.localId === localId)
+      const source = filesRef.current.get(localId)
+      if (!record || record.imageTier === imageTier) {
+        return
+      }
+      if (!source) {
+        return
+      }
+      activeRef.current.add(localId)
+      abortControllersRef.current.get(localId)?.abort()
+      const controller = new AbortController()
+      abortControllersRef.current.set(localId, controller)
+      if (record.uploadId && !record.detached) {
+        void service.deleteUpload(record.uploadId).catch(() => undefined)
+      }
+      if (scopeRef.current) {
+        removeStoredUnknownUpload(scopeRef.current, localId)
+      }
+      revokePreviewUrl(localId, previewUrlsRef.current)
+      const next: AttachmentUpload = {
+        ...record,
+        uploadId: null,
+        mediaType: source.type,
+        sizeBytes: source.size,
+        sha256: null,
+        status: 'uploading',
+        progress: 0,
+        previewUrl: null,
+        imageTier,
+        format: undefined,
+        originalWidth: undefined,
+        originalHeight: undefined,
+        storedWidth: undefined,
+        storedHeight: undefined,
+      }
+      patchUpload(localId, next)
+      void runPipeline(next, source)
     },
-    [patchUpload],
+    [patchUpload, runPipeline, service],
   )
 
   return {

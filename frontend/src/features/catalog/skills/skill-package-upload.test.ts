@@ -152,12 +152,22 @@ describe('skill package upload', () => {
       type: 'PENDING',
       presignedPut: presigned,
       expiresAt: 1786320000000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-1',
       type: 'READY',
       blobId: 'blob-1',
       expiresAt: 1786320000000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
 
     const promise = uploadSkillArchive({
@@ -184,12 +194,22 @@ describe('skill package upload', () => {
       type: 'READY',
       blobId: 'blob-2',
       expiresAt: 1786320000000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-2',
       type: 'READY',
       blobId: 'blob-2',
       expiresAt: 1786320000000,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     })
     const progress: UploadProgress[] = []
 
