@@ -98,7 +98,7 @@ func TestWindowsSupervisor_WaitFailsClosedWithoutCleanupEvidence(t *testing.T) {
 		close(process.done)
 		_, err := process.Wait(context.Background())
 		var notConverged *ProcessScopeNotConvergedError
-		if !errors.As(err, &notConverged) || !strings.Contains(notConverged.Error(), "could not be proven empty") {
+		if !errors.As(err, &notConverged) || notConverged.Cause == nil || !strings.Contains(notConverged.Cause.Error(), "did not prove cleanup") {
 			t.Fatalf("Wait error = %v, want unproven cleanup", err)
 		}
 	})
@@ -110,7 +110,7 @@ func TestWindowsSupervisor_WaitFailsClosedWithoutCleanupEvidence(t *testing.T) {
 		close(process.done)
 		_, err := process.Wait(context.Background())
 		var notConverged *ProcessScopeNotConvergedError
-		if !errors.As(err, &notConverged) || !strings.Contains(notConverged.Error(), "job handle is missing") {
+		if !errors.As(err, &notConverged) || notConverged.Cause == nil || !strings.Contains(notConverged.Cause.Error(), "job handle is missing") {
 			t.Fatalf("Wait error = %v, want missing Job handle", err)
 		}
 	})
@@ -125,7 +125,8 @@ func TestWindowsSupervisor_WaitFailsClosedWithoutCleanupEvidence(t *testing.T) {
 		}
 		close(process.done)
 		_, err := process.Wait(context.Background())
-		if err == nil || !strings.Contains(err.Error(), "job handle is missing") {
+		var notConverged *ProcessScopeNotConvergedError
+		if !errors.As(err, &notConverged) || notConverged.Cause == nil || !strings.Contains(notConverged.Cause.Error(), "job handle is missing") {
 			t.Fatalf("Wait error = %v, want missing Job handle before helper cleanup", err)
 		}
 	})
