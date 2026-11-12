@@ -11,6 +11,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
@@ -60,6 +62,36 @@ class PlatformResourceReadGatewayTest {
   }
 
   @Test
+  void returnsExplicitErrorForFileUriWithoutExecutionContext() {
+    PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
+    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+
+    ToolResult result =
+        gateway.read(
+            request("resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", null), ignored -> {});
+
+    assertTrue(result.error());
+    assertEquals(
+        "resource URI requires a tool execution context",
+        ((TextResultContent) result.contents().getFirst()).text());
+    verify(reader, never())
+        .readResource(any(), any(), any(), any(), any(), any(), any(), any(ReadDeadline.class));
+  }
+
+  @Test
+  void rejectsMalformedResourceUriWithoutCallingReader() {
+    PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
+    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+
+    ToolResult result =
+        gateway.read(request("resource://other/id", context(ROOT_SESSION_ID)), ignored -> {});
+
+    assertTrue(result.error());
+    verify(reader, never())
+        .readResource(any(), any(), any(), any(), any(), any(), any(), any(ReadDeadline.class));
+  }
+
+  @Test
   void routesFileResourcesThroughTheRootSessionAndReturnsText() {
     PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
     when(reader.readResource(
@@ -91,6 +123,37 @@ class PlatformResourceReadGatewayTest {
             eq(null),
             eq("resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
             any(ReadDeadline.class));
+  }
+
+  @Test
+  void returnsMediaResultContentFromTheReader() {
+    PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
+    ResourceRef resource =
+        new ResourceRef(
+            "resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "image/png",
+            "image.png",
+            1L,
+            "a".repeat(64));
+    when(reader.readResource(
+            eq(ROOT_SESSION_ID),
+            eq(TurnMediaCapabilities.NONE),
+            eq(RESOURCE_ID),
+            any(),
+            any(),
+            any(),
+            eq("resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+            any(ReadDeadline.class)))
+        .thenReturn(new PlatformResourceContentReader.ResourceRead.Media(resource, null));
+    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+
+    ToolResult result =
+        gateway.read(
+            request(
+                "resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", context(ROOT_SESSION_ID)),
+            ignored -> {});
+
+    assertEquals(resource, ((ResourceResultContent) result.contents().getFirst()).resource());
   }
 
   private static ToolExecutionRequest request(String path, ToolExecutionContext context) {

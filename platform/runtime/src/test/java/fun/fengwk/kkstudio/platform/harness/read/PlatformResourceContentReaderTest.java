@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
@@ -140,6 +141,36 @@ class PlatformResourceContentReaderTest {
         assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("binary"));
+  }
+
+  /** 测试意图：缺少 MIME 元数据时按普通文本读取，避免空类型触发媒体送达路径。 */
+  @Test
+  void readsBlobWithMissingMediaTypeAsText() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = activeBlob(blobId);
+    blob.setMediaType(null);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    when(blobs.withBlobStream(eq(blobId), any(), any())).thenReturn("1|blob-content");
+
+    assertTrue(read(sessionId, blobId).contains("1|blob-content"));
+  }
+
+  /** 测试意图：底层 Blob 缺失转换为资源 404，其它领域错误原样传播。 */
+  @Test
+  void mapsMissingBlobAndPreservesOtherDomainErrors() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(DomainException.notFound("blob"));
+    assertTrue(
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
+            .getMessage()
+            .contains("resource not found"));
+
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(DomainException.notFound("other"));
+    assertThrows(DomainException.class, () -> read(sessionId, blobId));
   }
 
   /** 测试意图：只在保留 Blob 流的生命周期内执行文本窗口投影。 */
