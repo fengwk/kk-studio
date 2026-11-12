@@ -44,15 +44,18 @@ env:
   RELEASE_PLATFORMS: linux-amd64 linux-arm64 macos-amd64 macos-arm64 windows-amd64
 
 jobs:
-  # Release 与镜像共享 Go daemon CI 的质量门禁和原生平台矩阵。
+  # Formal tag releases and Docker builds share the Go daemon CI gates. Manual dispatch remains
+  # a focused archive candidate: its script tests, staging and host smoke run without publishing.
   daemon_ci:
     name: Go daemon CI
+    if: github.event_name == 'push'
     uses: ./.github/workflows/daemon-go-ci.yml
 
   stage:
     name: build and stage daemon release
     needs:
       - daemon_ci
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.daemon_ci.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。

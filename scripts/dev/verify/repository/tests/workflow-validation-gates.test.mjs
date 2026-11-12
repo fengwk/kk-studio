@@ -25,6 +25,8 @@ test('release and Docker gates reuse Go daemon CI', () => {
 
 test('manual release dispatch stages and smokes but does not publish', () => {
   assert.match(release, /workflow_dispatch:/)
+  assert.match(release, /daemon_ci:\n    name: Go daemon CI\n    if: github\.event_name == 'push'/)
+  assert.match(release, /stage:\n    name: build and stage daemon release\n    needs:\n      - daemon_ci\n    if: \$\{\{ always\(\) && \(github\.event_name == 'workflow_dispatch' \|\| needs\.daemon_ci\.result == 'success'\) \}\}/)
   assert.match(release, /daemon-go\/release/)
   assert.match(release, /if: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/)
   assert.match(release, /smoke_archives:/)
