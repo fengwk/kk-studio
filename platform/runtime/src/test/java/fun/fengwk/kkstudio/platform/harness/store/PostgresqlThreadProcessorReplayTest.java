@@ -13,13 +13,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
-
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
@@ -30,10 +37,14 @@ import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -49,12 +60,91 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** 在真实 PostgreSQL 事务中验证带 replay state 的模型结果与兄弟 Tool batch 的完整交接。 */
+/** 在真实 PostgreSQL 事务中验证模型结果与兄弟 Tool batch 的完整交接。 */
 class PostgresqlThreadProcessorReplayTest {
+
+  @Test
+  void orderedAssistantBlocksRoundTripUnchangedThroughPostgresql() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    StoreTestSupport.TurnBaseline baseline = StoreTestSupport.seedTurnBaseline(store);
+    ProviderReplayAffinity affinity =
+        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "test-provider", "test-model");
+    ThinkingMessageContent thinking =
+        new ThinkingMessageContent(
+            "visible thought",
+            blockData(affinity, "thinking", "sig-native", "thinking", "summary_text", true));
+    RedactedThinkingMessageContent redacted =
+        new RedactedThinkingMessageContent(
+            "opaque-redaction",
+            blockData(affinity, "redacted", null, "redacted_thinking", null, true));
+    TextMessageContent text =
+        new TextMessageContent(
+            "answer", blockData(affinity, "text", null, "text", null, true));
+    ToolCallMessageContent toolCall =
+        new ToolCallMessageContent(
+            "call-1",
+            "lookup",
+            "lookup",
+            "{\"key\":\"value\"}",
+            null,
+            null,
+            blockData(affinity, "tool", null, "tool_use", null, true));
+    NativeAssistantBlockContent opaque =
+        new NativeAssistantBlockContent(
+            "provider_extension",
+            blockData(affinity, "opaque", "opaque-1", "provider_extension", null, true));
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT, List.of(thinking, redacted, text, toolCall, opaque));
+    MessagePayload payload =
+        new MessagePayload(
+            message,
+            new AssistantMessageMetadata(
+                GenerationStopReason.COMPLETE,
+                new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+            null);
+
+    UUID entryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.entries()
+                  .insert(
+                      new Entry(id, baseline.sessionId(), baseline.turnStartEntryId(), payload, T2));
+              return id;
+            });
+
+    MessagePayload reloaded =
+        (MessagePayload) store.transaction(tx -> tx.entries().find(entryId).orElseThrow().payload());
+    assertEquals(payload, reloaded);
+    assertEquals(List.of(thinking, redacted, text, toolCall, opaque), reloaded.message().contents());
+  }
+
+  private static ProviderBlockData blockData(
+      ProviderReplayAffinity affinity,
+      String owner,
+      String signature,
+      String itemType,
+      String contentType,
+      boolean itemStart) {
+    return new ProviderBlockData(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        affinity,
+        signature,
+        null,
+        null,
+        itemType,
+        contentType,
+        false,
+        null,
+        itemStart,
+        JsonNodeFactory.instance.objectNode().put("owner", owner).put("native", owner));
+  }
 
   @Test
   void stopSettlesPendingToolResponseInPostgresql() {
@@ -140,7 +230,7 @@ class PostgresqlThreadProcessorReplayTest {
   }
 
   @Test
-  void toolSiblingBatchWithTransferredReplayStateAdvancesAndWakesContinuation() {
+  void toolSiblingBatchAdvancesAndWakesContinuation() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
     StoreTestSupport.TurnBaseline baseline =
         StoreTestSupport.seedTurnBaseline(store, succeededRequest().toolBindings());
@@ -165,15 +255,6 @@ class PostgresqlThreadProcessorReplayTest {
 
     ModelRequestSpec request = succeededRequest();
     ProviderResponse response = StoreTestSupport.assistantResponse("call-0", "call-1");
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_CHAT,
-            new ProviderReplayAffinity(
-                request.providerType(), request.model().providerName(), request.model().modelId()),
-            JsonNodeFactory.instance
-                .objectNode()
-                .put("role", "assistant")
-                .put("content", "assistant reply"));
     UUID modelId =
         store.transaction(
             tx -> {
@@ -199,7 +280,7 @@ class PostgresqlThreadProcessorReplayTest {
               var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
               builtin(store, tx).updateModelInvocation(model.markRunning(T2));
               model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
-              builtin(store, tx).updateModelInvocation(model.succeed(response, null, replay, T2));
+              builtin(store, tx).updateModelInvocation(model.succeed(response, T2));
               return id;
             });
 
@@ -216,8 +297,7 @@ class PostgresqlThreadProcessorReplayTest {
                           baseline.sessionId(),
                           userId,
                           mappedAssistant(request, response),
-                          T3,
-                          replay));
+                          T3));
               builtin(store, tx).updateModelInvocation(model.attachResultEntry(id, T3));
               tx.threads().update(thread.advanceHead(id, T3));
               tx.tools()
@@ -268,18 +348,6 @@ class PostgresqlThreadProcessorReplayTest {
           tx.work().request(target);
           return null;
         });
-    assertNull(
-        store.transaction(
-            tx ->
-                builtin(store, tx)
-                    .findModelInvocation(modelId)
-                    .orElseThrow()
-                    .providerReplayState()));
-    assertEquals(
-        replay,
-        store.transaction(
-            tx -> tx.entries().find(assistantId).orElseThrow().providerReplayState()));
-
     TurnResolver resolver =
         (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Rejected(
@@ -315,9 +383,6 @@ class PostgresqlThreadProcessorReplayTest {
               .toList();
       assertEquals(List.of(0, 1), results.stream().map(ToolResultMetadata::callIndex).toList());
       assertTrue(results.stream().allMatch(r -> r.status() == ToolResultStatus.SUCCEEDED));
-      assertTrue(
-          applied.entries().stream()
-              .anyMatch(e -> e.id().equals(assistantId) && replay.equals(e.providerReplayState())));
       TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
       assertEquals(TurnEndOutcome.COMPLETED, batchEnd.outcome());
       assertTrue(batchEnd.continueModel());

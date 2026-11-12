@@ -21,10 +21,15 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector.ProjectedMessage;
 import fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec;
@@ -38,21 +43,23 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter;
@@ -66,6 +73,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -86,10 +94,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 四种协议的两轮离线回归：本地 HttpServer 回放合成 SSE，经真实 adapter + 真实 {@link JdkHttpSseTransport} 产生 provider
- * completion 与 assistant durable replay state，再经 {@link ProviderResourceMaterializer} 物化后发起第二轮请求。
+ * completion 与 block-owned metadata，经 durable message codec 和 {@link ProviderResourceMaterializer} 后发起第二轮请求。
  *
- * <p>测试意图：物化边界只替换 Resource 块，不得丢弃 assistant replay state；否则第二轮 wire 会退化为语义回退并丢失 {@code
- * reasoning_content}。测试不访问任何真实 Provider，也不使用真实会话内容。
+ * <p>物化和持久化边界不得丢弃 assistant block metadata；测试不访问真实 Provider，也不使用真实会话内容。
  */
 class ProviderReplayMaterializationTransportTest {
 
@@ -158,7 +165,7 @@ class ProviderReplayMaterializationTransportTest {
     }
   }
 
-  /** 意图：第一轮完成产生 replay state，第二轮经物化后 wire 上仍必须出现 assistant 的 reasoning_content。 */
+  /** Provider-native reasoning block metadata survives the resource materialization boundary. */
   @Test
   void secondTurnWireRequestKeepsReasoningContentAfterResourceMaterialization() throws Exception {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
@@ -180,9 +187,6 @@ class ProviderReplayMaterializationTransportTest {
                     Set.of(ModelInputModality.TEXT),
                     ProviderMediaCapabilities.NONE)));
 
-    ProviderReplayState replayState = firstCompletion.replayState();
-    assertNotNull(replayState, "COMPLETE 响应必须产出 OpenAI Chat replay state");
-    assertEquals(ProviderReplayFormat.OPENAI_CHAT, replayState.format());
     assertEquals(THINKING, firstCompletion.response().thinking());
     // 第一轮已发生物化：wire 上不再出现 durable blob 引用，且尚无 assistant replay。
     assertTrue(
@@ -192,12 +196,7 @@ class ProviderReplayMaterializationTransportTest {
 
     // 第二轮：assistant durable 消息（thinking 取自 provider response）与同一用户消息一起物化后发出。
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderTextBlock(firstCompletion.response().text()),
-                new ProviderThinkingBlock(firstCompletion.response().thinking())),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, firstCompletion.response().blocks());
     assertNotNull(
         stream(
             provider,
@@ -270,25 +269,14 @@ class ProviderReplayMaterializationTransportTest {
     ProviderCompletion completion = stream(provider, firstRequest);
     assertEquals(THINKING, completion.response().thinking());
     assertEquals(ANSWER, completion.response().text());
-    assertNotNull(completion.replayState());
 
-    ProviderReplayStateJsonCodec replayCodec = new ProviderReplayStateJsonCodec();
-    ProviderReplayState durableReplay =
-        replayCodec.decode(replayCodec.encode(completion.replayState()));
-    assertEquals(completion.replayState(), durableReplay);
     AgentMessage durableAssistant =
-        messages.decode(
-            messages.encode(
-                new AgentMessage(
-                    AgentMessageRole.ASSISTANT,
-                    List.of(
-                        new ThinkingMessageContent(completion.response().thinking()),
-                        new TextMessageContent(completion.response().text())))));
+        messages.decode(messages.encode(durableAssistant(completion.response().blocks())));
     List<ProviderMessage> secondMessages =
         projector.projectSources(
             List.of(
                 ProjectedMessage.of(durableUser),
-                ProjectedMessage.of(durableAssistant, durableReplay),
+                ProjectedMessage.of(durableAssistant),
                 ProjectedMessage.of(
                     new AgentMessage(
                         AgentMessageRole.USER, List.of(new TextMessageContent("continue"))))));
@@ -359,6 +347,33 @@ class ProviderReplayMaterializationTransportTest {
       assertNotNull(input, "missing SSE fixture");
       return new String(input.readAllBytes(), StandardCharsets.UTF_8);
     }
+  }
+
+  private static AgentMessage durableAssistant(List<ProviderContentBlock> blocks) {
+    List<AgentMessageContent> contents = new ArrayList<>();
+    for (ProviderContentBlock block : blocks) {
+      if (block instanceof ProviderThinkingBlock thinking) {
+        contents.add(new ThinkingMessageContent(thinking.thinking(), thinking.providerBlockData()));
+      } else if (block instanceof ProviderTextBlock text) {
+        contents.add(new TextMessageContent(text.text(), text.providerBlockData()));
+      } else if (block instanceof ProviderRedactedThinkingBlock redacted) {
+        contents.add(
+            new RedactedThinkingMessageContent(redacted.data(), redacted.providerBlockData()));
+      } else if (block instanceof ProviderToolCallBlock toolCall) {
+        var call = toolCall.toolCall();
+        contents.add(
+            new ToolCallMessageContent(
+                call.id(), call.name(), call.name(), call.argumentsJson(), null, null,
+                toolCall.providerBlockData()));
+      } else if (block instanceof ProviderOpaqueBlock opaque) {
+        contents.add(new NativeAssistantBlockContent(opaque.blockType(), opaque.providerBlockData()));
+      } else if (block instanceof ProviderJsonBlock json) {
+        contents.add(new JsonMessageContent(json.json()));
+      } else {
+        throw new IllegalArgumentException("unsupported assistant block: " + block.getClass());
+      }
+    }
+    return new AgentMessage(AgentMessageRole.ASSISTANT, contents);
   }
 
   private static ProviderMessage userWithResource() {

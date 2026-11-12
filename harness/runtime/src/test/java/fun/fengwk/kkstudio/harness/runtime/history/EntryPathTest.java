@@ -598,19 +598,6 @@ class EntryPathTest {
             start,
             assistantErrorWithMessage(id(3L), id(2L), "MODEL_FAILED", "down"),
             stopped));
-    // STOP turn 不可能误携 provider replay state：Entry 不变式只允许 replay state 出现在 ASSISTANT MESSAGE 上，
-    // 而 STOP turn 不接受任何 ASSISTANT MESSAGE。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new Entry(
-                id(3L),
-                SESSION_ID,
-                id(2L),
-                new AssistantErrorPayload(
-                    new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
-                time(id(3L)),
-                sampleReplayState()));
     // 重复取消屏障。
     assertRejectsEntryPath(List.of(root, start, error, assistantError(id(4L), id(3L)), stopped));
     // outcome 必须是 STOPPED：COMPLETED / FAILED / CANCELLED 都不允许。

@@ -12,8 +12,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
-
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -66,10 +64,10 @@ class PlatformModelGatewayTest {
       new ModelGateway.Execution(
           new UUID(0L, 42L), 1, ProviderType.OPENAI, CONNECTION_GENERATION_ID, PROVIDER_REQUEST);
 
-  /** admit 只解析与占名额，不打开 Provider；run 把增量同步转交 sink 并以成功终态返回（保留 native replay 状态）。 */
+  /** admit resolves and reserves capacity; run forwards deltas and returns the provider completion. */
   @Test
   void admittedRunBridgesDeltasAndCompletion() {
-    ProviderCompletion completion = new ProviderCompletion(response(), replayState());
+    ProviderCompletion completion = new ProviderCompletion(response());
     Resolution resolution =
         new Resolution(
             scripted(
@@ -415,14 +413,6 @@ class PlatformModelGatewayTest {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     return new ProviderResponse(
         "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "{}");
-  }
-
-  private static ProviderReplayState replayState() {
-    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
-    return new ProviderReplayState(
-        ProviderReplayFormat.GEMINI_CONTENT,
-        new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
-        payload);
   }
 
   /** 可注入解析失败的 {@link ProviderResolutionService}，记录解析与打开 Provider 的次数和超时策略。 */
