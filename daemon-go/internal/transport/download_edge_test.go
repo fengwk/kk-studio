@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"google.golang.org/protobuf/proto"
@@ -73,6 +76,23 @@ type failingBody struct{}
 func (failingBody) Read([]byte) (int, error) { return 0, errors.New("private body error") }
 func (failingBody) Close() error             { return nil }
 
+type countedDownloadBody struct {
+	reader *bytes.Reader
+	read   int
+	closed bool
+}
+
+func (b *countedDownloadBody) Read(p []byte) (int, error) {
+	n, err := b.reader.Read(p)
+	b.read += n
+	return n, err
+}
+
+func (b *countedDownloadBody) Close() error {
+	b.closed = true
+	return nil
+}
+
 // TRN-T-089 verifies a resource download can use the applied network runtime lifecycle.
 func TestDownload_UsesNetworkRuntime(t *testing.T) {
 	body := []byte("download")
@@ -80,7 +100,7 @@ func TestDownload_UsesNetworkRuntime(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
 	defer server.Close()
 	downloader := &ResourceDownloader{Network: NewNetworkRuntime(nil)}
-	got, err := downloader.DownloadPresigned(context.Background(), server.URL, nil, int64(len(body)), digest)
+	got, err := downloader.DownloadPresigned(context.Background(), server.URL, int64(len(body)), digest)
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("download=%q err=%v", got, err)
 	}
@@ -101,30 +121,26 @@ func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 	requestErrorClient := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) { return nil, errors.New("private request detail") })}
 	for _, tc := range []struct {
 		name, target string
-		headers      map[string]string
 		size         int64
 		hash         string
 		client       *http.Client
 		policy       *ProxyPolicy
 	}{
-		{"invalid target", "not-url", nil, 1, digest, nil, nil},
-		{"unsupported scheme", "ftp://store.example/file", nil, 1, digest, nil, nil},
-		{"credential URL", "http://user:secret@store.example/file", nil, 1, digest, nil, nil},
-		{"negative size", server.URL, nil, -1, digest, nil, nil},
-		{"overflow size", server.URL, nil, int64(^uint64(0) >> 1), digest, nil, nil},
-		{"bad digest length", server.URL, nil, 1, "abc", nil, nil},
-		{"uppercase digest", server.URL, nil, 1, strings.ToUpper(digest), nil, nil},
-		{"non-hex digest", server.URL, nil, 1, strings.Repeat("z", 64), nil, nil},
-		{"bad header name", server.URL, map[string]string{"bad name": "x"}, 1, digest, nil, nil},
-		{"unsafe header value", server.URL, map[string]string{"X-Test": "bad\nvalue"}, 1, digest, nil, nil},
-		{"missing network policy", server.URL, nil, 1, digest, nil, nil},
-		{"request failed", server.URL, nil, 1, digest, requestErrorClient, nil},
-		{"response read failed", server.URL, nil, 1, digest, bodyErrorClient, nil},
-		{"storage status", server.URL, nil, 1, digest, nil, mustProxyPolicy(t)},
+		{"invalid target", "not-url", 1, digest, nil, nil},
+		{"unsupported scheme", "ftp://store.example/file", 1, digest, nil, nil},
+		{"credential URL", "http://user:secret@store.example/file", 1, digest, nil, nil},
+		{"negative size", server.URL, -1, digest, nil, nil},
+		{"bad digest length", server.URL, 1, "abc", nil, nil},
+		{"uppercase digest", server.URL, 1, strings.ToUpper(digest), nil, nil},
+		{"non-hex digest", server.URL, 1, strings.Repeat("z", 64), nil, nil},
+		{"missing network policy", server.URL, 1, digest, nil, nil},
+		{"request failed", server.URL, 1, digest, requestErrorClient, nil},
+		{"response read failed", server.URL, 1, digest, bodyErrorClient, nil},
+		{"storage status", server.URL, 1, digest, nil, mustProxyPolicy(t)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &ResourceDownloader{Client: tc.client, Policy: tc.policy}
-			_, err := d.DownloadPresigned(context.Background(), tc.target, tc.headers, tc.size, tc.hash)
+			_, err := d.DownloadPresigned(context.Background(), tc.target, tc.size, tc.hash)
 			if err == nil {
 				t.Fatal("invalid download succeeded")
 			}
@@ -134,22 +150,86 @@ func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 		})
 	}
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Ticket") != "required" {
-			t.Errorf("ticket header missing: %v", r.Header)
+		if r.Header.Get("X-Ticket") != "" {
+			t.Errorf("unexpected ticket header: %v", r.Header)
 		}
 		_, _ = w.Write(body)
 	}))
 	defer ok.Close()
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	got, err := (&ResourceDownloader{Client: client}).DownloadPresigned(context.Background(), ok.URL, map[string]string{"X-Ticket": "required"}, 1, digest)
+	got, err := (&ResourceDownloader{Client: client}).DownloadPresigned(context.Background(), ok.URL, 1, digest)
 	if err != nil || string(got) != "x" {
 		t.Fatalf("valid ticketed download=%q err=%v", got, err)
 	}
 }
 
+// TRN-N-002 verifies download reads at most one byte beyond the declared size and rejects expired tickets without retrying.
+func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
+	const transferID = "123e4567-e89b-12d3-a456-426614174000"
+	body := &countedDownloadBody{reader: bytes.NewReader([]byte("oversized"))}
+	storageRequests := 0
+	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {
+		storageRequests++
+		return &http.Response{StatusCode: http.StatusOK, Body: body, Header: make(http.Header)}, nil
+	})}
+	ticketRequests := 0
+	d := &ResourceDownloader{Client: client, Requester: ticketRequesterFunc(func(context.Context, string) (*protocol.ResourceDownloadTicket, error) {
+		ticketRequests++
+		return testDownloadTicket(transferID, "http://storage.example/archive", []byte("x")), nil
+	})}
+	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download size failed" || got != nil {
+		t.Fatalf("oversized download=%q err=%v", got, err)
+	}
+	if body.read != 2 || !body.closed || ticketRequests != 1 || storageRequests != 1 {
+		t.Fatalf("reads=%d closed=%t tickets=%d requests=%d", body.read, body.closed, ticketRequests, storageRequests)
+	}
+
+	expired := testDownloadTicket(transferID, "http://storage.example/archive", []byte("x"))
+	expired.PresignedGet.ExpiresAtEpochMs = proto.Int64(time.Now().Add(-time.Hour).UnixMilli())
+	storageRequests = 0
+	ticketRequests = 0
+	d.Requester = ticketRequesterFunc(func(context.Context, string) (*protocol.ResourceDownloadTicket, error) {
+		ticketRequests++
+		return expired, nil
+	})
+	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download ticket expired" || got != nil {
+		t.Fatalf("expired download=%q err=%v", got, err)
+	}
+	if ticketRequests != 1 || storageRequests != 0 {
+		t.Fatalf("expired ticket retries=%d storage requests=%d", ticketRequests, storageRequests)
+	}
+
+	missingExpiry := testDownloadTicket(transferID, "http://storage.example/archive", []byte("x"))
+	missingExpiry.PresignedGet.ExpiresAtEpochMs = nil
+	ticketRequests = 0
+	d.Requester = ticketRequesterFunc(func(context.Context, string) (*protocol.ResourceDownloadTicket, error) {
+		ticketRequests++
+		return missingExpiry, nil
+	})
+	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download ticket is invalid" || got != nil {
+		t.Fatalf("ticket without expiry download=%q err=%v", got, err)
+	}
+	if ticketRequests != 1 || storageRequests != 0 {
+		t.Fatalf("ticket without expiry retries=%d storage requests=%d", ticketRequests, storageRequests)
+	}
+}
+
+// TRN-N-002 verifies no independent download-size ceiling rejects a ticket before the fetch.
+func TestDownload_DoesNotApplyAdditionalSizeLimit(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})}
+	_, err := (&ResourceDownloader{Client: client}).DownloadPresigned(context.Background(), "http://storage.example/file", math.MaxInt64, strings.Repeat("0", 64))
+	if err == nil || err.Error() != "resource download size failed" || requests != 1 {
+		t.Fatalf("download error=%v requests=%d", err, requests)
+	}
+}
+
 func mustProxyPolicy(t *testing.T) *ProxyPolicy {
 	t.Helper()
-	policy, err := NewProxyPolicy("", "")
+	policy, err := NewProxyPolicy("")
 	if err != nil {
 		t.Fatal(err)
 	}

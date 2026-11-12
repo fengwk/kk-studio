@@ -24,7 +24,6 @@ import (
 type DialConfig struct {
 	Applied              config.DaemonConfig
 	InstanceID, Platform string
-	NoProxyHosts         string
 	ReadToken            func(string) (string, error)
 	OnUpgradeFailed      func(int, *protocol.UpgradeRequired)
 	OnGoaway             func(uint32)
@@ -54,7 +53,7 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	if c.Applied.ProxyURL != nil {
 		proxyText = *c.Applied.ProxyURL
 	}
-	policy, err := NewProxyPolicy(proxyText, c.NoProxyHosts)
+	policy, err := NewProxyPolicy(proxyText)
 	if err != nil {
 		return nil, err
 	}

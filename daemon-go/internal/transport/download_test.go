@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"google.golang.org/protobuf/proto"
@@ -21,7 +22,7 @@ func (f ticketRequesterFunc) RequestTicket(ctx context.Context, id string) (*pro
 
 func testDownloadTicket(id, url string, body []byte) *protocol.ResourceDownloadTicket {
 	sum := sha256.Sum256(body)
-	return &protocol.ResourceDownloadTicket{TransferId: proto.String(id), State: protocol.TicketState_TICKET_READY, PresignedGet: &protocol.PresignedGet{Method: proto.String(http.MethodGet), Url: proto.String(url)}, Size: proto.Int64(int64(len(body))), Sha256: proto.String(fmt.Sprintf("%x", sum))}
+	return &protocol.ResourceDownloadTicket{TransferId: proto.String(id), State: protocol.TicketState_TICKET_READY, PresignedGet: &protocol.PresignedGet{Method: proto.String(http.MethodGet), Url: proto.String(url), ExpiresAtEpochMs: proto.Int64(time.Now().Add(time.Hour).UnixMilli())}, Size: proto.Int64(int64(len(body))), Sha256: proto.String(fmt.Sprintf("%x", sum))}
 }
 
 // TRN-F-005
@@ -91,7 +92,7 @@ func TestDownload_RejectsInvalidSizeAndDigest(t *testing.T) {
 		want   string
 	}{{"size", 2, fmt.Sprintf("%064x", 0), "resource download size failed"}, {"digest", 1, fmt.Sprintf("%064x", 0), "resource download digest failed"}} {
 		d := &ResourceDownloader{Client: &http.Client{Transport: &http.Transport{Proxy: nil}}}
-		_, err := d.DownloadPresigned(context.Background(), server.URL, nil, tc.size, tc.digest)
+		_, err := d.DownloadPresigned(context.Background(), server.URL, tc.size, tc.digest)
 		if err == nil || err.Error() != tc.want {
 			t.Errorf("%s error=%v want %q", tc.name, err, tc.want)
 		}

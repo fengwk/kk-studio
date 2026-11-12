@@ -1,90 +1,86 @@
 package transport
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+)
 
-// TRN-T-112
-func TestProxy_BypassKinds(t *testing.T) {
-	p, err := NewProxyPolicy("http://proxy.example:8080", "exact.example,*.example.org,.internal,127.*")
+// TRN-T-111 verifies only an explicitly configured proxy is used and invalid targets do not fall back.
+func TestProxy_ExplicitNoFallback(t *testing.T) {
+	policy, err := NewProxyPolicy("http://proxy.example:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"http://exact.example/a", "https://x.example.org", "http://a.internal", "http://127.0.0.4"} {
-		if p.UseProxy(target) {
-			t.Errorf("proxy selected for %s", target)
+	for _, target := range []string{"http://public.example", "https://public.example", "ws://public.example", "wss://public.example"} {
+		if !policy.UseProxy(target) {
+			t.Errorf("proxy not selected for %s", target)
 		}
 	}
-	if !p.UseProxy("https://public.example") {
-		t.Fatal("proxy not selected")
-	}
-}
-
-// TRN-T-113
-func TestProxy_BypassPort(t *testing.T) {
-	p, err := NewProxyPolicy("http://proxy.example:8080", "example.test:443")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.UseProxy("https://example.test") {
-		t.Fatal("expected bypass")
-	}
-	if !p.UseProxy("http://example.test") {
-		t.Fatal("bypass incorrectly matched other port")
-	}
-}
-
-// TRN-T-114
-func TestProxy_IPv4CIDR(t *testing.T) {
-	p, err := NewProxyPolicy("http://proxy.example:8080", "192.168.1.99/24")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for target, want := range map[string]bool{"http://192.168.1.1": false, "http://192.168.2.1": true, "http://private.internal": true} {
-		if got := p.UseProxy(target); got != want {
-			t.Errorf("UseProxy(%q)=%t want %t", target, got, want)
+	for _, target := range []string{"file:///tmp/data", "not-a-url", "http:/missing-host"} {
+		if policy.UseProxy(target) {
+			t.Errorf("proxy selected for unsupported target %q", target)
 		}
 	}
-}
+	direct, err := NewProxyPolicy("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct.UseProxy("http://public.example") {
+		t.Fatal("direct policy selected a proxy")
+	}
 
-// TRN-T-115, TRN-T-116
-func TestProxy_IPv6CIDRFamily(t *testing.T) {
-	p, err := NewProxyPolicy("http://proxy.example:8080", "2001:db8::/32")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.UseProxy("http://[2001:db8::2]") || !p.UseProxy("http://192.0.2.1") {
-		t.Fatal("CIDR matched wrong address family")
-	}
-	mapped, err := NewProxyPolicy("http://proxy.example:8080", "::ffff:192.0.2.0/120")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mapped.UseProxy("http://[::ffff:192.0.2.1]") || !mapped.UseProxy("http://192.0.2.1") {
-		t.Fatal("IPv4-mapped IPv6 CIDR lost its address family")
-	}
-}
-
-// TRN-T-112
-func TestProxy_DomainAndLoopbackBypass(t *testing.T) {
-	p, err := NewProxyPolicy("http://proxy.example:8080", ".internal,127.*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"http://internal", "http://a.internal", "http://127.1.2.3", "http://[::1]"} {
-		if p.UseProxy(target) {
-			t.Errorf("proxy selected for bypass target %s", target)
+	var targetHits, proxyHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		proxyHits.Add(1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack proxy connection: %v", err)
+			return
 		}
+		_ = conn.Close()
+	}))
+	defer proxyServer.Close()
+	deadProxy, err := NewProxyPolicy(proxyServer.URL)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, target := range []string{"http://127.example", "http://xpublic.internal.example"} {
-		if !p.UseProxy(target) {
-			t.Errorf("bypass incorrectly selected for %s", target)
+	resp, err := deadProxy.HTTPClient().Get(target.URL)
+	if err == nil {
+		if resp != nil {
+			_ = resp.Body.Close()
 		}
+		t.Fatal("request unexpectedly succeeded through a failed proxy")
+	}
+	if proxyHits.Load() != 1 || targetHits.Load() != 0 {
+		t.Fatalf("failed proxy requests=%d direct target requests=%d", proxyHits.Load(), targetHits.Load())
 	}
 }
 
-// TRN-T-118
+// TRN-T-118 verifies malformed or credential-bearing proxy settings are rejected without leaking them.
 func TestProxy_InvalidRedacted(t *testing.T) {
-	_, err := NewProxyPolicy("http://user:secret@proxy:8080/path", "")
-	if err == nil || err.Error() != "Invalid HTTP proxy or bypass configuration" {
-		t.Fatalf("error=%v", err)
+	for _, target := range []string{
+		"https://proxy.example:443",
+		"http://proxy.example",
+		"http://proxy.example:0",
+		"http://proxy.example:65536",
+		"http://proxy.example:8080/path",
+		"http://user:secret@proxy.example:8080",
+		"http://proxy.example:8080?query=secret",
+	} {
+		_, err := NewProxyPolicy(target)
+		if err == nil || err.Error() != "Invalid HTTP proxy configuration" {
+			t.Errorf("proxy %q error=%v", target, err)
+		}
+		if err != nil && (strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "proxy.example")) {
+			t.Errorf("error leaked proxy configuration: %v", err)
+		}
 	}
 }

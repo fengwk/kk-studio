@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"github.com/fengwk/kk-studio/daemon/internal/skill"
@@ -53,17 +54,23 @@ func (d *ResourceDownloader) Download(ctx context.Context, transferID string) ([
 	if get.GetMethod() != http.MethodGet {
 		return nil, fmt.Errorf("resource download ticket is invalid")
 	}
-	return d.DownloadPresigned(ctx, get.GetUrl(), nil, ticket.GetSize(), ticket.GetSha256())
+	if get.ExpiresAtEpochMs == nil || get.GetExpiresAtEpochMs() <= 0 {
+		return nil, fmt.Errorf("resource download ticket is invalid")
+	}
+	if time.Now().UnixMilli() >= get.GetExpiresAtEpochMs() {
+		return nil, fmt.Errorf("resource download ticket expired")
+	}
+	return d.DownloadPresigned(ctx, get.GetUrl(), ticket.GetSize(), ticket.GetSha256())
 }
 
 // DownloadPresigned fetches an explicit presigned GET and verifies its declared metadata.
-func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL string, headers map[string]string, size int64, digest string) ([]byte, error) {
+func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL string, size int64, digest string) ([]byte, error) {
 	fail := func(stage string) ([]byte, error) { return nil, fmt.Errorf("resource download %s failed", stage) }
 	u, err := url.Parse(targetURL)
 	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return fail("request")
 	}
-	if size < 0 || size == int64(^uint64(0)>>1) {
+	if size < 0 {
 		return fail("size")
 	}
 	if len(digest) != 64 || digest != strings.ToLower(digest) {
@@ -75,12 +82,6 @@ func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL st
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return fail("request")
-	}
-	for k, v := range headers {
-		if !validHeaderName(k) || hasUnsafeHeaderCharacter(v) {
-			return fail("request")
-		}
-		req.Header.Set(k, v)
 	}
 	if d.Network != nil {
 		var body []byte
@@ -136,12 +137,18 @@ func verifyDownloadResponse(resp *http.Response, size int64, digest string) ([]b
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fail(fmt.Sprintf("storage status %d", resp.StatusCode))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, size+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, size))
 	if err != nil {
 		return fail("response")
 	}
 	if int64(len(body)) != size {
 		return fail("size")
+	}
+	var extra [1]byte
+	if n, err := io.ReadFull(resp.Body, extra[:]); n > 0 {
+		return fail("size")
+	} else if err != io.EOF {
+		return fail("response")
 	}
 	sum := sha256.Sum256(body)
 	if fmt.Sprintf("%x", sum) != digest {
