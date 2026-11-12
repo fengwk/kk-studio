@@ -3169,10 +3169,6 @@ export interface ApiRoutes {
     path: { threadId: string }
     response: HarnessManualCompactionDTO
   }
-  'GET /api/harness/threads/{threadId}/subagents': {
-    path: { threadId: string }
-    response: HarnessThreadTreeNodeDTO[]
-  }
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }
     response: HarnessThreadTreeNodeDTO[]
