@@ -278,7 +278,11 @@ func TestEmptyFindAndGrepListIgnoredPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("not a match\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ignored := filepath.ToSlash(filepath.Join(root, "secret.txt"))
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignored := filepath.ToSlash(filepath.Join(resolvedRoot, "secret.txt"))
 	for _, test := range []struct {
 		capability string
 		args       map[string]any

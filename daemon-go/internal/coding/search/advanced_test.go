@@ -397,7 +397,11 @@ func TestFindCollectsIgnoreSkippedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{filepath.ToSlash(filepath.Join(root, "node_modules")) + "/", filepath.ToSlash(filepath.Join(root, "secret.txt"))}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.ToSlash(filepath.Join(resolvedRoot, "node_modules")) + "/", filepath.ToSlash(filepath.Join(resolvedRoot, "secret.txt"))}
 	if !reflect.DeepEqual(outcome.IgnoreSkipped, want) || outcome.IgnoreSkippedCount != 2 || !reflect.DeepEqual(outcome.Results, []string{"visible.txt"}) {
 		t.Fatalf("outcome=%#v want ignored=%v", outcome, want)
 	}
