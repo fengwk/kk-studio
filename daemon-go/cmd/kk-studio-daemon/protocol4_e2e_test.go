@@ -61,10 +61,10 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	configBody := fmt.Sprintf(`{"environmentId":%q,"version":"0","daemonConfig":{"studioUrl":%q,"lsp":{"servers":{"text":{"command":[%q],"extensions":[".txt"]}}}}}`, e2eEnvironmentID, server.URL, executable)
-	if err := os.WriteFile(configPath, []byte(configBody), 0600); err != nil {
+	if err := native.WritePrivateFile(configPath, []byte(configBody)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "daemon.token"), []byte("protocol4-test-token\n"), 0600); err != nil {
+	if err := native.WritePrivateFile(filepath.Join(directory, "daemon.token"), []byte("protocol4-test-token\n")); err != nil {
 		t.Fatal(err)
 	}
 	initial, err := config.LoadDaemonConfig(configPath)
