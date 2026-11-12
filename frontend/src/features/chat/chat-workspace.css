@@ -104,8 +104,7 @@
 }
 
 @media (max-width: 760px) {
-  .chat-workspace-actions .chat-ide-toggle,
-  .chat-workspace-actions .chat-files-toggle {
+  .chat-workspace-actions .chat-ide-toggle {
     min-width: 44px;
     min-height: 44px;
   }
@@ -142,15 +141,7 @@
   gap: 10px;
 }
 
-.chat-files-toggle {
-  gap: 6px;
-}
-
 @container chat-workspace (max-width: 560px) {
-  .chat-files-toggle-label {
-    display: none;
-  }
-
   /* 窄屏顶栏：身份文字先让位，短 ID 与复制保持完整，名称仍占一行并保留省略号。 */
   .chat-workspace-header .chat-workspace-title {
     gap: 6px;

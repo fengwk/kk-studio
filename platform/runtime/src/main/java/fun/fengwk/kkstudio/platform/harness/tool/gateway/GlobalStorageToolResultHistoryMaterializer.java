@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceUri;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
@@ -32,9 +33,9 @@ import java.util.function.IntSupplier;
  * <p>在单工具 terminal 的同一 store 事务内：
  *
  * <ul>
- *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 {@code vfs} 引用，不执行对象 I/O；
+ *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 Resource 引用，不执行对象 I/O；
  *   <li>上传引用走 {@code lockReady → 校验权威事实 → retainRef → delete} 原子转移；
- *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code vfs:/resources/<blobId>}，绝不保留临时 upload URI；
+ *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code resource://files/<blobId>}，绝不保留临时 upload URI；
  *   <li>任一项确定性校验失败抛 {@link ToolOutcomeMaterializationException} 并整体回滚，绝不产生部分 history。
  * </ul>
  */
@@ -74,7 +75,11 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     List<ResultContent> source = result.contents();
     List<ResultContent> stable = new ArrayList<>(source.size());
     for (ResultContent content : source) {
-      if (content instanceof TextResultContent || content instanceof JsonResultContent) {
+      if (content instanceof TextResultContent text) {
+        retainReferencedResources(sessionId, text.text());
+        stable.add(content);
+      } else if (content instanceof JsonResultContent json) {
+        retainReferencedResources(sessionId, json.json());
         stable.add(content);
       } else if (content instanceof ResourceResultContent resource) {
         stable.add(stableResource(sessionId, resource, maxOutputBytes));
@@ -86,6 +91,17 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     }
     return new ToolResult(
         result.toolCallId(), List.copyOf(stable), result.error(), result.detailsJson());
+  }
+
+  private void retainReferencedResources(UUID sessionId, String text) {
+    for (UUID blobId : ResourceUri.referencedFiles(text)) {
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+        throw new ToolOutcomeMaterializationException(
+            "tool output references an unavailable resource");
+      }
+      refManager.retainRef(sessionId, blobId);
+    }
   }
 
   private ResourceResultContent stableResource(

@@ -58,7 +58,7 @@ class PlatformResourceContentReaderMediaTest {
 
     sessionId = UUID.randomUUID();
     blobId = UUID.randomUUID();
-    when(refs.contains(sessionId, blobId)).thenReturn(true);
+    when(blobManager.getBlob(blobId)).thenAnswer(invocation -> activeBlob());
   }
 
   /** 支持的模型与协议下，媒体读取返回指向同一已授权 Blob 的 durable 引用，且不读取任何字节。 */
@@ -69,7 +69,7 @@ class PlatformResourceContentReaderMediaTest {
         capabilities(
             ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
-    ResourceRead read = read(capabilities, "vfs:/resources/" + blobId, deadline());
+    ResourceRead read = read(capabilities, "resource://files/" + blobId, deadline());
 
     ResourceRead.Media media = assertInstanceOf(ResourceRead.Media.class, read);
     assertEquals(blobId, media.resource().sessionBlobId());
@@ -122,23 +122,17 @@ class PlatformResourceContentReaderMediaTest {
     verifyNoInteractions(blobs);
   }
 
-  /** 未授权的 Blob 在读取元数据之前就被拒绝。 */
+  /** 首次读取即为当前 Session 建立持有，避免有效资源在 Session 删除前被回收。 */
   @Test
-  void rejectsUnreferencedBlobBeforeMetadata() {
-    when(refs.contains(sessionId, blobId)).thenReturn(false);
+  void readingResourceRetainsItForTheSession() {
+    stubBlob("image/png", 3L);
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
-    PlatformReadException error =
-        assertThrows(
-            PlatformReadException.class,
-            () ->
-                read(
-                    capabilities(
-                        ProviderType.OPENAI,
-                        Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE)),
-                    "resource",
-                    deadline()));
-    assertTrue(error.getMessage().contains("not referenced"), error.getMessage());
-    verifyNoInteractions(blobManager, blobs);
+    read(capabilities, "resource://files/" + blobId, deadline());
+
+    verify(refs).retainRef(sessionId, blobId);
   }
 
   /** 冻结能力快照不含该模态时即拒绝，即使同一 Blob 的 MIME 在别处被声明为媒体：绝不反查实时模型。 */
@@ -167,7 +161,7 @@ class PlatformResourceContentReaderMediaTest {
             });
 
     ReadDeadline deadline = deadline();
-    ResourceRead read = read(TurnMediaCapabilities.NONE, "vfs:/resources/" + blobId, deadline);
+    ResourceRead read = read(TurnMediaCapabilities.NONE, "resource://files/" + blobId, deadline);
 
     ResourceRead.Text text = assertInstanceOf(ResourceRead.Text.class, read);
     assertTrue(text.text().contains("1|blob-content"), text.text());
@@ -184,7 +178,7 @@ class PlatformResourceContentReaderMediaTest {
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () -> read(TurnMediaCapabilities.NONE, "vfs:/resources/" + blobId, deadline()));
+            () -> read(TurnMediaCapabilities.NONE, "resource://files/" + blobId, deadline()));
 
     assertEquals("failed to read resource: " + blobId, error.getMessage());
     assertFalse(error.getMessage().contains("sentinel-secret-7f3a"));
@@ -204,7 +198,7 @@ class PlatformResourceContentReaderMediaTest {
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () -> read(capabilities, "vfs:/resources/" + blobId, expired));
+            () -> read(capabilities, "resource://files/" + blobId, expired));
 
     assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
     verifyNoInteractions(blobs);
@@ -222,7 +216,7 @@ class PlatformResourceContentReaderMediaTest {
       PlatformReadException error =
           assertThrows(
               PlatformReadException.class,
-              () -> read(capabilities, "vfs:/resources/" + blobId, deadline()));
+              () -> read(capabilities, "resource://files/" + blobId, deadline()));
 
       assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
       verifyNoInteractions(blobs);
@@ -239,6 +233,16 @@ class PlatformResourceContentReaderMediaTest {
 
   private static ReadDeadline deadline() {
     return ReadDeadline.after(Duration.ofSeconds(60));
+  }
+
+  private StorageBlob activeBlob() {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType("image/png");
+    blob.setSizeBytes(3L);
+    blob.setSha256(SHA);
+    blob.setState(StorageBlobState.ACTIVE);
+    return blob;
   }
 
   private void stubBlob(String mediaType, long sizeBytes) {

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ValueConstants;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import tools.jackson.databind.BeanDescription;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.JsonNode;
@@ -1129,6 +1130,7 @@ final class TsContractGenerator {
       responseTsType = "void";
     } else if (unwrapped == byte[].class
         || unwrapped == InputStream.class
+        || unwrapped == StreamingResponseBody.class
         || (unwrapped instanceof Class<?> cls && Resource.class.isAssignableFrom(cls))) {
       responseTsType = "Blob";
       responseTypeKind = "blob";

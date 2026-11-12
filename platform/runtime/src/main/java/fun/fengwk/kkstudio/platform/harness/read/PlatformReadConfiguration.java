@@ -4,14 +4,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
-/** 装配 Platform VFS 与它复用的内容读取器的 Spring 配置。 */
+/** 装配 Platform 资源 URI 读取器。 */
 @Configuration(proxyBeanMethods = false)
 public class PlatformReadConfiguration {
 
@@ -24,9 +23,9 @@ public class PlatformReadConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public PlatformSkillContentReader platformSkillContentReader(
-      SkillPackageRepository skillPackageRepository, SkillArchiveFileReader archiveFileReader) {
-    return new PlatformSkillContentReader(skillPackageRepository, archiveFileReader);
+  public PlatformResourceReadGateway platformResourceReadGateway(
+      PlatformResourceContentReader reader) {
+    return new PlatformResourceReadGateway(reader);
   }
 
   @Bean
