@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2155,16 +2154,7 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	defer bridge.Close(context.Background())
 	const capacity = 64
 	gate := make(chan struct{})
-	var gateOnce sync.Once
-	releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
-	allStarted := make(chan struct{})
-	var started atomic.Int32
-	manager := &fakeCodeServerManager{ensureHook: func() {
-		if started.Add(1) == capacity {
-			close(allStarted)
-		}
-		<-gate
-	}}
+	manager := &fakeCodeServerManager{stopGate: gate, stopStarted: make(chan struct{})}
 	dataDir := filepath.Join(t.TempDir(), "daemon")
 	if err := native.EnsurePrivateDirectory(dataDir); err != nil {
 		t.Fatal(err)
@@ -2176,11 +2166,24 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
-	defer releaseGate()
+	defer func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	}()
 	for _, directory := range []string{service.paths.IDEDir, service.paths.ViewsDir} {
 		if err := native.EnsurePrivateDirectory(directory); err != nil {
 			t.Fatal(err)
 		}
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- service.stopManager(context.Background()) }()
+	select {
+	case <-manager.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("manager stop did not reach its test gate")
 	}
 	root := t.TempDir()
 	results := make(chan *protocol.IdeResult, capacity)
@@ -2190,23 +2193,39 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 		command := openCommandForTest(root, viewID, claimID)
 		go func() { results <- service.HandleCommand(context.Background(), command) }()
 	}
-	select {
-	case <-allStarted:
-	case <-time.After(15 * time.Second):
-		releaseGate()
-		t.Fatal("all view reservations did not reach process startup")
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	for {
+		service.mu.Lock()
+		reservations := len(service.reservations)
+		service.mu.Unlock()
+		if reservations == capacity {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("reservations=%d want=%d before process startup", reservations, capacity)
+		case <-time.After(time.Millisecond):
+		}
 	}
-	service.mu.Lock()
-	reservations := len(service.reservations)
-	service.mu.Unlock()
-	if reservations != capacity {
-		t.Fatalf("reservations=%d want=%d", reservations, capacity)
+	manager.mu.Lock()
+	startCalls := manager.startCalls
+	manager.mu.Unlock()
+	if startCalls != 0 {
+		t.Fatalf("process starts while manager stop gate is held = %d, want 0", startCalls)
 	}
-	overflow := openCommandForTest(root, "ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
-	if result := service.HandleCommand(context.Background(), overflow); result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
+	overflowResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		overflow := openCommandForTest(root, "ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+		overflowResult <- service.HandleCommand(context.Background(), overflow)
+	}()
+	close(gate)
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-overflowResult; result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
 		t.Fatalf("capacity overflow result=%v", result)
 	}
-	releaseGate()
 	for index := 0; index < capacity; index++ {
 		if result := <-results; !result.GetOk() {
 			t.Fatalf("reservation %d failed: %v", index, result)
@@ -2224,6 +2243,7 @@ type fakeCodeServerManager struct {
 	stopCalls     int
 	stopFailures  int
 	stopGate      chan struct{}
+	stopStarted   chan struct{}
 	ensureHook    func()
 	registerHook  func()
 	closeErr      error
@@ -2262,7 +2282,11 @@ func (m *fakeCodeServerManager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	m.stopCalls++
 	gate := m.stopGate
+	started := m.stopStarted
 	m.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
 	if gate != nil {
 		select {
 		case <-gate:
