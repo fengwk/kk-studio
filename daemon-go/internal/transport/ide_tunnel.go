@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -75,6 +76,15 @@ func parseIDERoute(path string) (string, int64, string, bool) {
 }
 
 func resolverStatus(err error) int {
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) {
+		switch coded.ErrorCode() {
+		case "VIEW_GONE":
+			return http.StatusNotFound
+		case "UNAVAILABLE":
+			return http.StatusServiceUnavailable
+		}
+	}
 	s := strings.ToUpper(err.Error())
 	if strings.Contains(s, "VIEW_GONE") {
 		return http.StatusNotFound

@@ -686,7 +686,13 @@ class DaemonCrossLanguageIntegrationTest {
 
   private void startDaemon(String token) throws IOException {
     testDataDir = Files.createTempDirectory("kk-daemon-crosslang-");
-    daemonProcess = DaemonProcess.start(repoRoot(), connector.getLocalPort(), token, testDataDir);
+    daemonProcess =
+        DaemonProcess.start(
+            repoRoot(),
+            connector.getLocalPort(),
+            token,
+            testDataDir,
+            System.getProperty("daemon.bin"));
   }
 
   private EnvironmentConfigSnapshot configuration(long version, String bashExecutable) {
@@ -790,13 +796,18 @@ class DaemonCrossLanguageIntegrationTest {
       this.stderrThread = Thread.ofVirtual().name("daemon-stderr-reader").start(this::readStderr);
     }
 
-    static DaemonProcess start(Path repoRoot, int studioPort, String token, Path dataDir)
+    static DaemonProcess start(
+        Path repoRoot, int studioPort, String token, Path dataDir, String daemonBinary)
         throws IOException {
       Path daemonDist = repoRoot.resolve("daemon/dist");
       Path mainScript = daemonDist.resolve("main.js");
-      if (!Files.isRegularFile(mainScript)) {
-        throw new IllegalStateException(
-            "daemon/dist/main.js not found. Run `npm --prefix daemon ci && npm --prefix daemon run build` first.");
+      if (daemonBinary == null || daemonBinary.isBlank()) {
+        if (!Files.isRegularFile(mainScript)) {
+          throw new IllegalStateException(
+              "daemon/dist/main.js not found. Run `npm --prefix daemon ci && npm --prefix daemon run build` first.");
+        }
+      } else if (!Files.isRegularFile(Path.of(daemonBinary))) {
+        throw new IllegalStateException("daemon.bin does not exist: " + daemonBinary);
       }
 
       boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
@@ -820,12 +831,19 @@ class DaemonCrossLanguageIntegrationTest {
         Files.setPosixFilePermissions(tokenFile, PosixFilePermissions.fromString("rw-------"));
       }
 
-      ProcessBuilder pb =
-          new ProcessBuilder(
-              resolveNodeBinary(),
-              mainScript.toAbsolutePath().toString(),
-              "--config",
-              configFile.toAbsolutePath().toString());
+      ProcessBuilder pb;
+      if (daemonBinary == null || daemonBinary.isBlank()) {
+        pb =
+            new ProcessBuilder(
+                resolveNodeBinary(),
+                mainScript.toAbsolutePath().toString(),
+                "--config",
+                configFile.toAbsolutePath().toString());
+      } else {
+        pb = new ProcessBuilder(daemonBinary, "--config", configFile.toAbsolutePath().toString());
+        pb.environment().remove("GODEBUG");
+        pb.environment().put("TZ", "Etc/UTC");
+      }
       pb.directory(repoRoot.toFile());
       pb.environment().put("http_proxy", "http://127.0.0.1:1");
       pb.environment().put("ALL_PROXY", "http://127.0.0.1:1");

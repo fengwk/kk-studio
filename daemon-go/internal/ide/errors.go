@@ -12,6 +12,9 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// ErrorCode exposes the stable routing code without leaking it into the safe error message.
+func (e *Error) ErrorCode() string { return e.Code }
+
 // NewError constructs a safe IDE error. An empty code defaults to UNAVAILABLE.
 func NewError(message, code string) *Error {
 	if code == "" {

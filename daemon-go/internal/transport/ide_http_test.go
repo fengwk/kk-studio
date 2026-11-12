@@ -19,6 +19,11 @@ func (f viewResolverFunc) ResolveView(ctx context.Context, r ViewRequest) (ViewU
 	return f(ctx, r)
 }
 
+type codedViewResolutionError struct{ code string }
+
+func (e codedViewResolutionError) Error() string     { return "view is not open for this binding epoch" }
+func (e codedViewResolutionError) ErrorCode() string { return e.code }
+
 // TRN-T-033, TRN-T-034, TRN-T-035
 func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +77,9 @@ func TestHandleIDE_ResolutionAndRouteErrors(t *testing.T) {
 		{"missing resolver", "/ide/" + ideTestID + "/1/", nil, http.StatusServiceUnavailable},
 		{"gone", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{}, fmt.Errorf("VIEW_GONE")
+		}), http.StatusNotFound},
+		{"gone with safe message", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+			return ViewUpstream{}, codedViewResolutionError{code: "VIEW_GONE"}
 		}), http.StatusNotFound},
 		{"unavailable", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{}, fmt.Errorf("UNAVAILABLE")

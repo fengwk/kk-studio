@@ -49,6 +49,33 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /tmp/kk-studio-daemon-${target%/*}-${target#*/} ./cmd/kk-studio-daemon
           done
 
+  jetty-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon-go/go.mod
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build Go daemon
+        working-directory: daemon-go
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon
+      - name: Verify RFC 8441 interoperability with Jetty
+        env:
+          MAVEN_OPTS: -Xmx2g
+          DAEMON_BINARY: ${{ runner.temp }}/kk-studio-daemon-go
+        run: |
+          mvn -B -ntp -q -pl web -am test \
+            -Dtest=DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Ddaemon.bin="$DAEMON_BINARY"
+
   test:
     strategy:
       fail-fast: false
