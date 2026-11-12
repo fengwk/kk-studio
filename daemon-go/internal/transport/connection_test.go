@@ -224,6 +224,7 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 			if err == nil {
 				_, _, _ = ws.Read(r.Context())
+				_ = ws.Close(websocket.StatusNormalClosure, "")
 			}
 		}))
 		return server, handshake

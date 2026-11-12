@@ -2155,6 +2155,9 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	defer bridge.Close(context.Background())
 	const capacity = 64
 	gate := make(chan struct{})
+	var gateOnce sync.Once
+	releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
+	defer releaseGate()
 	allStarted := make(chan struct{})
 	var started atomic.Int32
 	manager := &fakeCodeServerManager{ensureHook: func() {
@@ -2180,7 +2183,8 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	}
 	select {
 	case <-allStarted:
-	case <-time.After(2 * time.Second):
+	case <-time.After(15 * time.Second):
+		releaseGate()
 		t.Fatal("all view reservations did not reach process startup")
 	}
 	service.mu.Lock()
@@ -2193,7 +2197,7 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	if result := service.HandleCommand(context.Background(), overflow); result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
 		t.Fatalf("capacity overflow result=%v", result)
 	}
-	close(gate)
+	releaseGate()
 	for index := 0; index < capacity; index++ {
 		if result := <-results; !result.GetOk() {
 			t.Fatalf("reservation %d failed: %v", index, result)

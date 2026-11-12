@@ -117,7 +117,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		EnvironmentId: proto.String(e2eEnvironmentID),
 		Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{
 			Version: proto.Int64(1),
-			Config:  &protocol.DaemonConfiguration{StudioUrl: server.URL, Lsp: &protocol.LspConfiguration{Servers: []*protocol.LspServer{{Id: "text", Command: []string{"/bin/true"}, Extensions: []string{".txt"}}}}},
+			Config:  &protocol.DaemonConfiguration{StudioUrl: server.URL, Lsp: &protocol.LspConfiguration{Servers: []*protocol.LspServer{{Id: "text", Command: []string{executable}, Extensions: []string{".txt"}}}}},
 		}},
 	}
 	writeControlEnvelope(t, bodyWriter, settings)
