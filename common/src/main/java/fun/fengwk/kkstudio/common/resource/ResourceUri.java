@@ -62,7 +62,7 @@ public final class ResourceUri {
     return "resource://skills/" + String.join("/", segments);
   }
 
-  /** Accepts canonical percent-encoded paths and legacy raw Unicode/space segments. */
+  /** 解析资源 URI；路径段既可百分号编码，也可是模型直接写出的未编码文本（如空格、中文）。 */
   public static Parsed parse(String uri) {
     if (uri == null || !uri.startsWith("resource://")) {
       throw new IllegalArgumentException("not a resource URI");

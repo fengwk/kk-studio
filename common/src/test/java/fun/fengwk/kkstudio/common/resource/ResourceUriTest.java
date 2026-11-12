@@ -23,7 +23,7 @@ class ResourceUriTest {
   }
 
   @Test
-  void acceptsUnencodedLegacySegments() {
+  void acceptsUnencodedSegments() {
     ResourceUri.Parsed parsed = ResourceUri.parse("resource://skills/pkg/v1/skill/中文 文件.md");
     assertEquals("中文 文件.md", parsed.path());
   }
