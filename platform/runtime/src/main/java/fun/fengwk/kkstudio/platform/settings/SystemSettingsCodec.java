@@ -304,7 +304,8 @@ public class SystemSettingsCodec {
             dto.getTemporaryResourceTtlSeconds(), "storageMedia.temporaryResourceTtlSeconds"),
         requiredMillis(
             dto.getTemporaryResourceCleanupIntervalSeconds(),
-            "storageMedia.temporaryResourceCleanupIntervalSeconds"));
+            "storageMedia.temporaryResourceCleanupIntervalSeconds"),
+        requiredInt(dto.getMaxImagesPerRequest(), "storageMedia.maxImagesPerRequest"));
   }
 
   private static SystemSettings.Advanced toAdvanced(SystemSettingsAdvancedDTO dto) {
@@ -432,6 +433,7 @@ public class SystemSettingsCodec {
     dto.setTemporaryResourceTtlSeconds(storageMedia.temporaryResourceTtlSeconds());
     dto.setTemporaryResourceCleanupIntervalSeconds(
         storageMedia.temporaryResourceCleanupIntervalSeconds());
+    dto.setMaxImagesPerRequest(storageMedia.maxImagesPerRequest());
     return dto;
   }
 

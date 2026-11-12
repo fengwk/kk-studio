@@ -470,7 +470,7 @@ class PostgresqlSubagentContinuationTest {
     }
     // 即使 preflight 保留了原请求身份，也不能将合法输入替换成子线程环境命令。
     AcceptancePreflight rewrite =
-        (session, commands, copied) ->
+        (session, commands, copied, branchSettings) ->
             List.of(commands.getFirst().withPayload(new SetEnvironmentCommandPayload(null)));
     ThreadState child = before.thread();
     assertThrows(

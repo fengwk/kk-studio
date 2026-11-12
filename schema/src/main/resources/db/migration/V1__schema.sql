@@ -47,6 +47,11 @@ create table storage_upload (
     declared_media_type varchar(256)   not null,
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
+    image_format        varchar(32),
+    original_width      integer,
+    original_height     integer,
+    stored_width        integer,
+    stored_height       integer,
     cleanup_requested_at timestamptz(3),
     cleanup_token       uuid,
     cleanup_until       timestamptz(3),
@@ -56,6 +61,20 @@ create table storage_upload (
     constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
     constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_upload_image_metadata_pair check (
+        (image_format is null and original_width is null and original_height is null
+            and stored_width is null and stored_height is null)
+        or (image_format is not null and original_width is not null and original_height is not null
+            and stored_width is not null and stored_height is not null)
+    ),
+    constraint ck_storage_upload_image_dimensions check (
+        original_width is null or (original_width > 0 and original_height > 0
+            and stored_width > 0 and stored_height > 0)
+    ),
+    constraint ck_storage_upload_image_format check (
+        image_format is null or (image_format ~ '^[a-z0-9][a-z0-9.+-]{0,31}$'
+            and declared_media_type = 'image/' || image_format)
+    ),
     constraint ck_storage_upload_cleanup_pair check (
         (cleanup_token is null) = (cleanup_until is null)
     ),
@@ -65,6 +84,28 @@ create table storage_upload (
 
 create index idx_storage_upload_cleanup_claim
     on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
+
+create table storage_image_model_view (
+    source_blob_id  uuid         not null,
+    image_tier      varchar(16)  not null,
+    view_blob_id    uuid         not null,
+    original_width  integer      not null,
+    original_height integer      not null,
+    display_width   integer      not null,
+    display_height  integer      not null,
+    constraint pk_storage_image_model_view primary key (source_blob_id, image_tier),
+    constraint ck_storage_image_model_view_tier check (image_tier in ('720P', '1080P')),
+    constraint ck_storage_image_model_view_dimensions check (
+        original_width > 0 and original_height > 0 and display_width > 0 and display_height > 0
+    ),
+    constraint ck_storage_image_model_view_distinct_blobs check (source_blob_id <> view_blob_id),
+    constraint fk_storage_image_model_view_source foreign key (source_blob_id)
+        references storage_blob (id) on delete restrict,
+    constraint fk_storage_image_model_view_blob foreign key (view_blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+comment on table storage_image_model_view is 'Durable resized model view for a plugin image, keyed by original blob and image tier; the row owns one reference to view_blob_id and is removed when its source enters DELETING.';
 
 comment on table storage_blob is 'Deduplicated immutable content address of the global blob storage: one ACTIVE row per (sha256, size_bytes) content, with immutable media facts and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
 
@@ -252,7 +293,7 @@ insert into system_setting (id, config) values (
       "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
       "environment":{"heartbeatTimeoutMillis":60000},
       "backendNetwork":{"noProxyHosts":"localhost,127.*,::1"},
-      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"imageTier":"720P","s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
+      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"imageTier":"720P","maxImagesPerRequest":20,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
       "tool":{"maxOutputMib":16,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
     }'::jsonb
 );

@@ -94,16 +94,20 @@ class ProviderInlineBlobReaderTest {
   }
 
   @Test
-  void cacheEntryExpiresAfterTtlAndIsReadAgain() {
+  void cacheEntryDoesNotExpireWithTime() {
+    assertEquals(
+        8L * 1024L * 1024L, ProviderInlineBlobReader.Limits.DEFAULT.maxCacheEntryWeightBytes());
+    assertEquals(
+        100L * 1024L * 1024L, ProviderInlineBlobReader.Limits.DEFAULT.maxCacheWeightBytes());
     stub(BLOB_ID, BYTES);
     FakeTicker ticker = new FakeTicker();
     ProviderInlineBlobReader reader = reader(testLimits(), ticker);
 
     reader.readDataUri(BLOB_ID, MEDIA_TYPE, BYTES.length, GENEROUS_CHARS);
-    ticker.advance(testLimits().cacheTtl().plusSeconds(1));
+    ticker.advance(Duration.ofDays(365));
     reader.readDataUri(BLOB_ID, MEDIA_TYPE, BYTES.length, GENEROUS_CHARS);
 
-    verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
+    verify(contentService, times(1)).readBlobContent(eq(BLOB_ID), anyLong());
   }
 
   @Test
@@ -406,20 +410,13 @@ class ProviderInlineBlobReaderTest {
   @Test
   void rejectsInvalidLimitsAndNullDependencies() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderInlineBlobReader.Limits(0L, 1L, 1L, Duration.ofMinutes(1), 1));
+        IllegalArgumentException.class, () -> new ProviderInlineBlobReader.Limits(0L, 1L, 1L, 1));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderInlineBlobReader.Limits(1L, 0L, 1L, Duration.ofMinutes(1), 1));
+        IllegalArgumentException.class, () -> new ProviderInlineBlobReader.Limits(1L, 0L, 1L, 1));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderInlineBlobReader.Limits(1L, 1L, 0L, Duration.ofMinutes(1), 1));
+        IllegalArgumentException.class, () -> new ProviderInlineBlobReader.Limits(1L, 1L, 0L, 1));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderInlineBlobReader.Limits(1L, 1L, 1L, Duration.ZERO, 1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderInlineBlobReader.Limits(1L, 1L, 1L, Duration.ofMinutes(1), 0));
+        IllegalArgumentException.class, () -> new ProviderInlineBlobReader.Limits(1L, 1L, 1L, 0));
     assertThrows(
         NullPointerException.class,
         () -> new ProviderInlineBlobReader(null, testLimits(), Ticker.systemTicker()));
@@ -683,7 +680,6 @@ class ProviderInlineBlobReaderTest {
     private long maxBlobBytes = 64L * 1024L;
     private long maxCacheEntryWeightBytes = 1024L * 1024L;
     private long maxCacheWeightBytes = 4L * 1024L * 1024L;
-    private Duration cacheTtl = Duration.ofMinutes(5);
     private int maxConcurrentDownloads = 2;
 
     LimitsBuilder maxBlobBytes(long value) {
@@ -708,11 +704,7 @@ class ProviderInlineBlobReaderTest {
 
     ProviderInlineBlobReader.Limits build() {
       return new ProviderInlineBlobReader.Limits(
-          maxBlobBytes,
-          maxCacheEntryWeightBytes,
-          maxCacheWeightBytes,
-          cacheTtl,
-          maxConcurrentDownloads);
+          maxBlobBytes, maxCacheEntryWeightBytes, maxCacheWeightBytes, maxConcurrentDownloads);
     }
   }
 

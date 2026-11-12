@@ -116,7 +116,8 @@ class AgentMessageJsonCodecTest {
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
             + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
             + "\"name\":\"a.txt\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null,"
-            + "\"imageTier\":null}]}",
+            + "\"imageTier\":null,\"originalWidth\":null,\"originalHeight\":null,"
+            + "\"displayWidth\":null,\"displayHeight\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
@@ -266,7 +267,32 @@ class AgentMessageJsonCodecTest {
             + "\"name\":\"photo.png\",\"totalBytes\":null,\"totalLines\":null,"
             + "\"preview\":null,\"imageTier\":"
             + imageTierJsonValue
+            + ",\"originalWidth\":null,\"originalHeight\":null,"
+            + "\"displayWidth\":null,\"displayHeight\":null"
             + "}]}");
+  }
+
+  @Test
+  void resourceDimensionsRoundTripInDurableHistory() {
+    AgentMessage image =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(
+                ResourceMessageContent.media(
+                    UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                    "photo.png",
+                    null,
+                    ImageInputTier.P720,
+                    4032,
+                    3024,
+                    1280,
+                    960)));
+
+    String encoded = codec.encode(image);
+
+    assertTrue(encoded.contains("\"originalWidth\":4032"), encoded);
+    assertTrue(encoded.contains("\"displayHeight\":960"), encoded);
+    assertEquals(image, codec.decode(encoded));
   }
 
   @Test

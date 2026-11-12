@@ -9,6 +9,7 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -168,6 +169,25 @@ class StorageBlobRepositoryIntegrationTest {
     } finally {
       executor.shutdownNow();
     }
+  }
+
+  @Test
+  void durableImageModelViewRoundTripsAndIsUniquePerSourceAndTier() {
+    StorageBlob source = blob(6);
+    StorageBlob view = blob(7);
+    assertThat(repository.retainOrInsertActive(source)).isEqualTo(source.getId());
+    assertThat(repository.retainOrInsertActive(view)).isEqualTo(view.getId());
+
+    StorageBlobRepository.ImageModelView modelView =
+        new StorageBlobRepository.ImageModelView(
+            source.getId(), ImageInputTier.P720, view.getId(), 4000, 2000, 1280, 640);
+
+    assertThat(repository.insertImageModelView(modelView)).isTrue();
+    assertThat(repository.getImageModelView(source.getId(), ImageInputTier.P720))
+        .isEqualTo(modelView);
+    assertThat(repository.insertImageModelView(modelView)).isFalse();
+    assertThat(repository.deleteImageModelViews(source.getId())).containsExactly(view.getId());
+    assertThat(repository.getImageModelView(source.getId(), ImageInputTier.P720)).isNull();
   }
 
   private StorageBlob blob(int seed) {

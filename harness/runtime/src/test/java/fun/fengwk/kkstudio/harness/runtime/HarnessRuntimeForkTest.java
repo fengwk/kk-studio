@@ -115,7 +115,7 @@ class HarnessRuntimeForkTest {
                 new AcceptCommandsTarget.NewThread(
                     baseline.sessionId(), baseline.rootEntryId(), threadId, "branch", false),
                 List.of(userMessageCommand(TestIds.id(1), "hello"))),
-            (session, commands, copiedEntries) -> {
+            (session, commands, copiedEntries, branchSettings) -> {
               // 同一 Session 的分支共享历史，不向 preflight 暴露复制条目。
               assertTrue(copiedEntries.isEmpty());
               return commands;
@@ -525,7 +525,7 @@ class HarnessRuntimeForkTest {
         () ->
             runtime.acceptCommands(
                 command,
-                (session, commands, copiedEntries) -> {
+                (session, commands, copiedEntries, branchSettings) -> {
                   observed.addAll(copiedEntries);
                   throw new IllegalStateException("reject");
                 }));
@@ -539,7 +539,7 @@ class HarnessRuntimeForkTest {
     AcceptedCommands accepted =
         runtime.acceptCommands(
             command,
-            (session, commands, copiedEntries) -> {
+            (session, commands, copiedEntries, branchSettings) -> {
               observed.addAll(copiedEntries);
               return commands;
             });
@@ -550,7 +550,7 @@ class HarnessRuntimeForkTest {
         runtime
             .acceptCommands(
                 command,
-                (session, commands, copiedEntries) -> {
+                (session, commands, copiedEntries, branchSettings) -> {
                   throw new AssertionError("replay must not call preflight");
                 })
             .replayed());

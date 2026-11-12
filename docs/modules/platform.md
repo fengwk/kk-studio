@@ -506,12 +506,12 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
 挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
 `DELETE /uploads/{uploadId}` 返回 204；`{uploadId}`、`{blobId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
-联合：PENDING 携带 `presignedPut`，READY 只携带 `blobId`；两者都带响应时刻的 `expiresAt`（Instant）。
+联合：PENDING 携带 `presignedPut`，READY 携带 `blobId`；两者都回显可空图片事实与响应时刻的 `expiresAt`（Instant）。
 blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
 DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
 
-上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
-内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
+上传使用 reserve → 浏览器 PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
+complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD 与 copy，再短事务绑定 Blob；
 上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
@@ -523,7 +523,9 @@ DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fen
 
 [`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
 用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
-`kk-studio.storage.media` 配置。
+`kk-studio.storage.media` 配置。用户上传的已缩放图片将原始尺寸与存储尺寸保存在 durable Resource 中，Provider 读取时直接发送存储字节。图片前的英文标签包含 `resource://files/<uuid>`、原始尺寸和显示尺寸；仅当图像实际缩放时提示将坐标映射回原图。插件原图保持不变；首次需要缩放时按原图与档位生成独立 Blob，并在 `storage_image_model_view` 持久化原图、档位、模型视图 Blob 与尺寸。模型视图由该关联持有引用，原图最后一个引用释放时同事务删除关联并释放模型视图。被移到用户消息的工具图片以 `Tool call <toolCallId> image:` 标出来源。
+
+`storageMedia.maxImagesPerRequest` 默认 20。接受新用户消息时，图片数量取用户设置与所选模型协议已知上限的较小值；超出的图片在写入历史前截去，并附加模型可见的英文说明。该限制只处理当前新消息，不删减历史中的图片；跨历史累计超限由压缩流程处理。Provider attempt 读取缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期；持久模型视图不会因缓存淘汰而重算。
 
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。

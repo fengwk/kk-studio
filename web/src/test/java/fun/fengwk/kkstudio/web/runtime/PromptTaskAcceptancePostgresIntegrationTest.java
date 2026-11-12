@@ -248,7 +248,7 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private static AcceptancePreflight failIfPromptPreflightRuns() {
-    return (session, commands, copiedEntries) -> {
+    return (session, commands, copiedEntries, branchSettings) -> {
       throw new IllegalStateException("a replayed prompt must not run its acceptance preflight");
     };
   }

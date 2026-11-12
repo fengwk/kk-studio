@@ -24,4 +24,6 @@ public class SystemSettingsStorageMediaDTO {
   private Long temporaryResourceTtlSeconds;
 
   private Long temporaryResourceCleanupIntervalSeconds;
+
+  private Integer maxImagesPerRequest;
 }

@@ -164,7 +164,7 @@ public record SystemSettings(
     }
   }
 
-  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理、请求时图片档位与受控临时资源的非敏感预算。 */
+  /** storageMedia section：上传/S3 预签名、Canvas 媒体处理、请求时图片档位/数量与受控临时资源预算。 */
   public record StorageMedia(
       long uploadExpiresSeconds,
       long s3PresignDefaultExpiresSeconds,
@@ -174,7 +174,8 @@ public record SystemSettings(
       int thumbnailQuality,
       ImageInputTier imageTier,
       long temporaryResourceTtlSeconds,
-      long temporaryResourceCleanupIntervalSeconds) {
+      long temporaryResourceCleanupIntervalSeconds,
+      int maxImagesPerRequest) {
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(
@@ -200,6 +201,8 @@ public record SystemSettings(
       SystemSettingsValidation.requirePositive(
           temporaryResourceCleanupIntervalSeconds,
           "storageMedia.temporaryResourceCleanupIntervalSeconds");
+      SystemSettingsValidation.requirePositive(
+          maxImagesPerRequest, "storageMedia.maxImagesPerRequest");
     }
   }
 

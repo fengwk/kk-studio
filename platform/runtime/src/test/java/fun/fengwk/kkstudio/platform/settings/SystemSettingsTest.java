@@ -279,7 +279,8 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
-                base.temporaryResourceCleanupIntervalSeconds()));
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -292,7 +293,8 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
-                base.temporaryResourceCleanupIntervalSeconds()));
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -305,7 +307,28 @@ class SystemSettingsTest {
                 101,
                 base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
-                base.temporaryResourceCleanupIntervalSeconds()));
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()));
+  }
+
+  @Test
+  void maxImagesPerRequestDefaultsToTwentyAndMustBePositive() {
+    SystemSettings.StorageMedia base = SystemSettingsTestFixture.DEFAULT.storageMedia();
+    assertEquals(20, base.maxImagesPerRequest());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.StorageMedia(
+                base.uploadExpiresSeconds(),
+                base.s3PresignDefaultExpiresSeconds(),
+                base.s3PresignMaxExpiresSeconds(),
+                base.canvasMediaProcessTimeoutMillis(),
+                base.thumbnailMaxDimension(),
+                base.thumbnailQuality(),
+                base.imageTier(),
+                base.temporaryResourceTtlSeconds(),
+                base.temporaryResourceCleanupIntervalSeconds(),
+                0));
   }
 
   @Test
@@ -323,7 +346,8 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 base.imageTier(),
                 0L,
-                base.temporaryResourceCleanupIntervalSeconds()));
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -336,7 +360,8 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 base.imageTier(),
                 base.temporaryResourceTtlSeconds(),
-                0L));
+                0L,
+                base.maxImagesPerRequest()));
   }
 
   /** 图片档位是 required 引用：null 直接失败，未知 wire 名称在 codec 边界拒绝。 */
@@ -355,7 +380,8 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 null,
                 base.temporaryResourceTtlSeconds(),
-                base.temporaryResourceCleanupIntervalSeconds()));
+                base.temporaryResourceCleanupIntervalSeconds(),
+                base.maxImagesPerRequest()));
   }
 
   @Test

@@ -65,6 +65,34 @@ class StorageBlobManagerTest {
   }
 
   @Test
+  void deletingSourceReleasesDurableModelViewOwnersInTheSameTransaction() {
+    UUID sourceBlobId = UUID.randomUUID();
+    UUID viewBlobId = UUID.randomUUID();
+    StorageBlobRepository repository = deletingRepository(sourceBlobId);
+    when(repository.deleteImageModelViews(sourceBlobId)).thenReturn(List.of(viewBlobId));
+    when(repository.releaseOnce(viewBlobId)).thenReturn(true);
+    StorageBlob activeView = new StorageBlob();
+    activeView.setId(viewBlobId);
+    activeView.setRefCount(1L);
+    activeView.setState(StorageBlobState.ACTIVE);
+    when(repository.getById(viewBlobId)).thenReturn(activeView);
+    StorageBlobManager manager =
+        newManager(
+            repository,
+            mock(S3StorageService.class),
+            mock(S3PresignService.class),
+            provider(mock(StorageMaintenanceWakeup.class)));
+    TransactionSynchronizationManager.initSynchronization();
+
+    assertTrue(manager.release(sourceBlobId));
+
+    InOrder order = inOrder(repository);
+    order.verify(repository).releaseOnce(sourceBlobId);
+    order.verify(repository).deleteImageModelViews(sourceBlobId);
+    order.verify(repository).releaseOnce(viewBlobId);
+  }
+
+  @Test
   void rolledBackReleaseDoesNotWake() {
     UUID blobId = UUID.randomUUID();
     StorageMaintenanceWakeup wakeup = mock(StorageMaintenanceWakeup.class);
