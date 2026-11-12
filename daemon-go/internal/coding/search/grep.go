@@ -200,6 +200,72 @@ func requiredLiteralPattern(pattern string) []byte {
 	return requiredLiteral(ast)
 }
 
+// crossLinePattern mirrors Grep's compiled flags when deciding whether the pattern can span lines.
+func crossLinePattern(pattern string, literal, ignoreCase bool) bool {
+	if literal {
+		return bytes.Contains([]byte(pattern), []byte{'\n'})
+	}
+	body := pattern
+	flags := "(?m)"
+	if ignoreCase {
+		flags = "(?im)"
+	}
+	ast, err := syntax.Parse(flags+"(?:"+body+")", syntax.Perl)
+	return err == nil && hasCrossLineOperator(ast)
+}
+
+func hasCrossLineOperator(ast *syntax.Regexp) bool {
+	if ast.Op == syntax.OpAnyChar {
+		return true
+	}
+	if ast.Op == syntax.OpLiteral {
+		for _, r := range ast.Rune {
+			if r == '\n' {
+				return true
+			}
+		}
+	}
+	for _, sub := range ast.Sub {
+		if hasCrossLineOperator(sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func grepMultilineFile(data []byte, path string, re *regexp.Regexp, maxMatches int) ([]string, int) {
+	if len(data) == 0 || binary(data) {
+		return nil, 0
+	}
+	normalized := stripCRLF(data)
+	locations := re.FindAllIndex(normalized, -1)
+	lines := &lineCollector{data: normalized, path: path, end: lineEnd(normalized, 0), number: 1, lastOutput: -1}
+	seen := make(map[int]struct{})
+	for matchIndex, loc := range locations {
+		if maxMatches < 0 || maxMatches > 0 && matchIndex >= maxMatches {
+			break
+		}
+		if loc[0] == loc[1] {
+			continue
+		}
+		start := loc[0]
+		end := loc[1] - 1
+		for pos := start; pos <= end; {
+			lineStart, _, _ := lines.bounds(pos)
+			if _, ok := seen[lineStart]; !ok {
+				lines.add(pos)
+				seen[lineStart] = struct{}{}
+			}
+			next := bytes.IndexByte(normalized[pos:end+1], '\n')
+			if next < 0 {
+				break
+			}
+			pos += next + 1
+		}
+	}
+	return lines.out, len(locations)
+}
+
 // requiredLiteral returns a guaranteed literal fragment from an RE2 syntax tree.
 func requiredLiteral(r *syntax.Regexp) []byte {
 	switch r.Op {

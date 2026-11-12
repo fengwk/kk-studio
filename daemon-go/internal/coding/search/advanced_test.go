@@ -291,6 +291,99 @@ func TestRegexCRLFPreservesLineAnchorsAndOutput(t *testing.T) {
 	}
 }
 
+// COD-N-010: crossing behavior is inferred only from syntax that can cross a newline.
+func TestCrossLinePatternDetection(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		literal bool
+		want    bool
+	}{
+		{"actual-newline", "foo\nbar", false, true},
+		{"newline-escape", `foo\nbar`, false, true},
+		{"backslash-and-n", `foo\\nbar`, false, false},
+		{"whitespace-class", `foo\sbar`, false, false},
+		{"dotall", `(?s).`, false, true},
+		{"literal-newline", "foo\nbar", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := crossLinePattern(tc.pattern, tc.literal, false); got != tc.want {
+				t.Fatalf("crossLinePattern(%q, literal=%v)=%v want=%v", tc.pattern, tc.literal, got, tc.want)
+			}
+		})
+	}
+}
+
+// COD-T-174 COD-T-240: a cross-line match prints every covered line, while limit counts matches.
+func TestMultilineGrepOutputAndMatchLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("a\nb\na\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := GrepContext(context.Background(), root, `a\nb`, false, false, "", 1)
+	want := []string{"text.txt:1:a", "text.txt:2:b"}
+	if err != nil || !reflect.DeepEqual(outcome.Results, want) || !outcome.LimitReached || outcome.StopReason != "LIMIT" {
+		t.Fatalf("outcome=%#v err=%v want results=%v and match limit", outcome, err, want)
+	}
+	literal, err := GrepContext(context.Background(), root, "a\nb", true, false, "", 0)
+	if err != nil || !reflect.DeepEqual(literal.Results, []string{"text.txt:1:a", "text.txt:2:b", "text.txt:3:a", "text.txt:4:b"}) {
+		t.Fatalf("literal multiline results=%v err=%v", literal.Results, err)
+	}
+}
+
+// COD-T-174: a multiline scan skips files over the bounded whole-file size.
+func TestMultilineGrepSkipsOversizeFile(t *testing.T) {
+	root := t.TempDir()
+	file, err := os.Create(filepath.Join(root, "large.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(64*1024*1024 + 1); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := GrepContext(context.Background(), root, `foo\nbar`, false, false, "", 0)
+	if err != nil || !reflect.DeepEqual(outcome.Skipped, []string{"large.txt"}) {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+}
+
+// COD-T-174: multiline matching normalizes CRLF without emitting carriage returns.
+func TestMultilineGrepCRLF(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "crlf.txt"), []byte("foo\r\nbar\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := GrepContext(context.Background(), root, `foo\nbar`, false, false, "", 0)
+	want := []string{"crlf.txt:1:foo", "crlf.txt:2:bar"}
+	if err != nil || !reflect.DeepEqual(outcome.Results, want) {
+		t.Fatalf("results=%v err=%v want=%v", outcome.Results, err, want)
+	}
+}
+
+// COD-T-174: a deadline during a file read retains completed multiline results.
+func TestMultilineGrepTimeoutPreservesPartialResults(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("ignored"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outcome, err := grepContextWithReader(context.Background(), root, `a\nb`, false, false, "", 10, func(_ context.Context, path string) ([]byte, func(), bool, error) {
+		if filepath.Base(path) == "a.txt" {
+			return []byte("a\nb\n"), func() {}, false, nil
+		}
+		return []byte("a\nb\n"), func() {}, true, nil
+	})
+	want := []string{"a.txt:1:a", "a.txt:2:b", "b.txt:1:a", "b.txt:2:b"}
+	if err != nil || !outcome.Incomplete || outcome.StopReason != "TIMED_OUT" || !reflect.DeepEqual(outcome.Results, want) {
+		t.Fatalf("outcome=%#v err=%v want=%v", outcome, err, want)
+	}
+}
+
 // COD-N-012
 func TestRegexRequiredLiteralExtraction(t *testing.T) {
 	for _, test := range []struct {

@@ -139,8 +139,8 @@ func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	}
 }
 
-// COD-F-011 COD-F-012 COD-T-172 COD-T-173 COD-T-181 COD-T-184: include filtering, direct files, binary errors, and Git metadata are asserted.
-func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
+// COD-F-011 COD-F-012 COD-T-172 COD-T-173 COD-T-181 COD-T-184: glob filtering, direct files, binary errors, and Git metadata are asserted.
+func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -156,10 +156,10 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	args := map[string]any{"path": root, "pattern": "x", "literal": true, "include": "*.ts"}
+	args := map[string]any{"path": root, "pattern": "x", "literal": true, "glob": "*.ts"}
 	included := invokeCoding(t, Provider{}, "fs.grep", args, nil)
 	if included.Error || included.Contents[0].Text != "keep.ts:1:x" {
-		t.Fatalf("include result=%#v", included)
+		t.Fatalf("glob result=%#v", included)
 	}
 
 	file := filepath.Join(root, "keep.ts")
@@ -167,7 +167,7 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": file, "pattern": "x", "literal": true, "include": "*.js"}, nil)
+	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": file, "pattern": "x", "literal": true, "glob": "*.js"}, nil)
 	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(resolvedFile)+":1:x" {
 		t.Fatalf("direct-file result=%#v", direct)
 	}
@@ -186,6 +186,39 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	binaryResult := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": binaryFile, "pattern": "x", "literal": true}, nil)
 	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "ripgrep failed while searching") {
 		t.Fatalf("direct binary result=%#v", binaryResult)
+	}
+}
+
+// COD-T-043: skipped multiline files remain visible in the standard search summary.
+func TestFormatSearchSkippedPathSummary(t *testing.T) {
+	dataDir := t.TempDir()
+	for _, tc := range []struct {
+		name    string
+		skipped []string
+		want    string
+	}{
+		{"single", []string{"large.txt"}, "[1 path(s) could not be searched: large.txt]"},
+		{"truncated", []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}, "[11 path(s) could not be searched: a, b, c, d, e, f, g, h, i, j, ...]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := formatSearchResult(runtime.CapabilityCall{InvocationID: tc.name}, dataDir, search.SearchOutcome{Skipped: tc.skipped}, 10, "No matches found", "matches")
+			if result.Error || result.Contents[0].Text != tc.want {
+				t.Fatalf("result=%#v want text=%q", result, tc.want)
+			}
+		})
+	}
+}
+
+// COD-T-174: removed grep argument names are rejected as unknown arguments.
+func TestGrepRejectsRemovedArguments(t *testing.T) {
+	root := t.TempDir()
+	for _, argument := range []string{"multiline", "include"} {
+		result := invokeCoding(t, Provider{}, "fs.grep", map[string]any{
+			"path": root, "pattern": "x", argument: true,
+		}, nil)
+		if !result.Error || !strings.Contains(result.Contents[0].Text, "unknown argument: "+argument) {
+			t.Errorf("argument %q result=%#v", argument, result)
+		}
 	}
 }
 

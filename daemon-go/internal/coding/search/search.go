@@ -24,6 +24,7 @@ import (
 // SearchOutcome contains deterministic results and the reason an incomplete scan stopped.
 type SearchOutcome struct {
 	Results      []string
+	Skipped      []string
 	Incomplete   bool
 	StopReason   string
 	LimitReached bool
@@ -61,8 +62,9 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 	}
 	var re *regexp.Regexp
 	var required []byte
+	multiline := crossLinePattern(pattern, literal, ignoreCase)
 	caseFoldRegex := literal && ignoreCase && !ascii(pattern)
-	if !literal || caseFoldRegex {
+	if !literal || caseFoldRegex || multiline {
 		body := pattern
 		if literal {
 			body = regexp.QuoteMeta(pattern)
@@ -102,6 +104,10 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 		if directFile {
 			display = filepath.ToSlash(root)
 		}
+		if multiline {
+			matches, _ := grepMultilineFile(data, display, re, 0)
+			return matches
+		}
 		return grepFile(data, display, pattern, literal, ignoreCase, re, required)
 	})
 	flat := flatten(results)
@@ -112,22 +118,23 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 }
 
 // GrepContext processes files in sorted order and never opens a later file after reaching limit.
-func GrepContext(ctx context.Context, root, pattern string, literal, ignoreCase bool, include string, limit int) (SearchOutcome, error) {
-	return grepContextWithReader(ctx, root, pattern, literal, ignoreCase, include, limit, readPooledContext)
+func GrepContext(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int) (SearchOutcome, error) {
+	return grepContextWithReader(ctx, root, pattern, literal, ignoreCase, glob, limit, readPooledContext)
 }
 
-func grepContextWithReader(ctx context.Context, root, pattern string, literal, ignoreCase bool, include string, limit int, read func(context.Context, string) ([]byte, func(), bool, error)) (SearchOutcome, error) {
+func grepContextWithReader(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int, read func(context.Context, string) ([]byte, func(), bool, error)) (SearchOutcome, error) {
 	if limit < 0 {
 		return SearchOutcome{}, errors.New("limit cannot be negative")
 	}
-	files, timedOut, _, err := findWithContext(ctx, root, include, 0, min(runtime.NumCPU(), 8))
+	files, timedOut, _, err := findWithContext(ctx, root, glob, 0, min(runtime.NumCPU(), 8))
 	if err != nil {
 		return SearchOutcome{}, err
 	}
 	var re *regexp.Regexp
 	var required []byte
+	multiline := crossLinePattern(pattern, literal, ignoreCase)
 	caseFoldRegex := literal && ignoreCase && !ascii(pattern)
-	if !literal || caseFoldRegex {
+	if !literal || caseFoldRegex || multiline {
 		body := pattern
 		if literal {
 			body = regexp.QuoteMeta(pattern)
@@ -161,6 +168,7 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 	if timedOut {
 		outcome.StopReason = "TIMED_OUT"
 	}
+	multilineMatchCount := 0
 	for _, rel := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if errors.Is(ctxErr, context.DeadlineExceeded) {
@@ -170,27 +178,55 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			}
 			return outcome, ctxErr
 		}
-		data, release, readTimedOut, readErr := read(ctx, searchFilePath(absoluteRoot, rel, directFile))
+		filePath := searchFilePath(absoluteRoot, rel, directFile)
+		display := filepath.ToSlash(rel)
+		if directFile {
+			display = filepath.ToSlash(absoluteRoot)
+		}
+		if multiline {
+			info, statErr := os.Stat(filePath)
+			if statErr != nil || info.Size() > 64*1024*1024 {
+				outcome.Skipped = append(outcome.Skipped, display)
+				continue
+			}
+		}
+		data, release, readTimedOut, readErr := read(ctx, filePath)
 		if readErr != nil {
 			if errors.Is(readErr, context.Canceled) {
 				return outcome, readErr
 			}
 			continue
 		}
-		display := filepath.ToSlash(rel)
-		if directFile {
-			display = filepath.ToSlash(absoluteRoot)
-		}
 		if directFile && binary(data) {
 			release()
 			return outcome, errors.New("directly specified file is binary")
 		}
-		matches := grepFile(data, display, pattern, literal, ignoreCase, re, required)
-		release()
-		limitReached := limit > 0 && len(matches) >= limit-len(outcome.Results)
-		if limitReached {
-			matches = matches[:limit-len(outcome.Results)]
+		var matches []string
+		limitReached := false
+		if multiline {
+			maxMatches := 0
+			if limit > 0 {
+				maxMatches = limit - multilineMatchCount
+				if maxMatches <= 0 {
+					maxMatches = -1
+				}
+			}
+			var matchCount int
+			matches, matchCount = grepMultilineFile(data, display, re, maxMatches)
+			if limit > 0 && matchCount > max(0, limit-multilineMatchCount) {
+				limitReached = true
+				multilineMatchCount = limit
+			} else {
+				multilineMatchCount += matchCount
+			}
+		} else {
+			matches = grepFile(data, display, pattern, literal, ignoreCase, re, required)
+			limitReached = limit > 0 && len(matches) >= limit-len(outcome.Results)
+			if limitReached {
+				matches = matches[:limit-len(outcome.Results)]
+			}
 		}
+		release()
 		outcome.Results = append(outcome.Results, matches...)
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return outcome, context.Canceled
@@ -200,7 +236,7 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			outcome.StopReason = "TIMED_OUT"
 			break
 		}
-		if limitReached || limit > 0 && len(outcome.Results) >= limit {
+		if limitReached || !multiline && limit > 0 && len(outcome.Results) >= limit {
 			outcome.LimitReached = true
 			if outcome.StopReason == "" {
 				outcome.StopReason = "LIMIT"

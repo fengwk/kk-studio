@@ -34,7 +34,6 @@ type arguments struct {
 	Preview      bool   `json:"preview"`
 	Pattern      string `json:"pattern"`
 	Glob         string `json:"glob"`
-	Include      string `json:"include"`
 	Limit        int    `json:"limit"`
 	Offset       int    `json:"offset"`
 	ColumnOffset int    `json:"column_offset"`
@@ -408,6 +407,15 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(call.Arguments, &raw); err != nil {
+		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
+	}
+	for _, removed := range []string{"multiline", "include"} {
+		if _, exists := raw[removed]; exists {
+			return errorResult(call.InvocationID, rejectInput("unknown argument: "+removed)), nil
+		}
+	}
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -418,7 +426,7 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
-	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Include, args.Limit)
+	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
@@ -431,10 +439,20 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) runtime.CapabilityResult {
-	if len(outcome.Results) == 0 && !outcome.Incomplete && !outcome.LimitReached {
+	if len(outcome.Results) == 0 && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
 		return textResult(call.InvocationID, emptyText)
 	}
 	text := strings.Join(outcome.Results, "\n")
+	if len(outcome.Skipped) > 0 {
+		describe := strings.Join(outcome.Skipped[:min(len(outcome.Skipped), 10)], ", ")
+		if len(outcome.Skipped) > 10 {
+			describe += ", ..."
+		}
+		if text != "" {
+			text += "\n\n"
+		}
+		text += fmt.Sprintf("[%d path(s) could not be searched: %s]", len(outcome.Skipped), describe)
+	}
 	if outcome.LimitReached {
 		if text != "" {
 			text += "\n\n"
