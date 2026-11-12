@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -32,7 +33,7 @@ const (
 	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
 )
 
-// ExpectedFile identifies a user-approved file snapshot for fs.edit.
+// ExpectedFile identifies a user-approved file snapshot for a write or edit.
 type ExpectedFile struct {
 	Path   string
 	SHA256 string
@@ -65,6 +66,24 @@ type ResourceUploader interface {
 	Upload(ctx context.Context, invocationID string, content ResultContent) (ResultContent, error)
 }
 
+// ResourceUploadError carries an explicit cleanup fact across the uploader boundary. Cause is
+// retained for local inspection but is deliberately excluded from Error to avoid leaking tickets.
+type ResourceUploadError struct {
+	Stage            string
+	Category         string
+	CleanupConfirmed bool
+	Cause            error
+}
+
+func (e *ResourceUploadError) Error() string {
+	if e.Category == "ticket-failed" {
+		return "resource upload ticket failed"
+	}
+	return fmt.Sprintf("resource upload failed during %s (%s); cleanupConfirmed=%t", e.Stage, e.Category, e.CleanupConfirmed)
+}
+
+func (e *ResourceUploadError) Unwrap() error { return e.Cause }
+
 // Progress reports a non-terminal capability result to runtime.
 type Progress func(CapabilityResult) error
 
@@ -74,6 +93,7 @@ type CapabilityContext struct {
 	Processes            native.Supervisor
 	Resources            ResourceUploader
 	Progress             Progress
+	FileChanged          func(string)
 	ConfirmExecutionExit func()
 }
 

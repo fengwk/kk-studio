@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
@@ -84,7 +85,7 @@ func NewEnvironmentConfigRuntime(options EnvironmentConfigOptions) (*Environment
 		return nil, errors.New("environment config runtime requires initial paths and a preparer")
 	}
 	if options.Cache == nil {
-		options.Cache = FilePrivateCacheWriter{}
+		options.Cache = native.PrivateConfigCacheWriter{}
 	}
 	if options.Status == nil {
 		options.Status = NewStatusTracker()

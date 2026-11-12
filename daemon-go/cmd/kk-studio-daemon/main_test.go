@@ -12,6 +12,27 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
+// NAT-N-001, NAT-N-002
+func TestRunInternalCommand_DispatchesNativeHelpers(t *testing.T) {
+	for _, args := range [][]string{{"__native-helper"}, {"__lock-helper"}} {
+		code, handled := runInternalCommand(args)
+		if !handled {
+			t.Fatalf("command %q was not dispatched", args[0])
+		}
+		if code != 2 {
+			t.Fatalf("command %q exit code = %d, want invalid-argument code 2", args[0], code)
+		}
+	}
+}
+
+func TestRunInternalCommand_LeavesPublicCommandsAlone(t *testing.T) {
+	for _, args := range [][]string{nil, {"--version"}} {
+		if code, handled := runInternalCommand(args); handled || code != 0 {
+			t.Fatalf("command %q result = %d, %t", args, code, handled)
+		}
+	}
+}
+
 // RUN-T-135 verifies that the single-argument help/version commands are side-effect free.
 func TestInformationCommands(t *testing.T) {
 	for _, tc := range []struct{ arg, want string }{{"--help", "Usage:"}, {"--version", "kk-studio-daemon 1.0.0"}, {"-h", "Usage:"}} {

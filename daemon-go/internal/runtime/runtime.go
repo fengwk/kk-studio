@@ -36,6 +36,7 @@ type RuntimeOptions struct {
 	MaxReconnectDelay        time.Duration
 	Capabilities             map[string]CapabilityExecutor
 	Processes                native.Supervisor
+	FileChanged              func(string)
 	Resources                ResourceUploader
 	ApplyConfig              ConfigApplier
 	EnvironmentConfig        *EnvironmentConfigRuntime
@@ -815,7 +816,7 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 		call.ExpectedFile = &ExpectedFile{Path: f.GetPath(), SHA256: f.GetSha256()}
 	}
 	resources := r.options.Resources
-	capctx := CapabilityContext{Config: snapshot, Processes: r.options.Processes, Resources: resources, Progress: func(progress CapabilityResult) error { return r.sendProgress(id, progress) }, ConfirmExecutionExit: func() { r.noteExecutionExit(id) }}
+	capctx := CapabilityContext{Config: snapshot, Processes: r.options.Processes, FileChanged: r.options.FileChanged, Resources: resources, Progress: func(progress CapabilityResult) error { return r.sendProgress(id, progress) }, ConfirmExecutionExit: func() { r.noteExecutionExit(id) }}
 	go r.execute(callCtx, id, call, executor, capctx, budget, active)
 	return nil
 }

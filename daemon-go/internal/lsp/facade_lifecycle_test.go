@@ -1,0 +1,122 @@
+package lsp
+
+import (
+	"testing"
+	"time"
+
+	"github.com/fengwk/kk-studio/daemon/internal/config"
+)
+
+// LSP-T-038 keeps an acquired generation alive until its calls release it.
+func TestFacade_GenerationSwap(t *testing.T) {
+	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
+	prepared, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing"}, Extensions: []string{".go"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = prepared.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	old := facade.current
+	_, release := old.acquire()
+	disabled, err := facade.Prepare(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = disabled.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	if old.service.Pool.closing {
+		t.Fatal("old generation closed while a call was still acquired")
+	}
+	if got := facade.Support("/tmp/a.go"); got.Supported || got.Available || got.Language != nil {
+		t.Fatalf("disabled support = %#v", got)
+	}
+	facade.FileChanged("/tmp/a.go")
+	if facade.ActiveClientCount() != 0 {
+		t.Fatal("disabled facade reports active clients")
+	}
+	release()
+	select {
+	case <-old.done:
+	case <-time.After(time.Second):
+		t.Fatal("retired generation did not close after its call finished")
+	}
+	if old.service.Pool.Close() != nil {
+		t.Fatal("repeated close returned an error")
+	}
+	if err = facade.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// LSP-F-026 verifies publish swaps subsequent generation acquisitions while an old lease stays alive.
+func TestFacade_PublishRoutesGenerations(t *testing.T) {
+	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
+	first, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing-go"}, Extensions: []string{".go"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	old := facade.current
+	oldLease, releaseOld := old.acquire()
+	if oldLease != old.service || oldLease == nil {
+		t.Fatal("old generation did not provide its service")
+	}
+	second, err := facade.Prepare([]config.LSPServerConfig{{ID: "java", Command: []string{"missing-java"}, Extensions: []string{".java"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	if facade.current == old || facade.current.service == old.service {
+		t.Fatal("publish did not install a new service generation")
+	}
+	if _, ok := facade.current.service.Discovery.Server("file.java"); !ok {
+		t.Fatal("new service generation did not publish the java server")
+	}
+	if old.service.Pool.closing {
+		t.Fatal("old generation closed while its lease was active")
+	}
+	releaseOld()
+	select {
+	case <-old.done:
+	case <-time.After(time.Second):
+		t.Fatal("old generation was not retired after releasing its lease")
+	}
+	if err := facade.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// LSP-T-038 validates prepared-generation retirement and rejects duplicate configurations.
+func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
+	var nilGeneration *PreparedGeneration
+	if err := nilGeneration.Publish(); err == nil || err.Error() != "invalid LSP generation" {
+		t.Fatalf("nil generation publish error = %v", err)
+	}
+	if err := nilGeneration.Retire(); err != nil {
+		t.Fatalf("nil generation retire error = %v", err)
+	}
+
+	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
+	if err := facade.Update([]config.LSPServerConfig{{ID: "same", Command: []string{"a"}}, {ID: "same", Command: []string{"b"}}}); err == nil || err.Error() != "duplicate lsp server id: same" {
+		t.Fatalf("duplicate update error = %v", err)
+	}
+	prepared, err := facade.Prepare(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = prepared.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err = prepared.Retire(); err != nil {
+		t.Fatal(err)
+	}
+	if err = facade.Close(); err != nil {
+		t.Fatal(err)
+	}
+}

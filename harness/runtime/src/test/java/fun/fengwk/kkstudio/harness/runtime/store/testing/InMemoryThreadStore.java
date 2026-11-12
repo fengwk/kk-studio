@@ -137,13 +137,6 @@ final class InMemoryThreadStore implements ThreadStore {
   }
 
   @Override
-  public List<ThreadState> listSubagents(UUID parentThreadId) {
-    return listChildren(parentThreadId).stream()
-        .filter(thread -> thread.kind() == ThreadKind.SUBAGENT)
-        .toList();
-  }
-
-  @Override
   public void update(ThreadState thread) {
     tx.checkOpen();
     Objects.requireNonNull(thread, "thread");

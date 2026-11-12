@@ -14,20 +14,17 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
 import java.util.List;
-import java.util.UUID;
 
 /** 实际能力驱动 system prompt 的段落顺序、出现条件与黄金文件测试。 */
 class AgentPromptComposerTest {
 
   private static final int DEFAULT_MAX_TURNS = 7;
-  private static final UUID ROOT_SESSION = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
-  private static final UUID THREAD = UUID.fromString("00000000-0000-0000-0000-0000000000b2");
   private static final String GOLDEN_ROOT = "fun/fengwk/kkstudio/platform/harness/task/prompts/";
 
   private final AgentPromptComposer composer =
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
-  /** 有环境且注入 read/edit/grep/bash：绝对路径行、vfs 行、环境事实、技能与子 Agent 全部出现。 */
+  /** 有环境且注入 read/edit/grep/bash：Environment 路径说明、环境事实、技能与子 Agent 全部出现。 */
   @Test
   void rendersEnvironmentWithAllTools() {
     AgentPromptInput input =
@@ -41,7 +38,7 @@ class AgentPromptComposerTest {
     assertGolden("environment-all-tools.golden", input);
   }
 
-  /** 无环境时只出现 vfs 路径行；环境段使用 none、会话 tmp 与会话目录。 */
+  /** 无 Environment 时读取工具仍可见，本地路径说明明确要求选择 Environment。 */
   @Test
   void rendersWithoutEnvironment() {
     AgentPromptInput input =
@@ -50,7 +47,7 @@ class AgentPromptComposerTest {
     assertGolden("no-environment.golden", input);
   }
 
-  /** 只读 Agent：记忆段不出现 Keep them short，vfs 行不出现 Only session_dir is writable，且无 temp_dir。 */
+  /** 只读 Agent 不出现写入说明，且不注入与当前能力无关的 temp_dir。 */
   @Test
   void rendersReadOnlyAgentWithoutWriteInstructions() {
     AgentPromptInput input =
@@ -58,7 +55,6 @@ class AgentPromptComposerTest {
 
     String rendered = assertGolden("read-only.golden", input);
     assertFalse(rendered.contains("Keep them short and current"), rendered);
-    assertFalse(rendered.contains("Only session_dir is writable"), rendered);
     assertFalse(rendered.contains("<temp_dir>"), rendered);
   }
 
@@ -91,9 +87,9 @@ class AgentPromptComposerTest {
     assertTrue(rendered.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), rendered);
   }
 
-  /** 特殊字符：XML 字段转义；MEMORY-<环境名>.md 在正文里保持环境名原样。 */
+  /** 特殊字符在 prompt XML 中正确转义。 */
   @Test
-  void escapesXmlFieldsAndKeepsEnvironmentMemoryNameVerbatim() {
+  void escapesXmlFieldsAndPreservesEnvironmentFacts() {
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
             TestEnvironments.environmentId("env-special"),
@@ -112,7 +108,6 @@ class AgentPromptComposerTest {
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
     String rendered = assertGolden("special-characters.golden", input);
-    assertTrue(rendered.contains("MEMORY-nas<&>.md"), rendered);
     assertTrue(rendered.contains("<name>nas&lt;&amp;&gt;</name>"), rendered);
     assertTrue(rendered.contains("<user>dev&amp;user</user>"), rendered);
     assertTrue(rendered.contains("<home>/home/&lt;dev&gt;</home>"), rendered);
@@ -148,18 +143,6 @@ class AgentPromptComposerTest {
         rendered);
   }
 
-  /** 子 Agent 的 session_dir/thread_dir 必须按执行根会话生成。 */
-  @Test
-  void usesExecutionRootSessionForDirectories() {
-    AgentPromptInput input = input(null, none(), List.of("read"), List.of(), List.of());
-
-    String rendered = composer.compose(input);
-    assertTrue(rendered.contains("<session_dir>vfs:/sessions/" + ROOT_SESSION + "/</session_dir>"));
-    assertTrue(
-        rendered.contains(
-            "<thread_dir>vfs:/sessions/" + ROOT_SESSION + "/threads/" + THREAD + "/</thread_dir>"));
-  }
-
   /** 工具名与列表不可为空引用。 */
   @Test
   void rejectsNullInput() {
@@ -172,8 +155,7 @@ class AgentPromptComposerTest {
       List<String> toolNames,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagents) {
-    return new AgentPromptInput(
-        agentInstructions, environment, ROOT_SESSION, THREAD, toolNames, skills, subagents);
+    return new AgentPromptInput(agentInstructions, environment, toolNames, skills, subagents);
   }
 
   private static CurrentEnvironmentContext none() {

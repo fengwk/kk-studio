@@ -23,6 +23,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 const (
@@ -137,7 +138,7 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 	if err != nil {
 		return Outcome{}, errors.New("cannot create private update job directory")
 	}
-	if err = os.Chmod(work, 0700); err != nil {
+	if err = native.EnsurePrivateDirectory(work); err != nil {
 		if cleanupErr := os.RemoveAll(work); cleanupErr != nil {
 			return Outcome{}, errors.Join(errors.New("cannot protect update job directory"), errInstallerCleanup, cleanupErr)
 		}
@@ -171,7 +172,7 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 		jobRegistered = true
 	} else {
 		runnerPath := filepath.Join(work, "run.sh")
-		if err := writePrivateFile(runnerPath, []byte(unixRunner)); err != nil {
+		if err := native.WritePrivateFile(runnerPath, []byte(unixRunner)); err != nil {
 			return Outcome{}, errors.New("cannot prepare private update job")
 		}
 		invocation := unixInvocation(work, installer, environmentRoot, installerConfig, command.TargetVersion, command.OperationID, r.options.Home, r.options.Environment)
@@ -206,7 +207,7 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 			if err := requireRegularFile(filepath.Join(work, "ready")); err != nil {
 				return errors.New("update job is no longer ready")
 			}
-			if err := writePrivateFile(filepath.Join(work, "permit"), nil); err != nil {
+			if err := native.WritePrivateFile(filepath.Join(work, "permit"), nil); err != nil {
 				return errors.New("update job permit could not be released")
 			}
 			permitReleased = true
@@ -355,37 +356,8 @@ func (r *InstallerRunner) downloadInstaller(ctx context.Context, source, destina
 	if body.Len() == 0 {
 		return errors.New("official installer is empty")
 	}
-	if err := writePrivateFile(destination, body.Bytes()); err != nil {
+	if err := native.WritePrivateFile(destination, body.Bytes()); err != nil {
 		return errors.New("official installer could not be stored privately")
-	}
-	return nil
-}
-
-func writePrivateFile(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	if err := file.Chmod(0600); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return err
-	}
-	written, err := file.Write(data)
-	if err == nil && written != len(data) {
-		err = io.ErrShortWrite
-	}
-	if err == nil {
-		err = file.Sync()
-	}
-	closeErr := file.Close()
-	if err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	if closeErr != nil {
-		_ = os.Remove(path)
-		return closeErr
 	}
 	return nil
 }

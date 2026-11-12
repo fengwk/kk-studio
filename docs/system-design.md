@@ -21,7 +21,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
 | L4 产品 | [`apps/ide`](../apps/ide/pom.xml) | IDE 视图与数据面、浏览器使用身份、跨节点路由、HTTP 接口与 DTO |
 | 插件 | [`plugins`](../plugins/pom.xml) | 构建期插件：Agent 工具与画布函数 |
-| L3 平台 | [`platform/runtime`](../platform/runtime/pom.xml) | 目录、存储与 VFS、环境、插件宿主、设置、配置同步、交互待办（含无产品页的独立 Agent 任务）、通知、会话归属 SPI、跨节点设施、平台与 Harness 的 HTTP 接口及 DTO，以及 harness 端口实现与引擎存储适配 |
+| L3 平台 | [`platform/runtime`](../platform/runtime/pom.xml) | 目录、资源存储、环境、插件宿主、设置、配置同步、交互待办（含无产品页的独立 Agent 任务）、通知、会话归属 SPI、跨节点设施、平台与 Harness 的 HTTP 接口及 DTO，以及 harness 端口实现与引擎存储适配 |
 | L3 平台 | [`platform/daemon-server`](../platform/daemon-server/pom.xml) | Daemon 控制协议、会话与租约、调用裁决、资源票据、数据面隧道、IDE 与更新协调；实现 harness 的能力调用端口 |
 | L3 平台 | [`platform/plugin-api`](../platform/plugin-api/pom.xml) | 插件 SPI：身份、配置、凭据、资源、Harness 贡献与按类型返回的产品贡献 |
 | L2 harness | [`harness/runtime`](../harness/runtime/pom.xml) | Agent 内核：公开的命令、查询与订阅，SPI 端口，工具与贡献契约，内置工具，提示词渲染，Thread 与 Tool 处理器，执行退出账本 |
@@ -178,7 +178,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 | 包 | 内容 |
 | --- | --- |
 | `api` | 命令、会话、线程、历史、工具、执行、压缩、交互、Join、realtime、retry 等公开值；`HarnessChangeSubscriptions` 是变更订阅入口 |
-| `spi` | `ToolGateway`、`RealtimeEventSink`、`RealtimePayloadFetcher`、`AcceptancePreflight`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`VfsGateway` |
+| `spi` | `ToolGateway`、`RealtimeEventSink`、`RealtimePayloadFetcher`、`AcceptancePreflight`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ResourceReadGateway` |
 | `spi.store` | `HarnessStore` 与 `SessionStore`、`EntryStore`、`ThreadStore`、`CommandStore`、`ToolStore`、`WorkStore`、`JoinStore`、`StopReceiptStore`、`ExecutionExitStore` |
 | `spi.driver` | `AgentDriver`、`DriverWork`、`DriverThreadDeletion`、`LockedDriverState` 与进程外 Driver 的公共构件 |
 | `spi.work` | Work 值契约，以及 claim 后的 `ClaimedExecutionSupport`、租约与心跳 |
@@ -309,40 +309,15 @@ Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游
 读取，提示词资源经 `PluginPromptContent` 提供。插件与宿主同进程、拥有相同 JVM 权限，部署者须信任其代码。完整
 契约见 [Platform Plugin API](modules/platform-plugin-api.md)。
 
-## VFS
+## Resource URI 与 Session 持有
 
-文件工具按路径路由，`vfs:` 是平台存储的统一命名空间：
+文件工具的 `read` 在平台资源和 Environment 本地文件之间分流：`resource://files/<uuid>` 由平台读取，普通本地绝对路径交给绑定的 Environment；没有 Environment 时明确报告需要 Environment。其他本地文件工具始终只接受 Environment 绝对路径。URI 不携带存储键或预签名地址。
 
-```text
-vfs:/
-├── skills/<包>/<技能>/…      只读   全部已发布技能
-├── resources/<资源 ID>        只读   当前对话持有的资源
-└── sessions/<会话 ID>/        读写   执行根会话的目录，父子 Agent 共享
-    ├── threads/<线程 ID>/…   读写   线程自己的文件
-    └── …                     Agent 创建的其他文件
-```
+技能资源使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段按 UTF-8 百分号编码。当前 `read` 对 skills URI 返回明确的不可用错误；技能内容加载由后续能力提供。
 
-- 访问范围只按执行根会话解析：其他会话 ID 与不存在的路径一样返回「不存在」，`threads/<线程 ID>/` 只接受本对话
-  中存在的线程，`vfs:/sessions` 只列出执行根会话。子 Agent 运行在独立会话中，但 VFS 始终解析到执行根会话。
-- `skills` 与 `resources` 只读：写入在工具预检与执行两处都以固定文案拒绝并提示写入会话目录；列目录标出
-  `read-only` 与 `read-write`。技能按只读层级目录列举（`vfs:/skills` 列出技能包，`<包>/` 列出技能，`<技能>/`
-  列出文件及大小），按 `vfs:/skills/<包>/<技能>/<相对路径>` 读取文件；资源根目录不提供条目列举，直接按
-  `vfs:/resources/<资源 ID>` 读取。
-- 操作只有 `read`、`write`、`edit`、`find`、`grep`：目录用 `read` 列举；`find` 与 `grep` 仅在会话目录内检索，
-  `find` 只匹配路径，`grep` 在有文件数、字节数、结果数与截止时间的扫描预算内执行，超出时明确返回未完成。
-- 存储是 `session_file` 与全局 `storage_blob`：`(session_id, path)` 确定一个文件版本，写入先上传新 Blob，再按
-  `revision` 条件更新，最后一个引用释放时回收旧 Blob。目录由路径推导，不单独存储；会话删除先删文件行，再释放
-  Blob 引用。
-- 并发按 `revision` 检测冲突，冲突与不存在分别返回明确错误；写权限沿用工具权限策略，只读前缀在审批前拒绝，YOLO
-  也不能绕过。
-- 限制按会话计：文件数、单文件大小与总量都有上限；目录响应、`find` 结果与 `grep` 预算各自有界。
-- `VfsGateway` 是 harness 定义、平台实现的窄端口，只回答一次文件工具调用；实现负责命名空间、只读前缀、会话
-  归属、revision 与预算，harness 只按参数路由并保留错误文案。
-- 文件工具从工具执行上下文直接获取执行根线程、执行根会话与当前会话，由调用方在装配时注入所需上下文，无需反查引擎存储。
-- 工具层面的亲和性因此分三类：`read`、`write`、`edit`、`find`、`grep` 按每次调用的 `path` 路由；`bash` 与
-  LSP 工具只能在环境执行，没有环境时从工具声明中隐藏；`task`、`ask_user`、MCP、插件与产品工具始终在
-  Studio 执行。没有环境时传入绝对路径得到「未执行」并提示改用 `vfs:` 路径。
-- 浏览器只读：会话文件接口按产品归属校验后提供列目录、读内容与下载，编辑只由 Agent 完成。
+`session_blob_ref(session_id, blob_id)` 的 `(session_id, blob_id)` 唯一键表示一个 Session 对全局 Blob 的持有，一条关系对应一次 `storage_blob.ref_count` retain。资源被读取或通过用户消息、工具结果传递时，当前 Session 建立持有；Session fork 为复制的资源分别建立关系。删除 Session 时释放其关系，最后一个持有者离开后 Blob 转入 `DELETING` 并由后台清理对象。重复建立和释放关系均幂等。
+
+浏览器通过 Session 资源接口获取资源预览或下载，仅持有该资源的 Session 可访问；资源 URI 被前端拦截，不能作为浏览器导航地址。图片以内联方式预览，其他资源提供预览或下载，复制文本仍保留原始 URI。
 
 ## 技能包
 
@@ -381,7 +356,7 @@ vfs:/
 `/api/project/issues` 与项目下的 Issue 创建。Run 接受只使用通用命令提交 Agent、执行方式与环境，加一条项目模板渲染的任务
 消息，不写产品专属的 harness 状态；`issue_transition` 是 SELECTABLE 工具，由 Issue Agent 的配置显式声明，工具按
 调用线程查询项目自己的 Run 记录并在业务锁内复核身份、阶段、版本与合法交接边。Issue 对账以 `ISSUE` Work 认领，只
-认本次 Run 冻结的终态收尾。归属实现按 Project 再 Issue 的锁序序列化，证据引用 `vfs:/resources/…`。
+认本次 Run 冻结的终态收尾。归属实现按 Project 再 Issue 的锁序序列化，证据引用 `resource://files/<uuid>`。
 
 **Canvas**：[`apps/canvas/spi`](../apps/canvas/spi/pom.xml) 只有画布函数 SPI（adapter、冻结运行计划、执行上下
 文与严格 codec），只依赖 JDK、`common` 与 Jackson 流式 API，插件通过它贡献函数。Runtime 拥有节点模型、typed
@@ -485,7 +460,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
   ──▶ ThreadProcessor 选择下一项 durable action
   ──▶ TurnResolver（平台）解析 Agent、环境、技能、工具与 system prompt
   ──▶ Driver（Builtin 为 ModelProcessor）──▶ ModelGateway ──▶ Provider
-  ──▶ 工具调用 ──▶ ToolGateway ──▶ VfsGateway（vfs: 路径）或环境能力（绝对路径、bash、LSP）
+  ──▶ 工具调用 ──▶ ToolGateway ──▶ ResourceReadGateway（resource:// URI）或环境能力（本地绝对路径、bash、LSP）
   ──▶ 围栏写回 checkpoint 或终态 ──▶ REST Snapshot 读取
 ```
 
@@ -567,7 +542,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | 段 | 内容 |
 | --- | --- |
 | 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）与对象清理（`storage_object_cleanup`） |
-| 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`、`session_file`） |
+| 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
 | 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
 | 4 | 产品表：Canvas（`canvas_*`）、Chat（`chat`、`chat_session`）与 Project（`project_*`） |
 
@@ -575,8 +550,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
   内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。
 - 引擎表的领域语义由 harness 定义，DDL 与 SQL 实现归平台；新增 Driver 只在自己的适配分包内加表，不改通用存储。
 - 产品表只引用 harness 的公开身份（Session、Thread），不复制引擎内部状态，也不 join 引擎内部表做查询。
-- 约束表达真实不变量：Agent 定义的 `execution` 形状与 USER 类型必须有执行方式、`session_file` 的路径与
-  revision、`durable_work` 的租约成对与类型格式、技能包的命名与描述长度。
+- 约束表达真实不变量：Agent 定义的 `execution` 形状与 USER 类型必须有执行方式、`durable_work` 的租约成对与类型格式、技能包的命名与描述长度。
 - 关系、索引与约束细节见 [Schema](modules/schema.md)。
 
 ## 部署与安全条件
@@ -585,8 +559,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 控制。Daemon 继承启动用户的主机权限，**没有文件系统沙箱**；插件与 Contributor 也是同进程的可信代码。
 
 - HTTP 边界严格校验 UUID、cursor、sealed union 与 JSON 形状，拒绝未知或重复字段及错误类型。
-- 资源访问按业务持有关系授权；UUID、URI 与跳转地址只用于定位。VFS 只开放执行根会话，只读前缀在预检与执行两处
-  拒绝。
+- 资源访问按业务持有关系授权；UUID、URI 与跳转地址只用于定位。Session 资源接口要求该 Session 持有资源引用；本地文件权限与隔离由所选 Environment 在执行入口落实。
 - Provider、MCP、Daemon 与插件凭据经受控入口写入，普通 DTO、日志与 Debug 保持脱敏；它们以明文存入 PostgreSQL，
   保护依赖数据库访问控制与备份加密。技能仓库令牌不回显，也不下发给 Daemon。
 - 注册令牌文件要求 owner-only 权限；路径操作要求显式绝对路径，只有进程执行要求显式绝对 `workdir`。

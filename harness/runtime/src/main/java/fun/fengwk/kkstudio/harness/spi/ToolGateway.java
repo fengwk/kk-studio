@@ -31,7 +31,7 @@ public interface ToolGateway {
   /**
    * 一次 Tool execution 前的权限判定（不携带也不查询 YOLO）。
    *
-   * <p>{@code scope} 是该调用冻结的执行根事实：需要审批的 {@code vfs:} 编辑据此读取当前会话文件并生成审查预览。除只读预览外，判定本身不产生 执行副作用。
+   * <p>{@code scope} 是该调用冻结的执行根事实。只读预览之外，判定本身不产生执行副作用。
    */
   PreflightResult preflight(ToolInvocationRequest request, ExecutionScope scope);
 

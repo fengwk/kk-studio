@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config <absolute-path>\n"
@@ -26,8 +27,29 @@ type Dependencies struct {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	code := RunCLI(ctx, os.Args[1:], Dependencies{}, os.Stdout, os.Stderr)
+	code := RunCLI(ctx, os.Args[1:], Dependencies{HelperMain: runNativeHelper}, os.Stdout, os.Stderr)
 	os.Exit(code)
+}
+
+func runNativeHelper(args []string) int {
+	if code, handled := runInternalCommand(args); handled {
+		return code
+	}
+	return 1
+}
+
+func runInternalCommand(args []string) (int, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch args[0] {
+	case "__native-helper":
+		return native.HelperMain(args[1:]), true
+	case "__lock-helper":
+		return native.LockHelperMain(args[1:]), true
+	default:
+		return 0, false
+	}
 }
 
 // RunCLI processes direct OS argument strings and confines diagnostics to safe text.
@@ -38,7 +60,7 @@ func RunCLI(ctx context.Context, args []string, deps Dependencies, stdout, stder
 			return 2
 		}
 	}
-	if len(args) > 0 && strings.HasPrefix(args[0], "--internal-") {
+	if len(args) > 0 && (strings.HasPrefix(args[0], "--internal-") || strings.HasPrefix(args[0], "__")) {
 		if deps.HelperMain == nil {
 			fmt.Fprintln(stderr, "daemon: internal helper is unavailable")
 			return 1

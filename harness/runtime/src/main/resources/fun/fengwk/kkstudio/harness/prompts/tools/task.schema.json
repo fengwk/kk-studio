@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "description": "Delegate a self-contained task to a subagent that runs autonomously in an isolated session and reports back later.",
+  "description": "Delegate a self-contained task to a subagent and wait for its final result.",
   "properties": {
     "subagent_type": {
       "type": "string",
@@ -12,11 +12,11 @@
     },
     "max_turns": {
       "type": "integer",
-      "description": "Positive integer interaction-turn budget for this invocation. Defaults to the current subagent policy when omitted. An unfinished child is reminded to return a phase report when the budget is reached; use a smaller value when early path verification or frequent parent-child interaction is needed."
+      "description": "Positive integer interaction-turn soft budget for this invocation. Defaults to the current subagent policy when omitted. An unfinished child is reminded to return a phase report when the budget is reached."
     },
     "thread_id": {
       "type": "string",
-      "description": "Identifier of a previously accepted subagent thread to continue, using the `thread_id` returned by an earlier task receipt or completion message."
+      "description": "Identifier of a subagent thread to continue, using the `thread_id` returned by an earlier task result."
     }
   },
   "required": ["subagent_type", "prompt"],

@@ -602,7 +602,7 @@ public record ToolInvocation(
     }
   }
 
-  /** SUCCEEDED 结果必须已稳定：不得含 inline binary，Resource 只能是当前 Session 的 vfs 引用。 */
+  /** SUCCEEDED 结果必须已稳定：不得含 inline binary，Resource 只能是当前 Session 持有的 resource 引用。 */
   private static void requireStableSuccessResult(ToolResult result) {
     for (ResultContent content : result.contents()) {
       if (content instanceof BinaryResultContent) {
