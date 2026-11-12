@@ -33,6 +33,23 @@ func TestFilePrivateCacheWriterWritesPrivateAtomicFile(t *testing.T) {
 	}
 }
 
+// RUN-T-199 refuses invalid cache paths and cancelled writes before publication.
+func TestFilePrivateCacheWriterRejectsInvalidPathsAndCancelledContext(t *testing.T) {
+	writer := FilePrivateCacheWriter{}
+	if err := writer.WritePrivateAtomic(context.Background(), "relative.json", nil); err == nil {
+		t.Fatal("relative cache path was accepted")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := writer.WritePrivateAtomic(cancelled, filepath.Join(t.TempDir(), "cache.json"), nil); err == nil {
+		t.Fatal("cancelled cache write was accepted")
+	}
+	directory := t.TempDir()
+	if err := writer.WritePrivateAtomic(context.Background(), directory, []byte("data")); err == nil {
+		t.Fatal("directory cache target was accepted")
+	}
+}
+
 // RUN-T-199 refuses a symbolic-link target instead of following or replacing it.
 func TestFilePrivateCacheWriterRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()

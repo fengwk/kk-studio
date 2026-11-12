@@ -32,6 +32,14 @@ func TestIsWSLRecognizesMarkersAndProcMetadata(t *testing.T) {
 	}, readErr) {
 		t.Fatal("WSL_DISTRO_NAME was not recognized")
 	}
+	if !isWSL(func(key string) string {
+		if key == "WSL_INTEROP" {
+			return "/run/WSL/1_interop"
+		}
+		return ""
+	}, readErr) {
+		t.Fatal("WSL_INTEROP was not recognized")
+	}
 	if !isWSL(func(string) string { return "" }, func(path string) ([]byte, error) {
 		if path == "/proc/sys/kernel/osrelease" {
 			return []byte("Linux Microsoft WSL2"), nil
@@ -45,7 +53,27 @@ func TestIsWSLRecognizesMarkersAndProcMetadata(t *testing.T) {
 	}
 }
 
-// RUN-T-113 ADAPT rejects unsupported OS and architecture facts instead of returning an unspecified host.
+// RUN-T-113 verifies supported OS and architecture facts are mapped without losing WSL identity.
+func TestLocalHostInfoMapsSupportedPlatformFacts(t *testing.T) {
+	for _, tc := range []struct {
+		goos, goarch string
+		wsl          bool
+		os           protocol.OperatingSystem
+		arch         protocol.Architecture
+	}{
+		{"windows", "amd64", false, protocol.OperatingSystem_WINDOWS, protocol.Architecture_AMD64},
+		{"darwin", "arm64", false, protocol.OperatingSystem_MACOS, protocol.Architecture_ARM64},
+		{"linux", "amd64", false, protocol.OperatingSystem_LINUX, protocol.Architecture_AMD64},
+		{"linux", "arm64", true, protocol.OperatingSystem_WSL, protocol.Architecture_ARM64},
+	} {
+		info, err := localHostInfo(tc.goos, tc.goarch, tc.wsl, "UTC", "user", "/home/user", "/tmp")
+		if err != nil || info.GetOperatingSystem() != tc.os || info.GetArchitecture() != tc.arch {
+			t.Fatalf("localHostInfo(%s,%s,%t) = %+v, %v", tc.goos, tc.goarch, tc.wsl, info, err)
+		}
+	}
+}
+
+// RUN-F-035 rejects unsupported platform facts.
 func TestLocalHostInfoRejectsUnsupportedPlatformAndArchitecture(t *testing.T) {
 	for _, test := range []struct{ name, goos, goarch string }{
 		{name: "unknown OS", goos: "plan9", goarch: "amd64"},

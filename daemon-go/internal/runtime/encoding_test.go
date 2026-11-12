@@ -62,6 +62,9 @@ func TestSafeCapabilityErrorUsesFallbackForBlankMessages(t *testing.T) {
 	if got := safeCapabilityError(nil); got != "capability execution failed" {
 		t.Fatalf("nil error fallback = %q", got)
 	}
+	if got := safeCapabilityError(errors.New("specific failure")); got != "specific failure" {
+		t.Fatalf("specific error message = %q", got)
+	}
 }
 
 // RUN-T-023 permits text and JSON progress but rejects binary content without uploading it.

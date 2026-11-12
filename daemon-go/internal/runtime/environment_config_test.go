@@ -275,16 +275,19 @@ type testPreparedConfiguration struct {
 	config       config.DaemonConfig
 	publishCalls int
 	retireCalls  int
+	publishErr   error
+	retireErr    error
+	cleanup      func() error
 }
 
 func (p *testPreparedConfiguration) Config() config.DaemonConfig { return cloneDaemonConfig(p.config) }
 func (p *testPreparedConfiguration) Publish() (func() error, error) {
 	p.publishCalls++
-	return nil, nil
+	return p.cleanup, p.publishErr
 }
 func (p *testPreparedConfiguration) Retire() error {
 	p.retireCalls++
-	return nil
+	return p.retireErr
 }
 
 func newTestEnvironmentConfigRuntime(t *testing.T, initial config.DaemonConfig, prepare ConfigurationPreparer, cache ConfigCacheWriter) *EnvironmentConfigRuntime {
