@@ -131,17 +131,19 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	select {
 	case <-readErrors:
-		result := spool.Finish(true, "")
-		result.Error = true
-		result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
-		var details map[string]any
-		if err := json.Unmarshal(result.Details, &details); err != nil {
-			details = make(map[string]any)
+		if ctx.Err() == nil {
+			result := spool.Finish(true, "")
+			result.Error = true
+			result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
+			var details map[string]any
+			if err := json.Unmarshal(result.Details, &details); err != nil {
+				details = make(map[string]any)
+			}
+			details["code"] = "FAILED"
+			details["process"] = map[string]string{"outcome": "EXITED"}
+			result.Details = mustJSON(details)
+			return result, nil
 		}
-		details["code"] = "FAILED"
-		details["process"] = map[string]string{"outcome": "EXITED"}
-		result.Details = mustJSON(details)
-		return result, nil
 	default:
 	}
 	if terminationResult != nil {

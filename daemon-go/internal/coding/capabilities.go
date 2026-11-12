@@ -581,6 +581,12 @@ func exceedsInlineOutput(text string) bool {
 }
 
 func processCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	executing := false
+	defer func() {
+		if !executing && capability.ConfirmExecutionExit != nil {
+			capability.ConfirmExecutionExit()
+		}
+	}()
 	var args arguments
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
@@ -601,6 +607,7 @@ func processCapability(ctx context.Context, call runtime.CapabilityCall, capabil
 	if info, err := os.Stat(args.Workdir); err != nil || !info.IsDir() {
 		return errorResult(call.InvocationID, rejectInput("workdir is not a directory")), nil
 	}
+	executing = true
 	return ExecuteProcess(ctx, call, capability, args.Command, args.Workdir)
 }
 
