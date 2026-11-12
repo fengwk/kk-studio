@@ -25,3 +25,28 @@ func TestStatusRevisionAndProgress(t *testing.T) {
 		t.Fatal("expected backwards progress rejection")
 	}
 }
+
+// RUN-T-019 keeps the last applied configuration visible through failure and clears the error on repair.
+func TestStatusConfigurationFailurePreservesAppliedState(t *testing.T) {
+	s := NewStatusTracker()
+	if err := s.ApplyConfiguration(1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := s.FailConfiguration(ConfigurationError{Version: 2, Code: "VALIDATION_FAILED", Field: "bashExecutable"}); err != nil || !changed {
+		t.Fatalf("configuration failure status changed=%t err=%v", changed, err)
+	}
+	failure, ok := s.ConfigurationError()
+	if !ok || failure.Version != 2 || failure.Field != "bashExecutable" {
+		t.Fatalf("failure status = %+v, present=%t", failure, ok)
+	}
+	if err := s.ApplyConfiguration(3, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.ConfigurationError(); ok {
+		t.Fatal("successful configuration did not clear failure status")
+	}
+	status := s.Snapshot()
+	if status.Status["appliedVersion"] != int64(3) {
+		t.Fatalf("successful repair did not advance applied version: %+v", status.Status)
+	}
+}

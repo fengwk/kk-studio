@@ -37,6 +37,8 @@ type RuntimeOptions struct {
 	Processes                native.Supervisor
 	Resources                ResourceUploader
 	ApplyConfig              ConfigApplier
+	EnvironmentConfig        *EnvironmentConfigRuntime
+	Status                   *StatusTracker
 	MaxConcurrentInvocations int
 	HeartbeatInterval        time.Duration
 	HostInfo                 *protocol.HostInfo
@@ -79,8 +81,23 @@ type Runtime struct {
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
 func NewRuntime(options RuntimeOptions) (*Runtime, error) {
-	if options.EnvironmentID == "" || options.Connections == nil || options.ApplyConfig == nil {
-		return nil, errors.New("runtime requires environmentId, connection factory, and config applier")
+	if options.EnvironmentID == "" || options.Connections == nil || options.ApplyConfig == nil && options.EnvironmentConfig == nil {
+		return nil, errors.New("runtime requires environmentId, connection factory, and configuration applier")
+	}
+	if options.Status == nil {
+		if options.EnvironmentConfig != nil {
+			options.Status = options.EnvironmentConfig.StatusTracker()
+		} else {
+			options.Status = NewStatusTracker()
+		}
+	}
+	if options.EnvironmentConfig != nil {
+		if options.EnvironmentConfig.StatusTracker() != options.Status {
+			return nil, errors.New("runtime and environment config runtime must share a status tracker")
+		}
+		if options.EnvironmentConfig.Current().EnvironmentID != options.EnvironmentID {
+			return nil, errors.New("runtime and environment config runtime must share an environmentId")
+		}
 	}
 	if options.InitialReconnectDelay == 0 {
 		options.InitialReconnectDelay = 250 * time.Millisecond
@@ -117,7 +134,15 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: NewStatusTracker(), config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool)}, nil
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool)}
+	if options.EnvironmentConfig != nil {
+		options.EnvironmentConfig.AddSessionHooks(nil, nil, func(previous, next config.DaemonConfig) {
+			if previous.StudioURL != next.StudioURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL) {
+				runtime.dropActiveConnection()
+			}
+		})
+	}
+	return runtime, nil
 }
 
 // Run reconnects the injected control transport and retains accepted invocations across connection generations.
@@ -137,7 +162,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 	r.mu.Unlock()
 	heartbeatDone := make(chan struct{})
 	go r.heartbeatLoop(runCtx, heartbeatDone)
-	defer func() { cancel(); <-heartbeatDone; r.dropActiveConnection(); r.cancelAndWait() }()
+	defer func() {
+		cancel()
+		<-heartbeatDone
+		r.dropActiveConnection()
+		if r.options.EnvironmentConfig != nil {
+			r.options.EnvironmentConfig.Close()
+		}
+		r.cancelAndWait()
+	}()
 
 	delay := r.options.InitialReconnectDelay
 	for {
@@ -343,25 +376,41 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		}
 		return errors.New("the same environment config version must not change its content")
 	}
-	candidate, err := r.options.ApplyConfig(ctx, version, payload.EnvironmentConfig.Config)
-	if err != nil {
-		if !ready {
-			_ = r.sendError(nil, "environment configuration could not be applied")
-			return nil
+	var candidate config.DaemonConfig
+	if r.options.EnvironmentConfig != nil {
+		result, err := r.options.EnvironmentConfig.Submit(ctx, version, payload.EnvironmentConfig.Config)
+		if err != nil {
+			return err
 		}
-		return r.sendError(nil, "environment configuration could not be applied")
+		switch result.Kind {
+		case ConfigFailed:
+			if ready {
+				return r.sendStatus()
+			}
+			return nil
+		case ConfigFatal:
+			return errors.New(result.Message)
+		default:
+			candidate = result.Config
+		}
+	} else {
+		var err error
+		candidate, err = r.options.ApplyConfig(ctx, version, payload.EnvironmentConfig.Config)
+		if err != nil {
+			if !ready {
+				_ = r.sendError(nil, "environment configuration could not be applied")
+				return nil
+			}
+			return r.sendError(nil, "environment configuration could not be applied")
+		}
 	}
 	if candidate.EnvironmentID != "" && candidate.EnvironmentID != r.options.EnvironmentID {
 		return errors.New("applied configuration changed environment scope")
 	}
 	candidate.EnvironmentID = r.options.EnvironmentID
 	candidate.ConfigVersion = version
-	var proxyURL any
-	if candidate.ProxyURL != nil {
-		proxyURL = *candidate.ProxyURL
-	}
 	r.mu.Lock()
-	if _, err := r.status.Update(map[string]any{"appliedVersion": version, "proxyUrl": proxyURL}); err != nil {
+	if err := r.status.ApplyConfiguration(version, candidate.ProxyURL); err != nil {
 		r.mu.Unlock()
 		return err
 	}
@@ -672,8 +721,19 @@ func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
 	r.mu.RLock()
 	ready, snapshot := r.ready, r.config
 	r.mu.RUnlock()
+	configurationStatus := &protocol.ConfigurationStatus{}
 	if ready {
-		body.Configuration = &protocol.ConfigurationStatus{AppliedVersion: int64Ptr(snapshot.ConfigVersion), ProxyUrl: snapshot.ProxyURL}
+		configurationStatus.AppliedVersion = int64Ptr(snapshot.ConfigVersion)
+		configurationStatus.ProxyUrl = snapshot.ProxyURL
+	}
+	if failure, ok := r.status.ConfigurationError(); ok {
+		configurationStatus.Error = &protocol.ConfigurationError{Version: int64Ptr(failure.Version), Code: failure.Code}
+		if failure.Field != "" {
+			configurationStatus.Error.Field = stringPtr(failure.Field)
+		}
+	}
+	if ready || configurationStatus.Error != nil {
+		body.Configuration = configurationStatus
 	}
 	if progress, ok := r.status.Progress(); ok {
 		body.Update = &protocol.UpdateProgress{DownloadedBytes: int64Ptr(progress.DownloadedBytes), TotalBytes: progress.TotalBytes}
@@ -779,5 +839,12 @@ func safeCapabilityError(err error) string {
 	return err.Error()
 }
 func stringPtr(s string) *string { return &s }
-func boolPtr(b bool) *bool       { return &b }
-func int64Ptr(v int64) *int64    { return &v }
+
+func sameOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+func boolPtr(b bool) *bool    { return &b }
+func int64Ptr(v int64) *int64 { return &v }
