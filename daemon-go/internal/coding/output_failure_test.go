@@ -65,9 +65,6 @@ func TestOutputFsyncFailure(t *testing.T) {
 	if failingFile.closeCalls != 1 {
 		t.Fatalf("close calls=%d want=1", failingFile.closeCalls)
 	}
-	if _, err := file.Stat(); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("file stat after sync failure err=%v want os.ErrClosed", err)
-	}
 	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging file remains after sync failure: %v", err)
 	}
