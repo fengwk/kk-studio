@@ -63,6 +63,12 @@ type runningCall struct {
 }
 
 // Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
+type resourceUploadFailure struct {
+	cleanupConfirmed bool
+}
+
+func (e *resourceUploadFailure) Error() string { return "resource upload failed" }
+
 type Runtime struct {
 	options                RuntimeOptions
 	hostInfo               *protocol.HostInfo
@@ -80,6 +86,7 @@ type Runtime struct {
 	callsMu                sync.Mutex
 	calls                  map[string]*runningCall
 	exitRequested          map[string]bool
+	exitCleanupUnconfirmed map[string]bool
 	wg                     sync.WaitGroup
 	runMu                  sync.Mutex
 	running                bool
@@ -156,7 +163,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(
 			func(previous, candidate config.DaemonConfig) {
@@ -897,6 +904,12 @@ func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, e
 	}
 	encoded, encodeErr := r.encodeResult(ctx, id, result, budget, false)
 	if encodeErr != nil {
+		var uploadFailure *resourceUploadFailure
+		if errors.As(encodeErr, &uploadFailure) && !uploadFailure.cleanupConfirmed {
+			r.callsMu.Lock()
+			r.exitCleanupUnconfirmed[id] = true
+			r.callsMu.Unlock()
+		}
 		_ = r.finish(id, protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(encodeErr.Error())}}, InvocationFailed)
 		return
 	}
@@ -979,7 +992,9 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 			}
 			uploaded, err := r.options.Resources.Upload(ctx, id, content)
 			if err != nil {
-				return nil, errors.New("resource upload failed")
+				var uploadErr *ResourceUploadError
+				cleanupConfirmed := errors.As(err, &uploadErr) && uploadErr.CleanupConfirmed
+				return nil, &resourceUploadFailure{cleanupConfirmed: cleanupConfirmed}
 			}
 			item.Body = &protocol.Content_Resource{Resource: &protocol.ResourceContent{UploadId: stringPtr(uploaded.UploadID), MediaType: stringPtr(uploaded.MediaType), Name: uploaded.Name, Size: int64Ptr(uploaded.Size), Sha256: stringPtr(uploaded.SHA256), Preview: stringPtr(uploaded.Preview)}}
 		case "resource":
@@ -1227,9 +1242,11 @@ func (r *Runtime) noteExecutionExit(id string) {
 func (r *Runtime) publishRequestedExit(id string) {
 	r.callsMu.Lock()
 	requested := r.exitRequested[id]
+	cleanupUnconfirmed := r.exitCleanupUnconfirmed[id]
 	delete(r.exitRequested, id)
+	delete(r.exitCleanupUnconfirmed, id)
 	r.callsMu.Unlock()
-	if requested && r.journal.ConfirmExit(id) {
+	if requested && !cleanupUnconfirmed && r.journal.ConfirmExit(id) {
 		_ = r.sendExecutionExited(id)
 	}
 }
