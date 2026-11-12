@@ -103,11 +103,11 @@ func documentPosition(document string, line, character int, encoding string) (ma
 	}
 	text := strings.TrimSuffix(lines[line-1], "\r")
 	runes := []rune(text)
-	if character < 0 || character > len(runes) {
+	if character < 1 || character-1 > len(runes) {
 		return nil, &LspError{Message: fmt.Sprintf("character %d is beyond line %d of the synchronized document (%d code points)", character, line, len(runes))}
 	}
 	offset := 0
-	for _, r := range runes[:character] {
+	for _, r := range runes[:character-1] {
 		switch encoding {
 		case "utf-8":
 			offset += utf8.RuneLen(r)
@@ -136,7 +136,7 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	if err = c.call(ctx, "textDocument/definition", map[string]any{"textDocument": map[string]string{"uri": pathURI(path)}, "position": pos}, &result, onSent, onFinished); err != nil {
 		return nil, err
 	}
-	return formatLocations(result)
+	return c.formatDefinitionLocations(result)
 }
 func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, tracking ...func()) ([]string, error) {
 	if !c.Supports("workspace/symbol") {
@@ -201,6 +201,77 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 }
 
 func formatLocations(raw json.RawMessage) ([]string, error) {
+	return formatLocationsWithColumn(raw, func(_ string, _ int, character int) int { return character + 1 })
+}
+
+func (c *Client) formatDefinitionLocations(raw json.RawMessage) ([]string, error) {
+	return formatLocationsWithColumn(raw, func(uri string, line, character int) int {
+		return c.definitionColumn(uri, line, character)
+	})
+}
+
+func (c *Client) definitionColumn(uri string, line, character int) int {
+	fallback := character + 1
+	parsed, err := url.Parse(uri)
+	if err != nil || parsed.Scheme != "file" {
+		return fallback
+	}
+	path, err := fileURIPath(parsed)
+	if err != nil {
+		return fallback
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fallback
+	}
+	decoded, err := DecodeTextFile(data)
+	if err != nil {
+		return fallback
+	}
+	lines := strings.Split(decoded.Text, "\n")
+	if line < 0 || line >= len(lines) {
+		return fallback
+	}
+	text := strings.TrimSuffix(lines[line], "\r")
+	c.mu.RLock()
+	encoding := c.positionEncoding
+	c.mu.RUnlock()
+	column, ok := documentColumn(text, character, encoding)
+	if !ok {
+		return fallback
+	}
+	return column
+}
+
+func documentColumn(text string, offset int, encoding string) (int, bool) {
+	if offset < 0 {
+		return 0, false
+	}
+	column := 1
+	for _, r := range text {
+		if offset == 0 {
+			return column, true
+		}
+		width := 1
+		switch encoding {
+		case "utf-8":
+			width = utf8.RuneLen(r)
+		case "utf-32":
+		default:
+			if r > 0xffff {
+				width = 2
+			}
+		}
+		if offset < width {
+			return 0, false
+		}
+		offset -= width
+		column++
+	}
+	return column, offset == 0
+}
+
+func formatLocationsWithColumn(raw json.RawMessage, column func(string, int, int) int) ([]string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return []string{"No results found"}, nil
 	}
@@ -230,11 +301,11 @@ func formatLocations(raw json.RawMessage) ([]string, error) {
 			continue
 		}
 		location := "unknown"
-		if uri, ok := item["uri"]; ok && !hasTarget {
-			location = locationText(readString(uri), rangeData)
-		} else {
-			location = locationText(readString(uriData), rangeData)
+		uri := readString(uriData)
+		if sourceURI, ok := item["uri"]; ok && !hasTarget {
+			uri = readString(sourceURI)
 		}
+		location = locationTextWithColumn(uri, rangeData, column)
 		out = append(out, location)
 	}
 	if len(out) == 0 {
@@ -242,7 +313,7 @@ func formatLocations(raw json.RawMessage) ([]string, error) {
 	}
 	return out, nil
 }
-func locationText(uri string, rangeData json.RawMessage) string {
+func locationTextWithColumn(uri string, rangeData json.RawMessage, column func(string, int, int) int) string {
 	if uri == "" {
 		return "unknown"
 	}
@@ -256,7 +327,8 @@ func locationText(uri string, rangeData json.RawMessage) string {
 	if len(rangeData) == 0 || json.Unmarshal(rangeData, &position) != nil || position.Start == nil {
 		return location
 	}
-	return fmt.Sprintf("%s:%d:%d", location, position.Start.Line+1, position.Start.Character)
+	line := position.Start.Line
+	return fmt.Sprintf("%s:%d:%d", location, line+1, column(uri, line, position.Start.Character))
 }
 func readString(raw json.RawMessage) string { var s string; _ = json.Unmarshal(raw, &s); return s }
 func locationPath(value string) string {

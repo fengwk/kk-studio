@@ -35,8 +35,8 @@ func TestService_ActiveClientCount(t *testing.T) {
 		t.Fatal("new service has an active client")
 	}
 	var confirmed int
-	result, err := service.GotoDefinition(context.Background(), file, 1, 0, func() { confirmed++ })
-	if err != nil || result != filepath.FromSlash("/tmp/target.go")+":3:4" {
+	result, err := service.GotoDefinition(context.Background(), file, 1, 1, func() { confirmed++ })
+	if err != nil || result != filepath.FromSlash("/tmp/target.go")+":3:5" {
 		t.Fatalf("definition = %q, %v", result, err)
 	}
 	if service.ActiveClientCount() != 1 || supervisor.starts != 1 || confirmed != 1 {

@@ -212,9 +212,9 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 		if line < 1 {
 			return fail("line is required and must be a positive integer"), nil
 		}
-		character, err = integerArg(args, "character", false, 0)
-		if err != nil || character < 0 {
-			return fail("character must be a non-negative integer"), nil
+		character, err = integerArg(args, "character", false, 1)
+		if err != nil || character < 1 {
+			return fail("character must be a positive integer"), nil
 		}
 	case "symbols":
 		query, err = stringArg(args, "query")

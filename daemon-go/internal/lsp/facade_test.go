@@ -74,7 +74,7 @@ func TestCapabilities_ValidateCapabilityArguments(t *testing.T) {
 	}
 	cases := []struct {
 		id, args, want string
-	}{{"lsp.goto-definition", marshal(map[string]any{"path": source}), "line is required and must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1.5}), "line is required and must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1, "character": -1}), "character must be a non-negative integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1, "character": "x"}), "character must be a non-negative integer"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source}), "query is required and must be a string"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": " "}), "query must not be blank"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": -1}), "limit must be a non-negative integer"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": 501}), "limit must be <= 500"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": 1.5}), "limit must be a non-negative integer"}, {"lsp.java-decompile", marshal(map[string]any{"path": source}), "target is required and must be a string"}, {"lsp.java-decompile", marshal(map[string]any{"path": source, "target": "  "}), "target must not be blank"}, {"lsp.goto-definition", "[]", "tool arguments must be an object"}}
+	}{{"lsp.goto-definition", marshal(map[string]any{"path": source}), "line is required and must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1.5}), "line is required and must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1, "character": -1}), "character must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1, "character": 0}), "character must be a positive integer"}, {"lsp.goto-definition", marshal(map[string]any{"path": source, "line": 1, "character": "x"}), "character must be a positive integer"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source}), "query is required and must be a string"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": " "}), "query must not be blank"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": -1}), "limit must be a non-negative integer"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": 501}), "limit must be <= 500"}, {"lsp.workspace-symbols", marshal(map[string]any{"path": source, "query": "x", "limit": 1.5}), "limit must be a non-negative integer"}, {"lsp.java-decompile", marshal(map[string]any{"path": source}), "target is required and must be a string"}, {"lsp.java-decompile", marshal(map[string]any{"path": source, "target": "  "}), "target must not be blank"}, {"lsp.goto-definition", "[]", "tool arguments must be an object"}}
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
 	confirmed := 0
 	for _, tc := range cases {
@@ -121,7 +121,7 @@ func TestCapabilities_SharedClient(t *testing.T) {
 	if err := os.WriteFile(classFile, []byte("class"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	supervisor := &fakeSupervisor{}
+	supervisor := &fakeSupervisor{events: make(chan fakeRequest, 32)}
 	facade := NewFacade(supervisor, PoolOptions{IdleTimeout: time.Hour})
 	if err := facade.Update([]config.LSPServerConfig{{ID: "jdtls", Command: []string{binary}, Extensions: []string{".java"}}}); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestCapabilities_SharedClient(t *testing.T) {
 		id        string
 		arguments map[string]any
 		want      string
-	}{{"lsp.goto-definition", map[string]any{"path": source, "line": 1}, filepath.FromSlash("/tmp/target.go") + ":3:4"}, {"lsp.workspace-symbols", map[string]any{"path": source, "query": "Source"}, "No symbols found"}, {"lsp.java-decompile", map[string]any{"path": source, "target": "jdt://contents/java.base/java/lang/String.class"}, "class contents"}, {"lsp.java-decompile", map[string]any{"path": source, "target": classFile}, "class contents"}}
+	}{{"lsp.goto-definition", map[string]any{"path": source, "line": 1}, filepath.FromSlash("/tmp/target.go") + ":3:5"}, {"lsp.workspace-symbols", map[string]any{"path": source, "query": "Source"}, "No symbols found"}, {"lsp.java-decompile", map[string]any{"path": source, "target": "jdt://contents/java.base/java/lang/String.class"}, "class contents"}, {"lsp.java-decompile", map[string]any{"path": source, "target": classFile}, "class contents"}}
 	confirmed := 0
 	for _, item := range calls {
 		arguments, err := json.Marshal(item.arguments)
@@ -144,6 +144,26 @@ func TestCapabilities_SharedClient(t *testing.T) {
 		if err != nil || result.Error || len(result.Contents) != 1 || result.Contents[0].Text != item.want {
 			t.Errorf("%s result=%#v err=%v, want %q", item.id, result, err, item.want)
 		}
+	}
+	var gotDefaultPosition bool
+	for len(supervisor.events) > 0 {
+		event := <-supervisor.events
+		if event.Method != "textDocument/definition" {
+			continue
+		}
+		var params struct {
+			Position struct {
+				Line      int `json:"line"`
+				Character int `json:"character"`
+			} `json:"position"`
+		}
+		if err := json.Unmarshal(event.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		gotDefaultPosition = params.Position.Line == 0 && params.Position.Character == 0
+	}
+	if !gotDefaultPosition {
+		t.Fatal("omitted character did not select the first 1-based code-point column")
 	}
 	if supervisor.starts != 1 || confirmed != len(calls) || facade.ActiveClientCount() != 1 {
 		t.Fatalf("starts=%d confirmations=%d clients=%d", supervisor.starts, confirmed, facade.ActiveClientCount())

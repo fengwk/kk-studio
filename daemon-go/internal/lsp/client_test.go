@@ -258,7 +258,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	if !client.Supports("textDocument/definition") {
 		t.Fatal("definition capability not retained")
 	}
-	pos, err := client.Position(file, 1, 2)
+	pos, err := client.Position(file, 1, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(locations) != 1 || locations[0] != filepath.FromSlash("/tmp/target.go")+":3:4" {
+	if len(locations) != 1 || locations[0] != filepath.FromSlash("/tmp/target.go")+":3:5" {
 		t.Fatalf("locations = %v", locations)
 	}
 	if err = client.Stop(100 * time.Millisecond); err != nil {

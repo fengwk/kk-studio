@@ -14,7 +14,7 @@ func TestDocument_FormattingEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantLocations := []string{"jdt://contents/module/Type.class:3:4", "custom://host/path", "unknown"}
+	wantLocations := []string{"jdt://contents/module/Type.class:3:5", "custom://host/path", "unknown"}
 	if !reflect.DeepEqual(locations, wantLocations) {
 		t.Fatalf("locations = %v, want %v", locations, wantLocations)
 	}

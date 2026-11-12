@@ -14,7 +14,7 @@ func TestFormatLocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{filepath.FromSlash("/tmp/a.go") + ":1:2", "jdt://contents/java.base/java.lang/String.class:3:3"}
+	want := []string{filepath.FromSlash("/tmp/a.go") + ":1:3", "jdt://contents/java.base/java.lang/String.class:3:4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations = %v, want %v", got, want)
 	}
