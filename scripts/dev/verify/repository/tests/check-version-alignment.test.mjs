@@ -1,4 +1,4 @@
-/** The release workflow gate that keeps the POM, daemon package, runtime constant and optional tag on one version. */
+/** The release gate keeps every active repository version source aligned. */
 
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -13,107 +13,55 @@ const POM = (version, property = version) => `<project>
   <parent><groupId>g</groupId><artifactId>p</artifactId><version>9.9.9</version></parent>
   <version>${version}</version>
   <properties><kk-studio.version>${property}</kk-studio.version></properties>
-  <dependencies><dependency><version>0.0.1</version></dependency></dependencies>
 </project>`
-const PACKAGE = (version) => JSON.stringify({ name: 'daemon', version })
 const IDE_EXTENSION_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-ide-bridge', version })
 const FRONTEND_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-frontend', version })
-const CONFIG = (version) => `/** 构建版本。 */\nexport const DAEMON_VERSION = '${version}'\n`
-const GO_CONFIG = (version) => `package config\n\nconst DaemonVersion = "${version}"\n`
+const GO_CONFIG = (version) => `package config\n\nvar DaemonVersion = "${version}"\n`
 const inputs = (
   version,
   {
     property = version,
-    packageVersion = version,
     ideExtensionPackageVersion = version,
     frontendPackageVersion = version,
-    runtimeVersion = version,
+    goVersion = version,
   } = {},
 ) => ({
   pomXml: POM(version, property),
-  packageJson: PACKAGE(packageVersion),
   ideExtensionPackageJson: IDE_EXTENSION_PACKAGE(ideExtensionPackageVersion),
   frontendPackageJson: FRONTEND_PACKAGE(frontendPackageVersion),
-  configTs: CONFIG(runtimeVersion),
-  goConfig: GO_CONFIG(version),
+  goConfig: GO_CONFIG(goVersion),
 })
 
-test('test intent: aligned internal sources pass without a tag and the tag must carry a v prefix', () => {
-  const result = checkAlignment(inputs('1.2.3'))
-  assert.deepEqual(result, { expected: '1.2.3', mismatches: [] })
+test('test intent: aligned Go and application versions pass and the tag must carry a v prefix', () => {
+  assert.deepEqual(checkAlignment(inputs('1.2.3')), { expected: '1.2.3', mismatches: [] })
   assert.deepEqual(checkAlignment({ ...inputs('1.2.3'), tag: 'v1.2.3' }), { expected: '1.2.3', mismatches: [] })
 })
 
-test('test intent: a Go daemon constant left at the previous version fails the gate', () => {
-  const result = checkAlignment({ ...inputs('1.2.3'), goConfig: GO_CONFIG('1.2.2') })
-  assert.deepEqual(result.mismatches, [
-    'daemon-go/internal/config/version.go DaemonVersion is "1.2.2", expected "1.2.3"',
-  ])
-})
-
-test('test intent: a runtime constant left at the previous version fails the gate', () => {
-  // config.ts 必须与 root 版本保持对齐。
-  const result = checkAlignment(inputs('1.2.3', { runtimeVersion: '1.2.2' }))
-  assert.deepEqual(result.mismatches, [
-    'daemon/src/config.ts DAEMON_VERSION is "1.2.2", expected "1.2.3"',
-  ])
-})
-
-test('test intent: a daemon ide extension package left at the previous version fails the gate', () => {
-  const result = checkAlignment(inputs('1.2.3', { ideExtensionPackageVersion: '1.2.2' }))
-  assert.deepEqual(result.mismatches, [
-    'daemon/ide-extension/package.json version is "1.2.2", expected "1.2.3"',
-  ])
-})
-
-test('test intent: a frontend package left at the previous version fails the gate', () => {
-  const result = checkAlignment(inputs('1.2.3', { frontendPackageVersion: '1.2.2' }))
-  assert.deepEqual(result.mismatches, [
-    'frontend/package.json version is "1.2.2", expected "1.2.3"',
-  ])
-})
-
-test('test intent: every diverging source is reported against the root version', () => {
+test('test intent: each active runtime and package version source is compared to the root version', () => {
   const result = checkAlignment({
-    ...inputs('1.2.3', {
-      property: '1.2.4',
-      packageVersion: '1.2.2',
-      ideExtensionPackageVersion: '1.2.0',
-      frontendPackageVersion: '1.2.6',
-      runtimeVersion: '1.2.1',
-    }),
+    ...inputs('1.2.3', { property: '1.2.4', goVersion: '1.2.2', ideExtensionPackageVersion: '1.2.0', frontendPackageVersion: '1.2.6' }),
     tag: 'v1.2.5',
   })
-  assert.equal(result.mismatches.length, 6)
+  assert.equal(result.mismatches.length, 5)
   assert.ok(result.mismatches.some((line) => line.startsWith('pom.xml kk-studio.version is "1.2.4"')))
-  assert.ok(result.mismatches.some((line) => line.startsWith('daemon/package.json version is "1.2.2"')))
-  assert.ok(result.mismatches.some((line) => line.startsWith('daemon/ide-extension/package.json version is "1.2.0"')))
+  assert.ok(result.mismatches.some((line) => line.startsWith('daemon-go/internal/config/version.go DaemonVersion is "1.2.2"')))
+  assert.ok(result.mismatches.some((line) => line.startsWith('daemon-go/ide-extension/package.json version is "1.2.0"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('frontend/package.json version is "1.2.6"')))
-  assert.ok(result.mismatches.some((line) => line.startsWith('daemon/src/config.ts DAEMON_VERSION is "1.2.1"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('release tag "v1.2.5" is "1.2.5"')))
 })
 
-test('test intent: unreadable or ambiguous versions and invalid tags fail instead of passing silently', () => {
+test('test intent: missing or ambiguous Go and package versions and invalid tags fail closed', () => {
   assert.throws(() => checkAlignment({ ...inputs('1'), pomXml: '<project></project>' }), /root <version>/)
-  assert.throws(() => checkAlignment({ ...inputs('1'), packageJson: '{}' }), /daemon package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), ideExtensionPackageJson: '{}' }), /daemon IDE extension package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), frontendPackageJson: '{}' }), /frontend package version/)
-  assert.throws(() => checkAlignment({ ...inputs('1'), configTs: 'const DAEMON_VERSION = "1"\n' }), /exactly one literal/)
   assert.throws(() => checkAlignment({ ...inputs('1'), goConfig: 'const DaemonVersion = version\n' }), /exactly one literal/)
-  assert.throws(
-    () => checkAlignment({ ...inputs('1'), configTs: `${CONFIG('1')}${CONFIG('1')}` }),
-    /exactly one literal/,
-  )
-  assert.throws(
-    () => checkAlignment({ ...inputs('1'), configTs: 'export const DAEMON_VERSION = readVersion()\n' }),
-    /exactly one literal/,
-  )
+  assert.throws(() => checkAlignment({ ...inputs('1'), goConfig: `${GO_CONFIG('1')}${GO_CONFIG('1')}` }), /exactly one literal/)
   for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v', '1.2.3']) {
     assert.throws(() => checkAlignment({ ...inputs('1.2.3'), tag }), /invalid RELEASE_TAG/, JSON.stringify(tag))
   }
 })
 
-test('test intent: the CLI checks only internal versions when RELEASE_TAG is absent', () => {
+test('test intent: CLI lists only Go daemon sources and available optional package sources', () => {
   const root = repositoryRoot()
   const version = /<version>([^<]+)<\/version>/.exec(readFileSync(path.join(root, 'pom.xml'), 'utf8'))[1]
   const env = { ...process.env }
@@ -124,25 +72,27 @@ test('test intent: the CLI checks only internal versions when RELEASE_TAG is abs
     encoding: 'utf8',
   })
   assert.equal(result.status, 0, result.stderr)
-  assert.equal(
-    result.stdout,
-    `repository version ${version} is aligned across pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json, frontend/package.json, daemon/src/config.ts and daemon-go/internal/config/version.go\n`,
-  )
+  const sources = [
+    'pom.xml',
+    'kk-studio.version',
+    'daemon-go/internal/config/version.go',
+    ...(requireExists(root, 'daemon-go/ide-extension/package.json') ? ['daemon-go/ide-extension/package.json'] : []),
+    ...(requireExists(root, 'frontend/package.json') ? ['frontend/package.json'] : []),
+  ]
+  assert.equal(result.stdout, `repository version ${version} is aligned across ${sources.slice(0, -1).join(', ')} and ${sources.at(-1)}\n`)
 })
 
-test('test intent: the CLI strictly checks an explicitly supplied release tag', () => {
+test('test intent: CLI strictly rejects a tag that differs from the aligned repository version', () => {
   const root = repositoryRoot()
   const version = /<version>([^<]+)<\/version>/.exec(readFileSync(path.join(root, 'pom.xml'), 'utf8'))[1]
-  const run = (tag) => spawnSync(
-    process.execPath,
-    [path.join(root, 'scripts/dev/verify/repository/check-version-alignment.mjs')],
-    { cwd: root, env: { ...process.env, RELEASE_TAG: tag }, encoding: 'utf8' },
-  )
-
+  const run = (tag) => spawnSync(process.execPath, [path.join(root, 'scripts/dev/verify/repository/check-version-alignment.mjs')], {
+    cwd: root,
+    env: { ...process.env, RELEASE_TAG: tag },
+    encoding: 'utf8',
+  })
   const aligned = run(`v${version}`)
   assert.equal(aligned.status, 0, aligned.stderr)
   assert.ok(aligned.stdout.includes(`and release tag v${version}\n`))
-
   assert.equal(run(`v${version}-drift`).status, 1)
   for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3']) {
     const result = run(tag)
@@ -150,3 +100,12 @@ test('test intent: the CLI strictly checks an explicitly supplied release tag', 
     assert.match(result.stderr, /invalid RELEASE_TAG/)
   }
 })
+
+function requireExists(root, relativePath) {
+  try {
+    readFileSync(path.join(root, relativePath))
+    return true
+  } catch {
+    return false
+  }
+}

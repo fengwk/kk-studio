@@ -1,11 +1,3 @@
-/**
- * Keep the Unix/Windows daemon script suites wired into the real CI gates.
- *
- * These tests pin the platform-level facts: every publication path runs the repository script suite
- * (including Unix fixtures), the daemon matrix runs the macOS system-Bash contract, both Windows PowerShell
- * hosts run the native installer suite, and a failed gate blocks publication.
- */
-
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -13,76 +5,46 @@ import test from 'node:test'
 
 import { repositoryRoot } from '../../dev/lib/repo-root.mjs'
 
-const REPOSITORY_ROOT = repositoryRoot()
-const SUITE_COMMAND = 'node --test scripts/daemon/tests/*.test.mjs'
+const ROOT = repositoryRoot()
+const workflow = (name) => readFileSync(path.join(ROOT, '.github/workflows', name), 'utf8')
 
-const workflow = (name) => readFileSync(path.join(REPOSITORY_ROOT, '.github/workflows', name), 'utf8')
-
-/** Read one top-level job without adding a YAML dependency to script tests. */
 function jobBlock(text, name) {
   const match = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [A-Za-z_][A-Za-z_0-9]*:|$(?![\\s\\S]))`, 'm').exec(text)
   assert.ok(match, `missing job: ${name}`)
   return match[1]
 }
 
-test('test intent: every publication path runs the repository script suite', () => {
-  // Docker validate and release stage run the complete repository discovery, which includes the
-  // daemon installer fixtures; the daemon matrix additionally runs the macOS system Bash path.
-  for (const [name, jobName] of [
-    ['docker-publish.yml', 'validate'],
-    ['daemon-release.yml', 'stage'],
-  ]) {
-    const job = jobBlock(workflow(name), jobName)
-    assert.ok(job.includes('Run repository script tests'), `${name}: missing repository script tests`)
-    assert.ok(job.includes('scripts/*/tests/*.test.mjs'), `${name}: missing daemon fixture discovery`)
-    assert.ok(job.indexOf('npm --prefix daemon ci') < job.indexOf('Run repository script tests'))
-  }
-
-  const ci = jobBlock(workflow('daemon-ci.yml'), 'node_daemon')
-  for (const expected of [
-    'Test the macOS installer and archive smoke with system Bash',
-    'shell: /bin/bash --noprofile --norc -eo pipefail {0}',
-    '/bin/bash --version',
-    SUITE_COMMAND,
-  ]) {
-    assert.ok(ci.includes(expected), expected)
-  }
+test('Go daemon CI owns the release script suite and is reusable', () => {
+  const ci = workflow('daemon-go-ci.yml')
+  assert.match(ci, /^  workflow_call:/m)
+  const quality = jobBlock(ci, 'quality')
+  assert.ok(quality.includes('actions/setup-node'))
+  assert.ok(quality.includes('actions/setup-go'))
+  assert.ok(quality.includes('Run repository script tests'))
+  assert.ok(quality.includes('GO_BIN: go'))
+  assert.ok(quality.includes('scripts/daemon/tests/*.test.mjs'))
+  assert.ok(quality.includes('scripts/dev/verify/reliability/tests/daemon-entrypoint-contracts.test.mjs'))
+  assert.ok(quality.includes('scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs'))
 })
 
-test('test intent: the Windows gate runs both PowerShell hosts', () => {
-  // PS 5.1 is the floor; the PS7 result is collected even when PS 5.1 fails. The reusable daemon
-  // matrix is the single native Windows gate for both image publishing and tag releases.
-  const job = jobBlock(workflow('daemon-ci.yml'), 'windows_daemon_installer')
-  for (const expected of ['shell: powershell', 'shell: pwsh', 'test_daemon_install_windows.ps1', 'if: ${{ !cancelled() }}']) {
-    assert.ok(job.includes(expected), expected)
-  }
-  for (const [name, jobName] of [
-    ['docker-publish.yml', 'validate_windows_daemon'],
-    ['daemon-release.yml', 'validate_windows_daemon'],
-  ]) {
-    assert.throws(() => jobBlock(workflow(name), jobName), /missing job/u, `${name}: duplicate Windows job must stay removed`)
-  }
+test('release staging runs the script suite and host smoke includes Windows', () => {
+  const release = workflow('daemon-release.yml')
+  const stage = jobBlock(release, 'stage')
+  assert.ok(stage.includes('Run repository script tests'))
+  assert.ok(stage.includes('actions/setup-go'))
+  assert.ok(stage.includes('GO_BIN: go'))
+  const smoke = jobBlock(release, 'smoke_archives')
+  assert.ok(smoke.includes('windows-latest'))
+  assert.ok(smoke.includes('smoke-archive.ps1'))
 })
 
-test('test intent: publish and release require the shared gates', () => {
+test('Docker publishing waits for reusable Go Daemon CI before publishing', () => {
   const docker = workflow('docker-publish.yml')
+  assert.ok(jobBlock(docker, 'daemon_ci').includes('./.github/workflows/daemon-go-ci.yml'))
   const publish = jobBlock(docker, 'publish')
-  const dockerNeeds = publish.split('needs:\n')[1].split('    if:')[0]
+  const needs = publish.split('needs:\n')[1].split('    if:')[0]
   for (const name of ['preflight', 'validate', 'validate_frontend', 'daemon_ci']) {
-    assert.ok(dockerNeeds.includes(`      - ${name}\n`), name)
-  }
-  assert.ok(publish.includes("needs.preflight.result == 'success'"))
-  for (const name of ['validate', 'validate_frontend', 'daemon_ci']) {
+    assert.ok(needs.includes(`      - ${name}\n`), name)
     assert.ok(publish.includes(`needs.${name}.result == 'success'`), name)
-    assert.ok(publish.includes(`needs.${name}.result == 'skipped'`), name)
   }
-  assert.ok(publish.includes('&& !cancelled()'))
-  for (const name of ['validate_unix_daemon', 'validate_windows_daemon']) {
-    assert.throws(() => jobBlock(docker, name), /missing job/u)
-  }
-
-  const stage = jobBlock(workflow('daemon-release.yml'), 'stage')
-  const stageNeeds = stage.split('needs:\n')[1].split('    runs-on:')[0]
-  assert.deepEqual([...stageNeeds.matchAll(/^      - (.+)$/gm)].map((match) => match[1]), ['daemon_ci'])
-  assert.doesNotMatch(stage, /^ {4}if:/m)
 })

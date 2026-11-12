@@ -29,6 +29,10 @@ binary="$tmp/kk-studio-daemon"
 for forbidden in main.js package.json node_modules native/lock-helper.js delay.js rg; do
   [ ! -e "$tmp/$forbidden" ] || fail "Go archive unexpectedly contains $forbidden"
 done
+ripgrep_binary=$(find "$tmp" -type f \( -name rg -o -name rg.exe \) -print -quit)
+[ -z "$ripgrep_binary" ] || fail "Go archive unexpectedly contains ripgrep binary: $ripgrep_binary"
+ripgrep_package=$(find "$tmp/runtime/code-server" -type d -name 'ripgrep*' -print -quit)
+[ -z "$ripgrep_package" ] || fail "Go archive unexpectedly contains ripgrep package: $ripgrep_package"
 version=$($binary --version 2>&1) || fail 'daemon --version failed'
 [[ $version =~ ^kk-studio-daemon\ [0-9A-Za-z._+-]+$ ]] || fail "unexpected daemon version output: $version"
 if [ "$platform" = linux-amd64 ] || [ "$platform" = linux-arm64 ]; then

@@ -17,6 +17,14 @@ try {
     foreach ($forbidden in @('main.js', 'package.json', 'node_modules', 'native\lock-helper.js', 'delay.js', 'rg')) {
         if (Test-Path -LiteralPath (Join-Path $temp $forbidden)) { throw "Go archive unexpectedly contains $forbidden" }
     }
+    $ripgrepBinary = Get-ChildItem -LiteralPath $temp -Recurse -File |
+        Where-Object { $_.Name -in @('rg', 'rg.exe') } |
+        Select-Object -First 1
+    if ($null -ne $ripgrepBinary) { throw "Go archive unexpectedly contains ripgrep binary: $($ripgrepBinary.FullName)" }
+    $ripgrepPackage = Get-ChildItem -LiteralPath (Join-Path $temp 'runtime\code-server') -Recurse -Directory |
+        Where-Object { $_.Name -like 'ripgrep*' } |
+        Select-Object -First 1
+    if ($null -ne $ripgrepPackage) { throw "Go archive unexpectedly contains ripgrep package: $($ripgrepPackage.FullName)" }
     $version = & $binary --version
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^kk-studio-daemon [0-9A-Za-z._+-]+$') { throw 'daemon --version failed' }
     Write-Output "archive smoke ok: $name ($version)"

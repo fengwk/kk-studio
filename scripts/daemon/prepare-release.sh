@@ -59,31 +59,33 @@ main() {
   checksum="$artifact.sha256"
   metadata="kk-studio-daemon-${tag}-${os}-${arch}.json"
   if [ "$os" = windows ]; then bin_name=kk-studio-daemon.exe; else bin_name=kk-studio-daemon; fi
-  work=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon-release.XXXXXX")
-  staging=$(mktemp -d "$(dirname "$RELEASE_ROOT")/.kk-studio-daemon-stage.XXXXXX")
-  trap 'rm -rf -- "$work" "$staging"' EXIT
-  mkdir -p "$staging/runtime/code-server" "$staging/ide-extension"
-  (cd "$GO_DIR" && GOOS="$goos" GOARCH="$arch" CGO_ENABLED=0 "$GO_BIN" build -trimpath -ldflags "-X github.com/fengwk/kk-studio/daemon/internal/config.DaemonVersion=$version" -o "$work/$bin_name" ./cmd/kk-studio-daemon)
-  [ -x "$work/$bin_name" ] || die 'Go daemon build is not executable'
+  WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon-release.XXXXXX")
+  STAGING_DIR=$(mktemp -d "$(dirname "$RELEASE_ROOT")/.kk-studio-daemon-stage.XXXXXX")
+  mkdir -p "$STAGING_DIR/runtime/code-server" "$STAGING_DIR/ide-extension"
+  (cd "$GO_DIR" && GOOS="$goos" GOARCH="$arch" CGO_ENABLED=0 "$GO_BIN" build -trimpath -ldflags "-X github.com/fengwk/kk-studio/daemon/internal/config.DaemonVersion=$version" -o "$WORK_DIR/$bin_name" ./cmd/kk-studio-daemon)
+  [ -x "$WORK_DIR/$bin_name" ] || die 'Go daemon build is not executable'
   if [ "$goos" = "linux" ] && [ "$arch" = "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" ]; then
-    [ "$("$work/$bin_name" --version)" = "kk-studio-daemon $version" ] || die '--version mismatch'
+    [ "$("$WORK_DIR/$bin_name" --version)" = "kk-studio-daemon $version" ] || die '--version mismatch'
   fi
   local runtime_archive
-  runtime_archive="$work/code-server.tar.gz"
+  runtime_archive="$WORK_DIR/code-server.tar.gz"
   curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --output "$runtime_archive" "$runtime_url"
   [ "$(sha256_of "$runtime_archive")" = "$runtime_sha" ] || die 'code-server SHA256 mismatch'
-  tar -xzf "$runtime_archive" -C "$staging/runtime/code-server" --strip-components=1
-  cp "$work/$bin_name" "$staging/$bin_name"
-  cp -R "$EXTENSION/." "$staging/ide-extension/"
-  if [ -d "$GO_DIR/resources" ]; then cp -R "$GO_DIR/resources" "$staging/resources"; fi
-  cp "$REPO_ROOT/LICENSE" "$staging/LICENSE"
-  cp "$THIRD_PARTY_NOTICES" "$staging/THIRD_PARTY_NOTICES"
-  "$NODE_BIN" -e 'const fs=require("node:fs");const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const key=process.argv[2];fs.writeFileSync(process.argv[3],JSON.stringify({daemonVersion:process.argv[4],codeServerVersion:manifest.codeServerVersion,codeServer:{[key]:manifest.codeServer[key]}},null,2)+"\n")' "$MANIFEST" "$release_key" "$staging/runtime-manifest.json" "$version"
-  (cd "$staging" && tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "$work/$artifact" .)
+  tar -xzf "$runtime_archive" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
+  # The Go daemon replaces the bundled search binary; keep code-server's own Node runtime but omit rg.
+  find "$STAGING_DIR/runtime/code-server" -type d -name 'ripgrep*' -prune -exec rm -rf -- {} +
+  find "$STAGING_DIR/runtime/code-server" -type f \( -name rg -o -name rg.exe \) -delete
+  cp "$WORK_DIR/$bin_name" "$STAGING_DIR/$bin_name"
+  cp -R "$EXTENSION/." "$STAGING_DIR/ide-extension/"
+  if [ -d "$GO_DIR/resources" ]; then cp -R "$GO_DIR/resources" "$STAGING_DIR/resources"; fi
+  cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE"
+  cp "$THIRD_PARTY_NOTICES" "$STAGING_DIR/THIRD_PARTY_NOTICES"
+  "$NODE_BIN" -e 'const fs=require("node:fs");const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const key=process.argv[2];fs.writeFileSync(process.argv[3],JSON.stringify({daemonVersion:process.argv[4],codeServerVersion:manifest.codeServerVersion,codeServer:{[key]:manifest.codeServer[key]}},null,2)+"\n")' "$MANIFEST" "$release_key" "$STAGING_DIR/runtime-manifest.json" "$version"
+  (cd "$STAGING_DIR" && tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -czf "$WORK_DIR/$artifact" .)
   local digest
-  digest=$(sha256_of "$work/$artifact")
-  printf '%s  %s\n' "$digest" "$artifact" >"$work/$checksum"
-  cat >"$work/$metadata" <<EOF
+  digest=$(sha256_of "$WORK_DIR/$artifact")
+  printf '%s  %s\n' "$digest" "$artifact" >"$WORK_DIR/$checksum"
+  cat >"$WORK_DIR/$metadata" <<EOF
 {
   "tag": "$tag",
   "commit": "$commit",
@@ -100,7 +102,7 @@ EOF
   local output="$RELEASE_ROOT/$release_key"
   rm -rf -- "$output"
   mkdir -p "$output"
-  cp "$work/$artifact" "$work/$checksum" "$work/$metadata" "$output/"
+  cp "$WORK_DIR/$artifact" "$WORK_DIR/$checksum" "$WORK_DIR/$metadata" "$output/"
   cp "$REPO_ROOT/LICENSE" "$output/LICENSE"
   cp "$THIRD_PARTY_NOTICES" "$output/THIRD_PARTY_NOTICES"
   echo "staged Go daemon release $tag for $release_key (commit $commit)"
