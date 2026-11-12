@@ -69,19 +69,25 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 		return DaemonConfig{}, errors.New("config: configuration file is invalid")
 	}
 	var env configEnvelope
-	if err := jsonv2.Unmarshal(b, &env); err != nil || !canonicalUUID.MatchString(env.EnvironmentID) || !decimalVersion.MatchString(env.Version) {
-		return DaemonConfig{}, errors.New("config: configuration file is invalid")
+	if err := jsonv2.Unmarshal(b, &env); err != nil {
+		return DaemonConfig{}, errors.New("daemon: configuration file is invalid")
+	}
+	if !canonicalUUID.MatchString(env.EnvironmentID) {
+		return DaemonConfig{}, errors.New("daemon.environmentId: must be a canonical lowercase UUID")
+	}
+	if !decimalVersion.MatchString(env.Version) {
+		return DaemonConfig{}, errors.New("daemon.version: must be a canonical non-negative decimal string")
 	}
 	version, err := strconv.ParseInt(env.Version, 10, 64)
 	if err != nil {
-		return DaemonConfig{}, errors.New("config: configuration file is invalid")
+		return DaemonConfig{}, errors.New("daemon.version: must fit a signed 64-bit integer")
 	}
 	var raw map[string]json.RawMessage
 	if err := jsonv2.Unmarshal(env.DaemonConfig, &raw); err != nil || raw == nil || hasUnknown(raw, "studioUrl", "bashExecutable", "lsp", "proxyUrl") {
 		return DaemonConfig{}, errors.New("config: daemonConfig is invalid")
 	}
 	var lspOrder []string
-	if lspRaw, ok := raw["lsp"]; ok {
+	if lspRaw, ok := raw["lsp"]; ok && !bytes.Equal(bytes.TrimSpace(lspRaw), []byte("null")) {
 		var lspObject map[string]json.RawMessage
 		if jsonv2.Unmarshal(lspRaw, &lspObject) != nil || lspObject == nil || hasUnknown(lspObject, "servers") {
 			return DaemonConfig{}, errors.New("config: lsp is invalid")
@@ -91,7 +97,7 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
 		}
 		var servers map[string]json.RawMessage
-		if jsonv2.Unmarshal(serversRaw, &servers) != nil || servers == nil {
+		if jsonv2.Unmarshal(serversRaw, &servers) != nil || servers == nil || len(servers) == 0 {
 			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
 		}
 		lspOrder, err = orderedJSONKeys(serversRaw)
@@ -120,12 +126,12 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if wire.BashExecutable != nil && (strings.TrimSpace(*wire.BashExecutable) == "" || hasControl(*wire.BashExecutable)) {
 		return DaemonConfig{}, errors.New("config: bashExecutable is invalid")
 	}
-	if len(wire.LSP.Servers) == 0 {
-		return DaemonConfig{}, errors.New("config: lsp must contain at least one server")
-	}
 	lsp := make([]LSPServerConfig, 0, len(wire.LSP.Servers))
 	for _, id := range lspOrder {
 		s := wire.LSP.Servers[id]
+		s.Extensions = normalizeExtensions(s.Extensions)
+		s.RootMarkers = normalizeMarkers(s.RootMarkers)
+		s.FirstMatchMarkers = normalizeMarkers(s.FirstMatchMarkers)
 		if id == "" || !lspServerID.MatchString(id) || !validStringList(s.Command, true) || !validStringList(s.Extensions, true) || !validStringList(s.RootMarkers, false) || !validStringList(s.FirstMatchMarkers, false) {
 			return DaemonConfig{}, errors.New("config: lsp server is invalid")
 		}
@@ -142,13 +148,16 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 		lsp = append(lsp, LSPServerConfig{ID: id, Command: s.Command, Extensions: s.Extensions, RootMarkers: s.RootMarkers, FirstMatchMarkers: s.FirstMatchMarkers})
 	}
 	dataDir := filepath.Dir(path)
-	bash := wire.BashExecutable
-	if bash == nil {
-		defaultBash := "bash"
-		bash = &defaultBash
+	tokenPath := filepath.Join(dataDir, "daemon.token")
+	if err := validateRegistrationTokenFile(tokenPath); err != nil {
+		return DaemonConfig{}, err
+	}
+	var bash *string
+	if resolved, err := ResolveBash(wire.BashExecutable); err == nil {
+		bash = &resolved
 	}
 	gateway := gatewayURL(studio)
-	return DaemonConfig{EnvironmentID: env.EnvironmentID, ConfigVersion: int64(version), ConfigPath: path, DataDir: dataDir, TokenPath: filepath.Join(dataDir, "daemon.token"), StudioURL: studio, GatewayURL: gateway, BashExecutable: bash, BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath())}, nil
+	return DaemonConfig{EnvironmentID: env.EnvironmentID, ConfigVersion: int64(version), ConfigPath: path, DataDir: dataDir, TokenPath: tokenPath, StudioURL: studio, GatewayURL: gateway, BashExecutable: bash, BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath())}, nil
 }
 
 // CheckConfig validates config and its sibling token without creating directories or locks.
@@ -169,7 +178,11 @@ func parseProxy(p *string) (*string, error) {
 		return nil, nil
 	}
 	u, err := url.Parse(*p)
-	if err != nil || u.Scheme != "http" || u.Hostname() == "" || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Scheme != "http" || u.Hostname() == "" || u.Hostname() == "*" || u.Port() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("invalid")
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("invalid")
 	}
 	v := "http://" + u.Host
@@ -185,6 +198,22 @@ func validStringList(values []string, required bool) bool {
 		}
 	}
 	return true
+}
+
+func normalizeExtensions(values []string) []string {
+	normalized := make([]string, len(values))
+	for i, value := range values {
+		normalized[i] = strings.ToLower(strings.TrimSpace(value))
+	}
+	return normalized
+}
+
+func normalizeMarkers(values []string) []string {
+	normalized := make([]string, len(values))
+	for i, value := range values {
+		normalized[i] = strings.TrimSpace(value)
+	}
+	return normalized
 }
 
 func validRelativePath(s string) bool {
@@ -259,18 +288,25 @@ func executablePath() string {
 	return p
 }
 
+func validateRegistrationTokenFile(path string) error {
+	st, err := os.Lstat(path)
+	if err != nil || !st.Mode().IsRegular() {
+		return errors.New("daemon.token: cannot read registration token file")
+	}
+	if runtime.GOOS != "windows" && (st.Mode().Perm()&0077 != 0 || st.Mode().Perm()&0400 == 0) {
+		return errors.New("daemon.token: registration token file must be owner-only")
+	}
+	return nil
+}
+
 // ReadRegistrationToken reads and trims the sibling registration token without retaining it in config.
 func ReadRegistrationToken(path string) (string, error) {
 	c, err := LoadDaemonConfig(path)
 	if err != nil {
 		return "", err
 	}
-	st, err := os.Lstat(c.TokenPath)
-	if err != nil || !st.Mode().IsRegular() {
-		return "", errors.New("daemon.token: cannot read registration token file")
-	}
-	if runtime.GOOS != "windows" && (st.Mode().Perm()&0077 != 0 || st.Mode().Perm()&0400 == 0) {
-		return "", errors.New("daemon.token: registration token file must be owner-only")
+	if err := validateRegistrationTokenFile(c.TokenPath); err != nil {
+		return "", err
 	}
 	b, err := os.ReadFile(c.TokenPath)
 	if err != nil {

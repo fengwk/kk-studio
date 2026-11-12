@@ -897,7 +897,13 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 			return nil, errors.New("progress does not allow binary content")
 		}
 		if size > budget-total {
-			return nil, fmt.Errorf("aggregate resource bytes exceed maximumResourceBytes: maximum=%d", budget)
+			actual := size
+			if size <= maxSignedInt64-total {
+				actual += total
+			} else {
+				actual = maxSignedInt64
+			}
+			return nil, errors.New(toolOutputExceededMessage(actual, budget))
 		}
 		total += size
 	}

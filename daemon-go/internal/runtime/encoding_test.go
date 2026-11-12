@@ -46,7 +46,8 @@ func TestRuntimeRejectsResultOverResourceBudgetBeforeUpload(t *testing.T) {
 	uploader := &testUploader{}
 	r := newEncodingRuntime(t, uploader)
 	_, err := r.encodeResult(context.Background(), testInvocationID, CapabilityResult{CallID: testInvocationID, Contents: []ResultContent{{Type: "resource", Size: 2}, {Type: "binary", Bytes: []byte("ab")}}}, 3, false)
-	if err == nil || err.Error() != "aggregate resource bytes exceed maximumResourceBytes: maximum=3" {
+	want := "Tool output is 0.000004 MiB, which exceeds the tool output size limit of 0 MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings."
+	if err == nil || err.Error() != want {
 		t.Fatalf("unexpected budget error: %v", err)
 	}
 	if uploader.calls != 0 {
