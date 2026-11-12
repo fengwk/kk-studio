@@ -120,6 +120,19 @@ func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 	}
 }
 
+// COD-N-020: reaching N stops content reads and emits the exact limit notice.
+func TestGrepExactLimitNoticeText(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": root, "pattern": "x", "literal": true, "limit": 1}, nil)
+	want := "a.txt:1:x\n\n[1 matches limit reached. Refine the pattern or raise limit.]"
+	if result.Error || result.Contents[0].Text != want {
+		t.Fatalf("result=%#v want text %q", result, want)
+	}
+}
+
 // COD-F-012, COD-F-014
 func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	arguments, err := json.Marshal(map[string]any{"path": t.TempDir(), "pattern": "[", "literal": false})
@@ -137,6 +150,71 @@ func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	text := result.Contents[0].Text
 	if details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, "Invalid regex:") || !strings.Contains(text, "Use literal=true for exact text, or escape regex metacharacters.") || !strings.Contains(text, "The tool was not executed.") {
 		t.Fatalf("details=%v text=%q", details, text)
+	}
+}
+
+// COD-N-009: Go RE2's unsupported extended-mode diagnostic is visible to callers.
+func TestExtendedRegexModeDiagnosticIsModelVisible(t *testing.T) {
+	root := t.TempDir()
+	pattern := "(?x)é"
+	_, diagnosticErr := search.GrepContext(context.Background(), root, pattern, false, false, "", 0)
+	if diagnosticErr == nil || !strings.HasPrefix(diagnosticErr.Error(), "invalid regex:") {
+		t.Fatalf("extended-mode search error=%v", diagnosticErr)
+	}
+	want := "Invalid regex: " + strings.TrimSpace(strings.TrimPrefix(diagnosticErr.Error(), "invalid regex:")) + ". Use literal=true for exact text, or escape regex metacharacters."
+	arguments, err := json.Marshal(map[string]any{"path": root, "pattern": pattern, "literal": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := grepCapability(context.Background(), runtime.CapabilityCall{InvocationID: "extended-regex", Arguments: arguments}, runtime.CapabilityContext{})
+	if err != nil || !result.Error {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	text := result.Contents[0].Text
+	if details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, want) || !strings.Contains(text, "The tool was not executed.") {
+		t.Fatalf("details=%v text=%q want diagnostic %q", details, text, want)
+	}
+}
+
+// COD-N-012: invalid globs are rejected through both search capabilities.
+func TestInvalidSearchGlobIsInputRejection(t *testing.T) {
+	for _, capability := range []string{"fs.find", "fs.grep"} {
+		t.Run(capability, func(t *testing.T) {
+			arguments := map[string]any{"path": t.TempDir()}
+			if capability == "fs.find" {
+				arguments["pattern"] = "["
+			} else {
+				arguments["pattern"] = "needle"
+				arguments["glob"] = "["
+				arguments["literal"] = true
+			}
+			encoded, err := json.Marshal(arguments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := runtime.CapabilityCall{InvocationID: "invalid-glob", Arguments: encoded}
+			var result runtime.CapabilityResult
+			if capability == "fs.find" {
+				result, err = findCapability(context.Background(), call, runtime.CapabilityContext{})
+			} else {
+				result, err = grepCapability(context.Background(), call, runtime.CapabilityContext{})
+			}
+			if err != nil || !result.Error {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			var details map[string]string
+			if err := json.Unmarshal(result.Details, &details); err != nil {
+				t.Fatal(err)
+			}
+			text := result.Contents[0].Text
+			if details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, "Invalid glob:") || !strings.Contains(text, "The tool was not executed.") {
+				t.Fatalf("details=%v text=%q", details, text)
+			}
+		})
 	}
 }
 
@@ -210,7 +288,7 @@ func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	}
 }
 
-// COD-T-174: removed grep argument names are rejected as unknown arguments.
+// COD-N-010: the removed multiline argument is rejected.
 func TestGrepRejectsRemovedArguments(t *testing.T) {
 	root := t.TempDir()
 	for _, argument := range []string{"multiline", "include"} {

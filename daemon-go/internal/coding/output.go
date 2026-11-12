@@ -49,10 +49,11 @@ func TextOutputStoreForDataDir(dataDir string) (*TextOutputStore, error) {
 
 // TextOutputStore owns bounded process output files under dataDir/tmp/workspaces.
 type TextOutputStore struct {
-	root    string
-	mu      sync.Mutex
-	leases  map[string]int
-	staging map[string]string
+	root            string
+	mu              sync.Mutex
+	leases          map[string]int
+	staging         map[string]string
+	openStagingFile func(string) (*os.File, error)
 }
 
 // OpenTextOutputStore opens or creates the private temporary-output root.
@@ -92,7 +93,12 @@ func (s *TextOutputStore) CreateStagingFile(callID string) (*os.File, string, er
 		return nil, "", err
 	}
 	path := filepath.Join(workspace, sanitizeOutputName(callID)+"-"+id[:8]+".part")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	var file *os.File
+	if s.openStagingFile != nil {
+		file, err = s.openStagingFile(path)
+	} else {
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	}
 	if err != nil {
 		_ = os.RemoveAll(workspace)
 		return nil, "", err

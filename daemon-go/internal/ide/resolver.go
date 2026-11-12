@@ -126,7 +126,7 @@ func (r *Resolver) ResolveView(ctx context.Context, request transport.ViewReques
 }
 
 func upstreamPath(request transport.ViewRequest, viewID, epoch string) (string, error) {
-	if request.Mode != "HTTP" && request.Mode != "WS" {
+	if request.Mode != "http" && request.Mode != "websocket" {
 		return "", NewError("stream mode is invalid", "UNAVAILABLE")
 	}
 	if !methodPattern.MatchString(request.Method) {

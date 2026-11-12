@@ -283,19 +283,15 @@ func (c *ControlConnection) awaitControl(ctx context.Context) error {
 	}
 }
 
-// Close gracefully ends HTTP/2 before terminating the WebSocket transport.
+// Close terminates the WebSocket transport and its HTTP/2 server.
 func (c *ControlConnection) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.stopControl)
 		close(c.closed)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		c.closeErr = c.server.Shutdown(ctx)
-		if c.closeErr != nil {
-			c.closeErr = c.server.Close()
-		}
-		if err := c.conn.Close(); c.closeErr == nil {
-			c.closeErr = err
+		connErr := c.conn.Close()
+		c.closeErr = c.server.Close()
+		if c.closeErr == nil {
+			c.closeErr = connErr
 		}
 	})
 	return c.closeErr

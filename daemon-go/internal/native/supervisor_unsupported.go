@@ -9,7 +9,7 @@ import (
 )
 
 func NewSupervisor() (Supervisor, error) {
-	return nil, fmt.Errorf("the native process supervisor does not support %s", runtime.GOOS)
+	return newUnsupportedSupervisor(runtime.GOOS)
 }
 
 func helperMain(args []string) int {

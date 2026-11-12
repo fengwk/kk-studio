@@ -54,6 +54,22 @@ func TestFileTextEncodeRetainsCharsetAndRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+// COD-F-003: write surfaces the exact charset and stable CODEC error for unencodable text.
+func TestWriteEncodingFailureIncludesCharsetAndCodecCode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.txt")
+	_, err := Write(path, string([]byte{0xff}), nil)
+	if err == nil || err.Error() != "text cannot be losslessly encoded in charset UTF-8" {
+		t.Fatalf("write encoding error=%v", err)
+	}
+	result := toCapabilityErrorResult("invalid-write", err)
+	if !result.Error || !strings.Contains(string(result.Details), `"code":"CODEC"`) {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("encoding failure created target: stat error=%v", statErr)
+	}
+}
+
 // COD-F-007, COD-T-027
 func TestWriteRejectsInvalidTargetsAndCreatesNewFile(t *testing.T) {
 	root := t.TempDir()

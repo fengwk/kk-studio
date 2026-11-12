@@ -8,13 +8,37 @@ import (
 
 // COD-T-068
 func TestNumberedDiffNoNewlineMarker(t *testing.T) {
-	got, err := numberedDiff("foo", "bar")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "- 1|foo\n\\ No newline at end of file\n+ 1|bar\n\\ No newline at end of file"
-	if got != want {
-		t.Fatalf("diff=%q want=%q", got, want)
+	for _, test := range []struct {
+		name, old, new, want string
+	}{
+		{
+			name: "both missing newline",
+			old:  "foo",
+			new:  "bar",
+			want: "- 1|foo\n\\ No newline at end of file\n+ 1|bar\n\\ No newline at end of file",
+		},
+		{
+			name: "remove newline",
+			old:  "foo\n",
+			new:  "foo",
+			want: "- 1|foo\n+ 1|foo\n\\ No newline at end of file",
+		},
+		{
+			name: "add newline",
+			old:  "foo",
+			new:  "foo\n",
+			want: "- 1|foo\n\\ No newline at end of file\n+ 1|foo",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := numberedDiff(test.old, test.new)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("diff=%q want=%q", got, test.want)
+			}
+		})
 	}
 }
 

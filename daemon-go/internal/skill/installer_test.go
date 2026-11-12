@@ -151,6 +151,27 @@ func TestInstallerRejectsTicketDigestMismatch(t *testing.T) {
 	}
 }
 
+// TestSkillInstall_FailedMidDownloadLeavesNoTemporaryFiles proves failed ticket-backed
+// transfers do not leave staged or outer-download temporary files in the data directory.
+func TestSkillInstall_FailedMidDownloadLeavesNoTemporaryFiles(t *testing.T) {
+	root := t.TempDir()
+	d := &fakeDownloader{data: []byte("partial archive"), downloadErr: errors.New("connection interrupted")}
+	_, _, err := (&Installer{DataDir: root, Downloader: d}).Install(context.Background(), installInput())
+	if err == nil {
+		t.Fatal("expected download failure")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed download left temporary files in data directory: %v", entries)
+	}
+	if d.requests != 1 || d.downloads != 1 {
+		t.Fatalf("requests/downloads=%d/%d, want 1/1", d.requests, d.downloads)
+	}
+}
+
 // RUN-N-002 verifies installation failures are returned as errors rather than successful text-only results.
 func TestSkillInstall_FailureIsReturned(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})

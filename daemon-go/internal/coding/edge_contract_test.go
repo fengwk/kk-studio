@@ -19,9 +19,10 @@ func TestReadLSPHeader(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	resolvedPath := resolvedTestPath(t, path)
 	provider := Provider{LSPStatus: func(file string) (string, bool) {
-		if file != path {
-			t.Fatalf("LSP hook path=%q want=%q", file, path)
+		if file != resolvedPath {
+			t.Fatalf("LSP hook path=%q want=%q", file, resolvedPath)
 		}
 		return "go", true
 	}}
@@ -92,12 +93,12 @@ func TestDirectoryPagination(t *testing.T) {
 		}
 	}
 	page, err := readCapability(context.Background(), capabilityCall(t, "page", map[string]any{"path": listing, "offset": 2, "limit": 2}), runtime.CapabilityContext{})
-	want := fmt.Sprintf("path: %s\nkind: directory\n\nf2.txt\nf3.txt\n\n[Showing entries 2-3 of 5. Re-run read with offset=4 to continue.]", filepath.ToSlash(listing))
+	want := fmt.Sprintf("path: %s\nkind: directory\n\nf2.txt\nf3.txt\n\n[Showing entries 2-3 of 5. Re-run read with offset=4 to continue.]", filepath.ToSlash(resolvedTestPath(t, listing)))
 	if err != nil || page.Error || page.Contents[0].Text != want {
 		t.Fatalf("page=%#v err=%v want=%q", page, err, want)
 	}
 	beyond, err := readCapability(context.Background(), capabilityCall(t, "beyond", map[string]any{"path": listing, "offset": 10}), runtime.CapabilityContext{})
-	want = fmt.Sprintf("path: %s\nkind: directory\n\n[Showing 0 entries of 5.]", filepath.ToSlash(listing))
+	want = fmt.Sprintf("path: %s\nkind: directory\n\n[Showing 0 entries of 5.]", filepath.ToSlash(resolvedTestPath(t, listing)))
 	if err != nil || beyond.Error || beyond.Contents[0].Text != want {
 		t.Fatalf("beyond=%#v err=%v want=%q", beyond, err, want)
 	}

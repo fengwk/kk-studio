@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,8 +61,17 @@ func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
 	}
 	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
 	result := spool.Finish(false, "[Command exited with code 2.]")
-	if !strings.HasSuffix(result.Contents[0].Text, "[Command exited with code 2.]") || !strings.Contains(result.Contents[0].Text, "[Full output:") {
-		t.Fatalf("preview=%q", result.Contents[0].Text)
+	var details struct {
+		TextOutput struct {
+			Path string `json:"path"`
+		} `json:"textOutput"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	wantFooter := fmt.Sprintf("[Full output: %d bytes, 1 lines. Saved to: %s\nUse read with offset/limit to page through the file, or grep to search it.]\n[Command exited with code 2.]", inlineOutputBytes+1, details.TextOutput.Path)
+	if !strings.HasSuffix(result.Contents[0].Text, wantFooter) {
+		t.Fatalf("preview=%q want suffix=%q", result.Contents[0].Text, wantFooter)
 	}
 }
 
@@ -440,6 +450,39 @@ func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	}
 	if details := string(result.Details); !strings.Contains(details, `"captureFailed":true`) {
 		t.Fatalf("capture details=%s", details)
+	}
+}
+
+// COD-T-052: a staging-file failure removes the workspace and created-at registration.
+func TestCreateStagingFileFailureRollsBackWorkspace(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected staging open failure")
+	var workspace string
+	store.openStagingFile = func(path string) (*os.File, error) {
+		workspace = filepath.Dir(path)
+		if _, err := os.Stat(filepath.Join(workspace, "created-at")); err != nil {
+			t.Errorf("created-at registration was not written before staging: %v", err)
+		}
+		return nil, injected
+	}
+	if _, _, err := store.CreateStagingFile("rollback"); !errors.Is(err, injected) {
+		t.Fatalf("CreateStagingFile error=%v, want injected failure", err)
+	}
+	if workspace == "" {
+		t.Fatal("staging failure was not injected")
+	}
+	if _, err := os.Stat(workspace); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("workspace survived rollback: %v", err)
+	}
+	entries, err := os.ReadDir(store.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 || len(store.leases) != 0 || len(store.staging) != 0 {
+		t.Fatalf("rollback left store state: entries=%v leases=%v staging=%v", entries, store.leases, store.staging)
 	}
 }
 

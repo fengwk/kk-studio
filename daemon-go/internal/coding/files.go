@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-const staleWriteReviewMessage = "File changed since edit review; nothing was written. Review a new edit before approving it."
+const staleWriteReviewMessage = "File changed since review; nothing was written. Review a new change before approving it."
 
 type ExpectedFile struct {
 	Path   string
@@ -21,11 +21,11 @@ type ExpectedFile struct {
 }
 
 type WriteReview struct {
-	Path    string `json:"path"`
-	Diff    string `json:"diff,omitempty"`
-	SHA256  string `json:"sha256,omitempty"`
-	NewFile bool   `json:"newFile,omitempty"`
-	Content string `json:"content,omitempty"`
+	Path    string  `json:"path"`
+	Diff    string  `json:"diff"`
+	SHA256  *string `json:"sha256"`
+	NewFile bool    `json:"-"`
+	Content string  `json:"-"`
 }
 
 var pathLocks sync.Map
@@ -63,7 +63,11 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 		if isSymbolicLink(resolved) {
 			return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
 		}
-		return WriteReview{Path: resolved, NewFile: true, Content: content}, nil
+		diff, err := numberedDiff("", normalizeEOL(content))
+		if err != nil {
+			return WriteReview{}, err
+		}
+		return WriteReview{Path: resolved, Diff: diff, NewFile: true, Content: content}, nil
 	}
 	if err != nil {
 		return WriteReview{}, err
@@ -84,7 +88,8 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	if err != nil {
 		return WriteReview{}, err
 	}
-	return WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: diff}, nil
+	hashText := hex.EncodeToString(hash[:])
+	return WriteReview{Path: resolved, SHA256: &hashText, Diff: diff}, nil
 }
 
 // Write creates or atomically replaces a regular text file. expected, when present,
@@ -100,6 +105,12 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return WriteReview{}, statErr
+	}
+	if expected != nil && expected.Path != resolved {
+		return WriteReview{}, rejectInput(staleWriteReviewMessage)
+	}
+	if expected != nil && !exists && expected.SHA256 != "" {
+		return WriteReview{}, rejectInput(staleWriteReviewMessage)
 	}
 	if exists && info.Mode()&os.ModeSymlink != 0 {
 		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
@@ -134,9 +145,14 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 		if diffErr != nil {
 			return WriteReview{}, diffErr
 		}
-		review = WriteReview{Path: resolved, SHA256: hex.EncodeToString(hash[:]), Diff: diff}
+		hashText := hex.EncodeToString(hash[:])
+		review = WriteReview{Path: resolved, SHA256: &hashText, Diff: diff}
 	} else {
-		review = WriteReview{Path: resolved, NewFile: true, Content: content}
+		diff, diffErr := numberedDiff("", normalizeEOL(content))
+		if diffErr != nil {
+			return WriteReview{}, diffErr
+		}
+		review = WriteReview{Path: resolved, Diff: diff, NewFile: true, Content: content}
 	}
 	encoded, err := encodeFileText(content, charset, bom)
 	if err != nil {
@@ -271,6 +287,10 @@ func encodeFileText(text, charset string, bom int) ([]byte, error) {
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	return atomicWriteWithSync(path, data, mode, func(file *os.File) error { return file.Sync() })
+}
+
+func atomicWriteWithSync(path string, data []byte, mode os.FileMode, syncFile func(*os.File) error) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".kk-studio-*.part")
 	if err != nil {
 		return err
@@ -281,7 +301,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 		_, err = file.Write(data)
 	}
 	if err == nil {
-		err = file.Sync()
+		err = syncFile(file)
 	}
 	closeErr := file.Close()
 	if err != nil {

@@ -44,6 +44,19 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 		return productionFailure("daemon directory lock is unavailable", err)
 	}
 	defer func() { recordCleanupFailure(&runErr, "daemon directory lock release failed", directoryLock.Close()) }()
+	if err := (&skill.Installer{DataDir: initial.DataDir}).CleanupStaging(ctx); err != nil {
+		return productionFailure("abandoned skill staging cleanup failed", err)
+	}
+	temporaryResources, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	if err != nil {
+		return productionFailure("temporary resource storage is unavailable", err)
+	}
+	initialPolicy, err := proxyPolicy(initial)
+	if err != nil {
+		return productionFailure("initial proxy configuration is invalid", err)
+	}
+	networks := newNetworkRuntimeStore(transport.NewNetworkRuntime(initialPolicy))
+	defer func() { recordCleanupFailure(&runErr, "outbound network shutdown failed", networks.close()) }()
 	tracker, ok := processes.(native.DescendantTracker)
 	if !ok {
 		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
@@ -76,26 +89,8 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 	environmentConfig, err := daemonruntime.NewEnvironmentConfigRuntime(daemonruntime.EnvironmentConfigOptions{
 		Initial: initial,
 		Status:  status,
-		Prepare: func(_ context.Context, candidate config.DaemonConfig, _ *config.DaemonConfig) (daemonruntime.PreparedConfiguration, error) {
-			resolvedBash, err := config.ResolveBash(candidate.BashExecutable)
-			if err != nil {
-				return nil, fmt.Errorf("configured Bash executable is unavailable: %w", err)
-			}
-			candidate.BashExecutable = &resolvedBash
-			proxyURL := ""
-			if candidate.ProxyURL != nil {
-				proxyURL = *candidate.ProxyURL
-			}
-			if _, err := transport.NewProxyPolicy(proxyURL); err != nil {
-				return nil, fmt.Errorf("configured proxy is invalid: %w", err)
-			}
-			generation, err := lspFacade.Prepare(candidate.LSP)
-			if err != nil {
-				return nil, err
-			}
-			return &preparedEnvironment{config: candidate, lsp: generation}, nil
-		},
-		Report: func(err error) { slog.Error("environment configuration could not be applied", "error", err) },
+		Prepare: prepareProductionEnvironment(lspFacade, networks),
+		Report:  func(err error) { slog.Error("environment configuration could not be applied", "error", err) },
 	})
 	if err != nil {
 		return productionFailure("environment configuration runtime could not be initialized", err)
@@ -109,11 +104,17 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
-	capabilities := coding.Provider{}.Capabilities()
+	capabilities := coding.Provider{LSPStatus: func(file string) (string, bool) {
+		support := lspFacade.Support(file)
+		if support.Language == nil {
+			return "", false
+		}
+		return *support.Language, support.Available && support.Supported
+	}}.Capabilities()
 	for id, handler := range lspFacade.Capabilities() {
 		capabilities[id] = handler
 	}
-	capabilities["skill.install"] = skillCapability(environmentConfig.Current, resourceControl)
+	capabilities["skill.install"] = skillCapability(environmentConfig.Current, networks, resourceControl)
 	declarations, err := capability.Declare(capabilities)
 	if err != nil {
 		return productionFailure("daemon capability declarations are incomplete", err)
@@ -125,20 +126,21 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 	updateRunner := &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
 		return processes.Close(ctx)
 	}}
-	uploader := dynamicResourceUploader{current: environmentConfig.Current, control: resourceControl}
+	uploader := dynamicResourceUploader{networks: networks, control: resourceControl}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
-		EnvironmentID:     initial.EnvironmentID,
-		DaemonVersion:     config.DaemonVersion,
-		Connections:       connections,
-		Capabilities:      capabilities,
-		Processes:         processes,
-		FileChanged:       lspFacade.FileChanged,
-		Resources:         uploader,
-		EnvironmentConfig: environmentConfig,
-		Status:            status,
-		Update:            updateRunner,
-		IDE:               ideService,
-		ReportError:       func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
+		EnvironmentID:      initial.EnvironmentID,
+		DaemonVersion:      config.DaemonVersion,
+		Connections:        connections,
+		Capabilities:       capabilities,
+		Processes:          processes,
+		FileChanged:        lspFacade.FileChanged,
+		Resources:          uploader,
+		TemporaryResources: temporaryResources,
+		EnvironmentConfig:  environmentConfig,
+		Status:             status,
+		Update:             updateRunner,
+		IDE:                ideService,
+		ReportError:        func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
 	})
 	if err != nil {
 		return productionFailure("daemon runtime could not be initialized", err)
@@ -173,18 +175,46 @@ func (f connectionFactory) Connect(ctx context.Context) (daemonruntime.Connectio
 }
 
 type preparedEnvironment struct {
-	config config.DaemonConfig
-	lsp    *lsp.PreparedGeneration
+	config   config.DaemonConfig
+	network  *transport.NetworkRuntime
+	networks *networkRuntimeStore
+	lsp      *lsp.PreparedGeneration
 }
 
 func (p *preparedEnvironment) Config() config.DaemonConfig { return p.config }
 func (p *preparedEnvironment) Publish() (func() error, error) {
-	if err := p.lsp.Publish(); err != nil {
-		return nil, err
+	var cleanup func() error
+	var err error
+	if p.network != nil {
+		cleanup, err = p.networks.publish(p.network)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return func() error { return nil }, nil
+	if p.lsp != nil {
+		if err := p.lsp.Publish(); err != nil {
+			return nil, errors.Join(err, cleanupCandidate(cleanup))
+		}
+	}
+	return cleanup, nil
 }
-func (p *preparedEnvironment) Retire() error { return p.lsp.Retire() }
+func (p *preparedEnvironment) Retire() error {
+	var errs []error
+	if p.lsp != nil {
+		errs = append(errs, p.lsp.Retire())
+	}
+	if p.network != nil {
+		errs = append(errs, p.networks.retireCandidate(p.network))
+	}
+	return errors.Join(errs...)
+}
+
+func cleanupCandidate(cleanup func() error) error {
+	if cleanup == nil {
+		return nil
+	}
+	return cleanup()
+}
 
 type runtimeResourceControl struct {
 	runtime *daemonruntime.Runtime
@@ -213,29 +243,27 @@ func (r ticketRequester) RequestTicket(ctx context.Context, transferID string) (
 }
 
 type dynamicResourceUploader struct {
-	current func() config.DaemonConfig
-	control *runtimeResourceControl
+	networks *networkRuntimeStore
+	control  transport.UploadControl
 }
 
 func (u dynamicResourceUploader) Upload(ctx context.Context, invocationID string, content daemonruntime.ResultContent) (daemonruntime.ResultContent, error) {
-	policy, err := proxyPolicy(u.current())
+	network, release, err := u.networks.acquire()
 	if err != nil {
 		return daemonruntime.ResultContent{}, err
 	}
-	network := transport.NewNetworkRuntime(policy)
-	defer network.Close(context.Background())
+	defer release()
 	return (&transport.ResourceUploader{Control: u.control, Network: network}).Upload(ctx, invocationID, content)
 }
 
-func skillCapability(current func() config.DaemonConfig, control *runtimeResourceControl) daemonruntime.CapabilityExecutor {
+func skillCapability(current func() config.DaemonConfig, networks *networkRuntimeStore, control *runtimeResourceControl) daemonruntime.CapabilityExecutor {
 	return func(ctx context.Context, call daemonruntime.CapabilityCall, _ daemonruntime.CapabilityContext) (daemonruntime.CapabilityResult, error) {
 		applied := current()
-		policy, err := proxyPolicy(applied)
+		network, release, err := networks.acquire()
 		if err != nil {
-			return skillFailure(call.InvocationID, "skill.install: configured proxy is invalid"), nil
+			return skillFailure(call.InvocationID, "skill.install: outbound network is unavailable"), nil
 		}
-		network := transport.NewNetworkRuntime(policy)
-		defer network.Close(context.Background())
+		defer release()
 		installer := skill.Installer{DataDir: applied.DataDir, Downloader: &transport.ResourceDownloader{
 			Network: network, Requester: ticketRequester{runtime: control.runtime, invocationID: call.InvocationID},
 		}}

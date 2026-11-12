@@ -155,6 +155,12 @@ func (p *shellManagedProcess) Terminate(context.Context, time.Duration) error {
 
 type failingReadCloser struct{ data []byte }
 
+type closeOnWaitReadCloser struct {
+	data   []byte
+	closed chan struct{}
+	once   sync.Once
+}
+
 type cancelOnReadCloser struct {
 	ctx       context.Context
 	ready     chan struct{}
@@ -175,6 +181,20 @@ func (r *cancelOnReadCloser) Read(p []byte) (int, error) {
 	return 0, io.ErrClosedPipe
 }
 func (*cancelOnReadCloser) Close() error { return nil }
+
+func (r *closeOnWaitReadCloser) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	<-r.closed
+	return 0, os.ErrClosed
+}
+func (r *closeOnWaitReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
 
 func (r *failingReadCloser) Read(p []byte) (int, error) {
 	if len(r.data) == 0 {
@@ -203,7 +223,7 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader(stderr)), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, spec: &processSpec}
 	var progress []runtime.CapabilityResult
 	confirmed := 0
-	workdir := filepath.Join(t.TempDir(), "working dir")
+	workdir := filepath.Join(t.TempDir(), "working dir ' quote $ 中文")
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "call"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(r runtime.CapabilityResult) error { progress = append(progress, r); return nil }, ConfirmExecutionExit: func() { confirmed++ }}, "printf output", workdir)
 	wantArgs := []string{"-lc", `cd -- "$1" || exit 1; shift; printf output`, "bash", workdir}
 	if processSpec.Executable != "bash" || processSpec.Directory != workdir || !reflect.DeepEqual(processSpec.Args, wantArgs) {
@@ -229,7 +249,8 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Count(captured, []byte("x")) != len(output) || !strings.Contains(string(captured), stderr) || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
+	capturedText := string(captured)
+	if strings.ReplaceAll(capturedText, stderr, "") != output || strings.Count(capturedText, stderr) != 1 || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
 		t.Fatalf("details=%s captured=%d", result.Details, len(captured))
 	}
 	if confirmed != 1 {
@@ -533,7 +554,12 @@ func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	confirmed := 0
-	result, err := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "cancel"}, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }}, "true", filepath.Clean(t.TempDir()))
+	started := 0
+	supervisor := startSupervisor{start: func(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
+		started++
+		return nil, errors.New("unexpected start")
+	}}
+	result, err := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "cancel"}, runtime.CapabilityContext{Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ }}, "true", filepath.Clean(t.TempDir()))
 	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "[Operation cancelled by the caller.") {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
@@ -549,8 +575,8 @@ func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	if details.Process.Outcome != "CANCELLED" || details.Process.ExitCode != nil {
 		t.Fatalf("details=%s", result.Details)
 	}
-	if confirmed != 1 {
-		t.Fatalf("execution exit confirmations=%d want=1", confirmed)
+	if confirmed != 1 || started != 0 {
+		t.Fatalf("execution exit confirmations=%d starts=%d want=1/0", confirmed, started)
 	}
 }
 
@@ -677,6 +703,27 @@ func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 	}
 }
 
+// COD-F-017: a write after the 150ms idle interval flushes pending live output.
+func TestProcessEmitterFlushesAfterInterval(t *testing.T) {
+	if liveFlushInterval != 150*time.Millisecond {
+		t.Fatalf("live flush interval=%s want=150ms", liveFlushInterval)
+	}
+	var partials []runtime.CapabilityResult
+	emitter := &processEmitter{callID: "interval", progress: func(result runtime.CapabilityResult) error {
+		partials = append(partials, result)
+		return nil
+	}, stopped: func() bool { return false }, lastFlush: time.Now()}
+	emitter.Write([]byte("pending"))
+	if len(partials) != 0 {
+		t.Fatalf("unexpired interval flushed early: %d partials", len(partials))
+	}
+	emitter.lastFlush = time.Now().Add(-liveFlushInterval)
+	emitter.Write([]byte(" tail"))
+	if len(partials) != 1 || partials[0].Contents[0].Text != "pending tail" {
+		t.Fatalf("interval flush partials=%#v", partials)
+	}
+}
+
 // COD-T-153: live APPEND chunks preserve multibyte characters crossing the 64 KiB boundary.
 func TestProcessUTF8Boundary(t *testing.T) {
 	for _, character := range []string{"é", "中", "🚀"} {
@@ -745,6 +792,26 @@ func TestProcessReadErrorPreservesCapturedPrefix(t *testing.T) {
 	text := result.Contents[0].Text
 	if !strings.HasPrefix(text, "captured prefix") || !strings.Contains(text, "the process output stream failed while reading.") {
 		t.Fatalf("text=%q", text)
+	}
+}
+
+// A supervisor may close output pipes after a successful Wait; that is not a process read failure.
+func TestProcessWaitClosedOutputStreamsAfterNaturalExit(t *testing.T) {
+	dataDir := t.TempDir()
+	stdout := &closeOnWaitReadCloser{data: []byte("captured prefix"), closed: make(chan struct{})}
+	process := &fakeProcess{
+		stdout: stdout,
+		stderr: io.NopCloser(strings.NewReader("")),
+		wait: func(context.Context) (native.ProcessExit, error) {
+			_ = stdout.Close()
+			return testProcessExit(0), nil
+		},
+	}
+	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "wait-closed"}, runtime.CapabilityContext{
+		Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process},
+	}, "true", dataDir)
+	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "captured prefix") || strings.Contains(result.Contents[0].Text, "output stream failed while reading") {
+		t.Fatalf("result=%#v err=%v", result, err)
 	}
 }
 

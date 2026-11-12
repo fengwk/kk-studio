@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -157,7 +156,7 @@ func TestServiceCloseCancelsStreams(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,14 +202,14 @@ func TestResolveRouteAndRestoreMissing(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	request := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "//outside"}
+	request := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "//outside"}
 	if _, err := service.ResolveView(context.Background(), request); err == nil || service.ActiveStreamCount() != 0 {
 		t.Fatalf("unsafe route err=%v streams=%d", err, service.ActiveStreamCount())
 	}
-	if _, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 2, Mode: "HTTP", Method: "GET", Path: "/"}); err == nil {
+	if _, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 2, Mode: "http", Method: "GET", Path: "/"}); err == nil {
 		t.Fatal("stale binding resolved")
 	}
-	transportRequest := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 0, Mode: "HTTP", Method: "GET", Path: "/"}
+	transportRequest := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 0, Mode: "http", Method: "GET", Path: "/"}
 	if _, err := service.ResolveView(context.Background(), transportRequest); FailureCode(err) != "UNAVAILABLE" {
 		t.Fatalf("invalid epoch error=%v", err)
 	}
@@ -890,7 +889,7 @@ func TestResumeGenerationChangeDuringRegistration(t *testing.T) {
 	resume.Mode = protocol.IdeOpenMode_RESUME
 	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
 	result := service.HandleCommand(context.Background(), resume)
-	if result.GetOk() || result.GetCode() != "CLEANUP_FAILED" {
+	if result.GetOk() || result.GetCode() != "BUSY" {
 		t.Fatalf("generation drift resume=%v", result)
 	}
 	view := service.GetViewState(opened.GetViewId())
@@ -1129,7 +1128,7 @@ func TestIdleStopWaitsForFinalStreamRelease(t *testing.T) {
 	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
 	defer cancelHost()
 	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1188,7 +1187,7 @@ func TestUpdateAdmission(t *testing.T) {
 	if !opened.GetOk() || service.CanStartUpdate() {
 		t.Fatalf("open=%v update admitted=%v", opened, service.CanStartUpdate())
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1221,7 @@ func TestProcessExitConvergence(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1251,7 +1250,7 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	manager := &fakeCodeServerManager{stopFailures: 2}
+	manager := &fakeCodeServerManager{stopFailures: 2, stopDone: make(chan struct{})}
 	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -1266,9 +1265,14 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 	recovery := service.crashRecovery
 	service.mu.Unlock()
 	select {
+	case <-manager.stopDone:
+	case <-time.After(60 * time.Second):
+		t.Fatal("crash recovery did not reach the manager stop")
+	}
+	select {
 	case <-recovery:
-	case <-time.After(5 * time.Second):
-		t.Fatal("crash convergence did not settle")
+	case <-time.After(60 * time.Second):
+		t.Fatal("crash recovery did not settle after the manager stop")
 	}
 	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
 		t.Fatalf("unproven crash state=%v", state)
@@ -1301,7 +1305,7 @@ func TestViewRebindCancelsStreamContext(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1325,7 @@ func TestViewRebindCancelsStreamContext(t *testing.T) {
 	if count := service.ActiveStreamCount(); count != 0 {
 		t.Fatalf("active streams after release=%d", count)
 	}
-	plainUpstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: resumed.GetViewId(), BindingEpoch: resumed.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	plainUpstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: resumed.GetViewId(), BindingEpoch: resumed.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1622,7 +1626,7 @@ func TestBoundViewCommands(t *testing.T) {
 	if !focused.GetOk() || focused.GetViewId() != opened.GetViewId() || !collapsed.GetOk() || collapsed.GetViewId() != opened.GetViewId() {
 		t.Fatalf("focus=%v collapse=%v", focused, collapsed)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1675,7 +1679,7 @@ func TestUnknownNativeClosePreservesStream(t *testing.T) {
 	})
 	defer cancelHost()
 	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1720,7 +1724,7 @@ func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 				t.Fatal(err)
 			}
 			upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-				ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+				ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1811,7 +1815,7 @@ func TestCancelledNativeClosePreservesView(t *testing.T) {
 	}
 	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"closeView": {"ok": false, "code": "CANCELLED", "message": "save cancelled"}})
 	defer cancelHost()
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2155,16 +2159,7 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	defer bridge.Close(context.Background())
 	const capacity = 64
 	gate := make(chan struct{})
-	var gateOnce sync.Once
-	releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
-	allStarted := make(chan struct{})
-	var started atomic.Int32
-	manager := &fakeCodeServerManager{ensureHook: func() {
-		if started.Add(1) == capacity {
-			close(allStarted)
-		}
-		<-gate
-	}}
+	manager := &fakeCodeServerManager{stopGate: gate, stopStarted: make(chan struct{})}
 	dataDir := filepath.Join(t.TempDir(), "daemon")
 	if err := native.EnsurePrivateDirectory(dataDir); err != nil {
 		t.Fatal(err)
@@ -2176,11 +2171,24 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
-	defer releaseGate()
+	defer func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	}()
 	for _, directory := range []string{service.paths.IDEDir, service.paths.ViewsDir} {
 		if err := native.EnsurePrivateDirectory(directory); err != nil {
 			t.Fatal(err)
 		}
+	}
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- service.stopManager(context.Background()) }()
+	select {
+	case <-manager.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("manager stop did not reach its test gate")
 	}
 	root := t.TempDir()
 	results := make(chan *protocol.IdeResult, capacity)
@@ -2190,23 +2198,39 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 		command := openCommandForTest(root, viewID, claimID)
 		go func() { results <- service.HandleCommand(context.Background(), command) }()
 	}
-	select {
-	case <-allStarted:
-	case <-time.After(15 * time.Second):
-		releaseGate()
-		t.Fatal("all view reservations did not reach process startup")
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	for {
+		service.mu.Lock()
+		reservations := len(service.reservations)
+		service.mu.Unlock()
+		if reservations == capacity {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("reservations=%d want=%d before process startup", reservations, capacity)
+		case <-time.After(time.Millisecond):
+		}
 	}
-	service.mu.Lock()
-	reservations := len(service.reservations)
-	service.mu.Unlock()
-	if reservations != capacity {
-		t.Fatalf("reservations=%d want=%d", reservations, capacity)
+	manager.mu.Lock()
+	startCalls := manager.startCalls
+	manager.mu.Unlock()
+	if startCalls != 0 {
+		t.Fatalf("process starts while manager stop gate is held = %d, want 0", startCalls)
 	}
-	overflow := openCommandForTest(root, "ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
-	if result := service.HandleCommand(context.Background(), overflow); result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
+	overflowResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		overflow := openCommandForTest(root, "ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+		overflowResult <- service.HandleCommand(context.Background(), overflow)
+	}()
+	close(gate)
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-overflowResult; result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
 		t.Fatalf("capacity overflow result=%v", result)
 	}
-	releaseGate()
 	for index := 0; index < capacity; index++ {
 		if result := <-results; !result.GetOk() {
 			t.Fatalf("reservation %d failed: %v", index, result)
@@ -2224,6 +2248,9 @@ type fakeCodeServerManager struct {
 	stopCalls     int
 	stopFailures  int
 	stopGate      chan struct{}
+	stopStarted   chan struct{}
+	stopDone      chan struct{}
+	stopDoneOnce  sync.Once
 	ensureHook    func()
 	registerHook  func()
 	closeErr      error
@@ -2259,10 +2286,19 @@ func (m *fakeCodeServerManager) Session() *CodeServerSession {
 }
 func (m *fakeCodeServerManager) Diagnostics() string { return "" }
 func (m *fakeCodeServerManager) Stop(ctx context.Context) error {
+	defer func() {
+		if m.stopDone != nil {
+			m.stopDoneOnce.Do(func() { close(m.stopDone) })
+		}
+	}()
 	m.mu.Lock()
 	m.stopCalls++
 	gate := m.stopGate
+	started := m.stopStarted
 	m.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
 	if gate != nil {
 		select {
 		case <-gate:

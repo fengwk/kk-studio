@@ -38,6 +38,9 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if result.Error {
 		t.Fatalf("preview failed: %#v", result)
 	}
+	if string(result.Details) != "{}" {
+		t.Fatalf("preview details=%q want empty object", result.Details)
+	}
 	var review struct{ Path, Diff, SHA256 string }
 	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
@@ -63,9 +66,12 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if details.EditReview.Diff != review.Diff {
 		t.Fatalf("preview/commit diff differ: %q vs %q", review.Diff, details.EditReview.Diff)
 	}
+	if entries, err := os.ReadDir(filepath.Dir(path)); err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
+		t.Fatalf("edit left staging files behind: entries=%v err=%v", entries, err)
+	}
 }
 
-// COD-T-073
+// COD-T-108
 func TestEditMultihunkDiffContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "multi.txt")
 	lines := []string{"old A"}
@@ -80,9 +86,14 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	if result.Error {
 		t.Fatal(result.Contents)
 	}
-	got := string(result.Contents[0].JSON)
-	if !strings.Contains(got, "...") || strings.Contains(got, "middle\"\n  6") {
-		t.Fatalf("expected elided middle context: %s", got)
+	var review struct {
+		Diff string `json:"diff"`
+	}
+	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(review.Diff, "...") || strings.Contains(review.Diff, "6|middle") {
+		t.Fatalf("expected elided middle context: %s", review.Diff)
 	}
 }
 
@@ -213,8 +224,11 @@ func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 
 // COD-T-097 is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
 
-// COD-N-018
+// COD-N-021
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
+	if staleWriteReviewMessage != "File changed since review; nothing was written. Review a new change before approving it." {
+		t.Fatalf("stale review message=%q", staleWriteReviewMessage)
+	}
 	path := filepath.Join(t.TempDir(), "write.txt")
 	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -228,18 +242,18 @@ func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	if err := json.Unmarshal(preview.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
 	}
-	if review.SHA256 == "" || !strings.Contains(review.Diff, "- 1|old") || !strings.Contains(review.Diff, "+ 1|new") {
+	if review.SHA256 == nil || *review.SHA256 == "" || !strings.Contains(review.Diff, "- 1|old") || !strings.Contains(review.Diff, "+ 1|new") {
 		t.Fatalf("review=%#v", review)
 	}
-	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "new\n"}, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256}); result.Error {
+	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "new\n"}, &runtime.ExpectedFile{Path: review.Path, SHA256: *review.SHA256}); result.Error {
 		t.Fatalf("approved write failed: %#v", result)
 	}
-	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "stale"}, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256}); !result.Error || !strings.Contains(result.Contents[0].Text, staleWriteReviewMessage) {
+	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "stale"}, &runtime.ExpectedFile{Path: review.Path, SHA256: *review.SHA256}); !result.Error || !strings.Contains(result.Contents[0].Text, staleWriteReviewMessage) {
 		t.Fatalf("stale write accepted: %#v", result)
 	}
 }
 
-// COD-N-018
+// COD-N-021
 func TestWriteApprovalPreviewNewTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	result := invokeCoding(t, Provider{}, "fs.write.preview", map[string]any{"path": path, "content": "new file\n"}, nil)
@@ -250,10 +264,22 @@ func TestWriteApprovalPreviewNewTarget(t *testing.T) {
 	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
 	}
-	if !review.NewFile || review.Content != "new file\n" {
-		t.Fatalf("review=%#v", review)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(result.Contents[0].JSON, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if review.SHA256 != nil || !strings.Contains(review.Diff, "+ 1|new file") || len(fields) != 3 || fields["path"] == nil || fields["diff"] == nil || string(fields["sha256"]) != "null" {
+		t.Fatalf("review=%#v fields=%v", review, fields)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("preview created file: %v", err)
+	}
+	approved := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "new file\n"}, &runtime.ExpectedFile{Path: review.Path})
+	if approved.Error {
+		t.Fatalf("approved new file write failed: %#v", approved)
+	}
+	stale := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "replacement"}, &runtime.ExpectedFile{Path: review.Path})
+	if !stale.Error || !strings.Contains(stale.Contents[0].Text, staleWriteReviewMessage) {
+		t.Fatalf("write without approved hash overwrote existing file: %#v", stale)
 	}
 }

@@ -13,6 +13,24 @@ import (
 )
 
 // NAT-N-001, NAT-N-002
+func TestShouldBootstrapH2XConnect(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{args: nil, want: true},
+		{args: []string{"--version"}, want: true},
+		{args: []string{h2xconnectBootstrapArg}, want: false},
+		{args: []string{"__native-helper", "/tmp/state"}, want: false},
+		{args: []string{"__lock-helper", "/tmp/state"}, want: false},
+		{args: []string{"--internal-install-lock", "/tmp/state"}, want: false},
+	} {
+		if got := shouldBootstrapH2XConnect(tc.args); got != tc.want {
+			t.Errorf("shouldBootstrapH2XConnect(%q) = %t, want %t", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestRunInternalCommand_DispatchesNativeHelpers(t *testing.T) {
 	for _, args := range [][]string{{"__native-helper"}, {"__lock-helper"}} {
 		code, handled := runInternalCommand(args)

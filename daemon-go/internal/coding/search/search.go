@@ -44,7 +44,7 @@ func FindContext(ctx context.Context, root, glob string, limit int) (SearchOutco
 	if err != nil {
 		return SearchOutcome{}, err
 	}
-	outcome := SearchOutcome{Results: discovered.files, IgnoreSkipped: discovered.ignored, IgnoreSkippedCount: discovered.ignoredCount, LimitReached: discovered.limitReached, Incomplete: discovered.timedOut}
+	outcome := SearchOutcome{Results: discovered.files, Skipped: discovered.skipped, IgnoreSkipped: discovered.ignored, IgnoreSkippedCount: discovered.ignoredCount, LimitReached: discovered.limitReached, Incomplete: discovered.timedOut}
 	if discovered.timedOut {
 		outcome.StopReason = "TIMED_OUT"
 	} else if discovered.limitReached {
@@ -216,7 +216,8 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			}
 			var matchCount int
 			matches, matchCount = grepMultilineFile(data, display, re, maxMatches)
-			if limit > 0 && matchCount > max(0, limit-multilineMatchCount) {
+			remaining := limit - multilineMatchCount
+			if limit > 0 && matchCount >= remaining {
 				limitReached = true
 				multilineMatchCount = limit
 			} else {
@@ -224,9 +225,10 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			}
 		} else {
 			matches = grepFile(data, display, pattern, literal, ignoreCase, re, required)
-			limitReached = limit > 0 && len(matches) > limit-len(outcome.Results)
-			if limitReached {
-				matches = matches[:limit-len(outcome.Results)]
+			remaining := limit - len(outcome.Results)
+			limitReached = limit > 0 && len(matches) >= remaining
+			if limit > 0 && len(matches) > remaining {
+				matches = matches[:remaining]
 			}
 		}
 		release()
@@ -276,13 +278,20 @@ func isGitMetadataPath(path string) bool {
 
 type findResult struct {
 	files        []string
+	skipped      []string
 	ignored      []string
 	ignoredCount int
 	timedOut     bool
 	limitReached bool
 }
 
+type searchWalker func(*fastwalk.Config, string, fs.WalkDirFunc) error
+
 func findWithContext(ctx context.Context, root, glob string, limit, workers int) (findResult, error) {
+	return findWithWalker(ctx, root, glob, limit, workers, fastwalk.Walk)
+}
+
+func findWithWalker(ctx context.Context, root, glob string, limit, workers int, walk searchWalker) (findResult, error) {
 	if limit < 0 {
 		return findResult{}, errors.New("limit cannot be negative")
 	}
@@ -346,6 +355,7 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 		rootPrefix += "/"
 	}
 	var files []string
+	var skippedPaths []string
 	var ignoredPaths []string
 	var ignoredCount int
 	var ignoredMu sync.Mutex
@@ -359,11 +369,21 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			ignoredPaths = ignoredPaths[:10]
 		}
 	}
-	err = fastwalk.Walk(&fastwalk.Config{NumWorkers: workers, ToSlash: true}, abs, func(path string, d fs.DirEntry, walkErr error) error {
+	addSkipped := func(path string) {
+		ignoredMu.Lock()
+		defer ignoredMu.Unlock()
+		skippedPaths = append(skippedPaths, filepath.ToSlash(strings.TrimPrefix(path, rootPrefix)))
+		sort.Slice(skippedPaths, func(i, j int) bool { return pathLess(skippedPaths[i], skippedPaths[j]) })
+	}
+	err = walk(&fastwalk.Config{NumWorkers: workers, ToSlash: true}, abs, func(path string, d fs.DirEntry, walkErr error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		if walkErr != nil || d == nil {
+		if walkErr != nil {
+			addSkipped(path)
+			return nil
+		}
+		if d == nil {
 			return nil
 		}
 		if path == abs || path == rootPath {
@@ -442,7 +462,7 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	if limitReached {
 		files = files[:limit]
 	}
-	return findResult{files: files, ignored: ignoredPaths, ignoredCount: ignoredCount, timedOut: timedOut, limitReached: limitReached}, nil
+	return findResult{files: files, skipped: skippedPaths, ignored: ignoredPaths, ignoredCount: ignoredCount, timedOut: timedOut, limitReached: limitReached}, nil
 }
 
 func globMatch(pattern, rel string) bool {

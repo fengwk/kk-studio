@@ -217,11 +217,13 @@ func TestTransport_DialDirectIgnoresEnvironmentProxy(t *testing.T) {
 
 // TRN-T-067
 func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	startGateway := func() (*httptest.Server, <-chan http.Header) {
+	startGateway := func() (*httptest.Server, <-chan http.Header, <-chan struct{}) {
 		handshake := make(chan http.Header, 1)
+		finished := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(finished)
 			handshake <- r.Header.Clone()
 			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 			if err == nil {
@@ -229,7 +231,7 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 				_ = ws.Close(websocket.StatusNormalClosure, "")
 			}
 		}))
-		return server, handshake
+		return server, handshake, finished
 	}
 	startProxy := func(target string) (*httptest.Server, <-chan struct{}) {
 		targetURL, err := url.Parse(target)
@@ -244,9 +246,9 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 		}))
 		return server, seen
 	}
-	firstServer, _ := startGateway()
+	firstServer, _, firstFinished := startGateway()
 	defer firstServer.Close()
-	secondServer, secondHandshake := startGateway()
+	secondServer, secondHandshake, _ := startGateway()
 	defer secondServer.Close()
 	firstProxy, firstProxySeen := startProxy(firstServer.URL)
 	defer firstProxy.Close()
@@ -264,6 +266,11 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	_ = first.Close()
+	select {
+	case <-firstFinished:
+	case <-ctx.Done():
+		t.Fatal("first gateway did not release the closed connection")
+	}
 	secondProxyURL := secondProxy.URL
 	config.Applied.StudioURL = secondServer.URL
 	config.Applied.ProxyURL = &secondProxyURL
