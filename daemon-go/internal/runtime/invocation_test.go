@@ -223,18 +223,20 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 	if got := countFrames(frames, protocol.MessageType_COMPLETED); got != 0 {
 		t.Fatalf("completed terminals=%d, want none for cancelled call", got)
 	}
+	partialCount := 0
 	partialPreserved := false
 	for _, frame := range frames {
 		if frame.MessageType == protocol.MessageType_CANCELLED && frame.GetCancelled().GetReason() != "cancelled" {
 			t.Fatalf("cancelled terminal reason=%q", frame.GetCancelled().GetReason())
 		}
 		if frame.MessageType == protocol.MessageType_PROGRESS {
+			partialCount++
 			contents := frame.GetProgress().GetResult().GetContents()
 			partialPreserved = len(contents) == 1 && contents[0].GetText().GetText() == "partial match"
 		}
 	}
-	if !partialPreserved {
-		t.Fatal("partial search result was not preserved before cancellation")
+	if partialCount != 1 || !partialPreserved {
+		t.Fatalf("partial progress count=%d preserved=%t, want exactly one delivered match", partialCount, partialPreserved)
 	}
 	cancel()
 	if err := <-done; err != nil {

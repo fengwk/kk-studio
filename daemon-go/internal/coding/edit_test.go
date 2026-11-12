@@ -215,6 +215,9 @@ func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 
 // COD-N-018
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
+	if staleWriteReviewMessage != "File changed since review; nothing was written. Review a new change before approving it." {
+		t.Fatalf("stale review message=%q", staleWriteReviewMessage)
+	}
 	path := filepath.Join(t.TempDir(), "write.txt")
 	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
