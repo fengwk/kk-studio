@@ -443,10 +443,10 @@ class AnthropicOpaqueReplayTest {
   }
 
   private JsonNode fallbackContent(
-      NativeReplayFixture replayState, List<ProviderContentBlock> durableContents)
+      NativeReplayFixture nativeFixture, List<ProviderContentBlock> durableContents)
       throws IOException {
     ProviderRequest request =
-        request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
+        request(List.of(userMsg(), assistantMsg(durableContents, nativeFixture)));
     return wire(encoder.encode(request, descriptor)).path("messages").get(1).path("content");
   }
 
@@ -477,11 +477,11 @@ class AnthropicOpaqueReplayTest {
   private record NativeReplayFixture(ProviderReplayAffinity affinity, JsonNode content) {}
 
   private static ProviderMessage assistantMsg(
-      List<ProviderContentBlock> blocks, NativeReplayFixture replayState) {
+      List<ProviderContentBlock> blocks, NativeReplayFixture nativeFixture) {
     return new ProviderMessage(
         ProviderMessageRole.ASSISTANT,
         AnthropicNativeReplayTestSupport.withNativeData(
-            blocks, replayState.affinity(), replayState.content()));
+            blocks, nativeFixture.affinity(), nativeFixture.content()));
   }
 
   private static ModelDescriptor model() {

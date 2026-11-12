@@ -210,7 +210,7 @@ class OpenAiResponsesDurableReplayTest {
    * Semantic-only history becomes ordinary assistant text and never invents encrypted reasoning.
    */
   @Test
-  void durableHistoryWithoutReplayStateFallsBackToSemanticEncoding() throws Exception {
+  void durableHistoryWithoutNativeBlocksFallsBackToSemanticEncoding() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 

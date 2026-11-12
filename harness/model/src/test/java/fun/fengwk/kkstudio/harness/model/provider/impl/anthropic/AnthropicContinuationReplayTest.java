@@ -59,12 +59,9 @@ class AnthropicContinuationReplayTest {
           new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
           new UUID(1L, 2L));
 
-  /**
-   * 测试意图：{@code pause_turn} 映射为 CONTINUE 并冻结 native replay state（server tool 的输入与结果原样保留），
-   * 供运行时下一轮原样回放。
-   */
+  /** 测试意图：{@code pause_turn} 映射为 CONTINUE；assistant blocks 按序保留 server tool 的原生输入与结果，供运行时下一轮回放。 */
   @Test
-  void mapsPauseTurnToContinueWithNativeReplayState() throws IOException {
+  void mapsPauseTurnToContinueWithNativeBlocks() throws IOException {
     ProviderRequest firstRequest = request(List.of(userMsg("search the web")));
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
@@ -117,9 +114,9 @@ class AnthropicContinuationReplayTest {
     assertEquals("kk", assistantContent.get(0).path("input").path("query").asString(""));
   }
 
-  /** 测试意图：{@code compaction} 同样映射为 CONTINUE；即使没有 native block，也必须有 replay state 供续写。 */
+  /** 测试意图：{@code compaction} 映射为 CONTINUE，并将语义 text block 保留给后续请求。 */
   @Test
-  void mapsCompactionToContinueAndFreezesReplayState() {
+  void mapsCompactionToContinueWithSemanticBlock() {
     ProviderRequest firstRequest = request(List.of(userMsg("summarize")));
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);

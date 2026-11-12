@@ -751,7 +751,7 @@ class GeminiStreamAccumulatorTest {
         MAPPER.readTree(response.rawUsageJson()));
   }
 
-  /** 意图：验证显式合法的空对象参数 {} 正确保留在 toolCalls 与 replayState 中，不发生异常。 */
+  /** 意图：验证显式合法的空对象参数 {} 正确保留在 toolCalls 与 block metadata 中，不发生异常。 */
   @Test
   void test_validExplicitEmptyObjectFunctionCallArgs() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);

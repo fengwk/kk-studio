@@ -147,7 +147,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   }
 
   @Test
-  void responseBlocksReplayOrderedNativeItemsWithoutReplayState() throws Exception {
+  void responseBlocksReplayOrderedNativeItemsFromOwningBlocks() throws Exception {
     ProviderCompletion completion =
         accumulateTerminalItems(MESSAGE_ITEM, REASONING_ITEM, FUNCTION_CALL_ITEM, UNKNOWN_ITEM);
     List<ProviderContentBlock> blocks = completion.response().blocks();

@@ -650,8 +650,8 @@ test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、�
       thoughtSignature: 'gemini-signature-987654',
     },
     thoughtSignatureStandalone: 'gemini-signature-standalone-333',
-    // replayState, replayPayload, raw usage, HTTP bodies
-    replayState: { cursor: 'secret-cursor', messages: ['secret message'] },
+    // providerBlockData, replayPayload, raw usage, HTTP bodies
+    providerBlockData: { cursor: 'secret-cursor', messages: ['secret message'] },
     replayPayload: { payloadData: 'secret-replay-payload-leak' },
     rawUsageJson: '{"prompt_tokens":100,"completion_tokens":50}',
     rawUsageSnippet: '{"usage":{"total":150,"raw_usage_leak":true}}',

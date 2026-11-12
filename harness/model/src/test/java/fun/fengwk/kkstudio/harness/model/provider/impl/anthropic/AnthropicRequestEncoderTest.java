@@ -1491,7 +1491,7 @@ class AnthropicRequestEncoderTest {
         List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
 
     for (String badArg : invalidArguments) {
-      // 1. Fallback 场景（无 replayState）
+      // 1. Fallback 场景（无 native blocks）
       ProviderMessage asstFallback =
           asstMsg(List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))));
       ProviderRequest reqFallback =
@@ -1556,7 +1556,7 @@ class AnthropicRequestEncoderTest {
     assertTrue(normalizedInput.isEmpty());
   }
 
-  /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 replayState 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */
+  /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 native blocks 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */
   @Test
   void fallbackWhenReplayFormatDiffers() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
@@ -1676,7 +1676,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asString(""));
     assertEquals("call_lookup", wireAsst.path("content").get(2).path("id").asString(""));
 
-    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
+    // 3. 对比：如果 native blocks 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
     //    原生 thinking signature 无法由 durable 重建，只能降级为普通文本，绝不抛错。
     ProviderMessage asstMismatch =
         nativeAssistant(

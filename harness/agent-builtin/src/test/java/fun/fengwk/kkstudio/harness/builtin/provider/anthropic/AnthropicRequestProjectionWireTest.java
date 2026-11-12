@@ -64,7 +64,7 @@ class AnthropicRequestProjectionWireTest {
   @Test
   void verifiesSemanticChainFromLengthDiagnosticToAssistantTextBlockInNextRound()
       throws IOException {
-    // 1. 构造一个 LENGTH 导致的 ProviderResponse，包含 toolCallDiagnostic（因截断缺失完整参数，replayState 为 null）
+    // 1. 构造一个 LENGTH 导致的 ProviderResponse，包含 toolCallDiagnostic（因截断缺失完整参数，block metadata 为空）
     ProviderToolCallDiagnostic diagnostic =
         new ProviderToolCallDiagnostic(
             0,

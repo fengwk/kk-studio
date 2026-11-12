@@ -600,7 +600,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     List<ProviderToolCallDiagnostic> diagnostics = new ArrayList<>();
 
     if (stopReason == GenerationStopReason.FILTERED) {
-      // FILTERED 时 toolCalls 必须为空，不生成 replayState
+      // FILTERED 时 toolCalls 必须为空，不生成 provider-native block metadata
       canReplay = false;
     } else {
       for (ToolCallBuilder b : toolCallBuilders.values()) {

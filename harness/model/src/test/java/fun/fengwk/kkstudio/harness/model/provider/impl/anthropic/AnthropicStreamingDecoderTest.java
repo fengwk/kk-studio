@@ -70,8 +70,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>覆盖 Anthropic Messages API 标准流协议：
  *
  * <ul>
- *   <li>未知 content 类型平稳容错且 replayState 安全置空
- *   <li>text、thinking、redacted_thinking、tool_use 完整解码与 replayState 拼装
+ *   <li>未知 content 类型平稳容错且 block data 安全置空
+ *   <li>text、thinking、redacted_thinking、tool_use 完整解码与 block data 拼装
  *   <li>message_start 与 message_delta 累计 usage 快照准确更新（含 5m+1h cache breakdown 一致性检查）
  *   <li>HTTP 请求 URL 校验（包含 user-info/query/fragment 严格拒绝拦截，合法 URL 挂载 /messages）与 headers 校验
  *   <li>安全忽略 SSE [DONE] 哨兵与未识别事件帧
@@ -125,7 +125,7 @@ class AnthropicStreamingDecoderTest {
 
   /**
    * 测试意图：上游模型若下发未知类型的 content block（如未来扩展）， 流式解析器不得抛异常炸流，必须平稳忽略该 block 的 normalized
-   * 语义、保留已知语义内容，并把未知 block 的 raw 形态原样保留在 replayState 中（opaque replay）。未知 block 的 delta 不再按猜测性 merge
+   * 语义、保留已知语义内容，并把未知 block 的 raw 形态原样保留在 block data 中（opaque replay）。未知 block 的 delta 不再按猜测性 merge
    * 合并：只有可保真组装的 {@code input_json_delta} 被接受，其余 delta 明确失败。
    */
   @Test
@@ -223,7 +223,7 @@ class AnthropicStreamingDecoderTest {
 
   /**
    * 测试意图：官方标准消息创建响应全流解码，覆盖 text、thinking（含 signature）、 redacted_thinking 和
-   * tool_use，验证完整事件分发、completion 构造与 replayState 序列化。
+   * tool_use，验证完整事件分发、completion 构造与 block data 序列化。
    */
   @Test
   void shouldStreamCreateMessageResponse() {

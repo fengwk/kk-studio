@@ -113,7 +113,7 @@ class AnthropicThinkingTest {
    * 对应上游 should_return_and_send_thinking：覆盖 7 个模型维度。
    *
    * <p>测试意图：验证自适应思考全生命周期：请求编码阶段输出 thinking.type=adaptive 与 exact effort； 流式阶段按序派发 ThinkingDelta 与
-   * TextDelta；终态累积完整的 thinking 与 text 并生成携带 signature 的 ReplayState； 在同亲和性、同前缀的多轮后续请求中，wire
+   * TextDelta；终态累积完整的 thinking 与 text 并生成携带 signature 的 ProviderBlockData； 在同亲和性、同前缀的多轮后续请求中，wire
    * 协议精准重放原生 thinking 块与 signature。
    */
   @ParameterizedTest
@@ -268,8 +268,8 @@ class AnthropicThinkingTest {
    * 对应上游 should_return_and_send_thinking_with_tools：覆盖 7 个模型维度。
    *
    * <p>测试意图：验证包含工具调用的自适应思考流式处理与重放：模型先进行内部思考输出 signature， 紧随 tool_use 块；验证 ThinkingDelta 与
-   * ToolCallDelta 正确派发；验证 stop_reason=tool_use 时生成持久化工具调用与 包含 thinking+tool_use 的 ReplayState；后续带
-   * ToolResult 请求时 wire 协议严格保序重现 thinking 块与 tool_use 块。
+   * ToolCallDelta 正确派发；验证 stop_reason=tool_use 时生成持久化工具调用与 包含 thinking+tool_use 的
+   * ProviderBlockData；后续带 ToolResult 请求时 wire 协议严格保序重现 thinking 块与 tool_use 块。
    */
   @ParameterizedTest
   @MethodSource("upstreamModels")
@@ -434,8 +434,8 @@ class AnthropicThinkingTest {
   /**
    * 验证 Anthropic redacted_thinking 块在流式与回放中的处理。
    *
-   * <p>测试意图：当 Anthropic 返回加密脱敏思考块（redacted_thinking）时，提取 base64 data 并纳入 ReplayState； 在后续多轮请求中，能够以
-   * native 格式在 assistant 消息中精确重放 redacted_thinking 块。
+   * <p>测试意图：当 Anthropic 返回加密脱敏思考块（redacted_thinking）时，提取 base64 data 并纳入 ProviderBlockData；
+   * 在后续多轮请求中，能够以 native 格式在 assistant 消息中精确重放 redacted_thinking 块。
    */
   @ParameterizedTest
   @MethodSource("upstreamModels")
@@ -521,10 +521,10 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证思考块缺失或包含空白 signature 时，系统主动禁用 ReplayState 生成，防止向上游回放无签名的非法 thinking 块。
+   * 验证思考块缺失或包含空白 signature 时，系统主动禁用 ProviderBlockData 生成，防止向上游回放无签名的非法 thinking 块。
    *
-   * <p>测试意图：证明无 signature 的 thinking 无法形成有效 ReplayState（返回 null）， 且在其降级编码时自动将 thinking 转换为普通 text
-   * 块以防上游协议校验报错。
+   * <p>测试意图：证明无 signature 的 thinking 无法形成有效 ProviderBlockData（返回 null）， 且在其降级编码时自动将 thinking 转换为普通
+   * text 块以防上游协议校验报错。
    */
   @Test
   void should_disable_replay_when_signature_is_missing() throws IOException {
@@ -597,7 +597,7 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证当 ReplayState 的模型亲和性（affinity）与当前请求模型不匹配时：不再 fail closed，而是按 durable 语义回退投影。
+   * 验证当 ProviderBlockData 的模型亲和性（affinity）与当前请求模型不匹配时：不再 fail closed，而是按 durable 语义回退投影。
    *
    * <p>测试意图：跨模型复用思考块时不得把 native 事实（signature 等）发给上游；回退阶段把 thinking 降级为普通 text、text 原样保留，且不因存在
    * replay 而拒绝请求。
@@ -717,7 +717,7 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证当 ReplayState 内保存的 payload 与应用层 durable 内容不一致时，防篡改校验生效并抛出 INVALID_REQUEST，杜绝静默降级。
+   * 验证当 ProviderBlockData 内保存的 payload 与应用层 durable 内容不一致时，防篡改校验生效并抛出 INVALID_REQUEST，杜绝静默降级。
    *
    * <p>测试意图：防止 payload 内容被恶意篡改导致发往模型的请求偏离实际历史记录。
    */
@@ -837,7 +837,7 @@ class AnthropicThinkingTest {
   /**
    * 验证通过结构化测试 fixture 文件 thinking-stream.json 回放流式思考事件序列。
    *
-   * <p>测试意图：证明存放在资源目录中的标准 thinking 流数据能够被完整解析与累积，产生合规的终态响应与 ReplayState。
+   * <p>测试意图：证明存放在资源目录中的标准 thinking 流数据能够被完整解析与累积，产生合规的终态响应与 ProviderBlockData。
    */
   @Test
   void should_process_thinking_stream_from_fixture_resource() throws IOException {

@@ -936,7 +936,7 @@ class GeminiRequestEncoderTest {
     assertEquals("fn2", toolParts.get(1).get("functionResponse").get("name").asString(""));
   }
 
-  /** 验证无 replayState 时，ASSISTANT 消息按照 contents 原始顺序进行语义 fallback，不按类别重排。 */
+  /** 验证无 native blocks 时，ASSISTANT 消息按照 contents 原始顺序进行语义 fallback，不按类别重排。 */
   @Test
   void encodesAssistantMessage_fallsBackToOrderedContentsWhenNoReplay() throws Exception {
     ProviderRequest request =
