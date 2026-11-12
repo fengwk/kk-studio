@@ -171,9 +171,16 @@ func TestPool_IndependentWaiters(t *testing.T) {
 	firstCtx, cancelFirst := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancelFirst()
 	var confirmed atomic.Int32
+	confirmation := make(chan struct{}, 1)
 	firstResult := make(chan error, 1)
 	secondResult := make(chan *Lease, 1)
-	go func() { _, err := pool.LeaseWithExit(firstCtx, file, func() { confirmed.Add(1) }); firstResult <- err }()
+	go func() {
+		_, err := pool.LeaseWithExit(firstCtx, file, func() {
+			confirmed.Add(1)
+			confirmation <- struct{}{}
+		})
+		firstResult <- err
+	}()
 	select {
 	case <-supervisor.startEntered:
 	case <-time.After(time.Second):
@@ -216,9 +223,10 @@ func TestPool_IndependentWaiters(t *testing.T) {
 		t.Fatal("remaining waiter received no lease")
 	}
 	lease.Release()
-	deadline = time.Now().Add(time.Second)
-	for confirmed.Load() != 1 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	select {
+	case <-confirmation:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled waiter was not confirmed after boot convergence")
 	}
 	if confirmed.Load() != 1 || supervisor.starts != 1 {
 		t.Fatalf("confirmations=%d starts=%d", confirmed.Load(), supervisor.starts)
@@ -235,8 +243,15 @@ func TestPool_LastWaiterCancelsBoot(t *testing.T) {
 	supervisor.startGate = make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var confirmed atomic.Int32
+	confirmation := make(chan struct{}, 1)
 	result := make(chan error, 1)
-	go func() { _, err := pool.LeaseWithExit(ctx, file, func() { confirmed.Add(1) }); result <- err }()
+	go func() {
+		_, err := pool.LeaseWithExit(ctx, file, func() {
+			confirmed.Add(1)
+			confirmation <- struct{}{}
+		})
+		result <- err
+	}()
 	select {
 	case <-supervisor.startEntered:
 	case <-time.After(time.Second):
@@ -255,9 +270,10 @@ func TestPool_LastWaiterCancelsBoot(t *testing.T) {
 		t.Fatal("last waiter confirmed before boot cleanup")
 	}
 	close(supervisor.startGate)
-	deadline := time.Now().Add(2 * time.Second)
-	for confirmed.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	select {
+	case <-confirmation:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled waiter was not confirmed after boot cleanup")
 	}
 	if confirmed.Load() != 1 || supervisor.process.terminates.Load() != 1 {
 		t.Fatalf("confirmations=%d terminations=%d", confirmed.Load(), supervisor.process.terminates.Load())

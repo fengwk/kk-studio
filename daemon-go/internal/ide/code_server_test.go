@@ -217,9 +217,9 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	if err != nil || *first != *second || first.Host != "127.0.0.1" || first.Port < 1 || first.Cookie != "code-server-session=fake" {
 		t.Fatalf("session = %#v, second = %#v, err = %v", first, second, err)
 	}
-	if len(manager.Diagnostics()) == 0 || len(manager.Diagnostics()) > 4*1024 {
-		t.Fatalf("diagnostics length = %d", len(manager.Diagnostics()))
-	}
+	wantDiagnostics := strings.Repeat("diagnostic", 800)
+	wantDiagnostics = wantDiagnostics[len(wantDiagnostics)-4*1024:]
+	waitForDiagnostics(t, manager, wantDiagnostics)
 	if got := supervisor.count(); got != 1 {
 		t.Fatalf("process starts = %d", got)
 	}
@@ -228,6 +228,9 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	}
 	if manager.Session() != nil {
 		t.Fatal("session remains after stop")
+	}
+	if got := manager.Diagnostics(); got != wantDiagnostics {
+		t.Fatalf("diagnostics after stop length = %d, want %d", len(got), len(wantDiagnostics))
 	}
 	if _, err := manager.EnsureStarted(ctx); err != nil {
 		t.Fatalf("restart after stop: %v", err)
@@ -243,6 +246,25 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	}
 	if _, err := manager.EnsureStarted(ctx); err == nil || err.Error() != "ide service is closed" {
 		t.Fatalf("start after close error = %v", err)
+	}
+}
+
+func waitForDiagnostics(t *testing.T, manager CodeServerManager, want string) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		got := manager.Diagnostics()
+		if got == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatalf("diagnostics length = %d, want %d", len(got), len(want))
+		}
 	}
 }
 

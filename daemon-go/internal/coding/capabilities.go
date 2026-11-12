@@ -202,6 +202,10 @@ func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCal
 	if err := ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
+	args.Path, err = resolveExistingPath(args.Path)
+	if err != nil {
+		return errorResult(call.InvocationID, err), nil
+	}
 	if capability.Config.DataDir != "" {
 		store, err := TextOutputStoreForDataDir(capability.Config.DataDir)
 		if err != nil {

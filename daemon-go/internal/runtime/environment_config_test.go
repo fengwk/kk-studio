@@ -28,6 +28,59 @@ func TestEnvironmentConfigInitialPreparationUsesNilPrevious(t *testing.T) {
 	}
 }
 
+// Platform snapshots confirm the startup cache despite protobuf presence differences.
+func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.T) {
+	t.Run("empty LSP block with nullable proxy", func(t *testing.T) {
+		initial := initialRuntimeConfig()
+		initial.LSP = nil
+		initial.ProxyURL = nil
+		manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+		cachedResult, err := manager.Submit(context.Background(), initial.ConfigVersion, configurationOf(initial))
+		if err != nil || cachedResult.Kind != ConfigApplied {
+			t.Fatalf("startup cache snapshot = %+v, %v", cachedResult, err)
+		}
+		platformSnapshot := &protocol.DaemonConfiguration{
+			StudioUrl:      initial.StudioURL,
+			BashExecutable: cloneConfigString(initial.BashExecutableSetting),
+			Lsp:            &protocol.LspConfiguration{},
+		}
+		result, err := manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("same-version platform snapshot = %+v, %v", result, err)
+		}
+		result, err = manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("repeated same-version platform snapshot = %+v, %v", result, err)
+		}
+	})
+
+	t.Run("LSP entries with empty repeated lists", func(t *testing.T) {
+		initial := initialRuntimeConfig()
+		initial.LSP = []config.LSPServerConfig{{ID: "go", Command: append([]string(nil), initial.LSP[0].Command...), Extensions: []string{".go"}}}
+		initial.ProxyURL = nil
+		manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
+		cachedResult, err := manager.Submit(context.Background(), initial.ConfigVersion, configurationOf(initial))
+		if err != nil || cachedResult.Kind != ConfigApplied {
+			t.Fatalf("startup cache snapshot = %+v, %v", cachedResult, err)
+		}
+		platformSnapshot := &protocol.DaemonConfiguration{
+			StudioUrl:      initial.StudioURL,
+			BashExecutable: cloneConfigString(initial.BashExecutableSetting),
+			Lsp: &protocol.LspConfiguration{Servers: []*protocol.LspServer{{
+				Id: "go", Command: append([]string(nil), initial.LSP[0].Command...), Extensions: []string{".go"}, RootMarkers: []string{}, FirstMatchMarkers: []string{},
+			}}},
+		}
+		result, err := manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("same-version platform snapshot with LSP entry = %+v, %v", result, err)
+		}
+		result, err = manager.Submit(context.Background(), initial.ConfigVersion, platformSnapshot)
+		if err != nil || result.Kind != ConfigConfirmed {
+			t.Fatalf("repeated same-version platform snapshot with LSP entry = %+v, %v", result, err)
+		}
+	})
+}
+
 // RUN-T-190 persists a version-only change without preparing or publishing a new resource generation.
 func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
 	initial := initialRuntimeConfig()

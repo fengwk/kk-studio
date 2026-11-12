@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
+	"github.com/fengwk/kk-studio/daemon/internal/transport"
 )
 
 // TRN-T-091 verifies production uploads use the currently applied proxy, including removal.
@@ -39,10 +39,34 @@ func TestDynamicResourceUploaderUsesCurrentProxy(t *testing.T) {
 	}))
 	defer secondProxy.Close()
 
-	applied := config.DaemonConfig{}
-	uploader := dynamicResourceUploader{current: func() config.DaemonConfig { return applied }, control: uploadProxyTestControl{url: target.URL}}
-	for _, proxyURL := range []*string{stringPointer(firstProxy.URL), stringPointer(secondProxy.URL), nil} {
-		applied.ProxyURL = proxyURL
+	networks := newNetworkRuntimeStore(networkForTest(t, firstProxy.URL))
+	defer func() {
+		if err := networks.close(); err != nil {
+			t.Errorf("close network runtime: %v", err)
+		}
+	}()
+	uploader := dynamicResourceUploader{networks: networks, control: uploadProxyTestControl{url: target.URL}}
+	if _, err := uploader.Upload(context.Background(), "123e4567-e89b-42d3-a456-426614174000", runtimeapi.ResultContent{Type: "binary", Bytes: []byte("payload"), MediaType: "application/octet-stream"}); err != nil {
+		t.Fatalf("initial upload through proxy A: %v", err)
+	}
+	for _, proxyURL := range []*string{stringPointer(secondProxy.URL), nil} {
+		policyURL := ""
+		if proxyURL != nil {
+			policyURL = *proxyURL
+		}
+		policy, err := transport.NewProxyPolicy(policyURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup, err := networks.publish(transport.NewNetworkRuntime(policy))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cleanup != nil {
+			if err := cleanup(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := uploader.Upload(context.Background(), "123e4567-e89b-42d3-a456-426614174000", runtimeapi.ResultContent{Type: "binary", Bytes: []byte("payload"), MediaType: "application/octet-stream"}); err != nil {
 			t.Fatalf("upload with proxy %v: %v", proxyURL, err)
 		}
@@ -50,6 +74,15 @@ func TestDynamicResourceUploaderUsesCurrentProxy(t *testing.T) {
 	if firstRequests != 1 || secondRequests != 1 || directRequests != 1 {
 		t.Fatalf("requests: first proxy=%d second proxy=%d direct=%d, want 1 each", firstRequests, secondRequests, directRequests)
 	}
+}
+
+func networkForTest(t *testing.T, proxyURL string) *transport.NetworkRuntime {
+	t.Helper()
+	policy, err := transport.NewProxyPolicy(proxyURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return transport.NewNetworkRuntime(policy)
 }
 
 type uploadProxyTestControl struct {

@@ -14,6 +14,9 @@ import (
 
 // COD-T-122
 func TestOutputLimitsAndInlineThreshold(t *testing.T) {
+	if defaultCaptureBudget != 1<<30 {
+		t.Fatalf("default capture budget=%d want 1 GiB", defaultCaptureBudget)
+	}
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +30,10 @@ func TestOutputLimitsAndInlineThreshold(t *testing.T) {
 	result := spool.Finish(false, "")
 	if result.Contents[0].Text != want || result.Details != nil {
 		t.Fatalf("inline result=%#v", result)
+	}
+	entries, err := os.ReadDir(store.Root())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("inline output created staging or published files: entries=%v err=%v", entries, err)
 	}
 	if err := spool.Close(); err != nil {
 		t.Fatal(err)

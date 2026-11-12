@@ -54,6 +54,44 @@ func TestGrepExactLimitReportsLimitReached(t *testing.T) {
 	}
 }
 
+// COD-N-014: deadline checks stop pooled reads before requesting the next chunk.
+func TestReadPooledReaderStopsAtDeadlineChunkBoundary(t *testing.T) {
+	ctx := &deadlineAfterFirstCheckContext{Context: context.Background()}
+	reader := &deadlineChunkReader{}
+	closeCalls := 0
+	data, release, timedOut, err := readPooledReader(ctx, reader, func() error {
+		closeCalls++
+		return nil
+	})
+	defer release()
+	if err != nil || !timedOut || string(data) != "partial" || reader.reads != 1 || closeCalls != 1 {
+		t.Fatalf("data=%q timeout=%v reads=%d closes=%d err=%v", data, timedOut, reader.reads, closeCalls, err)
+	}
+}
+
+type deadlineAfterFirstCheckContext struct {
+	context.Context
+	checks int
+}
+
+func (ctx *deadlineAfterFirstCheckContext) Err() error {
+	ctx.checks++
+	if ctx.checks > 1 {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+type deadlineChunkReader struct{ reads int }
+
+func (reader *deadlineChunkReader) Read(p []byte) (int, error) {
+	reader.reads++
+	if reader.reads == 1 {
+		return copy(p, "partial"), nil
+	}
+	return copy(p, "must not read"), nil
+}
+
 // COD-N-014
 func TestFindContextReturnsPartialOnDeadlineAndCancellationError(t *testing.T) {
 	root := t.TempDir()

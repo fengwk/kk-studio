@@ -12,8 +12,18 @@ import (
 
 func secureNewPrivateDirectory(path string) error { return ensurePrivateDirectory(path) }
 
+type posixPrivateFSAPI struct {
+	lstat    func(string) (os.FileInfo, error)
+	mkdirAll func(string, os.FileMode) error
+	chmod    func(string, os.FileMode) error
+}
+
 func ensurePrivateDirectory(path string) error {
-	st, err := os.Lstat(path)
+	return ensurePrivateDirectoryWithAPI(path, posixPrivateFSAPI{lstat: os.Lstat, mkdirAll: os.MkdirAll, chmod: os.Chmod})
+}
+
+func ensurePrivateDirectoryWithAPI(path string, api posixPrivateFSAPI) error {
+	st, err := api.lstat(path)
 	if err == nil {
 		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("the private directory path is not a real directory: %s", path)
@@ -25,11 +35,11 @@ func ensurePrivateDirectory(path string) error {
 		return err
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(path, 0700); err != nil {
+		if err := api.mkdirAll(path, 0700); err != nil {
 			return err
 		}
 	}
-	if err := os.Chmod(path, 0700); err != nil {
+	if err := api.chmod(path, 0700); err != nil {
 		return err
 	}
 	return verifyPrivateDirectory(path)
@@ -82,7 +92,11 @@ func createPrivateFile(path string) error {
 }
 
 func verifyPrivateFile(path string) error {
-	st, err := os.Lstat(path)
+	return verifyPrivateFileWithLstat(path, os.Lstat)
+}
+
+func verifyPrivateFileWithLstat(path string, lstat func(string) (os.FileInfo, error)) error {
+	st, err := lstat(path)
 	if err != nil {
 		return err
 	}

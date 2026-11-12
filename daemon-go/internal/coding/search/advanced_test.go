@@ -333,7 +333,7 @@ func TestMultilineGrepOutputAndMatchLimit(t *testing.T) {
 	}
 }
 
-// COD-T-174: a multiline scan skips files over the bounded whole-file size.
+// COD-N-017: a multiline scan skips files over the bounded whole-file size.
 func TestMultilineGrepSkipsOversizeFile(t *testing.T) {
 	root := t.TempDir()
 	file, err := os.Create(filepath.Join(root, "large.txt"))
@@ -366,7 +366,7 @@ func TestMultilineGrepCRLF(t *testing.T) {
 	}
 }
 
-// COD-T-174: a deadline during a file read retains completed multiline results.
+// COD-N-014: a deadline during a file read retains completed multiline results.
 func TestMultilineGrepTimeoutPreservesPartialResults(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.txt", "b.txt"} {

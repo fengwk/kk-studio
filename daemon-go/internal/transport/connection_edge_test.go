@@ -95,6 +95,65 @@ func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	}
 }
 
+// TRN-T-086 verifies closing the WebSocket interrupts an active HTTP/2 handler.
+func TestControlConnection_CloseInterruptsActiveHTTP2Handler(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	handlerStarted := make(chan struct{})
+	handlerDone := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(handlerStarted)
+		<-r.Context().Done()
+		close(handlerDone)
+	})}
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+	server.Protocols = protocols
+	listener := &singleConnListener{conn: serverConn, closed: make(chan struct{})}
+	cc := &ControlConnection{conn: serverConn, server: server, listener: listener, closed: make(chan struct{}), stopControl: make(chan struct{})}
+	defer serverConn.Close()
+	defer server.Close()
+	go func() { _ = server.Serve(listener) }()
+
+	transport := &http.Transport{Protocols: protocols, DialContext: func(context.Context, string, string) (net.Conn, error) { return clientConn, nil }}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
+	request, err := http.NewRequest(http.MethodPost, "http://daemon/control", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		_, _ = client.Do(request)
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HTTP/2 handler did not start")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- cc.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = server.Close()
+		<-closeDone
+		t.Fatal("Close waited for an active HTTP/2 handler instead of closing the transport")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("closing the transport did not cancel the active handler")
+	}
+	<-requestDone
+	_ = clientConn.Close()
+}
+
 // TRN-T-082
 func TestControlConnection_ControlRouteAndGoaway(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{}), stopControl: make(chan struct{})}
