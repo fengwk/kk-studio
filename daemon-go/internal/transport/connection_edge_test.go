@@ -111,7 +111,7 @@ func TestControlConnection_ControlRouteAndGoaway(t *testing.T) {
 	}
 	second := httptest.NewRecorder()
 	cc.handleControl(second, httptest.NewRequest(http.MethodPost, "/control", nil))
-	if second.Code != http.StatusTooManyRequests {
+	if second.Code != http.StatusConflict {
 		t.Fatalf("duplicate status=%d", second.Code)
 	}
 	cc.signalGoaway(0)

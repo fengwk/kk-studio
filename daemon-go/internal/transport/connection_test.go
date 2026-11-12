@@ -77,6 +77,18 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	if response.ProtoMajor != 2 {
 		t.Fatalf("control protocol = %s, want HTTP/2", response.Proto)
 	}
+	duplicateRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/control", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateResponse, err := client.Do(duplicateRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer duplicateResponse.Body.Close()
+	if duplicateResponse.ProtoMajor != 2 || duplicateResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate control response=%s status=%d", duplicateResponse.Proto, duplicateResponse.StatusCode)
+	}
 
 	outbound := &protocol.Envelope{MessageType: protocol.MessageType_ERROR, EnvironmentId: proto.String(testEnvironment), Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: proto.String("ready")}}}
 	if err = cc.Send(ctx, outbound); err != nil {

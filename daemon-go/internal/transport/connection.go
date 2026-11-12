@@ -167,7 +167,7 @@ func (c *ControlConnection) handleControl(w http.ResponseWriter, r *http.Request
 	c.mu.Lock()
 	if c.controlStream != nil {
 		c.mu.Unlock()
-		http.Error(w, "control stream already open", http.StatusTooManyRequests)
+		http.Error(w, "control stream already open", http.StatusConflict)
 		return
 	}
 	c.controlStream = pipe
