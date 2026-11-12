@@ -154,6 +154,60 @@ public abstract class HarnessRuntimeThreadTreeContract {
   }
 
   @Test
+  protected void treeQueryRetainsCompactionForHttpBoundaryFiltering() {
+    UUID sessionId = TestIds.id(60);
+    UUID rootId = TestIds.id(61);
+    UUID compactionId = TestIds.id(62);
+    UUID rootEntryId = store.transaction(tx -> insertRoot(tx, sessionId));
+    store.transaction(
+        tx -> {
+          tx.threads()
+              .insert(
+                  thread(
+                      rootId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      "root",
+                      T0,
+                      ThreadExecutionControl.RUNNABLE,
+                      null));
+          ThreadState subagent =
+              thread(
+                  compactionId,
+                  sessionId,
+                  rootId,
+                  rootEntryId,
+                  "compaction",
+                  T0,
+                  ThreadExecutionControl.RUNNABLE,
+                  rootId);
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      subagent.id(),
+                      subagent.sessionId(),
+                      subagent.parentThreadId(),
+                      subagent.headEntryId(),
+                      subagent.creationRequestHash(),
+                      subagent.name(),
+                      subagent.rootThreadId(),
+                      subagent.yoloEnabled(),
+                      ThreadKind.COMPACTION,
+                      subagent.constraints(),
+                      subagent.executionControl(),
+                      subagent.inputThroughSequence(),
+                      subagent.nextCommandSequence(),
+                      subagent.version(),
+                      subagent.createdAt(),
+                      subagent.updatedAt()));
+          return null;
+        });
+
+    assertEquals(List.of(rootId, compactionId), ids(runtime.getThreadTree(compactionId)));
+  }
+
+  @Test
   protected void missingThreadIsNotFoundAndQueryDoesNotWrite() {
     DomainException error =
         assertThrows(DomainException.class, () -> runtime.getThreadTree(TestIds.id(999)));
