@@ -71,7 +71,7 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	}
 	call := runtime.CapabilityCall{InvocationID: "cancel", Arguments: arguments}
 	result, err := findCapability(ctx, call, runtime.CapabilityContext{})
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "Operation cancelled") {
+	if err != nil || !result.Error || len(result.Contents) != 1 || result.Contents[0].Text != "[Search cancelled; results are incomplete.]" {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	var details map[string]any
