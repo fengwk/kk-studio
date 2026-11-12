@@ -56,7 +56,7 @@ class EnvironmentCapabilityContractTest {
   @Test
   void requestContainsOnlyCapabilityExecutionFields() {
     assertArrayEquals(
-        new String[] {"descriptor", "call", "timeout", "expectedFile"},
+        new String[] {"descriptor", "call", "timeout", "expectedFile", "resourceDownload"},
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
@@ -154,7 +154,7 @@ class EnvironmentCapabilityContractTest {
                 new EnvironmentCapabilityCall("call-1", "{\"path\":\"/srv/a\"}"),
                 Duration.ofSeconds(-1)));
     assertEquals(
-        List.of("descriptor", "call", "timeout", "expectedFile"),
+        List.of("descriptor", "call", "timeout", "expectedFile", "resourceDownload"),
         Arrays.stream(EnvironmentCapabilityExecutionRequest.class.getRecordComponents())
             .map(RecordComponent::getName)
             .toList());

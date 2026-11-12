@@ -37,7 +37,8 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
+            EnvironmentCapabilityIds.SKILL_INSTALL);
 
     assertEquals(
         List.of(
@@ -50,7 +51,8 @@ class EnvironmentCapabilityCatalogTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile"),
+            "lsp.java-decompile",
+            "skill.install"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
