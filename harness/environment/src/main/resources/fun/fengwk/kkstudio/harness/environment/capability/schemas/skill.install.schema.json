@@ -1,24 +1,11 @@
 {
-  "description": "Install a skill from its Platform-managed archive.",
+  "type": "object",
   "properties": {
-    "transferId": {
-      "description": "Opaque resource download transfer identifier.",
-      "type": "string"
-    },
-    "package": {
-      "description": "Skill package name.",
-      "type": "string"
-    },
-    "version": {
-      "description": "Current skill package version.",
-      "type": "string"
-    },
-    "skill": {
-      "description": "Skill name within the package.",
-      "type": "string"
-    }
+    "transferId": {"type": "string", "description": "Lowercase UUID identifying the skill archive transfer."},
+    "package": {"type": "string", "description": "Skill package name; must be one safe path segment."},
+    "version": {"type": "string", "description": "Skill package version; must be one safe path segment."},
+    "skill": {"type": "string", "description": "Skill directory name inside the package; must be one safe path segment."}
   },
   "required": ["transferId", "package", "version", "skill"],
-  "type": "object",
   "additionalProperties": false
 }

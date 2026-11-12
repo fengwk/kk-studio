@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -13,12 +14,12 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
@@ -37,7 +38,8 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
+            EnvironmentCapabilityIds.SKILL_INSTALL);
 
     assertEquals(
         List.of(
@@ -50,7 +52,8 @@ class EnvironmentCapabilityCatalogTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile"),
+            "lsp.java-decompile",
+            "skill.install"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
@@ -290,26 +293,43 @@ class EnvironmentCapabilityCatalogTest {
     assertTrue(findDescription.contains("Defaults to 15."), findDescription);
   }
 
-  /** 测试意图：验证 Java classpath 加载的 schema 与 Daemon capabilities 镜像文件完全一致。 */
+  /** 测试意图：验证 Java classpath 中的每份 schema 与 Go Daemon 声明逐字节一致。 */
   @Test
-  void javaSchemasMirrorDaemonCapabilitySchemas() throws IOException {
-    Path projectRoot = findProjectRootDir();
-    Path daemonCapabilitiesDir = projectRoot.resolve("daemon/resources/capabilities");
-    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      String fileName = descriptor.id().value() + ".schema.json";
-      Path daemonSchemaPath = daemonCapabilitiesDir.resolve(fileName);
-      assertTrue(Files.exists(daemonSchemaPath), "daemon schema must exist: " + daemonSchemaPath);
-      String daemonSchema =
-          Files.readString(daemonSchemaPath, StandardCharsets.UTF_8).stripTrailing();
+  void javaSchemasMirrorGoCapabilitySchemas() throws IOException {
+    Path goCapabilitiesDir = findProjectRootDir().resolve("daemon-go/internal/capability/schemas");
+    Set<String> goSchemaNames = new TreeSet<>();
+    try (var files = Files.list(goCapabilitiesDir)) {
+      files
+          .filter(Files::isRegularFile)
+          .map(path -> path.getFileName().toString())
+          .filter(name -> name.endsWith(".schema.json"))
+          .forEach(goSchemaNames::add);
+    }
+    Path javaCapabilitiesDir =
+        findProjectRootDir()
+            .resolve(
+                "harness/environment/src/main/resources/fun/fengwk/kkstudio/harness/environment/capability/schemas");
+    Set<String> javaSchemaNames = new TreeSet<>();
+    try (var files = Files.list(javaCapabilitiesDir)) {
+      files
+          .filter(Files::isRegularFile)
+          .map(path -> path.getFileName().toString())
+          .filter(name -> name.endsWith(".schema.json"))
+          .forEach(javaSchemaNames::add);
+    }
+    assertEquals(goSchemaNames, javaSchemaNames, "Java and Go schema inventories must match");
+
+    for (String fileName : goSchemaNames) {
+      Path goSchemaPath = goCapabilitiesDir.resolve(fileName);
       String javaSchemaResource =
           "/fun/fengwk/kkstudio/harness/environment/capability/schemas/" + fileName;
       try (InputStream input =
           EnvironmentCapabilityCatalog.class.getResourceAsStream(javaSchemaResource)) {
-        assertNotNull(input, "missing java schema resource: " + javaSchemaResource);
-        String javaSchema =
-            new String(input.readAllBytes(), StandardCharsets.UTF_8).stripTrailing();
-        assertEquals(
-            daemonSchema, javaSchema, "Java and daemon schemas must match for " + fileName);
+        assertNotNull(input, "missing Java schema resource: " + javaSchemaResource);
+        assertArrayEquals(
+            Files.readAllBytes(goSchemaPath),
+            input.readAllBytes(),
+            "Java and Go schemas must match byte-for-byte for " + fileName);
       }
     }
   }
@@ -317,12 +337,12 @@ class EnvironmentCapabilityCatalogTest {
   private static Path findProjectRootDir() {
     Path current = Path.of("").toAbsolutePath();
     while (current != null) {
-      if (Files.isDirectory(current.resolve("daemon/resources/capabilities"))) {
+      if (Files.isDirectory(current.resolve("daemon-go/internal/capability/schemas"))) {
         return current;
       }
       current = current.getParent();
     }
     throw new IllegalStateException(
-        "cannot find project root containing daemon/resources/capabilities");
+        "cannot find project root containing daemon-go/internal/capability/schemas");
   }
 }
