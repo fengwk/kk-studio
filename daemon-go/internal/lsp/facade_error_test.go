@@ -70,7 +70,11 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		}
 		confirmed := 0
 		result, err := facade.Capabilities()[call.CapabilityID](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
-		want := "LSP server 'go' cannot be started: " + executable
+		resolvedExecutable, resolveErr := filepath.EvalSymlinks(executable)
+		if resolveErr != nil {
+			t.Fatal(resolveErr)
+		}
+		want := "LSP server 'go' cannot be started: " + resolvedExecutable
 		if err != nil || !result.Error || result.Contents[0].Text != want || confirmed != 1 {
 			t.Fatalf("result=%#v err=%v confirmations=%d", result, err, confirmed)
 		}
