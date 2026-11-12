@@ -57,6 +57,9 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	process, err := capability.Processes.Start(ctx, native.ProcessSpec{Executable: shell, Args: []string{"-lc", `cd -- "$1" || exit 1; shift; ` + command, "bash", workdir}, Directory: workdir})
 	if err != nil {
 		executionExited = !errors.Is(err, native.ErrScopeNotConverged)
+		if executionExited && ctx.Err() != nil {
+			return terminatedBeforeStart(call, ctx.Err())
+		}
 		return errorResult(call.InvocationID, failRun(err.Error(), "FAILED")), nil
 	}
 	executionExited = false

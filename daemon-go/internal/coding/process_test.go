@@ -7,8 +7,10 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +47,82 @@ func (p *fakeProcess) Terminate(context.Context, time.Duration) error {
 }
 
 type fakeSupervisor struct{ process *fakeProcess }
+
+type startSupervisor struct {
+	start func(context.Context, native.ProcessSpec) (native.ManagedProcess, error)
+}
+
+func (s startSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
+	return s.start(ctx, spec)
+}
+func (startSupervisor) Close(context.Context) error { return nil }
+
+type shellSupervisor struct{ home string }
+
+type shellManagedProcess struct {
+	command        *exec.Cmd
+	stdin          io.WriteCloser
+	stdout, stderr io.ReadCloser
+	mu             sync.Mutex
+	waited         bool
+}
+
+func (s shellSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
+	command := exec.CommandContext(ctx, spec.Executable, spec.Args...)
+	command.Dir = spec.Directory
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "HOME=") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	command.Env = append(command.Env, "HOME="+s.home)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	return &shellManagedProcess{command: command, stdin: stdin, stdout: stdout, stderr: stderr}, nil
+}
+func (shellSupervisor) Close(context.Context) error { return nil }
+
+func (p *shellManagedProcess) PID() int              { return p.command.Process.Pid }
+func (p *shellManagedProcess) Stdin() io.WriteCloser { return p.stdin }
+func (p *shellManagedProcess) Stdout() io.ReadCloser { return p.stdout }
+func (p *shellManagedProcess) Stderr() io.ReadCloser { return p.stderr }
+func (p *shellManagedProcess) Wait(context.Context) (native.ProcessExit, error) {
+	err := p.command.Wait()
+	p.mu.Lock()
+	p.waited = true
+	p.mu.Unlock()
+	if err != nil {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
+			code := exitError.ExitCode()
+			return native.ProcessExit{Code: &code}, nil
+		}
+		return native.ProcessExit{}, err
+	}
+	code := 0
+	return native.ProcessExit{Code: &code}, nil
+}
+func (p *shellManagedProcess) Terminate(context.Context, time.Duration) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waited {
+		return nil
+	}
+	return p.command.Process.Kill()
+}
 
 type failingReadCloser struct{ data []byte }
 
@@ -178,7 +256,184 @@ func TestProcessTimeoutTerminatesAndReportsTimeoutOutcome(t *testing.T) {
 	}
 }
 
-// COD-T-134
+// COD-T-134: cancellation after the process starts terminates it and returns a cancelled result.
+func TestProcessCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitStarted := make(chan struct{})
+	process := &fakeProcess{
+		stdout: io.NopCloser(strings.NewReader("running output")),
+		stderr: io.NopCloser(strings.NewReader("")),
+		wait: func(ctx context.Context) (native.ProcessExit, error) {
+			close(waitStarted)
+			<-ctx.Done()
+			return native.ProcessExit{}, ctx.Err()
+		},
+	}
+	confirmed := 0
+	dataDir, workdir := t.TempDir(), t.TempDir()
+	resultCh := make(chan runtime.CapabilityResult, 1)
+	go func() {
+		result, _ := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "run-cancel"}, runtime.CapabilityContext{
+			Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, ConfirmExecutionExit: func() { confirmed++ },
+		}, "sleep 10", workdir)
+		resultCh <- result
+	}()
+	<-waitStarted
+	cancel()
+	result := <-resultCh
+	var details struct {
+		Process struct {
+			Outcome string `json:"outcome"`
+		} `json:"process"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Error || details.Process.Outcome != "CANCELLED" || !strings.Contains(result.Contents[0].Text, "Operation cancelled by the caller") || !strings.Contains(result.Contents[0].Text, "running output") {
+		t.Fatalf("result=%#v", result)
+	}
+	process.mu.Lock()
+	terminated := process.terminated
+	process.mu.Unlock()
+	if terminated != 1 || confirmed != 1 {
+		t.Fatalf("terminated=%d confirmed=%d want one each", terminated, confirmed)
+	}
+}
+
+// COD-T-136: cancellation during Start waits for the late process handle and converges it.
+func TestProcessTerminateBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startContext := make(chan context.Context, 1)
+	resumeStart := make(chan struct{})
+	process := &fakeProcess{
+		stdout: io.NopCloser(strings.NewReader("")),
+		stderr: io.NopCloser(strings.NewReader("")),
+		wait:   func(ctx context.Context) (native.ProcessExit, error) { return native.ProcessExit{}, ctx.Err() },
+	}
+	supervisor := startSupervisor{start: func(ctx context.Context, _ native.ProcessSpec) (native.ManagedProcess, error) {
+		startContext <- ctx
+		<-resumeStart
+		return process, nil
+	}}
+	confirmed := 0
+	dataDir, workdir := t.TempDir(), t.TempDir()
+	resultCh := make(chan runtime.CapabilityResult, 1)
+	go func() {
+		result, _ := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "start-await-cancel"}, runtime.CapabilityContext{
+			Config: config.DaemonConfig{DataDir: dataDir}, Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ },
+		}, "sleep 10", workdir)
+		resultCh <- result
+	}()
+	startedCtx := <-startContext
+	cancel()
+	<-startedCtx.Done()
+	close(resumeStart)
+	result := <-resultCh
+	var details struct {
+		Process struct {
+			Outcome string `json:"outcome"`
+		} `json:"process"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	process.mu.Lock()
+	terminated := process.terminated
+	process.mu.Unlock()
+	if !result.Error || details.Process.Outcome != "CANCELLED" || terminated != 1 || confirmed != 1 {
+		t.Fatalf("result=%#v terminated=%d confirmed=%d", result, terminated, confirmed)
+	}
+}
+
+// COD-T-135: a supervisor that cannot converge a cancelled start must not claim cancellation.
+func TestProcessAbortStartFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startContext := make(chan context.Context, 1)
+	resumeStart := make(chan struct{})
+	supervisor := startSupervisor{start: func(ctx context.Context, _ native.ProcessSpec) (native.ManagedProcess, error) {
+		startContext <- ctx
+		<-resumeStart
+		return nil, native.ErrScopeNotConverged
+	}}
+	confirmed := 0
+	dataDir, workdir := t.TempDir(), t.TempDir()
+	resultCh := make(chan runtime.CapabilityResult, 1)
+	go func() {
+		result, _ := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "start-not-converged"}, runtime.CapabilityContext{
+			Config: config.DaemonConfig{DataDir: dataDir}, Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ },
+		}, "sleep 10", workdir)
+		resultCh <- result
+	}()
+	startedCtx := <-startContext
+	cancel()
+	<-startedCtx.Done()
+	close(resumeStart)
+	result := <-resultCh
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "process scope termination not converged") || !strings.Contains(string(result.Details), `"code":"FAILED"`) || confirmed != 0 {
+		t.Fatalf("result=%#v confirmed=%d", result, confirmed)
+	}
+}
+
+// COD-T-141: a start call returning the cancelled context is reported as cancellation, not failure.
+func TestProcessStartAwaitCancelledError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startContext := make(chan context.Context, 1)
+	resumeStart := make(chan struct{})
+	supervisor := startSupervisor{start: func(ctx context.Context, _ native.ProcessSpec) (native.ManagedProcess, error) {
+		startContext <- ctx
+		<-resumeStart
+		return nil, ctx.Err()
+	}}
+	confirmed := 0
+	dataDir, workdir := t.TempDir(), t.TempDir()
+	resultCh := make(chan runtime.CapabilityResult, 1)
+	go func() {
+		result, _ := ExecuteProcess(ctx, runtime.CapabilityCall{InvocationID: "start-cancelled-error"}, runtime.CapabilityContext{
+			Config: config.DaemonConfig{DataDir: dataDir}, Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ },
+		}, "sleep 10", workdir)
+		resultCh <- result
+	}()
+	startedCtx := <-startContext
+	cancel()
+	<-startedCtx.Done()
+	close(resumeStart)
+	result := <-resultCh
+	if !result.Error || !strings.Contains(string(result.Details), `"code":"CANCELLED"`) || !strings.Contains(result.Contents[0].Text, "Operation cancelled by the caller") || confirmed != 1 {
+		t.Fatalf("result=%#v confirmed=%d", result, confirmed)
+	}
+}
+
+// COD-T-238: the wrapper restores workdir after a login profile changes directories.
+func TestProcessWorkdirRestoredAfterLoginProfile(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("the integration fixture requires POSIX bash")
+	}
+	bash := "/bin/bash"
+	if _, err := os.Stat(bash); err != nil {
+		t.Skipf("bash is unavailable: %v", err)
+	}
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".bash_profile"), []byte("cd -- \"$HOME\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(t.TempDir(), "work ' $ 中文")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "profile-workdir", TimeoutMillis: 5000}, runtime.CapabilityContext{
+		Config: config.DaemonConfig{DataDir: dataDir, BashExecutable: &bash}, Processes: shellSupervisor{home: home},
+	}, "pwd", workdir)
+	if err != nil || result.Error || result.Contents[0].Text != workdir+"\n" {
+		t.Fatalf("result=%#v err=%v want path=%q", result, err, workdir)
+	}
+}
+
+// COD-T-143
 func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -281,6 +536,46 @@ func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 	}
 	if snapshotDetails["mode"] != "SNAPSHOT" || snapshotDetails["startOffset"] != float64(6) || snapshotDetails["endOffset"] != float64(6) || partials[1].Contents[0].Text != "bounded tail" {
 		t.Fatalf("snapshot=%v content=%q", snapshotDetails, partials[1].Contents[0].Text)
+	}
+}
+
+// COD-T-153: live APPEND chunks preserve multibyte characters crossing the 64 KiB boundary.
+func TestProcessUTF8Boundary(t *testing.T) {
+	for _, character := range []string{"é", "中", "🚀"} {
+		t.Run(character, func(t *testing.T) {
+			data := []byte(strings.Repeat("a", livePartialBytes-1) + character + "\n")
+			var partials []runtime.CapabilityResult
+			emitter := &processEmitter{callID: "utf8-boundary", progress: func(result runtime.CapabilityResult) error {
+				partials = append(partials, result)
+				return nil
+			}, stopped: func() bool { return false }, lastFlush: time.Now()}
+			emitter.Write(data)
+			if len(partials) != 2 {
+				t.Fatalf("partial chunks=%d want=2", len(partials))
+			}
+			var output strings.Builder
+			offset := int64(0)
+			for _, partial := range partials {
+				var details struct {
+					Mode     string `json:"mode"`
+					Start    int64  `json:"startOffset"`
+					End      int64  `json:"endOffset"`
+					Observed int64  `json:"observedBytes"`
+				}
+				if err := json.Unmarshal(partial.Details, &details); err != nil {
+					t.Fatal(err)
+				}
+				text := partial.Contents[0].Text
+				if details.Mode != "APPEND" || details.Start != offset || details.End-offset != int64(len(text)) || details.Observed != int64(len(data)) {
+					t.Fatalf("partial=%#v details=%#v offset=%d", partial, details, offset)
+				}
+				output.WriteString(text)
+				offset = details.End
+			}
+			if offset != int64(len(data)) || output.String() != string(data) || strings.Contains(output.String(), "�") {
+				t.Fatalf("offset=%d text matches=%v", offset, output.String() == string(data))
+			}
+		})
 	}
 }
 
