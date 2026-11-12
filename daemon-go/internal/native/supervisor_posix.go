@@ -57,8 +57,12 @@ func nativePOSIXStartAPI() posixStartAPI {
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
 func NewSupervisor() (Supervisor, error) {
-	if runtime.GOOS == "linux" {
-		if err := enableChildSubreaper(); err != nil {
+	return newPOSIXSupervisor(runtime.GOOS, enableChildSubreaper)
+}
+
+func newPOSIXSupervisor(goos string, enableSubreaper func() error) (Supervisor, error) {
+	if goos == "linux" {
+		if err := enableSubreaper(); err != nil {
 			return nil, fmt.Errorf("cannot enable process subreaper: %w", err)
 		}
 	}
@@ -184,7 +188,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
 	_ = ownerReader.Close()
-	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, trackedSessions: make(map[int]trackedSession), done: make(chan struct{})}
+	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, trackedSessions: make(map[int]trackedSession), processGroupID: syscall.Getpgid, done: make(chan struct{})}
 	go func() { p.waitErr = cmd.Wait(); close(p.done) }()
 	if err := p.awaitScope(ctx); err != nil {
 		failure := p.cleanupFailedStart(err)
@@ -272,6 +276,7 @@ type posixProcess struct {
 	baselinePIDs    []int
 	baselineKnown   bool
 	trackedSessions map[int]trackedSession
+	processGroupID  func(int) (int, error)
 	convergeScope   func(context.Context, int, time.Duration) error
 	done            chan struct{}
 	waitErr         error
@@ -429,6 +434,17 @@ func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSess
 			}
 			for _, member := range members {
 				if member.PID == p.pid && member.Session == p.sid && member.Identity != "" {
+					getpgid := p.processGroupID
+					if getpgid == nil {
+						getpgid = syscall.Getpgid
+					}
+					pgid, err := getpgid(p.pid)
+					if err != nil {
+						return fmt.Errorf("cannot verify the process scope helper process group: %w", err)
+					}
+					if pgid != p.pid {
+						return errors.New("the process scope helper is not the process group leader")
+					}
 					return nil
 				}
 			}
@@ -670,12 +686,16 @@ func completeHelperCommandLifecycle(publishExit func() error, converge func() er
 }
 
 func helperMain(args []string) int {
+	return helperMainWithSubreaper(args, runtime.GOOS, enableChildSubreaper)
+}
+
+func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() error) int {
 	if len(args) != 1 || !filepath.IsAbs(args[0]) || hasControl(args[0]) {
 		_, _ = fmt.Fprintln(os.Stderr, "helper-launch-failure")
 		return 2
 	}
-	if runtime.GOOS == "linux" {
-		if err := enableChildSubreaper(); err != nil {
+	if goos == "linux" {
+		if err := enableSubreaper(); err != nil {
 			publishQuietly(args[0], errorFile, "helper-posix-failure")
 			return 1
 		}
