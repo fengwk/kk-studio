@@ -117,6 +117,6 @@ jobs:
               key = order[i]
               print key, statements[key], counts[key]
             }
-          }' coverage/native-coverage-*/*.out > "$profile"
+          }' ../coverage/native-coverage-*/*.out > "$profile"
           go tool cover -func="$profile" | tee "$RUNNER_TEMP/native-coverage-merged.txt"
           awk '/^total:/ { print "merged internal/native coverage: " $3 }' "$RUNNER_TEMP/native-coverage-merged.txt"
