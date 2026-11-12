@@ -8,6 +8,7 @@ import (
 )
 
 type UpdateProgress struct {
+	TargetVersion   string
 	DownloadedBytes int64  `json:"downloadedBytes"`
 	TotalBytes      *int64 `json:"totalBytes"`
 }
@@ -30,6 +31,7 @@ type StatusTracker struct {
 	progress           *UpdateProgress
 	updating           bool
 	configurationError *ConfigurationError
+	updateTarget       string
 }
 
 func NewStatusTracker() *StatusTracker { return &StatusTracker{revision: 1, status: map[string]any{}} }
@@ -105,23 +107,45 @@ func (s *StatusTracker) ConfigurationError() (ConfigurationError, bool) {
 	return *s.configurationError, true
 }
 
-func (s *StatusTracker) BeginUpdate() {
+func (s *StatusTracker) BeginUpdate(targetVersion string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.updating && s.updateTarget == targetVersion {
+		return nil
+	}
+	if err := s.advanceLocked(); err != nil {
+		return err
+	}
 	s.updating = true
-	s.progress = nil
+	s.updateTarget = targetVersion
+	s.progress = &UpdateProgress{TargetVersion: targetVersion}
+	return nil
 }
-func (s *StatusTracker) EndUpdate() {
+func (s *StatusTracker) EndUpdate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.updating {
+		return nil
+	}
+	if err := s.advanceLocked(); err != nil {
+		return err
+	}
 	s.updating = false
+	s.updateTarget = ""
 	s.progress = nil
+	return nil
 }
 func (s *StatusTracker) UpdateProgress(p UpdateProgress) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.updating {
 		return errors.New("no update is active")
+	}
+	if p.TargetVersion == "" {
+		p.TargetVersion = s.updateTarget
+	}
+	if p.TargetVersion != s.updateTarget {
+		return errors.New("update progress target version does not match the active update")
 	}
 	if p.DownloadedBytes < 0 || p.DownloadedBytes > 9007199254740991 || p.TotalBytes != nil && (*p.TotalBytes < p.DownloadedBytes || *p.TotalBytes > 9007199254740991) {
 		return errors.New("invalid update progress")
@@ -133,6 +157,12 @@ func (s *StatusTracker) UpdateProgress(p UpdateProgress) error {
 	if p.TotalBytes != nil {
 		v := *p.TotalBytes
 		cp.TotalBytes = &v
+	}
+	if reflect.DeepEqual(s.progress, &cp) {
+		return nil
+	}
+	if err := s.advanceLocked(); err != nil {
+		return err
 	}
 	s.progress = &cp
 	return nil
@@ -150,6 +180,14 @@ func (s *StatusTracker) Progress() (*UpdateProgress, bool) {
 	}
 	return &p, true
 }
+func (s *StatusTracker) advanceLocked() error {
+	if s.revision == math.MaxInt64 {
+		return errors.New("runtime status revision exceeds the Java long range")
+	}
+	s.revision++
+	return nil
+}
+
 func cloneMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {

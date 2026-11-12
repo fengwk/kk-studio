@@ -15,6 +15,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	"github.com/fengwk/kk-studio/daemon/internal/update"
 )
 
 const (
@@ -42,6 +43,8 @@ type RuntimeOptions struct {
 	MaxConcurrentInvocations int
 	HeartbeatInterval        time.Duration
 	HostInfo                 *protocol.HostInfo
+	Update                   update.Runner
+	ReportError              func(error)
 }
 
 type activeConnection struct {
@@ -77,6 +80,11 @@ type Runtime struct {
 	running       bool
 	hasRun        bool
 	sendCtx       context.Context
+	updateOps     *update.Operations
+	updateMu      sync.Mutex
+	updateCancel  context.CancelFunc
+	updateWatch   func()
+	updatePermit  func() error
 }
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
@@ -134,7 +142,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), updateOps: update.NewOperations()}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(nil, nil, func(previous, next config.DaemonConfig) {
 			if previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL) {
@@ -166,6 +174,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		cancel()
 		<-heartbeatDone
 		r.dropActiveConnection()
+		r.stopUpdateForShutdown()
 		if r.options.EnvironmentConfig != nil {
 			r.options.EnvironmentConfig.Close()
 		}
@@ -321,7 +330,7 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		if !ready {
 			return r.sendError(e.InvocationId, "UPDATE requires a READY bound connection")
 		}
-		return r.sendError(e.InvocationId, "managed update is not configured")
+		return r.handleUpdate(ctx, e)
 	default:
 		return r.sendError(e.InvocationId, "unsupported inbound message type")
 	}
@@ -423,6 +432,243 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		return r.sendReady()
 	}
 	return r.sendStatus()
+}
+
+func (r *Runtime) handleUpdate(ctx context.Context, envelope *protocol.Envelope) error {
+	payload, ok := envelope.Payload.(*protocol.Envelope_Update)
+	if !ok || payload.Update == nil || payload.Update.OperationId == nil || payload.Update.TargetVersion == nil || len(payload.Update.ProtoReflect().GetUnknown()) != 0 {
+		return r.sendError(nil, "invalid update command")
+	}
+	command := update.Command{OperationID: payload.Update.GetOperationId(), TargetVersion: payload.Update.GetTargetVersion()}
+	if err := update.ValidateCommand(command); err != nil {
+		return r.sendError(nil, err.Error())
+	}
+	r.mu.RLock()
+	configuration := cloneDaemonConfig(r.config)
+	r.mu.RUnlock()
+	runner := r.options.Update
+	configured := runner != nil && runner.Configured()
+	decision, err := r.updateOps.Decide(command, r.options.DaemonVersion, configured, r.updateBusyReason(runner))
+	if err != nil {
+		return err
+	}
+	switch decision.Action {
+	case update.ActionStatus:
+		return r.sendStatus()
+	case update.ActionReplayActive, update.ActionReplayCache:
+		resultErr := r.sendUpdateReceipt(*decision.Receipt)
+		statusErr := r.sendStatus()
+		releaseErr := r.releaseUpdatePermit()
+		return firstError(resultErr, statusErr, releaseErr)
+	case update.ActionReject:
+		return r.sendUpdateReceipt(*decision.Receipt)
+	case update.ActionAdmit:
+		updateCtx, cancel := context.WithCancel(ctx)
+		r.updateMu.Lock()
+		r.updateCancel = cancel
+		r.updateMu.Unlock()
+		if err := r.status.BeginUpdate(command.TargetVersion); err != nil {
+			cancel()
+			failed, _ := r.updateOps.Complete(command.OperationID, update.PhaseFailed, "managed update failed")
+			return firstError(err, r.sendUpdateReceipt(failed))
+		}
+		statusErr := r.sendStatus()
+		acceptedErr := r.sendUpdateReceipt(*decision.Receipt)
+		r.wg.Add(1)
+		go r.executeUpdate(updateCtx, cancel, command, configuration)
+		return firstError(statusErr, acceptedErr)
+	default:
+		return errors.New("invalid update admission decision")
+	}
+}
+
+func (r *Runtime) updateBusyReason(runner update.Runner) string {
+	r.callsMu.Lock()
+	protected := len(r.calls) > 0
+	r.callsMu.Unlock()
+	if protected {
+		return "protected execution is still running"
+	}
+	if runner != nil {
+		return runner.BusyReason()
+	}
+	return ""
+}
+
+func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) {
+	defer r.wg.Done()
+	defer cancel()
+	runner := r.options.Update
+	if runner == nil {
+		r.finishUpdate(command.OperationID, update.PhaseFailed, "managed update is not configured")
+		return
+	}
+	if err := runner.StopForUpdate(ctx); err != nil {
+		if ctx.Err() == nil {
+			r.finishUpdate(command.OperationID, update.PhaseFailed, safeUpdateError(err))
+		}
+		return
+	}
+	outcome, err := runner.HandleUpdate(ctx, command, configuration, func(progress update.Progress) {
+		if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
+			return
+		}
+		value := UpdateProgress{TargetVersion: command.TargetVersion, DownloadedBytes: progress.DownloadedBytes, TotalBytes: progress.TotalBytes}
+		if err := r.status.UpdateProgress(value); err == nil {
+			_ = r.sendStatus()
+		}
+	})
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil || outcome.Phase == update.PhaseFailed || outcome.Phase != update.PhasePrepared {
+		message := outcome.Message
+		if err != nil || message == "" {
+			message = safeUpdateError(err)
+		}
+		r.finishUpdate(command.OperationID, update.PhaseFailed, message)
+		return
+	}
+	receipt, ok := r.updateOps.Complete(command.OperationID, update.PhasePrepared, outcome.Message)
+	if !ok {
+		return
+	}
+	var stopWatching func()
+	if outcome.WatchFailure != nil {
+		stopWatching = outcome.WatchFailure(func(string) {
+			r.failActiveUpdate(command.OperationID, "official installer failed; check local last-operation.json")
+		})
+	}
+	if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
+		if stopWatching != nil {
+			stopWatching()
+		}
+		return
+	}
+	r.updateMu.Lock()
+	r.updateCancel = nil
+	r.updatePermit = outcome.ReleasePermit
+	r.updateWatch = stopWatching
+	r.updateMu.Unlock()
+	_ = r.sendStatus()
+	_ = r.deliverUpdateReceipt(receipt)
+}
+
+func (r *Runtime) finishUpdate(operationID string, phase update.Phase, message string) {
+	receipt, ok := r.updateOps.Complete(operationID, phase, message)
+	if !ok {
+		return
+	}
+	r.status.EndUpdate()
+	r.clearUpdateWatch()
+	_ = r.sendStatus()
+	_ = r.sendUpdateReceipt(receipt)
+}
+
+func (r *Runtime) failActiveUpdate(operationID, message string) {
+	active, ok := r.updateOps.Active()
+	if !ok || active.Command.OperationID != operationID {
+		return
+	}
+	receipt, ok := r.updateOps.FailActive(message)
+	if !ok {
+		return
+	}
+	r.status.EndUpdate()
+	r.clearUpdateWatch()
+	_ = r.sendStatus()
+	_ = r.sendUpdateReceipt(receipt)
+}
+
+func (r *Runtime) clearUpdateWatch() {
+	r.updateMu.Lock()
+	stop := r.updateWatch
+	r.updateWatch = nil
+	r.updateCancel = nil
+	r.updatePermit = nil
+	r.updateMu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+func (r *Runtime) sendUpdateReceipt(receipt update.Receipt) error {
+	phase := protocol.UpdatePhase_UPDATE_PHASE_UNSPECIFIED
+	switch receipt.Phase {
+	case update.PhaseAccepted:
+		phase = protocol.UpdatePhase_UPDATE_ACCEPTED
+	case update.PhasePrepared:
+		phase = protocol.UpdatePhase_UPDATE_PREPARED
+	case update.PhaseFailed:
+		phase = protocol.UpdatePhase_UPDATE_FAILED
+	default:
+		return errors.New("invalid update receipt phase")
+	}
+	result := &protocol.UpdateResult{OperationId: stringPtr(receipt.Command.OperationID), Phase: phase}
+	if receipt.Message != "" {
+		result.Message = stringPtr(receipt.Message)
+	}
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_UPDATE_RESULT, Payload: &protocol.Envelope_UpdateResult{UpdateResult: result}}, true)
+}
+
+func (r *Runtime) deliverUpdateReceipt(receipt update.Receipt) error {
+	resultErr := r.sendUpdateReceipt(receipt)
+	releaseErr := r.releaseUpdatePermit()
+	return firstError(resultErr, releaseErr)
+}
+
+func (r *Runtime) releaseUpdatePermit() error {
+	r.updateMu.Lock()
+	permit := r.updatePermit
+	r.updateMu.Unlock()
+	if permit == nil {
+		return nil
+	}
+	if err := permit(); err != nil {
+		if r.options.ReportError != nil {
+			r.options.ReportError(err)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) resendUpdateReceipt() error {
+	receipt, ok := r.updateOps.ReceiptToResend()
+	if !ok {
+		return nil
+	}
+	resultErr := r.sendUpdateReceipt(receipt)
+	var releaseErr error
+	if receipt.Phase == update.PhasePrepared {
+		releaseErr = r.releaseUpdatePermit()
+	}
+	return firstError(resultErr, releaseErr)
+}
+
+func firstError(errors ...error) error {
+	for _, err := range errors {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func safeUpdateError(error) string { return "managed update failed" }
+
+func (r *Runtime) stopUpdateForShutdown() {
+	r.updateMu.Lock()
+	cancel := r.updateCancel
+	stop := r.updateWatch
+	r.updateCancel = nil
+	r.updateWatch = nil
+	r.updateMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if stop != nil {
+		stop()
+	}
 }
 
 func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error {
@@ -745,12 +991,15 @@ func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
 		body.Configuration = configurationStatus
 	}
 	if progress, ok := r.status.Progress(); ok {
-		body.Update = &protocol.UpdateProgress{DownloadedBytes: int64Ptr(progress.DownloadedBytes), TotalBytes: progress.TotalBytes}
+		body.Update = &protocol.UpdateProgress{TargetVersion: stringPtr(progress.TargetVersion), DownloadedBytes: int64Ptr(progress.DownloadedBytes), TotalBytes: progress.TotalBytes}
 	}
 	return &protocol.RuntimeSnapshot{Revision: int64Ptr(status.Revision), Status: body}
 }
 func (r *Runtime) sendReady() error {
-	return r.sendFrame(&protocol.Envelope{MessageType: protocol.MessageType_READY, EnvironmentId: stringPtr(r.options.EnvironmentID), Payload: &protocol.Envelope_Ready{Ready: &protocol.Ready{DaemonVersion: stringPtr(r.options.DaemonVersion), HostInfo: r.hostInfo, RuntimeStatus: r.runtimeSnapshot()}}})
+	if err := r.sendFrame(&protocol.Envelope{MessageType: protocol.MessageType_READY, EnvironmentId: stringPtr(r.options.EnvironmentID), Payload: &protocol.Envelope_Ready{Ready: &protocol.Ready{DaemonVersion: stringPtr(r.options.DaemonVersion), HostInfo: r.hostInfo, RuntimeStatus: r.runtimeSnapshot()}}}); err != nil {
+		return err
+	}
+	return r.resendUpdateReceipt()
 }
 func (r *Runtime) sendStatus() error {
 	frame := &protocol.Envelope{MessageType: protocol.MessageType_RUNTIME_STATUS, EnvironmentId: stringPtr(r.options.EnvironmentID), Payload: &protocol.Envelope_RuntimeStatus{RuntimeStatus: &protocol.RuntimeStatus{RuntimeStatus: r.runtimeSnapshot()}}}

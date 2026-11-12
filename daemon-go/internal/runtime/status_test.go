@@ -16,13 +16,25 @@ func TestStatusRevisionAndProgress(t *testing.T) {
 	if a.Revision != 2 || b.Revision != 2 {
 		t.Fatalf("revisions %d, %d", a.Revision, b.Revision)
 	}
-	s.BeginUpdate()
+	if err := s.BeginUpdate("2.0.0"); err != nil {
+		t.Fatal(err)
+	}
 	total := int64(12)
 	if err := s.UpdateProgress(UpdateProgress{DownloadedBytes: 4, TotalBytes: &total}); err != nil {
 		t.Fatal(err)
 	}
+	progress, ok := s.Progress()
+	if !ok || progress.TargetVersion != "2.0.0" || progress.DownloadedBytes != 4 {
+		t.Fatalf("update progress = %+v, present=%t", progress, ok)
+	}
 	if err := s.UpdateProgress(UpdateProgress{DownloadedBytes: 3, TotalBytes: &total}); err == nil {
 		t.Fatal("expected backwards progress rejection")
+	}
+	if err := s.EndUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Progress(); ok {
+		t.Fatal("ending update retained progress")
 	}
 }
 
