@@ -109,3 +109,45 @@ func TestWindowsSupervisor_NativeJobCloseReportsInvalidHandle(t *testing.T) {
 		t.Fatal("native Job close accepted an invalid handle")
 	}
 }
+
+// TestWindowsSupervisor_FailedStartCleanupReportsResourceFailures verifies failed cleanup retains the launch cause and resource error.
+func TestWindowsSupervisor_FailedStartCleanupReportsResourceFailures(t *testing.T) {
+	owner, err := os.CreateTemp(t.TempDir(), "closed-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("injected launch failure")
+	process := &windowsProcess{owner: owner, stateDir: "bad\x00state"}
+	cleanupErr := process.cleanupFailedStart(cause)
+	if !errors.Is(cleanupErr, cause) || process.owner != nil {
+		t.Fatalf("failed-start cleanup = %v; owner = %v", cleanupErr, process.owner)
+	}
+}
+
+// TestWindowsSupervisor_ChildHandleCloseRetainsFailure verifies failed inherited-handle cleanup stays retryable.
+func TestWindowsSupervisor_ChildHandleCloseRetainsFailure(t *testing.T) {
+	pipes := &windowsHelperPipes{childHandles: []windows.Handle{windows.Handle(0x12345678)}}
+	if err := pipes.closeChildHandles(); err == nil {
+		t.Fatal("invalid child handle close unexpectedly succeeded")
+	}
+	if len(pipes.childHandles) != 1 {
+		t.Fatalf("failed child handle was discarded: %v", pipes.childHandles)
+	}
+}
+
+// TestWindowsSupervisor_RejectsInvalidHelperStatePath verifies helper launch rejects NUL-containing protocol paths.
+func TestWindowsSupervisor_RejectsInvalidHelperStatePath(t *testing.T) {
+	if _, err := startWindowsHelper("bad\x00state", &windowsHelperPipes{}, nil); err == nil {
+		t.Fatal("helper accepted a NUL-containing state path")
+	}
+}
+
+// TestWindowsJobCreation_RejectsMalformedName verifies the Win32 name conversion rejects embedded NULs.
+func TestWindowsJobCreation_RejectsMalformedName(t *testing.T) {
+	if _, err := createWindowsJobWithAPI("bad\x00name", &fakeWindowsJobCreationAPI{}); err == nil {
+		t.Fatal("Job creation accepted an embedded NUL in its name")
+	}
+}
