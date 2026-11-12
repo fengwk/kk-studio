@@ -11,6 +11,9 @@ import (
 // TestWindowsPrivateFS_OwnerOnlyRoundTrip verifies directory and file ACL read-back on Windows.
 func TestWindowsPrivateFS_OwnerOnlyRoundTrip(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(directory, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := ensurePrivateDirectory(directory); err != nil {
 		t.Fatal(err)
 	}
