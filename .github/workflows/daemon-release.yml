@@ -34,6 +34,7 @@ permissions:
 
 env:
   GO_VERSION: '1.27.4'
+  GO_BIN: go
   POSTGRES_VERSION: '17'
   # push tag 用真实 tag，workflow_dispatch 用输入 tag 做候选验收。资产名、版本门禁与
   # Release 命令都只通过它取值，input 绝不直接拼进 shell。

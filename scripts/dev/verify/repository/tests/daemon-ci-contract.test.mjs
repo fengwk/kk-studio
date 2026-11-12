@@ -32,6 +32,7 @@ test('reusable Go CI does not invoke the stale Node-daemon interoperability fixt
 })
 
 test('release dispatch stages Go archives and cannot publish', () => {
+  assert.match(release, /GO_BIN: go/)
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon-go\/release/)
   assert.match(release, /github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\)/)
