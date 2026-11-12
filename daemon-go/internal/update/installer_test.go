@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -84,8 +85,10 @@ func TestInstallerRunnerPreparesAndGatesOfficialJob(t *testing.T) {
 	if err := outcome.ReleasePermit(); err != nil {
 		t.Fatalf("duplicate permit release = %v", err)
 	}
-	if info, err := os.Stat(filepath.Join(work, "permit")); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("permit file mode=%v err=%v", info, err)
+	if info, err := os.Stat(filepath.Join(work, "permit")); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("permit file info=%v err=%v", info, err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("permit file mode=%v", info.Mode().Perm())
 	}
 
 	failurePath := filepath.Join(root, "last-operation.json")
