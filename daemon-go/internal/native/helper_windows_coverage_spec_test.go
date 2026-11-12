@@ -55,21 +55,30 @@ func TestWindowsHelper_RejectsPrivateStateAndLaunchFailures(t *testing.T) {
 			t.Fatalf("launch failure record = %q, %v", failure, err)
 		}
 	})
-	for _, launch := range []string{`{"cwd":"C:\\work","args":[]}`, `{"cwd":"C:\\work","args":null}`} {
-		t.Run(launch, func(t *testing.T) {
+	for _, item := range []struct {
+		launch  string
+		failure string
+		cleanup bool
+	}{{`{"cwd":"C:\\work","args":[]}`, "helper-windows-failure", true}, {`{"cwd":"C:\\work","args":null}`, "helper-launch-failure", false}} {
+		t.Run(item.launch, func(t *testing.T) {
 			dir := stateTestDir(t)
-			if err := publishText(dir, launchFile, launch); err != nil {
+			if err := publishText(dir, launchFile, item.launch); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv(windowsStdinHandleEnv, "1234")
 			if got := runWindowsHelper([]string{dir}); got != 1 {
 				t.Fatalf("helper result = %d, want launch failure", got)
 			}
-			if failure, err := readState(dir, errorFile); err != nil || string(failure) != "helper-windows-failure" {
-				t.Fatalf("command failure record = %q, %v", failure, err)
+			if failure, err := readState(dir, errorFile); err != nil || string(failure) != item.failure {
+				t.Fatalf("command failure record = %q, %v; want %q", failure, err, item.failure)
 			}
-			if cleanup, err := readState(dir, cleanupFile); err != nil || string(cleanup) != "true" {
-				t.Fatalf("cleanup record = %q, %v", cleanup, err)
+			cleanup, err := readState(dir, cleanupFile)
+			if item.cleanup {
+				if err != nil || string(cleanup) != "true" {
+					t.Fatalf("cleanup record = %q, %v", cleanup, err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("cleanup record = %q, %v; want absent", cleanup, err)
 			}
 		})
 	}
