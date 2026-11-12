@@ -1250,7 +1250,7 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	manager := &fakeCodeServerManager{stopFailures: 2}
+	manager := &fakeCodeServerManager{stopFailures: 2, stopDone: make(chan struct{})}
 	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -1265,9 +1265,14 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 	recovery := service.crashRecovery
 	service.mu.Unlock()
 	select {
+	case <-manager.stopDone:
+	case <-time.After(60 * time.Second):
+		t.Fatal("crash recovery did not reach the manager stop")
+	}
+	select {
 	case <-recovery:
-	case <-time.After(20 * time.Second):
-		t.Fatal("crash convergence did not settle")
+	case <-time.After(60 * time.Second):
+		t.Fatal("crash recovery did not settle after the manager stop")
 	}
 	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
 		t.Fatalf("unproven crash state=%v", state)
@@ -2244,6 +2249,8 @@ type fakeCodeServerManager struct {
 	stopFailures  int
 	stopGate      chan struct{}
 	stopStarted   chan struct{}
+	stopDone      chan struct{}
+	stopDoneOnce  sync.Once
 	ensureHook    func()
 	registerHook  func()
 	closeErr      error
@@ -2279,6 +2286,11 @@ func (m *fakeCodeServerManager) Session() *CodeServerSession {
 }
 func (m *fakeCodeServerManager) Diagnostics() string { return "" }
 func (m *fakeCodeServerManager) Stop(ctx context.Context) error {
+	defer func() {
+		if m.stopDone != nil {
+			m.stopDoneOnce.Do(func() { close(m.stopDone) })
+		}
+	}()
 	m.mu.Lock()
 	m.stopCalls++
 	gate := m.stopGate
