@@ -123,6 +123,20 @@ class HarnessResourceControllerTest {
   }
 
   @Test
+  void fallsBackToBinaryMediaTypeWhenBlobMediaTypeIsMissingOrInvalid() {
+    when(refManager.contains(SESSION_ID, RESOURCE_ID)).thenReturn(true);
+    StorageBlob blob = activeBlob();
+    when(blobRepository.getById(RESOURCE_ID)).thenReturn(blob);
+
+    for (String mediaType : new String[] {null, "", "not a media type"}) {
+      blob.setMediaType(mediaType);
+      ResponseEntity<StreamingResponseBody> response =
+          controller.getResource(SESSION_ID, RESOURCE_ID, false);
+      assertEquals(MediaType.APPLICATION_OCTET_STREAM, response.getHeaders().getContentType());
+    }
+  }
+
+  @Test
   void downloadsAsAttachmentAndRejectsNonActiveBlobs() {
     when(refManager.contains(SESSION_ID, RESOURCE_ID)).thenReturn(true);
     StorageBlob deletingBlob = activeBlob();

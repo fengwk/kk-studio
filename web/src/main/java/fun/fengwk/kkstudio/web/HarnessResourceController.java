@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -67,7 +68,7 @@ public class HarnessResourceController {
     }
 
     HttpHeaders headers = new HttpHeaders();
-    headers.setContentType(MediaType.parseMediaType(blob.getMediaType()));
+    headers.setContentType(contentType(blob.getMediaType()));
     headers.setContentDisposition(
         (download ? ContentDisposition.attachment() : ContentDisposition.inline())
             .filename("resource", StandardCharsets.UTF_8)
@@ -90,5 +91,16 @@ public class HarnessResourceController {
                   }
                 });
     return new ResponseEntity<>(body, headers, HttpStatus.OK);
+  }
+
+  private static MediaType contentType(String mediaType) {
+    if (mediaType == null || mediaType.isBlank()) {
+      return MediaType.APPLICATION_OCTET_STREAM;
+    }
+    try {
+      return MediaType.parseMediaType(mediaType);
+    } catch (InvalidMediaTypeException ignored) {
+      return MediaType.APPLICATION_OCTET_STREAM;
+    }
   }
 }
