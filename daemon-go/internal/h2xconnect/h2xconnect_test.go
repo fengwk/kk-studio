@@ -25,7 +25,7 @@ func TestEnableExtendedConnect(t *testing.T) {
 	}
 }
 
-func TestInitEnablesAndPreservesOriginalGODEBUG(t *testing.T) {
+func TestInitAppendsAndPreservesGODEBUG(t *testing.T) {
 	if !strings.Contains(os.Getenv("GODEBUG"), "http2xconnect=1") {
 		t.Fatalf("GODEBUG = %q, missing http2xconnect=1", os.Getenv("GODEBUG"))
 	}
