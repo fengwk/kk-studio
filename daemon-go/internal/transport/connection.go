@@ -16,6 +16,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	_ "github.com/fengwk/kk-studio/daemon/internal/h2xconnect"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -87,7 +88,7 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 		return nil, fmt.Errorf("daemon websocket handshake failed: %w", err)
 	}
 	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
-	ws.SetReadLimit(int64(protocol.MaxFrameSize + 4))
+	ws.SetReadLimit(1 << 20)
 	cc := newControlConnection(conn, c.Resolver, c.OnGoaway)
 	return cc, nil
 }
@@ -111,6 +112,8 @@ const (
 	controlStreamTimeout = 10 * time.Second
 	inboundIdleTimeout   = 45 * time.Second
 )
+
+var _ runtimeapi.Connection = (*ControlConnection)(nil)
 
 type ControlConnection struct {
 	conn          net.Conn
@@ -141,7 +144,7 @@ func newControlConnection(conn net.Conn, resolver ViewResolver, onGoaway func(ui
 	mux.HandleFunc("/control", cc.handleControl)
 	mux.HandleFunc("/ide/", cc.handleIDE)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "not found", http.StatusNotFound) })
-	cc.server = &http.Server{Handler: mux, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 512, MaxReceiveBufferPerStream: 1 << 20}}
+	cc.server = &http.Server{Handler: mux, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 512, MaxReceiveBufferPerStream: 1 << 20, MaxReadFrameSize: 16 << 10}}
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)
 	cc.server.Protocols = protocols

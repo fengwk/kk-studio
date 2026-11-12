@@ -3,12 +3,14 @@ package transport
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
@@ -18,17 +20,25 @@ import (
 const testUploadID = "123e4567-e89b-12d3-a456-426614174001"
 
 type uploadControlStub struct {
-	requestState protocol.TicketState
-	commitState  protocol.TicketState
-	putURL       string
-	requestCount int
-	commitCount  int
-	gotRequest   *protocol.ResourceUploadRequest
+	requestState  protocol.TicketState
+	commitState   protocol.TicketState
+	putURL        string
+	requestCount  int
+	commitCount   int
+	requestErrors int
+	commitErrors  int
+	transferIDs   []string
+	gotRequest    *protocol.ResourceUploadRequest
 }
 
 func (s *uploadControlStub) RequestTicket(_ context.Context, invocation string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 	s.requestCount++
+	s.transferIDs = append(s.transferIDs, request.GetTransferId())
 	s.gotRequest = proto.Clone(request).(*protocol.ResourceUploadRequest)
+	if s.requestErrors > 0 {
+		s.requestErrors--
+		return nil, errors.New("temporary control failure")
+	}
 	if invocation != "123e4567-e89b-12d3-a456-426614174000" {
 		return nil, fmt.Errorf("wrong invocation")
 	}
@@ -43,6 +53,10 @@ func (s *uploadControlStub) RequestTicket(_ context.Context, invocation string, 
 }
 func (s *uploadControlStub) Commit(_ context.Context, _ string, transferID, uploadID string) (*protocol.ResourceUploadTicket, error) {
 	s.commitCount++
+	if s.commitErrors > 0 {
+		s.commitErrors--
+		return nil, errors.New("temporary control failure")
+	}
 	if uploadID != testUploadID {
 		return nil, fmt.Errorf("wrong upload id")
 	}
@@ -74,6 +88,29 @@ func TestUpload_RequestPutCommitAndReplaceBytes(t *testing.T) {
 	}
 	if control.requestCount != 1 || control.commitCount != 1 || control.gotRequest.GetTransferId() == "" || control.gotRequest.GetMediaType() != "image/png" || control.gotRequest.GetName() != name || control.gotRequest.GetSize() != int64(len(body)) {
 		t.Fatalf("upload exchange request=%+v commits=%d", control.gotRequest, control.commitCount)
+	}
+}
+
+// TRN-T-002, TRN-T-013, TRN-T-016
+func TestUpload_RetriesControlFailureWithSameTransfer(t *testing.T) {
+	putAttempts := 0
+	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {
+		putAttempts++
+		status := http.StatusForbidden
+		if putAttempts > 1 {
+			status = http.StatusNoContent
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})}
+	control := &uploadControlStub{requestState: protocol.TicketState_TICKET_PENDING, commitState: protocol.TicketState_TICKET_READY, putURL: "http://storage.example/file", requestErrors: 1, commitErrors: 1}
+	uploader := &ResourceUploader{Control: control, Client: client, TicketWait: time.Second, RetryBackoff: time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := uploader.Upload(ctx, "123e4567-e89b-12d3-a456-426614174000", runtimeapi.ResultContent{Bytes: []byte("x"), MediaType: "text/plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if control.requestCount != 3 || control.commitCount != 2 || putAttempts != 2 || len(control.transferIDs) != 3 || control.transferIDs[0] == "" || control.transferIDs[0] != control.transferIDs[1] || control.transferIDs[1] != control.transferIDs[2] {
+		t.Fatalf("retry counts request=%d commit=%d PUT=%d transferIDs=%v", control.requestCount, control.commitCount, putAttempts, control.transferIDs)
 	}
 }
 

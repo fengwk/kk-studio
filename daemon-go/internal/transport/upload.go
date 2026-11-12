@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
@@ -28,7 +29,11 @@ type ResourceUploader struct {
 	Policy           *ProxyPolicy
 	Client           *http.Client
 	MaxResourceBytes int64
+	TicketWait       time.Duration
+	RetryBackoff     time.Duration
 }
+
+var _ runtimeapi.ResourceUploader = (*ResourceUploader)(nil)
 
 // Upload uploads one binary result and replaces its bytes with a resource reference.
 func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, content runtimeapi.ResultContent) (runtimeapi.ResultContent, error) {
@@ -57,42 +62,105 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 	if content.Name != nil {
 		request.Name = content.Name
 	}
-	ticket, err := u.Control.RequestTicket(ctx, invocationID, request)
+	ticketWait, retryBackoff, err := u.retryOptions()
 	if err != nil {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket request failed")
-	}
-	if ticket == nil || ticket.GetTransferId() != transferID {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
-	}
-	if ticket.GetState() == protocol.TicketState_TICKET_FAILED {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket failed")
-	}
-	if ticket.GetState() == protocol.TicketState_TICKET_READY {
-		if !transferIDPattern.MatchString(ticket.GetUploadId()) {
-			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
-		}
-		return uploadedContent(content, ticket.GetUploadId()), nil
-	}
-	if ticket.GetState() != protocol.TicketState_TICKET_PENDING || ticket.GetPresignedPut() == nil || !transferIDPattern.MatchString(ticket.GetUploadId()) || ticket.GetPresignedPut().GetMethod() != http.MethodPut {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
-	}
-	if err = u.put(ctx, ticket.GetPresignedPut().GetUrl(), ticket.GetPresignedPut().Headers, content.Bytes); err != nil {
 		return runtimeapi.ResultContent{}, err
 	}
-	committed, err := u.Control.Commit(ctx, invocationID, transferID, ticket.GetUploadId())
-	if err != nil {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit failed")
+	for {
+		ticket, requestErr := u.requestTicket(ctx, ticketWait, invocationID, request)
+		if requestErr != nil {
+			if err = retryAfter(ctx, retryBackoff); err != nil {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket request failed")
+			}
+			continue
+		}
+		if ticket == nil || ticket.GetTransferId() != transferID {
+			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
+		}
+		if ticket.GetState() == protocol.TicketState_TICKET_FAILED {
+			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket failed")
+		}
+		if ticket.GetState() == protocol.TicketState_TICKET_READY {
+			if !transferIDPattern.MatchString(ticket.GetUploadId()) {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
+			}
+			return uploadedContent(content, ticket.GetUploadId()), nil
+		}
+		if ticket.GetState() != protocol.TicketState_TICKET_PENDING || ticket.GetPresignedPut() == nil || !transferIDPattern.MatchString(ticket.GetUploadId()) || ticket.GetPresignedPut().GetMethod() != http.MethodPut {
+			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
+		}
+		if err = u.put(ctx, ticket.GetPresignedPut().GetUrl(), ticket.GetPresignedPut().Headers, content.Bytes); err != nil {
+			if ctx.Err() != nil {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload put failed")
+			}
+			if err = retryAfter(ctx, retryBackoff); err != nil {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload put failed")
+			}
+			continue
+		}
+		for {
+			committed, commitErr := u.commit(ctx, ticketWait, invocationID, transferID, ticket.GetUploadId())
+			if commitErr != nil {
+				if err = retryAfter(ctx, retryBackoff); err != nil {
+					return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit failed")
+				}
+				continue
+			}
+			if committed == nil || committed.GetTransferId() != transferID || committed.GetUploadId() != ticket.GetUploadId() {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
+			}
+			if committed.GetState() == protocol.TicketState_TICKET_FAILED {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket failed")
+			}
+			if committed.GetState() == protocol.TicketState_TICKET_READY {
+				return uploadedContent(content, committed.GetUploadId()), nil
+			}
+			if committed.GetState() != protocol.TicketState_TICKET_PENDING {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
+			}
+			if err = retryAfter(ctx, retryBackoff); err != nil {
+				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit failed")
+			}
+		}
 	}
-	if committed == nil || committed.GetTransferId() != transferID {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
+}
+
+func (u *ResourceUploader) retryOptions() (time.Duration, time.Duration, error) {
+	ticketWait := u.TicketWait
+	if ticketWait == 0 {
+		ticketWait = 30 * time.Second
 	}
-	if committed.GetState() == protocol.TicketState_TICKET_FAILED {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket failed")
+	retryBackoff := u.RetryBackoff
+	if retryBackoff == 0 {
+		retryBackoff = 200 * time.Millisecond
 	}
-	if committed.GetState() != protocol.TicketState_TICKET_READY || committed.GetUploadId() != ticket.GetUploadId() {
-		return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
+	if ticketWait < 0 || retryBackoff < 0 {
+		return 0, 0, fmt.Errorf("resource upload timing options must be positive")
 	}
-	return uploadedContent(content, committed.GetUploadId()), nil
+	return ticketWait, retryBackoff, nil
+}
+
+func (u *ResourceUploader) requestTicket(ctx context.Context, wait time.Duration, invocationID string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+	ticketCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	return u.Control.RequestTicket(ticketCtx, invocationID, request)
+}
+
+func (u *ResourceUploader) commit(ctx context.Context, wait time.Duration, invocationID, transferID, uploadID string) (*protocol.ResourceUploadTicket, error) {
+	commitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	return u.Control.Commit(commitCtx, invocationID, transferID, uploadID)
+}
+
+func retryAfter(ctx context.Context, backoff time.Duration) error {
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func uploadedContent(content runtimeapi.ResultContent, uploadID string) runtimeapi.ResultContent {

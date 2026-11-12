@@ -74,6 +74,7 @@ func TestLifecycle_BackoffReadyGenerationAndGoaway(t *testing.T) {
 		t.Fatal("second connection did not connect")
 	}
 	gen := manager.Generation()
+	waitForLifecycleActive(t, manager, second.conn, gen)
 	if gen != 2 || !manager.MarkReady(gen) || manager.MarkReady(gen-1) || manager.State() != StateReady {
 		t.Fatalf("generation=%d state=%s", gen, manager.State())
 	}
@@ -92,6 +93,7 @@ func TestLifecycle_BackoffReadyGenerationAndGoaway(t *testing.T) {
 	if third.conn == nil || manager.Generation() != 3 {
 		t.Fatalf("third connection=%v generation=%d", third.conn, manager.Generation())
 	}
+	waitForLifecycleActive(t, manager, third.conn, 3)
 	if !manager.MarkReady(3) {
 		t.Fatal("current generation did not become ready")
 	}
@@ -119,7 +121,7 @@ func TestLifecycle_StaleGoawayAndSendFailureAreIgnoredAfterClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.Start(context.Background())
-	waitUntil(t, func() bool { return manager.Generation() == 1 })
+	waitForLifecycleActive(t, manager, conn, 1)
 	if !manager.MarkReady(1) {
 		t.Fatal("connection not ready")
 	}
@@ -138,6 +140,15 @@ func TestLifecycle_StaleGoawayAndSendFailureAreIgnoredAfterClose(t *testing.T) {
 	if onGoaway != nil {
 		onGoaway(0)
 	}
+}
+
+func waitForLifecycleActive(t *testing.T, lifecycle *ConnectionLifecycle, connection runtimeapi.Connection, generation uint64) {
+	t.Helper()
+	waitUntil(t, func() bool {
+		lifecycle.mu.Lock()
+		defer lifecycle.mu.Unlock()
+		return lifecycle.active == connection && lifecycle.activeGeneration == generation
+	})
 }
 
 func waitUntil(t *testing.T, condition func() bool) {

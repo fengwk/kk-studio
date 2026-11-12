@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	"github.com/fengwk/kk-studio/daemon/internal/skill"
 )
 
 // ResourceDownloader obtains ticketed downloads over the currently applied network policy.
@@ -24,6 +25,8 @@ type ResourceDownloader struct {
 	Client    *http.Client
 	Requester TicketRequester
 }
+
+var _ skill.ResourceDownloader = (*ResourceDownloader)(nil)
 
 var transferIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 

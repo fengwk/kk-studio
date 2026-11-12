@@ -103,10 +103,31 @@ func TestCodec_ScopeMismatch(t *testing.T) {
 
 // TRN-T-139
 func TestCodec_Settings(t *testing.T) {
-	for _, v := range []int64{0, -1} {
-		e := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: &ResourceBudgets{MaxResourceBytes: proto.Int64(v), TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1)}}})
-		if _, err := MarshalEnvelope(e); err == nil {
-			t.Fatalf("accepted max resource bytes %d", v)
+	e := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: &ResourceBudgets{TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1)}}})
+	if _, err := MarshalEnvelope(e); err != nil {
+		t.Fatalf("settings without removed maxResourceBytes rejected: %v", err)
+	}
+	for _, budgets := range []*ResourceBudgets{{}, {TemporaryResourceTtlSeconds: proto.Int64(1)}, {TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(0)}} {
+		bad := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: budgets}})
+		if _, err := MarshalEnvelope(bad); err == nil {
+			t.Errorf("accepted invalid resource budgets: %v", budgets)
+		}
+	}
+}
+
+// TRN-N-001
+func TestCodec_InvokeOutputBudget(t *testing.T) {
+	makeEnvelope := func(limit *int64) *Envelope {
+		return testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(`{}`), TimeoutMillis: proto.Int64(0), MaxOutputBytes: limit}})
+	}
+	for _, limit := range []*int64{nil, proto.Int64(0), proto.Int64(1024)} {
+		if _, err := MarshalEnvelope(makeEnvelope(limit)); err != nil {
+			t.Fatalf("valid output limit %v rejected: %v", limit, err)
+		}
+	}
+	for _, limit := range []int64{-1, maxSafeInteger + 1} {
+		if _, err := MarshalEnvelope(makeEnvelope(proto.Int64(limit))); err == nil {
+			t.Errorf("accepted output limit %d", limit)
 		}
 	}
 }

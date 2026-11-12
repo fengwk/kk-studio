@@ -30,9 +30,6 @@ func validateMessage(e *Envelope) error {
 		if b == nil {
 			return invalid("settings.resourceBudgets is required")
 		}
-		if b.MaxResourceBytes == nil || b.GetMaxResourceBytes() < 1 || b.GetMaxResourceBytes() > maxSafeInteger {
-			return invalid("settings.resourceBudgets.maxResourceBytes must be in 1..9007199254740991")
-		}
 		if b.TemporaryResourceTtlSeconds == nil || b.GetTemporaryResourceTtlSeconds() <= 0 {
 			return invalid("settings.resourceBudgets.temporaryResourceTtlSeconds must be positive")
 		}
@@ -106,6 +103,9 @@ func validateMessage(e *Envelope) error {
 		}
 		if v.TimeoutMillis == nil || v.GetTimeoutMillis() < 0 || v.GetTimeoutMillis() > maxSafeInteger {
 			return invalid("invoke.timeoutMillis must be a non-negative safe integer")
+		}
+		if v.MaxOutputBytes != nil && (v.GetMaxOutputBytes() < 0 || v.GetMaxOutputBytes() > maxSafeInteger) {
+			return invalid("invoke.maxOutputBytes must be a non-negative safe integer")
 		}
 		if v.ExpectedFile != nil {
 			if v.GetCapabilityId() != "fs.edit" {

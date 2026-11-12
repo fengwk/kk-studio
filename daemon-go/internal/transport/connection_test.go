@@ -162,7 +162,7 @@ func TestTransport_WebSocketReadLimitAfterNetConn(t *testing.T) {
 			return
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "")
-		_ = conn.Write(r.Context(), websocket.MessageBinary, bytes.Repeat([]byte{'x'}, protocol.MaxFrameSize+5))
+		_ = conn.Write(r.Context(), websocket.MessageBinary, bytes.Repeat([]byte{'x'}, (1<<20)+1))
 	}))
 	defer wsServer.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -173,7 +173,7 @@ func TestTransport_WebSocketReadLimitAfterNetConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	byteConn := websocket.NetConn(ctx, conn, websocket.MessageBinary)
-	conn.SetReadLimit(int64(protocol.MaxFrameSize + 4))
+	conn.SetReadLimit(1 << 20)
 	_, err = io.Copy(io.Discard, byteConn)
 	if err == nil {
 		t.Fatal("oversized WebSocket message was accepted")

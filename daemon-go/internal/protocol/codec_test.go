@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -39,6 +40,21 @@ func TestCodec_WireBounds(t *testing.T) {
 	e := testEnvelope(MessageType_COMPLETED, testInvocationID, &Envelope_Completed{Completed: &Completed{Result: &CapabilityResult{CallId: proto.String("call"), Error: proto.Bool(false), DetailsJson: proto.String(`{}`), Contents: tooMany}}})
 	if _, err := MarshalEnvelope(e); err == nil {
 		t.Fatal("oversized contents accepted")
+	}
+}
+
+// TRN-T-138
+func TestCodec_EncodedEnvelopeFrameLimit(t *testing.T) {
+	arguments := `{"x":"` + strings.Repeat("x", MaxFrameSize-9) + `"}`
+	envelope := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: &arguments, TimeoutMillis: proto.Int64(0)}})
+	if _, err := MarshalEnvelope(envelope); err == nil {
+		t.Fatal("envelope larger than the frame limit accepted")
+	}
+	if _, err := EncodeEnvelopeFrame(envelope); err == nil {
+		t.Fatal("oversized envelope frame accepted")
+	}
+	if _, err := DecodeEnvelopeFrame([]byte{0, 0, 0, 1, 0}); err == nil {
+		t.Fatal("invalid framed protobuf accepted")
 	}
 }
 
