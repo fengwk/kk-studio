@@ -46,9 +46,12 @@ func (api *fakeWindowsLockHandleAPI) CloseHandle(handle windows.Handle) error {
 	return nil
 }
 
-func (api *fakeWindowsLockHandleAPI) NewFile(handle uintptr, name string) *os.File {
+func (api *fakeWindowsLockHandleAPI) NewFile(handle uintptr, _ string) *os.File {
 	api.newFiles++
-	return os.NewFile(handle, name)
+	if api.file != nil {
+		return api.file
+	}
+	return os.NewFile(handle, "lock")
 }
 
 func newFakeWindowsLockHandleAPI(t *testing.T) *fakeWindowsLockHandleAPI {
