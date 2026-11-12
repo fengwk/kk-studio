@@ -8,8 +8,11 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -36,7 +39,8 @@ public record ModelRequestSpec(
     String systemInstruction,
     List<ToolBinding> toolBindings,
     List<SubagentBinding> subagentBindings,
-    ModelGroupExecution groupExecution) {
+    ModelGroupExecution groupExecution,
+    Map<String, String> systemSections) {
 
   public ModelRequestSpec(
       ProviderType providerType,
@@ -57,7 +61,8 @@ public record ModelRequestSpec(
         systemInstruction,
         toolBindings,
         subagentBindings,
-        null);
+        null,
+        Map.of("system", systemInstruction));
   }
 
   public ModelRequestSpec(
@@ -92,6 +97,31 @@ public record ModelRequestSpec(
       int outputTokens,
       String systemInstruction,
       List<ToolBinding> toolBindings,
+      List<SubagentBinding> subagentBindings,
+      ModelGroupExecution groupExecution) {
+    this(
+        providerType,
+        providerConnectionGenerationId,
+        model,
+        variant,
+        modelVariants,
+        outputTokens,
+        systemInstruction,
+        toolBindings,
+        subagentBindings,
+        groupExecution,
+        Map.of("system", systemInstruction));
+  }
+
+  public ModelRequestSpec(
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ModelDescriptor model,
+      ModelVariant variant,
+      List<ModelVariant> modelVariants,
+      int outputTokens,
+      String systemInstruction,
+      List<ToolBinding> toolBindings,
       List<SubagentBinding> subagentBindings) {
     this(
         providerType,
@@ -103,7 +133,8 @@ public record ModelRequestSpec(
         systemInstruction,
         toolBindings,
         subagentBindings,
-        null);
+        null,
+        Map.of("system", systemInstruction));
   }
 
   public ModelRequestSpec {
@@ -118,6 +149,19 @@ public record ModelRequestSpec(
     }
     if (systemInstruction == null || systemInstruction.isBlank()) {
       throw new IllegalArgumentException("systemInstruction must not be blank");
+    }
+    systemSections =
+        Collections.unmodifiableMap(
+            new LinkedHashMap<>(Objects.requireNonNull(systemSections, "systemSections")));
+    if (systemSections.isEmpty()
+        || systemSections.entrySet().stream()
+            .anyMatch(
+                entry ->
+                    entry.getKey() == null
+                        || entry.getKey().isBlank()
+                        || entry.getValue() == null
+                        || entry.getValue().isBlank())) {
+      throw new IllegalArgumentException("systemSections must contain named non-blank sections");
     }
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
@@ -148,7 +192,8 @@ public record ModelRequestSpec(
         systemInstruction,
         toolBindings,
         subagentBindings,
-        groupExecution);
+        groupExecution,
+        systemSections);
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {

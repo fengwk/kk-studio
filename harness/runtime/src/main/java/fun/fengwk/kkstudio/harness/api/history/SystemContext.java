@@ -57,6 +57,49 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
     return String.join("\n\n", sections.values());
   }
 
+  /** Collapse a SYSTEM history into baseline text followed by every append-only change in order. */
+  public static String collapseSystemInstruction(List<Entry> entries) {
+    String baseline = null;
+    List<String> changes = new ArrayList<>();
+    for (Entry entry : entries) {
+      if (!(entry.payload() instanceof SystemPayload system)) {
+        continue;
+      }
+      if (system.baseline()) {
+        baseline = String.join("\n\n", system.sections().values());
+        changes.clear();
+      } else {
+        String changeText = renderChangeText(system);
+        if (!changeText.isEmpty()) {
+          changes.add(changeText);
+        }
+      }
+    }
+    if (baseline == null) {
+      throw new IllegalArgumentException("Entry path has no SYSTEM baseline");
+    }
+    List<String> all = new ArrayList<>(changes.size() + 1);
+    all.add(baseline);
+    all.addAll(changes);
+    return String.join("\n\n", all);
+  }
+
+  /** Render the exact text portion of one SYSTEM change in its stored section order. */
+  public static String renderChangeText(SystemPayload change) {
+    List<String> texts = new ArrayList<>();
+    change
+        .sections()
+        .forEach(
+            (name, text) -> {
+              texts.add("This section replaces the earlier [" + name + "] section.");
+              texts.add(text);
+            });
+    change
+        .removedSections()
+        .forEach(name -> texts.add("The [" + name + "] section has been removed."));
+    return String.join("\n\n", texts);
+  }
+
   /** Produce a delta containing only changed sections and tool definitions when context differs. */
   public Optional<SystemPayload> changesTo(SystemContext next) {
     Objects.requireNonNull(next, "next");

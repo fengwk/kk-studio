@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -22,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner;
@@ -229,7 +232,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
               spec.systemInstruction(),
               spec.toolBindings(),
               spec.subagentBindings(),
-              spec.groupExecution());
+              spec.groupExecution(),
+              spec.systemSections());
     }
     // 无 cap 时保留 resolver 的模型上限元数据；有 cap 时不得超过实际请求预算。
     int maxOutputTokens =
@@ -250,7 +254,29 @@ public final class BuiltinAgentDriver implements AgentDriver {
         BuiltinExecution.of(
             spec.groupExecution() == null
                 ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
-                : ModelSelection.group(spec.groupExecution().groupName())));
+                : ModelSelection.group(spec.groupExecution().groupName())),
+        systemChange(thread, candidatePath, spec));
+  }
+
+  private static SystemPayload systemChange(
+      ThreadState thread, EntryPath path, ModelRequestSpec spec) {
+    SystemContext resolved = new SystemContext(spec.systemSections(), spec.toolBindings());
+    if (thread.kind() == ThreadKind.COMPACTION) {
+      return null;
+    }
+    if (path.requiresSystemBaseline()) {
+      return freshSystemBaseline(spec);
+    }
+    return path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
+  }
+
+  /**
+   * Build a fresh request-context baseline; compaction can reuse this at its future rebuild
+   * boundary.
+   */
+  private static SystemPayload freshSystemBaseline(ModelRequestSpec spec) {
+    return new SystemPayload(
+        spec.systemSections(), List.of(), spec.toolBindings(), List.of(), true);
   }
 
   @Override
@@ -575,18 +601,21 @@ public final class BuiltinAgentDriver implements AgentDriver {
     private final Integer maxOutputTokens;
     private final TurnCapabilities capabilities;
     private final ExecutionSelection executedSelection;
+    private final SystemPayload systemChange;
 
     private AcceptedTurn(
         ModelRequestSpec spec,
         int contextWindow,
         int maxOutputTokens,
         TurnCapabilities capabilities,
-        ExecutionSelection executedSelection) {
+        ExecutionSelection executedSelection,
+        SystemPayload systemChange) {
       this.spec = spec;
       this.contextWindow = contextWindow;
       this.maxOutputTokens = maxOutputTokens;
       this.capabilities = capabilities;
       this.executedSelection = executedSelection;
+      this.systemChange = systemChange;
     }
 
     @Override
@@ -602,6 +631,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
     @Override
     public TurnCapabilities capabilities() {
       return capabilities;
+    }
+
+    @Override
+    public SystemPayload systemChange() {
+      return systemChange;
     }
 
     @Override

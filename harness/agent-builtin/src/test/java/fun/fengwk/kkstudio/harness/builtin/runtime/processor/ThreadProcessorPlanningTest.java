@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -78,6 +79,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** ThreadProcessor continuation / input planning 与同事务 resolve 提交、reschedule：每个 claim 恰执行一个动作。 */
@@ -446,13 +448,16 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    // ROOT + SETTINGS 快照 + TURN_START(INPUT) + USER message。
-    assertEquals(4, path.entries().size());
+    // ROOT + SETTINGS snapshot + SYSTEM baseline + TURN_START(INPUT) + USER message.
+    assertEquals(5, path.entries().size());
     assertEquals(EntryType.SETTINGS, path.entries().get(1).payload().type());
-    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(2).payload();
+    SystemPayload system = (SystemPayload) path.entries().get(2).payload();
+    assertTrue(system.baseline());
+    assertEquals(Map.of("system", "Test system instruction."), system.sections());
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(3).payload();
     assertEquals(TurnStartReason.INPUT, turnStart.reason());
     assertEquals("model-b", builtinExecution(turnStart.settings()).modelName());
-    MessagePayload userPayload = (MessagePayload) path.entries().get(3).payload();
+    MessagePayload userPayload = (MessagePayload) path.entries().get(4).payload();
     assertEquals(AgentMessageRole.USER, userPayload.message().role());
     assertEquals("hi", ((TextMessageContent) userPayload.message().contents().get(0)).text());
     assertEquals(
@@ -462,16 +467,16 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
-        path.entries().get(3).id(), thread(fixture.store, baseline.threadId()).headEntryId());
+        path.entries().get(4).id(), thread(fixture.store, baseline.threadId()).headEntryId());
     // ModelInvocation：requestHead == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
     ModelInvocation invocation =
         inTx(
                 fixture,
                 tx ->
                     builtin(fixture.store, tx)
-                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(2).id()))
+                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(3).id()))
             .orElseThrow();
-    assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
+    assertEquals(path.entries().get(4).id(), invocation.requestHeadEntryId());
     assertNotNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);

@@ -235,7 +235,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             systemInstruction,
             context.toolBindings(),
             context.subagentBindings(),
-            resolved.group()),
+            resolved.group(),
+            context.systemSections()),
         contextWindow,
         context.candidateTools(),
         context.skills());

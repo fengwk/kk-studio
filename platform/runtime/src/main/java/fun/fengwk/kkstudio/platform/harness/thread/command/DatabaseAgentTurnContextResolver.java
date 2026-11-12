@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -107,13 +108,14 @@ public final class DatabaseAgentTurnContextResolver {
       List<String> toolNames = resolveToolNames(lease.catalog(), agentConfig);
       PlannedTools tools =
           resolveTools(lease.catalog(), environmentId, selectedEnvironment, toolNames, skills);
-      String systemInstruction =
-          systemInstruction(
+      Map<String, String> systemSections =
+          systemSections(
               agent.systemPrompt(),
               currentEnvironment,
               tools.bindings().stream().map(binding -> binding.descriptor().name()).toList(),
               promptSkills(environmentId, skills),
               subagentBindings);
+      String systemInstruction = String.join("\n\n", systemSections.values());
       return new AgentTurnContext(
           agent,
           agentConfig,
@@ -122,7 +124,8 @@ public final class DatabaseAgentTurnContextResolver {
           subagentBindings,
           tools.bindings(),
           tools.candidates(),
-          systemInstruction);
+          systemInstruction,
+          systemSections);
     }
   }
 
@@ -352,20 +355,20 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /** 本轮请求唯一的系统指令由 Agent 正文、Environment、工具、Skills 与 Subagents 组合，不写入会话消息。 */
-  private String systemInstruction(
+  private Map<String, String> systemSections(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<String> toolNames,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagentBindings) {
-    String instruction =
-        promptComposer.compose(
+    Map<String, String> sections =
+        promptComposer.composeSections(
             new AgentPromptInput(
                 systemPrompt, currentEnvironment, toolNames, skills, subagentBindings));
-    if (instruction == null || instruction.isBlank()) {
+    if (sections.isEmpty()) {
       throw rejection("system instruction must not be blank");
     }
-    return instruction;
+    return sections;
   }
 
   private static <T> T require(T value, String message) {

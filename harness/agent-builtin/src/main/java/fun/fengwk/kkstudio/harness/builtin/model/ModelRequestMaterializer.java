@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -66,15 +67,21 @@ public final class ModelRequestMaterializer {
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
-    List<ProviderToolDefinition> tools = providerTools(spec.toolBindings());
+    SystemContext context = path.systemContext().orElse(null);
+    List<ToolBinding> effectiveBindings = context == null ? spec.toolBindings() : context.tools();
+    String systemInstruction =
+        context == null
+            ? spec.systemInstruction()
+            : SystemContext.collapseSystemInstruction(path.entries());
+    List<ProviderToolDefinition> tools = providerTools(effectiveBindings);
     List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
     appendHistory(path, spec, projectedMessages);
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
         spec.outputTokens(),
-        spec.systemInstruction(),
-        projector(spec.toolBindings()).projectSources(projectedMessages),
+        systemInstruction,
+        projector(effectiveBindings).projectSources(projectedMessages),
         tools,
         ProviderCacheControl.session(
             spec.variant().promptCacheRetention(), path.root().sessionId().toString()));

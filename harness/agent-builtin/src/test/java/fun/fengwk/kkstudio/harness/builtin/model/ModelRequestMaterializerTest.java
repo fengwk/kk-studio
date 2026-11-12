@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
@@ -119,6 +120,41 @@ class ModelRequestMaterializerTest {
         second.cacheControl());
     assertEquals(shortCache, second.variant());
     assertEquals(first, MATERIALIZER.materialize(path, spec.forMember(0)));
+  }
+
+  @Test
+  void collapsesBaselineAndEverySystemChangeInPathOrder() {
+    Entry root = entry(1, 0, new RootPayload(SETTINGS));
+    Entry baseline =
+        entry(2, 1, new SystemPayload(Map.of("agent", "[agent]\nold"), List.of(), List.of(), true));
+    Entry change =
+        entry(
+            3,
+            2,
+            new SystemPayload(
+                Map.of("agent", "[agent]\nnew"), List.of("harness"), List.of(), List.of(), false));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(List.of(root, baseline, change)),
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                id(1L),
+                descriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(),
+                List.of()));
+
+    assertEquals(
+        "[agent]\nold\n\n"
+            + "This section replaces the earlier [agent] section.\n\n"
+            + "[agent]\nnew\n\n"
+            + "The [harness] section has been removed.",
+        request.systemInstruction());
+    assertTrue(request.tools().isEmpty());
+    assertTrue(request.messages().isEmpty());
   }
 
   /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
