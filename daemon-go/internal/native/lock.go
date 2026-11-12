@@ -37,7 +37,7 @@ type directoryLock struct {
 
 func AcquireDirectoryLock(directory, name string) (DirectoryLock, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		return nil, fmt.Errorf("the directory lock is not supported on %s", runtime.GOOS)
+		return nil, unsupportedDirectoryLockError(runtime.GOOS)
 	}
 	return acquireDirectoryLock(directory, name, openPlatformLockHandle)
 }
