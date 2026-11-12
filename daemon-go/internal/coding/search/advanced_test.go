@@ -101,6 +101,13 @@ func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	if _, err := FindContext(context.Background(), filepath.Join(root, "missing"), "", 0); err == nil {
 		t.Fatal("missing root accepted")
 	}
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := FindContext(context.Background(), filepath.Join(root, ".git"), "", 0)
+	if err != nil || len(metadata.Results) != 0 {
+		t.Fatalf(".git search root result=%#v error=%v", metadata, err)
+	}
 	if _, err := FindContext(context.Background(), root, "[", 0); err == nil || !strings.Contains(err.Error(), "invalid glob") {
 		t.Fatalf("invalid glob error=%v", err)
 	}

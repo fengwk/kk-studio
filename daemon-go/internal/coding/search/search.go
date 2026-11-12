@@ -181,6 +181,10 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 		if directFile {
 			display = filepath.ToSlash(absoluteRoot)
 		}
+		if directFile && binary(data) {
+			release()
+			return outcome, errors.New("directly specified file is binary")
+		}
 		matches := grepFile(data, display, pattern, literal, ignoreCase, re, required)
 		release()
 		limitReached := limit > 0 && len(matches) >= limit-len(outcome.Results)
@@ -219,6 +223,15 @@ func searchFilePath(root, rel string, directFile bool) string {
 	return filepath.Join(root, filepath.FromSlash(rel))
 }
 
+func isGitMetadataPath(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
 func findWithContext(ctx context.Context, root, glob string, limit, workers int) ([]string, bool, bool, error) {
 	if limit < 0 {
 		return nil, false, false, errors.New("limit cannot be negative")
@@ -240,6 +253,9 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	info, err := os.Stat(abs)
 	if err != nil {
 		return nil, false, false, err
+	}
+	if isGitMetadataPath(abs) {
+		return nil, false, false, nil
 	}
 	if !info.IsDir() {
 		return []string{filepath.ToSlash(abs)}, false, false, nil

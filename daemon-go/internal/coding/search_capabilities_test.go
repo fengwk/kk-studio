@@ -168,6 +168,15 @@ func TestGrepIncludeAndDirectFileBehavior(t *testing.T) {
 	if direct.Error || direct.Contents[0].Text != filepath.ToSlash(resolvedFile)+":1:x" {
 		t.Fatalf("direct-file result=%#v", direct)
 	}
+
+	binaryFile := filepath.Join(root, "binary.bin")
+	if err := os.WriteFile(binaryFile, []byte{'x', 0, 'y'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binaryResult := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": binaryFile, "pattern": "x", "literal": true}, nil)
+	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "ripgrep failed while searching") {
+		t.Fatalf("direct binary result=%#v", binaryResult)
+	}
 }
 
 // COD-F-015
