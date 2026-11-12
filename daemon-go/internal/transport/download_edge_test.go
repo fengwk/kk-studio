@@ -109,7 +109,7 @@ func TestDownload_UsesNetworkRuntime(t *testing.T) {
 	}
 }
 
-// TRN-N-002
+// TRN-N-002, TRN-T-090
 func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 	const digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 	body := []byte("x")
@@ -160,6 +160,22 @@ func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 	got, err := (&ResourceDownloader{Client: client}).DownloadPresigned(context.Background(), ok.URL, 1, digest)
 	if err != nil || string(got) != "x" {
 		t.Fatalf("valid ticketed download=%q err=%v", got, err)
+	}
+}
+
+// TRN-T-100
+func TestDownload_FailedRequestDoesNotLeakPresignedQuery(t *testing.T) {
+	const digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer server.Close()
+	secretQuery := "X-Amz-Signature=private-signature"
+	target := server.URL + "?" + secretQuery
+	_, err := (&ResourceDownloader{Client: &http.Client{Transport: &http.Transport{Proxy: nil}}}).DownloadPresigned(context.Background(), target, 1, digest)
+	if err == nil {
+		t.Fatal("failed storage request succeeded")
+	}
+	if strings.Contains(err.Error(), secretQuery) || strings.Contains(err.Error(), "private-signature") {
+		t.Fatalf("download error leaked signed URL: %v", err)
 	}
 }
 

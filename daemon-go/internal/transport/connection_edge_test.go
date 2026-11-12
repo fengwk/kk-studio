@@ -67,7 +67,7 @@ func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
 	}
 }
 
-// TRN-T-011, TRN-T-072
+// TRN-N-004, TRN-T-011, TRN-T-086
 func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	for _, data := range [][]byte{{0, 0, 0, 1}, {0, 0, 0, 1, 0xff}} {
 		left, right := net.Pipe()

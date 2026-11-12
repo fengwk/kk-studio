@@ -42,7 +42,7 @@ func TestProxy_ExplicitNoFallback(t *testing.T) {
 	}
 }
 
-// TRN-T-112 verifies configured proxies apply to public and loopback destinations without bypass rules.
+// TRN-N-004, TRN-T-096, TRN-T-112 verify explicit proxies also apply to loopback destinations.
 func TestProxy_ExplicitProxyAppliesToDestinations(t *testing.T) {
 	p, err := NewProxyPolicy("http://proxy.example:8080")
 	if err != nil {
@@ -68,7 +68,56 @@ func TestProxy_ExplicitProxyAppliesToDestinations(t *testing.T) {
 	}
 }
 
-// TRN-T-118 verifies malformed or credential-bearing proxy settings are rejected without leaking them.
+// TRN-N-004, TRN-T-068 verify a direct policy ignores unusable process proxy settings.
+func TestProxy_DirectDialIgnoresEnvironmentProxy(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("http_proxy", "http://127.0.0.1:1")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("https_proxy", "http://127.0.0.1:1")
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	policy, err := NewProxyPolicy("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := policy.HTTPClient().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if hits.Load() != 1 {
+		t.Fatalf("direct target hits=%d, want 1", hits.Load())
+	}
+}
+
+// TRN-N-004, TRN-T-099 verify an invalid proxy value cannot mutate an already-created policy.
+func TestProxy_InvalidConfigurationDoesNotReplaceExistingPolicy(t *testing.T) {
+	policy, err := NewProxyPolicy("http://proxy.example:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodGet, "http://target.example", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := policy.HTTPClient().Transport.(*http.Transport).Proxy(request)
+	if err != nil || before == nil || before.String() != "http://proxy.example:8080" {
+		t.Fatalf("initial policy proxy=%v err=%v", before, err)
+	}
+	if _, err = NewProxyPolicy("not a proxy URL"); err == nil {
+		t.Fatal("invalid new proxy accepted")
+	}
+	after, err := policy.HTTPClient().Transport.(*http.Transport).Proxy(request)
+	if err != nil || after == nil || after.String() != before.String() {
+		t.Fatalf("existing policy changed after rejected replacement: proxy=%v err=%v", after, err)
+	}
+}
+
+// TRN-N-004, TRN-T-118 verify invalid proxy errors are redacted and have the Go wording.
 func TestProxy_InvalidRedacted(t *testing.T) {
 	for _, target := range []string{
 		"https://proxy.example:443",
