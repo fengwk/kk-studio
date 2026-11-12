@@ -74,10 +74,15 @@ func TestProtocol_Crash(t *testing.T) {
 		requestResult <- client.call(context.Background(), "slow/request", map[string]any{}, nil, func() {}, func() { finished <- struct{}{} })
 	}()
 	waitForFakeRequest(t, supervisor.process, "slow/request")
+	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 11} })
+	select {
+	case <-client.exitSignal:
+	case <-time.After(time.Second):
+		t.Fatal("managed exit was not observed")
+	}
 	if err = supervisor.process.stdoutW.Close(); err != nil {
 		t.Fatal(err)
 	}
-	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 11} })
 	select {
 	case err = <-requestResult:
 	case <-time.After(time.Second):

@@ -260,22 +260,7 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 		output, err = service.JavaDecompile(requestCtx, realPath, target, confirm)
 	}
 	if err != nil {
-		var timeout *LspTimeoutError
-		var lspErr *LspError
-		if errors.As(err, &timeout) {
-			return capabilityFailure(call.InvocationID, "Operation timed out"), nil
-		}
-		if errors.Is(err, context.Canceled) {
-			return capabilityFailure(call.InvocationID, "Operation cancelled"), nil
-		}
-		if errors.As(err, &lspErr) {
-			return capabilityFailure(call.InvocationID, lspErr.Error()), nil
-		}
-		var bootstrap *LspBootstrapError
-		if errors.As(err, &bootstrap) {
-			return capabilityFailure(call.InvocationID, bootstrap.Error()), nil
-		}
-		return capabilityFailure(call.InvocationID, "The capability failed while running and the underlying error is not repeated to avoid leaking details"), nil
+		return capabilityFailure(call.InvocationID, capabilityErrorMessage(err)), nil
 	}
 	confirm()
 	return runtime.CapabilityResult{CallID: call.InvocationID, Contents: []runtime.ResultContent{{Type: "text", Text: output}}}, nil
@@ -289,6 +274,25 @@ func (f *Facade) workspaceSymbols(ctx context.Context, c runtime.CapabilityCall,
 func (f *Facade) javaDecompile(ctx context.Context, c runtime.CapabilityCall, x runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	return f.execute(ctx, c, x, "decompile")
 }
+func capabilityErrorMessage(err error) string {
+	var timeout *LspTimeoutError
+	if errors.As(err, &timeout) {
+		return "Operation timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "Operation cancelled"
+	}
+	var lspErr *LspError
+	if errors.As(err, &lspErr) {
+		return lspErr.Error()
+	}
+	var bootstrap *LspBootstrapError
+	if errors.As(err, &bootstrap) {
+		return bootstrap.Error()
+	}
+	return "The capability failed while running and the underlying error is not repeated to avoid leaking details"
+}
+
 func capabilityFailure(callID, message string) runtime.CapabilityResult {
 	return runtime.CapabilityResult{CallID: callID, Error: true, Contents: []runtime.ResultContent{{Type: "text", Text: message}}}
 }

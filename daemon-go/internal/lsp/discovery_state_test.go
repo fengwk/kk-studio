@@ -57,6 +57,31 @@ func TestDiscovery_EmptyConfig(t *testing.T) {
 }
 
 // LSP-T-031 verifies first-match markers are a fallback behind root markers.
+func TestDiscovery_ExecutableCacheUsesOriginalCommand(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "cached-tool")
+	if err := os.WriteFile(binary, []byte("x"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := NewDiscoveryFromServers([]ServerConfig{{ID: "tool", Command: []string{binary}}}, ResolverOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := ServerConfig{ID: "tool", Command: []string{binary}}
+	first, ok := discovery.Executable(server)
+	if !ok || first != binary {
+		t.Fatalf("first executable = %q, %v", first, ok)
+	}
+	if err := os.Remove(binary); err != nil {
+		t.Fatal(err)
+	}
+	cached, ok := discovery.Executable(server)
+	if !ok || cached != first {
+		t.Fatalf("cached executable = %q, %v; want %q, true", cached, ok, first)
+	}
+}
+
+// LSP-T-029 and LSP-T-031 cover shallow root-marker selection and first-match fallback.
 func TestDiscovery_FirstMatchAndRootMarkerPrecedence(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "repo")
@@ -65,7 +90,10 @@ func TestDiscovery_FirstMatchAndRootMarkerPrecedence(t *testing.T) {
 	if err := os.MkdirAll(src, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{filepath.Join(root, "root.marker"), filepath.Join(module, "first.marker")} {
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{filepath.Join(root, "root.marker"), filepath.Join(module, "root.marker"), filepath.Join(module, "first.marker")} {
 		if err := os.WriteFile(marker, nil, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -83,5 +111,10 @@ func TestDiscovery_FirstMatchAndRootMarkerPrecedence(t *testing.T) {
 	got, err = (&Discovery{}).WorkspaceRoot(server, file)
 	if err != nil || got != module {
 		t.Fatalf("first match fallback = %q, %v", got, err)
+	}
+	server.FirstMatchMarkers = []string{"missing.marker"}
+	got, err = (&Discovery{}).WorkspaceRoot(server, file)
+	if err != nil || got != filepath.Dir(file) {
+		t.Fatalf("unmatched first marker fallback = %q, %v; want %q", got, err, filepath.Dir(file))
 	}
 }

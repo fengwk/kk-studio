@@ -33,6 +33,7 @@ type fakeSupervisor struct {
 	startErr         error
 	earlyExit        *native.ProcessExit
 	terminateErr     error
+	terminateGate    <-chan struct{}
 	waitErr          error
 }
 
@@ -52,6 +53,7 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	process.allowProcessExit = s.allowProcessExit
 	process.shutdownParams = s.shutdownParams
 	process.terminateErr = s.terminateErr
+	process.terminateGate = s.terminateGate
 	process.waitErr = s.waitErr
 	s.process = process
 	s.mu.Unlock()

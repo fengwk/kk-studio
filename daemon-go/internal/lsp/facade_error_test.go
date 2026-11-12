@@ -30,9 +30,15 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		confirmed := 0
-		result, err := facade.Capabilities()[call.CapabilityID](ctx, call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
-		if err != nil || !result.Error || result.Contents[0].Text != "Operation cancelled" || confirmed != 1 {
-			t.Fatalf("result=%#v err=%v confirmations=%d", result, err, confirmed)
+		for _, id := range []string{"lsp.goto-definition", "lsp.workspace-symbols", "lsp.java-decompile"} {
+			call.CapabilityID = id
+			result, err := facade.Capabilities()[id](ctx, call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
+			if err != nil || !result.Error || result.Contents[0].Text != "Operation cancelled" {
+				t.Fatalf("%s result=%#v err=%v", id, result, err)
+			}
+		}
+		if confirmed != 3 {
+			t.Fatalf("confirmations=%d, want 3", confirmed)
 		}
 	})
 
@@ -40,13 +46,18 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
 		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 		defer cancel()
-		result, err := facade.Capabilities()[call.CapabilityID](ctx, call, runtime.CapabilityContext{})
-		if err != nil || !result.Error || result.Contents[0].Text != "Operation timed out" {
-			t.Fatalf("result=%#v err=%v", result, err)
+		for _, id := range []string{"lsp.goto-definition", "lsp.workspace-symbols", "lsp.java-decompile"} {
+			call.CapabilityID = id
+			result, err := facade.Capabilities()[id](ctx, call, runtime.CapabilityContext{})
+			if err != nil || !result.Error || result.Contents[0].Text != "Operation timed out" {
+				t.Fatalf("%s result=%#v err=%v", id, result, err)
+			}
 		}
 	})
 
 	t.Run("bootstrap failure preserves safe text", func(t *testing.T) {
+		call.CapabilityID = "lsp.goto-definition"
+		call.Arguments = arguments
 		root := t.TempDir()
 		executable := filepath.Join(root, "fake-lsp")
 		if err := os.WriteFile(executable, []byte("fake"), 0700); err != nil {
@@ -61,6 +72,44 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		result, err := facade.Capabilities()[call.CapabilityID](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
 		want := "LSP server 'go' cannot be started: " + executable
 		if err != nil || !result.Error || result.Contents[0].Text != want || confirmed != 1 {
+			t.Fatalf("result=%#v err=%v confirmations=%d", result, err, confirmed)
+		}
+		if err := facade.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("in-flight cancel", func(t *testing.T) {
+		call.CapabilityID = "lsp.goto-definition"
+		call.Arguments = arguments
+		supervisor := &fakeSupervisor{blockMethod: "textDocument/definition", startEntered: make(chan struct{}, 1)}
+		facade := NewFacade(supervisor, PoolOptions{IdleTimeout: time.Hour})
+		executable := filepath.Join(t.TempDir(), "fake-lsp")
+		if err := os.WriteFile(executable, []byte("fake"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := facade.Update([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		confirmed := 0
+		resultCh := make(chan runtime.CapabilityResult, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			result, err := facade.Capabilities()[call.CapabilityID](ctx, call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
+			resultCh <- result
+			errCh <- err
+		}()
+		select {
+		case <-supervisor.startEntered:
+		case <-time.After(time.Second):
+			t.Fatal("server start was not observed")
+		}
+		waitForFakeRequest(t, supervisor.process, "textDocument/definition")
+		cancel()
+		result, err := <-resultCh, <-errCh
+		if err != nil || !result.Error || result.Contents[0].Text != "Operation cancelled" || confirmed != 0 {
 			t.Fatalf("result=%#v err=%v confirmations=%d", result, err, confirmed)
 		}
 		if err := facade.Close(); err != nil {

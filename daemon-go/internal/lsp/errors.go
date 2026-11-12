@@ -21,14 +21,16 @@ type LspBootstrapError struct {
 func (e *LspBootstrapError) Error() string { return e.Message }
 func (e *LspBootstrapError) Unwrap() error { return e.Cause }
 
-// LspTimeoutError identifies an LSP request timeout.
-type LspTimeoutError struct {
-	Message string
-	Cause   error
+// LspTimeoutError identifies an LSP request timeout and is also an LSP error.
+type LspTimeoutError struct{ LspError }
+
+func newLspTimeoutError(message string, cause error) *LspTimeoutError {
+	return &LspTimeoutError{LspError: LspError{Message: message, Cause: cause}}
 }
 
-func (e *LspTimeoutError) Error() string { return e.Message }
-func (e *LspTimeoutError) Unwrap() error { return e.Cause }
+func (e *LspTimeoutError) Unwrap() []error {
+	return []error{&e.LspError, e.LspError.Cause}
+}
 
 // LspAggregateError retains a stable aggregate message and all underlying failures.
 type LspAggregateError struct {

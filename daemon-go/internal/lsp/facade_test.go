@@ -19,6 +19,15 @@ func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 	facade := NewFacade(supervisor, PoolOptions{})
 	confirmed := 0
 	missing := filepath.Join(t.TempDir(), "missing-source.java")
+	directory := t.TempDir()
+	realDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryArgs, err := json.Marshal(map[string]any{"path": directory, "line": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	workspaceArgs, err := json.Marshal(map[string]string{"path": missing, "query": " "})
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +40,7 @@ func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 		id   string
 		args string
 		want string
-	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", `{"path":"   ","line":1}`, "path is required"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", string(workspaceArgs), "path does not exist: " + filepath.ToSlash(missing)}, {"lsp.java-decompile", string(decompileArgs), "path does not exist: " + filepath.ToSlash(missing)}}
+	}{{"lsp.goto-definition", `{"line":1}`, "path is required and must be a string"}, {"lsp.goto-definition", string(directoryArgs), "path must be a file: " + realDirectory}, {"lsp.goto-definition", `{"path":"   ","line":1}`, "path is required"}, {"lsp.goto-definition", `{"path":"relative","line":1}`, "path must be an absolute path (a relative or non-absolute value was given)"}, {"lsp.workspace-symbols", string(workspaceArgs), "path does not exist: " + filepath.ToSlash(missing)}, {"lsp.java-decompile", string(decompileArgs), "path does not exist: " + filepath.ToSlash(missing)}}
 	for _, tc := range cases {
 		call := runtime.CapabilityCall{InvocationID: "id", CapabilityID: tc.id, Arguments: json.RawMessage(tc.args)}
 		result, err := facade.Capabilities()[tc.id](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
@@ -108,6 +117,10 @@ func TestCapabilities_SharedClient(t *testing.T) {
 	if err := os.WriteFile(source, []byte("class Source {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	classFile := filepath.Join(root, "Source.class")
+	if err := os.WriteFile(classFile, []byte("class"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	supervisor := &fakeSupervisor{}
 	facade := NewFacade(supervisor, PoolOptions{IdleTimeout: time.Hour})
 	if err := facade.Update([]config.LSPServerConfig{{ID: "jdtls", Command: []string{binary}, Extensions: []string{".java"}}}); err != nil {
@@ -117,12 +130,15 @@ func TestCapabilities_SharedClient(t *testing.T) {
 		id        string
 		arguments map[string]any
 		want      string
-	}{{"lsp.goto-definition", map[string]any{"path": source, "line": 1}, filepath.FromSlash("/tmp/target.go") + ":3:4"}, {"lsp.workspace-symbols", map[string]any{"path": source, "query": "Source"}, "No symbols found"}, {"lsp.java-decompile", map[string]any{"path": source, "target": "jdt://contents/java.base/java/lang/String.class"}, "class contents"}}
+	}{{"lsp.goto-definition", map[string]any{"path": source, "line": 1}, filepath.FromSlash("/tmp/target.go") + ":3:4"}, {"lsp.workspace-symbols", map[string]any{"path": source, "query": "Source"}, "No symbols found"}, {"lsp.java-decompile", map[string]any{"path": source, "target": "jdt://contents/java.base/java/lang/String.class"}, "class contents"}, {"lsp.java-decompile", map[string]any{"path": source, "target": classFile}, "class contents"}}
 	confirmed := 0
 	for _, item := range calls {
 		arguments, err := json.Marshal(item.arguments)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if item.id == "lsp.workspace-symbols" {
+			facade.FileChanged(source)
 		}
 		result, err := facade.Capabilities()[item.id](context.Background(), runtime.CapabilityCall{InvocationID: item.id, CapabilityID: item.id, Arguments: arguments}, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
 		if err != nil || result.Error || len(result.Contents) != 1 || result.Contents[0].Text != item.want {

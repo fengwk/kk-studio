@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -78,7 +79,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 			onExit()
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+			return nil, newLspTimeoutError("Operation timed out", ctx.Err())
 		}
 		return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 	}
@@ -124,7 +125,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 					onExit()
 				}
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+					return nil, newLspTimeoutError("Operation timed out", ctx.Err())
 				}
 				return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 			case <-old.done:
@@ -188,7 +189,7 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 				}()
 			}
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+				return nil, newLspTimeoutError("Operation timed out", ctx.Err())
 			}
 			return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 		case <-b.done:
@@ -258,6 +259,9 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 		entry := &poolEntry{key: key, client: client, lastUsed: time.Now()}
 		p.entries[key] = entry
 		b.client = client
+		if p.boots[key] == b {
+			delete(p.boots, key)
+		}
 	} else if err != nil {
 		var be *LspBootstrapError
 		if b.retryable || (errors.As(err, &be) && be.Converged) {
@@ -351,20 +355,31 @@ func (p *Pool) Close() error {
 	p.mu.Unlock()
 
 	var failures []error
+	seenFailures := map[error]struct{}{}
+	addFailure := func(err error) {
+		typeOf := reflect.TypeOf(err)
+		if typeOf != nil && typeOf.Comparable() {
+			if _, exists := seenFailures[err]; exists {
+				return
+			}
+			seenFailures[err] = struct{}{}
+		}
+		failures = append(failures, err)
+	}
 	stopped := map[*Client]bool{}
 	for _, b := range boots {
 		<-b.done
 		if b.err != nil {
 			var be *LspBootstrapError
 			if errors.As(b.err, &be) && !be.Converged {
-				failures = append(failures, b.err)
+				addFailure(b.err)
 			}
 			continue
 		}
 		if b.client != nil && !stopped[b.client] {
 			stopped[b.client] = true
 			if err := b.client.Stop(p.options.ShutdownGrace); err != nil {
-				failures = append(failures, err)
+				addFailure(err)
 			}
 		}
 	}
@@ -372,14 +387,14 @@ func (p *Pool) Close() error {
 		if !stopped[e.client] {
 			stopped[e.client] = true
 			if err := e.client.Stop(p.options.ShutdownGrace); err != nil {
-				failures = append(failures, err)
+				addFailure(err)
 			}
 		}
 	}
 	for _, r := range retirements {
 		<-r.done
 		if r.err != nil {
-			failures = append(failures, r.err)
+			addFailure(r.err)
 		}
 	}
 	if len(failures) > 0 {

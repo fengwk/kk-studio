@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -31,6 +32,7 @@ type Client struct {
 	requestID            atomic.Uint64
 	stopOnce             sync.Once
 	stopDone             chan struct{}
+	stopStarted          chan struct{}
 	stopErr              error
 	stopping             atomic.Bool
 	transportTerminating atomic.Bool
@@ -78,7 +80,7 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 	if err != nil {
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' cannot be started: %s", server.ID, executable), Converged: !errors.Is(err, native.ErrScopeNotConverged), Cause: err}
 	}
-	c := &Client{server: server, root: root, process: process, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1), stopDone: make(chan struct{}), exitSignal: make(chan struct{}), transportDone: make(chan struct{}), shutdownGrace: time.Second, positionEncoding: "utf-16", documents: map[string]document{}, jdtls: isJDTLS(server.Command)}
+	c := &Client{server: server, root: root, process: process, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1), stopDone: make(chan struct{}), stopStarted: make(chan struct{}), exitSignal: make(chan struct{}), transportDone: make(chan struct{}), shutdownGrace: time.Second, positionEncoding: "utf-16", documents: map[string]document{}, jdtls: isJDTLS(server.Command)}
 	go func() {
 		defer close(c.exitSignal)
 		result, e := process.Wait(context.Background())
@@ -238,9 +240,15 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 }
 
 func (c *Client) call(ctx context.Context, method string, params, result any, onSent, onFinished func()) error {
+	var finishOnce sync.Once
+	finish := func() {
+		if onFinished != nil {
+			finishOnce.Do(onFinished)
+		}
+	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return &LspTimeoutError{Message: "Operation timed out", Cause: ctx.Err()}
+			return newLspTimeoutError("Operation timed out", ctx.Err())
 		}
 		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
 	}
@@ -248,16 +256,27 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 		return &LspError{Message: "LSP client stopped"}
 	}
 	id := c.requestID.Add(1)
+	requestCtx, requestCancel := context.WithCancel(ctx)
+	defer requestCancel()
 	started := time.Now()
 	deadline, hasDeadline := ctx.Deadline()
 	if onSent != nil {
 		onSent()
 	}
+	if onFinished != nil && c.exitSignal != nil {
+		go c.confirmWhenProcessStops(finish)
+	}
 	done := make(chan error, 1)
-	go func() { done <- c.conn.Call(ctx, method, params, result, jsonrpc2.PickID(jsonrpc2.ID{Num: id})) }()
+	go func() { done <- c.conn.Call(requestCtx, method, params, result, jsonrpc2.PickID(jsonrpc2.ID{Num: id})) }()
 	select {
 	case err := <-done:
 		if err != nil {
+			if c.stopping.Load() {
+				if c.exitReported.Load() {
+					return c.exitError()
+				}
+				return &LspError{Message: "LSP client stopped"}
+			}
 			if c.processExitedWithTransportEOF() {
 				return c.exitError()
 			}
@@ -279,20 +298,17 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 					exitErr := c.exitError()
 					var lspErr *LspError
 					if errors.As(exitErr, &lspErr) && lspErr.Message != "LSP client stopped" {
-						c.confirmProcessExit(onFinished)
 						return exitErr
 					}
 				}
 			}
 			var rpcErr *jsonrpc2.Error
-			if onFinished != nil && errors.As(err, &rpcErr) {
-				onFinished()
+			if errors.As(err, &rpcErr) {
+				finish()
 			}
 			return &LspError{Message: "LSP request failed (" + method + ")", Cause: err}
 		}
-		if onFinished != nil {
-			onFinished()
-		}
+		finish()
 		return nil
 	case <-ctx.Done():
 		_ = c.conn.Notify(context.Background(), "$/cancelRequest", map[string]any{"id": id})
@@ -303,11 +319,16 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 					message = fmt.Sprintf("LSP request timed out after %dms (%s).", timeout.Milliseconds(), method)
 				}
 			}
-			return &LspTimeoutError{Message: message, Cause: ctx.Err()}
+			return newLspTimeoutError(message, ctx.Err())
 		}
 		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+	case <-c.stopStarted:
+		return &LspError{Message: "LSP client stopped"}
 	case exit := <-c.exited:
 		c.exited <- exit
+		if c.stopping.Load() && !c.exitReported.Load() {
+			return &LspError{Message: "LSP client stopped"}
+		}
 		if c.transportTerminating.Load() {
 			<-c.transportDone
 			if !c.processExitedWithTransportEOF() {
@@ -316,9 +337,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 				}
 			}
 		}
-		exitErr := c.exitError()
-		c.confirmProcessExit(onFinished)
-		return exitErr
+		return c.exitError()
 	case err := <-c.exitErr:
 		c.exitErr <- err
 		return &LspError{Message: "LSP client stopped", Cause: err}
@@ -342,8 +361,9 @@ func (c *Client) exitError() error {
 		return &LspError{Message: "LSP client stopped"}
 	}
 }
-func (c *Client) confirmProcessExit(onFinished func()) {
-	if !c.stopping.Load() && c.Stop(c.shutdownGrace) == nil && onFinished != nil {
+func (c *Client) confirmWhenProcessStops(onFinished func()) {
+	<-c.exitSignal
+	if c.Stop(c.shutdownGrace) == nil {
 		onFinished()
 	}
 }
@@ -387,6 +407,9 @@ func (c *Client) Stop(grace time.Duration) error {
 	c.stopOnce.Do(func() {
 		c.stopping.Store(true)
 		c.closed.Store(true)
+		if c.stopStarted != nil {
+			close(c.stopStarted)
+		}
 		go c.finishStop(grace)
 	})
 	<-c.stopDone
@@ -422,11 +445,13 @@ func (c *Client) finishStop(grace time.Duration) {
 	c.mu.Lock()
 	clear(c.documents)
 	c.mu.Unlock()
-	disposeErr := c.conn.Close()
-	if errors.Is(disposeErr, jsonrpc2.ErrClosed) {
+	disposeDone := make(chan error, 1)
+	go func() { disposeDone <- c.conn.Close() }()
+	terminateErr := c.process.Terminate(context.Background(), grace)
+	disposeErr := <-disposeDone
+	if errors.Is(disposeErr, jsonrpc2.ErrClosed) || errors.Is(disposeErr, io.ErrClosedPipe) || errors.Is(disposeErr, os.ErrClosed) {
 		disposeErr = nil
 	}
-	terminateErr := c.process.Terminate(context.Background(), grace)
 	if disposeErr != nil && terminateErr != nil {
 		c.stopErr = &LspAggregateError{
 			Message: "LSP client shutdown failed",

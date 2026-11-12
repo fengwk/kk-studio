@@ -319,7 +319,7 @@ func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 		t.Fatalf("inherited environment capability=%v err=%v", experimental, err)
 	}
 	if err = client.Stop(time.Second); err != nil {
-		t.Fatal(err)
+		t.Fatalf("stop error=%#v cause=%v", err, errors.Unwrap(err))
 	}
 	if _, err = supervisor.processes[0].Wait(context.Background()); err != nil {
 		t.Fatal(err)
