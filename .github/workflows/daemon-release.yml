@@ -163,6 +163,7 @@ jobs:
   smoke_archives:
     name: smoke staged archive (${{ matrix.platform }})
     needs: stage
+    if: ${{ always() && needs.stage.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:

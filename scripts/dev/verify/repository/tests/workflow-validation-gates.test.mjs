@@ -29,6 +29,6 @@ test('manual release dispatch stages and smokes but does not publish', () => {
   assert.match(release, /stage:\n    name: build and stage daemon release\n    needs:\n      - daemon_ci\n    if: \$\{\{ always\(\) && \(github\.event_name == 'workflow_dispatch' \|\| needs\.daemon_ci\.result == 'success'\) \}\}/)
   assert.match(release, /daemon-go\/release/)
   assert.match(release, /if: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/)
-  assert.match(release, /smoke_archives:/)
+  assert.match(release, /smoke_archives:\n    name: smoke staged archive[^\n]*\n    needs: stage\n    if: \$\{\{ always\(\) && needs\.stage\.result == 'success' \}\}/)
   assert.match(release, /name: Check documentation layout\n        if: github\.event_name != 'workflow_dispatch'/)
 })
