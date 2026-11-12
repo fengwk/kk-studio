@@ -55,6 +55,7 @@ type activeConnection struct {
 type runningCall struct {
 	cancel         context.CancelFunc
 	maxOutputBytes int64
+	progressError  string
 }
 
 // Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
@@ -825,6 +826,13 @@ func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, e
 	defer func() { r.callsMu.Lock(); delete(r.calls, id); r.callsMu.Unlock() }()
 	defer r.publishRequestedExit(id)
 	result, err := invokeCapability(ctx, call, capctx, executor)
+	r.callsMu.Lock()
+	progressError := active.progressError
+	r.callsMu.Unlock()
+	if progressError != "" {
+		_ = r.finish(id, protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(progressError)}}, InvocationFailed)
+		return
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			reason := "cancelled"
@@ -1044,6 +1052,10 @@ func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	}
 	encoded, err := r.encodeResult(context.Background(), id, result, active.maxOutputBytes, true)
 	if err != nil {
+		r.callsMu.Lock()
+		active.progressError = err.Error()
+		r.callsMu.Unlock()
+		active.cancel()
 		return err
 	}
 	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_PROGRESS, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Progress{Progress: &protocol.Progress{Result: encoded}}}, false)

@@ -56,3 +56,41 @@ func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 		return false
 	})
 }
+
+// RUN-T-018 fails and cancels an invocation when its progress payload cannot be encoded safely.
+func TestRuntimeProgressEncodingFailureCancelsCallAndFails(t *testing.T) {
+	progressReturned := make(chan error, 1)
+	options := runtimeOptionsForTest()
+	options.Capabilities = map[string]CapabilityExecutor{
+		"echo": func(_ context.Context, call CapabilityCall, capabilityContext CapabilityContext) (CapabilityResult, error) {
+			progressReturned <- capabilityContext.Progress(CapabilityResult{
+				CallID:   call.InvocationID,
+				Contents: []ResultContent{{Type: "binary", Bytes: []byte("not allowed in progress")}},
+			})
+			return CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`)}, nil
+		},
+	}
+	runtime, connection := newReadyRuntimeForTest(t, options)
+	if err := runtime.handleInvoke(context.Background(), invokeWithArgs("progress-failure", `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-progressReturned:
+		if err == nil || err.Error() != "progress does not allow binary content" {
+			t.Fatalf("progress error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("progress callback did not return")
+	}
+	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
+		for _, frame := range frames {
+			if frame.MessageType == protocol.MessageType_FAILED && frame.GetFailed().GetMessage() == "progress does not allow binary content" {
+				return true
+			}
+		}
+		return false
+	})
+	if connection.sent(protocol.MessageType_CANCELLED) {
+		t.Fatal("progress encoding failure was reported as user cancellation")
+	}
+}
