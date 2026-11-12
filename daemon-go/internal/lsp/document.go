@@ -3,11 +3,13 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 )
@@ -176,11 +178,10 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 			if e != nil || parsed.Scheme != "file" || parsed.Path == "" {
 				return "", &LspError{Message: "invalid class target URI: " + target}
 			}
-			decoded, e := url.PathUnescape(parsed.Path)
+			localPath, e = fileURIPath(parsed)
 			if e != nil {
 				return "", &LspError{Message: "invalid class target URI: " + target}
 			}
-			localPath = filepath.FromSlash(decoded)
 		} else if !filepath.IsAbs(localPath) {
 			return "", &LspError{Message: "target must be an absolute class path, a file: URI, or a jdt:// URI: " + target}
 		}
@@ -261,12 +262,26 @@ func readString(raw json.RawMessage) string { var s string; _ = json.Unmarshal(r
 func locationPath(value string) string {
 	u, err := url.Parse(value)
 	if err == nil && u.Scheme == "file" {
-		path, e := url.PathUnescape(u.Path)
+		path, e := fileURIPath(u)
 		if e == nil {
-			return filepath.FromSlash(path)
+			return path
 		}
 	}
 	return value
+}
+
+func fileURIPath(uri *url.URL) (string, error) {
+	if uri.Scheme != "file" || uri.Path == "" {
+		return "", errors.New("invalid file URI")
+	}
+	path, err := url.PathUnescape(uri.Path)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path), nil
 }
 func formatSymbols(raw json.RawMessage, limit int) ([]string, error) {
 	if limit <= 0 || len(raw) == 0 || string(raw) == "null" {

@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,7 +81,7 @@ func TestProtocol_JavaDecompile(t *testing.T) {
 	if err = client.Initialize(context.Background(), time.Second); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"See jdt://contents/java.base/java/lang/String.class in output", classFile, (&url.URL{Scheme: "file", Path: filepath.ToSlash(classFile)}).String()} {
+	for _, target := range []string{"See jdt://contents/java.base/java/lang/String.class in output", classFile, pathURI(classFile)} {
 		got, err := client.JavaDecompile(context.Background(), target)
 		if err != nil || got != "class contents" {
 			t.Errorf("JavaDecompile(%q) = %q, %v", target, got, err)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -146,7 +147,11 @@ func (c *Client) handleRequest(ctx context.Context, conn *jsonrpc2.Conn, req *js
 }
 func pathURI(path string) string {
 	abs, _ := filepath.Abs(path)
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
+	uriPath := filepath.ToSlash(abs)
+	if runtime.GOOS == "windows" && len(uriPath) >= 2 && uriPath[1] == ':' {
+		uriPath = "/" + uriPath
+	}
+	return (&url.URL{Scheme: "file", Path: uriPath}).String()
 }
 
 func (c *Client) watchTransport() {
