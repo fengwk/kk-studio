@@ -244,6 +244,7 @@ type posixProcess struct {
 	baselinePIDs    []int
 	baselineKnown   bool
 	trackedSessions map[int]trackedSession
+	convergeScope   func(context.Context, int, time.Duration) error
 	done            chan struct{}
 	waitErr         error
 	mu              sync.Mutex
@@ -255,6 +256,13 @@ func (p *posixProcess) PID() int              { return p.pid }
 func (p *posixProcess) Stdin() io.WriteCloser { return p.stdin }
 func (p *posixProcess) Stdout() io.ReadCloser { return p.stdout }
 func (p *posixProcess) Stderr() io.ReadCloser { return p.stderr }
+
+func (p *posixProcess) converge(ctx context.Context, sid int, grace time.Duration) error {
+	if p.convergeScope != nil {
+		return p.convergeScope(ctx, sid, grace)
+	}
+	return convergeSession(ctx, sid, grace)
+}
 
 func (p *posixProcess) Wait(ctx context.Context) (ProcessExit, error) {
 	select {
@@ -337,7 +345,7 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 	if grace < 0 {
 		grace = 0
 	}
-	if err := convergeSession(ctx, p.sid, grace); err != nil {
+	if err := p.converge(ctx, p.sid, grace); err != nil {
 		p.termErr = &ProcessScopeNotConvergedError{Cause: errors.Join(streamErr, err)}
 		return p.termErr
 	}
@@ -415,7 +423,7 @@ func (p *posixProcess) cleanupFailedStart(cause error) error {
 	cause = errors.Join(cause, p.closeStreams())
 	ctx, cancel := context.WithTimeout(context.Background(), posixForceKillBudget)
 	defer cancel()
-	if err := convergeSession(ctx, p.sid, 0); err != nil {
+	if err := p.converge(ctx, p.sid, 0); err != nil {
 		return &ProcessScopeNotConvergedError{Cause: errors.Join(cause, err)}
 	}
 	select {

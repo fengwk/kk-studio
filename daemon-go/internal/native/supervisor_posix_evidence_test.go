@@ -11,6 +11,64 @@ import (
 	"time"
 )
 
+// NAT-F-008 verifies failed-start cleanup uses its independent force-kill budget and retains evidence if proof fails.
+func TestPOSIXCleanupFailedStart_BudgetAndFailureEvidence(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		convergeError error
+	}{
+		{name: "converges"},
+		{name: "cannot prove convergence", convergeError: errors.New("injected convergence failure")},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := stateTestDir(t)
+			stream, err := os.OpenFile(filepath.Join(dir, "stream"), os.O_RDWR|os.O_CREATE, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stream.Close() })
+			done := make(chan struct{})
+			close(done)
+			cause := errors.New("startup failed")
+			process := &posixProcess{
+				stateDir: dir,
+				done:     done,
+				owner:    stream,
+				stdin:    stream,
+				stdout:   stream,
+				stderr:   stream,
+				convergeScope: func(ctx context.Context, sid int, grace time.Duration) error {
+					if sid != 0 || grace != 0 {
+						t.Errorf("converge arguments = SID %d, grace %s", sid, grace)
+					}
+					deadline, ok := ctx.Deadline()
+					if !ok || time.Until(deadline) > posixForceKillBudget || time.Until(deadline) <= 0 {
+						t.Errorf("cleanup context deadline = %v, want within %s", deadline, posixForceKillBudget)
+					}
+					return testCase.convergeError
+				},
+			}
+			err = process.cleanupFailedStart(cause)
+			if testCase.convergeError == nil {
+				if !errors.Is(err, cause) {
+					t.Fatalf("cleanup error = %v, want original cause", err)
+				}
+				if _, statErr := os.Stat(dir); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("state directory remains after proven cleanup: %v", statErr)
+				}
+				return
+			}
+			var notConverged *ProcessScopeNotConvergedError
+			if !errors.As(err, &notConverged) || !errors.Is(err, cause) || !errors.Is(err, testCase.convergeError) {
+				t.Fatalf("cleanup error = %v, want original and convergence failures", err)
+			}
+			if _, statErr := os.Stat(dir); statErr != nil {
+				t.Fatalf("state evidence was removed without convergence proof: %v", statErr)
+			}
+		})
+	}
+}
+
 // NAT-T-001
 func TestPOSIXSupervisor_UnprovenConvergenceRetainsEvidence(t *testing.T) {
 	supervisor, err := NewSupervisor()
