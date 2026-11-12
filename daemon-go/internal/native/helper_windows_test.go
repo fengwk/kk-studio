@@ -3,10 +3,16 @@
 package native
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -279,6 +285,140 @@ func TestCreateSuspendedWindowsCommand_CleansUpOnAPIAndResultFailures(t *testing
 				if test.name == "missing thread handle" && !reflect.DeepEqual(api.terminated, []windows.Handle{40}) {
 					t.Fatalf("terminated handles = %v, want [40]", api.terminated)
 				}
+			}
+		})
+	}
+}
+
+type fakeWindowsJobProtocolAPI struct {
+	resumeErr  error
+	waitStatus uint32
+	waitErr    error
+	exitCode   uint32
+	exitErr    error
+	drainErr   error
+	closeErr   error
+	calls      []string
+	closed     []windows.Handle
+}
+
+func (api *fakeWindowsJobProtocolAPI) CloseHandle(handle windows.Handle) error {
+	api.calls = append(api.calls, "close")
+	api.closed = append(api.closed, handle)
+	return api.closeErr
+}
+
+func (api *fakeWindowsJobProtocolAPI) TerminateJobObject(windows.Handle, uint32) error {
+	api.calls = append(api.calls, "terminate")
+	return nil
+}
+
+func (api *fakeWindowsJobProtocolAPI) ResumeThread(windows.Handle) (uint32, error) {
+	api.calls = append(api.calls, "resume")
+	return 1, api.resumeErr
+}
+
+func (api *fakeWindowsJobProtocolAPI) WaitForSingleObject(windows.Handle, uint32) (uint32, error) {
+	api.calls = append(api.calls, "wait")
+	return api.waitStatus, api.waitErr
+}
+
+func (api *fakeWindowsJobProtocolAPI) GetExitCodeProcess(_ windows.Handle, code *uint32) error {
+	api.calls = append(api.calls, "exit-code")
+	*code = api.exitCode
+	return api.exitErr
+}
+
+func (api *fakeWindowsJobProtocolAPI) AwaitJobEmpty(context.Context, windows.Handle, time.Duration) error {
+	api.calls = append(api.calls, "await-empty")
+	return api.drainErr
+}
+
+func TestRunWindowsJobProtocolWithAPI(t *testing.T) {
+	apiError := errors.New("injected Win32 failure")
+	tests := []struct {
+		name             string
+		permit           bool
+		invalidPermit    bool
+		ownerClosed      bool
+		scopeUnavailable bool
+		setup            func(*fakeWindowsJobProtocolAPI)
+		wantResult       int
+		wantError        bool
+		wantCleanup      string
+		wantExitCode     *int
+	}{
+		{name: "successful command", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.exitCode = 7 }, wantCleanup: "true", wantExitCode: func() *int { v := 7; return &v }()},
+		{name: "owner closes before permit", ownerClosed: true, wantCleanup: "true"},
+		{name: "invalid permit", permit: true, invalidPermit: true, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "scope publication failure", permit: true, scopeUnavailable: true, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "resume failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.resumeErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "wait failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.waitErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "unexpected wait status", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.waitStatus = 0x80 }, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "exit code failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.exitErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
+		{name: "drain failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.drainErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "false"},
+		{name: "close failure", permit: true, setup: func(api *fakeWindowsJobProtocolAPI) { api.closeErr = apiError }, wantResult: 1, wantError: true, wantCleanup: "true"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := stateTestDir(t)
+			if test.permit {
+				permit := "permit"
+				if test.invalidPermit {
+					permit = "invalid"
+				}
+				if err := publishText(dir, permitFile, permit); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.scopeUnavailable {
+				if err := os.Mkdir(filepath.Join(dir, scopeFile), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			api := &fakeWindowsJobProtocolAPI{waitStatus: windows.WAIT_OBJECT_0}
+			if test.setup != nil {
+				test.setup(api)
+			}
+			var ownerInput io.Reader
+			var ownerWriter *io.PipeWriter
+			if test.ownerClosed {
+				ownerInput = strings.NewReader("")
+			} else {
+				ownerReader, writer := io.Pipe()
+				ownerInput, ownerWriter = ownerReader, writer
+			}
+			result := runWindowsJobProtocolWithAPI(dir, 5, windows.ProcessInformation{Process: 10, Thread: 11, ProcessId: 12}, ownerInput, api)
+			if ownerWriter != nil {
+				_ = ownerWriter.Close()
+			}
+			if result != test.wantResult {
+				t.Fatalf("result = %d, want %d; API calls: %v", result, test.wantResult, api.calls)
+			}
+			_, errorErr := readState(dir, errorFile)
+			if (errorErr == nil) != test.wantError {
+				t.Fatalf("error file present = %t, want %t (err=%v)", errorErr == nil, test.wantError, errorErr)
+			}
+			cleanup, err := readState(dir, cleanupFile)
+			if err != nil || string(cleanup) != test.wantCleanup {
+				t.Fatalf("cleanup = %q, %v; want %q", cleanup, err, test.wantCleanup)
+			}
+			exit, exitErr := readState(dir, exitFile)
+			if test.wantExitCode == nil {
+				if exitErr == nil {
+					t.Fatalf("unexpected exit report: %s", exit)
+				}
+			} else {
+				var report exitReport
+				if err := json.Unmarshal(exit, &report); err != nil || report.ExitCode == nil || *report.ExitCode != *test.wantExitCode {
+					t.Fatalf("exit report = %s, %v", exit, err)
+				}
+			}
+			if !reflect.DeepEqual(api.closed, []windows.Handle{11, 10, 5}) {
+				t.Fatalf("closed handles = %v, want [11 10 5]", api.closed)
+			}
+			if test.wantExitCode != nil && !reflect.DeepEqual(api.calls, []string{"resume", "wait", "exit-code", "terminate", "await-empty", "close", "close", "close"}) {
+				t.Fatalf("API call order = %v", api.calls)
 			}
 		})
 	}
