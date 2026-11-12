@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/fengwk/kk-studio/daemon/internal/coding"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
@@ -69,6 +70,27 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}
 	initial, err := config.LoadDaemonConfig(configPath)
 	if err != nil {
+		t.Fatal(err)
+	}
+	stagingPath := filepath.Join(initial.DataDir, "skills", ".staging-interrupted")
+	if err := os.MkdirAll(stagingPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingPath, "partial.zip"), []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outputStore, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredWorkspace := filepath.Join(outputStore.Root(), "123e4567-e89b-42d3-a456-426614174010")
+	if err := os.MkdirAll(expiredWorkspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(expiredWorkspace, "created-at"), []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(expiredWorkspace, "result.log"), []byte("expired"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(directory, "sample.txt")
@@ -139,6 +161,33 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	if ready.MessageType != protocol.MessageType_READY || ready.GetReady().GetDaemonVersion() != config.DaemonVersion {
 		t.Fatalf("first runtime response=%v; want READY", ready)
 	}
+	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
+		t.Fatalf("startup skill staging path still exists: err=%v", err)
+	}
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_TEMPORARY_RESOURCE_POLICY, EnvironmentId: proto.String(e2eEnvironmentID),
+		Payload: &protocol.Envelope_TemporaryResourcePolicy{TemporaryResourcePolicy: &protocol.TemporaryResourcePolicy{
+			TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1),
+		}},
+	})
+	resourceSweepDeadline := time.NewTimer(5 * time.Second)
+	resourceSweepTicker := time.NewTicker(10 * time.Millisecond)
+	defer resourceSweepDeadline.Stop()
+	defer resourceSweepTicker.Stop()
+	for {
+		_, statErr := os.Stat(expiredWorkspace)
+		if os.IsNotExist(statErr) {
+			break
+		}
+		if statErr != nil {
+			t.Fatalf("inspect expired temporary resource: %v", statErr)
+		}
+		select {
+		case <-resourceSweepTicker.C:
+		case <-resourceSweepDeadline.C:
+			t.Fatal("production runtime did not sweep expired temporary resources")
+		}
+	}
 
 	const missingInvocation = "123e4567-e89b-42d3-a456-426614174006"
 	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
@@ -150,14 +199,13 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("missing invocation recovery=%v err=%v, want RECOVER_NOT_FOUND", recovered, err)
 	}
 
-	// Keep the command alive briefly so stdout delivery does not depend on scheduling at process exit.
 	cases := []struct {
 		name, capability, arguments, invocation, want string
 	}{
 		{"read", "fs.read", fmt.Sprintf(`{"path":%q}`, file), "123e4567-e89b-42d3-a456-426614174001", "needle original"},
 		{"grep", "fs.grep", fmt.Sprintf(`{"path":%q,"pattern":"needle","literal":true}`, directory), "123e4567-e89b-42d3-a456-426614174002", "needle original"},
 		{"edit", "fs.edit", fmt.Sprintf(`{"path":%q,"old_string":"original","new_string":"edited"}`, file), "123e4567-e89b-42d3-a456-426614174003", "edited"},
-		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e; sleep 0.1","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
+		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
