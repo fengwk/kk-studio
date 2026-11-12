@@ -19,6 +19,7 @@ import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.progressEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.readyEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.recoverNotFoundEnvelope;
+import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.resourceDownloadRequestEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.resourceUploadCommitEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.resourceUploadRequestEnvelope;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.runtimeStatusEnvelope;
@@ -55,6 +56,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityS
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.environment.capability.ResourceDownload;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
@@ -70,6 +72,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLeaseBinding;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceDownloadTicket;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Started;
 import fun.fengwk.kkstudio.platform.daemon.protocol.TicketState;
@@ -898,6 +901,52 @@ class EnvironmentDaemonServerTest {
         Duration.ofSeconds(60),
         firstHandle.terminalDeliveryGrace(),
         "已签发的句柄必须保持 invoke 时冻结的 terminalDeliveryGrace");
+  }
+
+  /** 下载仅可消费当前 invocation 登记的 transfer，并将票据绑定到该调用与连接。 */
+  @Test
+  void registeredDownloadReturnsArchiveTicketAndRejectsUnknownTransfer() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-download-ticket");
+    UUID blobId = UUID.randomUUID();
+    UUID transferId = UUID.randomUUID();
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_INSTALL),
+            new EnvironmentCapabilityCall(
+                CALL_ONE.toString(),
+                "{\"transferId\":\""
+                    + transferId
+                    + "\",\"package\":\"demo\",\"version\":\"1\",\"skill\":\"x\"}"),
+            Duration.ofMinutes(5),
+            null,
+            new ResourceDownload(transferId, blobId));
+    fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());
+
+    fixture.receive(channel, resourceDownloadRequestEnvelope(CALL_ONE, transferId));
+    Envelope ticketEnvelope = channel.lastEnvelope();
+    ResourceDownloadTicket ticket = ticketEnvelope.getResourceDownloadTicket();
+    assertEquals(MessageType.RESOURCE_DOWNLOAD_TICKET, ticketEnvelope.getMessageType());
+    assertEquals(TicketState.TICKET_READY, ticket.getState());
+    assertEquals(10L, ticket.getSize());
+    assertEquals(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ticket.getSha256());
+    assertEquals(
+        List.of(
+            new EnvironmentDaemonServerTestSupport.DownloadRequest(
+                ENVIRONMENT_ID, CALL_ONE.toString(), transferId, blobId)),
+        fixture.ticketService.downloads);
+
+    fixture.receive(channel, resourceDownloadRequestEnvelope(CALL_ONE, UUID.randomUUID()));
+    ResourceDownloadTicket rejected = channel.lastEnvelope().getResourceDownloadTicket();
+    assertEquals(TicketState.TICKET_FAILED, rejected.getState());
+    assertEquals(1, fixture.ticketService.downloads.size());
+
+    fixture.receive(channel, failedEnvelope(CALL_ONE.toString(), "installation failed"));
+    fixture.receive(channel, resourceDownloadRequestEnvelope(CALL_ONE, transferId));
+    ResourceDownloadTicket terminalRequest = channel.lastEnvelope().getResourceDownloadTicket();
+    assertEquals(TicketState.TICKET_FAILED, terminalRequest.getState());
+    assertEquals(1, fixture.ticketService.downloads.size());
   }
 
   /**

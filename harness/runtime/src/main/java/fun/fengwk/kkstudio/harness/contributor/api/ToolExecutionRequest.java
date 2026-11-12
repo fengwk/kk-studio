@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ResourceDownload;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
@@ -18,11 +19,20 @@ import java.util.Objects;
  * <p>请求不携带 workdir：目录只存在于具体工具 arguments 中，框架不把它提升为通用执行状态，也不提供隐藏默认目录。
  */
 public record ToolExecutionRequest(
-    ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
+    ToolDescriptor descriptor,
+    ToolCall call,
+    Duration timeout,
+    ToolExecutionContext context,
+    ResourceDownload resourceDownload) {
 
   /** 无 invocation context 的直调请求。 */
   public ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
-    this(descriptor, call, timeout, null);
+    this(descriptor, call, timeout, null, null);
+  }
+
+  public ToolExecutionRequest(
+      ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
+    this(descriptor, call, timeout, context, null);
   }
 
   public ToolExecutionRequest {
@@ -32,6 +42,9 @@ public record ToolExecutionRequest(
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must not be negative");
+    }
+    if ((resourceDownload != null) != "skill.install".equals(descriptor.name())) {
+      throw new IllegalArgumentException("resourceDownload is required only for skill.install");
     }
   }
 }

@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.ResourceDownload;
 import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -73,7 +74,7 @@ public final class PlatformSkillLoadGateway implements SkillLoadGateway {
       byte[] bytes = archiveFileReader.readFile(skillPackage.artifactBlobId(), name + "/SKILL.md");
       String body = decodeUtf8(bytes);
       if (context.environment().isPresent()) {
-        return install(context, skill, body, callId, progress);
+        return install(context, skill, skillPackage.artifactBlobId(), body, callId, progress);
       }
       String uri =
           ResourceUri.skills(skill.packageName(), skill.version(), skill.name(), "RELATIVE_PATH")
@@ -88,6 +89,7 @@ public final class PlatformSkillLoadGateway implements SkillLoadGateway {
   private ToolResult install(
       ToolExecutionContext context,
       ConfiguredSkill skill,
+      UUID blobId,
       String body,
       String callId,
       Consumer<ToolResult> progress)
@@ -118,7 +120,8 @@ public final class PlatformSkillLoadGateway implements SkillLoadGateway {
             installDescriptor,
             new ToolCall(callId, "skill.install", argumentsJson),
             capability.defaultTimeout(),
-            context);
+            context,
+            new ResourceDownload(UUID.fromString(transferId), blobId));
     ToolResult installation =
         context.environment().orElseThrow().execute(capability, installRequest, progress);
     if (installation.error()) {
