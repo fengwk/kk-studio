@@ -218,9 +218,7 @@ class AnthropicThinkingTest {
     assertEquals(2, completion.response().blocks().size());
     ProviderThinkingBlock thinkingBlock =
         assertInstanceOf(ProviderThinkingBlock.class, completion.response().blocks().get(0));
-    assertEquals(
-        "sig_berlin_valid_token",
-        thinkingBlock.providerBlockData().nativeFields().path("signature").asString(""));
+    assertEquals("sig_berlin_valid_token", thinkingBlock.providerBlockData().signature());
     assertInstanceOf(ProviderTextBlock.class, completion.response().blocks().get(1));
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
@@ -231,12 +229,7 @@ class AnthropicThinkingTest {
 
     // 3. 次轮后续请求重放 wire 断言
     ProviderMessage asstMsg1 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Analyzing geography: Berlin is the capital of Germany."),
-                new ProviderTextBlock("The capital of Germany is Berlin.")),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage userMsg2 =
         new ProviderMessage(
             ProviderMessageRole.USER,

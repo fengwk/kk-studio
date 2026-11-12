@@ -301,8 +301,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           }
         }
         default -> {
-          responseBlocks.add(
-              new ProviderOpaqueBlock(block.type, blockData(block.rawBlock, Set.of())));
           ObjectNode obj = block.rawBlock.deepCopy();
           if (block.nativeInputBuffer != null) {
             JsonNode parsedInput =
@@ -320,6 +318,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               obj.set("input", parsedInput);
             }
           }
+          responseBlocks.add(new ProviderOpaqueBlock(block.type, blockData(obj, Set.of())));
           if (canReplay) {
             // 未知但合法的 provider block：opaque 原样保留，只覆盖由 delta 累积出的 input
             replayBlocks.add(obj);
@@ -442,9 +441,16 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     for (String field : normalizedFields) {
       nativeFields.remove(field);
     }
+    String signature =
+        rawBlock.path("signature").isString() ? rawBlock.path("signature").stringValue() : null;
+    nativeFields.remove("signature");
+    nativeFields.remove("data");
     return new ProviderBlockData(
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
         descriptor.affinity(request.model().modelId()),
+        signature,
+        null,
+        null,
         nativeFields);
   }
 

@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
@@ -66,10 +67,13 @@ class AgentMessageJsonCodecTest {
   @Test
   void roundTripsBlockNativeFieldsAndRedactedThinking() {
     ProviderBlockData blockData =
-        ProviderBlockData.fromJson(
+        new ProviderBlockData(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             new ProviderReplayAffinity(ProviderType.ANTHROPIC, "claude", "claude-sonnet"),
-            "{\"signature\":\"signed-block\"}");
+            "signed-block",
+            null,
+            null,
+            HarnessJson.STRICT.createObjectNode());
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
@@ -78,21 +82,28 @@ class AgentMessageJsonCodecTest {
                 new RedactedThinkingMessageContent("opaque-data"),
                 new NativeAssistantBlockContent(
                     "web_search_call",
-                    ProviderBlockData.fromJson(
+                    new ProviderBlockData(
                         ProviderReplayFormat.OPENAI_RESPONSES,
                         new ProviderReplayAffinity(
                             ProviderType.OPENAI_RESPONSES, "openai", "gpt-5"),
-                        "{\"id\":\"search-1\",\"status\":\"completed\"}"))));
+                        null,
+                        null,
+                        "search-1",
+                        "web_search_call",
+                        null,
+                        false,
+                        HarnessJson.STRICT.createObjectNode()))));
 
     AgentMessage decoded = codec.decode(codec.encode(message));
     assertEquals(message, decoded);
-    assertEquals(
-        "signed-block",
-        ((ThinkingMessageContent) decoded.contents().getFirst())
-            .providerBlockData()
-            .nativeFields()
-            .path("signature")
-            .stringValue());
+    ProviderBlockData decodedThinkingData =
+        ((ThinkingMessageContent) decoded.contents().getFirst()).providerBlockData();
+    assertEquals("signed-block", decodedThinkingData.signature());
+    assertTrue(decodedThinkingData.nativeFields().isEmpty());
+    ProviderBlockData decodedNativeData =
+        ((NativeAssistantBlockContent) decoded.contents().get(2)).providerBlockData();
+    assertEquals("search-1", decodedNativeData.itemId());
+    assertEquals("web_search_call", decodedNativeData.itemType());
     assertThrows(
         IllegalArgumentException.class,
         () ->

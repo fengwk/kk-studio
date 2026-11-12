@@ -181,10 +181,13 @@ class ProviderResponseJsonCodecTest {
   @Test
   void roundTripsOrderedBlocksAndProviderNativeFields() {
     ProviderBlockData blockData =
-        ProviderBlockData.fromJson(
+        new ProviderBlockData(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             new ProviderReplayAffinity(ProviderType.ANTHROPIC, "claude", "claude-4"),
-            "{\"signature\":\"thinking-signature\"}");
+            "thinking-signature",
+            null,
+            null,
+            NODES.objectNode());
     ProviderResponse response =
         new ProviderResponse(
             List.of(
@@ -204,9 +207,8 @@ class ProviderResponseJsonCodecTest {
     ProviderThinkingBlock decodedThinking = (ProviderThinkingBlock) decoded.blocks().get(0);
     assertEquals(
         ProviderReplayFormat.ANTHROPIC_MESSAGES, decodedThinking.providerBlockData().protocol());
-    assertEquals(
-        "thinking-signature",
-        decodedThinking.providerBlockData().nativeFields().path("signature").asString(""));
+    assertEquals("thinking-signature", decodedThinking.providerBlockData().signature());
+    assertTrue(decodedThinking.providerBlockData().nativeFields().isEmpty());
     assertEquals("answer", ((ProviderTextBlock) decoded.blocks().get(1)).text());
   }
 

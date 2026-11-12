@@ -387,6 +387,9 @@ class OpenAiChatStreamAccumulatorTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("I cannot help with that.", completion.response().text());
+    ProviderTextBlock refusalBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    assertTrue(refusalBlock.providerBlockData().refusal());
+    assertTrue(refusalBlock.providerBlockData().nativeFields().isEmpty());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals(2, recordedEvents.size());
     assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());

@@ -939,7 +939,7 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
         }
         ObjectNode fields = NODES.objectNode();
         fields.put("itemType", "reasoning");
-        fields.put("summaryType", "summary_text");
+        fields.put("contentType", "summary_text");
         if (first) {
           fields.set("itemFields", itemFields);
           first = false;
@@ -958,10 +958,48 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
   }
 
   private ProviderBlockData responseBlockData(ObjectNode nativeFields) {
+    String itemId = null;
+    String encryptedContent = null;
+    String itemType = textualValue(nativeFields.remove("itemType"));
+    String contentType = textualValue(nativeFields.remove("contentType"));
+    JsonNode refusalNode = nativeFields.remove("refusal");
+    boolean refusal = refusalNode != null && refusalNode.isBoolean() && refusalNode.booleanValue();
+    JsonNode itemFields = nativeFields.get("itemFields");
+    if (itemFields instanceof ObjectNode objectFields) {
+      itemId = textualValue(objectFields.remove("id"));
+      if (itemType == null) {
+        itemType = textualValue(objectFields.remove("type"));
+      } else {
+        objectFields.remove("type");
+      }
+      encryptedContent = textualValue(objectFields.remove("encrypted_content"));
+    }
+    JsonNode item = nativeFields.get("item");
+    if (item instanceof ObjectNode objectItem) {
+      itemId = itemId == null ? textualValue(objectItem.remove("id")) : itemId;
+      if (itemType == null) {
+        itemType = textualValue(objectItem.remove("type"));
+      } else {
+        objectItem.remove("type");
+      }
+      if ("reasoning".equals(itemType)) {
+        encryptedContent = textualValue(objectItem.remove("encrypted_content"));
+      }
+    }
     return new ProviderBlockData(
         ProviderReplayFormat.OPENAI_RESPONSES,
         descriptor.affinity(request.model().modelId()),
+        null,
+        encryptedContent,
+        itemId,
+        itemType,
+        contentType,
+        refusal,
         nativeFields);
+  }
+
+  private static String textualValue(JsonNode node) {
+    return node != null && node.isString() ? node.stringValue() : null;
   }
 
   private ObjectNode copyFields(JsonNode source, Set<String> excludedFields) {

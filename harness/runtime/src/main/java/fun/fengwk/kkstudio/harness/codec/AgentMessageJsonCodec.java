@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
 
 import tools.jackson.core.JacksonException;
@@ -349,6 +351,12 @@ public final class AgentMessageJsonCodec {
     affinity.put("providerType", data.affinity().providerType().wireValue());
     affinity.put("providerName", data.affinity().providerName());
     affinity.put("modelId", data.affinity().modelId());
+    putNullableText(providerData, "signature", data.signature());
+    putNullableText(providerData, "encryptedContent", data.encryptedContent());
+    putNullableText(providerData, "itemId", data.itemId());
+    putNullableText(providerData, "itemType", data.itemType());
+    putNullableText(providerData, "contentType", data.contentType());
+    providerData.put("refusal", data.refusal());
     providerData.set("nativeFields", data.nativeFields());
   }
 
@@ -358,7 +366,18 @@ public final class AgentMessageJsonCodec {
     }
     ObjectNode data = requireObject(node.get("providerBlockData"), "content.providerBlockData");
     requireFields(
-        data, orderedSet("protocol", "affinity", "nativeFields"), "content.providerBlockData");
+        data,
+        orderedSet(
+            "protocol",
+            "affinity",
+            "signature",
+            "encryptedContent",
+            "itemId",
+            "itemType",
+            "contentType",
+            "refusal",
+            "nativeFields"),
+        "content.providerBlockData");
     ProviderReplayFormat protocol = ProviderReplayFormat.fromWireValue(text(data, "protocol"));
     ObjectNode affinity = requireObject(data.get("affinity"), "content.providerBlockData.affinity");
     requireFields(
@@ -376,7 +395,16 @@ public final class AgentMessageJsonCodec {
             providerType,
             requiredText(affinity, "providerName", "content.providerBlockData.affinity"),
             requiredText(affinity, "modelId", "content.providerBlockData.affinity"));
-    return new ProviderBlockData(protocol, providerAffinity, data.get("nativeFields"));
+    return new ProviderBlockData(
+        protocol,
+        providerAffinity,
+        decodeNullableText(data, "signature"),
+        decodeNullableText(data, "encryptedContent"),
+        decodeNullableText(data, "itemId"),
+        decodeNullableText(data, "itemType"),
+        decodeNullableText(data, "contentType"),
+        bool(data, "refusal"),
+        data.get("nativeFields"));
   }
 
   private static void requireContentFields(

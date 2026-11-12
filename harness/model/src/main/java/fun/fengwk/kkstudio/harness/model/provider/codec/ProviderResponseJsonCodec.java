@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.nonNegativeLong;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
@@ -297,6 +298,12 @@ public final class ProviderResponseJsonCodec {
     affinity.put("providerType", data.affinity().providerType().wireValue());
     affinity.put("providerName", data.affinity().providerName());
     affinity.put("modelId", data.affinity().modelId());
+    putNullableText(encoded, "signature", data.signature());
+    putNullableText(encoded, "encryptedContent", data.encryptedContent());
+    putNullableText(encoded, "itemId", data.itemId());
+    putNullableText(encoded, "itemType", data.itemType());
+    putNullableText(encoded, "contentType", data.contentType());
+    encoded.put("refusal", data.refusal());
     encoded.set("nativeFields", data.nativeFields());
   }
 
@@ -307,7 +314,19 @@ public final class ProviderResponseJsonCodec {
     }
     ObjectNode encoded = object(value, "providerBlockData");
     requireFields(
-        encoded, orderedSet("protocol", "affinity", "nativeFields"), Set.of(), "providerBlockData");
+        encoded,
+        orderedSet(
+            "protocol",
+            "affinity",
+            "signature",
+            "encryptedContent",
+            "itemId",
+            "itemType",
+            "contentType",
+            "refusal",
+            "nativeFields"),
+        Set.of(),
+        "providerBlockData");
     ObjectNode affinityNode = object(encoded.get("affinity"), "providerBlockData.affinity");
     requireFields(
         affinityNode, orderedSet("providerType", "providerName", "modelId"), Set.of(), "affinity");
@@ -317,7 +336,21 @@ public final class ProviderResponseJsonCodec {
             ProviderType.fromWireValue(text(affinityNode, "providerType")),
             text(affinityNode, "providerName"),
             text(affinityNode, "modelId")),
+        decodeNullableText(encoded, "signature"),
+        decodeNullableText(encoded, "encryptedContent"),
+        decodeNullableText(encoded, "itemId"),
+        decodeNullableText(encoded, "itemType"),
+        decodeNullableText(encoded, "contentType"),
+        bool(encoded, "refusal"),
         encoded.get("nativeFields"));
+  }
+
+  private void putNullableText(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
   }
 
   private void requireBlockFields(ObjectNode node, Set<String> fields, String label) {

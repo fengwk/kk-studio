@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -162,9 +163,10 @@ class OpenAiResponsesLosslessItemReplayTest {
     assertNotNull(replayState);
     assertEquals(1, completion.response().blocks().size());
     ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
-    assertEquals(
-        "msg_1",
-        textBlock.providerBlockData().nativeFields().path("itemFields").path("id").asString(""));
+    assertEquals("msg_1", textBlock.providerBlockData().itemId());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
+    assertFalse(textBlock.providerBlockData().nativeFields().path("itemFields").has("id"));
     JsonNode expectedItem = MAPPER.readTree(MESSAGE_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
 
@@ -190,14 +192,12 @@ class OpenAiResponsesLosslessItemReplayTest {
     assertEquals(
         "check the weather",
         ((ProviderThinkingBlock) completion.response().blocks().get(0)).thinking());
-    assertEquals(
-        "enc_lossless",
-        ((ProviderThinkingBlock) completion.response().blocks().get(0))
-            .providerBlockData()
-            .nativeFields()
-            .path("itemFields")
-            .path("encrypted_content")
-            .asString(""));
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) completion.response().blocks().get(0);
+    assertEquals("enc_lossless", thinkingBlock.providerBlockData().encryptedContent());
+    assertEquals("rs_1", thinkingBlock.providerBlockData().itemId());
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
+    assertEquals("summary_text", thinkingBlock.providerBlockData().contentType());
     JsonNode expectedItem = MAPPER.readTree(REASONING_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
 

@@ -801,10 +801,20 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     if (!replayable) {
       return null;
     }
+    JsonNode refusal = nativeFields.get("refusal");
+    boolean isRefusal = refusal != null && refusal.isBoolean() && refusal.booleanValue();
+    ObjectNode replayFields = nativeFields.deepCopy();
+    replayFields.remove("refusal");
     return new ProviderBlockData(
         ProviderReplayFormat.OPENAI_CHAT,
         descriptor.affinity(request.model().modelId()),
-        nativeFields);
+        null,
+        null,
+        null,
+        null,
+        null,
+        isRefusal,
+        replayFields);
   }
 
   private ObjectNode toolCallFields(ProviderToolCall call) {

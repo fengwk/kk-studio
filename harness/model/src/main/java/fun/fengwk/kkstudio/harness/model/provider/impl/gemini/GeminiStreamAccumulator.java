@@ -612,9 +612,17 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
     for (String field : semanticFields) {
       nativeFields.remove(field);
     }
+    String signature =
+        rawPart.path("thoughtSignature").isString()
+            ? rawPart.path("thoughtSignature").stringValue()
+            : null;
+    nativeFields.remove("thoughtSignature");
     return new ProviderBlockData(
         ProviderReplayFormat.GEMINI_CONTENT,
         descriptor.affinity(request.model().modelId()),
+        signature,
+        null,
+        null,
         nativeFields);
   }
 

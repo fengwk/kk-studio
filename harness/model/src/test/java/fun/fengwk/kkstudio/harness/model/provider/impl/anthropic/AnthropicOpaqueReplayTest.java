@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -124,12 +126,43 @@ class AnthropicOpaqueReplayTest {
     ProviderRequest nextRequest =
         request(
             List.of(
-                userMsg(), assistantMsg(List.of(new ProviderTextBlock("answer")), replayState)));
+                userMsg(),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT, completion.response().blocks())));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
     assertEquals(expectedNativeBlock, assistantContent.get(0));
     assertEquals("answer", assistantContent.get(1).path("text").asString(""));
+  }
+
+  /** 不同模型只保留可读 thinking 和普通文本，空/redacted thinking 与原生 opaque blocks 均不投影。 */
+  @Test
+  void crossModelDropsEmptyAndRedactedThinkingBlocks() throws IOException {
+    ProviderBlockData sourceData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "test-anthropic", "old-model"),
+            NODES.objectNode());
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("", sourceData),
+                new ProviderRedactedThinkingBlock("redacted", sourceData),
+                new ProviderThinkingBlock("readable thought", sourceData),
+                new ProviderOpaqueBlock("server_future", sourceData),
+                new ProviderTextBlock("answer", sourceData)));
+
+    JsonNode content =
+        wire(encoder.encode(request(List.of(userMsg(), assistant)), descriptor))
+            .path("messages")
+            .get(1)
+            .path("content");
+
+    assertEquals(2, content.size());
+    assertEquals("readable thought", content.get(0).path("text").asString(""));
+    assertEquals("answer", content.get(1).path("text").asString(""));
   }
 
   /**

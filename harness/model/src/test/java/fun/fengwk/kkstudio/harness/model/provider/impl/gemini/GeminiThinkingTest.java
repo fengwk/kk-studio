@@ -284,9 +284,7 @@ class GeminiThinkingTest {
         "sig_1",
         ((ProviderThinkingBlock) completion.response().blocks().get(0))
             .providerBlockData()
-            .nativeFields()
-            .path("thoughtSignature")
-            .asString(""));
+            .signature());
     assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(2)).text());
 
     List<String> thinkingDeltas =
