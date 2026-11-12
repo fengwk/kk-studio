@@ -77,6 +77,15 @@ func TestBuildEnvironmentConfigRejectsInvalidCandidateFields(t *testing.T) {
 	}
 }
 
+func TestEnvironmentConfigErrorAndNilClone(t *testing.T) {
+	if got := (&EnvironmentConfigError{Field: "studioUrl"}).Error(); got != "studioUrl is invalid" {
+		t.Fatalf("validation diagnostic = %q", got)
+	}
+	if cloneString(nil) != nil {
+		t.Fatal("nil optional string changed while cloning")
+	}
+}
+
 func TestBuildEnvironmentConfigRejectsVersionsOutsideSafeIntegerRange(t *testing.T) {
 	for _, version := range []int64{-1, maxEnvironmentConfigVersion + 1} {
 		if _, err := BuildEnvironmentConfig(DaemonConfig{}, version, validEnvironmentConfig()); err == nil {

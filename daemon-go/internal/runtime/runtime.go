@@ -59,32 +59,36 @@ type runningCall struct {
 
 // Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
 type Runtime struct {
-	options       RuntimeOptions
-	hostInfo      *protocol.HostInfo
-	gate          OutboundGate
-	journal       *InvocationJournal
-	status        *StatusTracker
-	mu            sync.RWMutex
-	connection    *activeConnection
-	generation    uint64
-	config        config.DaemonConfig
-	configProto   *protocol.DaemonConfiguration
-	bound         bool
-	ready         bool
-	sendMu        sync.Mutex
-	callsMu       sync.Mutex
-	calls         map[string]*runningCall
-	exitRequested map[string]bool
-	wg            sync.WaitGroup
-	runMu         sync.Mutex
-	running       bool
-	hasRun        bool
-	sendCtx       context.Context
-	updateOps     *update.Operations
-	updateMu      sync.Mutex
-	updateCancel  context.CancelFunc
-	updateWatch   func()
-	updatePermit  func() error
+	options                RuntimeOptions
+	hostInfo               *protocol.HostInfo
+	gate                   OutboundGate
+	journal                *InvocationJournal
+	status                 *StatusTracker
+	mu                     sync.RWMutex
+	connection             *activeConnection
+	generation             uint64
+	config                 config.DaemonConfig
+	configProto            *protocol.DaemonConfiguration
+	bound                  bool
+	ready                  bool
+	sendMu                 sync.Mutex
+	callsMu                sync.Mutex
+	calls                  map[string]*runningCall
+	exitRequested          map[string]bool
+	wg                     sync.WaitGroup
+	runMu                  sync.Mutex
+	running                bool
+	hasRun                 bool
+	sendCtx                context.Context
+	updateOps              *update.Operations
+	updateMu               sync.Mutex
+	updateCancel           context.CancelFunc
+	updateWatch            func()
+	updatePermit           func() error
+	admissionMu            sync.Mutex
+	admissionPaused        bool
+	configReconnectPending bool
+	candidateSuspension    *bool
 }
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
@@ -144,11 +148,42 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	}
 	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), updateOps: update.NewOperations()}
 	if options.EnvironmentConfig != nil {
-		options.EnvironmentConfig.AddSessionHooks(nil, nil, func(previous, next config.DaemonConfig) {
-			if previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL) {
-				runtime.dropActiveConnection()
-			}
-		})
+		options.EnvironmentConfig.AddSessionHooks(
+			func(previous, candidate config.DaemonConfig) {
+				if previous.GatewayURL == candidate.GatewayURL && sameOptionalString(previous.ProxyURL, candidate.ProxyURL) {
+					return
+				}
+				runtime.admissionMu.Lock()
+				if runtime.candidateSuspension == nil {
+					wasPaused := runtime.admissionPaused
+					runtime.candidateSuspension = &wasPaused
+				}
+				runtime.admissionPaused = true
+				runtime.admissionMu.Unlock()
+			},
+			func(previous, candidate config.DaemonConfig) {
+				if previous.GatewayURL == candidate.GatewayURL && sameOptionalString(previous.ProxyURL, candidate.ProxyURL) {
+					return
+				}
+				runtime.admissionMu.Lock()
+				if runtime.candidateSuspension != nil {
+					runtime.admissionPaused = *runtime.candidateSuspension
+					runtime.candidateSuspension = nil
+				}
+				runtime.admissionMu.Unlock()
+			},
+			func(previous, next config.DaemonConfig) {
+				reconnect := previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL)
+				runtime.admissionMu.Lock()
+				runtime.admissionPaused = reconnect
+				runtime.configReconnectPending = reconnect
+				runtime.candidateSuspension = nil
+				runtime.admissionMu.Unlock()
+				if reconnect {
+					runtime.dropActiveConnection()
+				}
+			},
+		)
 	}
 	return runtime, nil
 }
@@ -327,7 +362,7 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		}
 		return r.handleRecover(e)
 	case protocol.MessageType_UPDATE:
-		if !ready {
+		if !ready || e.EnvironmentId == nil || *e.EnvironmentId == "" {
 			return r.sendError(e.InvocationId, "UPDATE requires a READY bound connection")
 		}
 		return r.handleUpdate(ctx, e)
@@ -448,19 +483,24 @@ func (r *Runtime) handleUpdate(ctx context.Context, envelope *protocol.Envelope)
 	r.mu.RUnlock()
 	runner := r.options.Update
 	configured := runner != nil && runner.Configured()
+	r.admissionMu.Lock()
 	decision, err := r.updateOps.Decide(command, r.options.DaemonVersion, configured, r.updateBusyReason(runner))
 	if err != nil {
+		r.admissionMu.Unlock()
 		return err
 	}
 	switch decision.Action {
 	case update.ActionStatus:
+		r.admissionMu.Unlock()
 		return r.sendStatus()
 	case update.ActionReplayActive, update.ActionReplayCache:
+		r.admissionMu.Unlock()
 		resultErr := r.sendUpdateReceipt(*decision.Receipt)
 		statusErr := r.sendStatus()
 		releaseErr := r.releaseUpdatePermit()
 		return firstError(resultErr, statusErr, releaseErr)
 	case update.ActionReject:
+		r.admissionMu.Unlock()
 		return r.sendUpdateReceipt(*decision.Receipt)
 	case update.ActionAdmit:
 		updateCtx, cancel := context.WithCancel(ctx)
@@ -470,14 +510,17 @@ func (r *Runtime) handleUpdate(ctx context.Context, envelope *protocol.Envelope)
 		if err := r.status.BeginUpdate(command.TargetVersion); err != nil {
 			cancel()
 			failed, _ := r.updateOps.Complete(command.OperationID, update.PhaseFailed, "managed update failed")
+			r.admissionMu.Unlock()
 			return firstError(err, r.sendUpdateReceipt(failed))
 		}
+		r.admissionMu.Unlock()
 		statusErr := r.sendStatus()
 		acceptedErr := r.sendUpdateReceipt(*decision.Receipt)
 		r.wg.Add(1)
 		go r.executeUpdate(updateCtx, cancel, command, configuration)
 		return firstError(statusErr, acceptedErr)
 	default:
+		r.admissionMu.Unlock()
 		return errors.New("invalid update admission decision")
 	}
 }
@@ -505,7 +548,11 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 	}
 	if err := runner.StopForUpdate(ctx); err != nil {
 		if ctx.Err() == nil {
-			r.finishUpdate(command.OperationID, update.PhaseFailed, safeUpdateError(err))
+			message := "capability execution failed"
+			if !errors.Is(err, context.Canceled) && strings.TrimSpace(err.Error()) != "" {
+				message = safeUpdateError(err)
+			}
+			r.finishUpdate(command.OperationID, update.PhaseFailed, message)
 		}
 		return
 	}
@@ -522,9 +569,16 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 		return
 	}
 	if err != nil || outcome.Phase == update.PhaseFailed || outcome.Phase != update.PhasePrepared {
-		message := outcome.Message
-		if err != nil || message == "" {
+		message := "capability execution failed"
+		if err != nil {
 			message = safeUpdateError(err)
+		} else if outcome.Phase == update.PhaseFailed {
+			message = outcome.Message
+			if message == "" {
+				message = "managed update failed"
+			} else {
+				message = safeUpdateError(errors.New(message))
+			}
 		}
 		r.finishUpdate(command.OperationID, update.PhaseFailed, message)
 		return
@@ -535,17 +589,18 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 	}
 	var stopWatching func()
 	if outcome.WatchFailure != nil {
-		stopWatching = outcome.WatchFailure(func(string) {
-			r.failActiveUpdate(command.OperationID, "official installer failed; check local last-operation.json")
+		stopWatching = outcome.WatchFailure(func(message string) {
+			r.failActiveUpdate(command.OperationID, safeUpdateError(errors.New(message)))
 		})
 	}
+	r.updateMu.Lock()
 	if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
+		r.updateMu.Unlock()
 		if stopWatching != nil {
 			stopWatching()
 		}
 		return
 	}
-	r.updateMu.Lock()
 	r.updateCancel = nil
 	r.updatePermit = outcome.ReleasePermit
 	r.updateWatch = stopWatching
@@ -654,7 +709,12 @@ func firstError(errors ...error) error {
 	return nil
 }
 
-func safeUpdateError(error) string { return "managed update failed" }
+func safeUpdateError(err error) string {
+	if err == nil || strings.TrimSpace(err.Error()) == "" {
+		return "capability execution failed"
+	}
+	return err.Error()
+}
 
 func (r *Runtime) stopUpdateForShutdown() {
 	r.updateMu.Lock()
@@ -711,14 +771,25 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	if err := jsonv2.Unmarshal(arguments, &parsed); err != nil || parsed == nil {
 		return r.rejectCall(id, "arguments must be a JSON object")
 	}
+	r.admissionMu.Lock()
+	if r.admissionPaused {
+		r.admissionMu.Unlock()
+		return r.rejectCall(id, "environment configuration is switching; new work is not admitted")
+	}
+	if _, held := r.updateOps.Active(); held {
+		r.admissionMu.Unlock()
+		return r.rejectCall(id, "environment update admission is held")
+	}
 	r.callsMu.Lock()
 	if len(r.calls) >= r.options.MaxConcurrentInvocations {
 		r.callsMu.Unlock()
+		r.admissionMu.Unlock()
 		return r.rejectCall(id, "too many concurrent capability invocations")
 	}
 	millis := invoke.Invoke.GetTimeoutMillis()
 	if millis < 0 || millis > int64((time.Duration(1<<63-1))/time.Millisecond) {
 		r.callsMu.Unlock()
+		r.admissionMu.Unlock()
 		return r.rejectCall(id, "timeoutMillis must be a non-negative duration")
 	}
 	var callCtx context.Context
@@ -732,6 +803,7 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	r.calls[id] = active
 	r.wg.Add(1)
 	r.callsMu.Unlock()
+	r.admissionMu.Unlock()
 	if err := r.sendStarted(id, false); err != nil {
 		cancel()
 		r.callsMu.Lock()
@@ -999,6 +1071,11 @@ func (r *Runtime) sendReady() error {
 	if err := r.sendFrame(&protocol.Envelope{MessageType: protocol.MessageType_READY, EnvironmentId: stringPtr(r.options.EnvironmentID), Payload: &protocol.Envelope_Ready{Ready: &protocol.Ready{DaemonVersion: stringPtr(r.options.DaemonVersion), HostInfo: r.hostInfo, RuntimeStatus: r.runtimeSnapshot()}}}); err != nil {
 		return err
 	}
+	r.admissionMu.Lock()
+	r.admissionPaused = false
+	r.configReconnectPending = false
+	r.candidateSuspension = nil
+	r.admissionMu.Unlock()
 	return r.resendUpdateReceipt()
 }
 func (r *Runtime) sendStatus() error {

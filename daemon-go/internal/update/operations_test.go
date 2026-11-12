@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// RUN-T-124 admits one configured update when no protected work is active.
+// Unit coverage verifies that an eligible command is admitted.
 func TestOperationsAdmitUpdate(t *testing.T) {
 	operations := NewOperations()
 	decision, err := operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
@@ -13,7 +13,7 @@ func TestOperationsAdmitUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-125 rejects an update when a protected execution blocks admission.
+// Unit coverage verifies that a protected execution blocks update admission.
 func TestOperationsRejectBusyUpdate(t *testing.T) {
 	operations := NewOperations()
 	decision, err := operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "protected execution is still running")
@@ -22,7 +22,7 @@ func TestOperationsRejectBusyUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-126 replays accepted and prepared facts without starting a second runner.
+// RUN-T-128 replays an active command and holds admission until a terminal failure.
 func TestOperationsReplayActiveAndPreparedReceipts(t *testing.T) {
 	operations := NewOperations()
 	command := Command{OperationID: "op-1", TargetVersion: "2.0.0"}
@@ -43,7 +43,7 @@ func TestOperationsReplayActiveAndPreparedReceipts(t *testing.T) {
 	}
 }
 
-// RUN-T-127 returns the active failure receipt after the runner reports a post-PREPARED failure.
+// Unit coverage verifies that a post-PREPARED failure releases the active operation.
 func TestOperationsFailPreparedActiveUpdate(t *testing.T) {
 	operations := NewOperations()
 	_, _ = operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
@@ -71,7 +71,7 @@ func TestOperationsRejectDriftAndConcurrentTarget(t *testing.T) {
 	}
 }
 
-// RUN-T-129 caches at most eight receipts, evicting the oldest insertion.
+// RUN-T-131 caches at most eight receipts, evicting the oldest insertion.
 func TestOperationsBoundReceiptCache(t *testing.T) {
 	operations := NewOperations()
 	for index := 0; index < 9; index++ {
@@ -91,7 +91,7 @@ func TestOperationsBoundReceiptCache(t *testing.T) {
 	}
 }
 
-// RUN-T-130 redelivers the active operation before completed cached receipts.
+// RUN-T-132 redelivers the active operation before completed cached receipts.
 func TestOperationsResendActiveBeforeCached(t *testing.T) {
 	operations := NewOperations()
 	_, _ = operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
@@ -112,7 +112,38 @@ func TestOperationsResendActiveBeforeCached(t *testing.T) {
 	}
 }
 
-// RUN-T-131 returns command drift errors for cached results as well as active work.
+// ValidateCommand enforces the operation ID and release version formats at the wire boundary.
+func TestValidateCommandMatchesWireContract(t *testing.T) {
+	valid := Command{OperationID: "123e4567-e89b-42d3-a456-426614174000", TargetVersion: "1.0.0-rc.1+build"}
+	if err := ValidateCommand(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []Command{
+		{OperationID: "123E4567-e89b-42d3-a456-426614174000", TargetVersion: "1.0.0"},
+		{OperationID: "123e4567-e89b-42d3-a456-426614174000", TargetVersion: "../1"},
+		{OperationID: "123e4567-e89b-42d3-a456-426614174000", TargetVersion: ""},
+	} {
+		if err := ValidateCommand(command); err == nil {
+			t.Fatalf("accepted invalid update command: %+v", command)
+		}
+	}
+}
+
+func TestOperationsCompleteRejectsUnknownPhaseAndAbsentOperation(t *testing.T) {
+	operations := NewOperations()
+	if _, ok := operations.Complete("missing", PhasePrepared, ""); ok {
+		t.Fatal("completed an operation that was never admitted")
+	}
+	_, _ = operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
+	if _, ok := operations.Complete("op-1", PhaseAccepted, ""); ok {
+		t.Fatal("accepted a non-terminal completion phase")
+	}
+	if _, ok := operations.Active(); !ok {
+		t.Fatal("invalid completion phase released the operation")
+	}
+}
+
+// RUN-T-129 returns command drift errors for cached results as well as active work.
 func TestOperationsRejectCachedArgumentDrift(t *testing.T) {
 	operations := NewOperations()
 	command := Command{OperationID: "op-1", TargetVersion: "2.0.0"}
