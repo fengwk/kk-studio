@@ -213,7 +213,7 @@ func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 
 // COD-T-097 is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
 
-// COD-N-018
+// COD-N-021
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	if staleWriteReviewMessage != "File changed since review; nothing was written. Review a new change before approving it." {
 		t.Fatalf("stale review message=%q", staleWriteReviewMessage)
@@ -242,7 +242,7 @@ func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	}
 }
 
-// COD-N-018
+// COD-N-021
 func TestWriteApprovalPreviewNewTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	result := invokeCoding(t, Provider{}, "fs.write.preview", map[string]any{"path": path, "content": "new file\n"}, nil)
