@@ -88,6 +88,13 @@ func TestSkillInstallPropagatesTicketDownloadAndArchiveFailures(t *testing.T) {
 			if _, err := os.Stat(expectedTarget(root, tc.data)); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("installation target exists after failure: %v", err)
 			}
+			staging, err := filepath.Glob(filepath.Join(root, "skills", "demo", "1.0.0", ".staging-*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(staging) != 0 {
+				t.Fatalf("staging temporary directory leaked after failure: %v", staging)
+			}
 		})
 	}
 }
