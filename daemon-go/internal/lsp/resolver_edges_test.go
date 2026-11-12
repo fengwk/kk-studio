@@ -21,6 +21,20 @@ func TestResolver_ExpandHomePrefixes(t *testing.T) {
 			t.Errorf("expand(%q) = %q, want %q", tc.input, got, tc.want)
 		}
 	}
+	if runtime.GOOS != "windows" {
+		tool := filepath.Join(home, "bin", "tool")
+		if err := os.MkdirAll(filepath.Dir(tool), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(tool, []byte("x"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, command := range []string{"~/bin/tool", "$HOME/bin/tool", "${HOME}/bin/tool"} {
+			if got, ok := resolver.Resolve(command); !ok || got == "" {
+				t.Errorf("Resolve(%q) = %q, %v", command, got, ok)
+			}
+		}
+	}
 }
 
 // LSP-T-111 and LSP-T-035 cover PATH empty elements and ordered POSIX search.
