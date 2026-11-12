@@ -2,6 +2,7 @@ package search
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -15,13 +16,33 @@ var foldedBuffers = sync.Pool{New: func() any { buffer := make([]byte, 0, 256*10
 
 // readPooled performs one open and reuses the per-worker whole-file buffer.
 func readPooled(path string) ([]byte, func(), error) {
+	data, release, _, err := readPooledContext(context.Background(), path)
+	return data, release, err
+}
+
+func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, error) {
 	buf := (*fileBuffers.Get().(*[]byte))[:0]
 	f, err := os.Open(path)
 	if err != nil {
 		fileBuffers.Put(&buf)
-		return nil, func() {}, err
+		return nil, func() {}, false, err
+	}
+	released := false
+	release := func() {
+		if !released {
+			releaseBuffer(buf)
+			released = true
+		}
 	}
 	for {
+		if contextErr := ctx.Err(); contextErr != nil {
+			closeErr := f.Close()
+			if contextErr == context.DeadlineExceeded {
+				return buf, release, true, closeErr
+			}
+			release()
+			return nil, func() {}, false, contextErr
+		}
 		if len(buf) == cap(buf) {
 			next := cap(buf) * 2
 			if next < 64*1024 {
@@ -38,25 +59,18 @@ func readPooled(path string) ([]byte, func(), error) {
 		}
 		if readErr != nil {
 			_ = f.Close()
-			releaseBuffer(buf)
-			return nil, func() {}, readErr
+			release()
+			return nil, func() {}, false, readErr
 		}
 		if n == 0 {
 			break
 		}
 	}
 	if err := f.Close(); err != nil {
-		releaseBuffer(buf)
-		return nil, func() {}, err
+		release()
+		return nil, func() {}, false, err
 	}
-	released := false
-	release := func() {
-		if !released {
-			releaseBuffer(buf)
-			released = true
-		}
-	}
-	return buf, release, nil
+	return buf, release, false, nil
 }
 
 func releaseBuffer(buf []byte) {

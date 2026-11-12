@@ -17,6 +17,12 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
+const (
+	defaultFindLimit = 1000
+	defaultGrepLimit = 100
+	maxSearchLimit   = 100000
+)
+
 type arguments struct {
 	OldString    string `json:"old_string"`
 	NewString    string `json:"new_string"`
@@ -63,14 +69,19 @@ func limitOutput(handler runtime.CapabilityExecutor) runtime.CapabilityExecutor 
 		}
 		var size int64
 		for _, content := range result.Contents {
+			contentSize := int64(0)
 			switch content.Type {
 			case "text":
-				size += int64(len(content.Text))
+				contentSize = int64(len(content.Text))
 			case "json":
-				size += int64(len(content.JSON))
+				contentSize = int64(len(content.JSON))
 			case "binary":
-				size += int64(len(content.Bytes))
+				contentSize = int64(len(content.Bytes))
 			}
+			if content.Size > contentSize {
+				contentSize = content.Size
+			}
+			size += contentSize
 		}
 		if size > call.MaxOutputBytes {
 			message := fmt.Sprintf("Tool output is %s MiB, which exceeds the tool output size limit of %d MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings.", formatMiB(size, call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
@@ -146,6 +157,14 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	if err := ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
+	}
+	if capability.Config.DataDir != "" {
+		store, err := TextOutputStoreForDataDir(capability.Config.DataDir)
+		if err != nil {
+			return errorResult(call.InvocationID, err), nil
+		}
+		release := store.Acquire(args.Path)
+		defer release()
 	}
 	info, err := os.Stat(args.Path)
 	if err != nil {
@@ -293,40 +312,111 @@ func previewWriteCapability(ctx context.Context, call runtime.CapabilityCall, _ 
 	return runtime.CapabilityResult{CallID: call.InvocationID, Details: json.RawMessage(`{}`), Contents: []runtime.ResultContent{{Type: "json", JSON: mustJSON(review)}}}, nil
 }
 
-func findCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+func findCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	paths, err := search.Find(args.Path, args.Pattern, args.Limit)
+	if args.Limit == 0 {
+		args.Limit = defaultFindLimit
+	}
+	if args.Limit < 0 || args.Limit > maxSearchLimit {
+		return errorResult(call.InvocationID, errors.New("limit must be between 1 and 100000")), nil
+	}
+	outcome, err := search.FindContext(ctx, args.Path, args.Pattern, args.Limit)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		result := errorResult(call.InvocationID, err)
+		if errors.Is(err, context.Canceled) {
+			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
+			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+		}
+		return result, nil
 	}
-	if err = ctx.Err(); err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if len(paths) == 0 {
-		return textResult(call.InvocationID, "No files found matching pattern"), nil
-	}
-	return textResult(call.InvocationID, strings.Join(paths, "\n")), nil
+	return formatSearchResult(call, capability.Config.DataDir, outcome, args.Limit, "No files found matching pattern", "results"), nil
 }
 
-func grepCapability(ctx context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	matches, err := search.Grep(args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
+	if args.Limit == 0 {
+		args.Limit = defaultGrepLimit
+	}
+	if args.Limit < 0 || args.Limit > maxSearchLimit {
+		return errorResult(call.InvocationID, errors.New("limit must be between 1 and 100000")), nil
+	}
+	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		result := errorResult(call.InvocationID, err)
+		if errors.Is(err, context.Canceled) {
+			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
+			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+		}
+		return result, nil
 	}
-	if err = ctx.Err(); err != nil {
-		return errorResult(call.InvocationID, err), nil
+	return formatSearchResult(call, capability.Config.DataDir, outcome, args.Limit, "No matches found", "matches"), nil
+}
+
+func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) runtime.CapabilityResult {
+	if len(outcome.Results) == 0 && !outcome.Incomplete && !outcome.LimitReached {
+		return textResult(call.InvocationID, emptyText)
 	}
-	if len(matches) == 0 {
-		return textResult(call.InvocationID, "No matches found"), nil
+	text := strings.Join(outcome.Results, "\n")
+	if outcome.LimitReached {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += fmt.Sprintf("[%d %s limit reached. Refine the pattern or raise limit.]", limit, limitUnit)
 	}
-	return textResult(call.InvocationID, strings.Join(matches, "\n")), nil
+	if outcome.StopReason == "TIMED_OUT" {
+		if text != "" {
+			text += "\n\n"
+		}
+		seconds := strconv.FormatFloat(float64(call.TimeoutMillis)/1000, 'f', -1, 64)
+		text += "[Search timed out after " + seconds + "s; results are incomplete. Narrow the path or pattern, or raise timeout_seconds.]"
+	}
+	result := textResult(call.InvocationID, text)
+	if exceedsInlineOutput(text) {
+		store, err := TextOutputStoreForDataDir(dataDir)
+		if err != nil {
+			return errorResult(call.InvocationID, err)
+		}
+		spool, err := NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
+		if err != nil {
+			return errorResult(call.InvocationID, err)
+		}
+		spool.Write([]byte(text))
+		result = spool.Finish(false, "")
+		_ = spool.Close()
+	}
+	if outcome.StopReason == "TIMED_OUT" {
+		var details map[string]any
+		if err := json.Unmarshal(result.Details, &details); err != nil {
+			details = make(map[string]any)
+		}
+		details["search"] = map[string]any{"outcome": "TIMED_OUT", "incomplete": true}
+		result.Details = mustJSON(details)
+	}
+	return result
+}
+
+func exceedsInlineOutput(text string) bool {
+	if len(text) > inlineOutputBytes {
+		return true
+	}
+	var breaks int64
+	var last byte
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\r' || text[i] == '\n' && last != '\r' {
+			breaks++
+		}
+		last = text[i]
+	}
+	if len(text) > 0 && last != '\r' && last != '\n' {
+		breaks++
+	}
+	return breaks > inlineOutputLines
 }
 
 func processCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {

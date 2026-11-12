@@ -4,6 +4,7 @@ package search
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,9 +21,33 @@ import (
 	"github.com/charlievieth/fastwalk"
 )
 
+// SearchOutcome contains deterministic results and the reason an incomplete scan stopped.
+type SearchOutcome struct {
+	Results      []string
+	Incomplete   bool
+	StopReason   string
+	LimitReached bool
+}
+
 // Find returns paths relative to root, ordered like rg --sort path.
 func Find(root, glob string, limit int) ([]string, error) {
-	return findWith(root, glob, limit, min(runtime.NumCPU(), 8))
+	outcome, err := FindContext(context.Background(), root, glob, limit)
+	return outcome.Results, err
+}
+
+// FindContext returns available paths when a deadline expires and a cancellation error when canceled.
+func FindContext(ctx context.Context, root, glob string, limit int) (SearchOutcome, error) {
+	files, timedOut, limitReached, err := findWithContext(ctx, root, glob, limit, min(runtime.NumCPU(), 8))
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	outcome := SearchOutcome{Results: files, LimitReached: limitReached, Incomplete: timedOut}
+	if timedOut {
+		outcome.StopReason = "TIMED_OUT"
+	} else if limitReached {
+		outcome.StopReason = "LIMIT"
+	}
+	return outcome, nil
 }
 
 // Grep returns path:line:content records. literal controls fixed-string mode.
@@ -73,29 +98,125 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 	return flat, nil
 }
 
-func findWith(root, glob string, limit, workers int) ([]string, error) {
+// GrepContext processes files in sorted order and never opens a later file after reaching limit.
+func GrepContext(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int) (SearchOutcome, error) {
+	return grepContextWithReader(ctx, root, pattern, literal, ignoreCase, glob, limit, readPooledContext)
+}
+
+func grepContextWithReader(ctx context.Context, root, pattern string, literal, ignoreCase bool, glob string, limit int, read func(context.Context, string) ([]byte, func(), bool, error)) (SearchOutcome, error) {
 	if limit < 0 {
-		return nil, errors.New("limit cannot be negative")
+		return SearchOutcome{}, errors.New("limit cannot be negative")
+	}
+	files, timedOut, _, err := findWithContext(ctx, root, glob, 0, min(runtime.NumCPU(), 8))
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	var re *regexp.Regexp
+	var required []byte
+	caseFoldRegex := literal && ignoreCase && !ascii(pattern)
+	if !literal || caseFoldRegex {
+		body := pattern
+		if literal {
+			body = regexp.QuoteMeta(pattern)
+		}
+		flags := "(?m)"
+		if ignoreCase {
+			flags = "(?im)"
+		}
+		re, err = regexp.Compile(flags + "(?:" + body + ")")
+		if err != nil {
+			return SearchOutcome{}, fmt.Errorf("invalid regex: %w", err)
+		}
+		if !ignoreCase && !literal {
+			required = requiredLiteralPattern(pattern)
+		}
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	outcome := SearchOutcome{Incomplete: timedOut}
+	if timedOut {
+		outcome.StopReason = "TIMED_OUT"
+	}
+	for _, rel := range files {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if errors.Is(ctxErr, context.DeadlineExceeded) {
+				outcome.Incomplete = true
+				outcome.StopReason = "TIMED_OUT"
+				break
+			}
+			return outcome, ctxErr
+		}
+		data, release, readTimedOut, readErr := read(ctx, filepath.Join(absoluteRoot, filepath.FromSlash(rel)))
+		if readErr != nil {
+			if errors.Is(readErr, context.Canceled) {
+				return outcome, readErr
+			}
+			continue
+		}
+		matches := grepFile(data, filepath.ToSlash(rel), pattern, literal, ignoreCase, re, required)
+		release()
+		if limit > 0 && len(matches) > limit-len(outcome.Results) {
+			matches = matches[:limit-len(outcome.Results)]
+			outcome.Results = append(outcome.Results, matches...)
+			outcome.LimitReached = true
+			if !readTimedOut {
+				outcome.StopReason = "LIMIT"
+			}
+			break
+		}
+		outcome.Results = append(outcome.Results, matches...)
+		if readTimedOut {
+			outcome.Incomplete = true
+			outcome.StopReason = "TIMED_OUT"
+			break
+		}
+		if limit > 0 && len(outcome.Results) >= limit {
+			outcome.LimitReached = true
+			if outcome.StopReason == "" {
+				outcome.StopReason = "LIMIT"
+			}
+			break
+		}
+	}
+	return outcome, nil
+}
+
+func findWith(root, glob string, limit, workers int) ([]string, error) {
+	files, _, _, err := findWithContext(context.Background(), root, glob, limit, workers)
+	return files, err
+}
+
+func findWithContext(ctx context.Context, root, glob string, limit, workers int) ([]string, bool, bool, error) {
+	if limit < 0 {
+		return nil, false, false, errors.New("limit cannot be negative")
+	}
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, true, false, nil
+		}
+		return nil, false, false, err
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	if !info.IsDir() {
-		return nil, errors.New("root is not a directory")
+		return nil, false, false, errors.New("root is not a directory")
 	}
 	if glob != "" {
 		if _, err = doublestar.Match(glob, "probe"); err != nil {
-			return nil, fmt.Errorf("invalid glob: %w", err)
+			return nil, false, false, fmt.Errorf("invalid glob: %w", err)
 		}
 	}
 	matcher, err := newIgnoreMatcher(abs)
 	if err != nil {
-		return nil, err
+		return nil, false, false, err
 	}
 	// An explicitly selected ignored directory is the search boundary, not an ignored descendant.
 	if matcher.Ignored(abs, true) {
@@ -107,6 +228,9 @@ func findWith(root, glob string, limit, workers int) ([]string, error) {
 	var files []string
 	var filesMu sync.Mutex
 	err = fastwalk.Walk(&fastwalk.Config{NumWorkers: workers, ToSlash: true}, abs, func(path string, d fs.DirEntry, walkErr error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if walkErr != nil || d == nil {
 			return nil
 		}
@@ -144,14 +268,19 @@ func findWith(root, glob string, limit, workers int) ([]string, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, false, false, context.Canceled
+	}
+	if err != nil && !timedOut {
+		return nil, false, false, err
 	}
 	sort.Slice(files, func(i, j int) bool { return pathLess(files[i], files[j]) })
-	if limit > 0 && len(files) > limit {
+	limitReached := limit > 0 && len(files) > limit
+	if limitReached {
 		files = files[:limit]
 	}
-	return files, nil
+	return files, timedOut, limitReached, nil
 }
 
 func globMatch(pattern, rel string) bool {
