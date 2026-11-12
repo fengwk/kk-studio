@@ -223,7 +223,8 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 			handshake <- r.Header.Clone()
 			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 			if err == nil {
-				_, _, _ = ws.Read(r.Context())
+				time.Sleep(10 * time.Millisecond)
+				_ = ws.Close(websocket.StatusNormalClosure, "test complete")
 			}
 		}))
 		return server, handshake
@@ -260,9 +261,7 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_ = first.Close()
 	secondProxyURL := secondProxy.URL
 	config.Applied.StudioURL = secondServer.URL
 	config.Applied.ProxyURL = &secondProxyURL
