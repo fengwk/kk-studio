@@ -4,10 +4,10 @@ import {
   resolvePreferredVariant,
   trimValue,
   variantOptionsFromDraft,
-  variantOptionsFromModel,
 } from '@/features/catalog/ai-draft-variant-options'
+import { variantOptionsFromModel } from '@/shared/lib/model-variant-options'
 
-export { variantOptionsFromDraft, variantOptionsFromModel } from '@/features/catalog/ai-draft-variant-options'
+export { variantOptionsFromDraft } from '@/features/catalog/ai-draft-variant-options'
 
 export function normalizeModelDraftDefaultVariant(draft: ModelDraft): ModelDraft {
   const defaultVariant = resolvePreferredVariant(

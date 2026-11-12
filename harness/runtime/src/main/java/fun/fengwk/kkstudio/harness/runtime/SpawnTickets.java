@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
@@ -43,7 +44,7 @@ final class SpawnTickets {
           tx.threads()
               .find(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
-      if (ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
+      if (countsAsSubagent(ticket.delivery())) {
         // 停止父 Thread 不再接受新的执行子任务：不能只依赖 head 变化，STOPPED 是持久的拒绝条件。
         if (parent.executionControl().isStopped()) {
           throw new IllegalArgumentException("join parent is stopped");
@@ -52,13 +53,13 @@ final class SpawnTickets {
           throw new IllegalArgumentException("join parent no longer accepts this invocation");
         }
       }
-      if (ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
+      if (countsAsSubagent(ticket.delivery())) {
         int projectedChildren =
             tx.joins().countIncompleteChildren(parentId)
                 - replacedQuotaJoins(tx, childId, parentId)
                 + 1;
         if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
-          throw new IllegalArgumentException("parent join quota exceeded");
+          throw new SpawnQuotaExceededException("parent join quota exceeded");
         }
       }
     }
@@ -68,11 +69,11 @@ final class SpawnTickets {
     if (depth > ticket.budget().maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    if (parentId != null && ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
+    if (parentId != null && countsAsSubagent(ticket.delivery())) {
       int projectedGlobal =
           tx.joins().countIncompleteSubagent() - replacedQuotaJoins(tx, childId, parentId) + 1;
       if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
-        throw new IllegalArgumentException("subagent concurrency quota exceeded");
+        throw new SpawnQuotaExceededException("subagent concurrency quota exceeded");
       }
     }
   }
@@ -84,8 +85,12 @@ final class SpawnTickets {
             .filter(
                 pending ->
                     parentId.equals(pending.parentThreadId())
-                        && pending.delivery() == JoinDelivery.NOTIFY_PARENT)
+                        && countsAsSubagent(pending.delivery()))
             .count();
+  }
+
+  private static boolean countsAsSubagent(JoinDelivery delivery) {
+    return delivery == JoinDelivery.NOTIFY_PARENT || delivery == JoinDelivery.SETTLE_TOOL_RESULT;
   }
 
   /** 把票据登记到刚接受的源命令上；{@code ticket} 为空时原样返回。 */

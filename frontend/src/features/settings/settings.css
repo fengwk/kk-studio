@@ -15,6 +15,12 @@
   letter-spacing: -0.02em;
 }
 
+.settings-subtitle {
+  margin: -12px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
+}
+
 .settings-card {
   position: relative;
   background:
@@ -117,38 +123,6 @@
   gap: 18px;
 }
 
-.settings-card-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-apply-timing {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: var(--font-size-xs);
-  font-weight: 550;
-  line-height: 1.4;
-  border-radius: var(--radius-pill);
-  white-space: nowrap;
-}
-
-.settings-apply-timing[data-timing='nextInvocation'],
-.settings-apply-timing[data-timing='nextHttpRequest'] {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-}
-
-.settings-apply-timing[data-timing='restart'] {
-  color: var(--warning);
-  background: var(--warning-soft);
-  border: 1px solid var(--warning-border);
-}
-
 .ui-panel.settings-toolbar {
   gap: 10px;
   padding: var(--space-3) 14px;
@@ -205,6 +179,12 @@
   font-size: var(--font-size-xs);
   line-height: 1.5;
   color: var(--fg-muted);
+}
+
+.settings-field-error {
+  color: var(--danger);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
 }
 
 .settings-input {

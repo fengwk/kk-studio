@@ -917,6 +917,11 @@ export const chatCatalog = {
   'ai.runtime.tool.running': { 'en-US': 'Running', 'zh-CN': '执行中' },
   'ai.runtime.tool.succeeded': { 'en-US': 'Succeeded', 'zh-CN': '成功' },
   'ai.runtime.tool.accepted': { 'en-US': 'Delegation accepted', 'zh-CN': '委派已受理' },
+  'ai.runtime.tool.task.accepted': { 'en-US': 'Accepted', 'zh-CN': '已受理' },
+  'ai.runtime.tool.task.running': { 'en-US': 'Subagent running', 'zh-CN': '子代理运行中' },
+  'ai.runtime.tool.task.completed': { 'en-US': 'Completed', 'zh-CN': '已完成' },
+  'ai.runtime.tool.task.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
+  'ai.runtime.tool.task.cancelled': { 'en-US': 'Cancelled', 'zh-CN': '已取消' },
   'ai.runtime.tool.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
   'ai.runtime.tool.cancelled': { 'en-US': 'Stopped', 'zh-CN': '已停止' },
   'ai.runtime.tool.unknown': { 'en-US': 'Execution outcome unknown', 'zh-CN': '执行结果未知' },
@@ -2103,6 +2108,22 @@ export const chatCatalog = {
     'en-US': 'Reason',
     'zh-CN': '审批原因',
   },
+  'ai.interaction.denyReason': {
+    'en-US': 'Reason for denial (optional)',
+    'zh-CN': '拒绝原因（可选）',
+  },
+  'ai.interaction.denyReasonOptional': {
+    'en-US': 'Enter a reason, if you want',
+    'zh-CN': '可填写拒绝原因',
+  },
+  'ai.interaction.session': {
+    'en-US': 'Session',
+    'zh-CN': '会话',
+  },
+  'ai.interaction.unreadableArguments': {
+    'en-US': 'Tool parameters could not be read.',
+    'zh-CN': '无法读取工具参数。',
+  },
   'ai.interaction.environmentWaitingCount': {
     'en-US': '{{count}} tool calls waiting for {{environmentName}}',
     'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
@@ -2110,6 +2131,18 @@ export const chatCatalog = {
   'ai.resource.unsupported': {
     'en-US': 'Skill resources are not available yet',
     'zh-CN': '技能资源暂不可用',
+  },
+  'ai.interaction.queuedSameFile.one': {
+    'en-US': '1 more change to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 1 个修改将依次请求审批',
+  },
+  'ai.interaction.queuedSameFile.other': {
+    'en-US': '{{count}} more changes to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 {{count}} 个修改将依次请求审批',
+  },
+  'ai.runtime.tool.waitingForPreviousFileChange': {
+    'en-US': 'Waiting for the earlier change to this file',
+    'zh-CN': '等待前一个对此文件的修改',
   },
   'ai.resource.unavailable': {
     'en-US': 'Resource is unavailable in this session',

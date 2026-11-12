@@ -16,6 +16,8 @@ import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
@@ -60,13 +62,30 @@ public class HarnessThreadController {
   }
 
   /**
-   * 查询目标 Thread 所属执行树：任意节点返回同一真实根下的完整节点列表。
+   * 查询目标 Thread 所属执行树中的普通用户根节点；子代理通过独立的 subagents 端点读取。
    *
    * <p>纯查询，不创建 Command / Entry / Work，也不触碰 version。可见性与 Thread 快照相同。
    */
   @GetMapping("/{threadId}/tree")
   public List<HarnessThreadTreeNodeDTO> getTree(@PathVariable UUID threadId) {
-    return HarnessRuntimeResponseMapper.toThreadTreeDtos(runtime.getThreadTree(threadId));
+    return HarnessRuntimeResponseMapper.toThreadTreeDtos(
+        runtime.getThreadTree(threadId).stream()
+            .filter(node -> node.thread().kind() == ThreadKind.USER)
+            .toList());
+  }
+
+  /** 查询父 Thread 的直接 SUBAGENT 子线程。 */
+  @GetMapping("/{threadId}/subagents")
+  public List<HarnessThreadTreeNodeDTO> getSubagents(@PathVariable UUID threadId) {
+    List<UUID> subagentIds =
+        runtime.listSubagentsByParent(threadId).stream().map(ThreadState::id).toList();
+    if (subagentIds.isEmpty()) {
+      return List.of();
+    }
+    return HarnessRuntimeResponseMapper.toThreadTreeDtos(
+        runtime.getThreadTree(threadId).stream()
+            .filter(node -> subagentIds.contains(node.thread().id()))
+            .toList());
   }
 
   /**

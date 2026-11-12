@@ -24,9 +24,9 @@ import java.util.UUID;
 /**
  * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，再用同一张票据观察、停止与读取结果。
  *
- * <p>提交委托运行时的统一创建原语 {@link HarnessRuntime#spawn}，并加入调用方已有的事务（Issue 在自己的产品事务内提交）。有父 Thread 的任务以
- * {@code NOTIFY_PARENT} 通知父 Thread 并计入并发额度，无父任务以 {@code RECEIPT_ONLY}
- * 只留回执；任务没有额外的创建约束。观察只投影票据已冻结的结果，绝不据子 Thread 当前 head 推测。
+ * <p>提交委托运行时的统一创建原语 {@link HarnessRuntime#spawn}，并加入调用方已有的事务（Issue 在自己的产品事务内提交）。有父 Thread 的任务根据内部
+ * {@code async} 选择通知交付或同步工具结果交付，并计入并发额度；无父任务以 {@code RECEIPT_ONLY} 只留回执。观察只投影票据已冻结的结果，绝不据子 Thread
+ * 当前 head 推测。
  *
  * <p>运行时以 {@link ObjectProvider} 惰性解析：只装配 Platform 的上下文不会因缺少运行时而启动失败，真正使用时确定失败。
  */
@@ -59,12 +59,16 @@ public class AgentTaskService {
                 request.settings(),
                 request.commands(),
                 request.parentThreadId(),
-                request.expectedParentHeadEntryId(),
+                child ? request.expectedParentHeadEntryId() : null,
                 request.continuation(),
                 request.yoloEnabled(),
                 ThreadConstraints.NONE,
-                request.trigger(),
-                child ? JoinDelivery.NOTIFY_PARENT : JoinDelivery.RECEIPT_ONLY,
+                request.kind(),
+                child
+                    ? (request.async()
+                        ? JoinDelivery.NOTIFY_PARENT
+                        : JoinDelivery.SETTLE_TOOL_RESULT)
+                    : JoinDelivery.RECEIPT_ONLY,
                 request.budget(),
                 request.ticketId(),
                 request.requestHash()),

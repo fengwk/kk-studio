@@ -156,6 +156,7 @@ public class HarnessOwnerQueryService {
     ThreadState thread = snapshot.thread();
     HarnessThreadSummaryDTO dto = new HarnessThreadSummaryDTO();
     dto.setThreadId(thread.id().toString());
+    dto.setKind(thread.kind());
     dto.setParentThreadId(
         thread.parentThreadId() == null ? null : thread.parentThreadId().toString());
     dto.setName(thread.name());

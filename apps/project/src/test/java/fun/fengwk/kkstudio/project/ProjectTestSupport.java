@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -278,12 +279,19 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     UUID parentEntryId = headEntry(threadId);
     UUID entryId = UUID.randomUUID();
     Timestamp now = Timestamp.from(Instant.now());
+    MessagePayload payload =
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
+            new AssistantMessageMetadata(
+                GenerationStopReason.COMPLETE, new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L)),
+            null);
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
-            + " created_at) values (?, ?, ?, 'MESSAGE', '{}'::jsonb, ?)",
+            + " created_at) values (?, ?, ?, 'MESSAGE', ?::jsonb, ?)",
         entryId,
         sessionId,
         parentEntryId,
+        HarnessRuntimeTestConfiguration.ENTRY_CODEC.encode(payload),
         now);
     jdbc.update(
         "update harness_thread set head_entry_id = ?, updated_at = ? where id = ?",
@@ -392,6 +400,12 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
     private static final HistoryEntryPayloadJsonCodec ENTRY_CODEC =
         new HistoryEntryPayloadJsonCodec();
+
+    private static String rootPayload() {
+      return ENTRY_CODEC.encode(
+          new RootPayload(
+              new BranchSettings("assistant", new ExecutionSelection("builtin", "{}"), null)));
+    }
 
     /**
      * 受控 Harness 存储假件：只实现归属校验读取（Session / Thread 解析），事实直接来自真实 Harness 行。
@@ -689,13 +703,14 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
-                + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
+                + " created_at) values (?, ?, null, 'ROOT', ?::jsonb, ?)",
             rootEntryId,
             sessionId,
+            rootPayload(),
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, root_thread_id, yolo_enabled, spawn_trigger, constraints,"
+                + " name, root_thread_id, yolo_enabled, kind, constraints,"
                 + " execution_control, input_through_sequence,"
                 + " next_command_sequence, version, created_at, updated_at)"
                 + " values (?, ?, ?, ?, ?, ?, ?, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
@@ -751,13 +766,14 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           now);
       jdbc.update(
           "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
-              + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
+              + " created_at) values (?, ?, null, 'ROOT', ?::jsonb, ?)",
           rootEntryId,
           sessionId,
+          rootPayload(),
           now);
       jdbc.update(
           "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-              + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger,"
+              + " creation_request_hash, name, root_thread_id, yolo_enabled, kind,"
               + " constraints, execution_control, input_through_sequence, next_command_sequence,"
               + " version, created_at, updated_at)"
               + " values (?, ?, ?, ?, ?, ?, ?, false, ?, '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
@@ -768,7 +784,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           "0".repeat(64),
           "thread-" + threadId,
           rootThreadId,
-          request.trigger().name(),
+          request.kind().name(),
           request.commands().size() + 1L,
           now,
           now);

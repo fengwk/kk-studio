@@ -6,10 +6,7 @@ import {
   setDraftValue,
   settingsSectionsToDraft,
 } from '@/features/settings/system-settings-draft'
-import {
-  DEFAULT_MAX_RESOURCE_BYTES,
-  makeSettingsDto,
-} from '@/test-support/settings-test-fixtures'
+import { makeSettingsDto } from '@/test-support/settings-test-fixtures'
 
 describe('system settings draft codec', () => {
   // 默认关闭和清空代理都必须明确发送 null；绕过列表保留为字符串，不能产生模块覆盖。
@@ -40,7 +37,7 @@ describe('system settings draft codec', () => {
       { tool: 'edit', rules: [{ pattern: '*', action: 'ask' }] },
       { tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] },
     ])
-    expect(draft.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
+    expect(draft.tool.maxOutputMib).toBe('16')
     expect(draft.aiRuntime.retryMaxRetries).toBe('3')
     expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('0')
     expect(draft.storageMedia.thumbnailQuality).toBe('80')
@@ -58,7 +55,7 @@ describe('system settings draft codec', () => {
     expect(update.aiRuntime.retryMaxRetries).toBe(5)
     expect(update.aiRuntime.subagentMaxTotalConcurrency).toBe(12)
     expect(update.aiRuntime.retryMaxDelayMillis).toBe('60000')
-    expect(update.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
+    expect(update.tool.maxOutputMib).toBe(16)
     expect(update.advanced.processorLeaseDurationMillis).toBe('30000')
     // 六个 section 全部完整存在于请求体。
     expect(Object.keys(update).sort()).toEqual(
@@ -91,7 +88,6 @@ describe('system settings draft codec', () => {
         'postgresqlWorkReconnectBackoffMillis',
         'processorHeartbeatIntervalMillis',
         'processorLeaseDurationMillis',
-        'resourceMaxBytes',
         'threadResolveFailureDelayMillis',
         'toolDispatchBusyFallbackDelayMillis',
         'toolPreflightFailureDelayMillis',
@@ -133,7 +129,7 @@ describe('system settings draft codec', () => {
     )
 
     const emptyNumeric = settingsSectionsToDraft(makeSettingsDto())
-    emptyNumeric.environment.maxResourceBytes = ''
+    emptyNumeric.tool.maxOutputMib = ''
     expect(() => assembleSettingsUpdate(emptyNumeric, '0')).toThrowError(
       expect.objectContaining({ reason: 'emptyNumericField' }),
     )

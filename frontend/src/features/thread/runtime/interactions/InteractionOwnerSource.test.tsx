@@ -17,6 +17,7 @@ const childInvocation: InteractionDTO = {
   toolName: 'bash',
   argumentsJson: '{"command":"ls"}',
   approval: { required: true },
+  queuedSameFileCount: 0,
   createdAt: 1790503200000,
 }
 

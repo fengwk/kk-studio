@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
@@ -119,12 +120,26 @@ final class InMemoryThreadStore implements ThreadStore {
   }
 
   @Override
+  public List<ThreadState> listUserBySession(UUID sessionId) {
+    return listBySession(sessionId).stream()
+        .filter(thread -> thread.kind() == ThreadKind.USER)
+        .toList();
+  }
+
+  @Override
   public List<ThreadState> listChildren(UUID parentThreadId) {
     tx.checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
     return state.threads.values().stream()
         .filter(thread -> parentThreadId.equals(thread.parentThreadId()))
         .sorted(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR))
+        .toList();
+  }
+
+  @Override
+  public List<ThreadState> listSubagents(UUID parentThreadId) {
+    return listChildren(parentThreadId).stream()
+        .filter(thread -> thread.kind() == ThreadKind.SUBAGENT)
         .toList();
   }
 

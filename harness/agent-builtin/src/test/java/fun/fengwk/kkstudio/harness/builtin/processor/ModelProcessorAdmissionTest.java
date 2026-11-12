@@ -195,7 +195,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
                   List.of(
                       HarnessRuntimeTestSupport.driver(
                           fixture.store, (threadId, rootSessionId, path, preparation) -> null))),
-              new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+              new ThreadProcessorConfig(
+                  () -> Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
       assertEquals(
           ThreadProcessResult.COMPLETED,
           threadProcessor.process(
@@ -283,9 +284,9 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             fixture.gateway,
             fixture.sink,
             new ModelProcessorConfig(
-                LEASE_CONFIG,
+                () -> LEASE_CONFIG,
                 () -> NO_RETRY,
-                FALLBACK_DELAY,
+                () -> FALLBACK_DELAY,
                 ModelStreamConfig.DEFAULT,
                 null,
                 providerName -> ModelHttpErrorPolicy.DEFAULT),
@@ -771,7 +772,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             interleaved,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> policy, FALLBACK_DELAY),
+            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> policy, () -> FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
             Runnable::run,

@@ -319,7 +319,7 @@ RUNNING、EXIT_PENDING 与 WAITING 都计入活跃数，停止控制独立展示
 长路径在剩余宽度自然折行，不横滚；状态与展开图标占不收缩的尾部。
 工具状态直接保留 invocation 的 READY（排队或权威环境等待）、WAITING_APPROVAL、WAITING_INPUT、
 RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `aria-busy`；
-没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
+没有 invocation 的模型调用草稿不表示已运行或成功。task 卡片将子 Thread 的冻结 Join 结果呈现为完成、失败或取消，并保留子 Thread 导航；仅 Join 的完成状态表达执行成功，不替用户验证报告内容。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
 `/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。

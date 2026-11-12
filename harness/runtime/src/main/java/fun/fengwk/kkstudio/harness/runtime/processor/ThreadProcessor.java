@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -67,7 +68,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -166,6 +169,7 @@ public final class ThreadProcessor {
       throw new IllegalArgumentException(
           "ThreadProcessor requires a THREAD work claim, got " + claim.target());
     }
+    Duration resolveFailureDelay = config.resolveFailureDelayProvider().get();
     UUID threadId = claim.target().id();
     UUID token = claim.leaseToken();
     if (!claimOwned(claim)) {
@@ -185,7 +189,7 @@ public final class ThreadProcessor {
           "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
           threadId,
           transientFailure);
-      return rescheduleIfOwned(claim, config.resolveFailureDelay())
+      return rescheduleIfOwned(claim, resolveFailureDelay)
           ? ThreadProcessResult.RESCHEDULED
           : ThreadProcessResult.LOST_OWNERSHIP;
     } finally {
@@ -274,7 +278,8 @@ public final class ThreadProcessor {
             now,
             driver);
       }
-      case ThreadContext.ToolActive ignored -> completeClaim(tx, claim, now);
+      case ThreadContext.ToolActive pending -> dispatchQueuedTools(
+          tx, claim, thread, pending.assistant());
       case ThreadContext.ContinuationDue ignored -> {
         // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
@@ -448,17 +453,7 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     if (toolPhase) {
-      List<ToolInvocation> ordered = new ArrayList<>(invocations);
-      ordered.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
-      boolean readyRequested = false;
-      for (ToolInvocation invocation : ordered) {
-        if (invocation.status() == ToolInvocationStatus.READY) {
-          readyRequested = true;
-          // 只有只能在环境上执行的工具才把 Work 路由到环境；read 按 URI 或本地路径选择平台或 Environment。
-          EnvironmentId environmentId = requiredEnvironmentId(invocation);
-          tx.work().request(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
-        }
-      }
+      boolean readyRequested = dispatchReadyTools(tx, invocations);
       if (!readyRequested) {
         requestThread = true;
       }
@@ -467,6 +462,95 @@ public final class ThreadProcessor {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     tx.work().complete(claim);
+  }
+
+  /** Dispatches unkeyed calls as before and only the first live call for each file key. */
+  private boolean dispatchReadyTools(
+      HarnessStore.Transaction tx, List<ToolInvocation> invocations) {
+    List<ToolInvocation> ordered = new ArrayList<>(invocations);
+    ordered.sort(Comparator.comparingInt(ToolInvocation::callIndex));
+    Map<ToolFileMutationOrder.Key, ToolInvocation> firstByFile = new HashMap<>();
+    List<ToolInvocation> unkeyed = new ArrayList<>();
+    for (ToolInvocation invocation : ordered) {
+      Optional<ToolFileMutationOrder.Key> key = ToolFileMutationOrder.key(invocation);
+      if (key.isEmpty()) {
+        unkeyed.add(invocation);
+      } else if (!invocation.status().isTerminal()) {
+        firstByFile.putIfAbsent(key.get(), invocation);
+      }
+    }
+    List<ToolInvocation> dispatchable = new ArrayList<>();
+    for (ToolInvocation invocation : unkeyed) {
+      if (invocation.status() == ToolInvocationStatus.READY) {
+        dispatchable.add(invocation);
+      }
+    }
+    for (ToolInvocation invocation : firstByFile.values()) {
+      if (isDispatchableFileMutation(invocation)
+          && tx.work().find(new WorkTarget(WorkTargetType.TOOL, invocation.id())).isEmpty()) {
+        dispatchable.add(invocation);
+      }
+    }
+    dispatchable.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
+    for (ToolInvocation invocation : dispatchable) {
+      requestToolWork(tx, invocation);
+    }
+    return !dispatchable.isEmpty();
+  }
+
+  /** A THREAD wake rechecks each key's first live slot; unkeyed slots were dispatched on entry. */
+  private void dispatchQueuedTools(
+      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, Entry assistant) {
+    List<ToolInvocation> siblings = tx.tools().lockByAssistantEntry(assistant.id());
+    List<ToolInvocation> sameThread =
+        siblings.stream()
+            .filter(
+                invocation ->
+                    invocation.threadId().equals(thread.id())
+                        && invocation.assistantEntryId().equals(assistant.id()))
+            .toList();
+    dispatchReadyFileMutations(tx, sameThread);
+    if (tx.work().lockClaimed(claim).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    tx.work().complete(claim);
+  }
+
+  private void dispatchReadyFileMutations(
+      HarnessStore.Transaction tx, List<ToolInvocation> invocations) {
+    List<ToolInvocation> ordered = new ArrayList<>(invocations);
+    ordered.sort(Comparator.comparingInt(ToolInvocation::callIndex));
+    Map<ToolFileMutationOrder.Key, ToolInvocation> firstByFile = new HashMap<>();
+    for (ToolInvocation invocation : ordered) {
+      Optional<ToolFileMutationOrder.Key> key = ToolFileMutationOrder.key(invocation);
+      if (key.isPresent() && !invocation.status().isTerminal()) {
+        firstByFile.putIfAbsent(key.get(), invocation);
+      }
+    }
+    List<ToolInvocation> dispatchable = new ArrayList<>();
+    for (ToolInvocation invocation : firstByFile.values()) {
+      WorkTarget target = new WorkTarget(WorkTargetType.TOOL, invocation.id());
+      if (isDispatchableFileMutation(invocation) && tx.work().find(target).isEmpty()) {
+        dispatchable.add(invocation);
+      }
+    }
+    dispatchable.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
+    for (ToolInvocation invocation : dispatchable) {
+      requestToolWork(tx, invocation);
+    }
+  }
+
+  private static boolean isDispatchableFileMutation(ToolInvocation invocation) {
+    return invocation.status() == ToolInvocationStatus.READY
+        && invocation.attempt() == 0
+        && invocation.approval() == null;
+  }
+
+  private static void requestToolWork(HarnessStore.Transaction tx, ToolInvocation invocation) {
+    // Only required-environment capabilities route Work to an Environment. Per-call file tools
+    // remain claimable even while that Environment is offline.
+    EnvironmentId environmentId = requiredEnvironmentId(invocation);
+    tx.work().request(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
   }
 
   private static DriverCommit commit(HarnessStore.Transaction tx) {

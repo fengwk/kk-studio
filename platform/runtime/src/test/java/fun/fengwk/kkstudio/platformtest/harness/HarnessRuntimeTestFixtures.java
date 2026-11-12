@@ -28,9 +28,9 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -162,7 +162,7 @@ public final class HarnessRuntimeTestFixtures {
         "thread",
         parentThreadId == null ? id : parentThreadId,
         parentThreadId == null && true,
-        SpawnTrigger.MODEL_TOOL,
+        parentThreadId == null ? ThreadKind.USER : ThreadKind.SUBAGENT,
         ThreadConstraints.NONE,
         executionControl,
         0L,
@@ -183,7 +183,7 @@ public final class HarnessRuntimeTestFixtures {
         "new thread name",
         id,
         true,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

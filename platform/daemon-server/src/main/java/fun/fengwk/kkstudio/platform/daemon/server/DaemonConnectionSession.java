@@ -212,6 +212,25 @@ final class DaemonConnectionSession implements DaemonSession {
         initial.temporaryResourceCleanupIntervalSeconds();
   }
 
+  /** 已连接 Daemon 收到系统设置变更后重发当前 SETTINGS。 */
+  boolean refreshSettings() {
+    EnvironmentServerSettings current = settings();
+    Envelope envelope =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SETTINGS)
+            .setEnvironmentId(environmentId.value().toString())
+            .setSettings(EnvironmentDaemonServer.settingsMessage(current))
+            .build();
+    synchronized (stateLock) {
+      if (!offer(envelope)) {
+        return false;
+      }
+      temporaryResourceTtlSeconds = current.temporaryResourceTtlSeconds();
+      temporaryResourceCleanupIntervalSeconds = current.temporaryResourceCleanupIntervalSeconds();
+      return true;
+    }
+  }
+
   /** 初始控制流：SETTINGS 之后立即下发当前完整卡片配置；缺失卡片明确报错并关闭。 */
   void sendInitialEnvironmentConfig() {
     Optional<EnvironmentConfigSnapshot> snapshot;
@@ -337,7 +356,7 @@ final class DaemonConnectionSession implements DaemonSession {
                       this,
                       active,
                       envelope.getResourceUploadRequest(),
-                      settings().maxResourceBytes());
+                      settings().maxOutputBytes());
             }
             case RESOURCE_UPLOAD_COMMIT -> {
               requireReady();

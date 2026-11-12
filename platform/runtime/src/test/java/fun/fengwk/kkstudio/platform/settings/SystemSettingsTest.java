@@ -46,16 +46,14 @@ class SystemSettingsTest {
         InvocationRetryBackoffStrategy.EXPONENTIAL, defaults.aiRuntime().retryBackoffStrategy());
     assertEquals(2_000L, defaults.aiRuntime().retryBaseDelayMillis());
     assertEquals(60_000L, defaults.aiRuntime().retryMaxDelayMillis());
-    // 压缩模型默认未配置（运行时用对话当前模型）；回复预留默认 16,384。
+    // 压缩模型默认未配置（运行时用对话当前模型）。
     assertEquals(null, defaults.aiRuntime().compactionModel());
     assertEquals(20_000, defaults.aiRuntime().compactionKeepRecentTokens());
-    assertEquals(16_384, defaults.aiRuntime().compactionReserveTokens());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
     assertEquals(50, defaults.aiRuntime().subagentMaxTurns());
 
-    assertEquals(16L * 1024 * 1024, defaults.environment().maxResourceBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
     assertEquals(null, defaults.backendNetwork().proxyUrl());
     assertEquals("localhost,127.*,::1", defaults.backendNetwork().noProxyHosts());
@@ -72,7 +70,7 @@ class SystemSettingsTest {
     assertEquals(1_800L, storageMedia.temporaryResourceCleanupIntervalSeconds());
 
     SystemSettings.Advanced advanced = defaults.advanced();
-    assertEquals(16L * 1024 * 1024, advanced.resourceMaxBytes());
+    assertEquals(16, defaults.tool().maxOutputMib());
     assertEquals(30_000L, advanced.processorLeaseDurationMillis());
     assertEquals(10_000L, advanced.processorHeartbeatIntervalMillis());
     assertEquals(512, advanced.applicationEventQueueCapacity());
@@ -142,29 +140,6 @@ class SystemSettingsTest {
                 2_000L,
                 base.compactionModel(),
                 base.compactionKeepRecentTokens(),
-                base.compactionReserveTokens(),
-                base.subagentMaxDepth(),
-                base.subagentMaxConcurrency(),
-                base.subagentMaxTotalConcurrency(),
-                base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
-  }
-
-  /** 回复预留 token 与保留最近 token 一样必须为正整数。 */
-  @Test
-  void rejectsNonPositiveCompactionReserveTokens() {
-    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.AiRuntime(
-                base.retryMaxRetries(),
-                base.retryBackoffStrategy(),
-                base.retryBaseDelayMillis(),
-                base.retryMaxDelayMillis(),
-                base.compactionModel(),
-                base.compactionKeepRecentTokens(),
-                0,
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -185,7 +160,6 @@ class SystemSettingsTest {
                 base.retryMaxDelayMillis(),
                 base.compactionModel(),
                 base.compactionKeepRecentTokens(),
-                base.compactionReserveTokens(),
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -201,7 +175,6 @@ class SystemSettingsTest {
                 base.retryMaxDelayMillis(),
                 base.compactionModel(),
                 base.compactionKeepRecentTokens(),
-                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
@@ -217,7 +190,6 @@ class SystemSettingsTest {
                 base.retryMaxDelayMillis(),
                 base.compactionModel(),
                 base.compactionKeepRecentTokens(),
-                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -245,7 +217,6 @@ class SystemSettingsTest {
                 base.retryMaxDelayMillis(),
                 base.compactionModel(),
                 base.compactionKeepRecentTokens(),
-                base.compactionReserveTokens(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -264,7 +235,6 @@ class SystemSettingsTest {
                   base.retryMaxDelayMillis(),
                   base.compactionModel(),
                   base.compactionKeepRecentTokens(),
-                  base.compactionReserveTokens(),
                   base.subagentMaxDepth(),
                   base.subagentMaxConcurrency(),
                   base.subagentMaxTotalConcurrency(),
@@ -280,7 +250,6 @@ class SystemSettingsTest {
         IllegalArgumentException.class,
         () ->
             new SystemSettings.Advanced(
-                base.resourceMaxBytes(),
                 30_000L,
                 30_000L,
                 base.threadResolveFailureDelayMillis(),
@@ -391,7 +360,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsInvalidEnvironmentBudgets() {
-    assertThrows(IllegalArgumentException.class, () -> new SystemSettings.Environment(0L, 60_000L));
+    assertThrows(IllegalArgumentException.class, () -> new SystemSettings.Environment(29_999L));
   }
 
   @Test
@@ -452,6 +421,9 @@ class SystemSettingsTest {
     permission.put(toolId, List.of(rules));
     SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings.Tool(
-        permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis());
+        permission,
+        base.maxOutputMib(),
+        base.modelGatewayBusyRetryMillis(),
+        base.toolGatewayOverloadRetryMillis());
   }
 }

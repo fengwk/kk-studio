@@ -145,7 +145,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
             this.store,
             Objects.requireNonNull(scheduler, "scheduler"),
             Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
-            config.leaseConfig(),
+            config.leaseConfigProvider().get(),
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.toolResultHistoryMaterializer =

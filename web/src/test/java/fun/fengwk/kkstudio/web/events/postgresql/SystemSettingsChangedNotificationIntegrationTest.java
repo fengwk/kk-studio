@@ -143,7 +143,6 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
             ai.retryMaxDelayMillis(),
             ai.compactionModel(),
             ai.compactionKeepRecentTokens(),
-            ai.compactionReserveTokens(),
             ai.subagentMaxDepth(),
             ai.subagentMaxConcurrency(),
             ai.subagentMaxTotalConcurrency(),
@@ -233,8 +232,8 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
                         resyncs.incrementAndGet();
                         changeHandler.onResync();
                       })),
-              LOOP_POLL_INTERVAL,
-              LOOP_RECONNECT_BACKOFF);
+              () -> LOOP_POLL_INTERVAL,
+              () -> LOOP_RECONNECT_BACKOFF);
     }
 
     private void start() {

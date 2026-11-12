@@ -31,7 +31,8 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
     entries: [], queuedCommands: [], activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
     toolInvocations: [{
       id: 'tool', threadId: 'thread', turnStartEntryId: 'turn', assistantEntryId: 'entry', callIndex: 0,
-      status: 'READY', attempt: 1, toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',
+      status: 'READY', attempt: 1, toolCallId: 'call', queuedBehindToolCallId: null,
+      toolName: 'bash', rendererKey: 'bash',
       environmentId: null, requiredEnvironmentId: 'frozen-environment',
       requiredEnvironmentName: 'archlinux', waitingForEnvironment: true, environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"pwd"}', approval: null, result: null, error: null,

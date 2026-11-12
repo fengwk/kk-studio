@@ -47,7 +47,6 @@ class BuiltinHarnessContributorConfigurationTest {
             SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
             SystemSettingsTestFixture.AI_RUNTIME.compactionModel(),
             SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
-            SystemSettingsTestFixture.AI_RUNTIME.compactionReserveTokens(),
             4,
             7,
             13,

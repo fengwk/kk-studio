@@ -14,6 +14,7 @@ function node(
 ): ActiveThreadTreeNode {
   return {
     threadId,
+    kind: parentThreadId == null ? 'USER' : 'SUBAGENT',
     parentThreadId,
     name: threadId,
     agentName: 'assistant',

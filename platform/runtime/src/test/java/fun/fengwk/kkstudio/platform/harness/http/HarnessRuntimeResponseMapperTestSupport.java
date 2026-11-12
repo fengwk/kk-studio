@@ -18,8 +18,8 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -208,6 +208,32 @@ final class HarnessRuntimeResponseMapperTestSupport {
     return invocation;
   }
 
+  static ToolInvocation fileMutationInvocation(
+      int callIndex, String toolCallId, String toolName, String argumentsJson) {
+    ToolInvocation invocation =
+        toolInvocation(ToolInvocationStatus.READY, environmentToolBinding(), null, null, null, 0);
+    when(invocation.id()).thenReturn(id(100 + callIndex));
+    when(invocation.callIndex()).thenReturn(callIndex);
+    when(invocation.call()).thenReturn(new ToolCall(toolCallId, toolName, argumentsJson));
+    return invocation;
+  }
+
+  static ThreadSnapshot withToolSiblings(ThreadSnapshot snapshot, List<ToolInvocation> tools) {
+    return new ThreadSnapshot(
+        snapshot.thread(),
+        snapshot.entryState(),
+        snapshot.entrySlice(),
+        snapshot.queuedCommands(),
+        snapshot.generation(),
+        tools,
+        snapshot.liveState(),
+        snapshot.stopReceipts(),
+        snapshot.incompleteChildJoins(),
+        snapshot.unconsumedAppliedNotifications(),
+        snapshot.unconfirmedExecutions(),
+        snapshot.hasIncompleteOwnerChildJoin());
+  }
+
   static ToolBinding environmentToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
@@ -286,7 +312,7 @@ final class HarnessRuntimeResponseMapperTestSupport {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             ThreadConstraints.NONE,
             thread.executionControl(),
             thread.inputThroughSequence(),

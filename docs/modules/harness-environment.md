@@ -147,7 +147,7 @@ Daemon -> HEARTBEAT(runtime_status, ide_lease_round)*
 Daemon -> RUNTIME_STATUS(runtime_status)
 Studio -> TEMPORARY_RESOURCE_POLICY
 
-Studio -> INVOKE
+Studio -> INVOKE(max_output_bytes, image_input_tier)
 Daemon -> STARTED
 Daemon -> PROGRESS*
 Daemon -> RESOURCE_UPLOAD_REQUEST
@@ -170,8 +170,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 只通告环境标识、认证准入后的资源预算（`max_resource_bytes`）和临时资源策略
-（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。
+`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节，图片档位读取当前系统图片档位，值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值；TypeScript Daemon 校验图片档位，但不消费它。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
 同一连接上随后下发 `ENVIRONMENT_CONFIG` 完整卡片配置快照（`version` + `studio_url`、
 `bash_executable`、LSP servers、`proxy_url`）；Daemon 应用成功后才回执 `READY`。后续配置变更仍使用
 `ENVIRONMENT_CONFIG` 下发完整快照，不重复发送 READY；配置校验失败时已有可用快照继续运行并上报
@@ -306,8 +305,9 @@ READY 后核对、`environment_changed` 通知与心跳对账都读取数据库�
 ```text
 RESOURCE_UPLOAD_REQUEST
   -> invocation 必须仍活动且属于当前 READY Environment
-  -> 严格解码元数据，并在任何存储副作用前校验当前 settings 的 maxResourceBytes
-  -> 首次请求在核心锁外调用 ticketService.reserve，把结果固化为该 transfer 的票据事实
+  -> 严格解码元数据，并在任何存储副作用前按请求到达时的当前工具输出上限校验声明大小
+  -> 超限时为该 transfer 返回带统一错误文案的 FAILED 票据，不作为协议违规断开连接
+  -> 其余请求首次在核心锁外调用 ticketService.reserve，把结果固化为该 transfer 的票据事实
 
 RESOURCE_UPLOAD_COMMIT
   -> transfer 必须已申请，uploadId 必须等于服务端签发值

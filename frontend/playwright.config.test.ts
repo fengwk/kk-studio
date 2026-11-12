@@ -236,7 +236,7 @@ describe('vite browser build contract', () => {
     expect(inputs['custom-message-queue-harness']).toBe(
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )
-    expect(keys.length).toBe(35)
+    expect(keys.length).toBe(36)
   })
 
   // 验证静态构建目标与 MPA 模式

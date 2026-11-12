@@ -9,7 +9,7 @@ import { projectThreadTree, type ActiveThreadTreeNode } from './thread-panel/act
 import type { useActiveThreadTree } from './useActiveThreadTree'
 
 const node = (threadId: string, parentThreadId: string | null, overrides: Partial<ActiveThreadTreeNode> = {}): ActiveThreadTreeNode => ({
-  threadId, parentThreadId, agentName: 'Explorer', name: 'main',
+  threadId, kind: parentThreadId == null ? 'USER' : 'SUBAGENT', parentThreadId, agentName: 'Explorer', name: 'main',
   status: 'IDLE', executionControl: 'RUNNABLE', outcome: null, updatedAt: 1774958400,
   turnCount: 7, toolCallCount: 12,
   execution: createBuiltinExecution('model', 'default'),

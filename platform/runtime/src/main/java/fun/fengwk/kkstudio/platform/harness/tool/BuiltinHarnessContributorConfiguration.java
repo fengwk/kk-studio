@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
@@ -98,11 +99,13 @@ public class BuiltinHarnessContributorConfiguration {
   @ConditionalOnMissingBean
   public SubagentRunner subagentRunner(
       ObjectProvider<HarnessRuntime> runtimeProvider,
+      HarnessThreadChangeSource threadChangeSource,
       AgentTaskService agentTaskService,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider subagentConfigProvider) {
     return new SubagentTaskRunner(
         runtimeProvider::getIfAvailable,
+        threadChangeSource,
         agentTaskService,
         settingsMaterializer,
         subagentConfigProvider);
