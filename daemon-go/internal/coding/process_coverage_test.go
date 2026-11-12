@@ -64,7 +64,7 @@ func TestExecuteProcessReportsSignalAndUsesConfiguredShell(t *testing.T) {
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("finished")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{Signal: &signal}, nil }}
 	capability := runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: t.TempDir(), BashExecutable: stringPointer("/bin/custom-bash")}, Processes: fakeSupervisor{process}}
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "signal"}, capability, "true", workdir)
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "[Command was terminated by signal SIGTERM.]") || !strings.Contains(string(result.Details), `"signal":"SIGTERM"`) {
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "finished") || !strings.Contains(result.Contents[0].Text, "[Command was terminated by signal SIGTERM.]") || !strings.Contains(string(result.Details), `"outcome":"EXITED"`) || !strings.Contains(string(result.Details), `"signal":"SIGTERM"`) {
 		t.Fatalf("signal result=%#v err=%v", result, err)
 	}
 }
@@ -77,7 +77,7 @@ func TestExecuteProcessReportsNonzeroExitCode(t *testing.T) {
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("failed")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(7), nil }}
 	capability := runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: t.TempDir()}, Processes: fakeSupervisor{process}}
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "exit-seven"}, capability, "false", workdir)
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "[Command exited with code 7.]") || !strings.Contains(string(result.Details), `"exitCode":7`) {
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "failed") || !strings.Contains(result.Contents[0].Text, "[Command exited with code 7.]") || !strings.Contains(string(result.Details), `"outcome":"EXITED"`) || !strings.Contains(string(result.Details), `"exitCode":7`) {
 		t.Fatalf("exit result=%#v err=%v", result, err)
 	}
 }

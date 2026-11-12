@@ -3,13 +3,12 @@ package coding
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/fengwk/kk-studio/daemon/internal/coding/image"
-	"github.com/fengwk/kk-studio/daemon/internal/config"
-	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
@@ -30,17 +29,40 @@ func TestParseImageTierAcceptsEveryTier(t *testing.T) {
 	}
 }
 
-// COD-F-017
-func TestProcessCapabilityDefaultsWorkdirAndDispatches(t *testing.T) {
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("done")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }}
-	arguments, err := json.Marshal(map[string]string{"command": "true"})
-	if err != nil {
+// COD-F-016
+func TestProcessCapabilityRequiresValidWorkdir(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(file, []byte("content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dataDir := t.TempDir()
-	result, err := processCapability(context.Background(), runtime.CapabilityCall{InvocationID: "default-workdir", Arguments: arguments}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}})
-	if err != nil || result.Error || !strings.HasPrefix(result.Contents[0].Text, "done") {
-		t.Fatalf("result=%#v err=%v", result, err)
+	missing := filepath.Join(root, "missing")
+	for _, test := range []struct {
+		name     string
+		workdir  string
+		omit     bool
+		want     string
+		wantCode string
+	}{
+		{name: "required", omit: true, want: "workdir is required", wantCode: "INVALID_ARGUMENT"},
+		{name: "absolute", workdir: "relative", want: "workdir must be an absolute path (a relative or non-absolute value was given)", wantCode: "INVALID_ARGUMENT"},
+		{name: "exists", workdir: missing, want: "workdir does not exist: " + filepath.ToSlash(missing), wantCode: "NOT_FOUND"},
+		{name: "directory", workdir: file, want: "workdir is not a directory: " + filepath.ToSlash(file), wantCode: "INVALID_ARGUMENT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := map[string]string{"command": "true"}
+			if !test.omit {
+				args["workdir"] = test.workdir
+			}
+			arguments, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := processCapability(context.Background(), runtime.CapabilityCall{InvocationID: test.name, Arguments: arguments}, runtime.CapabilityContext{})
+			if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, test.want) || !strings.Contains(string(result.Details), `"code":"`+test.wantCode+`"`) {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+		})
 	}
 }
 

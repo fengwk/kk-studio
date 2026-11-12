@@ -16,6 +16,22 @@ import (
 	"testing"
 )
 
+// COD-N-007: exactly two scaling slots can be occupied before further work must wait.
+func TestScalingConcurrencyLimitTwo(t *testing.T) {
+	if cap(scalingSlots) != 2 {
+		t.Fatalf("scaling slot capacity=%d want=2", cap(scalingSlots))
+	}
+	scalingSlots <- struct{}{}
+	scalingSlots <- struct{}{}
+	defer func() {
+		<-scalingSlots
+		<-scalingSlots
+	}()
+	if len(scalingSlots) != 2 {
+		t.Fatalf("occupied scaling slots=%d want=2", len(scalingSlots))
+	}
+}
+
 // COD-N-003
 func TestTierBoxesAndNoUpscale(t *testing.T) {
 	cases := []struct {

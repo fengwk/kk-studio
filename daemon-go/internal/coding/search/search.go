@@ -224,7 +224,7 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			}
 		} else {
 			matches = grepFile(data, display, pattern, literal, ignoreCase, re, required)
-			limitReached = limit > 0 && len(matches) >= limit-len(outcome.Results)
+			limitReached = limit > 0 && len(matches) > limit-len(outcome.Results)
 			if limitReached {
 				matches = matches[:limit-len(outcome.Results)]
 			}
@@ -239,11 +239,14 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			outcome.StopReason = "TIMED_OUT"
 			break
 		}
-		if limitReached || !multiline && limit > 0 && len(outcome.Results) >= limit {
+		if limitReached {
 			outcome.LimitReached = true
 			if outcome.StopReason == "" {
 				outcome.StopReason = "LIMIT"
 			}
+			break
+		}
+		if !multiline && limit > 0 && len(outcome.Results) >= limit {
 			break
 		}
 	}

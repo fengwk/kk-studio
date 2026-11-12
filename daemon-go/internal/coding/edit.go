@@ -258,7 +258,12 @@ func numberedDiff(oldText, newText string) (string, error) {
 			continue
 		}
 		if line == `\ No newline at end of file` {
-			out = append(out, line)
+			if len(out) > 0 {
+				previous := out[len(out)-1]
+				if strings.HasPrefix(previous, "-") || strings.HasPrefix(previous, "+") {
+					out = append(out, line)
+				}
+			}
 			continue
 		}
 		if line == "\\" {
@@ -285,7 +290,7 @@ func numberedDiff(oldText, newText string) (string, error) {
 	if !seen {
 		return "", errors.New("edit produced an empty diff")
 	}
-	if oldCursor <= len(oldLines) || newCursor <= len(newLines) {
+	if oldCursor > 0 && oldCursor <= len(oldLines) || newCursor > 0 && newCursor <= len(newLines) {
 		out = append(out, "...")
 	}
 	return strings.Join(out, "\n"), nil

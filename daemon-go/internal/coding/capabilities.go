@@ -276,7 +276,7 @@ func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCal
 	probe = probe[:n]
 	imageType := DetectImageType(probe)
 	mediaType := DetectMediaType(probe)
-	if imageType == "" && mediaType != "" && call.MaxOutputBytes > 0 && info.Size() > call.MaxOutputBytes {
+	if (imageType != "" || mediaType != "") && call.MaxOutputBytes > 0 && info.Size() > call.MaxOutputBytes {
 		file.Close()
 		message := fmt.Sprintf("File is %s MiB, which exceeds the tool output size limit of %d MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.", formatMiB(info.Size(), call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
 		return codedErrorResult(call.InvocationID, "INVALID_ARGUMENT", message), nil
@@ -607,19 +607,28 @@ func processCapability(ctx context.Context, call runtime.CapabilityCall, capabil
 	if strings.TrimSpace(args.Command) == "" {
 		return errorResult(call.InvocationID, rejectInput("command must be a non-empty string")), nil
 	}
-	if args.Workdir == "" {
-		args.Workdir = "."
+	if strings.TrimSpace(args.Workdir) == "" {
+		return errorResult(call.InvocationID, rejectInput("workdir is required")), nil
 	}
 	if !filepath.IsAbs(args.Workdir) {
-		absolute, err := filepath.Abs(args.Workdir)
-		if err != nil {
-			return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, rejectInput("workdir must be an absolute path (a relative or non-absolute value was given)")), nil
+	}
+	args.Workdir = filepath.Clean(args.Workdir)
+	resolvedWorkdir, err := filepath.EvalSymlinks(args.Workdir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errorResult(call.InvocationID, rejectInputWithCode("workdir does not exist: "+displayPath(nil, &args.Workdir), "NOT_FOUND")), nil
 		}
-		args.Workdir = absolute
+		return errorResult(call.InvocationID, err), nil
 	}
-	if info, err := os.Stat(args.Workdir); err != nil || !info.IsDir() {
-		return errorResult(call.InvocationID, rejectInput("workdir is not a directory")), nil
+	info, err := os.Stat(resolvedWorkdir)
+	if err != nil {
+		return errorResult(call.InvocationID, err), nil
 	}
+	if !info.IsDir() {
+		return errorResult(call.InvocationID, rejectInput("workdir is not a directory: "+displayPath(&resolvedWorkdir, &args.Workdir))), nil
+	}
+	args.Workdir = resolvedWorkdir
 	executing = true
 	return ExecuteProcess(ctx, call, capability, args.Command, args.Workdir)
 }

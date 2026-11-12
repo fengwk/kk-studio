@@ -198,8 +198,9 @@ func (fakeSupervisor) Close(context.Context) error { return nil }
 func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("x", 100*1024)
+	stderr := "stderr output\n"
 	var processSpec native.ProcessSpec
-	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, spec: &processSpec}
+	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader(stderr)), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, spec: &processSpec}
 	var progress []runtime.CapabilityResult
 	confirmed := 0
 	workdir := filepath.Join(t.TempDir(), "working dir")
@@ -228,7 +229,7 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(captured) != output || details.TextOutput.TotalBytes != int64(len(output)) || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
+	if !strings.Contains(string(captured), output) || !strings.Contains(string(captured), stderr) || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
 		t.Fatalf("details=%s captured=%d", result.Details, len(captured))
 	}
 	if confirmed != 1 {
@@ -613,7 +614,7 @@ func TestProcessCapabilityRejectsInvalidWorkdirBeforeStarting(t *testing.T) {
 	result, err := processCapability(context.Background(), call, runtime.CapabilityContext{
 		Processes: supervisor, ConfirmExecutionExit: func() { confirmed++ },
 	})
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "workdir is not a directory") || started != 0 || confirmed != 1 {
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "workdir does not exist:") || started != 0 || confirmed != 1 {
 		t.Fatalf("result=%#v started=%d confirmed=%d err=%v", result, started, confirmed, err)
 	}
 }
