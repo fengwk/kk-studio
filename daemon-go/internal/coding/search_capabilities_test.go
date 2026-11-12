@@ -3,6 +3,7 @@ package coding
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +71,7 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	}
 	call := runtime.CapabilityCall{InvocationID: "cancel", Arguments: arguments}
 	result, err := findCapability(ctx, call, runtime.CapabilityContext{})
-	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "Operation cancelled") {
+	if err != nil || !result.Error || len(result.Contents) != 1 || result.Contents[0].Text != "[Search cancelled; results are incomplete.]" {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
 	var details map[string]any
@@ -184,12 +185,12 @@ func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	binaryResult := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": binaryFile, "pattern": "x", "literal": true}, nil)
-	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "ripgrep failed while searching") {
+	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "file appears to be binary") {
 		t.Fatalf("direct binary result=%#v", binaryResult)
 	}
 }
 
-// COD-T-043: skipped multiline files remain visible in the standard search summary.
+// COD-T-019, COD-T-020, COD-T-043: skipped paths are summarized without failing the result.
 func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	dataDir := t.TempDir()
 	for _, tc := range []struct {
@@ -248,5 +249,65 @@ func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
 	}
 	if string(full) != text {
 		t.Fatalf("stored bytes=%d want=%d", len(full), len(text))
+	}
+}
+
+// COD-N-018: empty search results explain ignored paths, but matches stay uncluttered.
+func TestEmptySearchResultIgnoreHint(t *testing.T) {
+	dataDir := t.TempDir()
+	outcome := search.SearchOutcome{IgnoreSkipped: []string{"/repo/.env"}, IgnoreSkippedCount: 1}
+	result := formatSearchResult(runtime.CapabilityCall{InvocationID: "empty"}, dataDir, outcome, 10, "No matches found", "matches")
+	want := "No matches found\n[No matches. Not searched because of ignore rules: /repo/.env]"
+	if result.Error || result.Contents[0].Text != want {
+		t.Fatalf("text=%q want=%q", result.Contents[0].Text, want)
+	}
+
+	outcome.Results = []string{"a.txt:1:match"}
+	result = formatSearchResult(runtime.CapabilityCall{InvocationID: "match"}, dataDir, outcome, 10, "No matches found", "matches")
+	if result.Error || result.Contents[0].Text != "a.txt:1:match" {
+		t.Fatalf("non-empty result has ignore hint: %q", result.Contents[0].Text)
+	}
+}
+
+// COD-N-018: both capabilities attach the real ignored path when no match is found.
+func TestEmptyFindAndGrepListIgnoredPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("secret.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("not a match\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignored := filepath.ToSlash(filepath.Join(resolvedRoot, "secret.txt"))
+	for _, test := range []struct {
+		capability string
+		args       map[string]any
+		want       string
+	}{
+		{capability: "fs.find", args: map[string]any{"path": root, "pattern": "secret*.txt"}, want: "No files found matching pattern"},
+		{capability: "fs.grep", args: map[string]any{"path": root, "pattern": "match", "literal": true, "glob": "secret*.txt"}, want: "No matches found"},
+	} {
+		result := invokeCoding(t, Provider{}, test.capability, test.args, nil)
+		want := test.want + "\n[No matches. Not searched because of ignore rules: " + ignored + "]"
+		if result.Error || result.Contents[0].Text != want {
+			t.Errorf("%s result=%#v want text=%q", test.capability, result, want)
+		}
+	}
+}
+
+// COD-N-018: the hint bounds visible paths and reports the exact omitted count.
+func TestEmptySearchResultIgnoreHintLimit(t *testing.T) {
+	paths := make([]string, 12)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/repo/%02d", i)
+	}
+	got := formatIgnoreSkippedHint(paths[:10], 12)
+	want := "[No matches. Not searched because of ignore rules: /repo/00, /repo/01, /repo/02, /repo/03, /repo/04, /repo/05, /repo/06, /repo/07, /repo/08, /repo/09, … and 2 more]"
+	if got != want {
+		t.Fatalf("hint=%q want=%q", got, want)
 	}
 }

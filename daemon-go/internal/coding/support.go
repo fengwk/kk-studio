@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -106,6 +108,8 @@ func classifySearchError(err error) error {
 		return rejectInput("Invalid glob: " + diagnostic)
 	case lower == "root is not a directory":
 		return rejectInput("path is not a directory")
+	case lower == "directly specified file is binary":
+		return failRun("file appears to be binary", "CODEC")
 	default:
 		return failRun("ripgrep failed while searching; results are incomplete", "FAILED")
 	}
@@ -133,4 +137,146 @@ func classifyFileSystemError(err error) (string, string) {
 	default:
 		return "IO", "file system operation failed"
 	}
+}
+
+const windowsSeparator = "\x5c"
+
+func isAbsolutePath(path string) bool {
+	if strings.HasPrefix(path, "/") {
+		return true
+	}
+	return hasWindowsDriveRoot(path) || strings.HasPrefix(path, windowsSeparator+windowsSeparator)
+}
+
+func hasWindowsDriveRoot(path string) bool {
+	return len(path) >= 3 && isASCIIAlpha(path[0]) && path[1] == ':' && isPathSeparator(path[2])
+}
+
+func isASCIIAlpha(value byte) bool {
+	return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
+}
+
+func isPathSeparator(value byte) bool {
+	return value == '/' || value == windowsSeparator[0]
+}
+
+func normalizePath(path string) string {
+	if hasWindowsDriveRoot(path) || strings.HasPrefix(path, windowsSeparator) || strings.Contains(path, windowsSeparator) && !strings.HasPrefix(path, "/") {
+		return normalizeWindowsPath(path)
+	}
+	return pathpkg.Clean(path)
+}
+
+func normalizeWindowsPath(path string) string {
+	value := strings.ReplaceAll(path, "/", windowsSeparator)
+	root := ""
+	rooted := false
+	unc := false
+	var remainder string
+	switch {
+	case strings.HasPrefix(value, windowsSeparator+windowsSeparator):
+		parts := strings.Split(strings.TrimLeft(value, windowsSeparator), windowsSeparator)
+		if len(parts) >= 2 {
+			root = windowsSeparator + windowsSeparator + parts[0] + windowsSeparator + parts[1]
+			remainder = strings.Join(parts[2:], windowsSeparator)
+			unc = true
+		} else {
+			root = windowsSeparator + windowsSeparator
+			remainder = strings.Join(parts, windowsSeparator)
+		}
+		rooted = true
+	case hasWindowsDriveRoot(value):
+		root = value[:2] + windowsSeparator
+		remainder = value[3:]
+		rooted = true
+	case strings.HasPrefix(value, windowsSeparator):
+		root = windowsSeparator
+		remainder = value[1:]
+		rooted = true
+	default:
+		remainder = value
+	}
+	var parts []string
+	for _, part := range strings.Split(remainder, windowsSeparator) {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(parts) > 0 && parts[len(parts)-1] != ".." {
+				parts = parts[:len(parts)-1]
+			} else if !rooted {
+				parts = append(parts, part)
+			}
+		default:
+			parts = append(parts, part)
+		}
+	}
+	clean := strings.Join(parts, windowsSeparator)
+	if root == "" {
+		if clean == "" {
+			return "."
+		}
+		return clean
+	}
+	if clean == "" {
+		if unc {
+			return root + windowsSeparator
+		}
+		return root
+	}
+	if strings.HasSuffix(root, windowsSeparator) {
+		return root + clean
+	}
+	return root + windowsSeparator + clean
+}
+
+func toPosix(path string) string {
+	return strings.ReplaceAll(path, windowsSeparator, "/")
+}
+
+func displayPath(target, rawPath *string) string {
+	if rawPath != nil && strings.TrimSpace(*rawPath) != "" && isAbsolutePath(*rawPath) {
+		return toPosix(normalizePath(*rawPath))
+	}
+	if target != nil {
+		return toPosix(*target)
+	}
+	if rawPath == nil {
+		return "<missing>"
+	}
+	return *rawPath
+}
+
+func resolveExistingPath(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", rejectInput("path must be an absolute path")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", rejectInputWithCode("path does not exist", "NOT_FOUND")
+		}
+		return "", err
+	}
+	return resolved, nil
+}
+
+func resolveWritablePath(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", rejectInput("path must be an absolute path")
+	}
+	if pathExists(path) {
+		return filepath.EvalSymlinks(path)
+	}
+	return resolveWritePath(path)
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func isSymbolicLink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }

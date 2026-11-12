@@ -2,6 +2,7 @@ package coding
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -30,8 +31,17 @@ func TestSpillFailureFallsBackToBoundedPreview(t *testing.T) {
 	}
 	spool.Write([]byte("extra"))
 	result := spool.Finish(false, "")
-	if !strings.Contains(result.Contents[0].Text, "could not be saved to local storage") || !strings.Contains(string(result.Details), `"captureFailed":true`) {
-		t.Fatalf("result=%#v", result)
+	var details struct {
+		TextOutput struct {
+			CaptureFailed bool    `json:"captureFailed"`
+			Path          *string `json:"path"`
+		} `json:"textOutput"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Contents[0].Text, "could not be saved to local storage") || !details.TextOutput.CaptureFailed || details.TextOutput.Path != nil {
+		t.Fatalf("result=%#v details=%#v", result, details)
 	}
 	if err := spool.Close(); err != nil {
 		t.Fatal(err)
@@ -181,9 +191,59 @@ func TestUTF8PreviewBoundaries(t *testing.T) {
 			t.Fatalf("complete value=%q aligned=%d want=%d", tc.value, end, tc.full)
 		}
 	}
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "preview", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write([]byte(strings.Repeat("a", 100)))
+	spool.Write([]byte{0x80, 0x80})
+	spool.Write([]byte(strings.Repeat("b", previewTailBytes-2)))
+	tail := spool.CaptureTruncatedTailPreview()
+	if tail != strings.Repeat("b", previewTailBytes-2) || strings.ContainsRune(tail, '\ufffd') {
+		t.Fatalf("truncated tail preview=%q", tail)
+	}
+	if err := spool.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // COD-T-012
+func TestAcquireLeaseReleaseIsIdempotent(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, path, err := store.CreateStagingFile("lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path, err = store.Publish(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "created-at"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, second := store.Acquire(path), store.Acquire(path)
+	first()
+	first()
+	if removed, err := store.Sweep(time.Second); err != nil || removed != 0 {
+		t.Fatalf("workspace removed after duplicate release: removed=%d err=%v", removed, err)
+	}
+	second()
+	if removed, err := store.Sweep(time.Second); err != nil || removed != 1 {
+		t.Fatalf("workspace not removed after all leases released: removed=%d err=%v", removed, err)
+	}
+}
+
+// COD-T-012: deleting staging twice is safe and removes its temporary workspace.
 func TestDeleteStagingIsIdempotent(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -205,7 +265,6 @@ func TestDeleteStagingIsIdempotent(t *testing.T) {
 	}
 }
 
-// COD-T-014
 func TestOutputSpoolCloseRemovesUnpublishedSpill(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -231,7 +290,7 @@ func TestOutputSpoolCloseRemovesUnpublishedSpill(t *testing.T) {
 	}
 }
 
-// COD-T-015
+// A workspace root that resolves to a non-directory must be rejected.
 func TestOpenOutputStoreRejectsNonDirectoryRoot(t *testing.T) {
 	dataDir := t.TempDir()
 	tmp := filepath.Join(dataDir, "tmp")
@@ -353,7 +412,7 @@ func TestOpenTextOutputStoreRejectsInvalidParent(t *testing.T) {
 	}
 }
 
-// COD-F-015
+// COD-T-001; COD-F-015
 func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	if _, err := NewOutputSpool(nil, "invalid", 1); err == nil {
 		t.Fatal("nil output store accepted")

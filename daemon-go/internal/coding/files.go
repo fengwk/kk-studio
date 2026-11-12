@@ -60,7 +60,7 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	}
 	current, err := os.ReadFile(resolved)
 	if errors.Is(err, os.ErrNotExist) {
-		if isSymlink(resolved) {
+		if isSymbolicLink(resolved) {
 			return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
 		}
 		return WriteReview{Path: resolved, NewFile: true, Content: content}, nil
@@ -197,11 +197,6 @@ func resolveExistingParent(path string) (string, error) {
 		missing = append(missing, filepath.Base(path))
 		path = parent
 	}
-}
-
-func isSymlink(path string) bool {
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 func charsetOf(data []byte) (string, int) {

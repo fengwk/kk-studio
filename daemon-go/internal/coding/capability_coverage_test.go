@@ -55,8 +55,9 @@ func TestReadCapabilityListsDirectoryAndRejectsMissingPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, err := readCapability(context.Background(), capabilityCall(t, "list", map[string]string{"path": root}), runtime.CapabilityContext{})
-	if err != nil || listed.Error || listed.Contents[0].Text != "a-dir/\nz-file" {
-		t.Fatalf("directory listing=%#v err=%v", listed, err)
+	wantListing := "path: " + filepath.ToSlash(root) + "\nkind: directory\n\na-dir/\nz-file"
+	if err != nil || listed.Error || listed.Contents[0].Text != wantListing {
+		t.Fatalf("directory listing=%#v err=%v want=%q", listed, err, wantListing)
 	}
 	missing, err := readCapability(context.Background(), capabilityCall(t, "missing", map[string]string{"path": filepath.Join(root, "missing")}), runtime.CapabilityContext{})
 	if err != nil || !missing.Error || !strings.Contains(string(missing.Details), `"code":"NOT_FOUND"`) {
@@ -117,6 +118,10 @@ func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 	result, err := writeCapability(context.Background(), capabilityCall(t, "create", map[string]string{"path": path, "content": "first"}), runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
 	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "Created ") || changed != 1 {
 		t.Fatalf("create=%#v changed=%d err=%v", result, changed, err)
+	}
+	created, err := os.ReadFile(path)
+	if err != nil || string(created) != "first" {
+		t.Fatalf("created file=%q err=%v", created, err)
 	}
 	preview, err := PreviewWrite(path, "second")
 	if err != nil {

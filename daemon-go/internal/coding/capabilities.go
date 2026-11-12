@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	defaultFindLimit = 1000
-	defaultGrepLimit = 100
-	maxSearchLimit   = 100000
+	defaultFindLimit          = 1000
+	defaultGrepLimit          = 100
+	maxSearchLimit            = 100000
+	maxDirectoryResponseBytes = 48 * 1024
 )
 
 type arguments struct {
@@ -42,11 +43,20 @@ type arguments struct {
 }
 
 // Provider supplies the filesystem and in-process search capability handlers.
-type Provider struct{}
+type Provider struct {
+	// LSPStatus reports the available language for the optional fs.read header.
+	LSPStatus func(file string) (language string, available bool)
+}
 
-func (Provider) Capabilities() map[string]runtime.CapabilityExecutor {
+func (p Provider) Capabilities() map[string]runtime.CapabilityExecutor {
+	read := runtime.CapabilityExecutor(readCapability)
+	if p.LSPStatus != nil {
+		read = func(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+			return readCapabilityWithLSPStatus(ctx, call, capability, p.LSPStatus)
+		}
+	}
 	handlers := map[string]runtime.CapabilityExecutor{
-		"fs.read":          readCapability,
+		"fs.read":          read,
 		"fs.write":         writeCapability,
 		"fs.write.preview": previewWriteCapability,
 		"fs.edit":          editCapability,
@@ -152,12 +162,16 @@ func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 		return args, rejectInput("path must be a non-empty string")
 	}
 	if !filepath.IsAbs(args.Path) {
-		return args, rejectInput("path must be absolute")
+		return args, rejectInput("path must be an absolute path")
 	}
 	return args, nil
 }
 
 func readCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return readCapabilityWithLSPStatus(ctx, call, capability, nil)
+}
+
+func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, lspStatus func(file string) (language string, available bool)) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -214,7 +228,37 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		return textResult(call.InvocationID, strings.Join(names, "\n")), nil
+		prefix := fmt.Sprintf("path: %s\nkind: directory\n", filepath.ToSlash(args.Path))
+		if args.Offset > len(names) {
+			return textResult(call.InvocationID, prefix+fmt.Sprintf("\n[Showing 0 entries of %d.]", len(names))), nil
+		}
+		start := args.Offset - 1
+		end := min(len(names), start+args.Limit)
+		page := make([]string, 0, end-start)
+		actualEnd := start
+		for index := start; index < end; index++ {
+			candidateEnd := index + 1
+			candidateBytes := len(prefix) + 1 + len(names[index])
+			if candidateEnd < len(names) {
+				tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, candidateEnd, len(names), candidateEnd+1)
+				candidateBytes += 2 + len(tail)
+			}
+			if candidateBytes > maxDirectoryResponseBytes {
+				if index == start {
+					message := fmt.Sprintf("directory read response exceeds %d bytes on first entry: %d bytes", maxDirectoryResponseBytes, candidateBytes)
+					return errorResult(call.InvocationID, errors.New(message)), nil
+				}
+				break
+			}
+			page = append(page, names[index])
+			actualEnd = candidateEnd
+		}
+		result := prefix + "\n" + strings.Join(page, "\n")
+		if actualEnd < len(names) {
+			tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, actualEnd, len(names), actualEnd+1)
+			result += "\n\n" + tail
+		}
+		return textResult(call.InvocationID, result), nil
 	}
 	if !info.Mode().IsRegular() {
 		return errorResult(call.InvocationID, failRun("path is not a regular file", "INVALID_ARGUMENT")), nil
@@ -282,6 +326,12 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if closeErr != nil {
 		return errorResult(call.InvocationID, closeErr), nil
 	}
+	if lspStatus != nil {
+		language, available := lspStatus(args.Path)
+		if available && language != "" {
+			window.LSPStatus = "supported (" + language + ")"
+		}
+	}
 	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
 }
 
@@ -301,6 +351,9 @@ func formatTextWindow(path string, window TextWindow) string {
 	}
 	if window.Truncated {
 		lines = append(lines, "truncated: yes", "truncation_reason: "+window.TruncationReason, fmt.Sprintf("next: %d:%d", window.NextLine, window.NextColumn))
+	}
+	if window.LSPStatus != "" {
+		lines = append(lines, "lsp: "+window.LSPStatus)
 	}
 	if window.Body != "" {
 		lines = append(lines, "", window.Body)
@@ -394,12 +447,19 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
+	info, err := os.Stat(args.Path)
+	if err != nil {
+		return errorResult(call.InvocationID, err), nil
+	}
+	if !info.IsDir() {
+		return errorResult(call.InvocationID, rejectInput("path must be a directory")), nil
+	}
 	outcome, err := search.FindContext(ctx, args.Path, args.Pattern, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
-			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+			result.Contents = []runtime.ResultContent{{Type: "text", Text: "[Search cancelled; results are incomplete.]"}}
 		}
 		return result, nil
 	}
@@ -426,12 +486,18 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if args.Limit < 0 || args.Limit > maxSearchLimit {
 		return errorResult(call.InvocationID, rejectInput("limit must be between 1 and 100000")), nil
 	}
+	if strings.ContainsRune(args.Pattern, '\u0000') {
+		return errorResult(call.InvocationID, rejectInput("pattern must not contain NUL")), nil
+	}
+	if strings.ContainsRune(args.Glob, '\u0000') {
+		return errorResult(call.InvocationID, rejectInput("glob must not contain NUL")), nil
+	}
 	outcome, err := search.GrepContext(ctx, args.Path, args.Pattern, args.Literal, args.IgnoreCase, args.Glob, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
 			result.Details = mustJSON(map[string]any{"code": "CANCELLED", "search": map[string]any{"outcome": "CANCELLED", "incomplete": true}})
-			result.Contents = append(result.Contents, runtime.ResultContent{Type: "text", Text: "[Search cancelled; results are incomplete.]"})
+			result.Contents = []runtime.ResultContent{{Type: "text", Text: "[Search cancelled; results are incomplete.]"}}
 		}
 		return result, nil
 	}
@@ -439,10 +505,10 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) runtime.CapabilityResult {
-	if len(outcome.Results) == 0 && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
-		return textResult(call.InvocationID, emptyText)
-	}
 	text := strings.Join(outcome.Results, "\n")
+	if text == "" && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
+		text = emptyText
+	}
 	if len(outcome.Skipped) > 0 {
 		describe := strings.Join(outcome.Skipped[:min(len(outcome.Skipped), 10)], ", ")
 		if len(outcome.Skipped) > 10 {
@@ -465,6 +531,12 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 		}
 		seconds := strconv.FormatFloat(float64(call.TimeoutMillis)/1000, 'f', -1, 64)
 		text += "[Search timed out after " + seconds + "s; results are incomplete. Narrow the path or pattern, or raise timeout_seconds.]"
+	}
+	if len(outcome.Results) == 0 && outcome.IgnoreSkippedCount > 0 {
+		if text != "" {
+			text += "\n"
+		}
+		text += formatIgnoreSkippedHint(outcome.IgnoreSkipped, outcome.IgnoreSkippedCount)
 	}
 	result := textResult(call.InvocationID, text)
 	if exceedsInlineOutput(text) {
@@ -491,6 +563,18 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 	return result
 }
 
+func formatIgnoreSkippedHint(paths []string, count int) string {
+	shown := paths[:min(len(paths), 10)]
+	entries := strings.Join(shown, ", ")
+	if count > len(shown) {
+		if entries != "" {
+			entries += ", "
+		}
+		entries += fmt.Sprintf("… and %d more", count-len(shown))
+	}
+	return "[No matches. Not searched because of ignore rules: " + entries + "]"
+}
+
 func exceedsInlineOutput(text string) bool {
 	if len(text) > inlineOutputBytes {
 		return true
@@ -510,6 +594,12 @@ func exceedsInlineOutput(text string) bool {
 }
 
 func processCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	executing := false
+	defer func() {
+		if !executing && capability.ConfirmExecutionExit != nil {
+			capability.ConfirmExecutionExit()
+		}
+	}()
 	var args arguments
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
@@ -530,6 +620,7 @@ func processCapability(ctx context.Context, call runtime.CapabilityCall, capabil
 	if info, err := os.Stat(args.Workdir); err != nil || !info.IsDir() {
 		return errorResult(call.InvocationID, rejectInput("workdir is not a directory")), nil
 	}
+	executing = true
 	return ExecuteProcess(ctx, call, capability, args.Command, args.Workdir)
 }
 

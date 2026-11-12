@@ -86,6 +86,44 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	}
 }
 
+// COD-T-016
+func TestEditMultilineInsert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "insert.txt")
+	if err := os.WriteFile(path, []byte("a\r\nc\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nc", "new_string": "a\nb\nc"}, nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
+		t.Fatalf("edit=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != "a\r\nb\r\nc\r\n" {
+		t.Fatalf("inserted file=%q", written)
+	}
+}
+
+// COD-T-017
+func TestEditMultilineDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delete.txt")
+	if err := os.WriteFile(path, []byte("a\r\nb\r\nc\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nb\nc", "new_string": "a\nc"}, nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
+		t.Fatalf("edit=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != "a\r\nc\r\n" {
+		t.Fatalf("deleted file=%q", written)
+	}
+}
+
 // COD-T-098
 func TestEditPreservesMixedLineEndings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.txt")
@@ -104,6 +142,76 @@ func TestEditPreservesMixedLineEndings(t *testing.T) {
 		t.Fatalf("line endings changed: %q", written)
 	}
 }
+
+// COD-T-070: editing a file without a final newline reports the EOF marker in review details.
+func TestEditNoNewlineEOFReview(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "noeol.txt")
+	if err := os.WriteFile(path, []byte("no newline"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "newline", "new_string": "EOF"}, nil)
+	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 1" {
+		t.Fatalf("result=%#v", result)
+	}
+	var details struct {
+		EditReview struct {
+			Diff string `json:"diff"`
+		} `json:"editReview"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(details.EditReview.Diff, `\ No newline at end of file`) {
+		t.Fatalf("review diff=%q", details.EditReview.Diff)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil || string(written) != "no EOF" {
+		t.Fatalf("written=%q err=%v", written, err)
+	}
+}
+
+// COD-T-093: duplicate matches are rejected without changing the file.
+func TestEditMultipleMatchesAreRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multiple.txt")
+	if err := os.WriteFile(path, []byte("old old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "use replace_all") {
+		t.Fatalf("result=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil || string(written) != "old old" {
+		t.Fatalf("written=%q err=%v", written, err)
+	}
+}
+
+// COD-T-095 and COD-T-096: missing and empty search strings are rejected without writes.
+func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unchanged.txt")
+	const original = "source"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		old  string
+		want string
+	}{{"missing", "absent", "Could not find old_string"}, {"empty", "", "old_string must not be empty"}} {
+		t.Run(test.name, func(t *testing.T) {
+			result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": test.old, "new_string": "new"}, nil)
+			if !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
+				t.Fatalf("result=%#v", result)
+			}
+			written, err := os.ReadFile(path)
+			if err != nil || string(written) != original {
+				t.Fatalf("written=%q err=%v", written, err)
+			}
+		})
+	}
+}
+
+// COD-T-097 is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
 
 // COD-N-018
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {

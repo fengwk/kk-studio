@@ -22,7 +22,7 @@ func TestReadRejectsInvalidWindowsBeforeOpeningFiles(t *testing.T) {
 		want string
 	}{
 		{name: "missing-path", args: map[string]any{}, want: "path must be a non-empty string"},
-		{name: "relative-path", args: map[string]any{"path": "relative"}, want: "path must be absolute"},
+		{name: "relative-path", args: map[string]any{"path": "relative"}, want: "absolute path"},
 		{name: "zero-limit", args: map[string]any{"path": filepath.Join(t.TempDir(), "missing"), "limit": 0}, want: "limit must be a positive integer"},
 		{name: "bad-column", args: map[string]any{"path": filepath.Join(t.TempDir(), "missing"), "column_offset": 0}, want: "column_offset must be a positive integer"},
 	} {
@@ -44,8 +44,9 @@ func TestReadDirectoryAndBinaryFile(t *testing.T) {
 		}
 	}
 	directory := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": root}, nil)
-	if directory.Error || directory.Contents[0].Text != "a.txt\nz.txt" {
-		t.Fatalf("directory=%#v", directory)
+	wantDirectory := "path: " + filepath.ToSlash(root) + "\nkind: directory\n\na.txt\nz.txt"
+	if directory.Error || directory.Contents[0].Text != wantDirectory {
+		t.Fatalf("directory=%#v want=%q", directory, wantDirectory)
 	}
 	binaryPath := filepath.Join(root, "binary.dat")
 	if err := os.WriteFile(binaryPath, []byte{0, 1, 2, 3}, 0600); err != nil {
