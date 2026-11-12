@@ -1,0 +1,25 @@
+{
+  "codeServerVersion": "4.145.0-kk.1",
+  "codeServer": {
+    "linux-amd64": {
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.0-kk.1/code-server-4.145.0-kk.1-linux-amd64.tar.gz",
+      "sha256": "d6337c836836bb4d3ece27cd44f9a36730920c0af18f2d6782699dd671a31077"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.0-kk.1/code-server-4.145.0-kk.1-linux-arm64.tar.gz",
+      "sha256": "77f0f1dff293b2d199e25b8592c0e65c34920d034f0d706cdaaf6d6596ff1d52"
+    },
+    "macos-amd64": {
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.0-kk.1/code-server-4.145.0-kk.1-macos-amd64.tar.gz",
+      "sha256": "af5e5984254c8fa2c06fad40f0c2fb7f3e7a8a33e67111ec8d89a510165200ea"
+    },
+    "macos-arm64": {
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.0-kk.1/code-server-4.145.0-kk.1-macos-arm64.tar.gz",
+      "sha256": "b4cd3b2e27a2f18f7497907c33a2945ac7f2ff130a6f85507e31f4a567ce0a90"
+    },
+    "windows-amd64": {
+      "url": "https://github.com/fengwk/code-server/releases/download/v4.145.0-kk.1/code-server-4.145.0-kk.1-windows-amd64.tar.gz",
+      "sha256": "259d2a8208ec1fa023761cd0e41f848e6ee27b44fe62150f6c4d854e4f32f3d8"
+    }
+  }
+}
