@@ -1,9 +1,11 @@
 package coding
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -47,12 +49,12 @@ func DecodeText(data []byte) (DecodedText, error) {
 	body := data[bom:]
 	if charset == "UTF-8" {
 		if !utf8.Valid(body) || LooksBinary(body, false) {
-			return DecodedText{}, errors.New("file appears to be binary")
+			return DecodedText{}, failRun("file appears to be binary", "CODEC")
 		}
 		return DecodedText{Text: string(body), Charset: charset, BOMBytes: bom}, nil
 	}
 	if len(body)%2 != 0 {
-		return DecodedText{}, errors.New("file appears to be binary")
+		return DecodedText{}, failRun("file appears to be binary", "CODEC")
 	}
 	units := make([]uint16, len(body)/2)
 	for i := range units {
@@ -65,10 +67,10 @@ func DecodeText(data []byte) (DecodedText, error) {
 	for i, u := range units {
 		if u >= 0xd800 && u <= 0xdbff {
 			if i+1 >= len(units) || units[i+1] < 0xdc00 || units[i+1] > 0xdfff {
-				return DecodedText{}, errors.New("file appears to be binary")
+				return DecodedText{}, failRun("file appears to be binary", "CODEC")
 			}
 		} else if u >= 0xdc00 && u <= 0xdfff && (i == 0 || units[i-1] < 0xd800 || units[i-1] > 0xdbff) {
-			return DecodedText{}, errors.New("file appears to be binary")
+			return DecodedText{}, failRun("file appears to be binary", "CODEC")
 		}
 	}
 	return DecodedText{Text: string(utf16.Decode(units)), Charset: charset, BOMBytes: bom}, nil
@@ -122,9 +124,14 @@ func LooksBinary(data []byte, utf16Encoded bool) bool {
 	return false
 }
 
-// ReadTextWindow projects a validated read window and never returns more than the
-// requested line or Unicode code-point budget.
+// ReadTextWindow projects a string through the same bounded reader used by fs.read.
 func ReadTextWindow(text string, options WindowOptions) (TextWindow, error) {
+	return ReadTextWindowReader(strings.NewReader(text), options)
+}
+
+// ReadTextWindowReader decodes and scans only the requested window plus the small
+// lookahead needed to distinguish truncation from EOF.
+func ReadTextWindowReader(source io.Reader, options WindowOptions) (TextWindow, error) {
 	if options.Offset < 1 || options.Offset > 2147483647 {
 		return TextWindow{}, errors.New("offset must be a positive integer")
 	}
@@ -140,85 +147,231 @@ func ReadTextWindow(text string, options WindowOptions) (TextWindow, error) {
 	if options.ColumnOffset == 0 {
 		options.ColumnOffset = 1
 	}
-	text = stringsReplaceCRLF(text)
-	lines := splitLines(text)
-	if options.Offset > len(lines) {
-		ends := strings.HasSuffix(text, "\n")
-		return TextWindow{Empty: true, EndsWithNewline: &ends}, nil
+	reader := bufio.NewReaderSize(source, 8192)
+	charset, err := detectReaderCharset(reader)
+	if err != nil {
+		return TextWindow{}, err
 	}
-	start := options.Offset - 1
-	end := min(len(lines), start+options.Limit)
-	selected := append([]string(nil), lines[start:end]...)
-	firstRunes := []rune(selected[0])
-	columnIndex := options.ColumnOffset - 1
-	if columnIndex >= len(firstRunes) && len(firstRunes) > 0 || columnIndex > 0 && len(firstRunes) == 0 {
-		return TextWindow{}, fmt.Errorf("column_offset %d is out of range: line %d has %d columns", options.ColumnOffset, options.Offset, len(firstRunes))
-	}
-	selected[0] = string(firstRunes[columnIndex:])
-	truncated, reason := false, ""
-	count := 0
-	for i, line := range selected {
-		runes := []rune(line)
-		if count+len(runes) > MaxReadCodePoints {
-			selected[i] = string(runes[:MaxReadCodePoints-count])
-			selected = selected[:i+1]
-			truncated, reason = true, "character_limit"
-			break
+	scanner := textWindowScanner{options: options, line: 1, endLine: options.Offset + options.Limit - 1, rejectBinaryControls: charset == "UTF-8"}
+	for {
+		value, eof, readErr := readTextRune(reader, charset)
+		if readErr != nil {
+			if scanner.line > scanner.endLine {
+				scanner.stopAtLineLimit()
+				return scanner.finish(false)
+			}
+			if scanner.captured == MaxReadCodePoints {
+				scanner.stopAtCharacterLimit()
+				return scanner.finish(false)
+			}
+			return TextWindow{}, readErr
 		}
-		count += len(runes)
-	}
-	if !truncated && count >= MaxReadCodePoints && end < len(lines) {
-		truncated, reason = true, "character_limit"
-	}
-	if !truncated && end < len(lines) {
-		truncated, reason = true, "line_limit"
-	}
-	startColumn := 1
-	if start == 0 {
-		startColumn = options.ColumnOffset
-	}
-	lastColumn := 1
-	if len(selected) > 0 {
-		lastStartColumn := 1
-		if start+len(selected)-1 == start {
-			lastStartColumn = options.ColumnOffset
+		if eof {
+			return scanner.finish(true)
 		}
-		lastColumn = max(1, lastStartColumn-1+len([]rune(selected[len(selected)-1])))
+		stop, scanErr := scanner.push(value)
+		if scanErr != nil {
+			return TextWindow{}, scanErr
+		}
+		if stop {
+			return scanner.finish(false)
+		}
 	}
-	window := TextWindow{Body: numberedLines(selected, start+1), StartLine: start + 1, StartColumn: startColumn, EndLine: start + len(selected), EndColumn: lastColumn, Truncated: truncated, TruncationReason: reason}
-	if !truncated {
-		ends := strings.HasSuffix(text, "\n")
-		window.EndsWithNewline = &ends
+}
+
+type textWindowScanner struct {
+	options              WindowOptions
+	line                 int
+	endLine              int
+	column               int
+	lines                []string
+	current              strings.Builder
+	captured             int
+	lastLineCut          bool
+	endedWithNewline     bool
+	truncated            bool
+	reason               string
+	skipLF               bool
+	rejectBinaryControls bool
+}
+
+func (s *textWindowScanner) push(value rune) (bool, error) {
+	if s.skipLF {
+		s.skipLF = false
+		if value == '\n' {
+			return false, nil
+		}
 	}
-	if truncated {
-		if reason == "character_limit" {
-			window.NextLine = window.EndLine
-			window.NextColumn = window.EndColumn + 1
+	if value == '\r' || value == '\n' {
+		if s.line > s.endLine {
+			s.stopAtLineLimit()
+			return true, nil
+		}
+		if err := s.finishLine(); err != nil {
+			return false, err
+		}
+		s.line++
+		s.column = 0
+		s.current.Reset()
+		s.endedWithNewline = true
+		s.skipLF = value == '\r'
+		return false, nil
+	}
+	if s.line > s.endLine {
+		s.stopAtLineLimit()
+		return true, nil
+	}
+	if s.captured == MaxReadCodePoints {
+		s.stopAtCharacterLimit()
+		return true, nil
+	}
+	if value == 0 {
+		return false, failRun("file appears to be binary", "CODEC")
+	}
+	s.endedWithNewline = false
+	s.column++
+	if s.line < s.options.Offset || s.line == s.options.Offset && s.column < s.options.ColumnOffset {
+		return false, nil
+	}
+	if s.rejectBinaryControls && value < 0x20 && value != '\t' && value != '\n' && value != '\r' && value != '\f' && value != 0x1b {
+		return false, failRun("file appears to be binary", "CODEC")
+	}
+	if len(s.lines) == s.options.Limit {
+		s.stopAtLineLimit()
+		return true, nil
+	}
+	s.current.WriteRune(value)
+	s.captured++
+	return false, nil
+}
+
+func (s *textWindowScanner) finishLine() error {
+	if s.line == s.options.Offset && (s.column == 0 && s.options.ColumnOffset > 1 || s.column > 0 && s.column < s.options.ColumnOffset) {
+		return fmt.Errorf("column_offset %d is out of range: line %d has %d columns", s.options.ColumnOffset, s.line, s.column)
+	}
+	if s.line >= s.options.Offset && s.line <= s.endLine && len(s.lines) < s.options.Limit {
+		return s.finishLineContent()
+	}
+	return nil
+}
+
+func (s *textWindowScanner) finishLineContent() error {
+	s.lines = append(s.lines, s.current.String())
+	return nil
+}
+
+func (s *textWindowScanner) stopAtLineLimit() {
+	s.truncated = true
+	s.reason = "line_limit"
+	if s.captured == MaxReadCodePoints {
+		s.reason = "character_limit"
+	}
+}
+
+func (s *textWindowScanner) stopAtCharacterLimit() {
+	s.truncated = true
+	s.reason = "character_limit"
+	lastLine := s.options.Offset + len(s.lines)
+	if s.line == lastLine && s.current.Len() > 0 {
+		s.lastLineCut = true
+		_ = s.finishLineContent()
+	}
+}
+
+func (s *textWindowScanner) finish(eof bool) (TextWindow, error) {
+	if eof && s.column > 0 && s.line >= s.options.Offset && s.line <= s.endLine && len(s.lines) < s.options.Limit {
+		if err := s.finishLine(); err != nil {
+			return TextWindow{}, err
+		}
+	}
+	if len(s.lines) == 0 {
+		if !eof {
+			return TextWindow{}, errors.New("bounded text scan stopped before collecting a window")
+		}
+		return TextWindow{Empty: true, EndsWithNewline: &s.endedWithNewline}, nil
+	}
+	endLine := s.options.Offset + len(s.lines) - 1
+	startColumn := s.options.ColumnOffset
+	lastStartColumn := 1
+	if endLine == s.options.Offset {
+		lastStartColumn = s.options.ColumnOffset
+	}
+	endColumn := max(1, lastStartColumn-1+utf8.RuneCountInString(s.lines[len(s.lines)-1]))
+	window := TextWindow{Body: numberedLines(s.lines, s.options.Offset), StartLine: s.options.Offset, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn, Truncated: s.truncated, TruncationReason: s.reason}
+	if s.truncated {
+		if s.lastLineCut {
+			window.NextLine = endLine
+			window.NextColumn = endColumn + 1
 		} else {
-			window.NextLine = window.EndLine + 1
+			window.NextLine = endLine + 1
 			window.NextColumn = 1
 		}
+	} else if eof {
+		window.EndsWithNewline = &s.endedWithNewline
 	}
 	return window, nil
 }
 
-func stringsReplaceCRLF(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+func detectReaderCharset(reader *bufio.Reader) (string, error) {
+	prefix, _ := reader.Peek(3)
+	if len(prefix) >= 3 && bytes.Equal(prefix[:3], []byte{0xef, 0xbb, 0xbf}) {
+		_, err := reader.Discard(3)
+		return "UTF-8", err
+	}
+	if len(prefix) >= 2 && bytes.Equal(prefix[:2], []byte{0xff, 0xfe}) {
+		_, err := reader.Discard(2)
+		return "UTF-16LE", err
+	}
+	if len(prefix) >= 2 && bytes.Equal(prefix[:2], []byte{0xfe, 0xff}) {
+		_, err := reader.Discard(2)
+		return "UTF-16BE", err
+	}
+	return "UTF-8", nil
 }
 
-func splitLines(s string) []string {
-	if s == "" {
-		return nil
+func readTextRune(reader *bufio.Reader, charset string) (rune, bool, error) {
+	if charset == "UTF-8" {
+		value, size, err := reader.ReadRune()
+		if err == io.EOF {
+			return 0, true, nil
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		if value == utf8.RuneError && size == 1 {
+			return 0, false, failRun("file appears to be binary", "CODEC")
+		}
+		return value, false, nil
 	}
-	parts := bytes.Split([]byte(s), []byte("\n"))
-	if len(parts) > 1 && len(parts[len(parts)-1]) == 0 {
-		parts = parts[:len(parts)-1]
+	readUnit := func() (uint16, bool, error) {
+		var pair [2]byte
+		n, err := io.ReadFull(reader, pair[:])
+		if err == io.EOF && n == 0 {
+			return 0, true, nil
+		}
+		if err != nil {
+			return 0, false, failRun("file appears to be binary", "CODEC")
+		}
+		if charset == "UTF-16LE" {
+			return uint16(pair[0]) | uint16(pair[1])<<8, false, nil
+		}
+		return uint16(pair[0])<<8 | uint16(pair[1]), false, nil
 	}
-	lines := make([]string, len(parts))
-	for i := range parts {
-		lines[i] = string(parts[i])
+	first, eof, err := readUnit()
+	if err != nil || eof {
+		return 0, eof, err
 	}
-	return lines
+	if first >= 0xdc00 && first <= 0xdfff {
+		return 0, false, failRun("file appears to be binary", "CODEC")
+	}
+	if first < 0xd800 || first > 0xdbff {
+		return rune(first), false, nil
+	}
+	second, eof, err := readUnit()
+	if err != nil || eof || second < 0xdc00 || second > 0xdfff {
+		return 0, false, failRun("file appears to be binary", "CODEC")
+	}
+	return utf16.DecodeRune(rune(first), rune(second)), false, nil
 }
 
 func numberedLines(lines []string, start int) string {

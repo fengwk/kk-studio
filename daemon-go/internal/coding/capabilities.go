@@ -237,42 +237,50 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		message := fmt.Sprintf("File is %s MiB, which exceeds the tool output size limit of %d MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.", formatMiB(info.Size(), call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
 		return codedErrorResult(call.InvocationID, "INVALID_ARGUMENT", message), nil
 	}
-	if _, err = file.Seek(0, io.SeekStart); err != nil {
-		file.Close()
-		return errorResult(call.InvocationID, err), nil
-	}
-	data, err := io.ReadAll(file)
-	closeErr := file.Close()
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if closeErr != nil {
-		return errorResult(call.InvocationID, closeErr), nil
-	}
-	if imageType != "" {
-		tier, err := parseImageTier(call.ImageInputTier)
-		if err != nil {
+	if imageType != "" || mediaType != "" {
+		if _, err = file.Seek(0, io.SeekStart); err != nil {
+			file.Close()
 			return errorResult(call.InvocationID, err), nil
 		}
-		result, err := imagescaler.ScaleContext(ctx, imageType, data, tier, call.MaxOutputBytes)
-		if err != nil {
-			return errorResult(call.InvocationID, err), nil
+		data, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return errorResult(call.InvocationID, readErr), nil
 		}
-		content := runtime.ResultContent{Type: "binary", Bytes: result.Bytes, MediaType: result.MediaType, Size: int64(len(result.Bytes))}
-		return runtime.CapabilityResult{CallID: call.InvocationID, Details: mustJSON(map[string]any{"image": map[string]int{"originalWidth": result.OriginalWidth, "originalHeight": result.OriginalHeight, "displayWidth": result.DisplayWidth, "displayHeight": result.DisplayHeight}}), Contents: []runtime.ResultContent{content}}, nil
-	}
-	if mediaType != "" {
+		if closeErr != nil {
+			return errorResult(call.InvocationID, closeErr), nil
+		}
+		if imageType != "" {
+			tier, err := parseImageTier(call.ImageInputTier)
+			if err != nil {
+				return errorResult(call.InvocationID, err), nil
+			}
+			result, err := imagescaler.ScaleContext(ctx, imageType, data, tier, call.MaxOutputBytes)
+			if err != nil {
+				return errorResult(call.InvocationID, err), nil
+			}
+			content := runtime.ResultContent{Type: "binary", Bytes: result.Bytes, MediaType: result.MediaType, Size: int64(len(result.Bytes))}
+			return runtime.CapabilityResult{CallID: call.InvocationID, Details: mustJSON(map[string]any{"image": map[string]int{"originalWidth": result.OriginalWidth, "originalHeight": result.OriginalHeight, "displayWidth": result.DisplayWidth, "displayHeight": result.DisplayHeight}}), Contents: []runtime.ResultContent{content}}, nil
+		}
 		name := filepath.Base(args.Path)
 		content := runtime.ResultContent{Type: "binary", Bytes: data, MediaType: mediaType, Name: &name, Size: int64(len(data))}
 		return runtime.CapabilityResult{CallID: call.InvocationID, Contents: []runtime.ResultContent{content}}, nil
 	}
-	decoded, err := DecodeText(data)
-	if err != nil {
-		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return errorResult(call.InvocationID, err), nil
 	}
-	window, err := ReadTextWindow(decoded.Text, WindowOptions{Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
-	if err != nil {
-		return errorResult(call.InvocationID, rejectInput(err.Error())), nil
+	window, readErr := ReadTextWindowReader(file, WindowOptions{Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
+	closeErr := file.Close()
+	if readErr != nil {
+		var typed *toolError
+		if errors.As(readErr, &typed) {
+			return errorResult(call.InvocationID, readErr), nil
+		}
+		return errorResult(call.InvocationID, rejectInput(readErr.Error())), nil
+	}
+	if closeErr != nil {
+		return errorResult(call.InvocationID, closeErr), nil
 	}
 	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
 }
