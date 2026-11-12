@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -103,6 +104,12 @@ type CapabilityExecutor func(context.Context, CapabilityCall, CapabilityContext)
 // CapabilityProvider exposes the capability map owned by a feature package.
 type CapabilityProvider interface {
 	Capabilities() map[string]CapabilityExecutor
+}
+
+// IDEService handles protocol IDE commands and leases without coupling runtime to the IDE package.
+type IDEService interface {
+	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
+	ApplyLease(*protocol.IdeLease, time.Time)
 }
 
 // Connection exchanges decoded control envelopes with the runtime. Transport implements it.
