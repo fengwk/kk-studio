@@ -108,36 +108,49 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.ExtraFiles = []*os.File{ownerReader}
 	cmd.Env = mergeEnvironment(os.Environ(), spec.Env)
-	stdin, err := cmd.StdinPipe()
+	stdinReader, stdin, err := os.Pipe()
 	if err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdinReader.Close()
 		_ = stdin.Close()
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdinReader.Close()
 		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, err
 	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
 	if err := cmd.Start(); err != nil {
+		_ = stdinReader.Close()
 		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = stderr.Close()
+		_ = stderrWriter.Close()
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, fmt.Errorf("cannot start process scope helper: %w", err)
 	}
+	_ = stdinReader.Close()
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 	_ = ownerReader.Close()
 	p := &posixProcess{supervisor: s, cmd: cmd, pid: cmd.Process.Pid, sid: cmd.Process.Pid, stateDir: dir, owner: ownerWriter, stdin: stdin, stdout: stdout, stderr: stderr, baselinePIDs: baselinePIDs, baselineKnown: baselineKnown, done: make(chan struct{})}
 	go func() { p.waitErr = cmd.Wait(); close(p.done) }()

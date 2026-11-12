@@ -52,6 +52,48 @@ func TestPOSIXSupervisor_NaturalExitDrains(t *testing.T) {
 	}
 }
 
+// NAT-T-119
+func TestPOSIXSupervisor_DuplexStreams(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "IFS= read -r value; printf 'out:%s' \"$value\"; printf 'native-error' >&2; exit 7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(process.Stdin(), "native-input\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Stdin().Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := io.ReadAll(process.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(process.Stderr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	exit, err := process.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stdout) != "out:native-input" || string(stderr) != "native-error" {
+		t.Fatalf("stdout/stderr = %q/%q", stdout, stderr)
+	}
+	if exit.Code == nil || *exit.Code != 7 {
+		t.Fatalf("exit = %+v", exit)
+	}
+}
+
 // NAT-T-133
 func TestPOSIXSupervisor_StartAfterClose(t *testing.T) {
 	supervisor, err := NewSupervisor()

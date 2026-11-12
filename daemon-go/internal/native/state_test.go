@@ -53,6 +53,11 @@ func TestState_ReadMissing(t *testing.T) {
 	}
 }
 
+// NAT-T-145
+func TestState_PublishQuietly(t *testing.T) {
+	publishQuietly(stateTestDir(t), "../escape", "sensitive")
+}
+
 // NAT-T-146
 func TestState_LaunchOneShot(t *testing.T) {
 	dir := stateTestDir(t)
@@ -90,6 +95,17 @@ func TestState_CorruptLaunch(t *testing.T) {
 	}
 }
 
+// NAT-T-149
+func TestState_IncompleteLaunch(t *testing.T) {
+	dir := stateTestDir(t)
+	if err := publish(dir, launchFile, []byte(`{"cwd":"/tmp"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readLaunch(dir); err == nil {
+		t.Fatal("incomplete launch accepted")
+	}
+}
+
 // NAT-T-150
 func TestState_ExitReport(t *testing.T) {
 	dir := stateTestDir(t)
@@ -100,6 +116,12 @@ func TestState_ExitReport(t *testing.T) {
 	got, err := readExit(dir)
 	if err != nil || got.ExitCode == nil || *got.ExitCode != code {
 		t.Fatalf("exit = %#v, %v", got, err)
+	}
+	if err := publish(dir, exitFile, []byte(`{"exitCode":null,"signal":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExit(dir); err == nil {
+		t.Fatal("exit report without a status was accepted")
 	}
 }
 
@@ -123,5 +145,34 @@ func TestState_CleanupTruth(t *testing.T) {
 	}
 	if _, err := readCleanup(dir); err == nil {
 		t.Fatal("invalid cleanup accepted")
+	}
+}
+
+// NAT-T-152
+func TestState_RemoveDirectory(t *testing.T) {
+	dir := stateTestDir(t)
+	if err := publishText(dir, scopeFile, "123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("state directory still exists: %v", err)
+	}
+}
+
+// NAT-T-153
+func TestState_AtomicPublish(t *testing.T) {
+	dir := stateTestDir(t)
+	if err := publishText(dir, scopeFile, "session"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != scopeFile {
+		t.Fatalf("published files = %v", entries)
 	}
 }
