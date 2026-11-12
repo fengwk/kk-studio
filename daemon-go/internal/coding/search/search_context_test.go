@@ -83,7 +83,6 @@ func TestFindCollectsUnreadablePathsAsSkipped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "readable.txt"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	blockedPath := filepath.ToSlash(blocked)
 	walker := func(_ *fastwalk.Config, walkRoot string, callback fs.WalkDirFunc) error {
 		rootInfo, err := os.Stat(walkRoot)
 		if err != nil {
@@ -92,6 +91,7 @@ func TestFindCollectsUnreadablePathsAsSkipped(t *testing.T) {
 		if err := callback(filepath.ToSlash(walkRoot), fs.FileInfoToDirEntry(rootInfo), nil); err != nil {
 			return err
 		}
+		blockedPath := filepath.ToSlash(filepath.Join(walkRoot, "blocked"))
 		if err := callback(blockedPath, nil, os.ErrPermission); err != nil {
 			return err
 		}
