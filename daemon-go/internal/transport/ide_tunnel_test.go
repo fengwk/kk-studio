@@ -59,7 +59,8 @@ func TestTunnel_ParseRoute(t *testing.T) {
 		epoch   int64
 		subpath string
 	}{
-		{"/ide/" + id + "/1", true, 1, "/"},
+		{"/ide/" + id + "/1", false, 0, ""},
+		{"/ide/" + id + "/1/", true, 1, "/"},
 		{"/ide/" + id + "/27/a/b", true, 27, "/a/b"},
 		{"/ide/" + id + "/01", false, 0, ""},
 		{"/ide/" + id + "/0", false, 0, ""},

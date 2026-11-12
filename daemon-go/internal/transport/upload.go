@@ -102,7 +102,7 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 			if errors.As(err, &uploadErr) && !uploadErr.CleanupConfirmed {
 				return runtimeapi.ResultContent{}, uploadErr
 			}
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return runtimeapi.ResultContent{}, uploadFailure("put", "cancelled", true, err)
 			}
 			if err = retryAfter(ctx, retryBackoff); err != nil {
@@ -233,6 +233,9 @@ func (u *ResourceUploader) put(ctx context.Context, targetURL string, headers ma
 		if err != nil {
 			if responseErr != nil {
 				return uploadFailure("put", "storage-rejected", true, responseErr)
+			}
+			if errors.Is(err, context.Canceled) {
+				return err
 			}
 			return uploadFailure("put", "cleanup-failed", false, err)
 		}

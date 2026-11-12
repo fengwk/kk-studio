@@ -69,15 +69,15 @@ func TestHandleIDE_ResolutionAndRouteErrors(t *testing.T) {
 		want       int
 	}{
 		{"bad route", "/ide/not-a-uuid/1", nil, http.StatusBadRequest},
-		{"missing resolver", "/ide/" + ideTestID + "/1", nil, http.StatusServiceUnavailable},
-		{"gone", "/ide/" + ideTestID + "/1", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+		{"missing resolver", "/ide/" + ideTestID + "/1/", nil, http.StatusServiceUnavailable},
+		{"gone", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{}, fmt.Errorf("VIEW_GONE")
 		}), http.StatusNotFound},
-		{"unavailable", "/ide/" + ideTestID + "/1", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+		{"unavailable", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{}, fmt.Errorf("UNAVAILABLE")
 		}), http.StatusServiceUnavailable},
-		{"resolution failure", "/ide/" + ideTestID + "/1", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) { return ViewUpstream{}, fmt.Errorf("other") }), http.StatusBadGateway},
-		{"invalid upstream", "/ide/" + ideTestID + "/1", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+		{"resolution failure", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) { return ViewUpstream{}, fmt.Errorf("other") }), http.StatusBadGateway},
+		{"invalid upstream", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{Host: "example.com", Port: 80, Path: "/"}, nil
 		}), http.StatusBadGateway},
 	} {
@@ -99,11 +99,29 @@ func TestHandleIDE_RejectsUnsupportedConnectProtocol(t *testing.T) {
 		t.Fatal("resolver must not be called")
 		return ViewUpstream{}, nil
 	})}
-	req := httptest.NewRequest(http.MethodConnect, "http://studio/ide/"+ideTestID+"/1", nil)
+	req := httptest.NewRequest(http.MethodConnect, "http://studio/ide/"+ideTestID+"/1/", nil)
 	response := httptest.NewRecorder()
 	connection.handleIDE(response, req)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+// TRN-T-034
+func TestHandleIDE_RejectsMissingPathBeforeResolve(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodConnect} {
+		t.Run(method, func(t *testing.T) {
+			connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
+				t.Fatal("resolver called for missing path")
+				return ViewUpstream{}, nil
+			})}
+			req := httptest.NewRequest(method, "http://studio/ide/"+ideTestID+"/1", nil)
+			response := httptest.NewRecorder()
+			connection.handleIDE(response, req)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want 400", response.Code)
+			}
+		})
 	}
 }
 

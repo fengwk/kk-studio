@@ -93,6 +93,47 @@ func TestUpload_NetworkCleanupFailureIsUnconfirmed(t *testing.T) {
 	}
 }
 
+// TRN-N-004, TRN-T-107
+func TestUpload_ShutdownAbortIsNotCleanupFailure(t *testing.T) {
+	control := uploadExchangeStub{
+		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			return ticket, nil
+		},
+		commit: func(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error) {
+			t.Fatal("commit after cancelled PUT")
+			return nil, nil
+		},
+	}
+	network := NewNetworkRuntime(nil)
+	network.client = &http.Client{Transport: uploadRoundTripper(func(request *http.Request) (*http.Response, error) {
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+	uploader := &ResourceUploader{Control: control, Network: network}
+	uploadDone := make(chan error, 1)
+	go func() {
+		_, err := uploader.Upload(context.Background(), "123e4567-e89b-12d3-a456-426614174000", uploadContent())
+		uploadDone <- err
+	}()
+	waitUntil(t, func() bool {
+		network.mu.Lock()
+		defer network.mu.Unlock()
+		return network.active == 1
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := network.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	err := <-uploadDone
+	var uploadErr *runtimeapi.ResourceUploadError
+	if !errors.As(err, &uploadErr) || uploadErr.Category != "cancelled" || !uploadErr.CleanupConfirmed {
+		t.Fatalf("shutdown abort classified as cleanup failure: %v (isCanceled=%t)", err, errors.Is(err, context.Canceled))
+	}
+}
+
 // TRN-F-005
 func TestUpload_ValidationAndTicketFailures(t *testing.T) {
 	const invocation = "123e4567-e89b-12d3-a456-426614174000"

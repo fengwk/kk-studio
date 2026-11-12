@@ -280,11 +280,10 @@ func (l *ConnectionLifecycle) run() {
 		wait := delay
 		if immediate {
 			wait = 0
-		} else {
-			delay *= 2
-			if delay > l.maxDelay {
-				delay = l.maxDelay
-			}
+		}
+		delay *= 2
+		if delay > l.maxDelay {
+			delay = l.maxDelay
 		}
 		if !waitLifecycle(l.ctx, wait) {
 			l.stopFromParent()

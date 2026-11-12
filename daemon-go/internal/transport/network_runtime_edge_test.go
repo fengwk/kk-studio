@@ -45,6 +45,83 @@ func TestNetworkRuntime_WithResponseReportsScopedFailures(t *testing.T) {
 	}
 }
 
+// TRN-N-004, TRN-T-109, TRN-T-110 verify Go's explicit callback and cleanup error outcomes.
+func TestNetworkRuntime_WithResponsePropagatesSingleFailures(t *testing.T) {
+	closeErr := errors.New("private close failure")
+	network := NewNetworkRuntime(nil)
+	network.client = &http.Client{Transport: runtimeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: runtimeCloseErrorBody{Reader: strings.NewReader("body"), err: closeErr}}, nil
+	})}
+	request, err := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := network.WithResponse(context.Background(), request, func(*http.Response) error { return nil })
+	if !errors.Is(got, closeErr) {
+		t.Fatalf("cleanup-only error=%v", got)
+	}
+
+	callbackErr := errors.New("callback failed")
+	network.client = &http.Client{Transport: runtimeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("body"))}, nil
+	})}
+	got = network.WithResponse(context.Background(), request, func(*http.Response) error { return callbackErr })
+	if got != callbackErr {
+		t.Fatalf("callback-only error=%v, want original error", got)
+	}
+}
+
+// TRN-N-004, TRN-T-103 verify each Go retirement waiter receives its own context deadline.
+func TestNetworkRuntime_RetireWaitersHaveIndependentDeadlines(t *testing.T) {
+	type result struct {
+		id  int
+		err error
+	}
+	network := NewNetworkRuntime(nil)
+	network.mu.Lock()
+	network.active = 1
+	network.idle = make(chan struct{})
+	idle := network.idle
+	network.mu.Unlock()
+	results := make(chan result, 2)
+	started := make(chan int, 2)
+	startTime := time.Now()
+	ctx1, cancel1 := context.WithDeadline(context.Background(), startTime.Add(250*time.Millisecond))
+	defer cancel1()
+	ctx2, cancel2 := context.WithDeadline(context.Background(), startTime.Add(750*time.Millisecond))
+	defer cancel2()
+	startWaiter := func(id int, ctx context.Context) {
+		go func() {
+			started <- id
+			results <- result{id: id, err: network.RetireWhenIdle(ctx)}
+		}()
+	}
+	startWaiter(1, ctx1)
+	startWaiter(2, ctx2)
+	<-started
+	<-started
+	first := <-results
+	if first.id != 1 || !errors.Is(first.err, context.DeadlineExceeded) {
+		t.Fatalf("first retirement result=%+v, want caller 1 deadline", first)
+	}
+	select {
+	case second := <-results:
+		t.Fatalf("second retirement waiter returned before its deadline: %+v", second)
+	default:
+	}
+	second := <-results
+	if second.id != 2 || !errors.Is(second.err, context.DeadlineExceeded) {
+		t.Fatalf("second retirement result=%+v, want caller 2 deadline", second)
+	}
+	network.mu.Lock()
+	network.active = 0
+	close(idle)
+	network.mu.Unlock()
+	if err := network.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TRN-T-101, TRN-T-102 verify Close returns its deadline when an admitted callback does not finish.
 func TestNetworkRuntime_CloseDeadlineAndAdmission(t *testing.T) {
 	network := NewNetworkRuntime(nil)

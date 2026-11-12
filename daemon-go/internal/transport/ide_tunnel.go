@@ -60,7 +60,7 @@ var ideUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 func parseIDERoute(path string) (string, int64, string, bool) {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(parts) < 3 || parts[0] != "ide" || !ideUUID.MatchString(parts[1]) || parts[2] == "" || parts[2] == "0" || (len(parts[2]) > 1 && parts[2][0] == '0') {
+	if len(parts) < 4 || parts[0] != "ide" || !ideUUID.MatchString(parts[1]) || parts[2] == "" || parts[2] == "0" || (len(parts[2]) > 1 && parts[2][0] == '0') {
 		return "", 0, "", false
 	}
 	epoch, err := strconv.ParseInt(parts[2], 10, 64)
