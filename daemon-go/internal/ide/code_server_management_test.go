@@ -177,6 +177,43 @@ func TestManagementResponsesRejectInvalidShapes(t *testing.T) {
 	}
 }
 
+// IDE-T-039 verifies code-server close results require an explicit cleanup.complete boolean.
+func TestCloseViewRequiresCleanupComplete(t *testing.T) {
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	validView := `"viewId":"` + viewID + `","bindingEpoch":"1","workspacePath":"/workspace","state":"CLOSED"`
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "missing cleanup", body: `{` + validView + `}`, wantErr: true},
+		{name: "missing complete", body: `{` + validView + `,"cleanup":{}}`, wantErr: true},
+		{name: "null complete", body: `{` + validView + `,"cleanup":{"complete":null}}`, wantErr: true},
+		{name: "non-boolean complete", body: `{` + validView + `,"cleanup":{"complete":"false"}}`, wantErr: true},
+		{name: "incomplete cleanup", body: `{` + validView + `,"cleanup":{"complete":false}}`},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(writer, test.body)
+			}))
+			defer server.Close()
+			manager := managementTestManager(t, server)
+			result, err := manager.CloseView(context.Background(), viewID, 1, ManagedViewCloseDiscard)
+			if test.wantErr {
+				if FailureCode(err) != "UNAVAILABLE" || err.Error() != "managed code-server returned an invalid close result" {
+					t.Fatalf("close result=%+v err=%v", result, err)
+				}
+				return
+			}
+			if err != nil || result == nil || result.Cleanup.Complete {
+				t.Fatalf("incomplete close result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
 // IDE-F-009 verifies stable native error-code mapping and rejects malformed code fields.
 func TestManagedFailureCodes(t *testing.T) {
 	cases := []struct {

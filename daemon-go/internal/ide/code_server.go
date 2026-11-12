@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -593,6 +594,15 @@ func (m *codeServerManager) CloseView(ctx context.Context, viewID string, epoch 
 	if err := json.Unmarshal(body, &result); err != nil || result.ViewID == "" {
 		return nil, NewError("managed code-server returned an invalid close result", "UNAVAILABLE")
 	}
+	var cleanupShape struct {
+		Cleanup *struct {
+			Complete *bool `json:"complete"`
+		} `json:"cleanup"`
+	}
+	if err := json.Unmarshal(body, &cleanupShape); err != nil || cleanupShape.Cleanup == nil || cleanupShape.Cleanup.Complete == nil {
+		return nil, NewError("managed code-server returned an invalid close result", "UNAVAILABLE")
+	}
+	result.Cleanup.Complete = *cleanupShape.Cleanup.Complete
 	result.Mode = mode
 	return &result, nil
 }
@@ -719,13 +729,27 @@ type diagnosticTail struct {
 func (d *diagnosticTail) push(value string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	current := d.value.String()
-	current += value
-	if len(current) > 4*1024 {
-		current = current[len(current)-(4*1024):]
-	}
+	current := d.value.String() + value
 	d.value.Reset()
-	d.value.WriteString(current)
+	d.value.WriteString(diagnosticUTF16Tail(current, 4*1024))
+}
+
+func diagnosticUTF16Tail(value string, limit int) string {
+	units := 0
+	start := len(value)
+	for start > 0 {
+		r, size := utf8.DecodeLastRuneInString(value[:start])
+		runeUnits := 1
+		if r > 0xffff {
+			runeUnits = 2
+		}
+		if units+runeUnits > limit {
+			break
+		}
+		units += runeUnits
+		start -= size
+	}
+	return value[start:]
 }
 func allocateLoopbackPort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

@@ -246,6 +246,15 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	}
 }
 
+// IDE-T-031 verifies diagnostic bounds count decoded characters rather than UTF-8 bytes.
+func TestDiagnosticTailUsesCharacterLimit(t *testing.T) {
+	var tail diagnosticTail
+	tail.push(strings.Repeat("界", 4*1024+1))
+	if got, want := tail.value.String(), strings.Repeat("界", 4*1024); got != want {
+		t.Fatalf("diagnostic tail has %d bytes, want %d decoded characters", len(got), 4*1024)
+	}
+}
+
 func fakeIDEConfig(root string) config.DaemonConfig {
 	return config.DaemonConfig{DataDir: filepath.Join(root, "data"), DistributionDir: root}
 }
