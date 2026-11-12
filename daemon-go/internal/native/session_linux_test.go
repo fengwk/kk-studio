@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -145,6 +144,33 @@ func TestLinuxSession_NoAdoptedChildren(t *testing.T) {
 	}
 }
 
+// NAT-T-051, NAT-T-121 verify explicitly tracked escaped sessions converge on terminate.
+func TestLinuxSupervisor_ConvergesTrackedEscapedSession(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	pidFile := filepath.Join(t.TempDir(), "escaped.pid")
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "setsid /bin/sleep 30 & echo $! > " + strconv.Quote(pidFile) + "; wait"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPID := waitPIDFile(t, pidFile)
+	if err := supervisor.(DescendantTracker).TrackDescendant(context.Background(), process.PID(), childPID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := process.Terminate(ctx, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	waitPIDGone(t, childPID, time.Second)
+}
+
 // NAT-T-122
 func TestLinuxSupervisor_ConvergesAdoptedSessionAfterNaturalExit(t *testing.T) {
 	supervisor, err := NewSupervisor()
@@ -206,24 +232,6 @@ func TestLinuxSupervisor_ConvergesAdoptedSessionAfterHelperDeath(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitPIDGone(t, childPID, time.Second)
-}
-
-func waitPIDFile(t *testing.T, path string) int {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil && len(data) != 0 {
-			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-			if parseErr != nil {
-				t.Fatal(parseErr)
-			}
-			return pid
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("pid file %s was not published", path)
-	return 0
 }
 
 func waitPIDGone(t *testing.T, pid int, timeout time.Duration) {
