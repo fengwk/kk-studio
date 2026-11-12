@@ -226,8 +226,16 @@ func TestResolveWritable(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "new", "deep", "f.txt")
 	got, err := resolveWritablePath(target)
-	if err != nil || got != target {
-		t.Fatalf("resolved=%q err=%v want=%q", got, err, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(resolvedRoot, "new", "deep", "f.txt")
+	if got != want {
+		t.Fatalf("resolved=%q want=%q", got, want)
 	}
 }
 

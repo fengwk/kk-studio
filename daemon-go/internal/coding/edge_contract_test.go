@@ -192,7 +192,11 @@ func TestEditReviewOutputSeparatesDiff(t *testing.T) {
 	if err := json.Unmarshal(result.Details, &details); err != nil {
 		t.Fatal(err)
 	}
-	if details.EditReview.Path != path || details.EditReview.Diff == "" || strings.Contains(result.Contents[0].Text, details.EditReview.Diff) {
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if details.EditReview.Path != resolvedPath || details.EditReview.Diff == "" || strings.Contains(result.Contents[0].Text, details.EditReview.Diff) {
 		t.Fatalf("body=%q review=%#v", result.Contents[0].Text, details.EditReview)
 	}
 }
