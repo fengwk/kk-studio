@@ -12,7 +12,7 @@ import (
 // RUN-T-001 heartbeat publication is suppressed until READY and begins after the first applied snapshot.
 func TestRuntimeHeartbeatsOnlyWhenReady(t *testing.T) {
 	c := newTestConnection()
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, HeartbeatInterval: 5 * time.Millisecond, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
 	}})

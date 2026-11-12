@@ -38,12 +38,12 @@ func (c *testConnection) waitFor(t *testing.T, predicate func([]*protocol.Envelo
 }
 
 func queueHandshake(c *testConnection) {
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(1024)}}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(1), Config: &protocol.DaemonConfiguration{StudioUrl: "https://studio.example", Lsp: &protocol.LspConfiguration{}}}}}
 }
 
 func invocationEnvelope() *protocol.Envelope {
-	return &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID), Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{}`), TimeoutMillis: int64Ptr(0)}}}
+	return &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID), Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{}`), TimeoutMillis: int64Ptr(0), MaxOutputBytes: int64Ptr(1024), ImageInputTier: imageTierPtr(protocol.ImageInputTier_P720)}}}
 }
 
 func newInvocationRuntime(t *testing.T, c *testConnection, executor CapabilityExecutor) *Runtime {

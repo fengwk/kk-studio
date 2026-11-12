@@ -46,6 +46,8 @@ func (f *sequenceConnectionFactory) Connect(ctx context.Context) (Connection, er
 	return connection, nil
 }
 
+func imageTierPtr(value protocol.ImageInputTier) *protocol.ImageInputTier { return &value }
+
 func newTestConnection() *testConnection {
 	return &testConnection{in: make(chan *protocol.Envelope, 16), failures: make(chan error, 1), closed: make(chan struct{})}
 }
@@ -100,7 +102,7 @@ func TestRuntimeSettingsRequireResourceBudgets(t *testing.T) {
 // RUN-T-086 does not send READY until the first environment snapshot has finished applying.
 func TestRuntimeSendsReadyAfterConfigurationApplication(t *testing.T) {
 	c := newTestConnection()
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	configMessage := &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(1), Config: &protocol.DaemonConfiguration{StudioUrl: "https://studio.example", Lsp: &protocol.LspConfiguration{}}}}}
 	c.in <- configMessage
 	c.in <- configMessage
@@ -161,7 +163,7 @@ func TestRuntimeRejectsOtherEnvironmentScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.handleSettings(&protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(1)}}}}); err != nil {
+	if err := r.handleSettings(&protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}); err != nil {
 		t.Fatal(err)
 	}
 	err = r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, EnvironmentId: stringPtr("another-env"), Payload: &protocol.Envelope_Heartbeat{Heartbeat: &protocol.Heartbeat{}}})
@@ -173,14 +175,20 @@ func TestRuntimeRejectsOtherEnvironmentScope(t *testing.T) {
 // RUN-T-005 dispatches a valid INVOKE and sends STARTED before its terminal result.
 func TestRuntimeExecutesInvocation(t *testing.T) {
 	c := newTestConnection()
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(1), Config: &protocol.DaemonConfiguration{StudioUrl: "https://studio.example", Lsp: &protocol.LspConfiguration{}}}}}
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: stringPtr("123e4567-e89b-42d3-a456-426614174000"), Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{"ok":true}`), TimeoutMillis: int64Ptr(0)}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: stringPtr("123e4567-e89b-42d3-a456-426614174000"), Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{"ok":true}`), TimeoutMillis: int64Ptr(0), MaxOutputBytes: int64Ptr(1024), ImageInputTier: imageTierPtr(protocol.ImageInputTier_P720)}}}
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", DaemonVersion: "1.0.0", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
 	}, Capabilities: map[string]CapabilityExecutor{"echo": func(_ context.Context, call CapabilityCall, _ CapabilityContext) (CapabilityResult, error) {
 		if !json.Valid(call.Arguments) {
 			t.Fatal("arguments were not JSON")
+		}
+		if call.ImageInputTier != ImageInputTierP720 {
+			t.Fatalf("image input tier = %q, want %q", call.ImageInputTier, ImageInputTierP720)
+		}
+		if call.MaxOutputBytes != 1024 {
+			t.Fatalf("max output bytes = %d, want 1024", call.MaxOutputBytes)
 		}
 		return CapabilityResult{CallID: call.InvocationID, Details: json.RawMessage(`{"ok":true}`)}, nil
 	}}})

@@ -22,7 +22,7 @@ func TestRuntimeSignalsConfigurationFailureAndAllowsRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	connection, reconnected := newTestConnection(), newTestConnection()
-	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
+	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	first := configurationOf(initial)
 	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(1), Config: first}}}
 	invalid := configurationOf(initial)
@@ -31,7 +31,7 @@ func TestRuntimeSignalsConfigurationFailureAndAllowsRepair(t *testing.T) {
 	repaired := configurationOf(initial)
 	repaired.StudioUrl = "https://repaired.example"
 	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(3), Config: repaired}}}
-	reconnected.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
+	reconnected.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
 	reconnected.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(3), Config: repaired}}}
 	factory := &sequenceConnectionFactory{connections: []Connection{connection, reconnected}}
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: factory, InitialReconnectDelay: time.Millisecond, MaxReconnectDelay: 10 * time.Millisecond, EnvironmentConfig: manager, Status: status})

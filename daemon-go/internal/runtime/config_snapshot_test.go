@@ -61,7 +61,7 @@ func TestRuntimeFreezesConfigurationPerInvocation(t *testing.T) {
 		cancel()
 		t.Fatal("updated configuration was not applied")
 	}
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: &secondID, Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{}`), TimeoutMillis: int64Ptr(0)}}}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: &secondID, Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{}`), TimeoutMillis: int64Ptr(0), MaxOutputBytes: int64Ptr(1024), ImageInputTier: imageTierPtr(protocol.ImageInputTier_P720)}}}
 	select {
 	case got := <-observed:
 		if got != "https://v1.example" {

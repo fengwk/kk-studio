@@ -50,33 +50,33 @@ type activeConnection struct {
 }
 
 type runningCall struct {
-	cancel context.CancelFunc
+	cancel         context.CancelFunc
+	maxOutputBytes int64
 }
 
 // Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
 type Runtime struct {
-	options          RuntimeOptions
-	hostInfo         *protocol.HostInfo
-	gate             OutboundGate
-	journal          *InvocationJournal
-	status           *StatusTracker
-	mu               sync.RWMutex
-	connection       *activeConnection
-	generation       uint64
-	config           config.DaemonConfig
-	configProto      *protocol.DaemonConfiguration
-	bound            bool
-	ready            bool
-	maxResourceBytes int64
-	sendMu           sync.Mutex
-	callsMu          sync.Mutex
-	calls            map[string]*runningCall
-	exitRequested    map[string]bool
-	wg               sync.WaitGroup
-	runMu            sync.Mutex
-	running          bool
-	hasRun           bool
-	sendCtx          context.Context
+	options       RuntimeOptions
+	hostInfo      *protocol.HostInfo
+	gate          OutboundGate
+	journal       *InvocationJournal
+	status        *StatusTracker
+	mu            sync.RWMutex
+	connection    *activeConnection
+	generation    uint64
+	config        config.DaemonConfig
+	configProto   *protocol.DaemonConfiguration
+	bound         bool
+	ready         bool
+	sendMu        sync.Mutex
+	callsMu       sync.Mutex
+	calls         map[string]*runningCall
+	exitRequested map[string]bool
+	wg            sync.WaitGroup
+	runMu         sync.Mutex
+	running       bool
+	hasRun        bool
+	sendCtx       context.Context
 }
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
@@ -348,7 +348,6 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 	r.mu.Lock()
 	r.bound = true
 	r.ready = false
-	r.maxResourceBytes = budgets.GetMaxResourceBytes()
 	r.mu.Unlock()
 	return nil
 }
@@ -439,6 +438,14 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	if !ok || invoke.Invoke == nil {
 		return r.rejectCall(id, "invoke payload is required")
 	}
+	tier, tierErr := mapImageInputTier(invoke.Invoke.ImageInputTier)
+	if tierErr != nil {
+		return r.rejectCall(id, tierErr.Error())
+	}
+	budget := invoke.Invoke.GetMaxOutputBytes()
+	if invoke.Invoke.MaxOutputBytes == nil || budget <= 0 {
+		return r.rejectCall(id, "maxOutputBytes must be a positive integer")
+	}
 	capabilityID := invoke.Invoke.GetCapabilityId()
 	if capabilityID == "" {
 		return r.rejectCall(id, "capabilityId is required")
@@ -475,7 +482,7 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	} else {
 		callCtx, cancel = context.WithCancel(ctx)
 	}
-	active := &runningCall{cancel: cancel}
+	active := &runningCall{cancel: cancel, maxOutputBytes: budget}
 	r.calls[id] = active
 	r.wg.Add(1)
 	r.callsMu.Unlock()
@@ -489,9 +496,8 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	}
 	r.mu.RLock()
 	snapshot := r.config
-	budget := r.maxResourceBytes
 	r.mu.RUnlock()
-	call := CapabilityCall{InvocationID: id, CapabilityID: capabilityID, Arguments: arguments, TimeoutMillis: invoke.Invoke.GetTimeoutMillis()}
+	call := CapabilityCall{InvocationID: id, CapabilityID: capabilityID, Arguments: arguments, TimeoutMillis: invoke.Invoke.GetTimeoutMillis(), MaxOutputBytes: budget, ImageInputTier: tier}
 	if f := invoke.Invoke.ExpectedFile; f != nil {
 		call.ExpectedFile = &ExpectedFile{Path: f.GetPath(), SHA256: f.GetSha256()}
 	}
@@ -697,10 +703,13 @@ func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	if !ok || entry.State != InvocationRunning {
 		return nil
 	}
-	r.mu.RLock()
-	budget := r.maxResourceBytes
-	r.mu.RUnlock()
-	encoded, err := r.encodeResult(context.Background(), id, result, budget, true)
+	r.callsMu.Lock()
+	active := r.calls[id]
+	r.callsMu.Unlock()
+	if active == nil {
+		return nil
+	}
+	encoded, err := r.encodeResult(context.Background(), id, result, active.maxOutputBytes, true)
 	if err != nil {
 		return err
 	}
@@ -839,6 +848,22 @@ func safeCapabilityError(err error) string {
 	return err.Error()
 }
 func stringPtr(s string) *string { return &s }
+
+func mapImageInputTier(value *protocol.ImageInputTier) (ImageInputTier, error) {
+	if value == nil || *value == protocol.ImageInputTier_IMAGE_INPUT_TIER_UNSPECIFIED {
+		return "", errors.New("imageInputTier is required")
+	}
+	switch *value {
+	case protocol.ImageInputTier_P720:
+		return ImageInputTierP720, nil
+	case protocol.ImageInputTier_P1080:
+		return ImageInputTierP1080, nil
+	case protocol.ImageInputTier_ORIGINAL:
+		return ImageInputTierOriginal, nil
+	default:
+		return "", errors.New("imageInputTier is invalid")
+	}
+}
 
 func sameOptionalString(left, right *string) bool {
 	if left == nil || right == nil {
