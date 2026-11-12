@@ -56,9 +56,11 @@ test('smoke archive rejects invalid arguments', () => {
   assert.equal(spawnSync('bash', [SCRIPT], { encoding: 'utf8' }).status, 1)
 })
 
-test('Windows smoke selects one tar executable from PATH', () => {
+test('Windows smoke prefers native tar and selects one fallback executable', () => {
   const source = readFileSync(WINDOWS_SCRIPT, 'utf8')
+  assert.match(source, /Join-Path \$env:SystemRoot 'System32\\tar\.exe'/)
   assert.match(source, /Get-Command tar\.exe -CommandType Application -ErrorAction Stop \| Select-Object -First 1/)
+  assert.match(source, /& \$tarPath -xzf \$Archive -C \$temp/)
 })
 
 test('smoke archive checks platform and refuses a non-Go payload', { skip: !UNIX_HOST }, () => {

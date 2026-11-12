@@ -4,11 +4,14 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw "archive not found: $Archive" }
 $name = [IO.Path]::GetFileName($Archive)
 if ($name -notmatch '^kk-studio-daemon-v[0-9A-Za-z._+-]+-windows-amd64\.tar\.gz$') { throw "unexpected archive name: $name" }
-$tar = Get-Command tar.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+$tarPath = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path -LiteralPath $tarPath -PathType Leaf)) {
+    $tarPath = (Get-Command tar.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+}
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-daemon-smoke-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
-    & $tar.Source -xzf $Archive -C $temp
+    & $tarPath -xzf $Archive -C $temp
     if ($LASTEXITCODE -ne 0) { throw 'cannot extract daemon archive' }
     $binary = Join-Path $temp 'kk-studio-daemon.exe'
     foreach ($required in @($binary, (Join-Path $temp 'runtime\code-server\out\node\entry.js'), (Join-Path $temp 'ide-extension\extension.cjs'), (Join-Path $temp 'runtime-manifest.json'), (Join-Path $temp 'LICENSE'), (Join-Path $temp 'THIRD_PARTY_NOTICES'))) {
