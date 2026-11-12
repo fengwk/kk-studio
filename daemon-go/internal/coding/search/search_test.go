@@ -1,6 +1,7 @@
 package search
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +36,7 @@ func put(t *testing.T, root, name, content string) {
 	}
 }
 
+// COD-F-011, COD-N-011
 func TestIgnoreRulesAgainstGitOracle(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
@@ -66,7 +68,7 @@ func TestIgnoreRulesAgainstGitOracle(t *testing.T) {
 	put(t, root, ".git/info/exclude", "excluded.local\n")
 	put(t, root, "excluded.local", "")
 
-	m, err := newIgnoreMatcher(root)
+	m, err := newIgnoreMatcherAt(root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,10 +128,9 @@ func boolText(v bool) string {
 	return "false"
 }
 
+// COD-F-010, COD-F-011, COD-N-012, COD-N-013
 func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
-	if _, err := exec.LookPath("rg"); err != nil {
-		t.Skip("ripgrep parity comparison requires rg")
-	}
+	rgPath, rgErr := exec.LookPath("rg")
 	root := t.TempDir()
 	for _, n := range []string{"a-c", "a/b", "a/bb", "a/x.go", "b/x.go", "x.java", "deep/x.java"} {
 		put(t, root, n, "func main() {}\n")
@@ -150,28 +151,32 @@ func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 		if !reflect.DeepEqual(got, expected) {
 			t.Errorf("glob %q = %v; want %v", pattern, got, expected)
 		}
-		cmd := exec.Command("rg", "--files", "--no-config", "--no-ignore-dot", "--no-ignore-global", "--no-ignore-exclude", "--no-require-git", "--hidden", "--sort", "path", "--glob", pattern, "--glob", "!.git", root)
-		out, e := cmd.Output()
-		if e != nil {
-			t.Fatalf("rg glob %q: %v", pattern, e)
-		}
-		var rgFiles []string
-		for _, p := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
-			if p != "" {
-				p = strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(root)+"/")
-				rgFiles = append(rgFiles, p)
+		if rgErr == nil {
+			cmd := exec.Command(rgPath, "--files", "--no-config", "--no-ignore-dot", "--no-ignore-global", "--no-ignore-exclude", "--no-require-git", "--hidden", "--sort", "path", "--glob", pattern, "--glob", "!.git", root)
+			out, e := cmd.Output()
+			if e != nil {
+				t.Fatalf("rg glob %q: %v", pattern, e)
 			}
-		}
-		if !reflect.DeepEqual(got, rgFiles) {
-			t.Errorf("glob %q differs from rg: Go=%v rg=%v", pattern, got, rgFiles)
+			var rgFiles []string
+			for _, p := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+				if p != "" {
+					p = strings.TrimPrefix(filepath.ToSlash(p), filepath.ToSlash(root)+"/")
+					rgFiles = append(rgFiles, p)
+				}
+			}
+			if !reflect.DeepEqual(got, rgFiles) {
+				t.Errorf("glob %q differs from rg: Go=%v rg=%v", pattern, got, rgFiles)
+			}
 		}
 	}
 	if _, err = Find(root, "[", 0); err == nil {
 		t.Fatal("invalid glob accepted")
 	}
-	cmd := exec.Command("rg", "--files", "--no-config", "--glob", "[", root)
-	if out, e := cmd.CombinedOutput(); e == nil || len(out) == 0 {
-		t.Fatalf("rg invalid glob output=%q err=%v", out, e)
+	if rgErr == nil {
+		cmd := exec.Command(rgPath, "--files", "--no-config", "--glob", "[", root)
+		if out, e := cmd.CombinedOutput(); e == nil || len(out) == 0 {
+			t.Fatalf("rg invalid glob output=%q err=%v", out, e)
+		}
 	}
 	all, _ := findWith(root, "", 0, 1)
 	first, _ := findWith(root, "", 3, 4)
@@ -244,6 +249,8 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 	}
 }
 
+// COD-F-011, COD-N-011
+// This test verifies local ignore rules, explicit ignored roots, and symlink traversal.
 func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 	repo := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
@@ -312,6 +319,134 @@ func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 	}
 }
 
+// COD-F-011, COD-N-011
+// TestIgnoreBoundariesAgainstGit checks repository and linked-worktree ignore scopes.
+func TestIgnoreBoundariesAgainstGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is required for ignore-boundary oracle tests")
+	}
+	initRepo := func(root string) {
+		t.Helper()
+		if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %s %v", out, err)
+		}
+	}
+	oracle := func(root string) []string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", root, "ls-files", "-co", "--exclude-standard").Output()
+		if err != nil {
+			t.Fatalf("git ls-files oracle: %v", err)
+		}
+		return strings.Fields(strings.ReplaceAll(string(out), "\\\\", "/"))
+	}
+	assertFind := func(name, root string, expected []string) {
+		t.Helper()
+		got, err := Find(root, "", 0)
+		if err != nil {
+			t.Fatalf("%s find: %v", name, err)
+		}
+		if !reflect.DeepEqual(got, expected) {
+			t.Fatalf("%s find=%v, want %v", name, got, expected)
+		}
+	}
+	t.Run("repository root excludes ancestor gitignore", func(t *testing.T) {
+		parent := t.TempDir()
+		put(t, parent, ".gitignore", "*\n")
+		repo := filepath.Join(parent, "repo")
+		initRepo(repo)
+		put(t, repo, "a.txt", "needle\n")
+		put(t, repo, "sub/c.txt", "needle\n")
+		want := oracle(repo)
+		if !reflect.DeepEqual(want, []string{"a.txt", "sub/c.txt"}) {
+			t.Fatalf("Git oracle under ancestor ignore=%v", want)
+		}
+		assertFind("ancestor ignore", repo, want)
+		got, err := Grep(repo, "needle", true, false, "", 0)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("grep with ancestor ignore=%v err=%v", got, err)
+		}
+	})
+	t.Run("linked worktree ignores parent scope", func(t *testing.T) {
+		parent := t.TempDir()
+		put(t, parent, ".gitignore", "*\n")
+		main := filepath.Join(t.TempDir(), "main")
+		initRepo(main)
+		for _, args := range [][]string{{"-C", main, "config", "user.email", "test@example.invalid"}, {"-C", main, "config", "user.name", "Test"}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git config: %s %v", out, err)
+			}
+		}
+		put(t, main, "seed", "seed\n")
+		for _, args := range [][]string{{"-C", main, "add", "seed"}, {"-C", main, "commit", "-qm", "seed"}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git commit: %s %v", out, err)
+			}
+		}
+		linked := filepath.Join(parent, "blocked", "linked")
+		if err := os.MkdirAll(filepath.Dir(linked), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("git", "-C", main, "worktree", "add", "-q", "--detach", linked, "HEAD").CombinedOutput(); err != nil {
+			t.Fatalf("git worktree add: %s %v", out, err)
+		}
+		put(t, linked, "i.txt", "i\n")
+		want := oracle(linked)
+		if !reflect.DeepEqual(want, []string{"i.txt", "seed"}) {
+			t.Fatalf("Git oracle for linked worktree=%v", want)
+		}
+		assertFind("linked worktree", linked, want)
+	})
+	t.Run("nested repository starts a new ignore scope", func(t *testing.T) {
+		outer := t.TempDir()
+		initRepo(outer)
+		put(t, outer, ".gitignore", "*.log\nhidden/\n")
+		inner := filepath.Join(outer, "inner")
+		initRepo(inner)
+		put(t, inner, "g.log", "visible\n")
+		for i := 0; i < 24; i++ {
+			put(t, inner, filepath.Join("nested", fmt.Sprintf("%02d.log", i)), "visible\n")
+		}
+		hiddenRepo := filepath.Join(outer, "hidden")
+		initRepo(hiddenRepo)
+		put(t, hiddenRepo, "secret.txt", "hidden\n")
+		innerWant := oracle(inner)
+		if len(innerWant) != 25 {
+			t.Fatalf("nested Git oracle returned %d paths: %v", len(innerWant), innerWant)
+		}
+		want := []string{".gitignore"}
+		for _, rel := range innerWant {
+			want = append(want, filepath.ToSlash(filepath.Join("inner", rel)))
+		}
+		assertFind("nested repository", outer, want)
+	})
+	t.Run("symlink search root resolves repository rules", func(t *testing.T) {
+		repo := t.TempDir()
+		initRepo(repo)
+		put(t, repo, ".gitignore", "*.log\n")
+		put(t, repo, "sub/x.log", "hidden\n")
+		link := filepath.Join(t.TempDir(), "search")
+		if err := os.Symlink(filepath.Join(repo, "sub"), link); err != nil {
+			t.Skipf("directory symlink unavailable: %v", err)
+		}
+		assertFind("symlink search root", link, nil)
+		ignored, err := GitOracle(repo, "sub/x.log")
+		if err != nil || !ignored {
+			t.Fatalf("Git ignore oracle=%v err=%v", ignored, err)
+		}
+	})
+	t.Run("no repository ignores only from search root down", func(t *testing.T) {
+		parent := t.TempDir()
+		put(t, parent, ".gitignore", "*\n")
+		root := filepath.Join(parent, "project")
+		if err := os.Mkdir(root, 0755); err != nil {
+			t.Fatal(err)
+		}
+		put(t, root, "j.txt", "visible\n")
+		assertFind("non-repository root", root, []string{"j.txt"})
+	})
+}
+
+// COD-F-011, COD-N-011
 func TestLinkedWorktreeCommonExclude(t *testing.T) {
 	main := t.TempDir()
 	commands := [][]string{{"init", "-q", main}, {"-C", main, "config", "user.email", "test@example.invalid"}, {"-C", main, "config", "user.name", "Test"}}

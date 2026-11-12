@@ -146,7 +146,7 @@ func TestScaleRejectsUnknownTierAndMismatchedMedia(t *testing.T) {
 	}
 }
 
-// COD-N-006
+// COD-N-006, COD-N-007
 func TestScaleContextReturnsWaitingCancellation(t *testing.T) {
 	scalingSlots <- struct{}{}
 	scalingSlots <- struct{}{}

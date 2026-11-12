@@ -16,6 +16,7 @@ import (
 	"testing"
 )
 
+// COD-N-003
 func TestTierBoxesAndNoUpscale(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -116,6 +117,7 @@ func TestEXIFOrientationsMapAllEightDirections(t *testing.T) {
 	}
 }
 
+// COD-N-003, COD-N-005
 func TestScaleReadsEXIFOrientationAndResizesDimensions(t *testing.T) {
 	for orientation := 1; orientation <= 8; orientation++ {
 		data := makeJPEGQuadrants(t, orientation)
@@ -147,6 +149,7 @@ func TestScaleReadsEXIFOrientationAndResizesDimensions(t *testing.T) {
 	}
 }
 
+// COD-N-004
 func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 	gifData := animatedGIFHeader()
 	if animated, err := gifAnimated(gifData); err != nil || !animated {
@@ -191,6 +194,7 @@ func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 	}
 }
 
+// COD-N-004
 func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	data := pngWithDeclaredDimensions(t, 10_000_001, 4)
 	var before, after runtime.MemStats
@@ -209,6 +213,7 @@ func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	}
 }
 
+// COD-N-006
 func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	photo := patternImage(1600, 1000, false)
 	var jpegBytes bytes.Buffer
@@ -238,6 +243,7 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	}
 }
 
+// COD-N-003, COD-N-004
 func TestMultiFrameGIFCanPassThroughButCannotBeResized(t *testing.T) {
 	data := animatedGIF(t)
 	if _, err := Scale("image/gif", data, P720, CatmullRom); err == nil {

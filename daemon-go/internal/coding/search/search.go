@@ -200,6 +200,10 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	if err != nil {
 		return nil, false, false, err
 	}
+	abs, err = filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, false, false, err
+	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		return nil, false, false, err
@@ -212,16 +216,41 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			return nil, false, false, fmt.Errorf("invalid glob: %w", err)
 		}
 	}
-	matcher, err := newIgnoreMatcher(abs)
+	rootScope := nearestGitRoot(abs)
+	if rootScope == "" {
+		rootScope = abs
+	}
+	rootMatcher, err := newIgnoreMatcherAt(rootScope, abs)
 	if err != nil {
 		return nil, false, false, err
 	}
 	// An explicitly selected ignored directory is the search boundary, not an ignored descendant.
-	if matcher.Ignored(abs, true) {
-		matcher = &ignoreMatcher{root: abs, matcher: ignorealt.New()}
-		if b, e := os.ReadFile(filepath.Join(abs, ".gitignore")); e == nil {
-			matcher.matcher.AddPatterns("", b)
+	if rootMatcher.Ignored(abs, true) {
+		rootScope = abs
+		rootMatcher, err = newIgnoreMatcherAt(rootScope, abs)
+		if err != nil {
+			return nil, false, false, err
 		}
+	}
+	type scopeKey struct {
+		root string
+		dir  string
+	}
+	var scopesMu sync.Mutex
+	scopes := map[scopeKey]*ignoreMatcher{{root: rootScope, dir: abs}: rootMatcher}
+	matcherFor := func(scope, dir string) (*ignoreMatcher, error) {
+		key := scopeKey{root: scope, dir: dir}
+		scopesMu.Lock()
+		defer scopesMu.Unlock()
+		if matcher := scopes[key]; matcher != nil {
+			return matcher, nil
+		}
+		matcher, err := newIgnoreMatcherAt(scope, dir)
+		if err != nil {
+			return nil, err
+		}
+		scopes[key] = matcher
+		return matcher, nil
 	}
 	var files []string
 	var filesMu sync.Mutex
@@ -247,6 +276,32 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			return nil
 		}
 		fullPath := filepath.Join(abs, filepath.FromSlash(rel))
+		var scope string
+		var matcher *ignoreMatcher
+		var scopeErr error
+		if d.IsDir() && hasGitMarker(fullPath) {
+			parentDir := filepath.Dir(fullPath)
+			scope = nearestGitRootWithin(parentDir, abs, rootScope)
+			matcher, scopeErr = matcherFor(scope, parentDir)
+			if scopeErr != nil {
+				return scopeErr
+			}
+			if matcher.Ignored(fullPath, true) {
+				return filepath.SkipDir
+			}
+			scope = fullPath
+			matcher, scopeErr = matcherFor(scope, fullPath)
+		} else {
+			dir := fullPath
+			if !d.IsDir() {
+				dir = filepath.Dir(fullPath)
+			}
+			scope = nearestGitRootWithin(dir, abs, rootScope)
+			matcher, scopeErr = matcherFor(scope, dir)
+		}
+		if scopeErr != nil {
+			return scopeErr
+		}
 		if matcher.Ignored(fullPath, d.IsDir()) {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -254,9 +309,6 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 			return nil
 		}
 		if d.IsDir() {
-			if b, e := os.ReadFile(filepath.Join(fullPath, ".gitignore")); e == nil {
-				matcher.matcher.AddPatterns(rel, b)
-			}
 			return nil
 		}
 		if glob == "" || globMatch(glob, rel) {
@@ -320,19 +372,36 @@ type ignoreMatcher struct {
 	matcher *ignorealt.Matcher
 }
 
-func newIgnoreMatcher(searchRoot string) (*ignoreMatcher, error) {
-	baseRoot := searchRoot
-	for p := searchRoot; ; p = filepath.Dir(p) {
-		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
-			baseRoot = p
-			break
+func nearestGitRoot(path string) string {
+	for p := path; ; p = filepath.Dir(p) {
+		if hasGitMarker(p) {
+			return p
 		}
 		if filepath.Dir(p) == p {
-			break
+			return ""
 		}
 	}
+}
+
+func nearestGitRootWithin(path, searchRoot, fallback string) string {
+	for p := path; ; p = filepath.Dir(p) {
+		if hasGitMarker(p) {
+			return p
+		}
+		if p == searchRoot || filepath.Dir(p) == p {
+			return fallback
+		}
+	}
+}
+
+func hasGitMarker(directory string) bool {
+	_, err := os.Lstat(filepath.Join(directory, ".git"))
+	return err == nil
+}
+
+// newIgnoreMatcherAt builds a directory-scoped matcher and never mutates it after publication.
+func newIgnoreMatcherAt(baseRoot, directory string) (*ignoreMatcher, error) {
 	m := &ignoreMatcher{root: baseRoot, matcher: ignorealt.New()}
-	// Git's info/exclude has lower precedence than the repository's .gitignore files.
 	if gitDir := findGitDir(baseRoot); gitDir != "" {
 		common := gitDir
 		if b, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
@@ -350,7 +419,7 @@ func newIgnoreMatcher(searchRoot string) (*ignoreMatcher, error) {
 		}
 	}
 	var chain []string
-	for p := searchRoot; ; p = filepath.Dir(p) {
+	for p := directory; ; p = filepath.Dir(p) {
 		chain = append(chain, p)
 		if p == baseRoot || filepath.Dir(p) == p {
 			break
@@ -370,23 +439,19 @@ func newIgnoreMatcher(searchRoot string) (*ignoreMatcher, error) {
 }
 
 func findGitDir(root string) string {
-	for p := root; ; p = filepath.Dir(p) {
-		if b, e := os.ReadFile(filepath.Join(p, ".git")); e == nil {
-			s := strings.TrimSpace(string(b))
-			if strings.HasPrefix(s, "gitdir:") {
-				gitDir := strings.TrimSpace(strings.TrimPrefix(s, "gitdir:"))
-				if !filepath.IsAbs(gitDir) {
-					gitDir = filepath.Join(p, gitDir)
-				}
-				return filepath.Clean(gitDir)
+	marker := filepath.Join(root, ".git")
+	if b, err := os.ReadFile(marker); err == nil {
+		value := strings.TrimSpace(string(b))
+		if strings.HasPrefix(value, "gitdir:") {
+			gitDir := strings.TrimSpace(strings.TrimPrefix(value, "gitdir:"))
+			if !filepath.IsAbs(gitDir) {
+				gitDir = filepath.Join(root, gitDir)
 			}
+			return filepath.Clean(gitDir)
 		}
-		if st, e := os.Stat(filepath.Join(p, ".git")); e == nil && st.IsDir() {
-			return filepath.Join(p, ".git")
-		}
-		if filepath.Dir(p) == p {
-			break
-		}
+	}
+	if info, err := os.Stat(marker); err == nil && info.IsDir() {
+		return marker
 	}
 	return ""
 }

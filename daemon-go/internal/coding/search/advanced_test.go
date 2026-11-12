@@ -6,10 +6,62 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
+
+// COD-N-008
+func TestFindAndGrepDoNotLaunchRipgrep(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("the fake executable uses a POSIX shell script")
+	}
+	root := t.TempDir()
+	binaryDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(binaryDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "launched")
+	rg := filepath.Join(binaryDir, "rg")
+	if err := os.WriteFile(rg, []byte(`#!/bin/sh
+printf launched > "$SEARCH_RG_MARKER"
+`), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SEARCH_RG_MARKER", marker)
+	if _, err := Find(root, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Grep(root, "needle", true, false, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("ripgrep was launched: stat error=%v", err)
+	}
+}
+
+// COD-N-014
+func TestSearchContextsDoNotLeakWorkers(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("match\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := FindContext(context.Background(), root, "", 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GrepContext(context.Background(), root, "match", true, false, "", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // COD-N-014
 func TestGrepContextReportsResultsAndContextFailures(t *testing.T) {
@@ -177,6 +229,52 @@ func TestLineEndHandlesEmptyAndUnterminatedLines(t *testing.T) {
 	} {
 		if got := lineEnd(test.data, test.start); got != test.want {
 			t.Fatalf("lineEnd(%q, %d)=%d want=%d", test.data, test.start, got, test.want)
+		}
+	}
+}
+
+// COD-N-009
+func TestRegexUnicodeCodePointsCaseFoldingAndRE2Syntax(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "unicode.txt"), []byte("é\nÉ\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		pattern string
+		want    []string
+	}{
+		{pattern: ".", want: []string{"unicode.txt:1:é", "unicode.txt:2:É"}},
+		{pattern: "[é]", want: []string{"unicode.txt:1:é"}},
+		{pattern: "(?i)é", want: []string{"unicode.txt:1:é", "unicode.txt:2:É"}},
+	} {
+		got, err := GrepContext(context.Background(), root, tc.pattern, false, false, "", 0)
+		if err != nil || !reflect.DeepEqual(got.Results, tc.want) {
+			t.Fatalf("pattern %q matches=%v err=%v, want %v", tc.pattern, got.Results, err, tc.want)
+		}
+	}
+	if _, err := GrepContext(context.Background(), root, `(?x)é`, false, false, "", 0); err == nil {
+		t.Fatal("Go RE2 unexpectedly accepted extended mode")
+	}
+}
+
+// COD-N-010
+func TestRegexCRLFPreservesLineAnchorsAndOutput(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "crlf.txt"), []byte("before\r\nmatch\r\nafter\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		pattern string
+		multi   bool
+		want    []string
+	}{
+		{pattern: "^match$", want: []string{"crlf.txt:2:match"}},
+		{pattern: `(?m)^match$`, multi: true, want: []string{"crlf.txt:2:match"}},
+		{pattern: `(?m)^after$`, multi: true, want: []string{"crlf.txt:3:after"}},
+	} {
+		got, err := GrepContext(context.Background(), root, tc.pattern, false, tc.multi, "", 0)
+		if err != nil || !reflect.DeepEqual(got.Results, tc.want) {
+			t.Fatalf("pattern %q multiline=%v matches=%v err=%v, want %v", tc.pattern, tc.multi, got.Results, err, tc.want)
 		}
 	}
 }

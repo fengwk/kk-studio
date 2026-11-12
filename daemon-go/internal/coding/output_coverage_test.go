@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,9 @@ import (
 
 // COD-F-007
 func TestSyncParentDirectoryReturnsOpenError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not sync directory handles")
+	}
 	if err := syncParentDirectory(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("sync of missing directory succeeded")
 	}
