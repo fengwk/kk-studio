@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -147,6 +148,24 @@ func TestCreateSuspendedWindowsCommand_UsesJobAndHandleLists(t *testing.T) {
 	}
 	if api.attributes.job != 10 || !reflect.DeepEqual(api.attributes.handles, []windows.Handle{19, 20, 21}) || !api.attributes.deleted {
 		t.Fatalf("attributes: job=%d handles=%v deleted=%t", api.attributes.job, api.attributes.handles, api.attributes.deleted)
+	}
+}
+
+// NAT-T-176 verifies filtered, sorted UTF-16 environment entries and duplicate-key replacement.
+func TestWindowsEnvironmentBlock_FiltersAndSortsEntries(t *testing.T) {
+	got := windowsEnvironmentBlock([]string{
+		"B=2",
+		"a=first",
+		"A=last",
+		"NODE_CHANNEL_FD=3",
+		"malformed",
+		"=empty-key",
+		"NULL=value\x00tail",
+		"UNICODE=雪",
+	})
+	want := utf16.Encode([]rune("A=last\x00B=2\x00UNICODE=雪\x00\x00"))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environment block = %q, want %q", utf16.Decode(got), utf16.Decode(want))
 	}
 }
 
