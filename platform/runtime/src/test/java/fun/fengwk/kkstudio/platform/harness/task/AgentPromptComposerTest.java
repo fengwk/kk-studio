@@ -24,6 +24,18 @@ class AgentPromptComposerTest {
   private final AgentPromptComposer composer =
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
+  @Test
+  void exposesOrderedNamedSectionsWithoutChangingComposedPrompt() {
+    AgentPromptInput input =
+        input("Agent instructions.", environment(), List.of("read"), List.of(), List.of());
+
+    assertEquals(
+        List.of("agent", "harness", "paths", "environment"),
+        List.copyOf(composer.composeSections(input).keySet()));
+    assertEquals(
+        String.join("\n\n", composer.composeSections(input).values()), composer.compose(input));
+  }
+
   /** 有环境且注入 read/edit/grep/bash：Environment 路径说明、环境事实、技能与子 Agent 全部出现。 */
   @Test
   void rendersEnvironmentWithAllTools() {
