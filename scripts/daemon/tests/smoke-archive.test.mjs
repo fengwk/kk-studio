@@ -10,6 +10,7 @@ import { writeTarGz } from './support/tar.mjs'
 
 const ROOT = repositoryRoot()
 const SCRIPT = path.join(ROOT, 'scripts/daemon/smoke-archive.sh')
+const WINDOWS_SCRIPT = path.join(ROOT, 'scripts/daemon/smoke-archive.ps1')
 const HOST = os.platform() === 'darwin' ? 'macos' : 'linux'
 const ARCH = ['arm64', 'aarch64'].includes(os.arch()) ? 'arm64' : 'amd64'
 const ARCHIVE_NAME = `kk-studio-daemon-v1.0.0-${HOST}-${ARCH}.tar.gz`
@@ -53,6 +54,11 @@ const run = (archive) => spawnSync('bash', [SCRIPT, archive], { cwd: ROOT, encod
 test('smoke archive rejects invalid arguments', () => {
   assert.equal(spawnSync('bash', [SCRIPT, '--help'], { encoding: 'utf8' }).status, 1)
   assert.equal(spawnSync('bash', [SCRIPT], { encoding: 'utf8' }).status, 1)
+})
+
+test('Windows smoke selects one tar executable from PATH', () => {
+  const source = readFileSync(WINDOWS_SCRIPT, 'utf8')
+  assert.match(source, /Get-Command tar\.exe -CommandType Application -ErrorAction Stop \| Select-Object -First 1/)
 })
 
 test('smoke archive checks platform and refuses a non-Go payload', { skip: !UNIX_HOST }, () => {

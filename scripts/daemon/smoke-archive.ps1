@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw "archive not found: $Archive" }
 $name = [IO.Path]::GetFileName($Archive)
 if ($name -notmatch '^kk-studio-daemon-v[0-9A-Za-z._+-]+-windows-amd64\.tar\.gz$') { throw "unexpected archive name: $name" }
-$tar = Get-Command tar.exe -CommandType Application -ErrorAction Stop
+$tar = Get-Command tar.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-daemon-smoke-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
