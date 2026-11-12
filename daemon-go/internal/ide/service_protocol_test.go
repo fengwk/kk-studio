@@ -2,6 +2,7 @@ package ide
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +15,10 @@ import (
 
 // IDE-T-100 validates live IDE replies against the generated protobuf wire contract.
 func TestLiveRepliesProtocol(t *testing.T) {
-	root := t.TempDir()
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	bridge, err := NewBridge()
 	if err != nil {
 		t.Fatal(err)
@@ -50,8 +54,12 @@ func TestLiveRepliesProtocol(t *testing.T) {
 	if err := os.Mkdir(next, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root,
-		map[string]map[string]any{"changeDirectory": {"directory": next}})
+	oldCtx, cancelOld := context.WithCancel(context.Background())
+	oldStream, oldReader := openManualBridgeStream(t, oldCtx, bridge, opened.GetWorkspacePath(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", root)
+	if _, err := oldReader.ReadString('\n'); err != nil {
+		cancelOld()
+		t.Fatal(err)
+	}
 	changedResult := make(chan *protocol.IdeResult, 1)
 	go func() {
 		changedResult <- service.HandleCommand(context.Background(), &protocol.IdeCommand{
@@ -60,9 +68,23 @@ func TestLiveRepliesProtocol(t *testing.T) {
 			Directory: stringPointer(next), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999"),
 		})
 	}()
+	var nativeCommand struct {
+		ID        string `json:"id"`
+		Op        string `json:"op"`
+		Directory string `json:"directory"`
+	}
+	if err := json.NewDecoder(oldReader).Decode(&nativeCommand); err != nil {
+		cancelOld()
+		t.Fatal(err)
+	}
+	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != next {
+		cancelOld()
+		t.Fatalf("native command=%+v", nativeCommand)
+	}
 	nextCtx, cancelNext := context.WithCancel(context.Background())
 	nextStream, nextReader := openManualBridgeStream(t, nextCtx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
 	if _, err := nextReader.ReadString('\n'); err != nil {
+		cancelOld()
 		cancelNext()
 		t.Fatal(err)
 	}
@@ -70,12 +92,13 @@ func TestLiveRepliesProtocol(t *testing.T) {
 	select {
 	case changed = <-changedResult:
 	case <-time.After(time.Second):
-		cancelHost()
+		cancelOld()
 		cancelNext()
 		t.Fatal("CHANGE_DIRECTORY did not receive replacement-host confirmation")
 	}
-	cancelHost()
+	cancelOld()
 	cancelNext()
+	_ = oldStream.Body.Close()
 	_ = nextStream.Body.Close()
 	deadline := time.Now().Add(time.Second)
 	for service.ActiveStreamCount() != 0 && time.Now().Before(deadline) {
