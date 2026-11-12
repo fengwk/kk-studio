@@ -212,15 +212,6 @@ func writeControlEnvelope(t *testing.T, writer *io.PipeWriter, envelope *protoco
 	}
 }
 
-func readControlEnvelope(t *testing.T, reader io.Reader) *protocol.Envelope {
-	t.Helper()
-	envelope, err := readControlEnvelopeResult(reader)
-	if err != nil {
-		t.Fatalf("read control envelope: %v", err)
-	}
-	return envelope
-}
-
 func readControlEnvelopeResult(reader io.Reader) (*protocol.Envelope, error) {
 	frame, err := protocol.ReadFrame(reader)
 	if err != nil {

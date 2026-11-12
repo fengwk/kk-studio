@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 
@@ -55,7 +55,7 @@ func Schemas() (map[string]json.RawMessage, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".schema.json") {
 			continue
 		}
-		data, err := schemaFiles.ReadFile(filepath.Join("schemas", entry.Name()))
+		data, err := schemaFiles.ReadFile(path.Join("schemas", entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read capability schema %s: %w", entry.Name(), err)
 		}

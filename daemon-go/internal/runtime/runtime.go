@@ -248,7 +248,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 		active := r.attachConnection(connection)
 		err = r.serveConnection(runCtx, active)
-		if err != nil && runCtx.Err() == nil && r.options.ReportError != nil {
+		if runCtx.Err() == nil && r.options.ReportError != nil {
 			r.options.ReportError(err)
 		}
 		r.dropConnection(active)
