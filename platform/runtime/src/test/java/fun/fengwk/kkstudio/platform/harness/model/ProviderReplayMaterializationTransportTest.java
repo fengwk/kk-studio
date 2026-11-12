@@ -46,10 +46,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -73,13 +73,13 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
@@ -94,7 +94,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 四种协议的两轮离线回归：本地 HttpServer 回放合成 SSE，经真实 adapter + 真实 {@link JdkHttpSseTransport} 产生 provider
- * completion 与 block-owned metadata，经 durable message codec 和 {@link ProviderResourceMaterializer} 后发起第二轮请求。
+ * completion 与 block-owned metadata，经 durable message codec 和 {@link ProviderResourceMaterializer}
+ * 后发起第二轮请求。
  *
  * <p>物化和持久化边界不得丢弃 assistant block metadata；测试不访问真实 Provider，也不使用真实会话内容。
  */
@@ -363,10 +364,16 @@ class ProviderReplayMaterializationTransportTest {
         var call = toolCall.toolCall();
         contents.add(
             new ToolCallMessageContent(
-                call.id(), call.name(), call.name(), call.argumentsJson(), null, null,
+                call.id(),
+                call.name(),
+                call.name(),
+                call.argumentsJson(),
+                null,
+                null,
                 toolCall.providerBlockData()));
       } else if (block instanceof ProviderOpaqueBlock opaque) {
-        contents.add(new NativeAssistantBlockContent(opaque.blockType(), opaque.providerBlockData()));
+        contents.add(
+            new NativeAssistantBlockContent(opaque.blockType(), opaque.providerBlockData()));
       } else if (block instanceof ProviderJsonBlock json) {
         contents.add(new JsonMessageContent(json.json()));
       } else {

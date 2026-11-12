@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,13 +25,13 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
@@ -58,7 +57,8 @@ import java.util.UUID;
  * Base64；其余一律确定性文本回退，且任何路径都不产生 URL、不读取未授权内容。
  *
  * <p>测试意图涵盖：四类媒体块与模态/能力交集、DOCUMENT 仅 PDF、SYSTEM/ASSISTANT 与非支持媒体类型的免读取回退、缺失或转 DELETING 的 Blob
- * 每次都重新判定状态（含缓存命中）、声明大小与单次 request 字符总量上限（重复与嵌套引用同样计入）、缓存对读 取的合并，以及 assistant block metadata、顺序和嵌套元数据的透传。
+ * 每次都重新判定状态（含缓存命中）、声明大小与单次 request 字符总量上限（重复与嵌套引用同样计入）、缓存对读 取的合并，以及 assistant block
+ * metadata、顺序和嵌套元数据的透传。
  *
  * <p>图片档位部分额外覆盖：档位决定实际送达的像素尺寸（含档位缺失时的平台默认）、档位框内逐字节直通、request 字符预算按转化后的实际字符数记账， 以及档位转化失败时整个 attempt
  * 显式失败而不是退回原图。
@@ -1267,7 +1267,8 @@ class ProviderResourceMaterializerTest {
         IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(1)).source());
     assertEquals(
         IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(2).contents().get(1)).source());
-    assertSame(data, ((ProviderTextBlock) materialized.get(1).contents().get(0)).providerBlockData());
+    assertSame(
+        data, ((ProviderTextBlock) materialized.get(1).contents().get(0)).providerBlockData());
     assertEquals(2, materialized.get(1).contents().size());
   }
 

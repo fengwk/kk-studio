@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -64,7 +65,9 @@ class PlatformModelGatewayTest {
       new ModelGateway.Execution(
           new UUID(0L, 42L), 1, ProviderType.OPENAI, CONNECTION_GENERATION_ID, PROVIDER_REQUEST);
 
-  /** admit resolves and reserves capacity; run forwards deltas and returns the provider completion. */
+  /**
+   * admit resolves and reserves capacity; run forwards deltas and returns the provider completion.
+   */
   @Test
   void admittedRunBridgesDeltasAndCompletion() {
     ProviderCompletion completion = new ProviderCompletion(response());

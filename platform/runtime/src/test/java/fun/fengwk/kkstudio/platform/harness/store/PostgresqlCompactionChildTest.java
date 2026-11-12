@@ -911,8 +911,7 @@ class PostgresqlCompactionChildTest {
     // attempt 1：纯空白 final → INVALID_RESPONSE，绝不产生结果，也不交付父。
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(
-                providerResponse("  \n ", GenerationStopReason.COMPLETE))));
+            new ProviderCompletion(providerResponse("  \n ", GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     ModelInvocation afterFirstAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());

@@ -30,13 +30,13 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -432,12 +432,9 @@ class DatabaseProviderResolutionServiceTest {
     assertEquals(ProviderMessageRole.ASSISTANT, effective.get(1).role());
     assertSame(assistant.contents().get(0), effective.get(1).contents().get(0));
     assertSame(assistant.contents().get(1), effective.get(1).contents().get(1));
+    assertSame(data, ((ProviderTextBlock) effective.get(1).contents().get(0)).providerBlockData());
     assertSame(
-        data,
-        ((ProviderTextBlock) effective.get(1).contents().get(0)).providerBlockData());
-    assertSame(
-        data,
-        ((ProviderThinkingBlock) effective.get(1).contents().get(1)).providerBlockData());
+        data, ((ProviderThinkingBlock) effective.get(1).contents().get(1)).providerBlockData());
   }
 
   @Test
@@ -584,6 +581,8 @@ class DatabaseProviderResolutionServiceTest {
     blob.setId(blobId);
     blob.setMediaType("image/png");
     blob.setSizeBytes(3L);
+    blob.setWidth(1L);
+    blob.setHeight(1L);
     blob.setState(StorageBlobState.ACTIVE);
     when(blobManager.getBlob(blobId)).thenReturn(blob);
     when(contentService.readBlobContent(
@@ -616,7 +615,7 @@ class DatabaseProviderResolutionServiceTest {
     ProviderImageBlock image =
         assertInstanceOf(
             ProviderImageBlock.class,
-            resolved.effectiveRequest().messages().get(0).contents().get(0));
+            resolved.effectiveRequest().messages().get(0).contents().get(1));
     assertEquals("data:image/png;base64,AAEC", image.source());
   }
 

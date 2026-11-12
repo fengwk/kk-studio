@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.io.InputStream;
 import java.util.UUID;
@@ -63,6 +64,7 @@ class ProviderImageModelViewServiceTest {
 
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlob modelViewBlob = mock(StorageBlob.class);
+    when(modelViewBlob.getState()).thenReturn(StorageBlobState.ACTIVE);
     when(modelViewBlob.getMediaType()).thenReturn("image/png");
     when(modelViewBlob.getSizeBytes()).thenReturn(1234L);
     when(blobManager.getBlob(viewBlobId)).thenReturn(modelViewBlob);

@@ -8,17 +8,20 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
+
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
@@ -27,9 +30,6 @@ import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
-import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
@@ -83,8 +82,7 @@ class PostgresqlThreadProcessorReplayTest {
             "opaque-redaction",
             blockData(affinity, "redacted", null, "redacted_thinking", null, true));
     TextMessageContent text =
-        new TextMessageContent(
-            "answer", blockData(affinity, "text", null, "text", null, true));
+        new TextMessageContent("answer", blockData(affinity, "text", null, "text", null, true));
     ToolCallMessageContent toolCall =
         new ToolCallMessageContent(
             "call-1",
@@ -105,8 +103,7 @@ class PostgresqlThreadProcessorReplayTest {
         new MessagePayload(
             message,
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE,
-                new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
             null);
 
     UUID userEntryId =
@@ -127,15 +124,16 @@ class PostgresqlThreadProcessorReplayTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.entries()
-                  .insert(new Entry(id, baseline.sessionId(), userEntryId, payload, T3));
+              tx.entries().insert(new Entry(id, baseline.sessionId(), userEntryId, payload, T3));
               return id;
             });
 
     MessagePayload reloaded =
-        (MessagePayload) store.transaction(tx -> tx.entries().find(entryId).orElseThrow().payload());
+        (MessagePayload)
+            store.transaction(tx -> tx.entries().find(entryId).orElseThrow().payload());
     assertEquals(payload, reloaded);
-    assertEquals(List.of(thinking, redacted, text, toolCall, opaque), reloaded.message().contents());
+    assertEquals(
+        List.of(thinking, redacted, text, toolCall, opaque), reloaded.message().contents());
   }
 
   private static ProviderBlockData blockData(
