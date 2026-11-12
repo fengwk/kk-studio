@@ -100,7 +100,7 @@ func TestWindowsSupervisor_FailedStartCleanupPreservesUnprovenScope(t *testing.T
 // NAT-T-231..232,237..238 verify unproven termination is cached and includes both convergence and close failures.
 func TestWindowsSupervisor_UnprovenTerminationPreservesScopeAndAggregatesCleanupFailure(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
-	process.job = windows.InvalidHandle
+	process.job = windows.Handle(0x12345678)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
