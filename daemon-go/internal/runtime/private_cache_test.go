@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -26,8 +27,8 @@ func TestFilePrivateCacheWriterWritesPrivateAtomicFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 || !info.Mode().IsRegular() {
-			t.Fatalf("cache file mode/type = %v, want regular 0600 file", info.Mode())
+		if !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+			t.Fatalf("cache file mode/type = %v, want a regular private file", info.Mode())
 		}
 	}
 }

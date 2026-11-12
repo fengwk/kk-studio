@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // FilePrivateCacheWriter atomically replaces a private cache file. Replace with the native package writer at final assembly.
@@ -63,7 +64,7 @@ func (FilePrivateCacheWriter) WritePrivateAtomic(ctx context.Context, path strin
 	}
 	published = true
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		return errors.New("private cache file failed readback validation")
 	}
 	actual, err := os.ReadFile(path)
