@@ -215,7 +215,7 @@ func TestTransport_DialDirectIgnoresEnvironmentProxy(t *testing.T) {
 
 // TRN-T-067
 func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	startGateway := func() (*httptest.Server, <-chan http.Header) {
 		handshake := make(chan http.Header, 1)

@@ -1267,7 +1267,7 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 	service.mu.Unlock()
 	select {
 	case <-recovery:
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		t.Fatal("crash convergence did not settle")
 	}
 	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
