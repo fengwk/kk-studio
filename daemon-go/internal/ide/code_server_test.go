@@ -64,7 +64,7 @@ func TestCodeServerExitDuringHealthCheck(t *testing.T) {
 		process := supervisor.proc
 		supervisor.mu.Unlock()
 		if process != nil {
-			process.exit <- native.ProcessExit{Code: 7}
+			process.exit <- native.ProcessExit{Code: intPointer(7)}
 			break
 		}
 		time.Sleep(time.Millisecond)
@@ -97,7 +97,7 @@ func TestCodeServerUnexpectedExitRestart(t *testing.T) {
 	supervisor.mu.Lock()
 	process := supervisor.proc
 	supervisor.mu.Unlock()
-	process.exit <- native.ProcessExit{Code: 5}
+	process.exit <- native.ProcessExit{Code: intPointer(5)}
 	select {
 	case generation := <-exited:
 		if generation != first.Generation {
@@ -381,6 +381,8 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 func (s *fakeSupervisor) Close(context.Context) error { return nil }
 func (s *fakeSupervisor) count() int                  { s.mu.Lock(); defer s.mu.Unlock(); return s.countN }
 
+func intPointer(value int) *int { return &value }
+
 type fakeProcess struct {
 	pid              int
 	stdout, stderr   io.ReadCloser
@@ -433,7 +435,7 @@ func (p *fakeProcess) Terminate(ctx context.Context, _ time.Duration) error {
 		_ = p.listener.Close()
 		_ = p.stdoutW.Close()
 		_ = p.stderrW.Close()
-		p.exit <- native.ProcessExit{Code: 0}
+		p.exit <- native.ProcessExit{Code: intPointer(0)}
 	})
 	select {
 	case <-ctx.Done():

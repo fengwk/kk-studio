@@ -195,7 +195,7 @@ func TestConvergeExitedScope(t *testing.T) {
 	supervisor.mu.Lock()
 	oldProcess := supervisor.proc
 	supervisor.mu.Unlock()
-	oldProcess.exit <- native.ProcessExit{Code: 7}
+	oldProcess.exit <- native.ProcessExit{Code: intPointer(7)}
 	deadline := time.Now().Add(time.Second)
 	for manager.Session() != nil && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -239,7 +239,7 @@ func TestUnexpectedExitNotification(t *testing.T) {
 	supervisor.mu.Lock()
 	process := supervisor.proc
 	supervisor.mu.Unlock()
-	process.exit <- native.ProcessExit{Code: 9}
+	process.exit <- native.ProcessExit{Code: intPointer(9)}
 	select {
 	case generation := <-exits:
 		if generation != second.Generation {

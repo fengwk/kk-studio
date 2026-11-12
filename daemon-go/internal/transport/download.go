@@ -31,29 +31,34 @@ var _ skill.ResourceDownloader = (*ResourceDownloader)(nil)
 
 var transferIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-// Download requests a one-time GET ticket, then verifies the downloaded body.
-func (d *ResourceDownloader) Download(ctx context.Context, transferID string) ([]byte, error) {
+// RequestTicket validates server metadata before an installer decides whether bytes are needed.
+func (d *ResourceDownloader) RequestTicket(ctx context.Context, transferID string) (skill.DownloadTicket, error) {
 	if d.Requester == nil || !transferIDPattern.MatchString(transferID) {
-		return nil, fmt.Errorf("resource download ticket is required")
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket is required")
 	}
 	ticket, err := d.Requester.RequestTicket(ctx, transferID)
 	if err != nil {
-		return nil, fmt.Errorf("resource download ticket request failed")
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket request failed")
 	}
 	if ticket == nil || ticket.GetTransferId() != transferID {
-		return nil, fmt.Errorf("resource download ticket is invalid")
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket is invalid")
 	}
 	if ticket.GetState() == protocol.TicketState_TICKET_FAILED {
-		return nil, fmt.Errorf("resource download ticket failed")
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket failed")
 	}
-	if ticket.GetState() != protocol.TicketState_TICKET_READY || ticket.GetPresignedGet() == nil {
+	if ticket.GetState() != protocol.TicketState_TICKET_READY || ticket.GetPresignedGet() == nil || ticket.GetPresignedGet().GetMethod() != http.MethodGet {
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket is invalid")
+	}
+	return skill.DownloadTicket{Size: ticket.GetSize(), SHA256: ticket.GetSha256(), Opaque: ticket.GetPresignedGet().GetUrl()}, nil
+}
+
+// Download fetches and verifies the resource represented by a previously validated ticket.
+func (d *ResourceDownloader) Download(ctx context.Context, ticket skill.DownloadTicket) ([]byte, error) {
+	targetURL, ok := ticket.Opaque.(string)
+	if !ok {
 		return nil, fmt.Errorf("resource download ticket is invalid")
 	}
-	get := ticket.GetPresignedGet()
-	if get.GetMethod() != http.MethodGet {
-		return nil, fmt.Errorf("resource download ticket is invalid")
-	}
-	return d.DownloadPresigned(ctx, get.GetUrl(), nil, ticket.GetSize(), ticket.GetSha256())
+	return d.DownloadPresigned(ctx, targetURL, nil, ticket.Size, ticket.SHA256)
 }
 
 // DownloadPresigned fetches an explicit presigned GET and verifies its declared metadata.

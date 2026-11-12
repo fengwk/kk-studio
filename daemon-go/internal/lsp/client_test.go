@@ -146,7 +146,7 @@ func (p *fakeProcess) Terminate(context.Context, time.Duration) error {
 		_ = p.stdinW.Close()
 		_ = p.stdoutW.Close()
 		_ = p.stderrW.Close()
-		p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: 0} })
+		p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: intPointer(0)} })
 	})
 	return p.terminateErr
 }
@@ -201,7 +201,7 @@ func (p *fakeProcess) serve() {
 			}
 			if p.allowProcessExit != nil {
 				<-p.allowProcessExit
-				p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: 0} })
+				p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: intPointer(0)} })
 				return
 			}
 		}
@@ -310,6 +310,8 @@ func TestClient_RequestTimeoutSendsCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func intPointer(value int) *int { return &value }
 
 var _ native.ManagedProcess = (*fakeProcess)(nil)
 var _ jsonrpc2.ObjectCodec = (*lspCodec)(nil)

@@ -159,7 +159,8 @@ func (p *execHelperProcess) waitForExit() {
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			p.waitResult.Code = exitErr.ExitCode()
+			code := exitErr.ExitCode()
+			p.waitResult.Code = &code
 		} else {
 			p.waitErr = err
 		}

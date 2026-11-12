@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 // IDE-T-030 verifies code-server storage helpers apply private modes and fail on non-directory paths.
@@ -14,7 +16,7 @@ func TestPrivateStorageHelpers(t *testing.T) {
 	if err := os.Mkdir(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensurePrivateDirectory(directory); err != nil {
+	if err := native.EnsurePrivateDirectory(directory); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(directory)
@@ -25,18 +27,18 @@ func TestPrivateStorageHelpers(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensurePrivateDirectory(file); err == nil {
+	if err := native.EnsurePrivateDirectory(file); err == nil {
 		t.Fatal("regular file accepted as a private directory")
 	}
 	secret := filepath.Join(directory, "secret")
-	if err := writePrivateFile(secret, []byte("token")); err != nil {
+	if err := native.WritePrivateFile(secret, []byte("token")); err != nil {
 		t.Fatal(err)
 	}
 	info, err = os.Stat(secret)
 	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode=%v err=%v", info, err)
 	}
-	if err := writePrivateFile(directory, []byte("not a file")); err == nil {
+	if err := native.WritePrivateFile(directory, []byte("not a file")); err == nil {
 		t.Fatal("directory accepted as a private file")
 	}
 }

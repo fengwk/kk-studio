@@ -33,7 +33,7 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 			}
 		})
 	}
-	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: 7}}
+	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: intPointer(7)}}
 	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
 	var bootstrap *LspBootstrapError
 	if !errors.As(err, &bootstrap) || !bootstrap.Converged || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 7)" {
@@ -74,7 +74,7 @@ func TestProtocol_Crash(t *testing.T) {
 		requestResult <- client.call(context.Background(), "slow/request", map[string]any{}, nil, func() {}, func() { finished <- struct{}{} })
 	}()
 	waitForFakeRequest(t, supervisor.process, "slow/request")
-	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 11} })
+	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: intPointer(11)} })
 	select {
 	case <-client.exitSignal:
 	case <-time.After(time.Second):
@@ -195,7 +195,7 @@ func TestProtocol_LaunchWaitFailure(t *testing.T) {
 
 func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 	cleanupErr := errors.New("termination did not converge")
-	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: 9}, terminateErr: cleanupErr}
+	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: intPointer(9)}, terminateErr: cleanupErr}
 	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
 	var bootstrap *LspBootstrapError
 	var aggregate *LspAggregateError

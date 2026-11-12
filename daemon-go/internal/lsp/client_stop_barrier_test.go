@@ -69,7 +69,7 @@ func TestProtocol_ExitWaitsForStop(t *testing.T) {
 		request <- client.call(context.Background(), "slow/request", map[string]any{}, nil, nil, func() { finished <- struct{}{} })
 	}()
 	waitForFakeRequest(t, supervisor.process, "slow/request")
-	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 12} })
+	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: intPointer(12)} })
 	select {
 	case <-client.exitSignal:
 	case <-time.After(time.Second):
@@ -125,7 +125,7 @@ func TestProtocol_StopFailureNoRetry(t *testing.T) {
 		request <- client.call(context.Background(), "slow/request", map[string]any{}, nil, nil, func() { finished <- struct{}{} })
 	}()
 	waitForFakeRequest(t, supervisor.process, "slow/request")
-	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 13} })
+	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: intPointer(13)} })
 	select {
 	case <-client.exitSignal:
 	case <-time.After(time.Second):
@@ -180,7 +180,7 @@ func TestProtocol_StopDoesNotSelfWait(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not observe exit")
 	}
-	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 0} })
+	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: intPointer(0)} })
 	select {
 	case err := <-stop:
 		if err != nil {

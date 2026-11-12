@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,12 +101,12 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 		cleanup := process.Terminate(context.Background(), 0)
 		if cleanup != nil {
 			return nil, &LspBootstrapError{
-				Message:   fmt.Sprintf("LSP server '%s' exited before initialization (exit code %d)", server.ID, exit.Code),
+				Message:   fmt.Sprintf("LSP server '%s' exited before initialization (exit code %s)", server.ID, processExitCodeText(exit)),
 				Converged: false,
 				Cause:     &LspAggregateError{Message: "LSP launch failed and cleanup failed", Errors: []error{errors.New("server exited early"), cleanup}},
 			}
 		}
-		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' exited before initialization (exit code %d)", server.ID, exit.Code), Converged: true, Cause: errors.New("server exited early")}
+		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' exited before initialization (exit code %s)", server.ID, processExitCodeText(exit)), Converged: true, Cause: errors.New("server exited early")}
 	case e := <-c.exitErr:
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' failed to start", server.ID), Converged: false, Cause: e}
 	case <-time.After(200 * time.Millisecond):
@@ -352,11 +353,18 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	}
 	return nil
 }
+func processExitCodeText(exit native.ProcessExit) string {
+	if exit.Code == nil {
+		return "unknown"
+	}
+	return strconv.Itoa(*exit.Code)
+}
+
 func (c *Client) exitError() error {
 	select {
 	case exit := <-c.exited:
 		c.exited <- exit
-		return &LspError{Message: fmt.Sprintf("LSP server '%s' exited (exit code %d)", c.server.ID, exit.Code)}
+		return &LspError{Message: fmt.Sprintf("LSP server '%s' exited (exit code %s)", c.server.ID, processExitCodeText(exit))}
 	default:
 		return &LspError{Message: "LSP client stopped"}
 	}

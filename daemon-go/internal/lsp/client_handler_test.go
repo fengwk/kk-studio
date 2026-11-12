@@ -110,7 +110,7 @@ func TestClient_ExitErrorAndAliveStates(t *testing.T) {
 	if got := client.exitError(); got.Error() != "LSP client stopped" {
 		t.Fatalf("live exit error = %v", got)
 	}
-	client.exited <- native.ProcessExit{Code: 7}
+	client.exited <- native.ProcessExit{Code: intPointer(7)}
 	if client.IsAlive() {
 		t.Fatal("client with a reported exit is alive")
 	}

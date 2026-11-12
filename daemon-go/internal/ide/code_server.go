@@ -287,7 +287,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 		return nil, err
 	}
 	for _, dir := range []string{m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.ViewsDir} {
-		if err := ensurePrivateDirectory(dir); err != nil {
+		if err := native.EnsurePrivateDirectory(dir); err != nil {
 			return nil, NewError("code-server storage is unavailable", "UNAVAILABLE")
 		}
 	}
@@ -307,7 +307,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 		return nil, NewError("code-server startup failed", "UNAVAILABLE")
 	}
 	configData := []byte(fmt.Sprintf("bind-addr: 127.0.0.1:%d\nauth: password\npassword: %s\ncert: false\n", port, password))
-	if err := writePrivateFile(m.paths.ConfigFile, configData); err != nil {
+	if err := native.WritePrivateFile(m.paths.ConfigFile, configData); err != nil {
 		return nil, NewError("code-server storage is unavailable", "UNAVAILABLE")
 	}
 	args := append([]string(nil), launch.Args...)
@@ -768,18 +768,6 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil
-}
-func ensurePrivateDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o700)
-}
-func writePrivateFile(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
 }
 func mergeEnvironment(in []string, values map[string]string) []string {
 	result := make([]string, 0, len(in)+len(values))

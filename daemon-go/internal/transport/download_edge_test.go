@@ -57,7 +57,7 @@ func TestDownload_TicketValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &ResourceDownloader{Requester: tc.requester}
-			if _, err := d.Download(context.Background(), tc.transfer); err == nil {
+			if _, err := d.RequestTicket(context.Background(), tc.transfer); err == nil {
 				t.Fatal("invalid ticket accepted")
 			}
 		})
@@ -149,7 +149,7 @@ func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 
 func mustProxyPolicy(t *testing.T) *ProxyPolicy {
 	t.Helper()
-	policy, err := NewProxyPolicy("", "")
+	policy, err := NewProxyPolicy("")
 	if err != nil {
 		t.Fatal(err)
 	}
