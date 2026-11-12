@@ -211,6 +211,65 @@ func TestWindowsSupervisor_TerminateBeforeScopeKillsHelper(t *testing.T) {
 	}
 }
 
+// TestWindowsSupervisor_TerminateConvergedJobReleasesOwnedResources verifies clean termination removes state and process ownership.
+func TestWindowsSupervisor_TerminateConvergedJobReleasesOwnedResources(t *testing.T) {
+	stateDir := t.TempDir()
+	process := &windowsProcess{
+		supervisor: &windowsSupervisor{processes: make(map[int]*windowsProcess)},
+		pid:        1,
+		stateDir:   stateDir,
+		done:       make(chan struct{}),
+	}
+	cmd := exec.Command(os.Args[0], "__native-fixture", "hold")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	helper, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.TerminateProcess(helper, 1); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := windows.WaitForSingleObject(helper, 1000); err != nil || status != windows.WAIT_OBJECT_0 {
+		t.Fatalf("wait for terminated helper = %#x, %v", status, err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("terminated fixture exited successfully")
+	}
+	process.helper = helper
+	process.job = 42
+	owner, err := os.CreateTemp(t.TempDir(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process.owner = owner
+	process.supervisor.processes[process.pid] = process
+	process.terminationAPI = survivingWindowsProcessAPI{}
+	if err := process.Terminate(context.Background(), 0); err != nil {
+		t.Fatalf("terminate converged Job = %v", err)
+	}
+	if !process.settled || process.job != 0 {
+		t.Fatalf("settled/job = %t/%d", process.settled, process.job)
+	}
+	if _, err := os.Stat(process.stateDir); !os.IsNotExist(err) {
+		t.Fatalf("state directory after converged termination = %v", err)
+	}
+	if _, ok := process.supervisor.processes[process.pid]; ok {
+		t.Fatal("terminated process remains tracked")
+	}
+	if process.owner != nil {
+		t.Fatal("owner pipe remains attached after cleanup")
+	}
+	if _, err := owner.Stat(); err == nil {
+		t.Fatal("owner pipe remains open")
+	}
+}
+
 // NAT-T-235 verifies the public process exposes its helper pid and managed standard streams.
 func TestWindowsSupervisor_ManagedProcessHelperFields(t *testing.T) {
 	supervisor, err := NewSupervisor()
