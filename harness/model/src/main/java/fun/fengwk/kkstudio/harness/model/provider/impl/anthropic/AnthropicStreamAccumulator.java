@@ -179,9 +179,13 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       switch (block.type) {
         case "text" -> {
           combinedText.append(block.textBuffer);
+          ObjectNode textFields = block.rawBlock.deepCopy();
+          if (block.citations != null) {
+            textFields.set("citations", block.citations.deepCopy());
+          }
           responseBlocks.add(
               new ProviderTextBlock(
-                  block.textBuffer.toString(), blockData(block.rawBlock, Set.of("text"))));
+                  block.textBuffer.toString(), blockData(textFields, Set.of("text"))));
         }
         case "thinking" -> {
           combinedThinking.append(block.thinkingBuffer);

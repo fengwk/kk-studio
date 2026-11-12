@@ -688,7 +688,17 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     if (canReplay) {
       ObjectNode messageFields = nativeAssistantMessage.deepCopy();
       for (String field : KNOWN_ASSISTANT_FIELDS) {
-        messageFields.remove(field);
+        if (!"tool_calls".equals(field) || !toolCalls.isEmpty()) {
+          messageFields.remove(field);
+        }
+      }
+      JsonNode nativeToolCalls = messageFields.get("tool_calls");
+      if (nativeToolCalls != null && nativeToolCalls.isArray()) {
+        for (JsonNode call : nativeToolCalls) {
+          if (call instanceof ObjectNode callObject) {
+            callObject.remove("index");
+          }
+        }
       }
       messageFields.remove("role");
       messageFields.remove("annotations");

@@ -92,17 +92,9 @@ class OpenAiResponsesPrecisionRegressionTest {
     feedSseFrames(accumulator, "fixtures/precision/opaque-item-precision-frames.json");
 
     ProviderCompletion completion = accumulator.finish();
-    ProviderOpaqueBlock opaqueBlock =
-        completion
-            .response()
-            .blocks()
-            .stream()
-            .filter(ProviderOpaqueBlock.class::isInstance)
-            .map(ProviderOpaqueBlock.class::cast)
-            .filter(block -> block.blockType().equals("vendor_opaque"))
-            .findFirst()
-            .orElseThrow();
-    JsonNode opaque = opaqueBlock.providerBlockData().nativeFields().path("item").path("vendor_opaque");
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().getFirst();
+    JsonNode opaque =
+        textBlock.providerBlockData().nativeFields().path("itemFields").path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");

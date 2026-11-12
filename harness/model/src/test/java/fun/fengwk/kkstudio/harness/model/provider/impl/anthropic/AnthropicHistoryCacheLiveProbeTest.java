@@ -122,9 +122,9 @@ class AnthropicHistoryCacheLiveProbeTest {
                   && warm.response().toolCalls().isEmpty()
                   && warm.response().thinking().isEmpty(),
               "classification=UNEXPECTED_ASSISTANT");
-          // Feed the provider-produced assistant blocks back as history; do not invent a warmup turn.
-          history.add(
-              new ProviderMessage(ProviderMessageRole.ASSISTANT, warm.response().blocks()));
+          // Feed the provider-produced assistant blocks back as history; do not invent a warmup
+          // turn.
+          history.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, warm.response().blocks()));
           history.add(increment());
           transport.old = old;
           transport.warm = false;

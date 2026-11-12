@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -504,7 +505,10 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
-    assertTrue(completion.response().blocks().isEmpty());
+    assertEquals(1, completion.response().blocks().size());
+    ProviderTextBlock refused =
+        assertInstanceOf(ProviderTextBlock.class, completion.response().blocks().getFirst());
+    assertEquals("refused", refused.text());
   }
 
   @Test

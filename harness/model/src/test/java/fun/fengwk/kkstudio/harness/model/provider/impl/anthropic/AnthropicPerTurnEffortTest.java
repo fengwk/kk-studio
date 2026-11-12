@@ -201,7 +201,7 @@ class AnthropicPerTurnEffortTest {
 
   private static ProviderMessage assistant(String effort) {
     return new ProviderMessage(
-        ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), null, effort);
+        ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), effort);
   }
 
   private static ProviderMessage tool(String id) {

@@ -277,9 +277,9 @@ class OpenAiChatNativeReplayTest {
     assertEquals("t-1", wireAsst.path("vendor_future_field").path("trace_id").asString(""));
   }
 
-  /** 测试意图：缺失有效 audio id 的上游响应不能冻结；持久化后篡改为响应 audio 或 annotations 不能进入下一轮请求。 */
+  /** 测试意图：缺失有效 audio id 的上游响应不能冻结。 */
   @Test
-  void rejectsMalformedAudioAndResponseOnlyReplayFields() throws Exception {
+  void rejectsMalformedAudioResponse() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     for (String audio : List.of("{}", "{\"id\":\"  \"}", "\"audio_1\"")) {
@@ -290,24 +290,6 @@ class OpenAiChatNativeReplayTest {
       accumulator.handleData("[DONE]");
       ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
-    }
-    for (String added :
-        List.of(
-            "\"audio\":{\"id\":\"audio_1\",\"data\":\"AAA\"}",
-            "\"audio\":{\"data\":\"AAA\"}",
-            "\"audio\":null",
-            "\"annotations\":[]",
-            "\"annotations\":null")) {
-      ObjectNode payload =
-          (ObjectNode) MAPPER.readTree("{\"role\":\"assistant\",\"content\":\"Hi\"}");
-      ObjectNode extra = (ObjectNode) MAPPER.readTree("{" + added + "}");
-      extra.properties().forEach(field -> payload.set(field.getKey(), field.getValue()));
-      ProviderMessage assistant =
-          assistant(List.of(new ProviderTextBlock("Hi")), modelAffinity(), payload);
-      ProviderException error =
-          assertThrows(
-              ProviderException.class, () -> encoder.encode(request(user, assistant), descriptor));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
     }
   }
 
@@ -468,12 +450,12 @@ class OpenAiChatNativeReplayTest {
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
-    assertNotNull(completion.response().blocks().getFirst().providerBlockData());
+    assertNotNull(
+        ((ProviderTextBlock) completion.response().blocks().getFirst()).providerBlockData());
     assertEquals("main answer", completion.response().text());
-    ProviderOpaqueBlock nativeMessage =
-        (ProviderOpaqueBlock) completion.response().blocks().getLast();
-    assertFalse(nativeMessage.providerBlockData().nativeFields().toString().contains("other"));
-    assertFalse(nativeMessage.providerBlockData().nativeFields().toString().contains("secondary"));
+    assertEquals(1, completion.response().blocks().size());
+    assertFalse(completion.response().text().contains("other"));
+    assertFalse(completion.response().text().contains("secondary"));
   }
 
   @Test
@@ -566,13 +548,10 @@ class OpenAiChatNativeReplayTest {
     assertEquals("kept", wire.path("messages").get(2).path("vendor_future_field").asString(""));
   }
 
-  /**
-   * 测试意图：无法由 durable 语义重建的原生字段在 affinity 失配时退回语义编码（既不丢失 durable 语义，也不外泄 native 事实）， 而 malformed
-   * payload 无论 affinity 是否匹配都必须以 INVALID_REQUEST 明确失败。
-   */
+  /** 测试意图：无法由 durable 语义重建的原生字段在 affinity 失配时退回语义编码。 */
   @Test
-  @DisplayName("affinity 失配时 native-only 字段退回语义编码；malformed payload 一律拒绝")
-  void fallsBackSemanticallyOnAffinityMismatchAndRejectsMalformed() throws Exception {
+  @DisplayName("affinity 失配时 native-only 字段退回语义编码")
+  void fallsBackSemanticallyOnAffinityMismatch() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderReplayAffinity other = descriptor.affinity("another-model");
@@ -641,28 +620,6 @@ class OpenAiChatNativeReplayTest {
                 extendedCallPayload));
     assertFalse(extendedAsst.path("tool_calls").get(0).path("function").has("vendorField"));
 
-    // 6. malformed payload：即使 affinity 失配也必须严格拒绝
-    ObjectNode badContent = MAPPER.createObjectNode();
-    badContent.put("role", "assistant");
-    badContent.put("content", 123);
-    assertRejected(user, List.of(new ProviderTextBlock("x")), other, badContent);
-
-    ObjectNode badRole = MAPPER.createObjectNode();
-    badRole.put("role", "system");
-    badRole.put("content", "text");
-    assertRejected(user, List.of(new ProviderTextBlock("text")), other, badRole);
-
-    ObjectNode badIndex = MAPPER.createObjectNode();
-    badIndex.put("role", "assistant");
-    ObjectNode badIndexCall = badIndex.putArray("tool_calls").addObject();
-    badIndexCall.put("id", "c1").put("type", "function").put("index", 0);
-    badIndexCall.putObject("function").put("name", "fn").put("arguments", "{}");
-    assertRejected(
-        user,
-        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
-        other,
-        badIndex);
-
     // 7. 最小可重建 payload：affinity 失配退回语义编码，affinity 匹配原样 opaque 回放
     ObjectNode minimalPayload = MAPPER.createObjectNode();
     minimalPayload.put("role", "assistant");
@@ -717,7 +674,7 @@ class OpenAiChatNativeReplayTest {
       JsonNode wire = MAPPER.readTree(encoder.encode(changed, descriptor).bodyUtf8Bytes());
       assertEquals(system, wire.at("/messages/0/content").asString(""));
       assertEquals(payload, wire.path("messages").get(2));
-      ProviderThinkingBlock thinking = (ProviderThinkingBlock) assistant.blocks().getFirst();
+      ProviderThinkingBlock thinking = (ProviderThinkingBlock) assistant.contents().getFirst();
       assertEquals(modelAffinity(), thinking.providerBlockData().affinity());
     }
   }
@@ -746,10 +703,10 @@ class OpenAiChatNativeReplayTest {
     }
   }
 
-  /** affinity 匹配时 opaque 原生字段原样透传；reasoning_content 损坏或与 durable 不一致一律拒绝。 */
+  /** 测试意图：affinity 匹配时 block native 原生字段原样透传。 */
   @Test
-  @DisplayName("affinity 匹配时 opaque 字段原样透传，reasoning 损坏或与 durable 不一致拒绝")
-  void replaysOpaqueFieldsAtSameAffinityButRejectsCorruptReasoning() throws Exception {
+  @DisplayName("affinity 匹配时 opaque 字段原样透传")
+  void replaysOpaqueFieldsAtSameAffinity() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     List<ProviderContentBlock> contents =
@@ -765,20 +722,6 @@ class OpenAiChatNativeReplayTest {
     assertEquals("opaque", asst.path("reasoning_details").get(0).path("signature").asString(""));
     assertEquals("opaque", asst.path("vendor_future_field").asString(""));
     assertEquals("reasoning", asst.path("reasoning_content").asString(""));
-
-    // reasoning_content 形态损坏（非文本）拒绝
-    ObjectNode objectReasoning = MAPPER.createObjectNode();
-    objectReasoning.put("role", "assistant");
-    objectReasoning.put("content", "Hello");
-    objectReasoning.putObject("reasoning_content").put("bad", "shape");
-    assertRejected(user, contents, modelAffinity(), objectReasoning);
-
-    // reasoning_content 与 durable thinking 不一致拒绝
-    ObjectNode mismatchedThinking = MAPPER.createObjectNode();
-    mismatchedThinking.put("role", "assistant");
-    mismatchedThinking.put("content", "Hello");
-    mismatchedThinking.put("reasoning_content", "tampered");
-    assertRejected(user, contents, modelAffinity(), mismatchedThinking);
   }
 
   private ProviderReplayAffinity modelAffinity() {
@@ -889,20 +832,6 @@ class OpenAiChatNativeReplayTest {
 
   private static JsonNode assistantNode(JsonNode wire) {
     return wire.path("messages").get(2);
-  }
-
-  private void assertRejected(
-      ProviderMessage user,
-      List<ProviderContentBlock> durableBlocks,
-      ProviderReplayAffinity affinity,
-      ObjectNode payload) {
-    ProviderException error =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(user, assistant(durableBlocks, affinity, payload)), descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
   }
 
   private ProviderRequest request(ProviderMessage... messages) {

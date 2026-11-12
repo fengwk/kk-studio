@@ -61,7 +61,8 @@ class OpenAiResponsesLosslessItemReplayTest {
       "{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\","
           + "\"encrypted_content\":\"enc_lossless\","
           + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"check the weather\"}],"
-          + "\"content\":[{\"type\":\"reasoning_text\",\"text\":\"private reasoning\"}]}";
+          + "\"content\":[{\"type\":\"reasoning_text\",\"text\":\"private reasoning\"}],"
+          + "\"future_member\":{\"nested\":true}}";
 
   private static final String FUNCTION_CALL_ITEM =
       "{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"completed\",\"call_id\":\"call_1\","

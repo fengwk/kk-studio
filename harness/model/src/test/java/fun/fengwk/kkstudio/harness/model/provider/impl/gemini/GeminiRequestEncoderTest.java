@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -70,6 +71,21 @@ class GeminiRequestEncoderTest {
         "https://generativelanguage.googleapis.com/v1beta",
         new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
         new UUID(1L, 2L));
+  }
+
+  private static ProviderBlockData geminiBlockData(
+      ProviderReplayAffinity affinity, String signature, Boolean thought, ObjectNode nativeFields) {
+    return new ProviderBlockData(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        affinity,
+        signature,
+        null,
+        null,
+        null,
+        null,
+        false,
+        thought,
+        nativeFields);
   }
 
   private static ModelDescriptor model(boolean reasoning) {

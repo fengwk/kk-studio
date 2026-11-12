@@ -16,7 +16,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -25,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -621,15 +621,18 @@ class OpenAiResponsesRequestEncoderTest {
                 desc.affinity(createModel().modelId()),
                 null,
                 null,
-                null,
+                "msg_1",
                 "message",
                 "refusal",
+                true,
+                null,
                 true,
                 MAPPER.createObjectNode()));
     ProviderMessage refusal =
         new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(refusalBlock));
 
-    JsonNode root = MAPPER.readTree(encoder.encode(request(List.of(refusal)), desc).bodyUtf8Bytes());
+    JsonNode root =
+        MAPPER.readTree(encoder.encode(request(List.of(refusal)), desc).bodyUtf8Bytes());
     JsonNode encodedRefusal = root.path("input").get(0).path("content").get(0);
     assertEquals("refusal", encodedRefusal.path("type").asString(""));
     assertEquals("I cannot help with that.", encodedRefusal.path("refusal").asString(""));

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -937,7 +936,8 @@ class OpenAiResponsesStreamAccumulatorTest {
 
   /** 意图：验证 LENGTH 终态下仅在 terminal output 出现的不完整 tool call 生成诊断且不生成工具 block。 */
   @Test
-  void test_lengthTerminalOnlyIncompleteToolCallProducesDiagnosticWithoutToolBlock() throws Exception {
+  void test_lengthTerminalOnlyIncompleteToolCallProducesDiagnosticWithoutToolBlock()
+      throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1064,7 +1064,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("item_2", toolBlock.providerBlockData().itemId());
     assertEquals("function_call", toolBlock.providerBlockData().itemType());
     assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, toolBlock.providerBlockData().protocol());
-    assertEquals(ProviderType.OPENAI_RESPONSES, toolBlock.providerBlockData().affinity().providerType());
+    assertEquals(
+        ProviderType.OPENAI_RESPONSES, toolBlock.providerBlockData().affinity().providerType());
   }
 
   /** 意图：验证 response 中显式提供非 Array 的 output 字段（如对象、标量或 null）时严格抛出 INVALID_RESPONSE。 */
@@ -1248,7 +1249,8 @@ class OpenAiResponsesStreamAccumulatorTest {
         "", resp.thinking(), "streamed draft thinking must be cleared by terminal empty output");
     assertTrue(
         resp.toolCalls().isEmpty(), "streamed tool calls must be cleared by terminal empty output");
-    assertTrue(resp.blocks().isEmpty(), "response blocks must be empty when terminal output is empty");
+    assertTrue(
+        resp.blocks().isEmpty(), "response blocks must be empty when terminal output is empty");
   }
 
   /** 意图：验证 terminal response 显式提供仅包含 message 的 output 时，前序流式思考内容被完全清除，终态权威。 */
@@ -1305,8 +1307,8 @@ class OpenAiResponsesStreamAccumulatorTest {
   }
 
   /**
-   * 意图：验证 response.created 携带 output:[] 时，随后通过 output_item 流式接收文本，且 terminal response 省略
-   * output 字段时，最终文本与消息 block 正确保留，不被初始 snapshot 误清。
+   * 意图：验证 response.created 携带 output:[] 时，随后通过 output_item 流式接收文本，且 terminal response 省略 output
+   * 字段时，最终文本与消息 block 正确保留，不被初始 snapshot 误清。
    */
   @Test
   void test_createdWithEmptyOutputAndStreamedItemDonePreservesBlockWhenTerminalOmitsOutput()
@@ -1367,9 +1369,8 @@ class OpenAiResponsesStreamAccumulatorTest {
    * response 省略 output 字段时，最终文本仍正确保留。
    */
   @Test
-  void
-      test_createdWithEmptyOutputAndPureTextDeltasPreservesTextWhenTerminalOmitsOutput()
-          throws Exception {
+  void test_createdWithEmptyOutputAndPureTextDeltasPreservesTextWhenTerminalOmitsOutput()
+      throws Exception {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
@@ -1652,8 +1653,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderResponse resp = accumulator.response();
     assertEquals("terminal summary", resp.thinking());
-    ProviderThinkingBlock thinkingBlock =
-        (ProviderThinkingBlock) resp.blocks().get(0);
+    ProviderThinkingBlock thinkingBlock = (ProviderThinkingBlock) resp.blocks().get(0);
     assertEquals("terminal summary", thinkingBlock.thinking());
     assertEquals("enc_s", thinkingBlock.providerBlockData().encryptedContent());
     assertEquals("rs_1", thinkingBlock.providerBlockData().itemId());
@@ -1849,10 +1849,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, webSearch.providerBlockData().protocol());
   }
 
-  /**
-   * 意图：验证仅通过流式 output_item.done 到达的未知 item 同样保留为原生 block；缺少非空白 string type 的碎片
-   * 不进入 blocks。
-   */
+  /** 意图：验证仅通过流式 output_item.done 到达的未知 item 同样保留为原生 block；缺少非空白 string type 的碎片 不进入 blocks。 */
   @Test
   void test_streamedUnknownItemsBecomeBlocksButTypeLessFragmentsDoNot() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -1879,9 +1876,19 @@ class OpenAiResponsesStreamAccumulatorTest {
     ProviderOpaqueBlock codeInterpreter = (ProviderOpaqueBlock) response.blocks().get(0);
     assertEquals("code_interpreter_call", codeInterpreter.providerBlockData().itemType());
     assertEquals("ci_1", codeInterpreter.providerBlockData().itemId());
-    assertEquals("completed", codeInterpreter.providerBlockData().nativeFields().path("item").path("status").asString(""));
-    assertEquals("1+1", codeInterpreter.providerBlockData().nativeFields().path("item").path("code").asString(""));
-    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, codeInterpreter.providerBlockData().protocol());
+    assertEquals(
+        "completed",
+        codeInterpreter
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("status")
+            .asString(""));
+    assertEquals(
+        "1+1",
+        codeInterpreter.providerBlockData().nativeFields().path("item").path("code").asString(""));
+    assertEquals(
+        ProviderReplayFormat.OPENAI_RESPONSES, codeInterpreter.providerBlockData().protocol());
   }
 
   /**
@@ -1942,17 +1949,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("img_1", addedImage.providerBlockData().itemId());
     assertEquals(
         "in_progress",
-        addedImage
-            .providerBlockData()
-            .nativeFields()
-            .path("item")
-            .path("status")
-            .asString(""));
+        addedImage.providerBlockData().nativeFields().path("item").path("status").asString(""));
   }
 
-  /**
-   * 意图：验证已知 message 的空 added 事件不覆盖流式 delta，terminal 省略 output 时最终 response 保留文本 block。
-   */
+  /** 意图：验证已知 message 的空 added 事件不覆盖流式 delta，terminal 省略 output 时最终 response 保留文本 block。 */
   @Test
   void test_knownMessageAddedWithoutDoneKeepsStreamedTextBlock() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -1982,7 +1982,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("output_text", textBlock.providerBlockData().contentType());
     assertNull(textBlock.providerBlockData().itemId());
     assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, textBlock.providerBlockData().protocol());
-    assertEquals(ProviderType.OPENAI_RESPONSES, textBlock.providerBlockData().affinity().providerType());
+    assertEquals(
+        ProviderType.OPENAI_RESPONSES, textBlock.providerBlockData().affinity().providerType());
   }
 
   @Test

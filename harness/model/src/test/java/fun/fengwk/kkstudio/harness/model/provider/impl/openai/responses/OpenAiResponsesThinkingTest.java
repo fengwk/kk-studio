@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -174,7 +175,8 @@ class OpenAiResponsesThinkingTest {
 
     ProviderResponse resp = acc.response();
     assertEquals(2, resp.blocks().size());
-    ProviderThinkingBlock reasoning = (ProviderThinkingBlock) resp.blocks().get(0);
+    ProviderOpaqueBlock reasoning = (ProviderOpaqueBlock) resp.blocks().get(0);
+    assertEquals("reasoning", reasoning.providerBlockData().itemType());
     assertEquals("enc_blob_123", reasoning.providerBlockData().encryptedContent());
     assertEquals("rs_enc", reasoning.providerBlockData().itemId());
     ProviderToolCallBlock nativeCall = (ProviderToolCallBlock) resp.blocks().get(1);
@@ -251,9 +253,9 @@ class OpenAiResponsesThinkingTest {
 
     ProviderResponse response = acc.response();
     assertEquals(3, response.blocks().size());
-    assertEquals(
-        "enc_blob",
-        ((ProviderThinkingBlock) response.blocks().get(0)).providerBlockData().encryptedContent());
+    ProviderOpaqueBlock reasoning = (ProviderOpaqueBlock) response.blocks().get(0);
+    assertEquals("reasoning", reasoning.providerBlockData().itemType());
+    assertEquals("blob_p", reasoning.providerBlockData().encryptedContent());
     assertEquals("c1", ((ProviderToolCallBlock) response.blocks().get(1)).toolCall().id());
     assertEquals("c2", ((ProviderToolCallBlock) response.blocks().get(2)).toolCall().id());
 
