@@ -1107,7 +1107,10 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 
 // IDE-T-101 verifies canonical directory change is acknowledged only by a replacement host.
 func TestChangeDirectoryReply(t *testing.T) {
-	root := t.TempDir()
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	next := filepath.Join(root, "next")
 	if err := os.Mkdir(next, 0o700); err != nil {
 		t.Fatal(err)
@@ -1253,7 +1256,7 @@ func TestBoundCommandRejections(t *testing.T) {
 	if result := service.HandleCommand(context.Background(), command); result.GetCode() != "UNAVAILABLE" {
 		t.Fatalf("invalid directory=%v", result)
 	}
-	if state := service.GetViewState(opened.GetViewId()); state.GetDirectory() != root {
+	if state := service.GetViewState(opened.GetViewId()); state.GetDirectory() != opened.GetDirectory() {
 		t.Fatalf("rejected directory changed state: %v", state)
 	}
 }
