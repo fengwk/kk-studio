@@ -182,8 +182,13 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 	c.in <- invocationEnvelope()
 	cancelMessage := &protocol.Envelope{MessageType: protocol.MessageType_CANCEL, EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID), Payload: &protocol.Envelope_Cancel{Cancel: &protocol.Cancel{}}}
 	started := make(chan struct{})
-	r := newInvocationRuntime(t, c, func(ctx context.Context, call CapabilityCall, _ CapabilityContext) (CapabilityResult, error) {
+	partialSent := make(chan struct{})
+	r := newInvocationRuntime(t, c, func(ctx context.Context, call CapabilityCall, capability CapabilityContext) (CapabilityResult, error) {
 		close(started)
+		if err := capability.Progress(CapabilityResult{CallID: call.InvocationID, Contents: []ResultContent{{Type: "text", Text: "partial match"}}}); err != nil {
+			return CapabilityResult{}, err
+		}
+		close(partialSent)
 		<-ctx.Done()
 		return CapabilityResult{}, ctx.Err()
 	})
@@ -196,6 +201,12 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 		cancel()
 		t.Fatal("executor did not start")
 	}
+	select {
+	case <-partialSent:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("partial result was not sent")
+	}
 	c.in <- cancelMessage
 	c.waitFor(t, func(frames []*protocol.Envelope) bool {
 		for _, frame := range frames {
@@ -205,15 +216,27 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 		}
 		return false
 	})
-	cancelled := false
-	for _, frame := range c.frames() {
-		if frame.MessageType == protocol.MessageType_CANCELLED {
-			cancelled = frame.GetCancelled().GetReason() == "cancelled"
+	frames := c.frames()
+	if got := countFrames(frames, protocol.MessageType_CANCELLED); got != 1 {
+		t.Fatalf("CANCELLED terminals=%d, want one", got)
+	}
+	if got := countFrames(frames, protocol.MessageType_COMPLETED); got != 0 {
+		t.Fatalf("completed terminals=%d, want none for cancelled call", got)
+	}
+	partialCount := 0
+	partialPreserved := false
+	for _, frame := range frames {
+		if frame.MessageType == protocol.MessageType_CANCELLED && frame.GetCancelled().GetReason() != "cancelled" {
+			t.Fatalf("cancelled terminal reason=%q", frame.GetCancelled().GetReason())
+		}
+		if frame.MessageType == protocol.MessageType_PROGRESS {
+			partialCount++
+			contents := frame.GetProgress().GetResult().GetContents()
+			partialPreserved = len(contents) == 1 && contents[0].GetText().GetText() == "partial match"
 		}
 	}
-	if !cancelled {
-		cancel()
-		t.Fatal("cancelled terminal did not preserve the cancellation reason")
+	if partialCount != 1 || !partialPreserved {
+		t.Fatalf("partial progress count=%d preserved=%t, want exactly one delivered match", partialCount, partialPreserved)
 	}
 	cancel()
 	if err := <-done; err != nil {

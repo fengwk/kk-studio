@@ -443,6 +443,39 @@ func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	}
 }
 
+// COD-T-052: a staging-file failure removes the workspace and created-at registration.
+func TestCreateStagingFileFailureRollsBackWorkspace(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected staging open failure")
+	var workspace string
+	store.openStagingFile = func(path string) (*os.File, error) {
+		workspace = filepath.Dir(path)
+		if _, err := os.Stat(filepath.Join(workspace, "created-at")); err != nil {
+			t.Errorf("created-at registration was not written before staging: %v", err)
+		}
+		return nil, injected
+	}
+	if _, _, err := store.CreateStagingFile("rollback"); !errors.Is(err, injected) {
+		t.Fatalf("CreateStagingFile error=%v, want injected failure", err)
+	}
+	if workspace == "" {
+		t.Fatal("staging failure was not injected")
+	}
+	if _, err := os.Stat(workspace); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("workspace survived rollback: %v", err)
+	}
+	entries, err := os.ReadDir(store.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 || len(store.leases) != 0 || len(store.staging) != 0 {
+		t.Fatalf("rollback left store state: entries=%v leases=%v staging=%v", entries, store.leases, store.staging)
+	}
+}
+
 // COD-F-015
 func TestOutputStoreRejectsInvalidPublishPathAndSanitizesName(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())

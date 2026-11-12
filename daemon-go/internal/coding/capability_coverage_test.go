@@ -114,9 +114,14 @@ func TestSearchCapabilitiesRejectLimitsAndReturnEmptyMessages(t *testing.T) {
 // COD-F-007, COD-F-014
 func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(resolvedParent, filepath.Base(path))
 	changed := 0
 	result, err := writeCapability(context.Background(), capabilityCall(t, "create", map[string]string{"path": path, "content": "first"}), runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
-	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "Created ") || changed != 1 {
+	if err != nil || result.Error || result.Contents[0].Text != "Created "+wantPath+" successfully." || changed != 1 {
 		t.Fatalf("create=%#v changed=%d err=%v", result, changed, err)
 	}
 	created, err := os.ReadFile(path)
@@ -128,9 +133,9 @@ func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := capabilityCall(t, "overwrite", map[string]string{"path": path, "content": "second"})
-	call.ExpectedFile = &runtime.ExpectedFile{Path: preview.Path, SHA256: preview.SHA256}
+	call.ExpectedFile = &runtime.ExpectedFile{Path: preview.Path, SHA256: *preview.SHA256}
 	result, err = writeCapability(context.Background(), call, runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
-	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "Overwrote ") || changed != 2 {
+	if err != nil || result.Error || result.Contents[0].Text != "Overwrote "+wantPath+" successfully." || changed != 2 {
 		t.Fatalf("overwrite=%#v changed=%d err=%v", result, changed, err)
 	}
 	result, err = writeCapability(context.Background(), capabilityCall(t, "directory", map[string]string{"path": filepath.Dir(path), "content": "x"}), runtime.CapabilityContext{})

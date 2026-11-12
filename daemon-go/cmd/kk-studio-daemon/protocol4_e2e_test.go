@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/fengwk/kk-studio/daemon/internal/coding"
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
@@ -69,6 +70,27 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}
 	initial, err := config.LoadDaemonConfig(configPath)
 	if err != nil {
+		t.Fatal(err)
+	}
+	stagingPath := filepath.Join(initial.DataDir, "skills", ".staging-interrupted")
+	if err := os.MkdirAll(stagingPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingPath, "partial.zip"), []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outputStore, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredWorkspace := filepath.Join(outputStore.Root(), "123e4567-e89b-42d3-a456-426614174010")
+	if err := os.MkdirAll(expiredWorkspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(expiredWorkspace, "created-at"), []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(expiredWorkspace, "result.log"), []byte("expired"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(directory, "sample.txt")
@@ -139,6 +161,43 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	if ready.MessageType != protocol.MessageType_READY || ready.GetReady().GetDaemonVersion() != config.DaemonVersion {
 		t.Fatalf("first runtime response=%v; want READY", ready)
 	}
+	if _, err := os.Stat(stagingPath); !os.IsNotExist(err) {
+		t.Fatalf("startup skill staging path still exists: err=%v", err)
+	}
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_TEMPORARY_RESOURCE_POLICY, EnvironmentId: proto.String(e2eEnvironmentID),
+		Payload: &protocol.Envelope_TemporaryResourcePolicy{TemporaryResourcePolicy: &protocol.TemporaryResourcePolicy{
+			TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1),
+		}},
+	})
+	resourceSweepDeadline := time.NewTimer(5 * time.Second)
+	resourceSweepTicker := time.NewTicker(10 * time.Millisecond)
+	defer resourceSweepDeadline.Stop()
+	defer resourceSweepTicker.Stop()
+	for {
+		_, statErr := os.Stat(expiredWorkspace)
+		if os.IsNotExist(statErr) {
+			break
+		}
+		if statErr != nil {
+			t.Fatalf("inspect expired temporary resource: %v", statErr)
+		}
+		select {
+		case <-resourceSweepTicker.C:
+		case <-resourceSweepDeadline.C:
+			t.Fatal("production runtime did not sweep expired temporary resources")
+		}
+	}
+
+	const missingInvocation = "123e4567-e89b-42d3-a456-426614174006"
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_RECOVER, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(missingInvocation),
+		Payload: &protocol.Envelope_Recover{Recover: &protocol.Recover{}},
+	})
+	recovered, err := readControlEnvelopeResult(response.Body)
+	if err != nil || recovered.MessageType != protocol.MessageType_RECOVER_NOT_FOUND || recovered.GetInvocationId() != missingInvocation {
+		t.Fatalf("missing invocation recovery=%v err=%v, want RECOVER_NOT_FOUND", recovered, err)
+	}
 
 	cases := []struct {
 		name, capability, arguments, invocation, want string
@@ -189,8 +248,40 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 			if !strings.Contains(output.String(), tc.want) {
 				t.Fatalf("%s output=%q, want substring %q", tc.capability, output.String(), tc.want)
 			}
+			if tc.capability == "fs.read" && !strings.Contains(output.String(), "lsp: supported (text)") {
+				t.Fatalf("fs.read did not report the configured LSP status: %q", output.String())
+			}
 		})
 	}
+	t.Run("output-limit", func(t *testing.T) {
+		const invocation = "123e4567-e89b-42d3-a456-426614174005"
+		writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+			MessageType: protocol.MessageType_INVOKE, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(invocation),
+			Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{
+				CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(fmt.Sprintf(`{"path":%q}`, file)),
+				TimeoutMillis: proto.Int64(10000), MaxOutputBytes: proto.Int64(1), ImageInputTier: imageTier(protocol.ImageInputTier_P720),
+			}},
+		})
+		for {
+			e, readErr := readControlEnvelopeResult(response.Body)
+			if readErr != nil {
+				t.Fatalf("read over-limit invocation result: %v", readErr)
+			}
+			if e.GetInvocationId() != invocation {
+				continue
+			}
+			if e.MessageType == protocol.MessageType_STARTED || e.MessageType == protocol.MessageType_PROGRESS {
+				continue
+			}
+			if e.MessageType != protocol.MessageType_FAILED {
+				t.Fatalf("over-limit terminal=%v, want FAILED", e)
+			}
+			if message := e.GetFailed().GetMessage(); !strings.Contains(message, "Tool output is ") || !strings.Contains(message, "exceeds the tool output size limit of 0 MiB") {
+				t.Fatalf("over-limit failure message=%q", message)
+			}
+			break
+		}
+	})
 	if got, err := os.ReadFile(file); err != nil || string(got) != "needle edited\n" {
 		t.Fatalf("edited file=%q err=%v", got, err)
 	}

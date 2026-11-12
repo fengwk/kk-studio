@@ -34,6 +34,25 @@ type PosixSupervisor struct {
 	closed                 bool
 	processes              map[int]*posixProcess
 	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
+	startAPI               posixStartAPI
+}
+
+type posixStartAPI struct {
+	createStateDir func() (string, error)
+	publishLaunch  func(string, []byte) error
+	pipe           func() (*os.File, *os.File, error)
+	executable     func() (string, error)
+	start          func(*exec.Cmd) error
+}
+
+func nativePOSIXStartAPI() posixStartAPI {
+	return posixStartAPI{
+		createStateDir: createStateDir,
+		publishLaunch:  func(dir string, payload []byte) error { return publish(dir, launchFile, payload) },
+		pipe:           os.Pipe,
+		executable:     os.Executable,
+		start:          func(cmd *exec.Cmd) error { return cmd.Start() },
+	}
 }
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
@@ -46,6 +65,7 @@ func NewSupervisor() (Supervisor, error) {
 	return &PosixSupervisor{
 		processes:              make(map[int]*posixProcess),
 		snapshotDirectChildren: directChildren,
+		startAPI:               nativePOSIXStartAPI(),
 	}, nil
 }
 
@@ -67,6 +87,10 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, errors.New("the process supervisor is closed")
 	}
 	s.mu.Unlock()
+	api := s.startAPI
+	if api.createStateDir == nil {
+		api = nativePOSIXStartAPI()
+	}
 	var baselinePIDs []int
 	baselineKnown := false
 	if runtime.GOOS == "linux" {
@@ -79,7 +103,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 			baselinePIDs = append(baselinePIDs, child.PID)
 		}
 	}
-	dir, err := createStateDir()
+	dir, err := api.createStateDir()
 	if err != nil {
 		return nil, err
 	}
@@ -94,18 +118,18 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	launch := launchSpec{Cwd: cwd, Args: append([]string{spec.Executable}, spec.Args...)}
 	payload, err := json.Marshal(launch)
 	if err == nil {
-		err = publish(dir, launchFile, payload)
+		err = api.publishLaunch(dir, payload)
 	}
 	if err != nil {
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	ownerReader, ownerWriter, err := os.Pipe()
+	ownerReader, ownerWriter, err := api.pipe()
 	if err != nil {
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	executable, err := os.Executable()
+	executable, err := api.executable()
 	if err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
@@ -116,14 +140,14 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.ExtraFiles = []*os.File{ownerReader}
 	cmd.Env = mergeEnvironment(os.Environ(), spec.Env)
-	stdinReader, stdin, err := os.Pipe()
+	stdinReader, stdin, err := api.pipe()
 	if err != nil {
 		_ = ownerReader.Close()
 		_ = ownerWriter.Close()
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stdout, stdoutWriter, err := os.Pipe()
+	stdout, stdoutWriter, err := api.pipe()
 	if err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
@@ -132,7 +156,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		_ = removeStateDir(dir)
 		return nil, err
 	}
-	stderr, stderrWriter, err := os.Pipe()
+	stderr, stderrWriter, err := api.pipe()
 	if err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
@@ -144,7 +168,7 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 		return nil, err
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdinReader, stdoutWriter, stderrWriter
-	if err := cmd.Start(); err != nil {
+	if err := api.start(cmd); err != nil {
 		_ = stdinReader.Close()
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -197,6 +221,10 @@ func (s *PosixSupervisor) Close(ctx context.Context) error {
 }
 
 func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int) error {
+	return s.trackDescendantWithMembers(ctx, rootPID, pid, allProcessMembers)
+}
+
+func (s *PosixSupervisor) trackDescendantWithMembers(ctx context.Context, rootPID, pid int, snapshot func() ([]sessionMember, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -206,7 +234,7 @@ func (s *PosixSupervisor) TrackDescendant(ctx context.Context, rootPID, pid int)
 	if p == nil {
 		return errors.New("the process root is not managed by this supervisor")
 	}
-	members, err := allProcessMembers()
+	members, err := snapshot()
 	if err != nil {
 		return err
 	}
@@ -379,6 +407,10 @@ func (p *posixProcess) Terminate(ctx context.Context, grace time.Duration) error
 }
 
 func (p *posixProcess) awaitScope(ctx context.Context) error {
+	return p.awaitScopeWithMembers(ctx, sessionMembers)
+}
+
+func (p *posixProcess) awaitScopeWithMembers(ctx context.Context, membersForSession func(int) ([]sessionMember, error)) error {
 	deadline := time.NewTimer(scopeStartBudget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(scopePollInterval)
@@ -391,7 +423,7 @@ func (p *posixProcess) awaitScope(ctx context.Context) error {
 			if strings.TrimSpace(string(value)) != fmt.Sprint(p.sid) {
 				return errors.New("the process scope helper published an untrusted scope")
 			}
-			members, err := sessionMembers(p.sid)
+			members, err := membersForSession(p.sid)
 			if err != nil {
 				return err
 			}
@@ -478,12 +510,40 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 	return convergeSessionFenced(ctx, sid, grace, excludedPID, nil)
 }
 
+type posixConvergenceAPI struct {
+	members func(int) ([]sessionMember, error)
+	kill    func(int, syscall.Signal) error
+	now     func() time.Time
+	wait    func(context.Context, time.Duration) error
+}
+
+func nativePOSIXConvergenceAPI() posixConvergenceAPI {
+	return posixConvergenceAPI{
+		members: sessionMembers,
+		kill:    syscall.Kill,
+		now:     time.Now,
+		wait: func(ctx context.Context, interval time.Duration) error {
+			timer := time.NewTimer(interval)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+	}
+}
+
 func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, excludedPID int, anchor *trackedSession) error {
-	deadline := time.NewTimer(scopeConvergeBudget)
-	defer deadline.Stop()
-	started := time.Now()
+	return convergeSessionFencedWithAPI(ctx, sid, grace, excludedPID, anchor, nativePOSIXConvergenceAPI())
+}
+
+func convergeSessionFencedWithAPI(ctx context.Context, sid int, grace time.Duration, excludedPID int, anchor *trackedSession, api posixConvergenceAPI) error {
+	deadline := api.now().Add(scopeConvergeBudget)
+	started := api.now()
 	for {
-		members, err := sessionMembers(sid)
+		members, err := api.members(sid)
 		if err != nil {
 			return err
 		}
@@ -507,14 +567,14 @@ func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, ex
 			return err
 		}
 		signal := syscall.SIGTERM
-		if time.Since(started) >= grace {
+		if api.now().Sub(started) >= grace {
 			signal = syscall.SIGKILL
 		}
 		for _, m := range active {
 			if m.Identity == "" {
 				return errors.New("process scope member identity is unknown")
 			}
-			current, err := sessionMembers(sid)
+			current, err := api.members(sid)
 			if err != nil {
 				return err
 			}
@@ -531,16 +591,24 @@ func convergeSessionFenced(ctx context.Context, sid int, grace time.Duration, ex
 			if !verified {
 				continue
 			}
-			if err := syscall.Kill(m.PID, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := api.kill(m.PID, signal); err != nil && !errors.Is(err, syscall.ESRCH) {
 				return fmt.Errorf("cannot signal process scope member: %w", err)
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
+		remaining := deadline.Sub(api.now())
+		if remaining <= 0 {
 			return errors.New("process scope did not converge within its deadline")
-		case <-time.After(scopePollInterval):
+		}
+		interval := scopePollInterval
+		deadlineWait := remaining <= interval
+		if deadlineWait {
+			interval = remaining
+		}
+		if err := api.wait(ctx, interval); err != nil {
+			return err
+		}
+		if deadlineWait {
+			return errors.New("process scope did not converge within its deadline")
 		}
 	}
 }
@@ -576,6 +644,29 @@ func mergeEnvironment(base, overrides []string) []string {
 		result = append(result, key+"="+values[key])
 	}
 	return result
+}
+
+func completeHelperCommandLifecycle(publishExit func() error, converge func() error, reapAdopted func() error, publishCleanup func(string) error, publishFailure func()) int {
+	if err := publishExit(); err != nil {
+		_ = converge()
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := converge(); err != nil {
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := reapAdopted(); err != nil {
+		_ = publishCleanup("false")
+		publishFailure()
+		return 1
+	}
+	if err := publishCleanup("true"); err != nil {
+		return 1
+	}
+	return 0
 }
 
 func helperMain(args []string) int {
@@ -697,24 +788,15 @@ func helperMain(args []string) int {
 		publishQuietly(args[0], errorFile, "helper-posix-failure")
 		return 1
 	}
-	if err := publishText(args[0], exitFile, string(payload)); err != nil {
-		_ = convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid())
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid()); err != nil {
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil); err != nil {
-		publishQuietly(args[0], cleanupFile, "false")
-		publishQuietly(args[0], errorFile, "helper-posix-failure")
-		return 1
-	}
-	if err := publishText(args[0], cleanupFile, "true"); err != nil {
-		return 1
-	}
-	return 0
+	return completeHelperCommandLifecycle(
+		func() error { return publishText(args[0], exitFile, string(payload)) },
+		func() error {
+			return convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid())
+		},
+		func() error {
+			return convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil)
+		},
+		func(value string) error { return publishText(args[0], cleanupFile, value) },
+		func() { publishQuietly(args[0], errorFile, "helper-posix-failure") },
+	)
 }

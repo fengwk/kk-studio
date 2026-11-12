@@ -23,6 +23,8 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	serverRequest := make(chan *http.Request, 1)
 	serverBytes := make(chan string, 1)
 	serverErr := make(chan error, 1)
+	serverStop := make(chan struct{})
+	defer close(serverStop)
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -46,6 +48,7 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 			return
 		}
 		serverBytes <- string(got)
+		<-serverStop
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())

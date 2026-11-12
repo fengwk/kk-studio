@@ -44,6 +44,13 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 		return productionFailure("daemon directory lock is unavailable", err)
 	}
 	defer func() { recordCleanupFailure(&runErr, "daemon directory lock release failed", directoryLock.Close()) }()
+	if err := (&skill.Installer{DataDir: initial.DataDir}).CleanupStaging(ctx); err != nil {
+		return productionFailure("abandoned skill staging cleanup failed", err)
+	}
+	temporaryResources, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	if err != nil {
+		return productionFailure("temporary resource storage is unavailable", err)
+	}
 	tracker, ok := processes.(native.DescendantTracker)
 	if !ok {
 		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
@@ -109,7 +116,13 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
-	capabilities := coding.Provider{}.Capabilities()
+	capabilities := coding.Provider{LSPStatus: func(file string) (string, bool) {
+		support := lspFacade.Support(file)
+		if support.Language == nil {
+			return "", false
+		}
+		return *support.Language, support.Available && support.Supported
+	}}.Capabilities()
 	for id, handler := range lspFacade.Capabilities() {
 		capabilities[id] = handler
 	}
@@ -127,18 +140,19 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 	}}
 	uploader := dynamicResourceUploader{current: environmentConfig.Current, control: resourceControl}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
-		EnvironmentID:     initial.EnvironmentID,
-		DaemonVersion:     config.DaemonVersion,
-		Connections:       connections,
-		Capabilities:      capabilities,
-		Processes:         processes,
-		FileChanged:       lspFacade.FileChanged,
-		Resources:         uploader,
-		EnvironmentConfig: environmentConfig,
-		Status:            status,
-		Update:            updateRunner,
-		IDE:               ideService,
-		ReportError:       func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
+		EnvironmentID:      initial.EnvironmentID,
+		DaemonVersion:      config.DaemonVersion,
+		Connections:        connections,
+		Capabilities:       capabilities,
+		Processes:          processes,
+		FileChanged:        lspFacade.FileChanged,
+		Resources:          uploader,
+		TemporaryResources: temporaryResources,
+		EnvironmentConfig:  environmentConfig,
+		Status:             status,
+		Update:             updateRunner,
+		IDE:                ideService,
+		ReportError:        func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
 	})
 	if err != nil {
 		return productionFailure("daemon runtime could not be initialized", err)
@@ -214,7 +228,7 @@ func (r ticketRequester) RequestTicket(ctx context.Context, transferID string) (
 
 type dynamicResourceUploader struct {
 	current func() config.DaemonConfig
-	control *runtimeResourceControl
+	control transport.UploadControl
 }
 
 func (u dynamicResourceUploader) Upload(ctx context.Context, invocationID string, content daemonruntime.ResultContent) (daemonruntime.ResultContent, error) {

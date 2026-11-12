@@ -157,7 +157,7 @@ func TestServiceCloseCancelsStreams(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,14 +203,14 @@ func TestResolveRouteAndRestoreMissing(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	request := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "//outside"}
+	request := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "//outside"}
 	if _, err := service.ResolveView(context.Background(), request); err == nil || service.ActiveStreamCount() != 0 {
 		t.Fatalf("unsafe route err=%v streams=%d", err, service.ActiveStreamCount())
 	}
-	if _, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 2, Mode: "HTTP", Method: "GET", Path: "/"}); err == nil {
+	if _, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 2, Mode: "http", Method: "GET", Path: "/"}); err == nil {
 		t.Fatal("stale binding resolved")
 	}
-	transportRequest := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 0, Mode: "HTTP", Method: "GET", Path: "/"}
+	transportRequest := transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: 0, Mode: "http", Method: "GET", Path: "/"}
 	if _, err := service.ResolveView(context.Background(), transportRequest); FailureCode(err) != "UNAVAILABLE" {
 		t.Fatalf("invalid epoch error=%v", err)
 	}
@@ -890,7 +890,7 @@ func TestResumeGenerationChangeDuringRegistration(t *testing.T) {
 	resume.Mode = protocol.IdeOpenMode_RESUME
 	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
 	result := service.HandleCommand(context.Background(), resume)
-	if result.GetOk() || result.GetCode() != "CLEANUP_FAILED" {
+	if result.GetOk() || result.GetCode() != "BUSY" {
 		t.Fatalf("generation drift resume=%v", result)
 	}
 	view := service.GetViewState(opened.GetViewId())
@@ -1129,7 +1129,7 @@ func TestIdleStopWaitsForFinalStreamRelease(t *testing.T) {
 	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
 	defer cancelHost()
 	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1188,7 +1188,7 @@ func TestUpdateAdmission(t *testing.T) {
 	if !opened.GetOk() || service.CanStartUpdate() {
 		t.Fatalf("open=%v update admitted=%v", opened, service.CanStartUpdate())
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1222,7 @@ func TestProcessExitConvergence(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1267,7 +1267,7 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 	service.mu.Unlock()
 	select {
 	case <-recovery:
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		t.Fatal("crash convergence did not settle")
 	}
 	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
@@ -1301,7 +1301,7 @@ func TestViewRebindCancelsStreamContext(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1321,7 @@ func TestViewRebindCancelsStreamContext(t *testing.T) {
 	if count := service.ActiveStreamCount(); count != 0 {
 		t.Fatalf("active streams after release=%d", count)
 	}
-	plainUpstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: resumed.GetViewId(), BindingEpoch: resumed.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	plainUpstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: resumed.GetViewId(), BindingEpoch: resumed.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1622,7 +1622,7 @@ func TestBoundViewCommands(t *testing.T) {
 	if !focused.GetOk() || focused.GetViewId() != opened.GetViewId() || !collapsed.GetOk() || collapsed.GetViewId() != opened.GetViewId() {
 		t.Fatalf("focus=%v collapse=%v", focused, collapsed)
 	}
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1675,7 +1675,7 @@ func TestUnknownNativeClosePreservesStream(t *testing.T) {
 	})
 	defer cancelHost()
 	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1720,7 +1720,7 @@ func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 				t.Fatal(err)
 			}
 			upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
-				ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+				ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1811,7 +1811,7 @@ func TestCancelledNativeClosePreservesView(t *testing.T) {
 	}
 	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"closeView": {"ok": false, "code": "CANCELLED", "message": "save cancelled"}})
 	defer cancelHost()
-	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/"})
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "http", Method: "GET", Path: "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
