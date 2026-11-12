@@ -159,8 +159,9 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 			}
 			writeControlEnvelope(t, bodyWriter, invoke)
 			var terminal *protocol.Envelope
+			var executionExited bool
 			var output strings.Builder
-			for terminal == nil {
+			for terminal == nil || tc.capability == "process.exec" && !executionExited {
 				e, readErr := readControlEnvelopeResult(response.Body)
 				if readErr != nil {
 					select {
@@ -179,6 +180,8 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 				case protocol.MessageType_COMPLETED:
 					appendE2EContents(&output, e)
 					terminal = e
+				case protocol.MessageType_EXECUTION_EXITED:
+					executionExited = true
 				case protocol.MessageType_FAILED:
 					t.Fatalf("%s invocation failed: %s", tc.capability, e.GetFailed().GetMessage())
 				}
