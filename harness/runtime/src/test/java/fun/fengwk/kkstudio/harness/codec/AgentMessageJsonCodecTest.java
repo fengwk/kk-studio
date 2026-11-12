@@ -14,13 +14,20 @@ import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +62,53 @@ class AgentMessageJsonCodecTest {
 
     assertEquals(message, codec.decode(codec.encode(message)));
     assertEquals(message, codec.decodeNode(codec.encodeNode(message)));
+  }
+
+  @Test
+  void roundTripsBlockNativeFieldsAndRedactedThinking() {
+    ProviderBlockData blockData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "claude", "claude-sonnet"),
+            "signed-block",
+            null,
+            null,
+            HarnessJson.STRICT.createObjectNode());
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new ThinkingMessageContent("reasoning", blockData),
+                new RedactedThinkingMessageContent("opaque-data"),
+                new NativeAssistantBlockContent(
+                    "web_search_call",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.OPENAI_RESPONSES,
+                        new ProviderReplayAffinity(
+                            ProviderType.OPENAI_RESPONSES, "openai", "gpt-5"),
+                        null,
+                        null,
+                        "search-1",
+                        "web_search_call",
+                        null,
+                        false,
+                        HarnessJson.STRICT.createObjectNode()))));
+
+    AgentMessage decoded = codec.decode(codec.encode(message));
+    assertEquals(message, decoded);
+    ProviderBlockData decodedThinkingData =
+        ((ThinkingMessageContent) decoded.contents().getFirst()).providerBlockData();
+    assertEquals("signed-block", decodedThinkingData.signature());
+    assertTrue(decodedThinkingData.nativeFields().isEmpty());
+    ProviderBlockData decodedNativeData =
+        ((NativeAssistantBlockContent) decoded.contents().get(2)).providerBlockData();
+    assertEquals("search-1", decodedNativeData.itemId());
+    assertEquals("web_search_call", decodedNativeData.itemType());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentMessage(
+                AgentMessageRole.USER, List.of(new TextMessageContent("x", blockData))));
   }
 
   @Test

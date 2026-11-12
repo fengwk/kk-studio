@@ -23,17 +23,18 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEncodedRequest;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesRequestEncoder;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesStreamAccumulator;
@@ -136,27 +137,33 @@ class OpenAiResponsesDurableReplayTest {
         "encrypted blob must not be exposed as text");
     assertEquals(1, response.toolCalls().size());
 
-    ProviderReplayState replayState = accumulator.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, replayState.format());
-    assertEquals(descriptor.affinity(firstRequest.model().modelId()), replayState.affinity());
-    JsonNode replayOutput = replayState.payload().get("output");
-    assertEquals("enc_blob_durable", replayOutput.get(0).path("encrypted_content").asString(""));
-    assertEquals(
-        "Check the weather", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
+    ProviderThinkingBlock reasoning = (ProviderThinkingBlock) response.blocks().get(0);
+    ProviderToolCallBlock functionCall = (ProviderToolCallBlock) response.blocks().get(1);
+    ProviderBlockData reasoningData = reasoning.providerBlockData();
+    assertNotNull(reasoningData);
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, reasoningData.protocol());
+    assertEquals(descriptor.affinity(firstRequest.model().modelId()), reasoningData.affinity());
+    assertTrue(reasoningData.itemStart());
+    assertEquals("enc_blob_durable", reasoningData.encryptedContent());
+    assertEquals("rs_durable", reasoningData.itemId());
+    assertEquals("reasoning", reasoningData.itemType());
+    assertEquals("summary_text", reasoningData.contentType());
+    assertEquals("fc_durable", functionCall.providerBlockData().itemId());
 
-    // durable 持久化：replay state 经严格 codec 往返后保持全等（含加密内容）。
-    ProviderReplayStateJsonCodec codec = new ProviderReplayStateJsonCodec();
-    ProviderReplayState durableReplay = codec.decode(codec.encode(replayState));
-    assertEquals(replayState, durableReplay);
-
-    // session 投影：durable assistant 消息只携带 summary thinking 与 tool call，加密内容留在 replay state。
+    // Durable message content owns replay metadata on the corresponding thinking/tool blocks.
     AgentMessage durableAssistant =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(
-                new ThinkingMessageContent(response.thinking()),
-                new ToolCallMessageContent("call_1", "query", "query", "{\"q\":\"Paris\"}")));
+                new ThinkingMessageContent(response.thinking(), reasoningData),
+                new ToolCallMessageContent(
+                    "call_1",
+                    "query",
+                    "query",
+                    "{\"q\":\"Paris\"}",
+                    null,
+                    null,
+                    functionCall.providerBlockData())));
     AgentMessage durableToolResult =
         new AgentMessage(
             AgentMessageRole.TOOL,
@@ -177,7 +184,7 @@ class OpenAiResponsesDurableReplayTest {
                         new AgentMessage(
                             AgentMessageRole.USER,
                             List.of(new TextMessageContent("call the tool")))),
-                    ProviderMessageProjector.ProjectedMessage.of(durableAssistant, durableReplay),
+                    ProviderMessageProjector.ProjectedMessage.of(durableAssistant),
                     ProviderMessageProjector.ProjectedMessage.of(durableToolResult)));
 
     OpenAiResponsesEncodedRequest second = encoder.encode(request(projected), descriptor);
@@ -199,9 +206,11 @@ class OpenAiResponsesDurableReplayTest {
         "private reasoning text must never reach the wire replay");
   }
 
-  /** 意图：历史缺少 replay state 时（例如旧历史或非 Responses provider）回退为语义编码，不合成 encrypted_content。 */
+  /**
+   * Semantic-only history becomes ordinary assistant text and never invents encrypted reasoning.
+   */
   @Test
-  void durableHistoryWithoutReplayStateFallsBackToSemanticEncoding() throws Exception {
+  void durableHistoryWithoutNativeBlocksFallsBackToSemanticEncoding() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -240,8 +249,8 @@ class OpenAiResponsesDurableReplayTest {
 
     assertEquals(4, input.size());
     assertEquals("user", input.get(0).path("role").asString(""));
-    assertEquals("reasoning", input.get(1).path("type").asString(""));
-    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asString(""));
+    assertEquals("message", input.get(1).path("type").asString(""));
+    assertEquals("durable thought", input.get(1).path("content").get(0).path("text").asString(""));
     assertFalse(input.get(1).has("encrypted_content"));
     assertEquals("function_call", input.get(2).path("type").asString(""));
     assertTrue(input.get(2).has("arguments"));

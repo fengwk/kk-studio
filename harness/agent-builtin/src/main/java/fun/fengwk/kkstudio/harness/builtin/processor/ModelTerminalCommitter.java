@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -94,9 +93,7 @@ final class ModelTerminalCommitter {
     ProviderResponse frozen =
         ToolHistoryActions.freeze(
             completion.response(), bindings, config.toolHistoryActionResolver());
-    return frozen == completion.response()
-        ? completion
-        : new ProviderCompletion(frozen, completion.replayState());
+    return frozen == completion.response() ? completion : new ProviderCompletion(frozen);
   }
 
   /** 按 Gateway 结果提交终态；{@code completion} 仅在成功且流未失败时非 null。调用方持有 stream lock。 */
@@ -149,7 +146,7 @@ final class ModelTerminalCommitter {
       }
       ProviderResponse durableResponse =
           validatedResponse.withDecodeDurationMillis(decodeDurationMillis);
-      boolean committed = safeTerminal(() -> commitSuccess(durableResponse, null, null));
+      boolean committed = safeTerminal(() -> commitSuccess(durableResponse, null));
       if (!committed) {
         return Applied.LOST;
       }
@@ -198,20 +195,9 @@ final class ModelTerminalCommitter {
     }
     final StreamCheckpoint checkpointToCommit = finalCheckpoint;
 
-    ProviderReplayState replayState = null;
-    if ((validatedResponse.stopReason() == GenerationStopReason.COMPLETE
-            || validatedResponse.stopReason() == GenerationStopReason.LENGTH
-            // CONTINUE 是撤下工具意图的续写终止态：下一请求必须原样回放上游 native 字段。
-            || validatedResponse.stopReason() == GenerationStopReason.CONTINUE)
-        && validatedResponse.toolCallDiagnostics().isEmpty()) {
-      replayState = completion.replayState();
-    }
-    final ProviderReplayState replayStateToCommit = replayState;
-
     ProviderResponse durableResponse =
         validatedResponse.withDecodeDurationMillis(decodeDurationMillis);
-    boolean committed =
-        safeTerminal(() -> commitSuccess(durableResponse, checkpointToCommit, replayStateToCommit));
+    boolean committed = safeTerminal(() -> commitSuccess(durableResponse, checkpointToCommit));
     if (!committed) {
       return Applied.LOST;
     }
@@ -326,10 +312,7 @@ final class ModelTerminalCommitter {
             }));
   }
 
-  private boolean commitSuccess(
-      ProviderResponse response,
-      StreamCheckpoint finalCheckpoint,
-      ProviderReplayState replayState) {
+  private boolean commitSuccess(ProviderResponse response, StreamCheckpoint finalCheckpoint) {
     try {
       return Boolean.TRUE.equals(
           inTransaction(
@@ -350,8 +333,7 @@ final class ModelTerminalCommitter {
                 if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                tx.updateModelInvocation(
-                    model.succeed(response, finalCheckpoint, replayState, now));
+                tx.updateModelInvocation(model.succeed(response, finalCheckpoint, now));
                 tx.threads().update(thread.touchVersion(now));
                 tx.work().complete(claim);
                 return true;

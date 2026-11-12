@@ -163,7 +163,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           public ModelGateway.Outcome run(ModelGateway.Sink sink) {
             runner.set(Thread.currentThread());
             return new ModelGateway.Succeeded(
-                new ProviderCompletion(response("final answer", stopReason), null));
+                new ProviderCompletion(response("final answer", stopReason)));
           }
 
           @Override
@@ -318,8 +318,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           public ModelGateway.Outcome run(ModelGateway.Sink sink) {
             runner.set(Thread.currentThread());
             return new ModelGateway.Succeeded(
-                new ProviderCompletion(
-                    response("final answer", GenerationStopReason.COMPLETE), null));
+                new ProviderCompletion(response("final answer", GenerationStopReason.COMPLETE)));
           }
 
           @Override
@@ -580,7 +579,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     String fallback = ((ProviderTextBlock) messages.get(2).contents().get(0)).text();
     assertTrue(fallback.startsWith("Previous context:"));
     assertTrue(fallback.contains("{\"secret\":1}"));
-    assertTrue(messages.stream().noneMatch(ProviderMessage::hasReplayState));
+    assertNull(((ProviderTextBlock) messages.get(1).contents().getFirst()).providerBlockData());
+    assertNull(((ProviderTextBlock) messages.get(2).contents().getFirst()).providerBlockData());
 
     ModelInvocation running = model(store, invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, running.status());

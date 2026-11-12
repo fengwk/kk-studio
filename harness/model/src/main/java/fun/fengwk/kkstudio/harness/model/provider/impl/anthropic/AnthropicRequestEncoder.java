@@ -12,6 +12,7 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -21,8 +22,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -524,8 +526,7 @@ public final class AnthropicRequestEncoder {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "assistant");
 
-    ReplayDecision replay =
-        evaluateReplay(message.replayState(), descriptor, requestedModel, message.contents());
+    ReplayDecision replay = evaluateBlockReplay(message, descriptor, requestedModel);
     if (replay.replayable()) {
       ArrayNode replayedBlocks = NODES.arrayNode();
       for (JsonNode blockNode : replay.content()) {
@@ -538,43 +539,92 @@ public final class AnthropicRequestEncoder {
     // Semantic fallback
     ArrayNode contents = msgNode.putArray("content");
     for (ProviderContentBlock block : message.contents()) {
-      contents.add(encodeAssistantFallbackBlock(block));
+      ObjectNode fallback = encodeAssistantFallbackBlock(block);
+      if (fallback != null) {
+        contents.add(fallback);
+      }
     }
     return new EncodedAssistantMessage(msgNode, false);
   }
 
-  private static ReplayDecision evaluateReplay(
-      ProviderReplayState replayState,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      List<ProviderContentBlock> durableContents) {
-    if (replayState == null || replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
+  private static ReplayDecision evaluateBlockReplay(
+      ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
+    if (message.contents().isEmpty()) {
       return ReplayDecision.FALLBACK;
     }
-
-    // 1. 源兼容性只由 affinity（Provider/连接世代/wire 模型）决定，与 system/时间前缀无关；不兼容时按 durable
-    // 语义投影，绝不因为存在 replay 而拒绝请求。
-    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-      return ReplayDecision.FALLBACK;
+    ArrayNode content = NODES.arrayNode();
+    for (ProviderContentBlock block : message.contents()) {
+      ProviderBlockData data = blockData(block);
+      if (data == null
+          || data.protocol() != ProviderReplayFormat.ANTHROPIC_MESSAGES
+          || !data.affinity().equals(descriptor.affinity(requestedModel))) {
+        return ReplayDecision.FALLBACK;
+      }
+      ObjectNode nativeBlock = NODES.objectNode();
+      if (block instanceof ProviderTextBlock textBlock) {
+        nativeBlock.put("type", "text");
+        nativeBlock.put("text", textBlock.text());
+      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        if (data.signature() == null || data.signature().isBlank()) {
+          return ReplayDecision.FALLBACK;
+        }
+        nativeBlock.put("type", "thinking");
+        nativeBlock.put("thinking", thinkingBlock.thinking());
+        nativeBlock.put("signature", data.signature());
+      } else if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+        nativeBlock.put("type", "redacted_thinking");
+        nativeBlock.put("data", redactedBlock.data());
+      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        ProviderToolCall call = toolCallBlock.toolCall();
+        nativeBlock.put("type", "tool_use");
+        nativeBlock.put("id", call.id());
+        nativeBlock.put("name", call.name());
+        nativeBlock.set(
+            "input",
+            ProviderJsonHelper.parseStrictJsonObject(
+                call.argumentsJson(), "tool_use input must be a JSON object"));
+      } else if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+        nativeBlock.put("type", opaqueBlock.blockType());
+      } else {
+        return ReplayDecision.FALLBACK;
+      }
+      if (!mergeNativeFields(nativeBlock, data)) {
+        return ReplayDecision.FALLBACK;
+      }
+      content.add(nativeBlock);
     }
+    boolean startsHistory = validatePayloadAgainstDurable(content, message.contents());
+    return new ReplayDecision(true, content, startsHistory);
+  }
 
-    // 2. 兼容的 native replay 必须通过真实 payload 形状与 durable 一致性校验，再原位回放全部原生事实
-    // （thinking signature、redacted thinking、未知 block 与官方附加字段均 opaque 保留）。
-    JsonNode payload = replayState.payload();
-    if (payload == null
-        || !payload.isObject()
-        || payload.size() != 2
-        || !payload.has("role")
-        || !payload.get("role").isString()
-        || !"assistant".equals(payload.get("role").stringValue())
-        || !payload.has("content")
-        || !payload.get("content").isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload");
+  private static ProviderBlockData blockData(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      return textBlock.providerBlockData();
     }
-    ArrayNode contentArray = (ArrayNode) payload.get("content");
-    boolean startsHistory = validatePayloadAgainstDurable(contentArray, durableContents);
-    return new ReplayDecision(true, contentArray, startsHistory);
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      return thinkingBlock.providerBlockData();
+    }
+    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+      return redactedBlock.providerBlockData();
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      return toolCallBlock.providerBlockData();
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      return opaqueBlock.providerBlockData();
+    }
+    return null;
+  }
+
+  private static boolean mergeNativeFields(ObjectNode target, ProviderBlockData data) {
+    JsonNode fields = data.nativeFields();
+    for (var entry : fields.properties()) {
+      if (target.has(entry.getKey())) {
+        return false;
+      }
+      target.set(entry.getKey(), entry.getValue().deepCopy());
+    }
+    return true;
   }
 
   /**
@@ -587,6 +637,7 @@ public final class AnthropicRequestEncoder {
     StringBuilder payloadText = new StringBuilder();
     StringBuilder payloadThinking = new StringBuilder();
     List<ProviderToolCall> payloadCalls = new ArrayList<>();
+    List<String> payloadRedacted = new ArrayList<>();
 
     int compactionIndex = -1;
     int blockIndex = 0;
@@ -629,6 +680,7 @@ public final class AnthropicRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid redacted_thinking block in replay payload");
           }
+          payloadRedacted.add(item.get("data").stringValue());
         }
         case "tool_use" -> {
           if (!item.has("id")
@@ -673,12 +725,18 @@ public final class AnthropicRequestEncoder {
     StringBuilder durableText = new StringBuilder();
     StringBuilder durableThinking = new StringBuilder();
     List<ProviderToolCall> durableCalls = new ArrayList<>();
+    List<String> durableRedacted = new ArrayList<>();
 
     for (ProviderContentBlock block : durableContents) {
       if (block instanceof ProviderTextBlock tb) {
         durableText.append(tb.text());
       } else if (block instanceof ProviderThinkingBlock pb) {
         durableThinking.append(pb.thinking());
+      } else if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+        durableRedacted.add(redactedBlock.data());
+      } else if (block instanceof ProviderOpaqueBlock) {
+        // opaque blocks are preserved for the same protocol but have no cross-model semantic
+        // projection
       } else if (block instanceof ProviderToolCallBlock cb) {
         ProviderToolCall call = cb.toolCall();
         ProviderJsonHelper.parseStrictJsonObject(
@@ -698,6 +756,11 @@ public final class AnthropicRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "replay payload thinking does not match durable content");
+    }
+    if (!durableRedacted.isEmpty() && !payloadRedacted.equals(durableRedacted)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay payload redacted thinking does not match durable content");
     }
     if (payloadCalls.size() != durableCalls.size()) {
       throw new ProviderException(
@@ -756,11 +819,16 @@ public final class AnthropicRequestEncoder {
       return node;
     }
     if (block instanceof ProviderThinkingBlock thinkingBlock) {
-      // thinking 降级为普通 text
+      if (thinkingBlock.thinking().isEmpty()) {
+        return null;
+      }
       ObjectNode node = NODES.objectNode();
       node.put("type", "text");
       node.put("text", thinkingBlock.thinking());
       return node;
+    }
+    if (block instanceof ProviderRedactedThinkingBlock || block instanceof ProviderOpaqueBlock) {
+      return null;
     }
     if (block instanceof ProviderJsonBlock jsonBlock) {
       // jsonBlock 降级为普通 text 回放（如 tool_call_diagnostic）

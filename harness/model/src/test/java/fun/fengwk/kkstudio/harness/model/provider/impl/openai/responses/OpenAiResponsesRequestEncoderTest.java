@@ -16,7 +16,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -25,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -610,470 +609,33 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(noneRoot.has("prompt_cache_options"));
   }
 
-  /** 验证合法 replayState 在原位回放有序 output 项并不重复语义内容。 */
+  /** 验证 refusal block 的原生 contentType 可编码为 refusal，而非普通 output_text。 */
   @Test
-  void test_replayState_inPlaceReplaySuccess() throws Exception {
+  void test_refusalBlockPreservesNativeShape() throws Exception {
     ProviderDescriptor desc = createDescriptor();
-
-    ObjectNode payload = MAPPER.createObjectNode();
-    ArrayNode outputArr = payload.putArray("output");
-    ObjectNode fc = outputArr.addObject();
-    fc.put("type", "function_call");
-    fc.put("call_id", "call_123");
-    fc.put("name", "getWeather");
-    fc.put("arguments", "{\"city\":\"Paris\"}");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), payload);
-
-    ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("call_123", "getWeather", "{\"city\":\"Paris\"}"))),
-            replayState);
-
-    ProviderRequest request =
-        request(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("question"))),
-                assistantMsg,
-                new ProviderMessage(
-                    ProviderMessageRole.TOOL,
-                    List.of(
-                        new ProviderToolResultBlock(
-                            "call_123",
-                            "getWeather",
-                            List.of(new ProviderTextBlock("20C")),
-                            false,
-                            null)))));
-
-    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, desc);
-    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-
-    JsonNode input = root.get("input");
-    assertEquals(3, input.size());
-    assertEquals("message", input.get(0).path("type").asString(""));
-    assertEquals("function_call", input.get(1).path("type").asString(""));
-    assertEquals("call_123", input.get(1).path("call_id").asString(""));
-    assertEquals("function_call_output", input.get(2).path("type").asString(""));
-  }
-
-  /** 验证 native replay 的亲和性只由 wire 模型与 provider 代际决定：system instruction 变化、乃至其中的日期戳跨午夜，都不影响原位回放。 */
-  @Test
-  void test_replayState_inPlaceReplayIgnoresSystemInstructionAndDateDrift() throws Exception {
-    ProviderDescriptor desc = createDescriptor();
-
-    ObjectNode payload = MAPPER.createObjectNode();
-    payload
-        .putArray("output")
-        .addObject()
-        .put("type", "message")
-        .put("role", "assistant")
-        .putArray("content")
-        .addObject()
-        .put("type", "output_text")
-        .put("text", "hello");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity(createModel().modelId()), payload);
-    ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hello")), replayState);
-
-    for (String instruction :
-        List.of("You are helpful. Today is 2026-10-07.", "You are helpful. Today is 2026-10-08.")) {
-      ProviderRequest request =
-          new ProviderRequest(
-              createModel(),
-              DEFAULT_VARIANT,
-              1024,
-              instruction,
-              List.of(assistantMsg),
-              List.of(),
-              ProviderCacheControl.none());
-      JsonNode input = MAPPER.readTree(encoder.encode(request, desc).bodyUtf8Bytes()).get("input");
-      assertEquals(1, input.size());
-      assertEquals("message", input.get(0).path("type").asString(""));
-      assertEquals("hello", input.get(0).path("content").get(0).path("text").asString(""));
-    }
-  }
-
-  /** 验证 refusal content block 可按原生形态回放，并与 durable 可见文本严格校验。 */
-  @Test
-  void test_refusalReplayPreservesNativeShape() throws Exception {
-    ProviderDescriptor desc = createDescriptor();
-    ObjectNode payload = MAPPER.createObjectNode();
-    ObjectNode message = payload.putArray("output").addObject();
-    message.put("type", "message");
-    message.put("role", "assistant");
-    ObjectNode refusalBlock = message.putArray("content").addObject();
-    refusalBlock.put("type", "refusal");
-    refusalBlock.put("refusal", "I cannot help with that.");
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), payload);
-
-    ProviderMessage firstUser =
-        new ProviderMessage(
-            ProviderMessageRole.USER, List.of(new ProviderTextBlock("unsafe request")));
+    ProviderTextBlock refusalBlock =
+        new ProviderTextBlock(
+            "I cannot help with that.",
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                desc.affinity(createModel().modelId()),
+                null,
+                null,
+                "msg_1",
+                "message",
+                "refusal",
+                true,
+                null,
+                true,
+                MAPPER.createObjectNode()));
     ProviderMessage refusal =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("I cannot help with that.")),
-            replayState);
-    ProviderMessage nextUser =
-        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Why?")));
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(refusalBlock));
 
     JsonNode root =
-        MAPPER.readTree(
-            encoder.encode(request(List.of(firstUser, refusal, nextUser)), desc).bodyUtf8Bytes());
-    JsonNode replayedBlock = root.path("input").get(1).path("content").get(0);
-    assertEquals("refusal", replayedBlock.path("type").asString(""));
-    assertEquals("I cannot help with that.", replayedBlock.path("refusal").asString(""));
-
-    ProviderMessage mismatchedRefusal =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("different text")),
-            replayState);
-    ProviderRequest invalidRequest = request(List.of(firstUser, mismatchedRefusal, nextUser));
-    assertThrows(ProviderException.class, () -> encoder.encode(invalidRequest, desc));
-  }
-
-  /** 测试意图：非 OPENAI_RESPONSES format 必须回退到语义编码（semantic fallback），不抛出异常。 */
-  @Test
-  void test_replayState_nonOpenAiFormatFallbackToSemantic() throws Exception {
-    ProviderDescriptor desc = createDescriptor();
-
-    ProviderReplayState replayStateOtherFormat =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            desc.affinity("gpt-5.4-mini"),
-            MAPPER.createObjectNode().put("role", "assistant"));
-    ProviderMessage msg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("fallback response")),
-            replayStateOtherFormat);
-    ProviderRequest req = request(List.of(msg));
-
-    OpenAiResponsesEncodedRequest enc = encoder.encode(req, desc);
-    JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
-    JsonNode input = root.get("input");
-    assertEquals(1, input.size());
-    assertEquals("message", input.get(0).path("type").asString(""));
-    assertEquals("assistant", input.get(0).path("role").asString(""));
-    assertEquals(
-        "fallback response", input.get(0).path("content").get(0).path("text").asString(""));
-  }
-
-  /**
-   * 验证同 OPENAI_RESPONSES format 但 payload 结构非法（含顶层非白名单字段、已知 item 结构损坏）、 与 durable 语义矛盾时，无论
-   * affinity/hash 是否匹配均必须抛出 INVALID_REQUEST。
-   */
-  @Test
-  void test_replayState_invalidPayloadRejected() {
-    ProviderDescriptor desc = createDescriptor();
-    String validHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    // 1. 缺少 output 数组
-    ObjectNode malformedPayload1 = MAPPER.createObjectNode();
-    malformedPayload1.put("not_output", 123);
-    ProviderReplayState replayState1 =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            malformedPayload1);
-
-    ProviderMessage msg1 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState1);
-    ProviderRequest req1 = request(List.of(msg1));
-
-    ProviderException ex1 = assertThrows(ProviderException.class, () -> encoder.encode(req1, desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
-
-    // 2. 根 payload 包含非白名单字段
-    ObjectNode malformedPayload2 = MAPPER.createObjectNode();
-    malformedPayload2.putArray("output");
-    malformedPayload2.put("malicious_extra", "injected");
-    ProviderReplayState replayState2 =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            malformedPayload2);
-    ProviderMessage msg2 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState2);
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg2)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-
-    // 3. output 数组内的已知 item 允许携带官方额外字段（如 message 的 status），
-    //    但 durable 语义所必需的结构仍然严格：message 的 content 必须是数组
-    ObjectNode malformedPayload3 = MAPPER.createObjectNode();
-    ArrayNode outArr3 = malformedPayload3.putArray("output");
-    ObjectNode msgItem3 = outArr3.addObject();
-    msgItem3.put("type", "message").put("role", "assistant").put("status", "completed");
-    msgItem3.put("content", "not_an_array");
-    ProviderReplayState replayState3 =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            malformedPayload3);
-    ProviderMessage msg3 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState3);
-    ProviderException ex3 =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg3)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
-
-    // 4. output 数组内 message role 不是 assistant
-    ObjectNode malformedPayload4 = MAPPER.createObjectNode();
-    ArrayNode outArr4 = malformedPayload4.putArray("output");
-    ObjectNode msgItem4 = outArr4.addObject();
-    msgItem4.put("type", "message").put("role", "user");
-    msgItem4.putArray("content").addObject().put("type", "output_text").put("text", "hi");
-    ProviderReplayState replayState4 =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            malformedPayload4);
-    ProviderMessage msg4 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState4);
-    ProviderException ex4 =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg4)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
-
-    // 5. function_call 缺少 call_id 和 id
-    ObjectNode malformedPayload5 = MAPPER.createObjectNode();
-    ArrayNode outArr5 = malformedPayload5.putArray("output");
-    ObjectNode fcItem5 = outArr5.addObject();
-    fcItem5.put("type", "function_call").put("name", "calc").put("arguments", "{}");
-    ProviderReplayState replayState5 =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            malformedPayload5);
-    ProviderMessage msg5 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
-            replayState5);
-    ProviderException ex5 =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg5)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex5.kind());
-
-    // 6. 损坏 payload 即使 affinity/hash 失配，也先被抛出 INVALID_REQUEST 而不走 fallback
-    ProviderReplayState replayStateMismatchAndBroken =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("completely_different_model"),
-            malformedPayload1);
-    ProviderMessage msg6 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("hi")),
-            replayStateMismatchAndBroken);
-    ProviderException ex6 =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg6)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex6.kind());
-  }
-
-  /**
-   * 测试意图：验证回放 tool_call 的 arguments 与 durable 必须完全一致； 即使 affinity 故意失配，参数被篡改的 payload 也必须抛出
-   * INVALID_REQUEST 而非回退。
-   */
-  @Test
-  void test_replayState_alteredToolArgumentsRejectedEvenWhenAffinityMismatch() {
-    ProviderDescriptor desc = createDescriptor();
-
-    ObjectNode alteredArgsPayload = MAPPER.createObjectNode();
-    alteredArgsPayload
-        .putArray("output")
-        .addObject()
-        .put("type", "function_call")
-        .put("call_id", "call_1")
-        .put("name", "get_weather")
-        .put("arguments", "{\"city\":\"Beijing\"}");
-
-    // 故意设置失配的 affinity
-    ProviderReplayState replayMismatchAffinityAndHash =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("completely_different_model"),
-            alteredArgsPayload);
-
-    ProviderMessage msg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("call_1", "get_weather", "{\"city\":\"Shanghai\"}"))),
-            replayMismatchAffinityAndHash);
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
-  }
-
-  /**
-   * 测试意图：验证 replay thinking 与 durable thinking 的一致性校验； 严禁 opaque reasoning 替换另一段 durable thinking。
-   */
-  @Test
-  void test_replayState_thinkingConsistencyValidation() throws Exception {
-    ProviderDescriptor desc = createDescriptor();
-
-    // 1. durable 包含 thinking，replay 只有 opaque reasoning（只有 encrypted_content，无 summary）：
-    //    原生 encrypted item 必须原位保留，缺失的 durable 可读思考作为普通 assistant 文本附带。
-    ObjectNode opaquePayload = MAPPER.createObjectNode();
-    ArrayNode out1 = opaquePayload.putArray("output");
-    ObjectNode r1 = out1.addObject();
-    r1.put("type", "reasoning").put("encrypted_content", "opaque_blob");
-    ObjectNode m1 = out1.addObject();
-    m1.put("type", "message").put("role", "assistant");
-    m1.putArray("content").addObject().put("type", "output_text").put("text", "answer");
-
-    ProviderReplayState replayOpaqueOnly =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), opaquePayload);
-    ProviderMessage msgWithDurableThinking =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
-            replayOpaqueOnly);
-
-    JsonNode opaqueInput =
-        MAPPER
-            .readTree(
-                encoder.encode(request(List.of(msgWithDurableThinking)), desc).bodyUtf8Bytes())
-            .get("input");
-    JsonNode opaqueReasoning = null;
-    boolean readableThinkingInWire = false;
-    for (JsonNode item : opaqueInput) {
-      if ("reasoning".equals(item.path("type").asString(""))) {
-        opaqueReasoning = item;
-      }
-      if ("message".equals(item.path("type").asString(""))) {
-        for (JsonNode block : item.path("content")) {
-          if (block.path("text").asString("").contains("durable thought")) {
-            readableThinkingInWire = true;
-          }
-        }
-      }
-    }
-    assertNotNull(opaqueReasoning, "native opaque reasoning item must be preserved");
-    assertEquals("opaque_blob", opaqueReasoning.path("encrypted_content").asString(""));
-    assertFalse(
-        opaqueReasoning.has("summary"), "must not forge a reasoning summary from durable thinking");
-    assertTrue(readableThinkingInWire, "durable readable thinking must survive into the wire");
-
-    // 2. durable 包含 thinking，但 replay 的 summary 文本不一致：必须被拒绝
-    ObjectNode mismatchSummaryPayload = MAPPER.createObjectNode();
-    ArrayNode out2 = mismatchSummaryPayload.putArray("output");
-    ObjectNode r2 = out2.addObject();
-    r2.put("type", "reasoning");
-    r2.putArray("summary").addObject().put("type", "summary_text").put("text", "different thought");
-    ObjectNode m2 = out2.addObject();
-    m2.put("type", "message").put("role", "assistant");
-    m2.putArray("content").addObject().put("type", "output_text").put("text", "answer");
-
-    ProviderReplayState replayMismatchSummary =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            mismatchSummaryPayload);
-    ProviderMessage msgMismatch =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
-            replayMismatchSummary);
-
-    ProviderException ex2 =
-        assertThrows(
-            ProviderException.class, () -> encoder.encode(request(List.of(msgMismatch)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-
-    // 3. durable 没有 thinking，但 replay 带有 summary thinking：必须被拒绝
-    ProviderMessage msgNoDurableWithReplaySummary =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("answer")),
-            replayMismatchSummary);
-    ProviderException ex3 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(request(List.of(msgNoDurableWithReplaySummary)), desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
-
-    // 4. durable 包含 thinking，且 replay 包含完全匹配的 summary thinking：成功回放
-    ObjectNode matchedSummaryPayload = MAPPER.createObjectNode();
-    ArrayNode out4 = matchedSummaryPayload.putArray("output");
-    ObjectNode r4 = out4.addObject();
-    r4.put("type", "reasoning");
-    r4.putArray("summary").addObject().put("type", "summary_text").put("text", "durable thought");
-    ObjectNode m4 = out4.addObject();
-    m4.put("type", "message").put("role", "assistant");
-    m4.putArray("content").addObject().put("type", "output_text").put("text", "answer");
-
-    // affinity 与请求 model 一致，直接原位回放
-    ProviderReplayState replayMatched =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            matchedSummaryPayload);
-    ProviderMessage msgMatched =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
-            replayMatched);
-
-    OpenAiResponsesEncodedRequest enc4 = encoder.encode(request(List.of(msgMatched)), desc);
-    JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
-    assertEquals(2, root4.get("input").size());
-    assertEquals("reasoning", root4.get("input").get(0).path("type").asString(""));
-    assertEquals("message", root4.get("input").get(1).path("type").asString(""));
-  }
-
-  /** 验证代际（affinity）失配时回退到语义 assistant 编码，不抛出异常。 */
-  @Test
-  void test_replayState_mismatchFallbackToSemantic() throws Exception {
-    ProviderDescriptor desc = createDescriptor();
-
-    ObjectNode payload = MAPPER.createObjectNode();
-    ArrayNode outputArr = payload.putArray("output");
-    ObjectNode msgNode = outputArr.addObject();
-    msgNode.put("type", "message").put("role", "assistant");
-    msgNode.putArray("content").addObject().put("type", "output_text").put("text", "hello world");
-
-    // affinity 失配（不同 connectionGenerationId）
-    ProviderReplayState replayStateMismatch =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("different_model"), payload);
-
-    ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("hello world")),
-            replayStateMismatch);
-
-    ProviderRequest request = request(List.of(assistantMsg));
-
-    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, desc);
-    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-
-    JsonNode input = root.get("input");
-    assertEquals(1, input.size());
-    assertEquals("message", input.get(0).path("type").asString(""));
-    assertEquals("assistant", input.get(0).path("role").asString(""));
-    assertEquals("hello world", input.get(0).path("content").get(0).path("text").asString(""));
+        MAPPER.readTree(encoder.encode(request(List.of(refusal)), desc).bodyUtf8Bytes());
+    JsonNode encodedRefusal = root.path("input").get(0).path("content").get(0);
+    assertEquals("refusal", encodedRefusal.path("type").asString(""));
+    assertEquals("I cannot help with that.", encodedRefusal.path("refusal").asString(""));
   }
 
   /** 验证带有 isError 标志的 tool result 正确映射。 */
@@ -1121,10 +683,10 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest enc1 = encoder.encode(req1, desc);
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode input1 = root1.get("input");
-    assertEquals(2, input1.size());
-    assertEquals("reasoning", input1.get(0).path("type").asString(""));
-    assertEquals("my thoughts", input1.get(0).path("summary").get(0).path("text").asString(""));
-    assertEquals("message", input1.get(1).path("type").asString(""));
+    assertEquals(1, input1.size());
+    assertEquals("message", input1.get(0).path("type").asString(""));
+    assertEquals(
+        "my thoughtsmy answer", input1.get(0).path("content").get(0).path("text").asString(""));
 
     // 2. ToolResult empty blocks
     ProviderRequest req2 =
@@ -1554,375 +1116,11 @@ class OpenAiResponsesRequestEncoderTest {
     assertTrue(output.get(0).toString().contains(itemCase.expectedSource()));
   }
 
-  /** 测试意图：全面验证回放校验子结构边界条件（非 Object 项、未知项类型、畸形字段、 id 回退、文本与工具调用失配、不支持的 durable 块）与媒体 URI 校验防御。 */
+  /** 验证用户图片媒体 URI 格式错误时均被拒绝。 */
   @Test
-  void test_replayAndValidationBoundaryConditions() throws Exception {
+  void test_rejectsInvalidUserImageUris() {
     ProviderDescriptor desc = createDescriptor();
-    String validHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-    // 1. replay payload 缺少 output 数组或不是 array
-    ObjectNode missingOutputPayload = MAPPER.createObjectNode();
-    missingOutputPayload.put("output", "not_an_array");
-    ProviderReplayState missingOutputReplay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            missingOutputPayload);
-    ProviderException exMissingOutput =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(
-                        List.of(
-                            new ProviderMessage(
-                                ProviderMessageRole.ASSISTANT,
-                                List.of(new ProviderTextBlock("hi")),
-                                missingOutputReplay))),
-                    desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMissingOutput.kind());
-
-    // 2. output array 包含非 object 项
-    ObjectNode nonObjItemPayload = MAPPER.createObjectNode();
-    nonObjItemPayload.putArray("output").add(12345);
-    ProviderReplayState nonObjItemReplay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            nonObjItemPayload);
-    ProviderException exNonObjItem =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(
-                        List.of(
-                            new ProviderMessage(
-                                ProviderMessageRole.ASSISTANT,
-                                List.of(new ProviderTextBlock("hi")),
-                                nonObjItemReplay))),
-                    desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exNonObjItem.kind());
-
-    // 3. output item 缺少 type 或为空白
-    ObjectNode emptyTypePayload = MAPPER.createObjectNode();
-    emptyTypePayload.putArray("output").addObject().put("type", "  ");
-    ProviderReplayState emptyTypeReplay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), emptyTypePayload);
-    ProviderException exEmptyType =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(
-                        List.of(
-                            new ProviderMessage(
-                                ProviderMessageRole.ASSISTANT,
-                                List.of(new ProviderTextBlock("hi")),
-                                emptyTypeReplay))),
-                    desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exEmptyType.kind());
-
-    // 4. output item 类型未知：未知 item 不承载 durable 语义，因此 durable 文本无从表达时仍然拒绝；
-    // 未知 item 本身的不透明透传由 OpenAiResponsesOpaqueItemReplayTest 专项覆盖。
-    ObjectNode unknownTypePayload = MAPPER.createObjectNode();
-    unknownTypePayload.putArray("output").addObject().put("type", "unknown_item_type");
-    ProviderReplayState unknownTypeReplay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            unknownTypePayload);
-    ProviderException exUnknownType =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(
-                        List.of(
-                            new ProviderMessage(
-                                ProviderMessageRole.ASSISTANT,
-                                List.of(new ProviderTextBlock("hi")),
-                                unknownTypeReplay))),
-                    desc));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exUnknownType.kind());
-
-    // 5. message 字段格式非法（id 为空白、phase 为空白、content 非 array、content block 非 object、content block type
-    // 错误、text 缺失）
-    List<ObjectNode> invalidMessages = new ArrayList<>();
-    ObjectNode mBlankId = MAPPER.createObjectNode();
-    mBlankId.put("type", "message").put("role", "assistant").put("id", " ");
-    mBlankId.putArray("content").addObject().put("type", "output_text").put("text", "hi");
-    invalidMessages.add(mBlankId);
-
-    ObjectNode mBlankPhase = MAPPER.createObjectNode();
-    mBlankPhase.put("type", "message").put("role", "assistant").put("phase", "");
-    mBlankPhase.putArray("content").addObject().put("type", "output_text").put("text", "hi");
-    invalidMessages.add(mBlankPhase);
-
-    ObjectNode mContentNotArray = MAPPER.createObjectNode();
-    mContentNotArray.put("type", "message").put("role", "assistant").put("content", "not_an_array");
-    invalidMessages.add(mContentNotArray);
-
-    ObjectNode mBlockNotObj = MAPPER.createObjectNode();
-    mBlockNotObj.put("type", "message").put("role", "assistant");
-    mBlockNotObj.putArray("content").add("not_object");
-    invalidMessages.add(mBlockNotObj);
-
-    ObjectNode mBlockWrongType = MAPPER.createObjectNode();
-    mBlockWrongType.put("type", "message").put("role", "assistant");
-    mBlockWrongType.putArray("content").addObject().put("type", "input_text").put("text", "hi");
-    invalidMessages.add(mBlockWrongType);
-
-    ObjectNode mBlockMissingText = MAPPER.createObjectNode();
-    mBlockMissingText.put("type", "message").put("role", "assistant");
-    mBlockMissingText.putArray("content").addObject().put("type", "output_text");
-    invalidMessages.add(mBlockMissingText);
-
-    for (ObjectNode invalidMsg : invalidMessages) {
-      ObjectNode p = MAPPER.createObjectNode();
-      p.putArray("output").add(invalidMsg);
-      ProviderReplayState rs =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
-      assertThrows(
-          ProviderException.class,
-          () ->
-              encoder.encode(
-                  request(
-                      List.of(
-                          new ProviderMessage(
-                              ProviderMessageRole.ASSISTANT,
-                              List.of(new ProviderTextBlock("hi")),
-                              rs))),
-                  desc));
-    }
-
-    // 6. reasoning 字段格式非法（id blank、encrypted_content blank、summary 非 array、summary block 非
-    // object、summary block type 错误、summary block 缺少 text）
-    List<ObjectNode> invalidReasonings = new ArrayList<>();
-    ObjectNode rBlankId = MAPPER.createObjectNode();
-    rBlankId.put("type", "reasoning").put("id", "   ").put("encrypted_content", "enc");
-    invalidReasonings.add(rBlankId);
-
-    ObjectNode rBlankEnc = MAPPER.createObjectNode();
-    rBlankEnc.put("type", "reasoning").put("encrypted_content", "  ");
-    invalidReasonings.add(rBlankEnc);
-
-    ObjectNode rSummaryNotArray = MAPPER.createObjectNode();
-    rSummaryNotArray.put("type", "reasoning").put("summary", "string_not_array");
-    invalidReasonings.add(rSummaryNotArray);
-
-    ObjectNode rSummaryBlockNotObj = MAPPER.createObjectNode();
-    rSummaryBlockNotObj.put("type", "reasoning");
-    rSummaryBlockNotObj.putArray("summary").add("string_block");
-    invalidReasonings.add(rSummaryBlockNotObj);
-
-    ObjectNode rSummaryBlockWrongType = MAPPER.createObjectNode();
-    rSummaryBlockWrongType.put("type", "reasoning");
-    rSummaryBlockWrongType
-        .putArray("summary")
-        .addObject()
-        .put("type", "wrong_type")
-        .put("text", "th");
-    invalidReasonings.add(rSummaryBlockWrongType);
-
-    ObjectNode rSummaryBlockMissingText = MAPPER.createObjectNode();
-    rSummaryBlockMissingText.put("type", "reasoning");
-    rSummaryBlockMissingText.putArray("summary").addObject().put("type", "summary_text");
-    invalidReasonings.add(rSummaryBlockMissingText);
-
-    for (ObjectNode invalidR : invalidReasonings) {
-      ObjectNode p = MAPPER.createObjectNode();
-      p.putArray("output").add(invalidR);
-      ProviderReplayState rs =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
-      assertThrows(
-          ProviderException.class,
-          () ->
-              encoder.encode(
-                  request(
-                      List.of(
-                          new ProviderMessage(
-                              ProviderMessageRole.ASSISTANT,
-                              List.of(new ProviderTextBlock("hi")),
-                              rs))),
-                  desc));
-    }
-
-    // 7. function_call 字段格式非法（call_id blank、id blank、name missing/blank、arguments missing/非 string）
-    List<ObjectNode> invalidFunctionCalls = new ArrayList<>();
-    ObjectNode fcBlankCallId = MAPPER.createObjectNode();
-    fcBlankCallId
-        .put("type", "function_call")
-        .put("call_id", "  ")
-        .put("name", "calc")
-        .put("arguments", "{}");
-    invalidFunctionCalls.add(fcBlankCallId);
-
-    ObjectNode fcBlankId = MAPPER.createObjectNode();
-    fcBlankId
-        .put("type", "function_call")
-        .put("id", " ")
-        .put("name", "calc")
-        .put("arguments", "{}");
-    invalidFunctionCalls.add(fcBlankId);
-
-    ObjectNode fcMissingName = MAPPER.createObjectNode();
-    fcMissingName.put("type", "function_call").put("call_id", "c1").put("arguments", "{}");
-    invalidFunctionCalls.add(fcMissingName);
-
-    ObjectNode fcMissingArgs = MAPPER.createObjectNode();
-    fcMissingArgs.put("type", "function_call").put("call_id", "c1").put("name", "calc");
-    invalidFunctionCalls.add(fcMissingArgs);
-
-    for (ObjectNode invalidFc : invalidFunctionCalls) {
-      ObjectNode p = MAPPER.createObjectNode();
-      p.putArray("output").add(invalidFc);
-      ProviderReplayState rs =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
-      assertThrows(
-          ProviderException.class,
-          () ->
-              encoder.encode(
-                  request(
-                      List.of(
-                          new ProviderMessage(
-                              ProviderMessageRole.ASSISTANT,
-                              List.of(
-                                  new ProviderToolCallBlock(
-                                      new ProviderToolCall("c1", "calc", "{}"))),
-                              rs))),
-                  desc));
-    }
-
-    // 8. function_call 仅提供 id 而无 call_id：支持合法回退到 id
-    ObjectNode fcFallbackId = MAPPER.createObjectNode();
-    fcFallbackId
-        .put("type", "function_call")
-        .put("id", "call_from_id")
-        .put("name", "calc")
-        .put("arguments", "{}");
-    ObjectNode pFallback = MAPPER.createObjectNode();
-    pFallback.putArray("output").add(fcFallbackId);
-    ProviderReplayState rsFallback =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), pFallback);
-    OpenAiResponsesEncodedRequest encFallback =
-        encoder.encode(
-            request(
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.ASSISTANT,
-                        List.of(
-                            new ProviderToolCallBlock(
-                                new ProviderToolCall("call_from_id", "calc", "{}"))),
-                        rsFallback))),
-            desc);
-    assertEquals(
-        "call_from_id",
-        MAPPER.readTree(encFallback.bodyUtf8Bytes()).get("input").get(0).path("id").asString(""));
-
-    // 9. durable 文本不一致：replay 文本与 durable 文本不匹配
-    ObjectNode textMismatchP = MAPPER.createObjectNode();
-    textMismatchP
-        .putArray("output")
-        .addObject()
-        .put("type", "message")
-        .put("role", "assistant")
-        .putArray("content")
-        .addObject()
-        .put("type", "output_text")
-        .put("text", "text_A");
-    ProviderReplayState rsTextMismatch =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), textMismatchP);
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(new ProviderTextBlock("text_B")),
-                            rsTextMismatch))),
-                desc));
-
-    // 10. durable 工具调用不一致：数量不匹配或名称不匹配
-    ObjectNode toolCountMismatchP = MAPPER.createObjectNode();
-    toolCountMismatchP
-        .putArray("output")
-        .addObject()
-        .put("type", "function_call")
-        .put("call_id", "c1")
-        .put("name", "calc")
-        .put("arguments", "{}");
-    ProviderReplayState rsToolMismatch =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            toolCountMismatchP);
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(
-                                new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")),
-                                new ProviderToolCallBlock(
-                                    new ProviderToolCall("c2", "calc2", "{}"))),
-                            rsToolMismatch))),
-                desc));
-
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(
-                                new ProviderToolCallBlock(
-                                    new ProviderToolCall("c1", "different_tool", "{}"))),
-                            rsToolMismatch))),
-                desc));
-
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(
-                                new ProviderToolCallBlock(
-                                    new ProviderToolCall("c1", "calc", "{\"diff\":true}"))),
-                            rsToolMismatch))),
-                desc));
-
-    // 11. durable assistant 消息混入非法块（如 ProviderImageBlock）
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(
-                                new ProviderImageBlock("image/png", "https://example.com/a.png")),
-                            rsToolMismatch))),
-                desc));
-
-    // 12. USER 消息媒体 URI 边界拦截
     assertThrows(
         ProviderException.class,
         () ->
@@ -1959,7 +1157,6 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(new ProviderImageBlock("image/png", "http:///a.png"))))),
                 desc));
 
-    // 13d. URI 包含非法字符（触发 URI.create 异常）
     assertThrows(
         ProviderException.class,
         () ->
@@ -1974,85 +1171,24 @@ class OpenAiResponsesRequestEncoderTest {
                 desc));
   }
 
-  /**
-   * 测试意图：验证工具调用参数 arguments 为非 Object（畸形、数组、标量、JSON null）时，在 replay 与 fallback 均严格抛出
-   * INVALID_REQUEST 且无原始参数泄露。
-   */
+  /** 验证语义 tool call 的 arguments 必须是 JSON object，且错误信息不泄露原始参数。 */
   @Test
-  void test_toolArguments_strictObjectValidationInReplayAndFallback() {
+  void test_toolArgumentsStrictObjectValidation() {
     ProviderDescriptor desc = createDescriptor();
-    String validHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    String mismatchedHash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-
     List<String> invalidArgs =
         List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
 
     for (String badArg : invalidArgs) {
-      // 1. Semantic fallback: durable 中的 toolCall.argumentsJson 为非 Object
-      ProviderMessage fallbackMsg =
+      ProviderMessage message =
           new ProviderMessage(
               ProviderMessageRole.ASSISTANT,
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
-              null);
-      ProviderException exFallback =
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))));
+      ProviderException exception =
           assertThrows(
-              ProviderException.class, () -> encoder.encode(request(List.of(fallbackMsg)), desc));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
-      assertNull(exFallback.getCause());
-      assertFalse(exFallback.getMessage().contains(badArg));
-
-      // 2. Replay payload: function_call.arguments 为非 Object（即使 hash 不匹配也必须严格拦截）
-      ObjectNode badReplayPayload = MAPPER.createObjectNode();
-      badReplayPayload
-          .putArray("output")
-          .addObject()
-          .put("type", "function_call")
-          .put("call_id", "c1")
-          .put("name", "calc")
-          .put("arguments", badArg);
-
-      ProviderReplayState badReplayState =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES,
-              desc.affinity("gpt-5.4-mini"),
-              badReplayPayload);
-      ProviderMessage replayMsg =
-          new ProviderMessage(
-              ProviderMessageRole.ASSISTANT,
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
-              badReplayState);
-      ProviderException exReplay =
-          assertThrows(
-              ProviderException.class, () -> encoder.encode(request(List.of(replayMsg)), desc));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
-      assertNull(exReplay.getCause());
-      assertFalse(exReplay.getMessage().contains(badArg));
-
-      // 3. Replay durable: durable 中的 toolCall.argumentsJson 为非 Object
-      ObjectNode validPayload = MAPPER.createObjectNode();
-      validPayload
-          .putArray("output")
-          .addObject()
-          .put("type", "function_call")
-          .put("call_id", "c1")
-          .put("name", "calc")
-          .put("arguments", "{}");
-
-      ProviderReplayState replayStateWithBadDurable =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), validPayload);
-      ProviderMessage msgWithBadDurable =
-          new ProviderMessage(
-              ProviderMessageRole.ASSISTANT,
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
-              replayStateWithBadDurable);
-      ProviderException exDurable =
-          assertThrows(
-              ProviderException.class,
-              () -> encoder.encode(request(List.of(msgWithBadDurable)), desc));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
-      assertNull(exDurable.getCause());
-      assertFalse(exDurable.getMessage().contains(badArg));
+              ProviderException.class, () -> encoder.encode(request(List.of(message)), desc));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
+      assertNull(exception.getCause());
+      assertFalse(exception.getMessage().contains(badArg));
     }
   }
 
@@ -2094,74 +1230,6 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("", emptyTool.asString(""));
     assertTrue(explicitRoot(List.of()).path("input").isEmpty());
     assertTrue(explicitRoot(List.of(assistant(""))).path("input").isEmpty());
-  }
-
-  /** cacheControl 不放宽 native replay：affinity 匹配即逐字回放，durable 矛盾仍拒绝，affinity 失配只回退语义。 */
-  @Test
-  void cacheControlKeepsNativeReplayExactAndStrict() throws Exception {
-    ProviderMessage toolInput = tool("c", List.of(new ProviderTextBlock("original")));
-    ObjectNode payload = MAPPER.createObjectNode();
-    ArrayNode output = payload.putArray("output");
-    output.addObject().put("type", "reasoning").put("encrypted_content", "signed-test-value");
-    ObjectNode opaque = output.addObject().put("type", "future_native_item");
-    opaque.putArray("output").addObject().put("type", "unsupported_input");
-    ObjectNode nativeMessage =
-        output.addObject().put("type", "message").put("role", "assistant").put("id", "msg-native");
-    nativeMessage.putArray("content").addObject().put("type", "output_text").put("text", "answer");
-    JsonNode frozenPayload = payload.deepCopy();
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            createDescriptor().affinity(createModel().modelId()),
-            payload);
-    ProviderMessage nativeAssistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock(""), new ProviderTextBlock("answer")),
-            replay);
-
-    // affinity 匹配：opaque/native item 原样原位回放，顶层拼上 cache key
-    JsonNode root = explicitRoot(List.of(toolInput, nativeAssistant));
-    JsonNode input = root.path("input");
-    assertEquals(output.get(0), input.get(1));
-    assertEquals(output.get(1), input.get(2));
-    assertEquals(output.get(2), input.get(3));
-    assertEquals("key", root.path("prompt_cache_key").asString(""));
-    assertEquals(0, root.findValues("prompt_cache_breakpoint").size());
-
-    // durable 与 replay 语义矛盾：无论 affinity 都拒绝
-    ProviderException durableMismatch =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                explicitRoot(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.ASSISTANT,
-                            List.of(new ProviderTextBlock("other")),
-                            replay))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, durableMismatch.kind());
-
-    // affinity 失配：不拒绝，回退语义编码并丢弃 opaque native 事实
-    ProviderReplayState wrongAffinity =
-        new ProviderReplayState(
-            replay.format(), createDescriptor().affinity("other-model"), payload);
-    JsonNode fallback =
-        explicitRoot(
-                List.of(
-                    toolInput,
-                    new ProviderMessage(
-                        ProviderMessageRole.ASSISTANT, nativeAssistant.contents(), wrongAffinity)))
-            .path("input");
-    assertEquals(2, fallback.size());
-    assertEquals("function_call_output", fallback.get(0).path("type").asString(""));
-    assertEquals("message", fallback.get(1).path("type").asString(""));
-    assertEquals("answer", fallback.get(1).path("content").get(0).path("text").asString(""));
-    assertFalse(fallback.toString().contains("future_native_item"));
-
-    // replay payload 不被改写，也不渗入 cache 字段
-    assertEquals(frozenPayload, payload);
-    assertFalse(payload.toString().contains("prompt_cache"));
   }
 
   private static ProviderMessage user(String text) {

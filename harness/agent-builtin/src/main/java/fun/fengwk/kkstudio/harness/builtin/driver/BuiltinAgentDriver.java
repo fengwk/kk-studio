@@ -635,8 +635,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
                   List.of(),
                   now,
                   now,
-                  null,
-                  groupProgress(spec)));
+                  groupProgress(spec),
+                  null));
       tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
     }
   }

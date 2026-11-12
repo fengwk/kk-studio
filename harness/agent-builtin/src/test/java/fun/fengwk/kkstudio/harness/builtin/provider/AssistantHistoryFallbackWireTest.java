@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -30,9 +29,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
@@ -47,7 +43,6 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -61,8 +56,6 @@ import java.util.concurrent.ScheduledExecutorService;
 class AssistantHistoryFallbackWireTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
   private static final String JSON_DIAGNOSTIC = "{\"synthetic\":\"tool_call_diagnostic\"}";
   private static final String TEXT = "synthetic assistant answer";
   private static final String CONTEXT_HEADER = "Previous context:";
@@ -141,13 +134,6 @@ class AssistantHistoryFallbackWireTest {
    */
   @Test
   void projectedBindingFallbackEncodesAcrossFourProtocols() throws Exception {
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-synthetic"),
-            NODES.objectNode().put("k", "v"));
-
     AgentMessage assistant =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
@@ -173,10 +159,9 @@ class AssistantHistoryFallbackWireTest {
         ProviderMessageProjector.byNames(Set.of("lookup"))
             .projectSources(
                 List.of(
-                    ProviderMessageProjector.ProjectedMessage.of(assistant, replay),
-                    ProviderMessageProjector.ProjectedMessage.of(nativeResult, null)));
+                    ProviderMessageProjector.ProjectedMessage.of(assistant),
+                    ProviderMessageProjector.ProjectedMessage.of(nativeResult)));
 
-    assertEquals(null, projected.get(0).replayState());
     assertEquals(TEXT, ((ProviderTextBlock) projected.get(0).contents().get(0)).text());
     assertEquals(
         "call-native",

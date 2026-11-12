@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -22,8 +23,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -58,11 +60,6 @@ final class OpenAiChatRequestEncoder {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  /** 语义回退中可读思考的来源标记：与 final text 明确分隔，避免无分隔拼接被误读为最终回答。 */
-  private static final String THINKING_OPEN = "<thinking>\n";
-
-  private static final String THINKING_CLOSE = "\n</thinking>\n";
 
   /** 运行时所有权字段：native protocolOptions 一旦声明即冲突，避免厂商选项覆盖运行时事实。 */
   private static final Set<String> RUNTIME_OWNED_FIELDS =
@@ -393,20 +390,133 @@ final class OpenAiChatRequestEncoder {
         ProviderErrorKind.INVALID_REQUEST, "unsupported audio format: " + mimeOrHeader);
   }
 
+  private static ObjectNode buildBlockReplayMessage(
+      ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
+    if (message.contents().isEmpty()) {
+      return null;
+    }
+    ObjectNode result = NODES.objectNode();
+    result.put("role", "assistant");
+    StringBuilder content = new StringBuilder();
+    StringBuilder refusal = new StringBuilder();
+    StringBuilder reasoning = new StringBuilder();
+    ArrayNode toolCalls = NODES.arrayNode();
+    boolean hasTextBlock = false;
+    boolean hasReasoningBlock = false;
+    for (ProviderContentBlock block : message.contents()) {
+      ProviderBlockData data = blockData(block);
+      if (data == null
+          || data.protocol() != ProviderReplayFormat.OPENAI_CHAT
+          || !data.affinity().equals(descriptor.affinity(requestedModel))) {
+        return null;
+      }
+      JsonNode nativeFieldsNode = data.nativeFields();
+      if (!(nativeFieldsNode instanceof ObjectNode nativeFields)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant block metadata");
+      }
+      if (block instanceof ProviderTextBlock textBlock) {
+        if (data.refusal()) {
+          refusal.append(textBlock.text());
+        } else {
+          hasTextBlock = true;
+          content.append(textBlock.text());
+        }
+      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        hasReasoningBlock = true;
+        reasoning.append(thinkingBlock.thinking());
+        if (!mergeFields(result, nativeFields)) {
+          return null;
+        }
+      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        ProviderToolCall call = toolCallBlock.toolCall();
+        ProviderJsonHelper.parseStrictJsonObject(
+            call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
+        ObjectNode callNode = NODES.objectNode();
+        callNode.put("id", call.id());
+        callNode.put("type", "function");
+        ObjectNode function = callNode.putObject("function");
+        function.put("name", call.name());
+        function.put("arguments", call.argumentsJson());
+        if (!mergeToolCallFields(callNode, nativeFields)) {
+          return null;
+        }
+        toolCalls.add(callNode);
+      } else if (block instanceof ProviderOpaqueBlock opaqueBlock
+          && "openai_chat_message".equals(opaqueBlock.blockType())) {
+        if (!mergeFields(result, nativeFields)) {
+          return null;
+        }
+      } else if (block instanceof ProviderRedactedThinkingBlock) {
+        return null;
+      } else {
+        return null;
+      }
+    }
+    if (hasTextBlock) {
+      result.put("content", content.toString());
+    }
+    if (!refusal.isEmpty()) {
+      result.put("refusal", refusal.toString());
+    }
+    if (hasReasoningBlock) {
+      result.put("reasoning_content", reasoning.toString());
+    }
+    if (!toolCalls.isEmpty()) {
+      result.set("tool_calls", toolCalls);
+    }
+    return result;
+  }
+
+  private static ProviderBlockData blockData(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      return textBlock.providerBlockData();
+    }
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      return thinkingBlock.providerBlockData();
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      return toolCallBlock.providerBlockData();
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      return opaqueBlock.providerBlockData();
+    }
+    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+      return redactedBlock.providerBlockData();
+    }
+    return null;
+  }
+
+  private static boolean mergeFields(ObjectNode target, ObjectNode fields) {
+    for (var entry : fields.properties()) {
+      if (target.has(entry.getKey())) {
+        return false;
+      }
+      target.set(entry.getKey(), entry.getValue().deepCopy());
+    }
+    return true;
+  }
+
+  private static boolean mergeToolCallFields(ObjectNode call, ObjectNode fields) {
+    JsonNode functionFields = fields.get("function");
+    ObjectNode function = (ObjectNode) call.get("function");
+    if (functionFields != null) {
+      if (!functionFields.isObject() || !mergeFields(function, (ObjectNode) functionFields)) {
+        return false;
+      }
+    }
+    ObjectNode topLevelFields = fields.deepCopy();
+    topLevelFields.remove("function");
+    return mergeFields(call, topLevelFields);
+  }
+
   private static ObjectNode encodeAssistantMessage(
       ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
-    ProviderReplayState replayState = message.replayState();
-    if (replayState != null && replayState.format() == ProviderReplayFormat.OPENAI_CHAT) {
-      // 同 format 先严格校验 shape 与 durable 一致性：损坏或与 durable 矛盾必须 INVALID_REQUEST
-      validateReplayPayload(replayState.payload(), message.contents());
-      if (replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-        // affinity 匹配即原样回放 opaque 字段（前缀变化不影响，历史思考不丢失）
-        return buildReplayMessage(replayState.payload());
-      }
-      // affinity 失配（不同 provider/model/连接代次）时退回语义编码，绝不因为存在 replay 就拒绝请求
+    ObjectNode blockReplay = buildBlockReplayMessage(message, descriptor, requestedModel);
+    if (blockReplay != null) {
+      validateReplayPayload(blockReplay, message.contents());
+      return buildReplayMessage(blockReplay);
     }
-    // 非 OPENAI_CHAT format 或 affinity 失配时走语义回退
-
     // 语义回退（semantic fallback）
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "assistant");
@@ -416,9 +526,9 @@ final class OpenAiChatRequestEncoder {
       if (block instanceof ProviderTextBlock tb) {
         textBuilder.append(tb.text());
       } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
-        // 跨 provider/连接/模型或跨格式时无法保留原生 reasoning 字段：可读思考降级为带来源标记的普通文本，
-        // 与 final text 明确分隔，避免被误读为最终回答。
-        appendMarkedThinking(textBuilder, thinkingBlock.thinking());
+        if (!thinkingBlock.thinking().isEmpty()) {
+          textBuilder.append(thinkingBlock.thinking());
+        }
       } else if (block instanceof ProviderJsonBlock jsonBlock) {
         // assistant JSON 诊断（如 tool_call_diagnostic）降级为普通文本回放。
         textBuilder.append(jsonBlock.json());
@@ -432,6 +542,9 @@ final class OpenAiChatRequestEncoder {
         ObjectNode fnNode = callNode.putObject("function");
         fnNode.put("name", call.name());
         fnNode.put("arguments", call.argumentsJson());
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Native opaque and redacted thinking blocks have no cross-model semantic projection.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
@@ -445,17 +558,6 @@ final class OpenAiChatRequestEncoder {
       msgNode.set("tool_calls", toolCallsArray);
     }
     return msgNode;
-  }
-
-  /**
-   * 把语义回退的可读思考以带来源标记的普通文本追加进 content：思考为空时不追加任何字节；非空时用 {@code <thinking>}/{@code </thinking>}
-   * 包裹，与后续 final text 明确分隔。
-   */
-  private static void appendMarkedThinking(StringBuilder textBuilder, String thinking) {
-    if (thinking.isEmpty()) {
-      return;
-    }
-    textBuilder.append(THINKING_OPEN).append(thinking).append(THINKING_CLOSE);
   }
 
   /**
@@ -637,6 +739,10 @@ final class OpenAiChatRequestEncoder {
             call.argumentsJson(),
             "invalid OpenAI chat assistant durable tool call arguments: must be a JSON object");
         durableCalls.add(call);
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Opaque and redacted blocks are preserved only for this protocol; neither contributes to
+        // durable text.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,

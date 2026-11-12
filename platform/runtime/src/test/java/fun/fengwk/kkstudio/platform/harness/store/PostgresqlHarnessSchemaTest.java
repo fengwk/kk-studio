@@ -401,12 +401,10 @@ class PostgresqlHarnessSchemaTest {
             "builtin_model_invocation.error",
             "builtin_model_invocation.failed_attempts",
             "builtin_model_invocation.group_execution",
-            "builtin_model_invocation.provider_replay_state",
             "builtin_model_invocation.request_spec",
             "builtin_model_invocation.result",
             "builtin_model_invocation.stream_checkpoint",
             "harness_entry.payload",
-            "harness_entry.provider_replay_state",
             "harness_thread.constraints",
             "harness_thread_command.payload",
             "harness_tool_invocation.approval",
@@ -670,112 +668,6 @@ class PostgresqlHarnessSchemaTest {
         "select indexdef from pg_indexes where schemaname = 'public' and indexname = ?",
         String.class,
         indexName);
-  }
-
-  @Test
-  void harnessEntryProviderReplayStateKeepsOnlyJsonObjectShape() {
-    // provider_replay_state 的适用 Entry 类型由应用维护；数据库只拒绝非 object JSON。
-    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000002");
-    jdbc.update(
-        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
-        sessionId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
-        rootEntryId,
-        sessionId);
-    String replayJson =
-        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":"
-            + "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
-
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            jdbc.update(
-                "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                    + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb,"
-                    + " statement_timestamp(), '[\"not_an_object\"]'::jsonb)",
-                UUID.randomUUID(),
-                sessionId,
-                rootEntryId),
-        "a non-object provider replay state must be rejected");
-    assertDoesNotThrow(
-        () ->
-            jdbc.update(
-                "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                    + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb,"
-                    + " statement_timestamp(), ?::jsonb)",
-                UUID.randomUUID(),
-                sessionId,
-                rootEntryId,
-                replayJson));
-  }
-
-  @Test
-  void builtinModelInvocationProviderReplayStateKeepsOnlyJsonObjectShape() {
-    // 适用状态与 result 的关联由应用维护；数据库只拒绝非 object JSON。
-    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000010");
-    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000011");
-    UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000012");
-    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000014");
-    jdbc.update(
-        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
-        sessionId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
-        rootEntryId,
-        sessionId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb, statement_timestamp())",
-        turnStartEntryId,
-        sessionId,
-        rootEntryId);
-    jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " root_thread_id, yolo_enabled, kind, constraints, execution_control,"
-            + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?,"
-            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
-            + " 'thread-demo', ?, false, 'USER',"
-            + " '{\"maxOutputTokens\":null,"
-            + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
-            + " statement_timestamp(), statement_timestamp())",
-        threadId,
-        sessionId,
-        turnStartEntryId,
-        threadId);
-    String replayJson =
-        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":"
-            + "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
-
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            jdbc.update(
-                "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                    + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                    + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb,"
-                    + " statement_timestamp(), statement_timestamp(), '[\"not_object\"]'::jsonb)",
-                UUID.randomUUID(),
-                threadId,
-                turnStartEntryId,
-                turnStartEntryId),
-        "a non-object provider replay state must be rejected");
-    assertDoesNotThrow(
-        () ->
-            jdbc.update(
-                "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                    + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                    + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb,"
-                    + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
-                UUID.randomUUID(),
-                threadId,
-                turnStartEntryId,
-                turnStartEntryId,
-                replayJson));
   }
 
   @Test

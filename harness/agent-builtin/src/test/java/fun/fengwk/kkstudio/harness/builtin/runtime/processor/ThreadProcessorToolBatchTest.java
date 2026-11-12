@@ -78,12 +78,14 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
@@ -432,19 +434,34 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         command(fixture.store, chain.turn().threadId(), queued).state());
   }
 
-  /** 回归：Provider replay state 在 Model attach 时转移到 Assistant Entry，两个 terminal Tool 仍须完成 batch。 */
+  /**
+   * Block-native Provider data remains on its owning message content as the tool batch is applied.
+   */
   @Test
-  void toolSiblingBatchAcceptsReplayStateTransferredToAssistantEntry() {
+  void toolSiblingBatchPreservesAssistantBlockProviderData() {
     Fixture fixture = fixture();
     var turn = seedOpenInputTurn(fixture.store, tooledRequest(List.of("bash")).toolBindings());
     ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
-    ProviderResponse response = successResponse(List.of("call-1", "call-2"), "bash");
-    ProviderReplayState replayState =
-        new ProviderReplayState(
+    ProviderResponse baseResponse = successResponse(List.of("call-1", "call-2"), "bash");
+    ProviderBlockData providerData =
+        new ProviderBlockData(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 1L), "claude-3-5-sonnet"),
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
             JsonNodeFactory.instance.objectNode().put("k", "v"));
+    ProviderResponse response =
+        new ProviderResponse(
+            List.of(
+                new ProviderTextBlock("response text", providerData),
+                new ProviderToolCallBlock(baseResponse.toolCalls().get(0), providerData),
+                new ProviderToolCallBlock(baseResponse.toolCalls().get(1), providerData)),
+            GenerationStopReason.COMPLETE,
+            baseResponse.usage(),
+            baseResponse.requestId(),
+            baseResponse.serviceTier(),
+            baseResponse.rawUsageJson(),
+            List.of(),
+            null,
+            null);
     UUID modelId =
         seedModelInvocation(
             fixture.store,
@@ -454,8 +471,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ModelInvocationStatus.SUCCEEDED,
             requestSpec,
             response,
-            null,
-            replayState);
+            null);
     UUID assistantId =
         fixture.store.transaction(
             tx -> {
@@ -472,8 +488,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                           new BuiltinHistoryPayloadMapper()
                               .assistantPayload(
                                   response, requestSpec.toolBindings(), selection, NOW),
-                          NOW,
-                          replayState));
+                          NOW));
               tx.threads().update(thread.advanceHead(id, NOW));
               return id;
             });
@@ -499,7 +514,15 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(turn.threadId()));
     List<Entry> entries = path(fixture.store, turn.threadId()).entries();
     assertEquals(7, entries.size());
-    assertEquals(replayState, entries.get(3).providerReplayState());
+    MessagePayload assistantPayload = (MessagePayload) entries.get(3).payload();
+    assertEquals(
+        providerData,
+        ((TextMessageContent) assistantPayload.message().contents().getFirst())
+            .providerBlockData());
+    assertEquals(
+        providerData,
+        ((ToolCallMessageContent) assistantPayload.message().contents().get(1))
+            .providerBlockData());
     assertEquals(
         AgentMessageRole.TOOL, ((MessagePayload) entries.get(4).payload()).message().role());
     assertEquals(

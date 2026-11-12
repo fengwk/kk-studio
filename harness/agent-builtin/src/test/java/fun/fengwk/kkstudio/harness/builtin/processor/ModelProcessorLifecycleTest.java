@@ -568,8 +568,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
           public ModelGateway.Outcome run(ModelGateway.Sink sink) {
             runs.incrementAndGet();
             return new ModelGateway.Succeeded(
-                new ProviderCompletion(
-                    response("unexpected", GenerationStopReason.COMPLETE), null));
+                new ProviderCompletion(response("unexpected", GenerationStopReason.COMPLETE)));
           }
 
           @Override
@@ -633,8 +632,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
           public ModelGateway.Outcome run(ModelGateway.Sink sink) {
             runs.incrementAndGet();
             return new ModelGateway.Succeeded(
-                new ProviderCompletion(
-                    response("unexpected", GenerationStopReason.COMPLETE), null));
+                new ProviderCompletion(response("unexpected", GenerationStopReason.COMPLETE)));
           }
 
           @Override
@@ -858,7 +856,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
     FakeGateway gatewayB = new FakeGateway();
     gatewayB.queueScript(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(response("done", GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(response("done", GenerationStopReason.COMPLETE))));
     ModelProcessor processorB =
         new ModelProcessor(
             fixtureA.store,

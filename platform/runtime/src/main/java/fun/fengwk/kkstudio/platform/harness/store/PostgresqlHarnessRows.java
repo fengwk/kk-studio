@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
@@ -55,8 +54,6 @@ final class PostgresqlHarnessRows {
 
   static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS = new HistoryEntryPayloadJsonCodec();
   static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS = new ThreadCommandPayloadJsonCodec();
-  static final ProviderReplayStateJsonCodec PROVIDER_REPLAY_STATES =
-      new ProviderReplayStateJsonCodec();
   static final ToolBindingJsonCodec TOOL_BINDINGS = new ToolBindingJsonCodec();
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
 
@@ -76,9 +73,7 @@ final class PostgresqlHarnessRows {
             uuid(resultSet, "session_id"),
             nullableUuid(resultSet, "parent_entry_id"),
             ENTRY_PAYLOADS.decode(type, resultSet.getString("payload")),
-            instant(resultSet, "created_at"),
-            decodeNullable(
-                resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode));
+            instant(resultSet, "created_at"));
       };
 
   static final RowMapper<ThreadState> THREAD =

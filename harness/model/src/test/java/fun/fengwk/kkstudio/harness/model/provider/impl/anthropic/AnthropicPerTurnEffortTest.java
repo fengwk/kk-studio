@@ -18,8 +18,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
@@ -180,34 +178,6 @@ class AnthropicPerTurnEffortTest {
             .size());
   }
 
-  // native compaction reset 后不允许已丢弃的旧 effort 或缓存端点影响新前缀。
-  @Test
-  void resetsEffortAndCachePrefixAtNativeCompaction() {
-    ObjectNode payload = MAPPER.createObjectNode();
-    payload.put("role", "assistant");
-    payload.putArray("content").addObject().put("type", "compaction");
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES, DESCRIPTOR.affinity("wire"), payload);
-    ProviderMessage compacted =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("")), replay, null);
-    // 空 durable 文本与 compaction replay 一致。
-    var request =
-        new ProviderRequest(
-            MODEL,
-            new ModelVariant("v", "max", PromptCacheRetention.SHORT, null),
-            20000,
-            "system",
-            List.of(user("discard"), assistant("high"), compacted, user("retained")),
-            List.of(),
-            ProviderCacheControl.session(PromptCacheRetention.SHORT, "key"));
-    JsonNode root = body(new AnthropicRequestEncoder().encode(request, DESCRIPTOR));
-    assertEquals(List.of("assistant", "user", "system:max"), describe(root.path("messages")));
-    assertFalse(root.toString().contains("discard"));
-    assertFalse(root.path("messages").get(2).toString().contains("cache_control"));
-  }
-
   private static AnthropicEncodedRequest encode(String effort, List<ProviderMessage> messages) {
     ProviderRequest request =
         new ProviderRequest(
@@ -231,7 +201,7 @@ class AnthropicPerTurnEffortTest {
 
   private static ProviderMessage assistant(String effort) {
     return new ProviderMessage(
-        ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), null, effort);
+        ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), effort);
   }
 
   private static ProviderMessage tool(String id) {

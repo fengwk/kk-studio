@@ -7,16 +7,22 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
@@ -165,48 +171,35 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     StringBuilder combinedText = new StringBuilder();
     StringBuilder combinedThinking = new StringBuilder();
     List<ProviderToolCall> toolCalls = new ArrayList<>();
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
-
-    // CONTINUE（pause_turn / compaction）同样是「下一请求必须原生回放上游字段」的终止态
-    boolean canReplay =
-        (stopReason == GenerationStopReason.COMPLETE
-            || stopReason == GenerationStopReason.LENGTH
-            || stopReason == GenerationStopReason.CONTINUE);
-    ArrayNode replayBlocks = NODES.arrayNode();
 
     // blocksByIndex 升序遍历，严格保持原生 block index 顺序
     for (WireBlockAccumulator block : blocksByIndex.values()) {
       switch (block.type) {
         case "text" -> {
           combinedText.append(block.textBuffer);
-          if (canReplay) {
-            // start 对象是 replay 基座：只覆盖 normalized 文本，citations 等官方附加字段原样保留
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("text", block.textBuffer.toString());
-            if (block.citations != null) {
-              obj.set("citations", block.citations.deepCopy());
-            }
-            replayBlocks.add(obj);
+          ObjectNode textFields = block.rawBlock.deepCopy();
+          if (block.citations != null) {
+            textFields.set("citations", block.citations.deepCopy());
           }
+          responseBlocks.add(
+              new ProviderTextBlock(
+                  block.textBuffer.toString(), blockData(textFields, Set.of("text"))));
         }
         case "thinking" -> {
           combinedThinking.append(block.thinkingBuffer);
-          if (block.signature == null || block.signature.isBlank()) {
-            canReplay = false;
-          } else if (canReplay) {
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("thinking", block.thinkingBuffer.toString());
-            obj.put("signature", block.signature);
-            replayBlocks.add(obj);
-          }
+          ObjectNode thinkingFields = block.rawBlock.deepCopy();
+          thinkingFields.put("signature", block.signature);
+          responseBlocks.add(
+              new ProviderThinkingBlock(
+                  block.thinkingBuffer.toString(), blockData(thinkingFields, Set.of("thinking"))));
         }
         case "redacted_thinking" -> {
-          if (block.redactedData == null || block.redactedData.isBlank()) {
-            canReplay = false;
-          } else if (canReplay) {
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("data", block.redactedData);
-            replayBlocks.add(obj);
+          if (block.redactedData != null) {
+            responseBlocks.add(
+                new ProviderRedactedThinkingBlock(
+                    block.redactedData, blockData(block.rawBlock, Set.of("data"))));
           }
         }
         case "tool_use" -> {
@@ -226,11 +219,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               // 终态补齐 {}
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, "{}");
               toolCalls.add(call);
-              if (canReplay) {
-                ObjectNode obj = block.rawBlock.deepCopy();
-                obj.putObject("input");
-                replayBlocks.add(obj);
-              }
+              responseBlocks.add(
+                  new ProviderToolCallBlock(
+                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
                 toolCallDiagnostics.add(
@@ -240,7 +231,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
                         block.toolName,
                         null,
                         "tool call truncated before arguments received"));
-                canReplay = false;
               } else {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
@@ -251,11 +241,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             if (parsedArgs != null) {
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, argsStr);
               toolCalls.add(call);
-              if (canReplay) {
-                ObjectNode obj = block.rawBlock.deepCopy();
-                obj.set("input", parsedArgs);
-                replayBlocks.add(obj);
-              }
+              responseBlocks.add(
+                  new ProviderToolCallBlock(
+                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
                 toolCallDiagnostics.add(
@@ -265,7 +253,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
                         block.toolName,
                         argsStr,
                         "tool arguments truncated before valid JSON formed"));
-                canReplay = false;
               } else {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE, "invalid tool arguments JSON");
@@ -279,10 +266,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             JsonNode parsedInput =
                 ProviderJsonHelper.tryParseJsonObject(block.nativeInputBuffer.toString());
             if (parsedInput == null) {
-              if (stopReason == GenerationStopReason.LENGTH) {
-                // 截断的 native tool 输入无法组成合法对象：保留余下 normalized 语义，但不冻结 replay
-                canReplay = false;
-              } else {
+              if (stopReason != GenerationStopReason.LENGTH) {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE,
                     "invalid native block input JSON accumulated from input_json_delta");
@@ -291,10 +275,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               obj.set("input", parsedInput);
             }
           }
-          if (canReplay) {
-            // 未知但合法的 provider block：opaque 原样保留，只覆盖由 delta 累积出的 input
-            replayBlocks.add(obj);
-          }
+          responseBlocks.add(new ProviderOpaqueBlock(block.type, blockData(obj, Set.of())));
         }
       }
     }
@@ -302,11 +283,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     if (stopReason == GenerationStopReason.FILTERED) {
       toolCalls.clear();
       toolCallDiagnostics.clear();
-      canReplay = false;
-    }
-
-    if (!toolCallDiagnostics.isEmpty()) {
-      canReplay = false;
     }
 
     if (!hasExplicitCacheBreakdown) {
@@ -382,29 +358,36 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
     ProviderResponse response =
         new ProviderResponse(
-            combinedText.toString(),
-            combinedThinking.toString(),
-            Collections.unmodifiableList(toolCalls),
+            responseBlocks,
             stopReason,
             usage,
             messageId,
             serviceTier,
             rawUsageJson,
-            Collections.unmodifiableList(toolCallDiagnostics));
+            Collections.unmodifiableList(toolCallDiagnostics),
+            null,
+            null);
 
-    ProviderReplayState replayState = null;
-    if (canReplay) {
-      ObjectNode payload = NODES.objectNode();
-      payload.put("role", "assistant");
-      payload.set("content", replayBlocks);
-      replayState =
-          new ProviderReplayState(
-              ProviderReplayFormat.ANTHROPIC_MESSAGES,
-              descriptor.affinity(request.model().modelId()),
-              payload);
+    return new ProviderCompletion(response);
+  }
+
+  private ProviderBlockData blockData(ObjectNode rawBlock, Set<String> normalizedFields) {
+    ObjectNode nativeFields = rawBlock.deepCopy();
+    nativeFields.remove("type");
+    for (String field : normalizedFields) {
+      nativeFields.remove(field);
     }
-
-    return new ProviderCompletion(response, replayState);
+    String signature =
+        rawBlock.path("signature").isString() ? rawBlock.path("signature").stringValue() : null;
+    nativeFields.remove("signature");
+    nativeFields.remove("data");
+    return new ProviderBlockData(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        descriptor.affinity(request.model().modelId()),
+        signature,
+        null,
+        null,
+        nativeFields);
   }
 
   private void handleMessageStart(JsonNode root) {

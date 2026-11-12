@@ -202,10 +202,10 @@ final class PostgresqlModelTransaction
         insert into builtin_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
             stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at,
-            provider_replay_state, group_execution, requested_at
+            group_execution, requested_at
         ) values (
             ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-            cast(? as jsonb), ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb), ?
+            cast(? as jsonb), ?, cast(? as jsonb), ?, ?, cast(? as jsonb), ?
         )
         """,
         invocation.id(),
@@ -222,7 +222,6 @@ final class PostgresqlModelTransaction
         PostgresqlBuiltinRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
         PostgresqlBuiltinRows.timestamp(invocation.createdAt()),
         PostgresqlBuiltinRows.timestamp(invocation.updatedAt()),
-        encodeModelProviderReplayState(invocation),
         encodeGroupExecution(invocation),
         invocation.status() == ModelInvocationStatus.READY
             ? null
@@ -259,7 +258,6 @@ final class PostgresqlModelTransaction
                 result_entry_id = ?,
                 failed_attempts = cast(? as jsonb),
                 updated_at = ?,
-                provider_replay_state = cast(? as jsonb),
                 group_execution = cast(? as jsonb),
                 requested_at = ?
             where id = ?
@@ -272,19 +270,12 @@ final class PostgresqlModelTransaction
             invocation.resultEntryId(),
             PostgresqlBuiltinRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
             PostgresqlBuiltinRows.timestamp(invocation.updatedAt()),
-            encodeModelProviderReplayState(invocation),
             encodeGroupExecution(invocation),
             invocation.requestedAt() == null
                 ? null
                 : PostgresqlBuiltinRows.timestamp(invocation.requestedAt()),
             invocation.id());
     PostgresqlHarnessTransaction.requireSingleUpdate(updated, "model invocation", invocation.id());
-  }
-
-  private static String encodeModelProviderReplayState(ModelInvocation invocation) {
-    return invocation.providerReplayState() == null
-        ? null
-        : PostgresqlBuiltinRows.PROVIDER_REPLAY_STATES.encode(invocation.providerReplayState());
   }
 
   private static String encodeGroupExecution(ModelInvocation invocation) {

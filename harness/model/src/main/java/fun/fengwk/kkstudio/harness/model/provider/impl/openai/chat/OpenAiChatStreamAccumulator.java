@@ -10,16 +10,21 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
@@ -595,7 +600,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     List<ProviderToolCallDiagnostic> diagnostics = new ArrayList<>();
 
     if (stopReason == GenerationStopReason.FILTERED) {
-      // FILTERED 时 toolCalls 必须为空，不生成 replayState
+      // FILTERED 时 toolCalls 必须为空，不生成 provider-native block metadata
       canReplay = false;
     } else {
       for (ToolCallBuilder b : toolCallBuilders.values()) {
@@ -652,103 +657,127 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             reasoningTokens,
             totalTokens);
 
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
+    ObjectNode reasoningFields = NODES.objectNode();
+    if (reasoningDetailsNode != null && !reasoningDetailsNode.isNull()) {
+      reasoningFields.set("reasoning_details", reasoningDetailsNode.deepCopy());
+    }
+    if (!reasoningContentBuilder.isEmpty() || !reasoningFields.isEmpty()) {
+      responseBlocks.add(
+          new ProviderThinkingBlock(
+              reasoningContentBuilder.toString(), blockData(reasoningFields, canReplay)));
+    }
+    if (!contentBuilder.isEmpty()) {
+      responseBlocks.add(
+          new ProviderTextBlock(
+              contentBuilder.toString(), blockData(NODES.objectNode(), canReplay)));
+    }
+    if (!refusalBuilder.isEmpty()) {
+      ObjectNode refusalFields = NODES.objectNode();
+      refusalFields.put("refusal", true);
+      responseBlocks.add(
+          new ProviderTextBlock(refusalBuilder.toString(), blockData(refusalFields, canReplay)));
+    }
+    for (ProviderToolCall call : toolCalls) {
+      responseBlocks.add(
+          new ProviderToolCallBlock(call, blockData(toolCallFields(call), canReplay)));
+    }
+    if (contentBuilder.isEmpty() && refusalBuilder.isEmpty() && toolCalls.isEmpty()) {
+      responseBlocks.add(new ProviderTextBlock("", blockData(NODES.objectNode(), canReplay)));
+    }
+    if (canReplay) {
+      ObjectNode messageFields = nativeAssistantMessage.deepCopy();
+      for (String field : KNOWN_ASSISTANT_FIELDS) {
+        if (!"tool_calls".equals(field) || !toolCalls.isEmpty()) {
+          messageFields.remove(field);
+        }
+      }
+      JsonNode nativeToolCalls = messageFields.get("tool_calls");
+      if (nativeToolCalls != null && nativeToolCalls.isArray()) {
+        for (JsonNode call : nativeToolCalls) {
+          if (call instanceof ObjectNode callObject) {
+            callObject.remove("index");
+          }
+        }
+      }
+      messageFields.remove("role");
+      messageFields.remove("annotations");
+      JsonNode audio = messageFields.get("audio");
+      if (audio != null) {
+        JsonNode audioId = audio.path("id");
+        messageFields.remove("audio");
+        if (audioId.isString() && !audioId.stringValue().isBlank()) {
+          ObjectNode replayAudio = NODES.objectNode();
+          replayAudio.set("id", audioId.deepCopy());
+          messageFields.set("audio", replayAudio);
+        }
+      }
+      if (!messageFields.isEmpty()) {
+        responseBlocks.add(
+            new ProviderOpaqueBlock("openai_chat_message", blockData(messageFields, true)));
+      }
+    }
+
     ProviderResponse response =
         new ProviderResponse(
-            contentBuilder.toString() + refusalBuilder,
-            reasoningContentBuilder.toString(),
-            Collections.unmodifiableList(toolCalls),
+            responseBlocks,
             stopReason,
             usage,
             messageId,
             serviceTier,
             rawUsageJson,
-            Collections.unmodifiableList(diagnostics));
+            Collections.unmodifiableList(diagnostics),
+            null,
+            null);
 
-    ProviderReplayState replayState = null;
-    if (canReplay) {
-      // replay 以 provider 原生 assistant message 为基座保留官方非规范化字段，known 字段再以 durable 事实补齐
-      ObjectNode payload = nativeAssistantMessage.deepCopy();
-      payload.put("role", "assistant");
-      payload.remove("annotations");
-      JsonNode audio = payload.get("audio");
-      if (audio != null) {
-        if (audio.isNull()) {
-          payload.remove("audio");
-        } else if (!audio.isObject()
-            || !audio.path("id").isString()
-            || audio.path("id").stringValue().isBlank()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "invalid assistant audio id");
-        } else {
-          payload.putObject("audio").put("id", audio.path("id").stringValue());
-        }
-      }
-      JsonNode nativeCalls = payload.get("tool_calls");
-      for (String knownField : KNOWN_ASSISTANT_FIELDS) {
-        payload.remove(knownField);
-      }
-      if (!contentBuilder.isEmpty() || (refusalBuilder.isEmpty() && toolCalls.isEmpty())) {
-        payload.put("content", contentBuilder.toString());
-      }
-      if (!refusalBuilder.isEmpty()) {
-        payload.put("refusal", refusalBuilder.toString());
-      }
-      if (nativeCalls != null && nativeCalls.isArray()) {
-        ArrayNode tcArr = payload.putArray("tool_calls");
-        for (JsonNode nativeCall : nativeCalls) {
-          if (nativeCall.isObject()) {
-            ObjectNode call = (ObjectNode) nativeCall.deepCopy();
-            JsonNode index = call.remove("index");
-            ProviderToolCall normalized =
-                index != null
-                        && index.isInt()
-                        && call.path("function").isObject()
-                        && (!call.path("type").isString()
-                            || "function".equals(call.path("type").stringValue()))
-                    ? completedCalls.remove(index.intValue())
-                    : null;
-            if (normalized != null) {
-              call.put("id", normalized.id());
-              call.put("type", "function");
-              ObjectNode fn = (ObjectNode) call.get("function");
-              fn.put("name", normalized.name());
-              fn.put("arguments", normalized.argumentsJson());
-            }
-            tcArr.add(call);
-          } else {
-            tcArr.add(nativeCall.deepCopy());
-          }
-        }
-      }
-      if (!completedCalls.isEmpty()) {
-        ArrayNode tcArr = (ArrayNode) payload.get("tool_calls");
-        if (tcArr == null) {
-          tcArr = payload.putArray("tool_calls");
-        }
-        for (ProviderToolCall tc : completedCalls.values()) {
-          ObjectNode call = tcArr.addObject();
-          call.put("id", tc.id());
-          call.put("type", "function");
-          ObjectNode fn = call.putObject("function");
-          fn.put("name", tc.name());
-          fn.put("arguments", tc.argumentsJson());
-        }
-      }
-      if (!reasoningContentBuilder.isEmpty()) {
-        payload.put("reasoning_content", reasoningContentBuilder.toString());
-      }
-      if (reasoningDetailsNode != null && !reasoningDetailsNode.isNull()) {
-        payload.set("reasoning_details", reasoningDetailsNode.deepCopy());
-      }
+    return new ProviderCompletion(response);
+  }
 
-      replayState =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_CHAT,
-              descriptor.affinity(request.model().modelId()),
-              payload);
+  private ProviderBlockData blockData(ObjectNode nativeFields, boolean replayable) {
+    if (!replayable) {
+      return null;
     }
+    JsonNode refusal = nativeFields.get("refusal");
+    boolean isRefusal = refusal != null && refusal.isBoolean() && refusal.booleanValue();
+    ObjectNode replayFields = nativeFields.deepCopy();
+    replayFields.remove("refusal");
+    return new ProviderBlockData(
+        ProviderReplayFormat.OPENAI_CHAT,
+        descriptor.affinity(request.model().modelId()),
+        null,
+        null,
+        null,
+        null,
+        null,
+        isRefusal,
+        replayFields);
+  }
 
-    return new ProviderCompletion(response, replayState);
+  private ObjectNode toolCallFields(ProviderToolCall call) {
+    for (ToolCallBuilder builder : toolCallBuilders.values()) {
+      if (!call.id().equals(builder.id())) {
+        continue;
+      }
+      JsonNode nativeCall = nativeToolCall(builder.wireIndex());
+      if (nativeCall == null || !nativeCall.isObject()) {
+        return NODES.objectNode();
+      }
+      ObjectNode fields = (ObjectNode) nativeCall.deepCopy();
+      fields.remove("index");
+      fields.remove("id");
+      fields.remove("type");
+      JsonNode functionValue = fields.remove("function");
+      if (functionValue != null && functionValue.isObject()) {
+        ObjectNode function = (ObjectNode) functionValue.deepCopy();
+        function.remove("name");
+        function.remove("arguments");
+        if (!function.isEmpty()) {
+          fields.set("function", function);
+        }
+      }
+      return fields;
+    }
+    return NODES.objectNode();
   }
 
   private static final class ToolCallBuilder {

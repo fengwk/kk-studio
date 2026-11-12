@@ -48,7 +48,7 @@ public record ToolBinding(
     contributor = Objects.requireNonNull(contributor, "contributor");
     environmentSupport = Objects.requireNonNull(environmentSupport, "environmentSupport");
     configuredSkills = List.copyOf(Objects.requireNonNull(configuredSkills, "configuredSkills"));
-    if (!configuredSkills.isEmpty() && !"load_skill".equals(descriptor().name())) {
+    if (!configuredSkills.isEmpty() && !"load_skill".equals(definition.descriptor().name())) {
       throw new IllegalArgumentException("only load_skill may carry configured skills");
     }
     if (environmentSupport == EnvironmentSupport.NONE) {

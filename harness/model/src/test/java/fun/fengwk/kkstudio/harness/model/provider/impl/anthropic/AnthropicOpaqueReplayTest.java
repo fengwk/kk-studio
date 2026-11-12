@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -26,9 +26,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -103,40 +104,66 @@ class AnthropicOpaqueReplayTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("answer", completion.response().text());
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-
-    JsonNode content = replayState.payload().path("content");
-    assertEquals(2, content.size());
-    ObjectNode expectedNativeBlock = NODES.objectNode();
-    expectedNativeBlock.put("type", "server_tool_use");
-    expectedNativeBlock.put("id", "srv_1");
-    expectedNativeBlock.put("name", "web_search");
-    expectedNativeBlock.putObject("input").put("query", "kk");
-    expectedNativeBlock.putObject("future_field").put("x", 1);
-    assertEquals(expectedNativeBlock, content.get(0));
-    assertEquals("text", content.get(1).path("type").asString(""));
-    assertEquals("answer", content.get(1).path("text").asString(""));
+    assertEquals(2, completion.response().blocks().size());
+    ProviderOpaqueBlock nativeBlock =
+        (ProviderOpaqueBlock) completion.response().blocks().getFirst();
+    assertEquals("server_tool_use", nativeBlock.blockType());
+    JsonNode nativeFields = nativeBlock.providerBlockData().nativeFields();
+    assertEquals("srv_1", nativeFields.path("id").asString(""));
+    assertEquals("web_search", nativeFields.path("name").asString(""));
+    assertEquals("kk", nativeFields.path("input").path("query").asString(""));
+    assertEquals(1, nativeFields.path("future_field").path("x").asInt());
+    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(1)).text());
 
     // 下一轮：native block（含解析后的 input）与已知 text 全部无损进入 wire
     ProviderRequest nextRequest =
         request(
             List.of(
-                userMsg(), assistantMsg(List.of(new ProviderTextBlock("answer")), replayState)));
+                userMsg(),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT, completion.response().blocks())));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
-    assertEquals(expectedNativeBlock, assistantContent.get(0));
+    assertEquals("server_tool_use", assistantContent.get(0).path("type").asString(""));
+    assertEquals("srv_1", assistantContent.get(0).path("id").asString(""));
+    assertEquals("kk", assistantContent.get(0).path("input").path("query").asString(""));
+    assertEquals(1, assistantContent.get(0).path("future_field").path("x").asInt());
     assertEquals("answer", assistantContent.get(1).path("text").asString(""));
   }
 
-  /**
-   * 测试意图：durable 与 replay payload 的 tool input 按数值语义比对（scale 无关）——{@code 1.0} 与 {@code 1.00}
-   * 是同一数值，不得因数值节点相等对 scale 敏感而误判为不一致；不同数值仍必须拒绝，整数与小数保持分型区别；wire 输出 使用 replay 原文，数值形态不被比较过程改写。
-   */
+  /** 不同模型只保留可读 thinking 和普通文本，空/redacted thinking 与原生 opaque blocks 均不投影。 */
   @Test
-  void comparesToolInputNumbersByValueAndKeepsWireTextVerbatim() throws IOException {
+  void crossModelDropsEmptyAndRedactedThinkingBlocks() throws IOException {
+    ProviderBlockData sourceData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "test-anthropic", "old-model"),
+            NODES.objectNode());
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("", sourceData),
+                new ProviderRedactedThinkingBlock("redacted", sourceData),
+                new ProviderThinkingBlock("readable thought", sourceData),
+                new ProviderOpaqueBlock("server_future", sourceData),
+                new ProviderTextBlock("answer", sourceData)));
+
+    JsonNode content =
+        wire(encoder.encode(request(List.of(userMsg(), assistant)), descriptor))
+            .path("messages")
+            .get(1)
+            .path("content");
+
+    assertEquals(2, content.size());
+    assertEquals("readable thought", content.get(0).path("text").asString(""));
+    assertEquals("answer", content.get(1).path("text").asString(""));
+  }
+
+  /** 测试意图：同 affinity 下 tool input 与扩展字段从 Provider block 原样回放。 */
+  @Test
+  void keepsToolInputValuesAndNativeFieldsVerbatim() throws IOException {
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
     ObjectNode toolUse = payload.putArray("content").addObject();
@@ -150,7 +177,7 @@ class AnthropicOpaqueReplayTest {
 
     JsonNode content =
         fallbackContent(
-            replayState(payload),
+            nativeBlockFixture(payload),
             List.of(
                 new ProviderToolCallBlock(
                     new ProviderToolCall(
@@ -164,43 +191,6 @@ class AnthropicOpaqueReplayTest {
     assertEquals(
         "1.0", replayed.path("input").path("nested").path("fee").decimalValue().toPlainString());
     assertEquals("t-1", replayed.path("futureMeta").path("trace").asString(""));
-
-    ProviderException valueError =
-        assertReplayRejected(
-            replayState(toolUsePayload(new BigDecimal("0.1234567890123456789012345678"))),
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall(
-                        "toolu_1", "charge", "{\"amount\":0.1234567890123456789012345679}"))));
-    assertEquals(
-        "replay payload tool call arguments do not match durable content", valueError.getMessage());
-
-    ObjectNode integerInput = NODES.objectNode();
-    integerInput.put("role", "assistant");
-    ObjectNode integerUse = integerInput.putArray("content").addObject();
-    integerUse.put("type", "tool_use");
-    integerUse.put("id", "toolu_1");
-    integerUse.put("name", "charge");
-    integerUse.putObject("input").put("amount", 1);
-    ProviderException typeError =
-        assertReplayRejected(
-            replayState(integerInput),
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("toolu_1", "charge", "{\"amount\":1.0}"))));
-    assertEquals(
-        "replay payload tool call arguments do not match durable content", typeError.getMessage());
-  }
-
-  private static ObjectNode toolUsePayload(BigDecimal amount) {
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ObjectNode toolUse = payload.putArray("content").addObject();
-    toolUse.put("type", "tool_use");
-    toolUse.put("id", "toolu_1");
-    toolUse.put("name", "charge");
-    toolUse.putObject("input").put("amount", amount);
-    return payload;
   }
 
   /** 测试意图：未携带 delta 的 native block 原样保留，绝不被补造或裁剪字段。 */
@@ -221,14 +211,16 @@ class AnthropicOpaqueReplayTest {
         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
-    JsonNode content = accumulator.finish().replayState().payload().path("content");
-    assertEquals(1, content.size());
-    assertEquals("web_search_tool_result", content.get(0).path("type").asString(""));
-    assertEquals("srv_1", content.get(0).path("tool_use_id").asString(""));
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(1, completion.response().blocks().size());
+    ProviderOpaqueBlock block = (ProviderOpaqueBlock) completion.response().blocks().get(0);
+    assertEquals("web_search_tool_result", block.blockType());
+    JsonNode nativeFields = block.providerBlockData().nativeFields();
+    assertEquals("srv_1", nativeFields.path("tool_use_id").asString(""));
     assertEquals(
-        "https://example.com", content.get(0).path("content").get(0).path("url").asString(""));
-    assertEquals(false, content.get(0).path("flag").asBoolean(false));
-    assertEquals(4, content.get(0).size());
+        "https://example.com", nativeFields.path("content").get(0).path("url").asString(""));
+    assertEquals(false, nativeFields.path("flag").asBoolean(false));
+    assertEquals(3, nativeFields.size());
   }
 
   /**
@@ -249,7 +241,7 @@ class AnthropicOpaqueReplayTest {
     citedBlock.putObject("future_official_field").put("k", "v");
     JsonNode citedContent =
         fallbackContent(
-            replayState(mismatchedAffinity, citedPayload),
+            nativeBlockFixture(mismatchedAffinity, citedPayload),
             List.of(new ProviderTextBlock("cited answer")));
     assertEquals(1, citedContent.size());
     assertEquals("text", citedContent.get(0).path("type").asString(""));
@@ -267,7 +259,8 @@ class AnthropicOpaqueReplayTest {
     List<ProviderContentBlock> durableToolCall =
         List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":1}")));
     JsonNode toolContent =
-        fallbackContent(replayState(mismatchedAffinity, extraMemberToolPayload), durableToolCall);
+        fallbackContent(
+            nativeBlockFixture(mismatchedAffinity, extraMemberToolPayload), durableToolCall);
     assertEquals(1, toolContent.size());
     assertEquals("tool_use", toolContent.get(0).path("type").asString(""));
     assertEquals("c1", toolContent.get(0).path("id").asString(""));
@@ -296,8 +289,15 @@ class AnthropicOpaqueReplayTest {
     nativeContent.addObject().put("type", "text").put("text", "answer");
     JsonNode serverToolFallback =
         fallbackContent(
-            replayState(mismatchedAffinity, nativePayload),
-            List.of(new ProviderTextBlock("answer")));
+            nativeBlockFixture(mismatchedAffinity, nativePayload),
+            List.of(
+                new ProviderOpaqueBlock(
+                    "server_tool_use",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        mismatchedAffinity,
+                        NODES.objectNode())),
+                new ProviderTextBlock("answer")));
     assertEquals(1, serverToolFallback.size());
     assertEquals("text", serverToolFallback.get(0).path("type").asString(""));
     assertEquals("answer", serverToolFallback.get(0).path("text").asString(""));
@@ -310,8 +310,8 @@ class AnthropicOpaqueReplayTest {
     redactedContent.addObject().put("type", "text").put("text", "answer");
     JsonNode redactedFallback =
         fallbackContent(
-            replayState(mismatchedAffinity, redactedPayload),
-            List.of(new ProviderTextBlock("answer")));
+            nativeBlockFixture(mismatchedAffinity, redactedPayload),
+            List.of(new ProviderRedactedThinkingBlock("abc=="), new ProviderTextBlock("answer")));
     assertEquals(1, redactedFallback.size());
     assertEquals("text", redactedFallback.get(0).path("type").asString(""));
     assertEquals("answer", redactedFallback.get(0).path("text").asString(""));
@@ -322,7 +322,7 @@ class AnthropicOpaqueReplayTest {
     knownPayload.putArray("content").addObject().put("type", "text").put("text", "answer");
     JsonNode knownFallback =
         fallbackContent(
-            replayState(mismatchedAffinity, knownPayload),
+            nativeBlockFixture(mismatchedAffinity, knownPayload),
             List.of(new ProviderTextBlock("answer")));
     assertEquals(1, knownFallback.size());
     assertEquals("text", knownFallback.get(0).path("type").asString(""));
@@ -353,37 +353,31 @@ class AnthropicOpaqueReplayTest {
             List.of(
                 userMsg(),
                 assistantMsg(
-                    List.of(new ProviderTextBlock("cited answer")), replayState(payload))));
+                    List.of(new ProviderTextBlock("cited answer")), nativeBlockFixture(payload))));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(1, assistantContent.size());
     assertEquals(textBlock, assistantContent.get(0));
   }
 
-  /** 测试意图：citations 只做形状校验，不做字段白名单；形状非法时必须显式失败而不是回放损坏结构。 */
+  /** 测试意图：block-native text 的 citations 字段必须是对象数组，避免原生回放发出损坏结构。 */
   @Test
-  void rejectsInvalidCitationShapesInReplayPayload() {
-    ObjectNode scalarCitations = NODES.objectNode();
-    scalarCitations.put("role", "assistant");
-    ObjectNode textBlock = scalarCitations.putArray("content").addObject();
-    textBlock.put("type", "text");
-    textBlock.put("text", "answer");
-    textBlock.put("citations", "not-an-array");
-    ProviderException notArray =
-        assertReplayRejected(
-            replayState(scalarCitations), List.of(new ProviderTextBlock("answer")));
-    assertEquals("invalid text block in replay payload", notArray.getMessage());
-
+  void rejectsInvalidCitationShapesInBlockNativeFields() {
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-3-5-sonnet");
+    ObjectNode invalidArray = NODES.objectNode();
+    invalidArray.put("citations", "not-an-array");
     ObjectNode nonObjectCitation = NODES.objectNode();
-    nonObjectCitation.put("role", "assistant");
-    ObjectNode textBlock2 = nonObjectCitation.putArray("content").addObject();
-    textBlock2.put("type", "text");
-    textBlock2.put("text", "answer");
-    textBlock2.putArray("citations").add("not-an-object");
-    ProviderException notObject =
-        assertReplayRejected(
-            replayState(nonObjectCitation), List.of(new ProviderTextBlock("answer")));
-    assertEquals("invalid text block in replay payload", notObject.getMessage());
+    nonObjectCitation.putArray("citations").add("not-an-object");
+    for (ObjectNode fields : List.of(invalidArray, nonObjectCitation)) {
+      ProviderTextBlock text =
+          new ProviderTextBlock(
+              "answer",
+              new ProviderBlockData(ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, fields));
+      ProviderMessage assistant = new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(text));
+      assertThrows(
+          ProviderException.class,
+          () -> encoder.encode(request(List.of(userMsg(), assistant)), descriptor));
+    }
   }
 
   /** 测试意图：native block 的 input_json_delta 累积结果不是合法 JSON 对象时，绝不伪造 replay，也不静默保留半成品。 */
@@ -439,76 +433,21 @@ class AnthropicOpaqueReplayTest {
         error.getMessage());
   }
 
-  /** 测试意图：opaque 透传不放宽已知 block 的 shape 与 durable 一致性校验，空 type 也不算合法未知 block。 */
-  @Test
-  void keepsStrictDurableAndShapeValidationForKnownBlocks() {
-    // 1. opaque block 存在也不能掩盖已知 durable text 不一致
-    ObjectNode mismatchedText = NODES.objectNode();
-    mismatchedText.put("role", "assistant");
-    ArrayNode content1 = mismatchedText.putArray("content");
-    content1.addObject().put("type", "future_block").put("label", "opaque");
-    content1.addObject().put("type", "text").put("text", "different");
-    ProviderException textError =
-        assertReplayRejected(replayState(mismatchedText), List.of(new ProviderTextBlock("answer")));
-    assertEquals("replay payload text does not match durable content", textError.getMessage());
-
-    // 2. 未知 block 透传不放宽已知 type 的 shape 校验（text block 缺少 text 字段）
-    ObjectNode missingTextField = NODES.objectNode();
-    missingTextField.put("role", "assistant");
-    ArrayNode content2 = missingTextField.putArray("content");
-    content2.addObject().put("type", "future_block").put("label", "opaque");
-    content2.addObject().put("type", "text");
-    ProviderException shapeError =
-        assertReplayRejected(replayState(missingTextField), List.of(new ProviderTextBlock("")));
-    assertEquals("invalid text block in replay payload", shapeError.getMessage());
-
-    // 3. 空 type 不是合法未知 block
-    ObjectNode blankType = NODES.objectNode();
-    blankType.put("role", "assistant");
-    ArrayNode content3 = blankType.putArray("content");
-    content3.addObject().put("type", "");
-    content3.addObject().put("type", "text").put("text", "answer");
-    ProviderException blankTypeError =
-        assertReplayRejected(replayState(blankType), List.of(new ProviderTextBlock("answer")));
-    assertEquals("invalid Anthropic replay payload block", blankTypeError.getMessage());
-
-    // 4. 已知 thinking block 的 signature 仍必须存在且非空白
-    ObjectNode blankSignature = NODES.objectNode();
-    blankSignature.put("role", "assistant");
-    ObjectNode thinkingBlock = blankSignature.putArray("content").addObject();
-    thinkingBlock.put("type", "thinking");
-    thinkingBlock.put("thinking", "t");
-    thinkingBlock.put("signature", " ");
-    ProviderException signatureError =
-        assertReplayRejected(replayState(blankSignature), List.of(new ProviderThinkingBlock("t")));
-    assertEquals("invalid thinking block in replay payload", signatureError.getMessage());
+  private NativeReplayFixture nativeBlockFixture(ObjectNode payload) {
+    return nativeBlockFixture(descriptor.affinity("claude-3-5-sonnet"), payload);
   }
 
-  private ProviderReplayState replayState(ObjectNode payload) {
-    return replayState(descriptor.affinity("claude-3-5-sonnet"), payload);
-  }
-
-  private static ProviderReplayState replayState(
+  private static NativeReplayFixture nativeBlockFixture(
       ProviderReplayAffinity affinity, ObjectNode payload) {
-    return new ProviderReplayState(ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, payload);
+    return new NativeReplayFixture(affinity, payload.path("content"));
   }
 
   private JsonNode fallbackContent(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableContents)
+      NativeReplayFixture nativeFixture, List<ProviderContentBlock> durableContents)
       throws IOException {
     ProviderRequest request =
-        request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
+        request(List.of(userMsg(), assistantMsg(durableContents, nativeFixture)));
     return wire(encoder.encode(request, descriptor)).path("messages").get(1).path("content");
-  }
-
-  private ProviderException assertReplayRejected(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableContents) {
-    ProviderRequest request =
-        request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    return error;
   }
 
   private AnthropicStreamAccumulator accumulator(ProviderRequest request) {
@@ -535,9 +474,14 @@ class AnthropicOpaqueReplayTest {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")));
   }
 
+  private record NativeReplayFixture(ProviderReplayAffinity affinity, JsonNode content) {}
+
   private static ProviderMessage assistantMsg(
-      List<ProviderContentBlock> blocks, ProviderReplayState replayState) {
-    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks, replayState);
+      List<ProviderContentBlock> blocks, NativeReplayFixture nativeFixture) {
+    return new ProviderMessage(
+        ProviderMessageRole.ASSISTANT,
+        AnthropicNativeReplayTestSupport.withNativeData(
+            blocks, nativeFixture.affinity(), nativeFixture.content()));
   }
 
   private static ModelDescriptor model() {

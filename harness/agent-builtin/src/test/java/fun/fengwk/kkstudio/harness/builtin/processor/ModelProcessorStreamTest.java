@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -35,7 +34,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
-/** 流式与响应收敛：checkpoint 前缀、tool fragment gap、replayState、压缩子 final 完整性与 invalid response 重试。 */
+/** 流式与响应收敛：checkpoint 前缀、tool fragment gap、压缩子 final 完整性与 invalid response 重试。 */
 class ModelProcessorStreamTest extends ModelProcessorTestSupport {
   // ---------------------------------------------------------------------------------------------
   // stream / terminal 回调
@@ -149,8 +148,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
 
     listener.event(new ProviderStreamEvent.TextDelta("truncated partial"));
     listener.succeed(
-        new ProviderCompletion(
-            response("truncated partial", GenerationStopReason.LENGTH), sampleReplayState()));
+        new ProviderCompletion(response("truncated partial", GenerationStopReason.LENGTH)));
     awaitExecutionExit(fixture);
 
     ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
@@ -178,14 +176,13 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.succeed(
-        new ProviderCompletion(
-            response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
+        new ProviderCompletion(response("valid summary", GenerationStopReason.COMPLETE)));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertEquals(2, terminal.attempt());
     assertEquals("valid summary", terminal.result().text());
-    assertNotNull(terminal.providerReplayState(), "compaction child follows normal replay rules");
+    assertFalse(terminal.result().blocks().isEmpty());
   }
 
   /** 截断 final 耗尽重试预算：第二次仍是截断 final 即 FAILED，保留 attempt 1 的失败审计，绝不交付部分摘要。 */
@@ -204,9 +201,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     listener.event(new ProviderStreamEvent.TextDelta("partial one"));
-    listener.succeed(
-        new ProviderCompletion(
-            response("partial one", GenerationStopReason.LENGTH), sampleReplayState()));
+    listener.succeed(new ProviderCompletion(response("partial one", GenerationStopReason.LENGTH)));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
@@ -216,8 +211,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.event(new ProviderStreamEvent.TextDelta("partial two"));
     secondListener.succeed(
-        new ProviderCompletion(
-            response("partial two", GenerationStopReason.LENGTH), sampleReplayState()));
+        new ProviderCompletion(response("partial two", GenerationStopReason.LENGTH)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -256,8 +250,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     listener.succeed(
         new ProviderCompletion(
             new ProviderResponse(
-                "", null, List.of(), GenerationStopReason.COMPLETE, usage(), "req-1", null, null),
-            sampleReplayState()));
+                "", null, List.of(), GenerationStopReason.COMPLETE, usage(), "req-1", null, null)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -286,9 +279,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.succeed(
-        new ProviderCompletion(
-            response(" \n\t", GenerationStopReason.COMPLETE), sampleReplayState()));
+    listener.succeed(new ProviderCompletion(response(" \n\t", GenerationStopReason.COMPLETE)));
 
     ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, afterFirst.status());
@@ -309,8 +300,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
     secondListener.succeed(
-        new ProviderCompletion(
-            response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
+        new ProviderCompletion(response("valid summary", GenerationStopReason.COMPLETE)));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
@@ -336,9 +326,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     fixture
         .gateway
         .controlled(fixture.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response(" \n", GenerationStopReason.COMPLETE), sampleReplayState()));
+        .succeed(new ProviderCompletion(response(" \n", GenerationStopReason.COMPLETE)));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
@@ -349,9 +337,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     fixture
         .gateway
         .controlled(fixture.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("\t \n", GenerationStopReason.COMPLETE), sampleReplayState()));
+        .succeed(new ProviderCompletion(response("\t \n", GenerationStopReason.COMPLETE)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -380,8 +366,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     listener.succeed(
-        new ProviderCompletion(
-            response("filtered text", GenerationStopReason.FILTERED), sampleReplayState()));
+        new ProviderCompletion(response("filtered text", GenerationStopReason.FILTERED)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -415,13 +400,11 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
                 usage(),
                 "req-1",
                 null,
-                null),
-            sampleReplayState()));
+                null)));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertEquals(1, terminal.result().toolCalls().size());
-    assertNotNull(terminal.providerReplayState());
     assertEquals(List.of("calling tool"), deltaTexts(fixture.sink));
   }
 
@@ -446,8 +429,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
                 usage(),
                 "req-1",
                 null,
-                null),
-            sampleReplayState()));
+                null)));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -482,9 +464,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     truncated
         .gateway
         .controlled(truncated.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("partial answer", GenerationStopReason.LENGTH), sampleReplayState()));
+        .succeed(new ProviderCompletion(response("partial answer", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(truncated.store, truncated.invocationId).status(),
@@ -507,8 +487,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
                     usage(),
                     "req-1",
                     null,
-                    null),
-                sampleReplayState()));
+                    null)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(empty.store, empty.invocationId).status(),
@@ -523,9 +502,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     taskChild
         .gateway
         .controlled(taskChild.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("task partial", GenerationStopReason.LENGTH), sampleReplayState()));
+        .succeed(new ProviderCompletion(response("task partial", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(taskChild.store, taskChild.invocationId).status(),
@@ -553,9 +530,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     truncated
         .gateway
         .controlled(truncated.invocationId)
-        .succeed(
-            new ProviderCompletion(
-                response("ordinary partial", GenerationStopReason.LENGTH), sampleReplayState()));
+        .succeed(new ProviderCompletion(response("ordinary partial", GenerationStopReason.LENGTH)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(truncated.store, truncated.invocationId).status(),
@@ -579,20 +554,16 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         .gateway
         .controlled(filtered.invocationId)
         .succeed(
-            new ProviderCompletion(
-                response("ordinary filtered", GenerationStopReason.FILTERED), sampleReplayState()));
+            new ProviderCompletion(response("ordinary filtered", GenerationStopReason.FILTERED)));
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(filtered.store, filtered.invocationId).status(),
         "ordinary FILTERED keeps ordinary semantics");
   }
 
-  /**
-   * 验证 ModelExecution 完成路径：普通非 compaction 的 COMPLETE 与 LENGTH 在无 toolCallDiagnostics 时持久化
-   * replayState。
-   */
+  /** Ordinary COMPLETE and LENGTH results persist their ordered response blocks. */
   @Test
-  void modelExecutionPersistsReplayStateOnCompleteAndLengthWithoutDiagnostics() {
+  void modelExecutionPersistsResponseBlocksOnCompleteAndLength() {
     // 1. COMPLETE 场景
     Fixture fixtureComplete = fixture();
     fixtureComplete.gateway.queueControlled();
@@ -603,16 +574,12 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     ControlledRun listenerComplete =
         fixtureComplete.gateway.controlled(fixtureComplete.invocationId);
 
-    ProviderReplayState replayState1 = sampleReplayState();
-    listenerComplete.succeed(
-        new ProviderCompletion(response("hello", GenerationStopReason.COMPLETE), replayState1));
+    ProviderResponse completeResponse = response("hello", GenerationStopReason.COMPLETE);
+    listenerComplete.succeed(new ProviderCompletion(completeResponse));
 
     ModelInvocation modelComplete = model(fixtureComplete.store, fixtureComplete.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelComplete.status());
-    assertEquals(
-        replayState1,
-        modelComplete.providerReplayState(),
-        "COMPLETE without diagnostics must persist replayState");
+    assertEquals(completeResponse.blocks(), modelComplete.result().blocks());
 
     // 2. LENGTH 场景
     Fixture fixtureLength = fixture();
@@ -622,21 +589,20 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixtureLength.processor.process(claim(fixtureLength.store, fixtureLength.invocationId)));
     ControlledRun listenerLength = fixtureLength.gateway.controlled(fixtureLength.invocationId);
 
-    ProviderReplayState replayState2 = sampleReplayState();
-    listenerLength.succeed(
-        new ProviderCompletion(response("partial", GenerationStopReason.LENGTH), replayState2));
+    ProviderResponse lengthResponse = response("partial", GenerationStopReason.LENGTH);
+    listenerLength.succeed(new ProviderCompletion(lengthResponse));
 
     ModelInvocation modelLength = model(fixtureLength.store, fixtureLength.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelLength.status());
-    assertEquals(
-        replayState2,
-        modelLength.providerReplayState(),
-        "LENGTH without diagnostics must persist replayState");
+    assertEquals(lengthResponse.blocks(), modelLength.result().blocks());
   }
 
-  /** 验证 ModelExecution 完成路径：FILTERED 与含 incomplete tool diagnostics 时严格不持久化 replayState。 */
+  /**
+   * Filtered responses and incomplete tool diagnostics still persist their semantic response
+   * blocks.
+   */
   @Test
-  void modelExecutionSuppressesReplayStateOnFilteredAndIncompleteDiagnostics() {
+  void modelExecutionPersistsFilteredAndDiagnosticResponseBlocks() {
     // 1. FILTERED 场景
     Fixture fixtureFiltered = fixture();
     fixtureFiltered.gateway.queueControlled();
@@ -648,12 +614,11 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
         fixtureFiltered.gateway.controlled(fixtureFiltered.invocationId);
 
     listenerFiltered.succeed(
-        new ProviderCompletion(
-            response("filtered output", GenerationStopReason.FILTERED), sampleReplayState()));
+        new ProviderCompletion(response("filtered output", GenerationStopReason.FILTERED)));
 
     ModelInvocation modelFiltered = model(fixtureFiltered.store, fixtureFiltered.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelFiltered.status());
-    assertNull(modelFiltered.providerReplayState(), "FILTERED must not persist replayState");
+    assertEquals("filtered output", modelFiltered.result().text());
 
     // 2. 含 incomplete tool diagnostics 场景
     Fixture fixtureDiag = fixture();
@@ -677,18 +642,16 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
             null,
             List.of(diagnostic));
 
-    listenerDiag.succeed(new ProviderCompletion(responseWithDiagnostics, sampleReplayState()));
+    listenerDiag.succeed(new ProviderCompletion(responseWithDiagnostics));
 
     ModelInvocation modelDiag = model(fixtureDiag.store, fixtureDiag.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelDiag.status());
-    assertNull(
-        modelDiag.providerReplayState(),
-        "Incomplete tool diagnostics must suppress replayState persistence");
+    assertEquals(List.of(diagnostic), modelDiag.result().toolCallDiagnostics());
   }
 
-  /** 验证 ModelExecution 完成路径：失败与 UNKNOWN 路径绝对不会残留 replayState。 */
+  /** Failed and UNKNOWN invocations do not retain a response result. */
   @Test
-  void modelExecutionDoesNotLeaveReplayStateOnFailureOrUnknown() {
+  void modelExecutionDoesNotRetainResultOnFailureOrUnknown() {
     // 1. FAILED 终态
     Fixture fixtureFailed = fixture();
     fixtureFailed.gateway.queueControlled();
@@ -702,7 +665,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
 
     ModelInvocation modelFailed = model(fixtureFailed.store, fixtureFailed.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, modelFailed.status());
-    assertNull(modelFailed.providerReplayState(), "Failed invocation must not retain replayState");
+    assertNull(modelFailed.result());
 
     // 2. UNKNOWN 终态
     Fixture fixtureUnknown = fixture();
@@ -717,8 +680,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
 
     ModelInvocation modelUnknown = model(fixtureUnknown.store, fixtureUnknown.invocationId);
     assertEquals(ModelInvocationStatus.UNKNOWN, modelUnknown.status());
-    assertNull(
-        modelUnknown.providerReplayState(), "UNKNOWN invocation must not retain replayState");
+    assertNull(modelUnknown.result());
   }
 
   /**

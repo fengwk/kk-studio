@@ -38,8 +38,8 @@ import java.util.UUID;
 
 /**
  * 测试意图：Gemini 自由 JSON 数值语义的边界行为——工具 schema 与原生 opaque part 的数值以 {@link java.math.BigDecimal} 穿过
- * encoder/stream/replay 边界（{@code 1e309}/{@code 1e-324} 不得退化为 {@code Infinity}/{@code 0}，尾零原样保留）；
- * JSON null 的 finishReason 视为无语义尾帧，不产生停止原因。
+ * encoder/stream/block replay 边界（{@code 1e309}/{@code 1e-324} 不得退化为 {@code Infinity}/{@code
+ * 0}，尾零原样保留）； JSON null 的 finishReason 视为无语义尾帧，不产生停止原因。
  */
 class GeminiPrecisionRegressionTest {
 
@@ -116,7 +116,8 @@ class GeminiPrecisionRegressionTest {
             + "\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode opaque = completion.replayState().payload().path("parts").get(0).path("vendor_opaque");
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    JsonNode opaque = textBlock.providerBlockData().nativeFields().path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");
@@ -124,10 +125,7 @@ class GeminiPrecisionRegressionTest {
     assertPreservedScale(opaque.path("ratio"), "1.10");
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("hi")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("contents")

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -9,7 +9,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -17,18 +16,17 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
@@ -63,12 +61,16 @@ class OpenAiResponsesLosslessItemReplayTest {
       "{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\","
           + "\"encrypted_content\":\"enc_lossless\","
           + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"check the weather\"}],"
-          + "\"content\":[{\"type\":\"reasoning_text\",\"text\":\"private reasoning\"}]}";
+          + "\"content\":[{\"type\":\"reasoning_text\",\"text\":\"private reasoning\"}],"
+          + "\"future_member\":{\"nested\":true}}";
 
   private static final String FUNCTION_CALL_ITEM =
       "{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"completed\",\"call_id\":\"call_1\","
           + "\"name\":\"query\",\"arguments\":\"{\\\"q\\\":\\\"Paris\\\"}\","
           + "\"future_member\":{\"nested\":true}}";
+  private static final String UNKNOWN_ITEM =
+      "{\"id\":\"ws_1\",\"type\":\"web_search_call\",\"status\":\"completed\","
+          + "\"action\":{\"query\":\"Paris\"}}";
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -106,8 +108,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   }
 
   /** 喂入「created + 终态 output」两帧，复现真实 stateless replay 的捕获阶段。 */
-  private ProviderReplayState accumulateTerminalItems(String... terminalItemJsons)
-      throws Exception {
+  private ProviderCompletion accumulateTerminalItems(String... terminalItemJsons) throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
             request(List.of(userMessage())), createDescriptor(), e -> {});
@@ -124,15 +125,10 @@ class OpenAiResponsesLosslessItemReplayTest {
                 + "\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"output\":"
                 + output
                 + "}}"));
-    return accumulator.replayState();
+    return accumulator.finish();
   }
 
-  /**
-   * 编码下一轮请求（replay 与请求 model 的 affinity 一致）；replay 位置固定在 input[1]（user → assistant replay → user）。
-   */
-  private ArrayNode encodeNextRequest(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableContents)
-      throws Exception {
+  private ArrayNode encodeNextRequest(List<ProviderContentBlock> assistantBlocks) throws Exception {
     return (ArrayNode)
         MAPPER
             .readTree(
@@ -141,8 +137,7 @@ class OpenAiResponsesLosslessItemReplayTest {
                         request(
                             List.of(
                                 userMessage(),
-                                new ProviderMessage(
-                                    ProviderMessageRole.ASSISTANT, durableContents, replayState),
+                                new ProviderMessage(ProviderMessageRole.ASSISTANT, assistantBlocks),
                                 new ProviderMessage(
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("thanks"))))),
@@ -151,79 +146,164 @@ class OpenAiResponsesLosslessItemReplayTest {
             .get("input");
   }
 
+  @Test
+  void responseBlocksReplayOrderedNativeItemsFromOwningBlocks() throws Exception {
+    ProviderCompletion completion =
+        accumulateTerminalItems(MESSAGE_ITEM, REASONING_ITEM, FUNCTION_CALL_ITEM, UNKNOWN_ITEM);
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    ArrayNode input = encodeNextRequest(blocks);
+
+    assertEquals(6, input.size());
+    assertEquals(MAPPER.readTree(MESSAGE_ITEM), input.get(1));
+    assertEquals(MAPPER.readTree(REASONING_ITEM), input.get(2));
+    assertEquals(MAPPER.readTree(FUNCTION_CALL_ITEM), input.get(3));
+    assertEquals(MAPPER.readTree(UNKNOWN_ITEM), input.get(4));
+  }
+
+  @Test
+  void crossModelBlocksUseReadableThinkingAsTextAndDropOpaqueAndEncryptedFields() throws Exception {
+    var otherAffinity = createDescriptor().affinity("gpt-4o");
+    List<ProviderContentBlock> blocks =
+        List.of(
+            new ProviderThinkingBlock(
+                "private thought",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    "encrypted",
+                    "rs_1",
+                    "reasoning",
+                    "summary_text",
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderTextBlock(
+                "answer",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    null,
+                    "msg_1",
+                    "message",
+                    "output_text",
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderOpaqueBlock(
+                "web_search_call",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    null,
+                    "ws_1",
+                    "web_search_call",
+                    null,
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())));
+    JsonNode encoded =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        List.of(
+                            userMessage(),
+                            new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks))),
+                    createDescriptor())
+                .bodyUtf8Bytes());
+    ArrayNode input = (ArrayNode) encoded.path("input");
+
+    assertEquals(2, input.size());
+    assertEquals("message", input.get(1).path("type").asString(""));
+    assertEquals(
+        "private thoughtanswer", input.get(1).path("content").get(0).path("text").asString(""));
+    assertFalse(input.get(1).has("encrypted_content"));
+    assertFalse(input.get(1).path("content").get(0).has("thought"));
+  }
+
   /**
    * 测试意图：终态 message 的官方字段（id/status/phase 与 output_text 的 annotations/logprobs）必须在 replay state
    * 与下一轮 请求中逐字保留，同时 durable 文本仍然是回放可用性的硬约束。
    */
   @Test
   void terminalMessageItemReplaysLosslesslyAndKeepsDurableText() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(MESSAGE_ITEM);
-    assertNotNull(replayState);
-    JsonNode expectedItem = MAPPER.readTree(MESSAGE_ITEM);
-    assertEquals(expectedItem, replayState.payload().path("output").get(0));
-
-    ArrayNode input = encodeNextRequest(replayState, List.of(new ProviderTextBlock("sunny")));
-    assertEquals(3, input.size());
+    ProviderCompletion completion = accumulateTerminalItems(MESSAGE_ITEM);
+    assertEquals(1, completion.response().blocks().size());
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().getFirst();
+    assertEquals("msg_1", textBlock.providerBlockData().itemId());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
     assertEquals(
-        expectedItem, input.get(1), "replayed message item must keep every official field");
+        "completed",
+        textBlock
+            .providerBlockData()
+            .nativeFields()
+            .path("itemFields")
+            .path("status")
+            .asString(""));
+    JsonNode expectedItem = MAPPER.readTree(MESSAGE_ITEM);
 
-    // durable 文本仍严格：与冻结 output_text 不一致时拒绝，绝不因为字段无损就放行
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () -> encodeNextRequest(replayState, List.of(new ProviderTextBlock("rainy"))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    ArrayNode input = encodeNextRequest(completion.response().blocks());
+    assertEquals(3, input.size());
+    assertEquals(expectedItem, input.get(1), "block metadata preserves the source message fields");
   }
 
   /** 测试意图：终态 reasoning 的 id/status/密文/摘要/未来成员整体保留，且 durable 思考仍与摘要严格一致。 */
   @Test
   void terminalReasoningItemReplaysLosslesslyAndKeepsDurableThinking() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(REASONING_ITEM);
-    assertNotNull(replayState);
-    JsonNode expectedItem = MAPPER.readTree(REASONING_ITEM);
-    assertEquals(expectedItem, replayState.payload().path("output").get(0));
-
-    ArrayNode input =
-        encodeNextRequest(replayState, List.of(new ProviderThinkingBlock("check the weather")));
+    ProviderCompletion completion = accumulateTerminalItems(REASONING_ITEM);
     assertEquals(
-        expectedItem, input.get(1), "replayed reasoning item must keep every official field");
+        "check the weather",
+        ((ProviderThinkingBlock) completion.response().blocks().getFirst()).thinking());
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) completion.response().blocks().getFirst();
+    assertEquals("enc_lossless", thinkingBlock.providerBlockData().encryptedContent());
+    assertEquals("rs_1", thinkingBlock.providerBlockData().itemId());
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
+    assertEquals("summary_text", thinkingBlock.providerBlockData().contentType());
+    assertEquals(
+        Boolean.TRUE,
+        thinkingBlock
+            .providerBlockData()
+            .nativeFields()
+            .path("itemFields")
+            .path("future_member")
+            .path("nested")
+            .asBoolean());
+    JsonNode expectedItem = MAPPER.readTree(REASONING_ITEM);
 
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encodeNextRequest(
-                    replayState, List.of(new ProviderThinkingBlock("other thought"))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    ArrayNode input = encodeNextRequest(completion.response().blocks());
+    assertEquals(expectedItem, input.get(1), "block metadata preserves the source reasoning item");
   }
 
   /** 测试意图：终态 function_call 的 id/status/未来成员整体保留，durable 工具调用语义仍被严格比对。 */
   @Test
   void terminalFunctionCallItemReplaysLosslesslyAndKeepsDurableToolCall() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(FUNCTION_CALL_ITEM);
-    assertNotNull(replayState);
-    JsonNode expectedItem = MAPPER.readTree(FUNCTION_CALL_ITEM);
-    assertEquals(expectedItem, replayState.payload().path("output").get(0));
-
-    ArrayNode input =
-        encodeNextRequest(
-            replayState,
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("call_1", "query", "{\"q\":\"Paris\"}"))));
+    ProviderCompletion completion = accumulateTerminalItems(FUNCTION_CALL_ITEM);
+    ProviderToolCallBlock toolCallBlock =
+        (ProviderToolCallBlock) completion.response().blocks().getFirst();
+    assertEquals("call_1", toolCallBlock.toolCall().id());
     assertEquals(
-        expectedItem, input.get(1), "replayed function_call item must keep every official field");
+        Boolean.TRUE,
+        toolCallBlock
+            .providerBlockData()
+            .nativeFields()
+            .path("itemFields")
+            .path("future_member")
+            .path("nested")
+            .asBoolean());
+    assertEquals("fc_1", toolCallBlock.providerBlockData().itemId());
+    JsonNode expectedItem = MAPPER.readTree(FUNCTION_CALL_ITEM);
 
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encodeNextRequest(
-                    replayState,
-                    List.of(
-                        new ProviderToolCallBlock(
-                            new ProviderToolCall("call_1", "query", "{\"q\":\"Berlin\"}")))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    ArrayNode input = encodeNextRequest(completion.response().blocks());
+    assertEquals(
+        expectedItem, input.get(1), "block metadata preserves the source function_call item");
   }
 
   /** 测试意图：终态 reasoning 缺失的密文由流式事实补齐，保证可回放的原生推理不被丢失。 */
@@ -247,9 +327,12 @@ class OpenAiResponsesLosslessItemReplayTest {
                 + "\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"check the weather\"}]}]}}"));
 
-    JsonNode replayItem = accumulator.replayState().payload().path("output").get(0);
-    assertEquals("enc_stream", replayItem.path("encrypted_content").asString(""));
-    assertEquals("completed", replayItem.path("status").asString(""));
+    ProviderThinkingBlock thinking =
+        (ProviderThinkingBlock) accumulator.response().blocks().getFirst();
+    assertEquals("enc_stream", thinking.providerBlockData().encryptedContent());
+    assertEquals(
+        "completed",
+        thinking.providerBlockData().nativeFields().path("itemFields").path("status").asString(""));
   }
 
   /**
@@ -276,7 +359,7 @@ class OpenAiResponsesLosslessItemReplayTest {
             "{\"type\":\"response.output_item.done\",\"output_index\":0,"
                 + "\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"completed\","
                 + "\"call_id\":\"call_1\",\"name\":\"query\"}}"));
-    // 终态未声明 output：流式权威仍是 replay 事实来源
+    // Terminal omission keeps the streamed tool arguments on its owning block.
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_repair\","
@@ -288,40 +371,27 @@ class OpenAiResponsesLosslessItemReplayTest {
             "{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"completed\","
                 + "\"call_id\":\"call_1\",\"name\":\"query\","
                 + "\"arguments\":\"{\\\"q\\\":\\\"Paris\\\"}\"}");
-    ProviderReplayState replayState = accumulator.replayState();
-    assertEquals(expectedItem, replayState.payload().path("output").get(0));
+    ProviderToolCallBlock toolCall =
+        (ProviderToolCallBlock) accumulator.response().blocks().getFirst();
+    assertEquals("{\"q\":\"Paris\"}", toolCall.toolCall().argumentsJson());
+    assertEquals("fc_1", toolCall.providerBlockData().itemId());
+    assertEquals(
+        "completed",
+        toolCall.providerBlockData().nativeFields().path("itemFields").path("status").asString(""));
 
-    ArrayNode input =
-        encodeNextRequest(
-            replayState,
-            List.of(
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("call_1", "query", "{\"q\":\"Paris\"}"))));
+    ArrayNode input = encodeNextRequest(accumulator.response().blocks());
     assertEquals(expectedItem, input.get(1));
   }
 
-  /** 测试意图：结构损坏的已知 item 即使携带合法额外字段也仍然失败；未知 type 才是唯一的不透明通道。 */
+  /** Malformed free-form native fields are rejected when constructing block metadata. */
   @Test
-  void malformedKnownItemStillFailsEvenWithOfficialExtraFields() throws Exception {
-    ObjectNode payload = MAPPER.createObjectNode();
-    payload
-        .putArray("output")
-        .addObject()
-        .put("type", "message")
-        .put("role", "assistant")
-        .put("id", "msg_1")
-        .put("status", "completed")
-        .put("content", "not_an_array");
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            createDescriptor().affinity("gpt-5.4-mini"),
-            payload);
-
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () -> encodeNextRequest(replayState, List.of(new ProviderTextBlock("sunny"))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+  void blockMetadataRequiresObjectNativeFields() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderBlockData(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                createDescriptor().affinity("gpt-5.4-mini"),
+                MAPPER.createArrayNode()));
   }
 }

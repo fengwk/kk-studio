@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -35,9 +36,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -320,31 +322,18 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void replaysAssistantWhenAffinityMatches() throws IOException {
-    // 构造第一条用户消息
     ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
-
-    // 构造与 wire modelId 亲和性匹配的 ReplayState
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
+    List<ProviderContentBlock> blocks =
+        List.of(new ProviderThinkingBlock("think text"), new ProviderTextBlock("response text"));
+    ArrayNode content = NODES.arrayNode();
     content
         .addObject()
         .put("type", "thinking")
         .put("thinking", "think text")
         .put("signature", "sig-123");
     content.addObject().put("type", "text").put("text", "response text");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload);
-
     ProviderMessage assistantMsg =
-        asstMsg(
-            List.of(
-                new ProviderThinkingBlock("think text"), new ProviderTextBlock("response text")),
-            replayState);
+        nativeAssistant(blocks, descriptor.affinity("claude-3-5-sonnet"), content);
 
     ProviderRequest request =
         request(
@@ -352,13 +341,18 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg, assistantMsg),
             List.of(),
             ProviderCacheControl.none());
-
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
+    JsonNode asstWire =
+        MAPPER
+            .readTree(encoder.encode(request, descriptor).bodyUtf8Bytes())
+            .path("messages")
+            .get(1);
 
     assertEquals("thinking", asstWire.path("content").get(0).path("type").asString(""));
     assertEquals("sig-123", asstWire.path("content").get(0).path("signature").asString(""));
     assertEquals("text", asstWire.path("content").get(1).path("type").asString(""));
+    assertEquals(
+        "sig-123",
+        ((ProviderThinkingBlock) assistantMsg.contents().get(0)).providerBlockData().signature());
   }
 
   /**
@@ -379,15 +373,13 @@ class AnthropicRequestEncoderTest {
     toolNode.put("type", "tool_use").put("id", "call_1").put("name", "calc");
     toolNode.putObject("input").put("x", 1);
 
-    ProviderReplayState reconstructibleState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, reconstructiblePayload);
     ProviderMessage reconstructibleAsstMsg =
-        asstMsg(
+        nativeAssistant(
             List.of(
                 new ProviderTextBlock("response text"),
                 new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"x\":1}"))),
-            reconstructibleState);
+            mismatchedAffinity,
+            reconstructiblePayload.path("content"));
 
     ProviderRequest reconstructibleRequest =
         request(
@@ -419,14 +411,12 @@ class AnthropicRequestEncoderTest {
         .put("signature", "sig-123");
     nativeContent.addObject().put("type", "text").put("text", "response text");
 
-    ProviderReplayState nativeState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, nativePayload);
     ProviderMessage nativeAsstMsg =
-        asstMsg(
+        nativeAssistant(
             List.of(
                 new ProviderThinkingBlock("think text"), new ProviderTextBlock("response text")),
-            nativeState);
+            mismatchedAffinity,
+            nativePayload.path("content"));
 
     ProviderRequest nativeRequest =
         request(
@@ -455,7 +445,7 @@ class AnthropicRequestEncoderTest {
             defaultVariant(),
             List.of(
                 userMsg(new ProviderTextBlock("User 1")),
-                asstMsg(List.of(new ProviderTextBlock("Asst 1")), null),
+                asstMsg(List.of(new ProviderTextBlock("Asst 1"))),
                 userMsg(new ProviderTextBlock("User 2"))),
             List.of(tool),
             new ProviderCacheControl(PromptCacheRetention.LONG, "test-affinity"));
@@ -853,45 +843,11 @@ class AnthropicRequestEncoderTest {
             null));
   }
 
-  /** 意图：affinity 匹配时 redacted_thinking 作为原生事实逐字节回放，不由 durable 重建。 */
-  @Test
-  void encodesRedactedThinkingInReplay() throws IOException {
-    ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
-
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content.addObject().put("type", "redacted_thinking").put("data", "abc==");
-    content.addObject().put("type", "text").put("text", "response text");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload);
-
-    ProviderMessage assistantMsg =
-        asstMsg(List.of(new ProviderTextBlock("response text")), replayState);
-
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(userMsg, assistantMsg),
-            List.of(),
-            ProviderCacheControl.none());
-
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-    assertEquals("redacted_thinking", asstWire.path("content").get(0).path("type").asString(""));
-    assertEquals("abc==", asstWire.path("content").get(0).path("data").asString(""));
-  }
-
   @Test
   void rejectsMalformedAssistantToolCallInFallback() {
     ProviderMessage badToolCallMsg =
         asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "not-json"))),
-            null);
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "not-json"))));
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -939,27 +895,21 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void skipsThinkingBlocksWhenApplyingConversationCacheMarker() throws IOException {
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    payload
-        .putArray("content")
+    ArrayNode nativeContent = NODES.arrayNode();
+    nativeContent
         .addObject()
         .put("type", "thinking")
         .put("thinking", "Last thinking")
         .put("signature", "sig-valid");
-
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+    ProviderMessage thinking =
+        nativeAssistant(
+            List.of(new ProviderThinkingBlock("Last thinking")),
             descriptor.affinity("claude-3-5-sonnet"),
-            payload);
-
+            nativeContent);
     ProviderRequest req =
         request(
             defaultVariant(),
-            List.of(
-                userMsg(new ProviderTextBlock("Text before")),
-                asstMsg(List.of(new ProviderThinkingBlock("Last thinking")), replay)),
+            List.of(userMsg(new ProviderTextBlock("Text before")), thinking),
             List.of(),
             new ProviderCacheControl(PromptCacheRetention.SHORT, "aff"));
 
@@ -976,51 +926,10 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
-  void handlesReplayPayloadValidationMismatches() throws IOException {
-    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-
-    // 1. payload contains bad tool_use without input object
-    ObjectNode badPayload1 = NODES.objectNode();
-    badPayload1.put("role", "assistant");
-    ArrayNode content1 = badPayload1.putArray("content");
-    content1.addObject().put("type", "tool_use").put("id", "c1").put("name", "calc"); // 缺少 input
-    ProviderReplayState replay1 =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            badPayload1);
-    ProviderMessage asst1 =
-        asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))), replay1);
-    ProviderRequest req1 =
-        request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
-    ProviderException ex1 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
-
-    // 2. payload 含未知 block type：未知块 opaque 透传，但 durable text 缺失导致一致性校验失败
-    ObjectNode badPayload2 = NODES.objectNode();
-    badPayload2.put("role", "assistant");
-    badPayload2.putArray("content").addObject().put("type", "unknown_type");
-    ProviderReplayState replay2 =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            badPayload2);
-    ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("text")), replay2);
-    ProviderRequest req2 =
-        request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-  }
-
-  @Test
   void rejectsAssistantToolCallWithNonObjectJsonInFallback() {
     ProviderMessage badAsst =
         asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "[1, 2, 3]"))),
-            null);
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "[1, 2, 3]"))));
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -1033,7 +942,7 @@ class AnthropicRequestEncoderTest {
   @Test
   void rejectsUnsupportedAssistantBlockInFallback() {
     ProviderMessage badAsst =
-        asstMsg(List.of(new ProviderImageBlock("image/png", "https://ex.com/a.png")), null);
+        asstMsg(List.of(new ProviderImageBlock("image/png", "https://ex.com/a.png")));
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -1071,111 +980,11 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
-  void handlesReplayTextThinkingOrToolMismatches() throws IOException {
-    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-
-    // 1. payloadText mismatch
-    ObjectNode payloadTextMismatch = NODES.objectNode();
-    payloadTextMismatch.put("role", "assistant");
-    payloadTextMismatch.putArray("content").addObject().put("type", "text").put("text", "A");
-    ProviderReplayState replayText =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payloadTextMismatch);
-    ProviderMessage asstText = asstMsg(List.of(new ProviderTextBlock("B")), replayText);
-    ProviderRequest req1 =
-        request(defaultVariant(), List.of(user, asstText), List.of(), ProviderCacheControl.none());
-    ProviderException ex1 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
-
-    // 2. payloadThinking mismatch
-    ObjectNode payloadThinkMismatch = NODES.objectNode();
-    payloadThinkMismatch.put("role", "assistant");
-    payloadThinkMismatch
-        .putArray("content")
-        .addObject()
-        .put("type", "thinking")
-        .put("thinking", "think A")
-        .put("signature", "sig");
-    ProviderReplayState replayThink =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payloadThinkMismatch);
-    ProviderMessage asstThink = asstMsg(List.of(new ProviderThinkingBlock("think B")), replayThink);
-    ProviderRequest req2 =
-        request(defaultVariant(), List.of(user, asstThink), List.of(), ProviderCacheControl.none());
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-
-    // 3. tool call args mismatch
-    ObjectNode payloadToolMismatch = NODES.objectNode();
-    payloadToolMismatch.put("role", "assistant");
-    ArrayNode toolContent = payloadToolMismatch.putArray("content");
-    ObjectNode toolObj = toolContent.addObject();
-    toolObj.put("type", "tool_use").put("id", "c1").put("name", "calc");
-    toolObj.putObject("input").put("x", 1);
-    ProviderReplayState replayTool =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payloadToolMismatch);
-    ProviderMessage asstTool =
-        asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":2}"))),
-            replayTool);
-    ProviderRequest req3 =
-        request(defaultVariant(), List.of(user, asstTool), List.of(), ProviderCacheControl.none());
-    ProviderException ex3 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req3, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
-  }
-
-  @Test
-  void rejectsReplayStateMissingAssistantRoleOrHavingExtraProperties() throws IOException {
-    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-    // 缺少 role: assistant
-    ObjectNode noRolePayload = NODES.objectNode();
-    noRolePayload.putArray("content").addObject().put("type", "text").put("text", "hi");
-    ProviderReplayState replayNoRole =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            noRolePayload);
-    ProviderMessage asst1 = asstMsg(List.of(new ProviderTextBlock("hi")), replayNoRole);
-    ProviderRequest req1 =
-        request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
-    ProviderException ex1 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
-
-    // 带有额外未授权字段 (size != 2)
-    ObjectNode extraPropPayload = NODES.objectNode();
-    extraPropPayload.put("role", "assistant");
-    extraPropPayload.put("extra_field", "forbidden");
-    extraPropPayload.putArray("content").addObject().put("type", "text").put("text", "hi");
-    ProviderReplayState replayExtra =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            extraPropPayload);
-    ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("hi")), replayExtra);
-    ProviderRequest req2 =
-        request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-  }
-
-  @Test
   void encodesAssistantJsonBlockAsTextBlockInSemanticFallback() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
     // Assistant 消息带有 ProviderJsonBlock（例如来自截断诊断序列化）
     ProviderMessage asstWithJson =
-        asstMsg(List.of(new ProviderJsonBlock("{\"diagnostic\":\"truncated\"}")), null);
+        asstMsg(List.of(new ProviderJsonBlock("{\"diagnostic\":\"truncated\"}")));
 
     AnthropicEncodedRequest encoded =
         encoder.encode(
@@ -1222,13 +1031,13 @@ class AnthropicRequestEncoderTest {
     List<ProviderMessage> messages =
         List.of(
             userMsg(new ProviderTextBlock("same")),
-            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            asstMsg(List.of(new ProviderTextBlock("a"))),
             userMsg(new ProviderTextBlock("same")),
-            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            asstMsg(List.of(new ProviderTextBlock("a"))),
             userMsg(new ProviderTextBlock("same")),
-            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            asstMsg(List.of(new ProviderTextBlock("a"))),
             userMsg(new ProviderTextBlock("same")),
-            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            asstMsg(List.of(new ProviderTextBlock("a"))),
             userMsg(new ProviderTextBlock("same")));
     JsonNode wire = cacheWire(messages);
     assertEquals(4, countCacheMarkers(wire));
@@ -1246,8 +1055,7 @@ class AnthropicRequestEncoderTest {
         asstMsg(
             List.of(
                 new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")),
-                new ProviderToolCallBlock(new ProviderToolCall("c2", "calc", "{}"))),
-            null);
+                new ProviderToolCallBlock(new ProviderToolCall("c2", "calc", "{}"))));
     ProviderMessage results =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -1268,8 +1076,8 @@ class AnthropicRequestEncoderTest {
                 calls,
                 results,
                 secondResult,
-                asstMsg(List.of(new ProviderTextBlock("continue")), null),
-                asstMsg(List.of(new ProviderTextBlock("continued")), null),
+                asstMsg(List.of(new ProviderTextBlock("continue"))),
+                asstMsg(List.of(new ProviderTextBlock("continued"))),
                 userMsg(new ProviderTextBlock("third"))));
     // 历史端点为 queued-2、第二个 tool_result、continue、third；tools/system 占两个名额，仅最近两个端点打标
     assertEquals(4, countCacheMarkers(wire));
@@ -1288,8 +1096,8 @@ class AnthropicRequestEncoderTest {
     List<ProviderMessage> messages =
         List.of(
             userMsg(new ProviderTextBlock("valid")),
-            asstMsg(List.of(new ProviderTextBlock("")), null),
-            asstMsg(List.of(new ProviderTextBlock("")), null),
+            asstMsg(List.of(new ProviderTextBlock(""))),
+            asstMsg(List.of(new ProviderTextBlock(""))),
             userMsg(new ProviderTextBlock("")));
     JsonNode wire = cacheWire(messages);
     // tools + system 固定打标，空/重复端点只留一个 conversation marker
@@ -1318,17 +1126,37 @@ class AnthropicRequestEncoderTest {
    */
   @Test
   void replaysOpaquePayloadAcrossChangedPrefixAndSystem() throws IOException {
-    ObjectNode payload = NODES.objectNode().put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content.addObject().put("type", "thinking").put("thinking", "t").put("signature", "sig");
-    content.addObject().put("type", "redacted_thinking").put("data", "opaque");
-    content.addObject().put("type", "future_block").put("value", "kept");
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload);
-    ProviderMessage assistant = asstMsg(List.of(new ProviderThinkingBlock("t")), replay);
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-3-5-sonnet");
+    ObjectNode noFields = NODES.objectNode();
+    ObjectNode opaqueFields = NODES.objectNode().put("value", "kept");
+    ProviderMessage assistant =
+        asstMsg(
+            List.of(
+                new ProviderThinkingBlock(
+                    "t",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        affinity,
+                        "sig",
+                        null,
+                        null,
+                        noFields)),
+                new ProviderRedactedThinkingBlock(
+                    "opaque",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, noFields)),
+                new ProviderOpaqueBlock(
+                    "future_block",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, opaqueFields))));
+    ArrayNode expectedContent = NODES.arrayNode();
+    expectedContent
+        .addObject()
+        .put("type", "thinking")
+        .put("thinking", "t")
+        .put("signature", "sig");
+    expectedContent.addObject().put("type", "redacted_thinking").put("data", "opaque");
+    expectedContent.addObject().put("type", "future_block").put("value", "kept");
     ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
 
     // 1. 同前缀：opaque 尾部逐字节回放；无 tools，system 与最近可用端点各 1 个 marker
@@ -1343,8 +1171,8 @@ class AnthropicRequestEncoderTest {
     assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
     assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
     assertEquals(2, countCacheMarkers(wire));
-    assertEquals(content, wire.path("messages").get(1).path("content"));
-    assertEquals(0, countCacheMarkers(payload));
+    assertEquals(expectedContent, wire.path("messages").get(1).path("content"));
+    assertEquals(0, countCacheMarkers(expectedContent));
 
     // 2. 改变用户消息：affinity 不变，兼容 replay 仍然有效
     ProviderRequest changedPrefix =
@@ -1387,21 +1215,23 @@ class AnthropicRequestEncoderTest {
         new ArrayList<>(
             List.of(
                 userMsg(new ProviderTextBlock("old")),
-                asstMsg(List.of(new ProviderTextBlock("old-answer")), null),
+                asstMsg(List.of(new ProviderTextBlock("old-answer"))),
                 userMsg(new ProviderTextBlock("old-next"))));
-    ObjectNode payload = NODES.objectNode().put("role", "assistant");
-    payload.putArray("content").addObject().put("type", "compaction").put("content", "summary");
-    messages.add(
-        asstMsg(
-            List.of(new ProviderTextBlock("")),
-            new ProviderReplayState(
+    ObjectNode compactionFields = NODES.objectNode().put("content", "summary");
+    ProviderOpaqueBlock compaction =
+        new ProviderOpaqueBlock(
+            "compaction",
+            new ProviderBlockData(
                 ProviderReplayFormat.ANTHROPIC_MESSAGES,
                 descriptor.affinity("claude-3-5-sonnet"),
-                payload)));
+                compactionFields));
+    ArrayNode expectedCompaction = NODES.arrayNode();
+    expectedCompaction.addObject().put("type", "compaction").put("content", "summary");
+    messages.add(asstMsg(List.of(compaction)));
     messages.add(userMsg(new ProviderTextBlock("new")));
     JsonNode wire = cacheWire(messages);
     assertEquals(2, wire.path("messages").size());
-    assertEquals(payload.path("content"), wire.path("messages").get(0).path("content"));
+    assertEquals(expectedCompaction, wire.path("messages").get(0).path("content"));
     // 已摘要历史被整体省略，其缓存候选也随 compaction 清空：只剩 tools/system 与摘要后的 "new" 端点
     assertTrue(cacheBlock(wire, 1, 0).has("cache_control"));
     assertTrue(wire.path("tools").get(0).has("cache_control"));
@@ -1487,49 +1317,27 @@ class AnthropicRequestEncoderTest {
             .asString(""));
   }
 
-  /** 意图：打标移至最终冻结之后，不能放宽已有原生 replay 的形状和 durable 工具一致性校验。 */
-  @ParameterizedTest
-  @MethodSource("invalidCacheReplayCases")
-  void rejectsMalformedReplayBeforeCacheMarkers(JsonNode payload) {
-    ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
-    ProviderRequest prefix =
+  /** Invalid native citation data must fail before cache markers are attached. */
+  @Test
+  void rejectsInvalidNativeFieldsBeforeCacheMarkers() {
+    ObjectNode nativeFields = NODES.objectNode().put("citations", "not-an-array");
+    ProviderTextBlock text =
+        new ProviderTextBlock(
+            "answer",
+            new ProviderBlockData(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                descriptor.affinity("claude-3-5-sonnet"),
+                nativeFields));
+    ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(user),
+            List.of(userMsg(new ProviderTextBlock("valid")), asstMsg(List.of(text))),
             List.of(),
             ProviderCacheControl.session(PromptCacheRetention.SHORT, "cache"));
-    ProviderReplayState replay =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload);
-    ProviderMessage assistant =
-        asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))), replay);
     ProviderException error =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(
-                        defaultVariant(),
-                        List.of(user, assistant),
-                        List.of(),
-                        prefix.cacheControl()),
-                    descriptor));
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(0, countCacheMarkers(payload));
-  }
-
-  private static Stream<JsonNode> invalidCacheReplayCases() throws IOException {
-    try (var input =
-        AnthropicRequestEncoderTest.class.getResourceAsStream(
-            "fixtures/cache-invalid-replay.json")) {
-      assertNotNull(input);
-      List<JsonNode> cases = new ArrayList<>();
-      MAPPER.readTree(input).forEach(cases::add);
-      return cases.stream();
-    }
+    assertEquals(0, countCacheMarkers(nativeFields));
   }
 
   private JsonNode cacheWire(List<ProviderMessage> messages) throws IOException {
@@ -1601,9 +1409,15 @@ class AnthropicRequestEncoderTest {
         model, variant, 1024, systemInstruction, messages, tools, cacheControl);
   }
 
-  private static ProviderMessage asstMsg(
-      List<ProviderContentBlock> blocks, ProviderReplayState replayState) {
-    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks, replayState);
+  private static ProviderMessage asstMsg(List<ProviderContentBlock> blocks) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks);
+  }
+
+  private static ProviderMessage nativeAssistant(
+      List<ProviderContentBlock> blocks, ProviderReplayAffinity affinity, JsonNode content) {
+    return new ProviderMessage(
+        ProviderMessageRole.ASSISTANT,
+        AnthropicNativeReplayTestSupport.withNativeData(blocks, affinity, content));
   }
 
   private static ModelVariant defaultVariant() {
@@ -1627,20 +1441,21 @@ class AnthropicRequestEncoderTest {
         .put("type", "tool_use")
         .put("id", "c1")
         .put("name", "calc");
-    ProviderReplayState replay1 =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            badPayload);
     ProviderMessage asst1 =
-        asstMsg(
+        nativeAssistant(
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":1}"))),
-            replay1);
+            descriptor.affinity("claude-3-5-sonnet"),
+            badPayload.path("content"));
     ProviderRequest req1 =
         request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
-    ProviderException ex1 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+    JsonNode toolWire =
+        MAPPER
+            .readTree(encoder.encode(req1, descriptor).bodyUtf8Bytes())
+            .path("messages")
+            .get(1)
+            .path("content")
+            .get(0);
+    assertEquals(1, toolWire.path("input").path("x").asInt(0));
 
     // 2. affinity 失配：payload 文本与 durable 不一致也不抛错，改由 durable 语义重建
     ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("other-model");
@@ -1651,10 +1466,11 @@ class AnthropicRequestEncoderTest {
         .addObject()
         .put("type", "text")
         .put("text", "mismatched");
-    ProviderReplayState replay2 =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, textMismatchPayload);
-    ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("original")), replay2);
+    ProviderMessage asst2 =
+        nativeAssistant(
+            List.of(new ProviderTextBlock("original")),
+            mismatchedAffinity,
+            textMismatchPayload.path("content"));
     ProviderRequest req2 =
         request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
     JsonNode asstWire =
@@ -1675,10 +1491,9 @@ class AnthropicRequestEncoderTest {
         List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
 
     for (String badArg : invalidArguments) {
-      // 1. Fallback 场景（无 replayState）
+      // 1. Fallback 场景（无 native blocks）
       ProviderMessage asstFallback =
-          asstMsg(
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))), null);
+          asstMsg(List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))));
       ProviderRequest reqFallback =
           request(
               defaultVariant(),
@@ -1697,15 +1512,11 @@ class AnthropicRequestEncoderTest {
       ObjectNode toolNode = validPayload.putArray("content").addObject();
       toolNode.put("type", "tool_use").put("id", "c1").put("name", "calc");
       toolNode.putObject("input");
-      ProviderReplayState replay =
-          new ProviderReplayState(
-              ProviderReplayFormat.ANTHROPIC_MESSAGES,
-              descriptor.affinity("claude-3-5-sonnet"),
-              validPayload);
       ProviderMessage asstReplay =
-          asstMsg(
+          nativeAssistant(
               List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
-              replay);
+              descriptor.affinity("claude-3-5-sonnet"),
+              validPayload.path("content"));
       ProviderRequest reqReplay =
           request(
               defaultVariant(), List.of(user, asstReplay), List.of(), ProviderCacheControl.none());
@@ -1722,44 +1533,38 @@ class AnthropicRequestEncoderTest {
     ObjectNode toolArrayNode = payloadArrayInput.putArray("content").addObject();
     toolArrayNode.put("type", "tool_use").put("id", "c1").put("name", "calc");
     toolArrayNode.putArray("input").add(1).add(2);
-    ProviderReplayState replayArray =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payloadArrayInput);
     ProviderMessage asstArrayInput =
-        asstMsg(
+        nativeAssistant(
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
-            replayArray);
+            descriptor.affinity("claude-3-5-sonnet"),
+            payloadArrayInput.path("content"));
     ProviderRequest reqArrayInput =
         request(
             defaultVariant(),
             List.of(user, asstArrayInput),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException exArray =
-        assertThrows(ProviderException.class, () -> encoder.encode(reqArrayInput, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exArray.kind());
+    JsonNode normalizedInput =
+        MAPPER
+            .readTree(encoder.encode(reqArrayInput, descriptor).bodyUtf8Bytes())
+            .path("messages")
+            .get(1)
+            .path("content")
+            .get(0)
+            .path("input");
+    assertTrue(normalizedInput.isObject());
+    assertTrue(normalizedInput.isEmpty());
   }
 
-  /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 replayState 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */
+  /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 native blocks 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */
   @Test
   void fallbackWhenReplayFormatDiffers() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-    ObjectNode openAiPayload = NODES.objectNode();
-    openAiPayload.put("role", "assistant").put("content", "hello from openai");
-    ProviderReplayState differentFormatReplay =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_CHAT,
-            descriptor.affinity("claude-3-5-sonnet"),
-            openAiPayload);
-
     ProviderMessage asst =
         asstMsg(
             List.of(
                 new ProviderTextBlock("fallback response"),
-                new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"a\":1}"))),
-            differentFormatReplay);
+                new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"a\":1}"))));
     ProviderRequest req =
         request(defaultVariant(), List.of(user, asst), List.of(), ProviderCacheControl.none());
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
@@ -1821,19 +1626,17 @@ class AnthropicRequestEncoderTest {
         .put("name", "lookup_status")
         .set("input", NODES.objectNode());
 
-    ProviderReplayState wireReplayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-fable-5-dd-3M-xaMiniM"),
-            anthropicPayload);
-
     List<ProviderContentBlock> durableBlocks =
         List.of(
             new ProviderThinkingBlock("deep reasoning"),
             new ProviderTextBlock("replayed answer"),
             new ProviderToolCallBlock(new ProviderToolCall("call_lookup", "lookup_status", "{}")));
 
-    ProviderMessage asst = asstMsg(durableBlocks, wireReplayState);
+    ProviderMessage asst =
+        nativeAssistant(
+            durableBlocks,
+            descriptor.affinity("claude-fable-5-dd-3M-xaMiniM"),
+            anthropicPayload.path("content"));
 
     ProviderMessage toolResult =
         new ProviderMessage(
@@ -1873,14 +1676,11 @@ class AnthropicRequestEncoderTest {
     assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asString(""));
     assertEquals("call_lookup", wireAsst.path("content").get(2).path("id").asString(""));
 
-    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
+    // 3. 对比：如果 native blocks 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
     //    原生 thinking signature 无法由 durable 重建，只能降级为普通文本，绝不抛错。
-    ProviderReplayState logicalAffinityState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("MiniMax-M3"),
-            anthropicPayload);
-    ProviderMessage asstMismatch = asstMsg(durableBlocks, logicalAffinityState);
+    ProviderMessage asstMismatch =
+        nativeAssistant(
+            durableBlocks, descriptor.affinity("MiniMax-M3"), anthropicPayload.path("content"));
     ProviderRequest requestMismatch =
         requestWithModelId(
             "MiniMax-M3",

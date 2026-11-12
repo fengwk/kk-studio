@@ -125,8 +125,8 @@ class AnthropicPrecisionRegressionTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode opaque =
-        completion.replayState().payload().path("content").get(0).path("vendor_opaque");
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    JsonNode opaque = textBlock.providerBlockData().nativeFields().path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");
@@ -134,10 +134,7 @@ class AnthropicPrecisionRegressionTest {
     assertPreservedScale(opaque.path("ratio"), "1.10");
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("hi")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(textBlock));
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("messages")

@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -21,11 +20,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.time.Instant;
 import java.util.List;
@@ -442,118 +437,6 @@ class ModelInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> succeeded(1).attachResultEntry(id(99L), T1).attachResultEntry(id(100L), T2));
-  }
-
-  @Test
-  void attachResultEntryClearsProviderReplayStateAndEnforcesImmutability() {
-    ProviderReplayState replayState = sampleReplayState();
-    ModelInvocation withReplay = running(1, null).succeed(response(), null, replayState, T1);
-    assertEquals(replayState, withReplay.providerReplayState());
-
-    // 绑定结果 entry 清空 replayState
-    ModelInvocation attached = withReplay.attachResultEntry(id(99L), T2);
-    assertNull(attached.providerReplayState());
-    assertEquals(id(99L), attached.resultEntryId());
-
-    // 验证 transition 合法
-    ModelInvocation.validateTransition(withReplay, attached);
-
-    // 已 attached 终态不可再次修改 replayState 或再次 attach
-    assertThrows(IllegalArgumentException.class, () -> attached.attachResultEntry(id(100L), T3));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelInvocation(
-                attached.id(),
-                attached.threadId(),
-                attached.turnStartEntryId(),
-                attached.requestHeadEntryId(),
-                attached.requestSpec(),
-                attached.status(),
-                attached.attempt(),
-                attached.streamCheckpoint(),
-                attached.result(),
-                attached.error(),
-                attached.resultEntryId(),
-                attached.failedAttempts(),
-                attached.createdAt(),
-                T3,
-                replayState));
-  }
-
-  @Test
-  void providerReplayStateInvariantsRejectIllegalHolding() {
-    ProviderReplayState replayState = sampleReplayState();
-
-    // 非 SUCCEEDED 状态不能持有 replayState
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelInvocation(
-                id(1L),
-                id(1L),
-                id(1L),
-                id(1L),
-                requestSpec(),
-                ModelInvocationStatus.RUNNING,
-                1,
-                null,
-                null,
-                null,
-                null,
-                List.of(),
-                CREATED,
-                CREATED,
-                replayState));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelInvocation(
-                id(1L),
-                id(1L),
-                id(1L),
-                id(1L),
-                requestSpec(),
-                ModelInvocationStatus.FAILED,
-                1,
-                null,
-                null,
-                error(),
-                null,
-                List.of(),
-                CREATED,
-                CREATED,
-                replayState));
-
-    // 已有 resultEntryId 的 SUCCEEDED 不能持有 replayState
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelInvocation(
-                id(1L),
-                id(1L),
-                id(1L),
-                id(1L),
-                requestSpec(),
-                ModelInvocationStatus.SUCCEEDED,
-                1,
-                null,
-                response(),
-                null,
-                id(99L),
-                List.of(),
-                CREATED,
-                CREATED,
-                replayState));
-  }
-
-  private static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
-        ProviderReplayFormat.OPENAI_RESPONSES,
-        new ProviderReplayAffinity(
-            ProviderType.OPENAI_RESPONSES, "minimax", UUID.randomUUID(), "minimax-m2"),
-        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   @Test

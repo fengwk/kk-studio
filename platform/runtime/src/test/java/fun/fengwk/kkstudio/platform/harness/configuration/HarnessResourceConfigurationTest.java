@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderImageModelViewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -25,6 +26,8 @@ class HarnessResourceConfigurationTest {
         .withUserConfiguration(HarnessResourceConfiguration.class)
         .withBean(StorageBlobManager.class, () -> mock(StorageBlobManager.class))
         .withBean(StorageBlobContentService.class, () -> mock(StorageBlobContentService.class))
+        .withBean(
+            ProviderImageModelViewService.class, () -> mock(ProviderImageModelViewService.class))
         .withBean(StorageUploadService.class, () -> mock(StorageUploadService.class))
         .withBean(SessionBlobRefManager.class, () -> mock(SessionBlobRefManager.class))
         .withBean(

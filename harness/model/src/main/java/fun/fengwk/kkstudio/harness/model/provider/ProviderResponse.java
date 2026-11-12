@@ -8,8 +8,11 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -29,9 +32,7 @@ import java.util.Set;
  * Provider 构造响应时一律为 null，adapter 未提供请求体观察或没有任何 request-body 条件时保持 null。它绝不包含请求正文。
  */
 public record ProviderResponse(
-    String text,
-    String thinking,
-    List<ProviderToolCall> toolCalls,
+    List<ProviderContentBlock> blocks,
     GenerationStopReason stopReason,
     ModelUsage usage,
     String requestId,
@@ -46,9 +47,7 @@ public record ProviderResponse(
   private static final String EMPTY_USAGE_JSON = "{}";
 
   public ProviderResponse {
-    text = text == null ? "" : text;
-    thinking = thinking == null ? "" : thinking;
-    toolCalls = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
+    blocks = List.copyOf(Objects.requireNonNull(blocks, "blocks"));
     stopReason = Objects.requireNonNull(stopReason, "stopReason");
     usage = Objects.requireNonNull(usage, "usage");
     requestId = optionalNonBlank(requestId, "requestId");
@@ -59,7 +58,31 @@ public record ProviderResponse(
     if (decodeDurationMillis != null && decodeDurationMillis < 0) {
       throw new IllegalArgumentException("decodeDurationMillis must be null or non-negative");
     }
-    validateToolOutcomes(toolCalls, toolCallDiagnostics, stopReason);
+    validateToolOutcomes(toolCalls(blocks), toolCallDiagnostics, stopReason);
+  }
+
+  public ProviderResponse(
+      String text,
+      String thinking,
+      List<ProviderToolCall> toolCalls,
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      String requestId,
+      String serviceTier,
+      String rawUsageJson,
+      List<ProviderToolCallDiagnostic> toolCallDiagnostics,
+      Long decodeDurationMillis,
+      RequestBodyPricingSnapshot requestBodyPricing) {
+    this(
+        semanticBlocks(text, thinking, toolCalls),
+        stopReason,
+        usage,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        decodeDurationMillis,
+        requestBodyPricing);
   }
 
   public ProviderResponse(
@@ -136,18 +159,30 @@ public record ProviderResponse(
 
   /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/计时）原样保留。 */
   public ProviderResponse withToolCalls(List<ProviderToolCall> value) {
-    return new ProviderResponse(
-        text,
-        thinking,
-        value,
-        stopReason,
-        usage,
-        requestId,
-        serviceTier,
-        rawUsageJson,
-        toolCallDiagnostics,
-        decodeDurationMillis,
-        requestBodyPricing);
+    List<ProviderContentBlock> updated = new ArrayList<>();
+    int insertAt = -1;
+    Map<String, ProviderBlockData> nativeDataByCallId = new HashMap<>();
+    for (ProviderContentBlock block : blocks) {
+      if (block instanceof ProviderToolCallBlock callBlock) {
+        if (insertAt < 0) {
+          insertAt = updated.size();
+        }
+        if (callBlock.providerBlockData() != null) {
+          nativeDataByCallId.put(callBlock.toolCall().id(), callBlock.providerBlockData());
+        }
+      } else {
+        updated.add(block);
+      }
+    }
+    if (insertAt < 0) {
+      insertAt = updated.size();
+    }
+    List<ProviderContentBlock> callBlocks = new ArrayList<>();
+    for (ProviderToolCall call : value) {
+      callBlocks.add(new ProviderToolCallBlock(call, nativeDataByCallId.get(call.id())));
+    }
+    updated.addAll(insertAt, callBlocks);
+    return copyWithBlocks(updated, decodeDurationMillis, requestBodyPricing);
   }
 
   /** 返回以给定 Harness 观测计时替换后的副本；其余事实原样保留（{@code null} 表示无可信流计时）。 */
@@ -155,18 +190,7 @@ public record ProviderResponse(
     if (Objects.equals(decodeDurationMillis, value)) {
       return this;
     }
-    return new ProviderResponse(
-        text,
-        thinking,
-        toolCalls,
-        stopReason,
-        usage,
-        requestId,
-        serviceTier,
-        rawUsageJson,
-        toolCallDiagnostics,
-        value,
-        requestBodyPricing);
+    return copyWithBlocks(blocks, value, requestBodyPricing);
   }
 
   /** 返回以给定 request-body 条件快照替换后的副本；其余事实原样保留（{@code null} 表示没有可信观察）。 */
@@ -174,18 +198,71 @@ public record ProviderResponse(
     if (Objects.equals(requestBodyPricing, value)) {
       return this;
     }
+    return copyWithBlocks(blocks, decodeDurationMillis, value);
+  }
+
+  private ProviderResponse copyWithBlocks(
+      List<ProviderContentBlock> value, Long durationMillis, RequestBodyPricingSnapshot pricing) {
     return new ProviderResponse(
-        text,
-        thinking,
-        toolCalls,
+        value,
         stopReason,
         usage,
         requestId,
         serviceTier,
         rawUsageJson,
         toolCallDiagnostics,
-        decodeDurationMillis,
-        value);
+        durationMillis,
+        pricing);
+  }
+
+  /** 将有序内容块中的通用语义投影为兼容读取视图。 */
+  public String text() {
+    StringBuilder value = new StringBuilder();
+    for (ProviderContentBlock block : blocks) {
+      if (block instanceof ProviderTextBlock textBlock) {
+        value.append(textBlock.text());
+      }
+    }
+    return value.toString();
+  }
+
+  public String thinking() {
+    StringBuilder value = new StringBuilder();
+    for (ProviderContentBlock block : blocks) {
+      if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        value.append(thinkingBlock.thinking());
+      }
+    }
+    return value.toString();
+  }
+
+  public List<ProviderToolCall> toolCalls() {
+    return toolCalls(blocks);
+  }
+
+  private static List<ProviderToolCall> toolCalls(List<ProviderContentBlock> blocks) {
+    List<ProviderToolCall> value = new ArrayList<>();
+    for (ProviderContentBlock block : blocks) {
+      if (block instanceof ProviderToolCallBlock callBlock) {
+        value.add(callBlock.toolCall());
+      }
+    }
+    return List.copyOf(value);
+  }
+
+  private static List<ProviderContentBlock> semanticBlocks(
+      String text, String thinking, List<ProviderToolCall> toolCalls) {
+    List<ProviderContentBlock> blocks = new ArrayList<>();
+    if (thinking != null && !thinking.isEmpty()) {
+      blocks.add(new ProviderThinkingBlock(thinking));
+    }
+    if (text != null && !text.isEmpty()) {
+      blocks.add(new ProviderTextBlock(text));
+    }
+    for (ProviderToolCall toolCall : Objects.requireNonNull(toolCalls, "toolCalls")) {
+      blocks.add(new ProviderToolCallBlock(toolCall));
+    }
+    return List.copyOf(blocks);
   }
 
   private static String optionalNonBlank(String value, String name) {

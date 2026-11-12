@@ -324,7 +324,7 @@ class ModelExecutionFailureConvergenceTest {
   }
 
   private static ModelGateway.Outcome succeeded(String text) {
-    return new ModelGateway.Succeeded(new ProviderCompletion(response(text), null));
+    return new ModelGateway.Succeeded(new ProviderCompletion(response(text)));
   }
 
   private static ProviderResponse response(String text) {

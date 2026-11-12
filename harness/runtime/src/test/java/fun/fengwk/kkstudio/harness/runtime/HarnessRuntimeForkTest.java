@@ -51,15 +51,19 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -72,6 +76,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -216,17 +221,16 @@ class HarnessRuntimeForkTest {
                     .toList()));
   }
 
-  /**
-   * providerReplayState 是隔离的 compat opaque 事实：复制时原样保留（不作为活跃 provider 会话续接），且复制后的 Entry 使用新身份。 同时新
-   * Session 只承载新的执行根，不克隆任何子执行树。
-   */
+  /** Session fork 保留 assistant 有序原生 block 及其 Provider 字段，并分配新的 Entry 身份。 */
   @Test
-  void sessionForkPreservesProviderReplayStateAsOpaqueFact() {
-    ProviderReplayState replayState =
-        new ProviderReplayState(
+  void sessionForkPreservesOrderedAssistantBlocks() {
+    ProviderBlockData blockData =
+        new ProviderBlockData(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            new ProviderReplayAffinity(
-                ProviderType.ANTHROPIC, "anthropic", TestIds.id(700), "claude"),
+            new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude"),
+            "signature",
+            null,
+            null,
             JsonNodeFactory.instance.objectNode().put("k", "v"));
     UUID sessionId = TestIds.id(930);
     UUID threadId = TestIds.id(931);
@@ -247,9 +251,17 @@ class HarnessRuntimeForkTest {
                       assistant,
                       sessionId,
                       user,
-                      assistantEntry(TestIds.id(937), sessionId, user, T1).payload(),
-                      T1,
-                      replayState));
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent("answer"),
+                                  new NativeAssistantBlockContent("signature", blockData))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(0L, 0L, 0L, 0L, Map.of(), null, null)),
+                          null),
+                      T1));
           tx.entries().insert(turnEndEntry(turnEnd, sessionId, assistant, T1, turnStart, false));
           tx.threads().insert(thread(threadId, sessionId, turnEnd));
           return null;
@@ -269,7 +281,13 @@ class HarnessRuntimeForkTest {
                         && message.message().role() == AgentMessageRole.ASSISTANT)
             .findFirst()
             .orElseThrow();
-    assertEquals(replayState, copiedAssistant.providerReplayState());
+    AgentMessage copiedMessage = ((MessagePayload) copiedAssistant.payload()).message();
+    assertEquals(2, copiedMessage.contents().size());
+    assertEquals(new TextMessageContent("answer"), copiedMessage.contents().get(0));
+    NativeAssistantBlockContent copiedBlock =
+        assertInstanceOf(NativeAssistantBlockContent.class, copiedMessage.contents().get(1));
+    assertEquals("signature", copiedBlock.blockType());
+    assertEquals(blockData, copiedBlock.providerBlockData());
     assertNotEquals(assistant, copiedAssistant.id());
     // 只承载新的执行根，不克隆子执行树。
     assertEquals(1, store.transaction(tx -> tx.threads().listBySession(newSessionId)).size());

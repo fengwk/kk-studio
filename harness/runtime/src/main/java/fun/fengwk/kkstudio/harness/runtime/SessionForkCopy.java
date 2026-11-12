@@ -27,8 +27,8 @@ import java.util.UUID;
  * <p>复制范围是「切点处的有效上下文」：存在 complete 压缩时从该压缩 {@code cutEntryId} 所在的完整 Turn 起（摘要由复制过去的 COMPACTION Entry
  * 在投影时重建），否则从 ROOT 之后的完整历史起；两者都以切点（fork 边界，ROOT 或已闭合 TURN_END）收尾。因此每个复制的 Turn 都完整，绝不修补半轮。
  *
- * <p>只复制历史事实：Entry 的 payload 与 provider replay state 原样保留，仅重写跨 Entry 的引用（压缩 cut / turn prefix 引用与
- * tool result 的 assistantEntryId）到新 id，绝不复用旧身份；invocation / command / join 与执行控制绝不复制。
+ * <p>只复制历史事实：Entry 的 payload 原样保留，仅重写跨 Entry 的引用（压缩 cut / turn prefix 引用与 tool result 的
+ * assistantEntryId）到新 id，绝不复用旧身份；invocation / command / join 与执行控制绝不复制。
  */
 final class SessionForkCopy {
 
@@ -55,13 +55,7 @@ final class SessionForkCopy {
       UUID newId = tx.nextId();
       newIds.put(source.id(), newId);
       Entry copied =
-          new Entry(
-              newId,
-              newSessionId,
-              parentId,
-              remapPayload(source.payload(), newIds),
-              now,
-              source.providerReplayState());
+          new Entry(newId, newSessionId, parentId, remapPayload(source.payload(), newIds), now);
       tx.entries().insert(copied);
       parentId = newId;
       copiedEntries.add(copied);

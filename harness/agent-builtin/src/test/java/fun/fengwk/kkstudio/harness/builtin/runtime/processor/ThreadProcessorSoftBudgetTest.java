@@ -977,7 +977,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
           builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
           builtin(store, tx).updateModelInvocation(running);
-          ModelInvocation succeeded = running.succeed(response, null, null, NOW);
+          ModelInvocation succeeded = running.succeed(response, NOW);
           builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
@@ -991,7 +991,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
           builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
           builtin(store, tx).updateModelInvocation(running);
-          ModelInvocation succeeded = running.succeed(response, null, null, NOW);
+          ModelInvocation succeeded = running.succeed(response, NOW);
           builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
@@ -1005,7 +1005,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
           builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
           builtin(store, tx).updateModelInvocation(running);
-          ModelInvocation succeeded = running.succeed(response, null, null, NOW);
+          ModelInvocation succeeded = running.succeed(response, NOW);
           builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
