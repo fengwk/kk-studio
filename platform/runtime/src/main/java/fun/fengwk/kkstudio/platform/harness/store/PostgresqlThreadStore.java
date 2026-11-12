@@ -44,7 +44,7 @@ final class PostgresqlThreadStore implements ThreadStore {
           """
           insert into harness_thread (
               id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
-              root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,
+              root_thread_id, yolo_enabled, kind, constraints, execution_control,
               input_through_sequence, next_command_sequence, version, created_at, updated_at
           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?, ?)
           """,
@@ -56,7 +56,7 @@ final class PostgresqlThreadStore implements ThreadStore {
           thread.name(),
           thread.rootThreadId(),
           thread.yoloEnabled(),
-          thread.spawnTrigger().name(),
+          thread.kind().name(),
           PostgresqlHarnessRows.encodeConstraints(thread.constraints()),
           thread.executionControl().name(),
           thread.inputThroughSequence(),
@@ -144,6 +144,24 @@ final class PostgresqlThreadStore implements ThreadStore {
   }
 
   @Override
+  public List<ThreadState> listUserBySession(UUID sessionId) {
+    tx.checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (tx.sessions().find(sessionId).isEmpty()) {
+      throw new IllegalArgumentException("session " + sessionId + " does not exist");
+    }
+    return tx.queryList(
+        """
+        select *
+        from harness_thread
+        where session_id = ? and kind = 'USER'
+        order by created_at, id
+        """,
+        PostgresqlHarnessRows.THREAD,
+        sessionId);
+  }
+
+  @Override
   public List<ThreadState> listChildren(UUID parentThreadId) {
     tx.checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -152,6 +170,21 @@ final class PostgresqlThreadStore implements ThreadStore {
         select *
         from harness_thread
         where parent_thread_id = ?
+        order by id
+        """,
+        PostgresqlHarnessRows.THREAD,
+        parentThreadId);
+  }
+
+  @Override
+  public List<ThreadState> listSubagents(UUID parentThreadId) {
+    tx.checkOpen();
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    return tx.queryList(
+        """
+        select *
+        from harness_thread
+        where parent_thread_id = ? and kind = 'SUBAGENT'
         order by id
         """,
         PostgresqlHarnessRows.THREAD,

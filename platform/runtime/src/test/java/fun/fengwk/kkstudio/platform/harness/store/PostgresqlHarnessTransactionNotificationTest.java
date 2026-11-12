@@ -33,9 +33,9 @@ import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -541,7 +541,7 @@ class PostgresqlHarnessTransactionNotificationTest {
                       "main",
                       parentThreadId == null ? threadId : rootThreadId,
                       false,
-                      SpawnTrigger.MODEL_TOOL,
+                      ThreadKind.SUBAGENT,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
@@ -619,7 +619,7 @@ class PostgresqlHarnessTransactionNotificationTest {
         "child",
         parentThreadId,
         false,
-        SpawnTrigger.MODEL_TOOL,
+        ThreadKind.SUBAGENT,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

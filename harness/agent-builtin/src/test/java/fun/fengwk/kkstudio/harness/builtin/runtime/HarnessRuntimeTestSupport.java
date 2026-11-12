@@ -38,9 +38,9 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -621,7 +621,7 @@ public final class HarnessRuntimeTestSupport {
                   "main",
                   parentThreadId == null ? threadId : parentThreadId,
                   false,
-                  SpawnTrigger.MODEL_TOOL,
+                  ThreadKind.SUBAGENT,
                   ThreadConstraints.NONE,
                   status,
                   0L,
@@ -952,7 +952,7 @@ public final class HarnessRuntimeTestSupport {
                       "parent",
                       threadId,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
@@ -1199,7 +1199,7 @@ public final class HarnessRuntimeTestSupport {
         name,
         id,
         yoloEnabled,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

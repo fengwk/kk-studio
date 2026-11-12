@@ -4,8 +4,8 @@ import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 
 import java.util.HashSet;
 import java.util.List;
@@ -40,7 +40,7 @@ public record SpawnRequest(
     Continuation continuation,
     boolean yoloEnabled,
     ThreadConstraints constraints,
-    SpawnTrigger trigger,
+    ThreadKind kind,
     JoinDelivery delivery,
     Budget budget,
     UUID ticketId,
@@ -52,12 +52,12 @@ public record SpawnRequest(
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(constraints, "constraints");
-    Objects.requireNonNull(trigger, "trigger");
+    Objects.requireNonNull(kind, "kind");
     Objects.requireNonNull(delivery, "delivery");
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(ticketId, "ticketId");
     commands = requireCommandBatch(commands);
-    if (trigger == SpawnTrigger.USER) {
+    if (kind == ThreadKind.USER) {
       throw new IllegalArgumentException("user-created threads are accepted via acceptCommands");
     }
     if (requestHash == null || !HASH.matcher(requestHash).matches()) {

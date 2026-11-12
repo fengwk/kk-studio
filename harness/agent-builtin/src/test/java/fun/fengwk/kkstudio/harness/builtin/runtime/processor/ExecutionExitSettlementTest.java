@@ -362,7 +362,7 @@ class ExecutionExitSettlementTest {
                         parent.name(),
                         parent.rootThreadId(),
                         parent.yoloEnabled(),
-                        parent.spawnTrigger(),
+                        parent.kind(),
                         parent.constraints(),
                         ThreadExecutionControl.STOPPED,
                         parent.inputThroughSequence(),
