@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -66,6 +67,11 @@ type ResourceUploader interface {
 	Upload(ctx context.Context, invocationID string, content ResultContent) (ResultContent, error)
 }
 
+// TemporaryResourceSweeper removes expired daemon-managed temporary resources.
+type TemporaryResourceSweeper interface {
+	Sweep(ttl time.Duration) (int, error)
+}
+
 // ResourceUploadError carries an explicit cleanup fact across the uploader boundary. Cause is
 // retained for local inspection but is deliberately excluded from Error to avoid leaking tickets.
 type ResourceUploadError struct {
@@ -117,5 +123,8 @@ type ConnectionFactory interface {
 	Connect(context.Context) (Connection, error)
 }
 
-// ErrRegistrationRejected marks an authentication rejection that must not be retried.
+var (
+	ErrForbiddenInboundFrame = errors.New("forbidden inbound frame")
+	ErrRuntimeFatal          = errors.New("runtime entered a fatal state")
+)
 var ErrRegistrationRejected = errors.New("daemon registration rejected")

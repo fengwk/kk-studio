@@ -38,6 +38,9 @@ type RuntimeOptions struct {
 	Processes                native.Supervisor
 	FileChanged              func(string)
 	Resources                ResourceUploader
+	TemporaryResources       TemporaryResourceSweeper
+	IDECommandCount          func() int
+	IDECanStartUpdate        func() bool
 	ApplyConfig              ConfigApplier
 	EnvironmentConfig        *EnvironmentConfigRuntime
 	Status                   *StatusTracker
@@ -91,6 +94,11 @@ type Runtime struct {
 	admissionPaused        bool
 	configReconnectPending bool
 	candidateSuspension    *bool
+	resourcePolicyMu       sync.Mutex
+	resourceTTL            time.Duration
+	resourceSweepInterval  time.Duration
+	resourcePolicyActive   bool
+	resourcePolicyChanged  chan struct{}
 }
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
@@ -148,7 +156,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), updateOps: update.NewOperations()}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(
 			func(previous, candidate config.DaemonConfig) {
@@ -206,10 +214,13 @@ func (r *Runtime) Run(ctx context.Context) error {
 	r.sendCtx = runCtx
 	r.mu.Unlock()
 	heartbeatDone := make(chan struct{})
+	sweepDone := make(chan struct{})
 	go r.heartbeatLoop(runCtx, heartbeatDone)
+	go r.temporaryResourceSweepLoop(runCtx, sweepDone)
 	defer func() {
 		cancel()
 		<-heartbeatDone
+		<-sweepDone
 		r.dropActiveConnection()
 		r.stopUpdateForShutdown()
 		if r.options.EnvironmentConfig != nil {
@@ -242,6 +253,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 		r.dropConnection(active)
 		if runCtx.Err() != nil {
 			return nil
+		}
+		if errors.Is(err, ErrRuntimeFatal) {
+			return err
 		}
 		if errors.Is(err, ErrRegistrationRejected) {
 			return err
@@ -290,6 +304,7 @@ func doubledDelay(delay, maximum time.Duration) time.Duration {
 }
 
 func (r *Runtime) attachConnection(connection Connection) *activeConnection {
+	r.setTemporaryResourcePolicyActive(false)
 	r.mu.Lock()
 	r.generation++
 	active := &activeConnection{generation: r.generation, connection: connection}
@@ -362,6 +377,16 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 			return r.sendBoundError(e.InvocationId, "UPDATE requires a READY bound connection")
 		}
 		return r.handleUpdate(ctx, e)
+	case protocol.MessageType_TEMPORARY_RESOURCE_POLICY:
+		if !ready {
+			return r.sendBoundError(e.InvocationId, "TEMPORARY_RESOURCE_POLICY requires a READY bound connection")
+		}
+		return r.handleTemporaryResourcePolicy(e)
+	case protocol.MessageType_READY:
+		if err := r.sendBoundError(nil, "daemon must not receive READY from server"); err != nil {
+			return err
+		}
+		return fmt.Errorf("daemon must not receive READY from server: %w", ErrForbiddenInboundFrame)
 	default:
 		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
@@ -382,6 +407,8 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 	if (budgets.TemporaryResourceTtlSeconds != nil && budgets.GetTemporaryResourceTtlSeconds() < 0) || (budgets.TemporaryResourceCleanupIntervalSeconds != nil && budgets.GetTemporaryResourceCleanupIntervalSeconds() < 0) {
 		return errors.New("settings.resourceBudgets is invalid")
 	}
+	ttl, interval := time.Duration(budgets.GetTemporaryResourceTtlSeconds())*time.Second, time.Duration(budgets.GetTemporaryResourceCleanupIntervalSeconds())*time.Second
+	r.setTemporaryResourcePolicy(ttl, interval, false)
 	if err := r.gate.Bind(r.options.EnvironmentID); err != nil {
 		return err
 	}
@@ -389,6 +416,19 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 	r.bound = true
 	r.ready = false
 	r.mu.Unlock()
+	return nil
+}
+
+func (r *Runtime) handleTemporaryResourcePolicy(e *protocol.Envelope) error {
+	payload, ok := e.Payload.(*protocol.Envelope_TemporaryResourcePolicy)
+	if !ok || payload.TemporaryResourcePolicy == nil {
+		return r.sendBoundError(e.InvocationId, "temporary resource policy is invalid")
+	}
+	policy := payload.TemporaryResourcePolicy
+	if policy.TemporaryResourceTtlSeconds == nil || policy.TemporaryResourceCleanupIntervalSeconds == nil || policy.GetTemporaryResourceTtlSeconds() <= 0 || policy.GetTemporaryResourceCleanupIntervalSeconds() <= 0 {
+		return r.sendBoundError(e.InvocationId, "temporary resource policy is invalid")
+	}
+	r.setTemporaryResourcePolicy(time.Duration(policy.GetTemporaryResourceTtlSeconds())*time.Second, time.Duration(policy.GetTemporaryResourceCleanupIntervalSeconds())*time.Second, true)
 	return nil
 }
 
@@ -428,7 +468,7 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 			}
 			return nil
 		case ConfigFatal:
-			return errors.New(result.Message)
+			return fmt.Errorf("%w: environment configuration is inconsistent", ErrRuntimeFatal)
 		default:
 			candidate = result.Config
 		}
@@ -458,6 +498,7 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 	first := !r.ready
 	r.ready = true
 	r.mu.Unlock()
+	r.setTemporaryResourcePolicyActive(true)
 	r.gate.MarkReady()
 	if first {
 		return r.sendReady()
@@ -527,6 +568,12 @@ func (r *Runtime) updateBusyReason(runner update.Runner) string {
 	r.callsMu.Unlock()
 	if protected {
 		return "protected execution is still running"
+	}
+	if r.options.IDECommandCount != nil && r.options.IDECommandCount() > 0 {
+		return "IDE command is in progress"
+	}
+	if r.options.IDECanStartUpdate != nil && !r.options.IDECanStartUpdate() {
+		return "IDE views, cleanup or data streams are active"
 	}
 	if runner != nil {
 		return runner.BusyReason()
