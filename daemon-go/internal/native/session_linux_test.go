@@ -351,3 +351,18 @@ func waitPIDGone(t *testing.T, pid int, timeout time.Duration) {
 	_ = unix.Kill(pid, syscall.SIGKILL)
 	t.Fatalf("process %d is still present", pid)
 }
+
+func TestLinuxProcStatRejectsMissingCommandDelimiter(t *testing.T) {
+	for _, record := range []string{"missing delimiter", "123 (truncated)"} {
+		if fields := fieldsAfterComm(record); fields != nil {
+			t.Fatalf("fieldsAfterComm(%q) = %v, want nil", record, fields)
+		}
+	}
+}
+
+func TestLinuxConvergeAdoptedChildrenRejectsUnknownOwner(t *testing.T) {
+	err := convergeAdoptedChildren(context.Background(), int(^uint(0)>>1), 0, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot inspect adopted-child owner session") {
+		t.Fatalf("convergeAdoptedChildren error = %v, want owner-session error", err)
+	}
+}
