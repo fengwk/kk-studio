@@ -38,7 +38,7 @@ type lifecycleDialResult struct {
 	err    error
 }
 
-// TRN-F-007
+// TRN-F-007, TRN-T-073, TRN-T-085, TRN-T-160
 func TestLifecycle_BackoffReadyGenerationAndGoaway(t *testing.T) {
 	results := make(chan lifecycleDialResult, 4)
 	var calls atomic.Int32
