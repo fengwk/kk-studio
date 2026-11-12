@@ -79,7 +79,7 @@ jobs:
               }
             }
             END {
-              printf "test events (pass/skip, including subtests): total=%d, internal/native=%d\\n", total, native
+              printf "test events (pass/skip, including subtests): total=%d, internal/native=%d\n", total, native
             }
           ' "$test_json"
       - name: Native coverage
