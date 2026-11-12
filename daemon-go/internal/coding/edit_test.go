@@ -143,6 +143,33 @@ func TestEditPreservesMixedLineEndings(t *testing.T) {
 	}
 }
 
+// COD-T-070: editing a file without a final newline reports the EOF marker in review details.
+func TestEditNoNewlineEOFReview(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "noeol.txt")
+	if err := os.WriteFile(path, []byte("no newline"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "newline", "new_string": "EOF"}, nil)
+	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 1" {
+		t.Fatalf("result=%#v", result)
+	}
+	var details struct {
+		EditReview struct {
+			Diff string `json:"diff"`
+		} `json:"editReview"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(details.EditReview.Diff, `\ No newline at end of file`) {
+		t.Fatalf("review diff=%q", details.EditReview.Diff)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil || string(written) != "no EOF" {
+		t.Fatalf("written=%q err=%v", written, err)
+	}
+}
+
 // COD-T-093: duplicate matches are rejected without changing the file.
 func TestEditMultipleMatchesAreRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "multiple.txt")
