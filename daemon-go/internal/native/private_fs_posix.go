@@ -5,7 +5,6 @@ package native
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -76,15 +75,8 @@ func writePrivateFile(path string, data []byte) error {
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	for len(data) > 0 {
-		n, writeErr := tmp.Write(data)
-		if writeErr != nil {
-			return writeErr
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
+	if err := writeAll(tmp, data); err != nil {
+		return err
 	}
 	if err := tmp.Sync(); err != nil {
 		return err

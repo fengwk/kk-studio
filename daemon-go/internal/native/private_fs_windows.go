@@ -4,7 +4,6 @@ package native
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -63,15 +62,8 @@ func writePrivateFile(path string, data []byte) error {
 	if err := setWindowsOwnerOnly(tmpPath); err != nil {
 		return err
 	}
-	for len(data) > 0 {
-		n, writeErr := tmp.Write(data)
-		if writeErr != nil {
-			return writeErr
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
+	if err := writeAll(tmp, data); err != nil {
+		return err
 	}
 	if err := tmp.Sync(); err != nil {
 		return err
