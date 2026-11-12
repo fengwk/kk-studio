@@ -48,8 +48,24 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 	return members, nil
 }
 
+type darwinProcessAPI interface {
+	SysctlKinfoProcSlice(string) ([]unix.KinfoProc, error)
+	Getsid(int) (int, error)
+}
+
+type nativeDarwinProcessAPI struct{}
+
+func (nativeDarwinProcessAPI) SysctlKinfoProcSlice(name string) ([]unix.KinfoProc, error) {
+	return unix.SysctlKinfoProcSlice(name)
+}
+func (nativeDarwinProcessAPI) Getsid(pid int) (int, error) { return unix.Getsid(pid) }
+
 func darwinProcessMembers() ([]sessionMember, error) {
-	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	return darwinProcessMembersWithAPI(nativeDarwinProcessAPI{})
+}
+
+func darwinProcessMembersWithAPI(api darwinProcessAPI) ([]sessionMember, error) {
+	procs, err := api.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
 		return nil, fmt.Errorf("cannot enumerate process scope members: %w", err)
 	}
@@ -59,7 +75,7 @@ func darwinProcessMembers() ([]sessionMember, error) {
 		if pid <= 0 {
 			continue
 		}
-		got, err := unix.Getsid(pid)
+		got, err := api.Getsid(pid)
 		if errors.Is(err, syscall.ESRCH) {
 			continue
 		}
