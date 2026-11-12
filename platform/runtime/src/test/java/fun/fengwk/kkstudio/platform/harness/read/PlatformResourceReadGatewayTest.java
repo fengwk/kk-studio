@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -73,18 +74,41 @@ class PlatformResourceReadGatewayTest {
                 null));
     when(archive.readFile(blobId, "skill/guide file.md"))
         .thenReturn("skill contents".getBytes(StandardCharsets.UTF_8));
+    SessionBlobRefManager refManager = mock(SessionBlobRefManager.class);
     PlatformResourceReadGateway gateway =
-        new PlatformResourceReadGateway(reader, packages, archive);
+        new PlatformResourceReadGateway(reader, packages, archive, refManager);
 
     ToolResult result =
         gateway.read(
-            request("resource://skills/pkg%20name/1.0.0/skill/guide%20file.md", null),
+            request(
+                "resource://skills/pkg%20name/1.0.0/skill/guide%20file.md",
+                context(ROOT_SESSION_ID)),
             ignored -> {});
 
     assertTrue(!result.error());
     assertTrue(
         ((TextResultContent) result.contents().getFirst()).text().contains("skill contents"));
     verify(archive).readFile(blobId, "skill/guide file.md");
+    verify(refManager).retainRef(ROOT_SESSION_ID, blobId);
+  }
+
+  @Test
+  void returnsExplicitErrorForSkillUriWithoutExecutionContext() {
+    PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
+    SkillPackageRepository packages = mock(SkillPackageRepository.class);
+    SkillArchiveFileReader archive = mock(SkillArchiveFileReader.class);
+    PlatformResourceReadGateway gateway =
+        new PlatformResourceReadGateway(
+            reader, packages, archive, mock(SessionBlobRefManager.class));
+
+    ToolResult result =
+        gateway.read(request("resource://skills/pkg/1.0.0/skill/guide.md", null), ignored -> {});
+
+    assertTrue(result.error());
+    assertEquals(
+        "resource URI requires a tool execution context",
+        ((TextResultContent) result.contents().getFirst()).text());
+    verify(packages, never()).getPackage(any());
   }
 
   @Test
@@ -184,7 +208,10 @@ class PlatformResourceReadGatewayTest {
 
   private static PlatformResourceReadGateway gateway(PlatformResourceContentReader reader) {
     return new PlatformResourceReadGateway(
-        reader, mock(SkillPackageRepository.class), mock(SkillArchiveFileReader.class));
+        reader,
+        mock(SkillPackageRepository.class),
+        mock(SkillArchiveFileReader.class),
+        mock(SessionBlobRefManager.class));
   }
 
   private static ToolExecutionRequest request(String path, ToolExecutionContext context) {

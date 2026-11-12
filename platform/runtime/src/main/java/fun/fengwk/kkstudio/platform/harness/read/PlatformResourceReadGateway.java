@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.json.ToolArguments;
@@ -15,44 +16,51 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /** Platform reader for durable {@code resource://} references. */
-public final class PlatformResourceReadGateway implements ResourceReadGateway {
+public class PlatformResourceReadGateway implements ResourceReadGateway {
 
   private final PlatformResourceContentReader reader;
   private final SkillPackageRepository skillPackageRepository;
   private final SkillArchiveFileReader skillArchiveFileReader;
+  private final SessionBlobRefManager sessionBlobRefManager;
 
   public PlatformResourceReadGateway(
       PlatformResourceContentReader reader,
       SkillPackageRepository skillPackageRepository,
-      SkillArchiveFileReader skillArchiveFileReader) {
+      SkillArchiveFileReader skillArchiveFileReader,
+      SessionBlobRefManager sessionBlobRefManager) {
     this.reader = Objects.requireNonNull(reader, "reader");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.skillArchiveFileReader =
         Objects.requireNonNull(skillArchiveFileReader, "skillArchiveFileReader");
+    this.sessionBlobRefManager =
+        Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
   }
 
   @Override
+  @Transactional
   public ToolResult read(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     String callId = request.call().id();
     try {
       JsonNode arguments = ToolArguments.parse(request.call().argumentsJson());
       String uri = ToolArguments.text(arguments, "path");
       ResourceUri.Parsed resource = ResourceUri.parse(uri);
-      if (resource.namespace() == ResourceUri.Namespace.SKILLS) {
-        return readSkill(callId, resource, arguments, request.timeout());
-      }
       ToolExecutionContext context = request.context();
       if (context == null) {
         return ToolResult.error(callId, "resource URI requires a tool execution context");
+      }
+      if (resource.namespace() == ResourceUri.Namespace.SKILLS) {
+        return readSkill(callId, resource, arguments, request.timeout(), context.rootSessionId());
       }
       var result =
           reader.readResource(
@@ -79,7 +87,11 @@ public final class PlatformResourceReadGateway implements ResourceReadGateway {
   }
 
   private ToolResult readSkill(
-      String callId, ResourceUri.Parsed resource, JsonNode arguments, Duration timeout) {
+      String callId,
+      ResourceUri.Parsed resource,
+      JsonNode arguments,
+      Duration timeout,
+      UUID sessionId) {
     SkillPackage skillPackage = skillPackageRepository.getPackage(resource.packageName());
     if (skillPackage == null || !skillPackage.packageVersion().equals(resource.version())) {
       return ToolResult.error(callId, "skill package version is not available");
@@ -87,6 +99,7 @@ public final class PlatformResourceReadGateway implements ResourceReadGateway {
     if (skillPackage.findSkill(resource.skill()) == null) {
       return ToolResult.error(callId, "skill is not available: " + resource.skill());
     }
+    sessionBlobRefManager.retainRef(sessionId, skillPackage.artifactBlobId());
     String archivePath = resource.skill() + "/" + resource.path();
     byte[] content = skillArchiveFileReader.readFile(skillPackage.artifactBlobId(), archivePath);
     String imageType = imageMediaType(archivePath);

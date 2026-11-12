@@ -15,7 +15,7 @@ Usage:
 - Use `read` on directories instead of `bash ls`. Directories keep their own listing format, also paged by `offset`/`limit`.
 - `path` is an absolute path on the selected Environment's file system, or a `resource://` URI:
   - `resource://files/<uuid>`: a shared resource. Read it with `read`; `offset`/`limit` apply only when it is returned as a text window. A supported media resource (image, audio, video, or PDF) may be returned as actual media content when the current model and provider protocol allow it; otherwise the call fails explicitly.
-  - `resource://skills/<package>/<version>/<skill>/<relativePath>`: a published skill resource. Skill-resource reading is not available yet.
+  - `resource://skills/<package>/<version>/<skill>/<relativePath>`: a file from a published skill package. The URI is read by the platform and held by the current Session; percent-encode path segments when needed.
 - Local paths require an Environment. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project` or `//server/share/project`.
 
 Examples:

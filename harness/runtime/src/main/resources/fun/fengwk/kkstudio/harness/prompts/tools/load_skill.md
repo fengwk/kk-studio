@@ -1,1 +1,1 @@
-Load the full instructions for a configured skill by name before using it. Call this tool only for a skill listed in `<available_skills>`.
+Load the full instructions for a configured skill by its exact name before using it. Call this tool only for a skill listed in `<available_skills>`. With an Environment that supports `skill.install`, the platform installs the skill and returns its `skill_dir`; resolve all relative paths against that directory. Otherwise, the instructions identify a `resource://skills/...` base URI; use `read` to open related files.

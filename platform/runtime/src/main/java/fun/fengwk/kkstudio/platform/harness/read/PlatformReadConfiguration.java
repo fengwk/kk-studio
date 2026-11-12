@@ -35,8 +35,10 @@ public class PlatformReadConfiguration {
   public PlatformResourceReadGateway platformResourceReadGateway(
       PlatformResourceContentReader reader,
       SkillPackageRepository skillPackageRepository,
-      SkillArchiveFileReader skillArchiveFileReader) {
-    return new PlatformResourceReadGateway(reader, skillPackageRepository, skillArchiveFileReader);
+      SkillArchiveFileReader skillArchiveFileReader,
+      SessionBlobRefManager sessionBlobRefManager) {
+    return new PlatformResourceReadGateway(
+        reader, skillPackageRepository, skillArchiveFileReader, sessionBlobRefManager);
   }
 
   @Bean

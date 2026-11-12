@@ -109,7 +109,7 @@ public final class PlatformSkillLoadGateway implements SkillLoadGateway {
     }
     ToolDescriptor installDescriptor =
         new ToolDescriptor(
-            "skill.install",
+            "skill-install",
             "Install a skill from its package archive",
             "skill.install",
             capability.inputSchema(),
@@ -118,7 +118,7 @@ public final class PlatformSkillLoadGateway implements SkillLoadGateway {
     ToolExecutionRequest installRequest =
         new ToolExecutionRequest(
             installDescriptor,
-            new ToolCall(callId, "skill.install", argumentsJson),
+            new ToolCall(callId, "skill-install", argumentsJson),
             capability.defaultTimeout(),
             context,
             new ResourceDownload(UUID.fromString(transferId), blobId));
