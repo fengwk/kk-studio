@@ -5,7 +5,6 @@ package native
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -68,35 +67,7 @@ func writePrivateFile(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	ok := false
-	defer func() {
-		_ = tmp.Close()
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	for len(data) > 0 {
-		n, writeErr := tmp.Write(data)
-		if writeErr != nil {
-			return writeErr
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	ok = true
-	return verifyPrivateFile(path)
+	return publishPrivateFileTransaction(tmp, path, data, os.Rename, os.Remove, verifyPrivateFile)
 }
 
 func createPrivateFile(path string) error {

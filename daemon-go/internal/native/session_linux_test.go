@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,6 +41,105 @@ func TestLinuxSupervisor_UnknownBaselineFailsBeforeStartingCommand(t *testing.T)
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("command marker exists or cannot be inspected: %v", err)
+	}
+}
+
+func linuxStatRecord(pid, parent, sid, threads int, start string) []byte {
+	fields := make([]string, 20)
+	for index := range fields {
+		fields[index] = "0"
+	}
+	fields[0] = "S"
+	fields[1] = strconv.Itoa(parent)
+	fields[3] = strconv.Itoa(sid)
+	fields[17] = strconv.Itoa(threads)
+	fields[19] = start
+	return []byte(fmt.Sprintf("%d (command with ) delimiter) %s", pid, strings.Join(fields, " ")))
+}
+
+// NAT-F-006 verifies process snapshot errors and disappearing entries never become an empty successful snapshot.
+func TestLinuxProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"noise", "0", "-1", "10", "20", "30", "40", "50"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	readDirError := errors.New("injected proc directory error")
+	api := linuxProcessSnapshotAPI{
+		readDir:  func(string) ([]os.DirEntry, error) { return nil, readDirError },
+		readFile: func(string) ([]byte, error) { return nil, nil },
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); !errors.Is(err, readDirError) || members != nil {
+		t.Fatalf("directory error = %+v, %v", members, err)
+	}
+
+	fileError := errors.New("injected stat read error")
+	api.readDir = os.ReadDir
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 1, 1, "123"), nil
+		case "20", "30":
+			return nil, os.ErrNotExist
+		case "40":
+			return nil, fileError
+		default:
+			return nil, nil
+		}
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); !errors.Is(err, fileError) || members != nil {
+		t.Fatalf("stat read error = %+v, %v", members, err)
+	}
+
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 4, 2, "123"), nil
+		case "20":
+			return nil, os.ErrNotExist
+		case "30":
+			return nil, unix.ESRCH
+		case "40":
+			return []byte("10 (short) S 1"), nil
+		case "50":
+			return linuxStatRecord(50, 1, 4, 2, "not-a-number"), nil
+		default:
+			return nil, nil
+		}
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); err == nil || members != nil {
+		t.Fatalf("malformed stat record = %+v, %v", members, err)
+	}
+	api.readFile = func(path string) ([]byte, error) {
+		if filepath.Base(filepath.Dir(path)) == "50" {
+			return linuxStatRecord(50, 1, 4, 2, "not-a-number"), nil
+		}
+		return linuxStatRecord(10, 1, 4, 2, "123"), nil
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); err == nil || members != nil {
+		t.Fatalf("invalid stat field = %+v, %v", members, err)
+	}
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 4, 2, "123"), nil
+		case "20":
+			return nil, os.ErrNotExist
+		case "30":
+			return nil, unix.ESRCH
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	members, err := linuxProcessMembersWithAPI(root, api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []sessionMember{{PID: 10, Parent: 1, Session: 4, Identity: "123", State: "S", Threads: 2}}
+	if !reflect.DeepEqual(members, want) {
+		t.Fatalf("members = %+v, want %+v", members, want)
 	}
 }
 
@@ -145,6 +245,33 @@ func TestLinuxSession_NoAdoptedChildren(t *testing.T) {
 	}
 }
 
+// NAT-T-051, NAT-T-121 verify explicitly tracked escaped sessions converge on terminate.
+func TestLinuxSupervisor_ConvergesTrackedEscapedSession(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	pidFile := filepath.Join(t.TempDir(), "escaped.pid")
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "setsid /bin/sleep 30 & echo $! > " + strconv.Quote(pidFile) + "; wait"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPID := waitPIDFile(t, pidFile)
+	if err := supervisor.(DescendantTracker).TrackDescendant(context.Background(), process.PID(), childPID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := process.Terminate(ctx, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	waitPIDGone(t, childPID, time.Second)
+}
+
 // NAT-T-122
 func TestLinuxSupervisor_ConvergesAdoptedSessionAfterNaturalExit(t *testing.T) {
 	supervisor, err := NewSupervisor()
@@ -208,24 +335,6 @@ func TestLinuxSupervisor_ConvergesAdoptedSessionAfterHelperDeath(t *testing.T) {
 	waitPIDGone(t, childPID, time.Second)
 }
 
-func waitPIDFile(t *testing.T, path string) int {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil && len(data) != 0 {
-			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-			if parseErr != nil {
-				t.Fatal(parseErr)
-			}
-			return pid
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("pid file %s was not published", path)
-	return 0
-}
-
 func waitPIDGone(t *testing.T, pid int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -241,4 +350,19 @@ func waitPIDGone(t *testing.T, pid int, timeout time.Duration) {
 	}
 	_ = unix.Kill(pid, syscall.SIGKILL)
 	t.Fatalf("process %d is still present", pid)
+}
+
+func TestLinuxProcStatRejectsMissingCommandDelimiter(t *testing.T) {
+	for _, record := range []string{"missing delimiter", "123 (truncated)"} {
+		if fields := fieldsAfterComm(record); fields != nil {
+			t.Fatalf("fieldsAfterComm(%q) = %v, want nil", record, fields)
+		}
+	}
+}
+
+func TestLinuxConvergeAdoptedChildrenRejectsUnknownOwner(t *testing.T) {
+	err := convergeAdoptedChildren(context.Background(), int(^uint(0)>>1), 0, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot inspect adopted-child owner session") {
+		t.Fatalf("convergeAdoptedChildren error = %v, want owner-session error", err)
+	}
 }

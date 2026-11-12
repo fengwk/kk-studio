@@ -144,10 +144,7 @@ func (s *windowsSupervisor) Start(ctx context.Context, spec ProcessSpec) (Manage
 		}
 		return nil, p.cleanupFailedStart(err)
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, p.cleanupFailedStart(err)
-	}
-	if err := publishText(stateDir, permitFile, "permit"); err != nil {
+	if err := publishWindowsPermit(ctx, stateDir); err != nil {
 		return nil, p.cleanupFailedStart(err)
 	}
 	s.mu.Lock()
@@ -205,6 +202,13 @@ func (s *windowsSupervisor) TrackDescendant(ctx context.Context, rootPID, childP
 	return nil
 }
 
+func publishWindowsPermit(ctx context.Context, stateDir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return publishText(stateDir, permitFile, "permit")
+}
+
 func jobNameFor(stateDir string) string {
 	sum := sha256.Sum256([]byte(stateDir))
 	return windowsJobNamePrefix + hex.EncodeToString(sum[:])[:24]
@@ -223,24 +227,77 @@ func openWindowsJob(name string) (windows.Handle, error) {
 	return windows.Handle(handle), nil
 }
 
-func windowsProcessInJob(pid uint32, job windows.Handle) (bool, error) {
-	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-	if err != nil {
-		return false, fmt.Errorf("cannot open the process for Job membership: %w", err)
-	}
+type windowsMembershipAPI interface {
+	OpenProcess(uint32, bool, uint32) (windows.Handle, error)
+	IsProcessInJob(windows.Handle, windows.Handle) (bool, error)
+	CloseHandle(windows.Handle) error
+}
+
+type nativeWindowsMembershipAPI struct{}
+
+func (nativeWindowsMembershipAPI) OpenProcess(access uint32, inherit bool, pid uint32) (windows.Handle, error) {
+	return windows.OpenProcess(access, inherit, pid)
+}
+
+func (nativeWindowsMembershipAPI) IsProcessInJob(process, job windows.Handle) (bool, error) {
 	var inJob int32
 	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
 	result, _, callErr := proc.Call(uintptr(process), uintptr(job), uintptr(unsafe.Pointer(&inJob)))
 	if result == 0 {
-		err = fmt.Errorf("cannot query Job membership: %w", callErr)
+		return false, callErr
 	}
-	if closeErr := windows.CloseHandle(process); closeErr != nil {
+	return inJob != 0, nil
+}
+
+func (nativeWindowsMembershipAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+
+func windowsProcessInJob(pid uint32, job windows.Handle) (bool, error) {
+	return windowsProcessInJobWithAPI(pid, job, nativeWindowsMembershipAPI{})
+}
+
+func windowsProcessInJobWithAPI(pid uint32, job windows.Handle, api windowsMembershipAPI) (bool, error) {
+	process, err := api.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return false, fmt.Errorf("cannot open the process for Job membership: %w", err)
+	}
+	inJob, err := api.IsProcessInJob(process, job)
+	if err != nil {
+		err = fmt.Errorf("cannot query Job membership: %w", err)
+	}
+	if closeErr := api.CloseHandle(process); closeErr != nil {
 		err = errors.Join(err, fmt.Errorf("cannot close process membership handle: %w", closeErr))
 	}
-	return inJob != 0, err
+	return inJob, err
+}
+
+type windowsJobCreationAPI interface {
+	CreateJobObject(*windows.SecurityAttributes, *uint16) (windows.Handle, error)
+	SetInformationJobObject(windows.Handle, uint32, *windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION) error
+	CloseHandle(windows.Handle) error
+}
+
+type nativeWindowsJobCreationAPI struct{}
+
+func (nativeWindowsJobCreationAPI) CreateJobObject(security *windows.SecurityAttributes, name *uint16) (windows.Handle, error) {
+	return windows.CreateJobObject(security, name)
+}
+
+func (nativeWindowsJobCreationAPI) SetInformationJobObject(job windows.Handle, class uint32, info *windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION) error {
+	_, err := windows.SetInformationJobObject(job, class, uintptr(unsafe.Pointer(info)), uint32(unsafe.Sizeof(*info)))
+	return err
+}
+
+func (nativeWindowsJobCreationAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
 }
 
 func createWindowsJob(name string) (windows.Handle, error) {
+	return createWindowsJobWithAPI(name, nativeWindowsJobCreationAPI{})
+}
+
+func createWindowsJobWithAPI(name string, api windowsJobCreationAPI) (windows.Handle, error) {
 	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return 0, err
@@ -255,14 +312,17 @@ func createWindowsJob(name string) (windows.Handle, error) {
 		return 0, err
 	}
 	security := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
-	job, err := windows.CreateJobObject(&security, name16)
+	job, err := api.CreateJobObject(&security, name16)
 	if err != nil {
 		return 0, fmt.Errorf("cannot create the process scope job: %w", err)
 	}
+	if job == 0 || job == windows.InvalidHandle {
+		return 0, errors.New("cannot create the process scope job: the API returned no Job handle")
+	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
 	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
-		_ = windows.CloseHandle(job)
+	if err := api.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, &info); err != nil {
+		_ = api.CloseHandle(job)
 		return 0, fmt.Errorf("cannot configure the process scope job lifetime: %w", err)
 	}
 	return job, nil
@@ -289,25 +349,29 @@ type windowsHelperPipes struct {
 }
 
 func createWindowsHelperPipes() (*windowsHelperPipes, error) {
+	return createWindowsHelperPipesWithAPI(nativeWindowsPipeAPI{})
+}
+
+func createWindowsHelperPipesWithAPI(api windowsPipeAPI) (*windowsHelperPipes, error) {
 	pipes := &windowsHelperPipes{}
-	ownerFile, ownerChild, err := windowsPipe(true)
+	ownerFile, ownerChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		return nil, err
 	}
 	pipes.ownerFile, pipes.owner = ownerFile, ownerChild
-	inputFile, inputChild, err := windowsPipe(true)
+	inputFile, inputChild, err := windowsPipeWithAPI(true, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.inputFile, pipes.commandInput = inputFile, inputChild
-	outputFile, outputChild, err := windowsPipe(false)
+	outputFile, outputChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
 	}
 	pipes.outputFile, pipes.output = outputFile, outputChild
-	errorFile, errorChild, err := windowsPipe(false)
+	errorFile, errorChild, err := windowsPipeWithAPI(false, api)
 	if err != nil {
 		pipes.close()
 		return nil, err
@@ -317,25 +381,51 @@ func createWindowsHelperPipes() (*windowsHelperPipes, error) {
 	return pipes, nil
 }
 
+type windowsPipeAPI interface {
+	CreatePipe(*windows.Handle, *windows.Handle, *windows.SecurityAttributes, uint32) error
+	SetHandleInformation(windows.Handle, uint32, uint32) error
+	CloseHandle(windows.Handle) error
+	NewFile(uintptr, string) *os.File
+}
+
+type nativeWindowsPipeAPI struct{}
+
+func (nativeWindowsPipeAPI) CreatePipe(readHandle, writeHandle *windows.Handle, attributes *windows.SecurityAttributes, size uint32) error {
+	return windows.CreatePipe(readHandle, writeHandle, attributes, size)
+}
+func (nativeWindowsPipeAPI) SetHandleInformation(handle windows.Handle, mask, flags uint32) error {
+	return windows.SetHandleInformation(handle, mask, flags)
+}
+func (nativeWindowsPipeAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+func (nativeWindowsPipeAPI) NewFile(handle uintptr, name string) *os.File {
+	return os.NewFile(handle, name)
+}
+
 func windowsPipe(parentWrites bool) (*os.File, windows.Handle, error) {
+	return windowsPipeWithAPI(parentWrites, nativeWindowsPipeAPI{})
+}
+
+func windowsPipeWithAPI(parentWrites bool, api windowsPipeAPI) (*os.File, windows.Handle, error) {
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
 	var readHandle, writeHandle windows.Handle
-	if err := windows.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
+	if err := api.CreatePipe(&readHandle, &writeHandle, &sa, 0); err != nil {
 		return nil, 0, err
 	}
 	parent, child := readHandle, writeHandle
 	if parentWrites {
 		parent, child = writeHandle, readHandle
 	}
-	if err := windows.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+	if err := api.SetHandleInformation(parent, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, err
 	}
-	file := os.NewFile(uintptr(parent), "native-pipe")
+	file := api.NewFile(uintptr(parent), "native-pipe")
 	if file == nil {
-		_ = windows.CloseHandle(readHandle)
-		_ = windows.CloseHandle(writeHandle)
+		_ = api.CloseHandle(readHandle)
+		_ = api.CloseHandle(writeHandle)
 		return nil, 0, errors.New("cannot wrap a native pipe handle")
 	}
 	return file, child, nil
@@ -487,6 +577,7 @@ type windowsProcess struct {
 	waitErr          error
 	terminationErr   error
 	closeErr         error
+	terminationAPI   windowsProcessTerminationAPI
 }
 
 func (p *windowsProcess) PID() int              { return p.pid }
@@ -529,7 +620,11 @@ func (p *windowsProcess) recordHelperExit() {
 }
 
 func (p *windowsProcess) awaitScope(ctx context.Context) error {
-	deadline := time.NewTimer(windowsPrepareBudget)
+	return p.awaitScopeWithBudget(ctx, windowsPrepareBudget)
+}
+
+func (p *windowsProcess) awaitScopeWithBudget(ctx context.Context, budget time.Duration) error {
+	deadline := time.NewTimer(budget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(windowsScopePoll)
 	defer ticker.Stop()
@@ -666,6 +761,10 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	api := p.terminationAPI
+	if api == nil {
+		api = nativeWindowsProcessTerminationAPI{}
+	}
 	var resourceErrors []error
 	if p.owner != nil {
 		if err := p.owner.Close(); err != nil {
@@ -676,22 +775,20 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	var convergenceErrors []error
 	converged := false
 	if p.job != 0 {
-		_ = windows.TerminateJobObject(p.job, 1)
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), windowsDrainBudget)
-		err := awaitWindowsJobEmpty(cleanupCtx, p.job, windowsDrainBudget)
-		cancel()
+		_ = api.TerminateJobObject(p.job, 1)
+		err := api.AwaitJobEmpty(context.Background(), p.job, windowsDrainBudget)
 		if err != nil {
 			convergenceErrors = append(convergenceErrors, err)
 		} else {
 			converged = true
 		}
-	} else if err := terminateWindowsProcess(context.Background(), p.helper); err != nil {
+	} else if err := terminateWindowsProcessWithAPI(context.Background(), p.helper, windowsForceKillBudget, api); err != nil {
 		convergenceErrors = append(convergenceErrors, err)
 	} else {
 		converged = true
 	}
 	if p.job != 0 {
-		if err := windows.CloseHandle(p.job); err != nil {
+		if err := api.CloseHandle(p.job); err != nil {
 			resourceErrors = append(resourceErrors, fmt.Errorf("cannot close process scope job: %w", err))
 		}
 		p.job = 0
@@ -699,7 +796,7 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	if converged {
 		if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 			if p.helper != 0 {
-				_ = windows.TerminateProcess(p.helper, 1)
+				_ = api.TerminateProcess(p.helper, 1)
 			}
 			if err := p.awaitHelperExit(context.Background(), windowsForceKillBudget); err != nil {
 				convergenceErrors = append(convergenceErrors, err)
@@ -712,7 +809,8 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 		}
 	}
 	if len(convergenceErrors) > 0 {
-		p.terminationErr = &ProcessScopeNotConvergedError{Cause: errors.Join(convergenceErrors...)}
+		failures := append(convergenceErrors, resourceErrors...)
+		p.terminationErr = &ProcessScopeNotConvergedError{Cause: errors.Join(failures...)}
 		return p.terminationErr
 	}
 	p.settled = true
@@ -897,17 +995,43 @@ func (p *windowsProcess) awaitHelperExit(ctx context.Context, budget time.Durati
 	}
 }
 
-func terminateWindowsProcess(ctx context.Context, process windows.Handle) error {
+type windowsProcessTerminationAPI interface {
+	TerminateProcess(windows.Handle, uint32) error
+	WaitForSingleObject(windows.Handle, uint32) (uint32, error)
+	TerminateJobObject(windows.Handle, uint32) error
+	AwaitJobEmpty(context.Context, windows.Handle, time.Duration) error
+	CloseHandle(windows.Handle) error
+}
+
+type nativeWindowsProcessTerminationAPI struct{}
+
+func (nativeWindowsProcessTerminationAPI) TerminateProcess(process windows.Handle, code uint32) error {
+	return windows.TerminateProcess(process, code)
+}
+func (nativeWindowsProcessTerminationAPI) WaitForSingleObject(process windows.Handle, milliseconds uint32) (uint32, error) {
+	return windows.WaitForSingleObject(process, milliseconds)
+}
+func (nativeWindowsProcessTerminationAPI) TerminateJobObject(job windows.Handle, code uint32) error {
+	return windows.TerminateJobObject(job, code)
+}
+func (nativeWindowsProcessTerminationAPI) AwaitJobEmpty(ctx context.Context, job windows.Handle, budget time.Duration) error {
+	return awaitWindowsJobEmpty(ctx, job, budget)
+}
+func (nativeWindowsProcessTerminationAPI) CloseHandle(handle windows.Handle) error {
+	return windows.CloseHandle(handle)
+}
+
+func terminateWindowsProcessWithAPI(ctx context.Context, process windows.Handle, budget time.Duration, api windowsProcessTerminationAPI) error {
 	if process == 0 {
 		return nil
 	}
-	if err := windows.TerminateProcess(process, 1); err != nil && err != windows.ERROR_ACCESS_DENIED {
+	if err := api.TerminateProcess(process, 1); err != nil && err != windows.ERROR_ACCESS_DENIED {
 		return err
 	}
-	deadline := time.NewTimer(windowsForceKillBudget)
+	deadline := time.NewTimer(budget)
 	defer deadline.Stop()
 	for {
-		status, err := windows.WaitForSingleObject(process, 0)
+		status, err := api.WaitForSingleObject(process, 0)
 		if err != nil {
 			return err
 		}

@@ -3,6 +3,7 @@ package native
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -206,5 +207,56 @@ func TestState_AtomicPublish(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != scopeFile {
 		t.Fatalf("published files = %v", entries)
+	}
+}
+
+// Invalid temporary-directory configuration must fail without returning a scope path.
+func TestState_CreateDirectoryFailure(t *testing.T) {
+	invalidTemp := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(invalidTemp, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Setenv("TMP", invalidTemp)
+		t.Setenv("TEMP", invalidTemp)
+	} else {
+		t.Setenv("TMPDIR", invalidTemp)
+	}
+	if dir, err := createStateDir(); err == nil || dir != "" {
+		t.Fatalf("createStateDir() = %q, %v; want failure without a directory", dir, err)
+	}
+}
+
+// State filenames and non-private roots are rejected before accessing payloads.
+func TestState_ReadAndPublishRejectInvalidPaths(t *testing.T) {
+	dir := stateTestDir(t)
+	if err := publish(dir, "../escape", []byte("secret")); err == nil {
+		t.Fatal("publish accepted a path traversal name")
+	}
+	if _, err := readState(dir, "../escape"); err == nil {
+		t.Fatal("readState accepted a path traversal name")
+	}
+	if _, err := readState(filepath.Join(t.TempDir(), "missing"), scopeFile); err == nil {
+		t.Fatal("readState accepted a missing private directory")
+	}
+	if spec, err := readLaunch(dir); err != nil || spec != nil {
+		t.Fatalf("missing launch = %#v, %v; want absent without error", spec, err)
+	}
+}
+
+// Malformed state records are rejected rather than accepted as process outcomes.
+func TestState_RejectMalformedExitAndMissingCleanup(t *testing.T) {
+	dir := stateTestDir(t)
+	if err := publishText(dir, exitFile, "not-json"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExit(dir); err == nil {
+		t.Fatal("malformed exit report was accepted")
+	}
+	if _, err := readCleanup(dir); err == nil {
+		t.Fatal("missing cleanup evidence was accepted")
+	}
+	if err := removeStateDir(filepath.Join(t.TempDir(), "already-removed")); err != nil {
+		t.Fatalf("removing absent state directory: %v", err)
 	}
 }

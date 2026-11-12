@@ -32,8 +32,40 @@ func convergeAdoptedChildren(ctx context.Context, ownerPID int, grace time.Durat
 	return nil
 }
 
+func allProcessMembers() ([]sessionMember, error) { return darwinProcessMembers() }
+
 func sessionMembers(sid int) ([]sessionMember, error) {
-	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	all, err := darwinProcessMembers()
+	if err != nil {
+		return nil, err
+	}
+	members := make([]sessionMember, 0)
+	for _, member := range all {
+		if member.Session == sid {
+			members = append(members, member)
+		}
+	}
+	return members, nil
+}
+
+type darwinProcessAPI interface {
+	SysctlKinfoProcSlice(string) ([]unix.KinfoProc, error)
+	Getsid(int) (int, error)
+}
+
+type nativeDarwinProcessAPI struct{}
+
+func (nativeDarwinProcessAPI) SysctlKinfoProcSlice(name string) ([]unix.KinfoProc, error) {
+	return unix.SysctlKinfoProcSlice(name)
+}
+func (nativeDarwinProcessAPI) Getsid(pid int) (int, error) { return unix.Getsid(pid) }
+
+func darwinProcessMembers() ([]sessionMember, error) {
+	return darwinProcessMembersWithAPI(nativeDarwinProcessAPI{})
+}
+
+func darwinProcessMembersWithAPI(api darwinProcessAPI) ([]sessionMember, error) {
+	procs, err := api.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
 		return nil, fmt.Errorf("cannot enumerate process scope members: %w", err)
 	}
@@ -43,15 +75,12 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 		if pid <= 0 {
 			continue
 		}
-		got, err := unix.Getsid(pid)
+		got, err := api.Getsid(pid)
 		if errors.Is(err, syscall.ESRCH) {
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("cannot inspect process scope member: %w", err)
-		}
-		if got != sid {
-			continue
 		}
 		start := proc.Proc.P_starttime
 		identity := fmt.Sprintf("%d.%d", start.Sec, start.Usec)
