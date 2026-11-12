@@ -248,6 +248,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 		active := r.attachConnection(connection)
 		err = r.serveConnection(runCtx, active)
+		if err != nil && runCtx.Err() == nil && r.options.ReportError != nil {
+			r.options.ReportError(err)
+		}
 		r.dropConnection(active)
 		if runCtx.Err() != nil {
 			return nil
@@ -1157,7 +1160,11 @@ func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, stat
 	return r.sendBound(frame, false)
 }
 func (r *Runtime) sendStarted(id string, replayed bool) error {
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: &protocol.Started{Replayed: boolPtr(replayed)}}}, false)
+	started := &protocol.Started{}
+	if replayed {
+		started.Replayed = boolPtr(true)
+	}
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: started}}, false)
 }
 func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	entry, ok := r.journal.Get(id)
