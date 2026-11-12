@@ -77,8 +77,11 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	}
 	port, _ := strconv.Atoi(portText)
 	upstream := ViewUpstream{Host: addr, Port: port, Path: "/", Protocols: []string{"chat"}}
-	done := make(chan struct{})
-	go func() { defer close(done); (&ControlConnection{}).tunnelIDEWebSocket(response, request, upstream, "/") }()
+	done := make(chan any, 1)
+	go func() {
+		defer func() { done <- recover() }()
+		(&ControlConnection{}).tunnelIDEWebSocket(response, request, upstream, "/")
+	}()
 	select {
 	case got := <-serverRequest:
 		for name, want := range map[string]string{"Sec-WebSocket-Key": "client-key", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Protocol": "chat", "Sec-WebSocket-Extensions": "permessage-deflate"} {
@@ -116,7 +119,10 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	}
 	cancel()
 	select {
-	case <-done:
+	case recovered := <-done:
+		if recovered != nil && recovered != http.ErrAbortHandler {
+			t.Fatalf("unexpected tunnel panic: %v", recovered)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("cancel did not end websocket tunnel")
 	}

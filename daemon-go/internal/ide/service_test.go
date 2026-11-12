@@ -2157,7 +2157,6 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	gate := make(chan struct{})
 	var gateOnce sync.Once
 	releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
-	defer releaseGate()
 	allStarted := make(chan struct{})
 	var started atomic.Int32
 	manager := &fakeCodeServerManager{ensureHook: func() {
@@ -2166,13 +2165,23 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 		}
 		<-gate
 	}}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+	dataDir := filepath.Join(t.TempDir(), "daemon")
+	if err := native.EnsurePrivateDirectory(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(config.DaemonConfig{DataDir: dataDir}, nil, nil, ServiceOptions{
 		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: capacity,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
+	defer releaseGate()
+	for _, directory := range []string{service.paths.IDEDir, service.paths.ViewsDir} {
+		if err := native.EnsurePrivateDirectory(directory); err != nil {
+			t.Fatal(err)
+		}
+	}
 	root := t.TempDir()
 	results := make(chan *protocol.IdeResult, capacity)
 	for index := 0; index < capacity; index++ {
