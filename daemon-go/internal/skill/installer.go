@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,10 +19,10 @@ import (
 )
 
 const (
-	maxArchiveBytes   = 128 << 20
-	maxArchiveFiles   = 10000
-	maxExpandedBytes  = 512 << 20
-	installDigestFile = ".kk-studio-skill-sha256"
+	maxArchiveFiles       = 10000
+	maxExpandedBytes      = 512 << 20
+	maxSkillManifestBytes = 64 << 10
+	installDigestFile     = ".kk-studio-skill-sha256"
 )
 
 type installArgs struct {
@@ -37,6 +38,37 @@ var packageLocks sync.Map
 type Installer struct {
 	DataDir    string
 	Downloader ResourceDownloader
+}
+
+// CleanupStaging removes only abandoned staging directories left by interrupted installations.
+// Call it once during daemon startup, before accepting skill.install invocations.
+func (i *Installer) CleanupStaging(ctx context.Context) error {
+	root := filepath.Join(i.DataDir, "skills")
+	info, err := os.Lstat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("skill.install: cannot inspect skills directory: %w", err)
+	}
+	if !info.IsDir() {
+		return errors.New("skill.install: skills path is not a directory")
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".staging-") {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("skill.install: cannot remove abandoned staging directory: %w", err)
+			}
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }
 
 // Install verifies the request and ticket, then publishes one immutable content-addressed skill archive.
@@ -55,7 +87,7 @@ func (i *Installer) Install(ctx context.Context, input json.RawMessage) (json.Ra
 	if err != nil {
 		return nil, "", errors.New("skill.install: resource ticket is unavailable")
 	}
-	if ticket.Size <= 0 || ticket.Size > maxArchiveBytes || !validSHA256(ticket.SHA256) {
+	if ticket.Size < 0 || !validSHA256(ticket.SHA256) {
 		return nil, "", errors.New("skill.install: resource ticket metadata is invalid")
 	}
 	packageVersionDir := filepath.Join(i.DataDir, "skills", a.Package, a.Version)
@@ -147,9 +179,12 @@ func requireInstalledSkill(target, skillName, digest string) error {
 }
 
 func requireSkillMarker(root, skillName string) error {
-	marker, err := os.Stat(filepath.Join(root, skillName, "SKILL.md"))
+	marker, err := os.Lstat(filepath.Join(root, skillName, "SKILL.md"))
 	if err != nil || !marker.Mode().IsRegular() {
 		return errors.New("skill.install: requested skill marker is missing")
+	}
+	if marker.Size() > maxSkillManifestBytes {
+		return errors.New("skill.install: requested skill marker exceeds 64 KiB")
 	}
 	return nil
 }

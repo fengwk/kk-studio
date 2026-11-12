@@ -71,8 +71,8 @@ func expectedTarget(root string, archive []byte) string {
 	return filepath.Join(root, "skills", "pkg", "1.2", hex.EncodeToString(digest[:])[:12])
 }
 
-// RUN-T-228 verifies ticket-bound extraction and publication under the content-addressed path.
-func TestInstallerPublishesContentAddressedSkill(t *testing.T) {
+// RUN-N-002 and RUN-T-228 verify ticket-bound extraction and publication under the content-addressed path.
+func TestSkillInstall_TicketHashAndSafeVersionedPublish(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill", "demo/readme.txt": "content"})
 	d := &fakeDownloader{data: archive}
 	root := t.TempDir()
@@ -90,6 +90,15 @@ func TestInstallerPublishesContentAddressedSkill(t *testing.T) {
 	want := filepath.Join(expectedTarget(root, archive), "demo")
 	if got.SkillDir != want {
 		t.Fatalf("skill_dir=%q, want %q", got.SkillDir, want)
+	}
+	wantResult, err := json.Marshal(struct {
+		SkillDir string `json:"skill_dir"`
+	}{want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result, wantResult) {
+		t.Fatalf("success result = %s, want %s", result, wantResult)
 	}
 	if _, err := os.Stat(filepath.Join(got.SkillDir, "SKILL.md")); err != nil {
 		t.Fatal(err)
@@ -139,6 +148,31 @@ func TestInstallerRejectsTicketDigestMismatch(t *testing.T) {
 	}
 	if _, err := os.Stat(expectedTarget(root, archive)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target unexpectedly published: %v", err)
+	}
+}
+
+// RUN-N-002 verifies installation failures are returned as errors rather than successful text-only results.
+func TestSkillInstall_FailureIsReturned(t *testing.T) {
+	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
+	digest := sha256.Sum256(archive)
+	cases := []struct {
+		name string
+		d    *fakeDownloader
+	}{
+		{name: "ticket request", d: &fakeDownloader{data: archive, requestErr: errors.New("offline")}},
+		{name: "download", d: &fakeDownloader{data: archive, downloadErr: errors.New("offline")}},
+		{name: "ticket size mismatch", d: &fakeDownloader{data: archive, ticket: DownloadTicket{Size: int64(len(archive)) + 1, SHA256: hex.EncodeToString(digest[:]), Opaque: "ticket-token"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, message, err := (&Installer{DataDir: t.TempDir(), Downloader: tc.d}).Install(context.Background(), installInput())
+			if err == nil || result != nil || message != "" {
+				t.Fatalf("Install result=%q message=%q err=%v; want error-only failure", result, message, err)
+			}
+			if tc.d.requests != 1 || tc.d.downloads > 1 {
+				t.Fatalf("requests/downloads=%d/%d, want one ticket request and at most one download", tc.d.requests, tc.d.downloads)
+			}
+		})
 	}
 }
 

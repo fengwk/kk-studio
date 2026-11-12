@@ -159,16 +159,22 @@ func TestLoadRejectsInvalidConfigurationBranches(t *testing.T) {
 
 // RUN-T-159/166/167/177 cover optional config values and derived executable paths.
 func TestLoadOptionalFieldsAndDistributionPaths(t *testing.T) {
-	document := `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"9","daemonConfig":{"studioUrl":"https://studio.example/","bashExecutable":"/bin/bash","proxyUrl":"http://proxy.example:8080","lsp":{"servers":{"go":{"command":["gopls"],"extensions":[".go"],"rootMarkers":["go.mod"],"firstMatchMarkers":["go.work"]}}}}}`
+	bash := writeExecutableFixture(t, "bash")
+	bashJSON, err := json.Marshal(bash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"9","daemonConfig":{"studioUrl":"https://studio.example/","bashExecutable":` + string(bashJSON) + `,"proxyUrl":"http://proxy.example:8080","lsp":{"servers":{"go":{"command":["gopls"],"extensions":[".go"],"rootMarkers":["go.mod"],"firstMatchMarkers":["go.work"]}}}}}`
 	path := writeConfigFixture(t, document)
 	got, err := LoadDaemonConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ConfigVersion != 9 || got.ProxyURL == nil || *got.ProxyURL != "http://proxy.example:8080" || got.BashExecutable == nil || *got.BashExecutable != "/bin/bash" || len(got.LSP) != 1 || got.LSP[0].FirstMatchMarkers[0] != "go.work" {
+	if got.ConfigVersion != 9 || got.ProxyURL == nil || *got.ProxyURL != "http://proxy.example:8080" || got.BashExecutable == nil || *got.BashExecutable != bash || len(got.LSP) != 1 || got.LSP[0].FirstMatchMarkers[0] != "go.work" {
 		t.Fatalf("optional config fields = %+v", got)
 	}
-	if DistributionDir(filepath.Join("/opt", "dist", "daemon")) != filepath.Join("/opt") || DistributionDir(filepath.Join("/opt", "bin", "daemon")) != filepath.Join("/opt", "bin") {
+	root := t.TempDir()
+	if DistributionDir(filepath.Join(root, "dist", "daemon")) != root || DistributionDir(filepath.Join(root, "bin", "daemon")) != filepath.Join(root, "bin") {
 		t.Fatal("distribution directory resolution returned an unexpected path")
 	}
 }
