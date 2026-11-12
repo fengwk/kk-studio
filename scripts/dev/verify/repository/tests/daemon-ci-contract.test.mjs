@@ -17,8 +17,10 @@ const smoke = readFileSync(path.join(root, 'scripts/daemon/smoke-archive.sh'), '
 test('Go daemon CI builds all six static targets and is reusable by release and Docker workflows', () => {
   assert.match(goCi, /workflow_call:/)
   assert.match(goCi, /POSTGRES_VERSION: '17'/)
-  assert.match(goCi, /go test -p 1 -json/)
-  assert.match(goCi, /go test -p 1 -race/)
+  assert.match(goCi, /go test -json \.\/\.\.\./)
+  assert.match(goCi, /go test -race \.\/\.\.\./)
+  assert.doesNotMatch(goCi, /go test -p\s+1/)
+  assert.match(goCi, /Install ripgrep for search parity tests[\s\S]*?if: runner\.os == 'Linux'[\s\S]*?sudo apt-get install -y ripgrep/)
   assert.match(goCi, /CGO_ENABLED=0 go build/)
   for (const target of ['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64', 'windows/amd64', 'windows/arm64']) {
     assert.ok(goCi.includes(target), `missing cross-compile target ${target}`)
@@ -27,8 +29,12 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
 })
 
-test('reusable Go CI does not invoke the stale Node-daemon interoperability fixture', () => {
-  assert.doesNotMatch(goCi, /DaemonCrossLanguageIntegrationTest|daemon\/package\.json/)
+test('reusable Go CI exercises Jetty interoperability with the Go daemon binary', () => {
+  assert.match(goCi, /jetty-interop:/)
+  assert.match(goCi, /Build Go daemon/)
+  assert.match(goCi, /DAEMON_BINARY: \$\{\{ runner\.temp \}\}\/kk-studio-daemon-go/)
+  assert.match(goCi, /DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView/)
+  assert.doesNotMatch(goCi, /daemon\/package\.json/)
 })
 
 test('release dispatch stages Go archives and cannot publish', () => {
