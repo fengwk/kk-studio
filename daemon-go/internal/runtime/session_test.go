@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -12,29 +13,65 @@ import (
 )
 
 type testConnection struct {
-	in  chan *protocol.Envelope
-	mu  sync.Mutex
-	out []*protocol.Envelope
+	in        chan *protocol.Envelope
+	failures  chan error
+	closed    chan struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
+	out       []*protocol.Envelope
+}
+
+type fixedConnectionFactory struct{ connection Connection }
+
+func (f fixedConnectionFactory) Connect(context.Context) (Connection, error) {
+	return f.connection, nil
+}
+
+type sequenceConnectionFactory struct {
+	mu          sync.Mutex
+	connections []Connection
+}
+
+func (f *sequenceConnectionFactory) Connect(ctx context.Context) (Connection, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.connections) == 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("no test connection remains")
+	}
+	connection := f.connections[0]
+	f.connections = f.connections[1:]
+	return connection, nil
 }
 
 func newTestConnection() *testConnection {
-	return &testConnection{in: make(chan *protocol.Envelope, 16)}
+	return &testConnection{in: make(chan *protocol.Envelope, 16), failures: make(chan error, 1), closed: make(chan struct{})}
 }
 func (c *testConnection) Receive(ctx context.Context) (*protocol.Envelope, error) {
 	select {
 	case e := <-c.in:
 		return e, nil
+	case err := <-c.failures:
+		return nil, err
+	case <-c.closed:
+		return nil, errors.New("connection closed")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
+func (c *testConnection) fail(err error) { c.failures <- err }
 func (c *testConnection) Send(_ context.Context, e *protocol.Envelope) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.out = append(c.out, e)
 	return nil
 }
-func (c *testConnection) Close() error { return nil }
+func (c *testConnection) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
 func (c *testConnection) sent(t protocol.MessageType) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -49,16 +86,13 @@ func (c *testConnection) sent(t protocol.MessageType) bool {
 // RUN-T-003 (ADAPT) rejects SETTINGS missing the current ResourceBudgets contract.
 func TestRuntimeSettingsRequireResourceBudgets(t *testing.T) {
 	c := newTestConnection()
-	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{}}}
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connection: c, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{}, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := r.Run(ctx); err == nil {
+	if err := r.handleSettings(&protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{}}}); err == nil {
 		t.Fatal("expected missing resource budget rejection")
 	}
 }
@@ -71,7 +105,7 @@ func TestRuntimeSendsReadyAfterConfigurationApplication(t *testing.T) {
 	c.in <- configMessage
 	c.in <- configMessage
 	started, release := make(chan struct{}), make(chan struct{})
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", DaemonVersion: "1.0.0", Connection: c, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", DaemonVersion: "1.0.0", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		close(started)
 		<-release
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
@@ -121,7 +155,7 @@ func TestRuntimeSendsReadyAfterConfigurationApplication(t *testing.T) {
 // RUN-T-063 rejects inbound envelopes that declare a different bound environment.
 func TestRuntimeRejectsOtherEnvironmentScope(t *testing.T) {
 	c := newTestConnection()
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connection: c, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{}, nil
 	}})
 	if err != nil {
@@ -142,7 +176,7 @@ func TestRuntimeExecutesInvocation(t *testing.T) {
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_ENVIRONMENT_CONFIG, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_EnvironmentConfig{EnvironmentConfig: &protocol.EnvironmentConfig{Version: int64Ptr(1), Config: &protocol.DaemonConfiguration{StudioUrl: "https://studio.example", Lsp: &protocol.LspConfiguration{}}}}}
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_INVOKE, EnvironmentId: stringPtr("env"), InvocationId: stringPtr("123e4567-e89b-42d3-a456-426614174000"), Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{CapabilityId: stringPtr("echo"), ArgumentsJson: stringPtr(`{"ok":true}`), TimeoutMillis: int64Ptr(0)}}}
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", DaemonVersion: "1.0.0", Connection: c, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", DaemonVersion: "1.0.0", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
 	}, Capabilities: map[string]CapabilityExecutor{"echo": func(_ context.Context, call CapabilityCall, _ CapabilityContext) (CapabilityResult, error) {
 		if !json.Valid(call.Arguments) {

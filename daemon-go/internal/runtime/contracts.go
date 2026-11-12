@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -90,3 +91,11 @@ type Connection interface {
 	Send(context.Context, *protocol.Envelope) error
 	Close() error
 }
+
+// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation policy.
+type ConnectionFactory interface {
+	Connect(context.Context) (Connection, error)
+}
+
+// ErrRegistrationRejected marks an authentication rejection that must not be retried.
+var ErrRegistrationRejected = errors.New("daemon registration rejected")

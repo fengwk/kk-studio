@@ -13,7 +13,7 @@ import (
 func TestRuntimeHeartbeatsOnlyWhenReady(t *testing.T) {
 	c := newTestConnection()
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{MaxResourceBytes: int64Ptr(100)}}}}
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connection: c, HeartbeatInterval: 5 * time.Millisecond, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, HeartbeatInterval: 5 * time.Millisecond, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
 	}})
 	if err != nil {

@@ -30,7 +30,9 @@ type ConfigApplier func(context.Context, int64, *protocol.DaemonConfiguration) (
 type RuntimeOptions struct {
 	EnvironmentID            string
 	DaemonVersion            string
-	Connection               Connection
+	Connections              ConnectionFactory
+	InitialReconnectDelay    time.Duration
+	MaxReconnectDelay        time.Duration
 	Capabilities             map[string]CapabilityExecutor
 	Processes                native.Supervisor
 	Resources                ResourceUploader
@@ -38,6 +40,11 @@ type RuntimeOptions struct {
 	MaxConcurrentInvocations int
 	HeartbeatInterval        time.Duration
 	HostInfo                 *protocol.HostInfo
+}
+
+type activeConnection struct {
+	generation uint64
+	connection Connection
 }
 
 type runningCall struct {
@@ -52,6 +59,8 @@ type Runtime struct {
 	journal          *InvocationJournal
 	status           *StatusTracker
 	mu               sync.RWMutex
+	connection       *activeConnection
+	generation       uint64
 	config           config.DaemonConfig
 	configProto      *protocol.DaemonConfiguration
 	bound            bool
@@ -70,8 +79,17 @@ type Runtime struct {
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
 func NewRuntime(options RuntimeOptions) (*Runtime, error) {
-	if options.EnvironmentID == "" || options.Connection == nil || options.ApplyConfig == nil {
-		return nil, errors.New("runtime requires environmentId, connection, and config applier")
+	if options.EnvironmentID == "" || options.Connections == nil || options.ApplyConfig == nil {
+		return nil, errors.New("runtime requires environmentId, connection factory, and config applier")
+	}
+	if options.InitialReconnectDelay == 0 {
+		options.InitialReconnectDelay = 250 * time.Millisecond
+	}
+	if options.MaxReconnectDelay == 0 {
+		options.MaxReconnectDelay = 30 * time.Second
+	}
+	if options.InitialReconnectDelay < 0 || options.MaxReconnectDelay < options.InitialReconnectDelay {
+		return nil, errors.New("invalid reconnect delay bounds")
 	}
 	if options.MaxConcurrentInvocations == 0 {
 		options.MaxConcurrentInvocations = defaultInvocationLimit
@@ -102,7 +120,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	return &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: NewStatusTracker(), config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool)}, nil
 }
 
-// Run receives protocol events until cancellation or connection failure, then waits for accepted work to settle.
+// Run reconnects the injected control transport and retains accepted invocations across connection generations.
 func (r *Runtime) Run(ctx context.Context) error {
 	r.runMu.Lock()
 	if r.hasRun {
@@ -117,25 +135,119 @@ func (r *Runtime) Run(ctx context.Context) error {
 	r.mu.Lock()
 	r.sendCtx = runCtx
 	r.mu.Unlock()
-	defer cancel()
-	defer func() { _ = r.options.Connection.Close() }()
 	heartbeatDone := make(chan struct{})
 	go r.heartbeatLoop(runCtx, heartbeatDone)
-	defer func() { cancel(); <-heartbeatDone; r.cancelAndWait() }()
+	defer func() { cancel(); <-heartbeatDone; r.dropActiveConnection(); r.cancelAndWait() }()
+
+	delay := r.options.InitialReconnectDelay
 	for {
-		envelope, err := r.options.Connection.Receive(runCtx)
+		connection, err := r.options.Connections.Connect(runCtx)
 		if err != nil {
 			if runCtx.Err() != nil {
 				return nil
 			}
+			if errors.Is(err, ErrRegistrationRejected) {
+				return err
+			}
+			if !waitReconnect(runCtx, delay) {
+				return nil
+			}
+			delay = doubledDelay(delay, r.options.MaxReconnectDelay)
+			continue
+		}
+		if connection == nil {
+			return errors.New("connection factory returned an empty connection")
+		}
+		active := r.attachConnection(connection)
+		err = r.serveConnection(runCtx, active)
+		r.dropConnection(active)
+		if runCtx.Err() != nil {
+			return nil
+		}
+		if errors.Is(err, ErrRegistrationRejected) {
+			return err
+		}
+		if !waitReconnect(runCtx, delay) {
+			return nil
+		}
+		delay = doubledDelay(delay, r.options.MaxReconnectDelay)
+	}
+}
+
+func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection) error {
+	for {
+		envelope, err := active.connection.Receive(ctx)
+		if err != nil {
 			return err
 		}
 		if envelope == nil {
 			return errors.New("control connection returned an empty envelope")
 		}
-		if err := r.handle(runCtx, envelope); err != nil {
+		if !r.isActiveConnection(active) {
+			return errors.New("stale control connection generation")
+		}
+		if err := r.handle(ctx, envelope); err != nil {
 			return err
 		}
+	}
+}
+
+func waitReconnect(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func doubledDelay(delay, maximum time.Duration) time.Duration {
+	if delay >= maximum || delay > maximum/2 {
+		return maximum
+	}
+	return delay * 2
+}
+
+func (r *Runtime) attachConnection(connection Connection) *activeConnection {
+	r.mu.Lock()
+	r.generation++
+	active := &activeConnection{generation: r.generation, connection: connection}
+	r.connection = active
+	r.bound = false
+	r.ready = false
+	r.mu.Unlock()
+	r.gate.Clear()
+	return active
+}
+
+func (r *Runtime) isActiveConnection(active *activeConnection) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.connection == active
+}
+
+func (r *Runtime) dropConnection(active *activeConnection) {
+	r.mu.Lock()
+	if r.connection != active {
+		r.mu.Unlock()
+		return
+	}
+	r.connection = nil
+	r.bound = false
+	r.ready = false
+	r.mu.Unlock()
+	r.gate.Clear()
+	_ = active.connection.Close()
+}
+
+func (r *Runtime) dropActiveConnection() {
+	r.mu.RLock()
+	active := r.connection
+	r.mu.RUnlock()
+	if active != nil {
+		r.dropConnection(active)
 	}
 }
 
@@ -153,6 +265,8 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		return errors.New("envelope is bound to a different environment")
 	}
 	switch e.MessageType {
+	case protocol.MessageType_ERROR:
+		return errors.New("control server rejected the connection")
 	case protocol.MessageType_ENVIRONMENT_CONFIG:
 		return r.handleEnvironmentConfig(ctx, e)
 	case protocol.MessageType_INVOKE:
@@ -590,12 +704,19 @@ func (r *Runtime) sendFrame(e *protocol.Envelope) error {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
 	r.mu.RLock()
-	ctx := r.sendCtx
+	ctx, active := r.sendCtx, r.connection
 	r.mu.RUnlock()
+	if active == nil {
+		return errors.New("control connection is disconnected")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return r.options.Connection.Send(ctx, e)
+	if err := active.connection.Send(ctx, e); err != nil {
+		r.dropConnection(active)
+		return err
+	}
+	return nil
 }
 func (r *Runtime) heartbeatLoop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)

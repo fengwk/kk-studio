@@ -51,7 +51,7 @@ func newInvocationRuntime(t *testing.T, c *testConnection, executor CapabilityEx
 	r, err := NewRuntime(RuntimeOptions{
 		EnvironmentID: "env",
 		DaemonVersion: "1.0.0",
-		Connection:    c,
+		Connections:   fixedConnectionFactory{connection: c},
 		ApplyConfig: func(_ context.Context, version int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 			return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: version}, nil
 		},

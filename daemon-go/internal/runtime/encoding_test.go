@@ -19,7 +19,7 @@ func (u *testUploader) Upload(_ context.Context, _ string, content ResultContent
 
 func newEncodingRuntime(t *testing.T, uploader ResourceUploader) *Runtime {
 	t.Helper()
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connection: newTestConnection(), Resources: uploader, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: newTestConnection()}, Resources: uploader, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		return config.DaemonConfig{EnvironmentID: "env", ConfigVersion: v}, nil
 	}})
 	if err != nil {

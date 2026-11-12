@@ -25,7 +25,7 @@ CGO_ENABLED=0 go test ./...
 
 The standard-library protobuf representation is also tested against all 28 binary fixtures under `platform/daemon-server/src/main/protocol/golden/`. Linux/macOS CI additionally runs `go test -race ./...`. The six cross-build targets are Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64. The GitHub Actions workflow `.github/workflows/daemon-go-ci.yml` runs these checks on the supported platform matrix.
 
-The runtime partition implements CLI parsing, `--help`, `--version`, read-only `--check-config`, configuration validation, and an injected `RuntimeRunner` boundary for service execution. `internal/runtime` currently provides an injected single-connection session with SETTINGS/ENVIRONMENT_CONFIG readiness, heartbeats, capability invocation, cancellation/replay, result encoding, and host facts. Reconnection, full configuration candidate publication, managed updates, and final service assembly remain integration work.
+The runtime partition implements CLI parsing, `--help`, `--version`, read-only `--check-config`, configuration validation, and an injected `RuntimeRunner` boundary for service execution. `internal/runtime` provides an injected reconnecting control session with SETTINGS/ENVIRONMENT_CONFIG readiness, heartbeats, capability invocation, cancellation/replay, result encoding, and host facts. Full configuration candidate publication, managed updates, and final service assembly remain integration work.
 
 ### Runtime-partition behavior change
 

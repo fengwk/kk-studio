@@ -23,7 +23,7 @@ func TestRuntimeFreezesConfigurationPerInvocation(t *testing.T) {
 	defer release()
 	secondConfigApplied := make(chan struct{})
 	observed := make(chan string, 2)
-	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connection: c, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
+	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
 		if v == 2 {
 			close(secondConfigApplied)
 		}
