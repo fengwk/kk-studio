@@ -135,6 +135,17 @@ func TestUpload_AlreadyCancelledDoesNotRequestTicket(t *testing.T) {
 	}
 }
 
+// TRN-T-010 verifies zero-valued timing options select the Go defaults.
+func TestUpload_ZeroTimingOptionsUseDefaults(t *testing.T) {
+	ticketWait, retryBackoff, err := (&ResourceUploader{}).retryOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticketWait != 30*time.Second || retryBackoff != 200*time.Millisecond {
+		t.Fatalf("default timings = %s / %s", ticketWait, retryBackoff)
+	}
+}
+
 // TRN-T-013 verifies a timed-out request retries with the original transfer ID.
 func TestUpload_TicketTimeoutRetriesTransfer(t *testing.T) {
 	var transferIDs []string
