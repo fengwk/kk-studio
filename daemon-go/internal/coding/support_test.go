@@ -218,6 +218,11 @@ func TestResolveExisting(t *testing.T) {
 	}
 	if _, err := resolveExistingPath(filepath.Join(filepath.Dir(file), "missing")); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("missing path error=%v", err)
+	} else {
+		var capabilityError *toolError
+		if !errors.As(err, &capabilityError) || capabilityError.code != "NOT_FOUND" {
+			t.Fatalf("missing path error=%#v want code NOT_FOUND", err)
+		}
 	}
 }
 
