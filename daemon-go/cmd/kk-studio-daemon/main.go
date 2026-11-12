@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -24,11 +25,89 @@ type Dependencies struct {
 	HelperMain func([]string) int
 }
 
+const h2xconnectBootstrapArg = "__bootstrap-h2xconnect"
+
 func main() {
+	args := os.Args[1:]
+	if len(args) == 0 || args[0] != h2xconnectBootstrapArg {
+		bootstrapH2XConnect(args)
+	}
+	args = args[1:]
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	code := RunCLI(ctx, os.Args[1:], Dependencies{HelperMain: runNativeHelper}, os.Stdout, os.Stderr)
+	code := RunCLI(ctx, args, Dependencies{Runtime: productionRuntime{}, HelperMain: runNativeHelper}, os.Stdout, os.Stderr)
 	os.Exit(code)
+}
+
+func bootstrapH2XConnect(args []string) {
+	executable, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "daemon failed: executable path is unavailable")
+		os.Exit(1)
+	}
+	childArgs := append([]string{h2xconnectBootstrapArg}, args...)
+	command := exec.Command(executable, childArgs...)
+	command.Env = withH2XConnect(os.Environ())
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := command.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "daemon failed: bootstrap process could not be started")
+		os.Exit(1)
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	forwardDone := make(chan struct{})
+	go func() {
+		select {
+		case received := <-signals:
+			_ = command.Process.Signal(received)
+		case <-forwardDone:
+		}
+	}()
+	waitErr := command.Wait()
+	close(forwardDone)
+	signal.Stop(signals)
+	if waitErr != nil {
+		var exitError *exec.ExitError
+		if errors.As(waitErr, &exitError) {
+			os.Exit(exitError.ExitCode())
+		}
+		fmt.Fprintln(os.Stderr, "daemon failed: bootstrap process could not be started")
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func withH2XConnect(environment []string) []string {
+	result := make([]string, 0, len(environment)+1)
+	found := false
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "GODEBUG=") {
+			found = true
+			value := strings.TrimPrefix(entry, "GODEBUG=")
+			if !hasH2XConnect(value) {
+				if value != "" {
+					value += ","
+				}
+				value += "http2xconnect=1"
+			}
+			result = append(result, "GODEBUG="+value)
+		} else {
+			result = append(result, entry)
+		}
+	}
+	if !found {
+		result = append(result, "GODEBUG=http2xconnect=1")
+	}
+	return result
+}
+
+func hasH2XConnect(value string) bool {
+	for _, option := range strings.Split(value, ",") {
+		if option == "http2xconnect=1" {
+			return true
+		}
+	}
+	return false
 }
 
 func runNativeHelper(args []string) int {

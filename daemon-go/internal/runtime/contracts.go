@@ -111,6 +111,12 @@ type CapabilityProvider interface {
 	Capabilities() map[string]CapabilityExecutor
 }
 
+// IDEService handles protocol IDE commands and leases without coupling runtime to the IDE package.
+type IDEService interface {
+	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
+	ApplyLease(*protocol.IdeLease, time.Time)
+}
+
 // Connection exchanges decoded control envelopes with the runtime. Transport implements it.
 type Connection interface {
 	Receive(context.Context) (*protocol.Envelope, error)

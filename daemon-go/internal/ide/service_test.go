@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -676,6 +678,52 @@ func TestRevisionExhaustionRollsBackOpen(t *testing.T) {
 	}
 }
 
+// IDE-T-121 verifies one claim ID cannot concurrently bind different view IDs.
+func TestClaimIDSerializesAcrossViewIDs(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	root := t.TempDir()
+	claimID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	commands := []*protocol.IdeCommand{
+		openCommandForTest(root, "11111111-1111-4111-8111-111111111111", claimID),
+		openCommandForTest(root, "22222222-2222-4222-8222-222222222222", claimID),
+	}
+	start := make(chan struct{})
+	results := make(chan *protocol.IdeResult, len(commands))
+	for _, command := range commands {
+		go func(command *protocol.IdeCommand) {
+			<-start
+			results <- service.HandleCommand(context.Background(), command)
+		}(command)
+	}
+	close(start)
+	var succeeded, conflicted int
+	for range commands {
+		result := <-results
+		switch {
+		case result.GetOk():
+			succeeded++
+		case result.GetCode() == "CLAIM_CONFLICT":
+			conflicted++
+		default:
+			t.Fatalf("claim result=%v", result)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 || len(service.snapshot().Views) != 1 {
+		t.Fatalf("success=%d conflicts=%d snapshot=%+v", succeeded, conflicted, service.snapshot())
+	}
+}
+
 // IDE-T-105 verifies bounded claim replay cache refresh and oldest-claim eviction.
 func TestClaimCacheRefreshAndEviction(t *testing.T) {
 	service := &Service{claims: make(map[string]claimRecord)}
@@ -767,6 +815,102 @@ func TestFailedRegistrationConvergence(t *testing.T) {
 	}
 }
 
+// IDE-T-072 verifies a manager generation change during registration retains a CLOSING reservation and reports BUSY.
+func TestCreateGenerationChangeDuringRegistration(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	stopGate := make(chan struct{})
+	var releaseStop sync.Once
+	unlockStop := func() { releaseStop.Do(func() { close(stopGate) }) }
+	manager := &fakeCodeServerManager{stopGate: stopGate}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		unlockStop()
+		_ = service.Close(context.Background())
+	}()
+	manager.registerHook = manager.Crash
+	result := service.HandleCommand(context.Background(), openCommandForTest(t.TempDir(), "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if result.GetOk() || result.GetCode() != "BUSY" {
+		t.Fatalf("generation drift result=%v", result)
+	}
+	view := service.GetViewState("11111111-1111-4111-8111-111111111111")
+	if view == nil || view.GetState() != protocol.IdeViewState_CLOSING || !service.HasActiveViews() {
+		t.Fatalf("generation drift view=%v active=%v", view, service.HasActiveViews())
+	}
+	service.mu.Lock()
+	recovery := service.crashRecovery
+	service.mu.Unlock()
+	unlockStop()
+	if recovery == nil {
+		t.Fatal("process exit did not start recovery")
+	}
+	select {
+	case <-recovery:
+	case <-time.After(time.Second):
+		t.Fatal("process recovery did not finish")
+	}
+}
+
+// IDE-T-073 verifies a generation change during resume keeps the prior binding CLOSING until recovery converges.
+func TestResumeGenerationChangeDuringRegistration(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	stopGate := make(chan struct{})
+	var releaseStop sync.Once
+	unlockStop := func() { releaseStop.Do(func() { close(stopGate) }) }
+	manager := &fakeCodeServerManager{stopGate: stopGate}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		unlockStop()
+		_ = service.Close(context.Background())
+	}()
+	root := t.TempDir()
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	manager.registerHook = manager.Crash
+	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	result := service.HandleCommand(context.Background(), resume)
+	if result.GetOk() || result.GetCode() != "CLEANUP_FAILED" {
+		t.Fatalf("generation drift resume=%v", result)
+	}
+	view := service.GetViewState(opened.GetViewId())
+	if view == nil || view.GetState() != protocol.IdeViewState_CLOSING || view.GetBindingEpoch() != opened.GetBindingEpoch() {
+		t.Fatalf("generation drift published a new binding: %v", view)
+	}
+	service.mu.Lock()
+	recovery := service.crashRecovery
+	service.mu.Unlock()
+	unlockStop()
+	if recovery == nil {
+		t.Fatal("process exit did not start recovery")
+	}
+	select {
+	case <-recovery:
+	case <-time.After(time.Second):
+		t.Fatal("process recovery did not finish")
+	}
+}
+
 // IDE-T-075/076/077 verifies resume reconciles lost management results from the authoritative registry.
 func TestResumeRegistrationReconciliation(t *testing.T) {
 	root := t.TempDir()
@@ -813,6 +957,64 @@ func TestResumeRegistrationReconciliation(t *testing.T) {
 	unproven.ExpectedBindingEpoch = int64Pointer(adopted.GetBindingEpoch())
 	if result := service.HandleCommand(context.Background(), unproven); result.GetOk() || result.GetCode() != "CLEANUP_FAILED" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_CLOSING {
 		t.Fatalf("unverified resume result=%v state=%v", result, service.GetViewState(opened.GetViewId()))
+	}
+}
+
+// IDE-T-079 verifies a blocked resume does not block another command's canonical view snapshot.
+func TestSnapshotDuringBlockedResume(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	root := t.TempDir()
+	first := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	second := service.HandleCommand(context.Background(), openCommandForTest(root, "22222222-2222-4222-8222-222222222222", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
+	if !first.GetOk() || !second.GetOk() {
+		t.Fatalf("opens first=%v second=%v", first, second)
+	}
+	before := service.snapshot().Revision
+	registerEntered := make(chan struct{})
+	registerRelease := make(chan struct{})
+	var releaseRegistration sync.Once
+	unlockRegistration := func() { releaseRegistration.Do(func() { close(registerRelease) }) }
+	defer unlockRegistration()
+	manager.registerHook = func() {
+		close(registerEntered)
+		<-registerRelease
+	}
+	resume := openCommandForTest(root, first.GetViewId(), "ffffffff-ffff-4fff-8fff-ffffffffffff")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(first.GetBindingEpoch())
+	resumeResult := make(chan *protocol.IdeResult, 1)
+	go func() { resumeResult <- service.HandleCommand(context.Background(), resume) }()
+	select {
+	case <-registerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("resume registration did not block")
+	}
+	snapshot := service.HandleCommand(context.Background(), &protocol.IdeCommand{
+		Action: protocol.IdeAction_LIST_VIEWS, ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999"),
+	})
+	if !snapshot.GetOk() || snapshot.GetRevision() != before+1 || len(snapshot.GetViews()) != 2 || snapshot.GetViews()[0].GetBindingEpoch() != first.GetBindingEpoch() || snapshot.GetViews()[0].GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("snapshot during resume=%v, revision before=%d", snapshot, before)
+	}
+	unlockRegistration()
+	select {
+	case result := <-resumeResult:
+		if !result.GetOk() || result.GetRevision() <= before {
+			t.Fatalf("resume result=%v revision before=%d", result, before)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resume did not finish after registration release")
 	}
 }
 
@@ -903,6 +1105,71 @@ func TestIdleStopBoundary(t *testing.T) {
 	}
 }
 
+// IDE-T-134 verifies an active stream prevents idle stop until release and the idle timer is armed once.
+func TestIdleStopWaitsForFinalStreamRelease(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
+	defer cancelHost()
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		closeResult <- service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	}()
+	select {
+	case <-upstream.Context.Done():
+	case <-time.After(time.Second):
+		upstream.Release()
+		t.Fatal("view close did not invalidate its stream")
+	}
+	scheduler.Advance(2 * idleStopDuration)
+	if manager.stopCalls != 0 || service.ActiveStreamCount() != 1 {
+		upstream.Release()
+		t.Fatalf("idle stopped before stream release: stops=%d streams=%d", manager.stopCalls, service.ActiveStreamCount())
+	}
+	upstream.Release()
+	select {
+	case result := <-closeResult:
+		if !result.GetOk() {
+			t.Fatalf("close result=%v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after stream release")
+	}
+	service.mu.Lock()
+	timerArmed := service.idleTimer != nil
+	service.mu.Unlock()
+	if !timerArmed {
+		t.Fatal("idle timer was not armed after final stream release and close")
+	}
+	scheduler.Advance(idleStopDuration)
+	if manager.stopCalls != 1 {
+		t.Fatalf("idle stop calls=%d want=1", manager.stopCalls)
+	}
+}
+
 // IDE-T-118 verifies update admission is blocked by views and streams, then stops the empty manager.
 func TestUpdateAdmission(t *testing.T) {
 	root := t.TempDir()
@@ -984,8 +1251,8 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	manager := &fakeCodeServerManager{stopFailures: 1}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 2})
+	manager := &fakeCodeServerManager{stopFailures: 2}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1007,9 +1274,13 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatalf("unproven crash state=%v", state)
 	}
 	replacement := openCommandForTest(root, "22222222-2222-4222-8222-222222222222", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	blocked := service.HandleCommand(context.Background(), replacement)
+	if blocked.GetOk() || blocked.GetCode() != "CLEANUP_FAILED" || service.GetViewState(opened.GetViewId()) == nil || service.GetViewState(replacement.GetViewId()) != nil {
+		t.Fatalf("replacement during unproven cleanup=%v old=%v new=%v", blocked, service.GetViewState(opened.GetViewId()), service.GetViewState(replacement.GetViewId()))
+	}
 	result := service.HandleCommand(context.Background(), replacement)
 	if !result.GetOk() || service.GetViewState(opened.GetViewId()) != nil || service.GetViewState(replacement.GetViewId()) == nil {
-		t.Fatalf("replacement=%v old=%v", result, service.GetViewState(opened.GetViewId()))
+		t.Fatalf("replacement after convergence=%v old=%v", result, service.GetViewState(opened.GetViewId()))
 	}
 }
 
@@ -1112,6 +1383,49 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 	return response, cancel
 }
 
+// IDE-T-098 verifies create and resume assign the confirmed directory and binding to the bridge.
+func TestBridgeDirectoryBindingOnCreateAndResume(t *testing.T) {
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("create reply=%v", opened)
+	}
+	assertBinding := func(result *protocol.IdeResult) {
+		t.Helper()
+		bridge.mu.Lock()
+		binding := bridge.views[result.GetViewId()]
+		valid := binding != nil && binding.workspacePath == result.GetWorkspacePath() && binding.epoch == result.GetBindingEpoch() && binding.directory == root
+		bridge.mu.Unlock()
+		if !valid {
+			t.Fatalf("bridge binding for %s does not match create/resume result %v", result.GetViewId(), result)
+		}
+	}
+	assertBinding(opened)
+	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	resumed := service.HandleCommand(context.Background(), resume)
+	if !resumed.GetOk() || resumed.GetBindingEpoch() <= opened.GetBindingEpoch() {
+		t.Fatalf("resume reply=%v", resumed)
+	}
+	assertBinding(resumed)
+}
+
 // IDE-T-101 verifies canonical directory change is acknowledged only by a replacement host.
 func TestChangeDirectoryReply(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
@@ -1169,6 +1483,13 @@ func TestChangeDirectoryReply(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("replacement host did not confirm directory")
+	}
+	bridge.mu.Lock()
+	binding := bridge.views[opened.GetViewId()]
+	confirmedByTarget := binding != nil && binding.directory == next && binding.hostID == "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" && binding.stream != nil
+	bridge.mu.Unlock()
+	if !confirmedByTarget {
+		t.Fatal("directory change reassigned the bridge instead of retaining the confirming replacement host")
 	}
 	workspaceBytes, err := os.ReadFile(opened.GetWorkspacePath())
 	var workspace struct {
@@ -1305,11 +1626,10 @@ func TestBoundViewCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if !closed.GetOk() {
-		upstream.Release()
-		t.Fatalf("close reply=%v", closed)
-	}
+	closeResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		closeResult <- service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	}()
 	select {
 	case <-upstream.Context.Done():
 	case <-time.After(time.Second):
@@ -1317,8 +1637,157 @@ func TestBoundViewCommands(t *testing.T) {
 		t.Fatal("close did not cancel the active stream context")
 	}
 	upstream.Release()
+	select {
+	case closed := <-closeResult:
+		if !closed.GetOk() {
+			t.Fatalf("close reply=%v", closed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after stream release")
+	}
 	if service.ActiveStreamCount() != 0 {
 		t.Fatalf("streams after close=%d", service.ActiveStreamCount())
+	}
+}
+
+// IDE-T-125 verifies an unknown native close outcome preserves the OPEN binding and active stream.
+func TestUnknownNativeClosePreservesStream(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{
+		"closeView": {"ok": false, "message": "close outcome unknown"},
+	})
+	defer cancelHost()
+	upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
+		ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Release()
+	result := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	if result.GetOk() || result.GetCode() != "UNAVAILABLE" || upstream.Context.Err() != nil || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("unknown close=%v stream=%v state=%v", result, upstream.Context.Err(), service.GetViewState(opened.GetViewId()))
+	}
+}
+
+// IDE-T-127 verifies late native success cannot close a binding after caller abort or bridge disconnect.
+func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
+	for _, scenario := range []string{"caller abort", "bridge disconnect"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, err := CanonicalDirectory(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			bridge, err := NewBridge()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer bridge.Close(context.Background())
+			service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+				DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer service.Close(context.Background())
+			opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+			if !opened.GetOk() {
+				t.Fatalf("open reply=%v", opened)
+			}
+			streamCtx, stopHost := context.WithCancel(context.Background())
+			defer stopHost()
+			const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			response, reader := openManualBridgeStream(t, streamCtx, bridge, opened.GetWorkspacePath(), hostID, root)
+			defer response.Body.Close()
+			if _, err := reader.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+			upstream, err := service.ResolveView(context.Background(), transport.ViewRequest{
+				ViewID: opened.GetViewId(), BindingEpoch: opened.GetBindingEpoch(), Mode: "HTTP", Method: "GET", Path: "/",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer upstream.Release()
+			closeCtx, cancelClose := context.WithCancel(context.Background())
+			defer cancelClose()
+			closeResult := make(chan *protocol.IdeResult, 1)
+			go func() {
+				closeResult <- service.HandleCommand(closeCtx, viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+			}()
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				cancelClose()
+				t.Fatal(err)
+			}
+			var command struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal([]byte(line), &command); err != nil || command.ID == "" {
+				cancelClose()
+				t.Fatalf("close command=%q err=%v", line, err)
+			}
+			if scenario == "caller abort" {
+				cancelClose()
+			} else {
+				stopHost()
+			}
+			select {
+			case result := <-closeResult:
+				if result.GetOk() || result.GetCode() != "UNAVAILABLE" {
+					t.Fatalf("interrupted close=%v", result)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("interrupted close remained pending")
+			}
+			lateSuccess, err := json.Marshal(map[string]any{"id": command.ID, "ok": true, "clean": true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status := postBridge(t, bridge, "/bridge/result", lateSuccess); status != http.StatusNoContent {
+				t.Fatalf("late result status=%d", status)
+			}
+			if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN || upstream.Context.Err() != nil {
+				t.Fatalf("late success mutated view=%v stream=%v", state, upstream.Context.Err())
+			}
+		})
+	}
+}
+
+// IDE-T-136 verifies shutdown reports child close failures without losing their error identity.
+func TestShutdownAggregatesComponentCloseFailure(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	cause := errors.New("manager close failed")
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{closeErr: cause},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeErr := service.Close(context.Background())
+	if closeErr == nil || !errors.Is(closeErr, cause) || !strings.Contains(closeErr.Error(), "ide service shutdown failed") {
+		t.Fatalf("shutdown error=%v", closeErr)
 	}
 }
 
@@ -1447,6 +1916,44 @@ func TestForceCloseUnreachableView(t *testing.T) {
 	}
 }
 
+// IDE-T-132 verifies force-close authorization does not survive a resumed binding epoch.
+func TestForceAuthorizationDoesNotCrossEpoch(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	unknown := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	if unknown.GetOk() || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("disconnected close=%v state=%v", unknown, service.GetViewState(opened.GetViewId()))
+	}
+	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	resumed := service.HandleCommand(context.Background(), resume)
+	if !resumed.GetOk() || resumed.GetBindingEpoch() <= opened.GetBindingEpoch() {
+		t.Fatalf("resume=%v", resumed)
+	}
+	_, cancelHost := startBridgeReplyHost(t, bridge, resumed.GetWorkspacePath(), resumed.GetViewId(), root)
+	defer cancelHost()
+	force := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, resumed, true))
+	if force.GetOk() || force.GetCode() != "BUSY" || service.GetViewState(resumed.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("new epoch inherited force authorization: result=%v state=%v", force, service.GetViewState(resumed.GetViewId()))
+	}
+}
+
 // IDE-T-130 verifies an authorized force-close snapshot can be restored.
 func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 	root := t.TempDir()
@@ -1471,19 +1978,26 @@ func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{
+	resume := openCommandForTest(root, "11111111-1111-4111-8111-111111111111", opened.GetViewId())
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	resumed := service.HandleCommand(context.Background(), resume)
+	if !resumed.GetOk() || resumed.GetBindingEpoch() == opened.GetBindingEpoch() {
+		t.Fatalf("resume reply=%v", resumed)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, resumed.GetWorkspacePath(), resumed.GetViewId(), root, map[string]map[string]any{
 		"restore":  {"restored": float64(1), "skipped": float64(0)},
 		"snapshot": {"documents": []map[string]string{{"path": file, "text": "unsaved"}}, "complete": true},
 	})
 	defer cancelHost()
-	restored, skipped, err := service.RestoreBackup(context.Background(), opened.GetViewId())
+	restored, skipped, err := service.RestoreBackup(context.Background(), resumed.GetViewId())
 	if err != nil || restored != 1 || skipped != 0 {
 		t.Fatalf("restore=(%d,%d), err=%v", restored, skipped, err)
 	}
 	service.mu.Lock()
-	service.views[opened.GetViewId()].forceAllowed = true
+	service.views[resumed.GetViewId()].forceAllowed = true
 	service.mu.Unlock()
-	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, resumed, true))
 	if !closed.GetOk() {
 		t.Fatalf("force close=%v", closed)
 	}
@@ -1528,14 +2042,23 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)
 	}
+	assertBackupPreserved := func() {
+		t.Helper()
+		stored, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+		if err != nil || stored == nil || len(stored.Documents) != 1 || stored.Documents[0].Text != "draft" {
+			t.Fatalf("restore failure lost backup: backup=%#v err=%v", stored, err)
+		}
+	}
 	if _, _, err := service.RestoreBackup(context.Background(), opened.GetViewId()); FailureCode(err) != "UNAVAILABLE" {
 		t.Fatalf("disconnected restore=%v", err)
 	}
+	assertBackupPreserved()
 	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"restore": {"ok": false, "code": "DIRTY", "message": "restore rejected"}})
 	if _, _, err := service.RestoreBackup(context.Background(), opened.GetViewId()); FailureCode(err) != "DIRTY" {
 		cancelHost()
 		t.Fatalf("rejected restore=%v", err)
 	}
+	assertBackupPreserved()
 	cancelHost()
 	path := filepath.Join(recoveryDirectory(cfg), opened.GetViewId()+".json")
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
@@ -1543,6 +2066,9 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	}
 	if _, _, err := service.RestoreBackup(context.Background(), opened.GetViewId()); FailureCode(err) != "UNAVAILABLE" || SafeMessage(err) != "ide request failed" {
 		t.Fatalf("corrupt restore=%v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("corrupt backup was removed: %v", err)
 	}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)
@@ -1553,6 +2079,7 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	if _, _, err := service.RestoreBackup(context.Background(), opened.GetViewId()); FailureCode(err) != "VIEW_GONE" {
 		t.Fatalf("closed-view restore=%v", err)
 	}
+	assertBackupPreserved()
 }
 
 // IDE-T-096 verifies the omitted directory defaults to host HOME and missing HOME is reported safely.
@@ -1619,6 +2146,61 @@ func TestDirectoryListingCommand(t *testing.T) {
 	}
 }
 
+// IDE-T-117 verifies concurrent create reservations enforce the configured 64-view limit before process work.
+func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const capacity = 64
+	gate := make(chan struct{})
+	allStarted := make(chan struct{})
+	var started atomic.Int32
+	manager := &fakeCodeServerManager{ensureHook: func() {
+		if started.Add(1) == capacity {
+			close(allStarted)
+		}
+		<-gate
+	}}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: capacity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	root := t.TempDir()
+	results := make(chan *protocol.IdeResult, capacity)
+	for index := 0; index < capacity; index++ {
+		viewID := fmt.Sprintf("%08x-0000-4000-8000-%012x", index+1, index+1)
+		claimID := fmt.Sprintf("%08x-0000-4000-8000-%012x", index+capacity+1, index+capacity+1)
+		command := openCommandForTest(root, viewID, claimID)
+		go func() { results <- service.HandleCommand(context.Background(), command) }()
+	}
+	select {
+	case <-allStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("all view reservations did not reach process startup")
+	}
+	service.mu.Lock()
+	reservations := len(service.reservations)
+	service.mu.Unlock()
+	if reservations != capacity {
+		t.Fatalf("reservations=%d want=%d", reservations, capacity)
+	}
+	overflow := openCommandForTest(root, "ffffffff-ffff-4fff-8fff-ffffffffffff", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	if result := service.HandleCommand(context.Background(), overflow); result.GetOk() || result.GetCode() != "IDE_CAPACITY_EXCEEDED" {
+		t.Fatalf("capacity overflow result=%v", result)
+	}
+	close(gate)
+	for index := 0; index < capacity; index++ {
+		if result := <-results; !result.GetOk() {
+			t.Fatalf("reservation %d failed: %v", index, result)
+		}
+	}
+}
+
 // fakeCodeServerManager supplies a bounded code-server contract without launching a real process.
 type fakeCodeServerManager struct {
 	mu            sync.Mutex
@@ -1629,6 +2211,9 @@ type fakeCodeServerManager struct {
 	stopCalls     int
 	stopFailures  int
 	stopGate      chan struct{}
+	ensureHook    func()
+	registerHook  func()
+	closeErr      error
 	generation    uint64
 	registerMode  string
 	startFailure  bool
@@ -1639,6 +2224,9 @@ type fakeCodeServerManager struct {
 }
 
 func (m *fakeCodeServerManager) EnsureStarted(context.Context) (*CodeServerSession, error) {
+	if m.ensureHook != nil {
+		m.ensureHook()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.startCalls++
@@ -1678,13 +2266,18 @@ func (m *fakeCodeServerManager) Stop(ctx context.Context) error {
 	m.session = nil
 	return nil
 }
-func (m *fakeCodeServerManager) Close(context.Context) error { return nil }
-func (m *fakeCodeServerManager) RegisterView(_ context.Context, viewID string, epoch int64, workspace string) (*ManagedViewInspection, error) {
+func (m *fakeCodeServerManager) Close(context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.closeErr
+}
+func (m *fakeCodeServerManager) RegisterView(_ context.Context, viewID string, epoch int64, workspace string) (*ManagedViewInspection, error) {
+	m.mu.Lock()
 	m.registerCalls++
 	mode := m.registerMode
+	hook := m.registerHook
 	if mode == "before-error" {
+		m.mu.Unlock()
 		return nil, NewError("managed view write failed", "CLEANUP_FAILED")
 	}
 	if m.views == nil {
@@ -1698,6 +2291,10 @@ func (m *fakeCodeServerManager) RegisterView(_ context.Context, viewID string, e
 		view.State = ManagedViewClosing
 	}
 	m.views[viewID] = view
+	m.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if mode == "after-error" {
 		return nil, NewError("managed view response was lost", "CLEANUP_FAILED")
 	}

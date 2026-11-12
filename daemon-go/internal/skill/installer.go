@@ -87,7 +87,7 @@ func (i *Installer) Install(ctx context.Context, input json.RawMessage) (json.Ra
 	if err != nil {
 		return nil, "", errors.New("skill.install: resource ticket is unavailable")
 	}
-	if ticket.Size < 0 || !validSHA256(ticket.SHA256) {
+	if ticket.Size <= 0 || !validSHA256(ticket.SHA256) {
 		return nil, "", errors.New("skill.install: resource ticket metadata is invalid")
 	}
 	packageVersionDir := filepath.Join(i.DataDir, "skills", a.Package, a.Version)

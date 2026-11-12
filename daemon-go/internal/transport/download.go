@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"github.com/fengwk/kk-studio/daemon/internal/skill"
@@ -49,26 +50,46 @@ func (d *ResourceDownloader) RequestTicket(ctx context.Context, transferID strin
 	if ticket.GetState() != protocol.TicketState_TICKET_READY || ticket.GetPresignedGet() == nil || ticket.GetPresignedGet().GetMethod() != http.MethodGet {
 		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket is invalid")
 	}
-	return skill.DownloadTicket{Size: ticket.GetSize(), SHA256: ticket.GetSha256(), Opaque: ticket.GetPresignedGet().GetUrl()}, nil
+	get := ticket.GetPresignedGet()
+	if get.ExpiresAtEpochMs == nil || get.GetExpiresAtEpochMs() <= 0 {
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket is invalid")
+	}
+	expiresAt := get.GetExpiresAtEpochMs()
+	if time.Now().UnixMilli() >= expiresAt {
+		return skill.DownloadTicket{}, fmt.Errorf("resource download ticket expired")
+	}
+	return skill.DownloadTicket{
+		Size:   ticket.GetSize(),
+		SHA256: ticket.GetSha256(),
+		Opaque: presignedDownloadTicket{url: get.GetUrl(), expiresAtEpochMs: expiresAt},
+	}, nil
+}
+
+type presignedDownloadTicket struct {
+	url              string
+	expiresAtEpochMs int64
 }
 
 // Download fetches and verifies the resource represented by a previously validated ticket.
 func (d *ResourceDownloader) Download(ctx context.Context, ticket skill.DownloadTicket) ([]byte, error) {
-	targetURL, ok := ticket.Opaque.(string)
+	presigned, ok := ticket.Opaque.(presignedDownloadTicket)
 	if !ok {
 		return nil, fmt.Errorf("resource download ticket is invalid")
 	}
-	return d.DownloadPresigned(ctx, targetURL, nil, ticket.Size, ticket.SHA256)
+	if time.Now().UnixMilli() >= presigned.expiresAtEpochMs {
+		return nil, fmt.Errorf("resource download ticket expired")
+	}
+	return d.DownloadPresigned(ctx, presigned.url, ticket.Size, ticket.SHA256)
 }
 
 // DownloadPresigned fetches an explicit presigned GET and verifies its declared metadata.
-func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL string, headers map[string]string, size int64, digest string) ([]byte, error) {
+func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL string, size int64, digest string) ([]byte, error) {
 	fail := func(stage string) ([]byte, error) { return nil, fmt.Errorf("resource download %s failed", stage) }
 	u, err := url.Parse(targetURL)
 	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return fail("request")
 	}
-	if size < 0 || size == int64(^uint64(0)>>1) {
+	if size < 0 {
 		return fail("size")
 	}
 	if len(digest) != 64 || digest != strings.ToLower(digest) {
@@ -80,12 +101,6 @@ func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL st
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return fail("request")
-	}
-	for k, v := range headers {
-		if !validHeaderName(k) || hasUnsafeHeaderCharacter(v) {
-			return fail("request")
-		}
-		req.Header.Set(k, v)
 	}
 	if d.Network != nil {
 		var body []byte
@@ -141,12 +156,18 @@ func verifyDownloadResponse(resp *http.Response, size int64, digest string) ([]b
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fail(fmt.Sprintf("storage status %d", resp.StatusCode))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, size+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, size))
 	if err != nil {
 		return fail("response")
 	}
 	if int64(len(body)) != size {
 		return fail("size")
+	}
+	var extra [1]byte
+	if n, err := io.ReadFull(resp.Body, extra[:]); n > 0 {
+		return fail("size")
+	} else if err != io.EOF {
+		return fail("response")
 	}
 	sum := sha256.Sum256(body)
 	if fmt.Sprintf("%x", sum) != digest {

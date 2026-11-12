@@ -49,6 +49,7 @@ type RuntimeOptions struct {
 	HostInfo                 *protocol.HostInfo
 	Update                   update.Runner
 	ReportError              func(error)
+	IDE                      IDEService
 }
 
 type activeConnection struct {
@@ -60,6 +61,12 @@ type runningCall struct {
 	cancel         context.CancelFunc
 	maxOutputBytes int64
 	progressError  string
+}
+
+type resourceExchangeKey struct {
+	messageType  protocol.MessageType
+	invocationID string
+	transferID   string
 }
 
 // Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
@@ -87,6 +94,8 @@ type Runtime struct {
 	calls                  map[string]*runningCall
 	exitRequested          map[string]bool
 	exitCleanupUnconfirmed map[string]bool
+	resourceMu             sync.Mutex
+	resourceRequests       map[resourceExchangeKey]chan *protocol.Envelope
 	wg                     sync.WaitGroup
 	runMu                  sync.Mutex
 	running                bool
@@ -163,7 +172,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(
 			func(previous, candidate config.DaemonConfig) {
@@ -257,6 +266,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 		active := r.attachConnection(connection)
 		err = r.serveConnection(runCtx, active)
+		if runCtx.Err() == nil && r.options.ReportError != nil {
+			r.options.ReportError(err)
+		}
 		r.dropConnection(active)
 		if runCtx.Err() != nil {
 			return nil
@@ -384,6 +396,31 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 			return r.sendBoundError(e.InvocationId, "UPDATE requires a READY bound connection")
 		}
 		return r.handleUpdate(ctx, e)
+	case protocol.MessageType_RESOURCE_UPLOAD_TICKET, protocol.MessageType_RESOURCE_DOWNLOAD_TICKET:
+		if !ready {
+			return errors.New("resource ticket requires a READY bound connection")
+		}
+		return r.routeResourceTicket(e)
+	case protocol.MessageType_IDE_COMMAND:
+		if !ready || r.options.IDE == nil {
+			return r.sendBoundError(e.InvocationId, "IDE command requires a READY bound connection")
+		}
+		request, ok := e.Payload.(*protocol.Envelope_IdeCommand)
+		if !ok || request.IdeCommand == nil {
+			return errors.New("IDE command payload is invalid")
+		}
+		result := r.options.IDE.HandleCommand(ctx, request.IdeCommand)
+		return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_IDE_RESULT, InvocationId: e.InvocationId, Payload: &protocol.Envelope_IdeResult{IdeResult: result}}, true)
+	case protocol.MessageType_IDE_LEASE:
+		if !ready || r.options.IDE == nil {
+			return errors.New("IDE lease requires a READY bound connection")
+		}
+		lease, ok := e.Payload.(*protocol.Envelope_IdeLease)
+		if !ok || lease.IdeLease == nil {
+			return errors.New("IDE lease payload is invalid")
+		}
+		r.options.IDE.ApplyLease(lease.IdeLease, time.Now())
+		return nil
 	case protocol.MessageType_TEMPORARY_RESOURCE_POLICY:
 		if !ready {
 			return r.sendBoundError(e.InvocationId, "TEMPORARY_RESOURCE_POLICY requires a READY bound connection")
@@ -397,6 +434,91 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 	default:
 		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
+}
+
+// RequestTicket requests one binary upload ticket and waits for its correlated control response.
+func (r *Runtime) RequestTicket(ctx context.Context, invocationID string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+	if request == nil {
+		return nil, errors.New("resource upload request is required")
+	}
+	envelope := &protocol.Envelope{MessageType: protocol.MessageType_RESOURCE_UPLOAD_REQUEST, InvocationId: stringPtr(invocationID), Payload: &protocol.Envelope_ResourceUploadRequest{ResourceUploadRequest: request}}
+	response, err := r.resourceExchange(ctx, protocol.MessageType_RESOURCE_UPLOAD_TICKET, invocationID, request.GetTransferId(), envelope)
+	if err != nil {
+		return nil, err
+	}
+	return response.GetResourceUploadTicket(), nil
+}
+
+// Commit requests publication of one uploaded resource and waits for its correlated ticket.
+func (r *Runtime) Commit(ctx context.Context, invocationID, transferID, uploadID string) (*protocol.ResourceUploadTicket, error) {
+	envelope := &protocol.Envelope{MessageType: protocol.MessageType_RESOURCE_UPLOAD_COMMIT, InvocationId: stringPtr(invocationID), Payload: &protocol.Envelope_ResourceUploadCommit{ResourceUploadCommit: &protocol.ResourceUploadCommit{TransferId: stringPtr(transferID), UploadId: stringPtr(uploadID)}}}
+	response, err := r.resourceExchange(ctx, protocol.MessageType_RESOURCE_UPLOAD_TICKET, invocationID, transferID, envelope)
+	if err != nil {
+		return nil, err
+	}
+	return response.GetResourceUploadTicket(), nil
+}
+
+// RequestResourceDownloadTicket requests a skill or other invocation-bound resource ticket.
+func (r *Runtime) RequestResourceDownloadTicket(ctx context.Context, invocationID, transferID string) (*protocol.ResourceDownloadTicket, error) {
+	envelope := &protocol.Envelope{MessageType: protocol.MessageType_RESOURCE_DOWNLOAD_REQUEST, InvocationId: stringPtr(invocationID), Payload: &protocol.Envelope_ResourceDownloadRequest{ResourceDownloadRequest: &protocol.ResourceDownloadRequest{TransferId: stringPtr(transferID)}}}
+	response, err := r.resourceExchange(ctx, protocol.MessageType_RESOURCE_DOWNLOAD_TICKET, invocationID, transferID, envelope)
+	if err != nil {
+		return nil, err
+	}
+	return response.GetResourceDownloadTicket(), nil
+}
+
+func (r *Runtime) resourceExchange(ctx context.Context, responseType protocol.MessageType, invocationID, transferID string, request *protocol.Envelope) (*protocol.Envelope, error) {
+	key := resourceExchangeKey{messageType: responseType, invocationID: invocationID, transferID: transferID}
+	response := make(chan *protocol.Envelope, 1)
+	r.resourceMu.Lock()
+	if _, exists := r.resourceRequests[key]; exists {
+		r.resourceMu.Unlock()
+		return nil, errors.New("duplicate resource transfer request")
+	}
+	r.resourceRequests[key] = response
+	r.resourceMu.Unlock()
+	defer func() {
+		r.resourceMu.Lock()
+		if r.resourceRequests[key] == response {
+			delete(r.resourceRequests, key)
+		}
+		r.resourceMu.Unlock()
+	}()
+	if err := r.sendBound(request, true); err != nil {
+		return nil, err
+	}
+	select {
+	case envelope := <-response:
+		return envelope, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *Runtime) routeResourceTicket(envelope *protocol.Envelope) error {
+	var transferID string
+	switch ticket := envelope.Payload.(type) {
+	case *protocol.Envelope_ResourceUploadTicket:
+		transferID = ticket.ResourceUploadTicket.GetTransferId()
+	case *protocol.Envelope_ResourceDownloadTicket:
+		transferID = ticket.ResourceDownloadTicket.GetTransferId()
+	default:
+		return errors.New("resource ticket payload is invalid")
+	}
+	key := resourceExchangeKey{messageType: envelope.MessageType, invocationID: envelope.GetInvocationId(), transferID: transferID}
+	r.resourceMu.Lock()
+	response := r.resourceRequests[key]
+	if response != nil {
+		delete(r.resourceRequests, key)
+	}
+	r.resourceMu.Unlock()
+	if response == nil {
+		return errors.New("unsolicited resource ticket")
+	}
+	response <- envelope
+	return nil
 }
 
 func (r *Runtime) handleSettings(e *protocol.Envelope) error {
@@ -1106,7 +1228,11 @@ func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, stat
 	return r.sendBound(frame, false)
 }
 func (r *Runtime) sendStarted(id string, replayed bool) error {
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: &protocol.Started{Replayed: boolPtr(replayed)}}}, false)
+	started := &protocol.Started{}
+	if replayed {
+		started.Replayed = boolPtr(true)
+	}
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: started}}, false)
 }
 func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	entry, ok := r.journal.Get(id)

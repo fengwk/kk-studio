@@ -58,6 +58,63 @@ func TestBridgeAuthAndRoutes(t *testing.T) {
 	}
 }
 
+// IDE-T-006 verifies a timed-out directory transition fails safely and never admits its target folder.
+func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	bridge.commandTimeout = 10 * time.Millisecond
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const oldHost = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const targetHost = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	workspace, err := filepath.Abs(filepath.Join(t.TempDir(), "view.code-workspace"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Dir(workspace)
+	targetDirectory := filepath.Join(directory, "target")
+	bridge.Assign(viewID, workspace, 1, directory)
+	hostCtx, cancelHost := context.WithCancel(context.Background())
+	defer cancelHost()
+	response, reader := openManualBridgeStream(t, hostCtx, bridge, workspace, oldHost, directory)
+	defer response.Body.Close()
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	commandResult := make(chan BridgeResult, 1)
+	go func() {
+		result, _ := bridge.Request(context.Background(), viewID, BridgeCommand{Op: "changeDirectory", Directory: targetDirectory}, BridgeRequestOptions{ExpectedEpoch: 1, ExpectedDirectory: targetDirectory})
+		commandResult <- result
+	}()
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-commandResult:
+		if result.OK || result.Message != "ide window did not respond" {
+			t.Fatalf("timed-out result=%+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("directory command did not time out")
+	}
+	params := url.Values{"workspacePath": {workspace}, "hostId": {targetHost}, "folder": {targetDirectory}}
+	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+bridge.Secret)
+	denied, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer denied.Body.Close()
+	if denied.StatusCode != http.StatusGone {
+		t.Fatalf("target folder status=%d, want 410", denied.StatusCode)
+	}
+}
+
 // IDE-T-002 verifies native close prompts have no bridge command timer and remain answerable.
 func TestNativeClosePromptHasNoTimeout(t *testing.T) {
 	bridge, err := NewBridge()
@@ -101,6 +158,44 @@ func TestNativeClosePromptHasNoTimeout(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("native close prompt did not remain answerable")
+	}
+}
+
+// IDE-T-048 verifies explicit discard close requests are bounded even though normal native prompts are not.
+func TestDiscardClosePromptHasTimeout(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	bridge.commandTimeout = 10 * time.Millisecond
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
+	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte, 1), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	bridge.views[viewID].hostID, bridge.views[viewID].stream = stream.hostID, stream
+	bridge.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	requestResult := make(chan BridgeResult, 1)
+	go func() {
+		result, _ := bridge.Request(ctx, viewID, BridgeCommand{Op: "closeView", Discard: true}, BridgeRequestOptions{ExpectedEpoch: 1})
+		requestResult <- result
+	}()
+	var command struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(<-stream.messages, &command); err != nil || command.ID == "" {
+		t.Fatalf("discard close command=%+v err=%v", command, err)
+	}
+	select {
+	case result := <-requestResult:
+		if result.OK || result.Message != "ide window did not respond" {
+			t.Fatalf("discard close timeout=%+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal("discard close request did not time out")
 	}
 }
 
@@ -277,6 +372,19 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 		t.Fatalf("mismatched directory result=%+v", got)
 	}
 	bridge.mu.Lock()
+	stream = &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.views[viewID].hostID = stream.hostID
+	bridge.views[viewID].stream = stream
+	initiatorEcho := make(chan BridgeResult, 1)
+	bridge.pending["initiator-echo"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: initiatorEcho}
+	bridge.mu.Unlock()
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"initiator-echo","ok":true,"directory":"/managed/new"}`)); status != http.StatusNoContent {
+		t.Fatalf("initiator echo status=%d", status)
+	}
+	if got := <-initiatorEcho; got.OK || got.Message != "directory change was not applied" {
+		t.Fatalf("initiator self-confirmed directory result=%+v", got)
+	}
+	bridge.mu.Lock()
 	stale := make(chan BridgeResult, 1)
 	bridge.pending["stale"] = &bridgePending{viewID: viewID, epoch: 1, op: "inspect", stream: stream, result: stale}
 	bridge.views[viewID].stream = &bridgeStream{hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", messages: make(chan []byte), retired: make(chan struct{})}
@@ -313,6 +421,52 @@ func TestBridgePTYFailureBoundaries(t *testing.T) {
 	}
 }
 
+// IDE-T-051 verifies the current host identity may reconnect after an ordinary stream disconnect.
+func TestSameHostReconnectAfterDisconnect(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
+	directory := filepath.Dir(workspace)
+	bridge.Assign(viewID, workspace, 1, directory)
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstResponse, _ := openManualBridgeStream(t, firstCtx, bridge, workspace, hostID, directory)
+	if firstResponse.StatusCode != http.StatusOK {
+		cancelFirst()
+		firstResponse.Body.Close()
+		t.Fatalf("first stream status=%d", firstResponse.StatusCode)
+	}
+	cancelFirst()
+	firstResponse.Body.Close()
+	deadline := time.Now().Add(time.Second)
+	for {
+		bridge.mu.Lock()
+		disconnected := bridge.views[viewID].stream == nil
+		bridge.mu.Unlock()
+		if disconnected {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first stream did not disconnect")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	secondCtx, cancelSecond := context.WithCancel(context.Background())
+	defer cancelSecond()
+	secondResponse, reader := openManualBridgeStream(t, secondCtx, bridge, workspace, hostID, directory)
+	defer secondResponse.Body.Close()
+	if secondResponse.StatusCode != http.StatusOK {
+		t.Fatalf("same-host reconnect status=%d", secondResponse.StatusCode)
+	}
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("same-host reconnect handshake: %v", err)
+	}
+}
+
 // IDE-T-014/022 verifies stream query, retired-host, and host-capacity admission rules.
 func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	bridge, err := NewBridge()
@@ -339,6 +493,9 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	}
 	if status(url.Values{"workspacePath": {workspace, workspace}}) != http.StatusBadRequest {
 		t.Fatal("duplicate workspace path accepted")
+	}
+	if status(url.Values{"workspacePath": {workspace}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, "folder": {directory}}) != http.StatusBadRequest {
+		t.Fatal("duplicate host ID accepted")
 	}
 	if status(url.Values{"workspacePath": {"/unassigned"}, "hostId": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "folder": {"/managed"}}) != http.StatusForbidden {
 		t.Fatal("unassigned workspace accepted")

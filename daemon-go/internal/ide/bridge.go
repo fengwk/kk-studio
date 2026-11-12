@@ -110,16 +110,17 @@ type Bridge struct {
 	server   *http.Server
 	listener net.Listener
 
-	mu           sync.Mutex
-	views        map[string]*bridgeView
-	byKey        map[string]string
-	pending      map[string]*bridgePending
-	waiters      map[string]map[chan error]struct{}
-	ptyListeners []func(string, int) error
-	nextStreamID uint64
-	closed       bool
-	closeDone    chan struct{}
-	closeErr     error
+	mu             sync.Mutex
+	views          map[string]*bridgeView
+	byKey          map[string]string
+	pending        map[string]*bridgePending
+	waiters        map[string]map[chan error]struct{}
+	ptyListeners   []func(string, int) error
+	nextStreamID   uint64
+	closed         bool
+	closeDone      chan struct{}
+	closeErr       error
+	commandTimeout time.Duration
 }
 
 // NewBridge starts a token-protected HTTP service on an ephemeral loopback port.
@@ -136,7 +137,7 @@ func NewBridge() (*Bridge, error) {
 		URL: "http://" + listener.Addr().String(), Secret: secret, listener: listener,
 		views: make(map[string]*bridgeView), byKey: make(map[string]string),
 		pending: make(map[string]*bridgePending), waiters: make(map[string]map[chan error]struct{}),
-		closeDone: make(chan struct{}),
+		closeDone: make(chan struct{}), commandTimeout: bridgeCommandTimeout,
 	}
 	bridge.server = &http.Server{Handler: http.HandlerFunc(bridge.handle)}
 	go func() { _ = bridge.server.Serve(listener) }()
@@ -281,7 +282,7 @@ func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeComma
 	}
 	pending := &bridgePending{viewID: viewID, epoch: view.epoch, op: command.Op, stream: view.stream, hostID: view.hostID, expectedDirectory: options.ExpectedDirectory, result: make(chan BridgeResult, 1)}
 	if command.Op != "closeView" || command.Discard {
-		pending.timer = time.AfterFunc(bridgeCommandTimeout, func() { b.resolvePending(id, BridgeResult{Message: "ide window did not respond"}) })
+		pending.timer = time.AfterFunc(b.commandTimeout, func() { b.resolvePending(id, BridgeResult{Message: "ide window did not respond"}) })
 	}
 	b.pending[id] = pending
 	stream := view.stream

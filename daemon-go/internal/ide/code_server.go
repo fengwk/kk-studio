@@ -286,7 +286,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 	if err != nil {
 		return nil, err
 	}
-	for _, dir := range []string{m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.ViewsDir} {
+	for _, dir := range []string{m.paths.IDEDir, m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.ViewsDir} {
 		if err := native.EnsurePrivateDirectory(dir); err != nil {
 			return nil, NewError("code-server storage is unavailable", "UNAVAILABLE")
 		}

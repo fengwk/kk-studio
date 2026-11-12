@@ -70,6 +70,31 @@ func TestCodec_UnknownProtobuf(t *testing.T) {
 	if _, err := UnmarshalEnvelope(data); err == nil {
 		t.Fatal("unknown nested field accepted")
 	}
+
+	invoke := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{
+		CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(`{}`), TimeoutMillis: proto.Int64(0),
+	}})
+	invoke.GetInvoke().ProtoReflect().SetUnknown([]byte{0xf8, 0x07, 0x01})
+	data, err = proto.Marshal(invoke)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalEnvelope(data); err == nil {
+		t.Fatal("unknown INVOKE field accepted")
+	}
+
+	result := testEnvelope(MessageType_COMPLETED, testInvocationID, &Envelope_Completed{Completed: &Completed{Result: &CapabilityResult{
+		CallId: proto.String("call-1"), Error: proto.Bool(false), DetailsJson: proto.String(`{}`),
+		Contents: []*Content{{Body: &Content_Text{Text: &TextContent{Text: proto.String("ok")}}}},
+	}}})
+	result.GetCompleted().GetResult().Contents[0].ProtoReflect().SetUnknown([]byte{0xf8, 0x07, 0x01})
+	data, err = proto.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalEnvelope(data); err == nil {
+		t.Fatal("unknown content field accepted")
+	}
 }
 
 // TRN-T-135

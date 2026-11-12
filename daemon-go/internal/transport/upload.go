@@ -40,16 +40,13 @@ var _ runtimeapi.ResourceUploader = (*ResourceUploader)(nil)
 // Upload uploads one binary result and replaces its bytes with a resource reference.
 func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, content runtimeapi.ResultContent) (result runtimeapi.ResultContent, err error) {
 	defer func() {
-		if err == nil {
-			return
-		}
-		var uploadErr *runtimeapi.ResourceUploadError
-		if !errors.As(err, &uploadErr) {
-			err = &runtimeapi.ResourceUploadError{Stage: "internal", Category: "boundary-violation", CleanupConfirmed: false, Cause: err}
-		}
+		err = normalizeUploadError(err)
 	}()
 	if u.Control == nil {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "control-unavailable", true, nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return runtimeapi.ResultContent{}, uploadFailure("request", "cancelled", true, err)
 	}
 	if !transferIDPattern.MatchString(invocationID) {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
@@ -138,6 +135,17 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 			}
 		}
 	}
+}
+
+func normalizeUploadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var uploadErr *runtimeapi.ResourceUploadError
+	if errors.As(err, &uploadErr) {
+		return err
+	}
+	return &runtimeapi.ResourceUploadError{Stage: "internal", Category: "boundary-violation", CleanupConfirmed: false, Cause: err}
 }
 
 func uploadFailure(stage, category string, cleanupConfirmed bool, cause error) error {

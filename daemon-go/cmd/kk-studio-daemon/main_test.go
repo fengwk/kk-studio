@@ -124,6 +124,34 @@ func TestConfigRunInvokesRuntimeAndContainsFailures(t *testing.T) {
 	}
 }
 
+func TestWithH2XConnectSetsDebugBeforeReexecution(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"missing", []string{"PATH=/bin"}, "GODEBUG=http2xconnect=1"},
+		{"append", []string{"GODEBUG=netdns=go", "PATH=/bin"}, "GODEBUG=netdns=go,http2xconnect=1"},
+		{"existing", []string{"GODEBUG=netdns=go,http2xconnect=1"}, "GODEBUG=netdns=go,http2xconnect=1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := withH2XConnect(tc.env)
+			found := false
+			for _, entry := range got {
+				if strings.HasPrefix(entry, "GODEBUG=") {
+					if entry != tc.want {
+						t.Fatalf("GODEBUG=%q, want %q", entry, tc.want)
+					}
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("GODEBUG missing from %#v", got)
+			}
+		})
+	}
+}
+
 func TestSafeErrorNormalizesDiagnostics(t *testing.T) {
 	if got := safeError(nil); got != "unknown" {
 		t.Fatalf("nil message = %q", got)
