@@ -1001,46 +1001,39 @@ public abstract class HarnessStoreCommandContract {
             .equals(Boolean.TRUE));
   }
 
-  /** 普通 Session 列表排除子代理；父级查询只返回直接 SUBAGENT。 */
+  /** Session 列表只公开 USER Thread。 */
   @Test
-  void userAndSubagentQueriesFilterByKindAndParent() {
-    UUID childThreadId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.threads()
-                  .insert(
-                      new ThreadState(
-                          id,
-                          baseline.sessionId(),
-                          baseline.threadId(),
-                          baseline.rootEntryId(),
-                          StoreTestSupport.CREATION_REQUEST_HASH,
-                          "subagent",
-                          baseline.threadId(),
-                          false,
-                          ThreadKind.SUBAGENT,
-                          ThreadConstraints.NONE,
-                          ThreadExecutionControl.RUNNABLE,
-                          0L,
-                          1,
-                          0,
-                          T0,
-                          T0));
-              return id;
-            });
+  void userThreadQueryFiltersByKind() {
+    store.transaction(
+        tx -> {
+          UUID childThreadId = tx.nextId();
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      baseline.sessionId(),
+                      baseline.threadId(),
+                      baseline.rootEntryId(),
+                      StoreTestSupport.CREATION_REQUEST_HASH,
+                      "subagent",
+                      baseline.threadId(),
+                      false,
+                      ThreadKind.SUBAGENT,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      T0,
+                      T0));
+          return null;
+        });
 
     assertEquals(
         List.of(baseline.threadId()),
         store.transaction(tx -> tx.threads().listUserBySession(baseline.sessionId())).stream()
             .map(ThreadState::id)
             .toList());
-    assertEquals(
-        List.of(childThreadId),
-        store.transaction(tx -> tx.threads().listSubagents(baseline.threadId())).stream()
-            .map(ThreadState::id)
-            .toList());
-    assertTrue(store.transaction(tx -> tx.threads().listSubagents(childThreadId)).isEmpty());
   }
 
   /** listThreadsBySession：按 (created_at, id) 确定性序返回同 Session 的 Thread，跨 Session 不混入。 */

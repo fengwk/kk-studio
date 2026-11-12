@@ -13,10 +13,12 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.SkillLoadTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
+import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -83,14 +85,19 @@ class BuiltinHarnessContributorConfigurationTest {
     when(task.descriptor()).thenReturn(descriptor("task"));
     when(task.requirements()).thenReturn(ToolRequirements.none());
 
+    SkillLoadTool skillLoadTool = new SkillLoadTool(mock(SkillLoadGateway.class));
     BuiltinHarnessContributor contributor =
         new BuiltinHarnessContributorConfiguration()
-            .builtinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), task);
+            .builtinHarnessContributor(
+                BuiltinFileToolsTestSupport.fileTools(), task, skillLoadTool);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     assertEquals(
         ToolVisibility.INTERNAL,
         catalog.findTool(TaskTool.NAME).orElseThrow().definition().visibility());
+    assertEquals(
+        ToolVisibility.INTERNAL,
+        catalog.findTool(SkillLoadTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.SELECTABLE,
         catalog.findTool(FileTool.READ_NAME).orElseThrow().definition().visibility());
@@ -99,7 +106,8 @@ class BuiltinHarnessContributorConfigurationTest {
   @Test
   void fileToolBeanInstantiatesExactlyTheFiveFileTools() {
     List<Tool> tools =
-        new BuiltinHarnessContributorConfiguration().builtinFileTools(mock(VfsGateway.class));
+        new BuiltinHarnessContributorConfiguration()
+            .builtinFileTools(mock(ResourceReadGateway.class));
     assertEquals(
         List.of("read", "write", "edit", "grep", "find"),
         tools.stream().map(tool -> tool.descriptor().name()).toList());

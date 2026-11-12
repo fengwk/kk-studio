@@ -93,7 +93,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
     Set<String> objectsBeforePublish = s3Storage.keys();
     assertEquals(1L, support.refCount(blobId), "READY upload owns the only reference");
 
-    String uri = "vfs:/resources/" + blobId;
+    String uri = "resource://files/" + blobId;
     MvcResult result =
         mockMvc
             .perform(

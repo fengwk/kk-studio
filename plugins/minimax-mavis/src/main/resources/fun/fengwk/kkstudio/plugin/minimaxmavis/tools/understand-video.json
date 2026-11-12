@@ -9,7 +9,7 @@
         "description": "Video inputs to analyze, 1-10 entries.",
         "items": {
           "type": "string",
-          "description": "A public HTTP(S) video URL or a vfs:/resources/<blobId> video resource of the current session."
+          "description": "A public HTTP(S) video URL or a resource://files/<uuid> video resource of the current session."
         }
       },
       "prompt": {

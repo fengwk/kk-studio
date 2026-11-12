@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
@@ -19,12 +21,12 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 平台侧 Session 授权 Blob 资源内容读取器。
+ * 平台侧 Session 资源内容读取器。
  *
- * <p>按 {@code vfs:/resources/<blobId>} 读取当前会话授权的 Blob：
+ * <p>按 {@code resource://files/<uuid>} 读取全局 Blob，并在当前 Session 建立持有：
  *
  * <ol>
- *   <li>会话身份由工具执行上下文给出，只校验该 Session 已引用该 Blob（鉴权失败与不存在无法区分地拒绝，避免信息泄露）；
+ *   <li>会话身份由工具执行上下文给出；存在的 ACTIVE 资源在首次访问时被该 Session 持有；
  *   <li>以授权 Blob 的权威 MIME 判定读取形态：文本继续返回有界窗口；{@code image/*}、{@code audio/*}、{@code video/*} 与
  *       {@code application/pdf} 走真实媒体路径；
  *   <li>媒体路径在读取任何内容之前，用执行上下文中该 Turn 已冻结的消费者媒体能力、权威 MIME 与内联预算共同校验：不支持或超预算都以明确英文错误拒绝；
@@ -72,6 +74,7 @@ public class PlatformResourceContentReader {
    * @return 文本窗口或媒体引用
    * @throws PlatformReadException 鉴权失败、媒体不受支持或超出预算、读取失败时抛出
    */
+  @Transactional
   public ResourceRead readResource(
       UUID sessionId,
       TurnMediaCapabilities mediaCapabilities,
@@ -89,16 +92,15 @@ public class PlatformResourceContentReader {
       throw new PlatformReadException("blobId must not be null");
     }
     Objects.requireNonNull(deadline, "deadline must not be null");
-    authorize(sessionId, blobId);
-
     StorageBlob blob = storageBlobManager.getBlob(blobId);
-    ModelInputModality modality = blob == null ? null : mediaModality(blob.getMediaType());
+    if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+      throw new PlatformReadException("resource is not available: " + blobId);
+    }
+    sessionBlobRefManager.retainRef(sessionId, blobId);
+    ModelInputModality modality = mediaModality(blob.getMediaType());
     if (modality == null) {
       return new ResourceRead.Text(
           readTextWindow(blobId, offset, limit, columnOffset, displayPath, deadline));
-    }
-    if (blob.getState() != StorageBlobState.ACTIVE) {
-      throw new PlatformReadException("resource is not available: " + blobId);
     }
     boolean consumerDeclares = mediaCapabilities.declares(modality);
     boolean protocolAccepts = mediaCapabilities.acceptsProtocolPosition(modality);
@@ -146,13 +148,6 @@ public class PlatformResourceContentReader {
             sizeBytes,
             blob.getSha256());
     return new ResourceRead.Media(ref, null);
-  }
-
-  /** 当前 Session 已引用该 Blob；否则以无法区分的错误拒绝。会话身份来自执行上下文，不在这里反查 Harness 存储。 */
-  private void authorize(UUID sessionId, UUID blobId) {
-    if (!sessionBlobRefManager.contains(sessionId, blobId)) {
-      throw new PlatformReadException("resource is not referenced by this session");
-    }
   }
 
   private String readTextWindow(

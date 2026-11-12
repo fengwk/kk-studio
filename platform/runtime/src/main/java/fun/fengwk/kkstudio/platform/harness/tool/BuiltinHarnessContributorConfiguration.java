@@ -8,6 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.SkillLoadTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
@@ -16,7 +17,8 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
+import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -36,10 +38,10 @@ import java.util.List;
 @Configuration(proxyBeanMethods = false)
 public class BuiltinHarnessContributorConfiguration {
 
-  /** 五个文件工具：{@code vfs:} 路径走 Platform VFS，绝对宿主路径走分支绑定的 Environment。 */
+  /** 五个文件工具：{@code resource://} 由平台读取，本地路径交给所选 Environment。 */
   @Bean
   @ConditionalOnMissingBean(name = "builtinFileTools")
-  public List<Tool> builtinFileTools(VfsGateway vfsGateway) {
+  public List<Tool> builtinFileTools(ResourceReadGateway resourceReadGateway) {
     return List.of(
         new FileTool(
             "read",
@@ -47,35 +49,35 @@ public class BuiltinHarnessContributorConfiguration {
             "read.md",
             EnvironmentCapabilityIds.FS_READ,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "write",
             FileTool.Operation.WRITE,
             "write.md",
             EnvironmentCapabilityIds.FS_WRITE,
             ToolSideEffect.IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "edit",
             FileTool.Operation.EDIT,
             "edit.md",
             EnvironmentCapabilityIds.FS_EDIT,
             ToolSideEffect.NON_IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "grep",
             FileTool.Operation.GREP,
             "grep.md",
             EnvironmentCapabilityIds.FS_GREP,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "find",
             FileTool.Operation.FIND,
             "find.md",
             EnvironmentCapabilityIds.FS_FIND,
             ToolSideEffect.READ_ONLY,
-            vfsGateway));
+            resourceReadGateway));
   }
 
   /**
@@ -119,8 +121,14 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public SkillLoadTool skillLoadTool(SkillLoadGateway skillLoadGateway) {
+    return new SkillLoadTool(skillLoadGateway);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public BuiltinHarnessContributor builtinHarnessContributor(
-      List<Tool> builtinFileTools, TaskTool taskTool) {
-    return new BuiltinHarnessContributor(builtinFileTools, taskTool);
+      List<Tool> builtinFileTools, TaskTool taskTool, SkillLoadTool skillLoadTool) {
+    return new BuiltinHarnessContributor(builtinFileTools, taskTool, skillLoadTool);
   }
 }

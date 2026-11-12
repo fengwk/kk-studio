@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,7 +23,6 @@ import { chatService } from '@/features/chat/chat-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import { harnessService } from '@/shared/api/harness-service'
-import { sessionFileService } from '@/shared/api/session-file-service'
 import {
   createBuiltinExecution,
 } from '@/shared/api/contracts/ai-runtime'
@@ -84,13 +83,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     decideApproval: vi.fn(),
     renameThread: vi.fn(),
     renameSession: vi.fn(),
-  },
-}))
-vi.mock('@/shared/api/session-file-service', () => ({
-  sessionFileService: {
-    listSessionFiles: vi.fn(),
-    readSessionFileContent: vi.fn(),
-    downloadSessionFile: vi.fn(),
   },
 }))
 
@@ -222,11 +214,6 @@ beforeEach(() => {
   vi.mocked(harnessService.listSessionThreads).mockReset().mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
-  vi.mocked(sessionFileService.listSessionFiles).mockResolvedValue({
-    sessionId: 'session-1',
-    path: 'vfs:/sessions/session-1/',
-    entries: [],
-  })
 })
 
 function renderWorkspaceRouter(
@@ -811,31 +798,6 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const dialog = document.querySelector<HTMLElement>('.new-branch-dialog')!
     await user.click(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!)
   }
-
-  it('disables the session files action before a session exists', async () => {
-    // 草稿 pane 尚无 Session，入口禁用并说明原因，不发任何请求。
-    renderWorkspace()
-    const button = await screen.findByTestId('chat-files-toggle')
-    expect(button).toBeDisabled()
-    expect(button.parentElement).toHaveAttribute('title', '先选择或创建会话')
-  })
-
-  it('opens the read-only session files panel for the focused session', async () => {
-    const user = userEvent.setup()
-    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
-    renderWorkspace()
-    const button = await screen.findByTestId('chat-files-toggle')
-    await waitFor(() => expect(button).toBeEnabled())
-
-    await user.click(button)
-    const dialog = await screen.findByRole('dialog', { name: '会话文件' })
-    expect(await within(dialog).findByText('此目录为空')).toBeVisible()
-    // 只列出当前焦点 Session 的根目录；会话坐标来自路径，不再携带产品 owner。
-    expect(sessionFileService.listSessionFiles).toHaveBeenCalledWith('session-1', undefined)
-
-    await user.click(within(dialog).getByTestId('session-files-close'))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '会话文件' })).toBeNull())
-  })
 
   it('opens the shared naming flow from /tree and routes the draft into a hidden pane', async () => {
     const user = userEvent.setup()

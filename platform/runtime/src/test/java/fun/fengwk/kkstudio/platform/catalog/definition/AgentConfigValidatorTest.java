@@ -109,6 +109,20 @@ class AgentConfigValidatorTest {
   }
 
   @Test
+  void rejectsSkillNamesRepeatedAcrossPackages() {
+    try (Fixture fixture = new Fixture(List.of())) {
+      AgentConfigDTO config = new AgentConfigDTO();
+      config.setTools(List.of());
+      config.setSkills(List.of(skillRef("first", "review"), skillRef("second", "review")));
+      config.setSubagents(List.of());
+
+      DomainException error =
+          assertThrows(DomainException.class, () -> fixture.validator.validate(config));
+      assertTrue(error.getMessage().contains("agent skill names must be unique: review"));
+    }
+  }
+
+  @Test
   void rejectsInternalToolSelection() {
     try (Fixture fixture = new Fixture(List.of())) {
       AgentConfigDTO config = new AgentConfigDTO();

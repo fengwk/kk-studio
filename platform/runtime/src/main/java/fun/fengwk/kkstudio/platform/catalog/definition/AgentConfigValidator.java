@@ -59,6 +59,7 @@ public final class AgentConfigValidator {
       throw DomainException.validation("agent", "agent config skills is required");
     }
     Set<SkillRefKey> seen = new HashSet<>();
+    Set<String> seenNames = new HashSet<>();
     for (SkillRefDTO skill : skills) {
       if (skill == null) {
         throw DomainException.validation(
@@ -84,6 +85,10 @@ public final class AgentConfigValidator {
                 + skill.getPackageName()
                 + "/"
                 + skill.getName());
+      }
+      if (!seenNames.add(skill.getName())) {
+        throw DomainException.validation(
+            "agent", "agent skill names must be unique: " + skill.getName());
       }
     }
   }

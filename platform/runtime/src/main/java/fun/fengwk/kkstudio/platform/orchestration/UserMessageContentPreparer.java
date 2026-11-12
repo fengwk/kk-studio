@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.resource.ResourceUri;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -8,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -88,6 +90,9 @@ public final class UserMessageContentPreparer {
           contents.add(attachmentToResource(sessionId, attachment));
         } else if (content instanceof ResourceMessageContent resource) {
           contents.add(requireOwnedResource(sessionId, resource));
+        } else if (content instanceof TextMessageContent text) {
+          retainReferencedResources(sessionId, text.text());
+          contents.add(content);
         } else {
           contents.add(content);
         }
@@ -108,6 +113,17 @@ public final class UserMessageContentPreparer {
         ready.filename(),
         null,
         imageTierForBlob(ready.blobId(), attachment.imageTier()));
+  }
+
+  /** 自由文本中的资源 URI 也建立当前 Session 持有。 */
+  private void retainReferencedResources(UUID sessionId, String text) {
+    for (UUID blobId : ResourceUri.referencedFiles(text)) {
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+        throw DomainException.validation("resource", "Resource is not available");
+      }
+      refManager.retainRef(sessionId, blobId);
+    }
   }
 
   /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */

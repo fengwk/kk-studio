@@ -80,6 +80,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private final Supplier<EnvironmentServerSettings> settingsSupplier;
   private final DaemonInvocationTracker invocationTracker;
   private final DaemonTransferCoordinator transferCoordinator;
+  private final DaemonDownloadCoordinator downloadCoordinator = new DaemonDownloadCoordinator();
   private final DaemonIdeCoordinator ideCoordinator;
   private final DaemonUpdateCoordinator updateCoordinator;
   private final Consumer<DaemonConnectionSession> onClosed;
@@ -315,6 +316,7 @@ final class DaemonConnectionSession implements DaemonSession {
   public void receive(Envelope envelope) {
     Objects.requireNonNull(envelope, "envelope");
     DaemonTransferCoordinator.PreparedTransfer prepared = null;
+    DaemonDownloadCoordinator.PreparedDownload preparedDownload = null;
     List<Runnable> deferred = new ArrayList<>();
     RuntimeException protocolError = null;
     boolean backlogFull = false;
@@ -372,6 +374,15 @@ final class DaemonConnectionSession implements DaemonSession {
                   transferCoordinator.prepareUploadCommit(
                       this, active, envelope.getResourceUploadCommit());
             }
+            case RESOURCE_DOWNLOAD_REQUEST -> {
+              requireReady();
+              UUID invocationId = parseInvocationId(envelope);
+              ActiveInvocation active =
+                  invocationTracker.registeredInvocation(environmentId, invocationId);
+              preparedDownload =
+                  downloadCoordinator.prepare(
+                      this, active, invocationId.toString(), envelope.getResourceDownloadRequest());
+            }
             case UPDATE_RESULT -> {
               requireReady();
               updateCoordinator.handleUpdateResult(
@@ -406,6 +417,9 @@ final class DaemonConnectionSession implements DaemonSession {
     drainCallbacks();
     if (prepared != null) {
       transferCoordinator.executeTransfer(prepared, ticketService, invocationTracker);
+    }
+    if (preparedDownload != null) {
+      downloadCoordinator.executeDownload(preparedDownload, ticketService, invocationTracker);
     }
   }
 

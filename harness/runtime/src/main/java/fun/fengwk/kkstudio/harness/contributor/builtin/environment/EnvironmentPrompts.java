@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.environment;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 
 import java.util.Map;
@@ -15,5 +17,10 @@ public final class EnvironmentPrompts {
   public static String load(String fileName) {
     Objects.requireNonNull(fileName, "fileName");
     return PromptRenderer.render(RESOURCE_PREFIX + fileName, Map.of()).trim();
+  }
+
+  public static InputSchema loadSchema(String fileName) {
+    Objects.requireNonNull(fileName, "fileName");
+    return new SchemaJsonCodec().decode(PromptRenderer.read(RESOURCE_PREFIX + fileName));
   }
 }

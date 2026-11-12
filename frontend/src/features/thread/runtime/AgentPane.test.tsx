@@ -319,7 +319,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     renameThread: vi.fn(),
     getCompactionAvailability: vi.fn(),
     getThreadTree: vi.fn(),
-    getThreadSubagents: vi.fn(),
   },
 }))
 
@@ -539,11 +538,6 @@ beforeEach(() => {
   vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [
     treeNode(threadId, null, 'thread-name', false),
   ])
-  vi.mocked(harnessService.getThreadSubagents).mockImplementation(async (parentId) => {
-    const latestTree = vi.mocked(harnessService.getThreadTree).mock.results.at(-1)?.value
-    const nodes: HarnessThreadTreeNodeDTO[] = latestTree == null ? [] : await latestTree
-    return nodes.filter((node) => node.parentThreadId === parentId && node.kind === 'SUBAGENT')
-  })
   vi.mocked(interactionService.listInteractions).mockResolvedValue(interactionPage([]))
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())

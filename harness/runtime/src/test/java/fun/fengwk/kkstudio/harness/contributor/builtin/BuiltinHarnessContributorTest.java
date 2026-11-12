@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -211,7 +211,7 @@ class BuiltinHarnessContributorTest {
   /**
    * 验证内置 contributor 的模型工具面恰好是 5 个文件工具加 4 个环境专用工具，不泄漏任何 MCP 身份。
    *
-   * <p>文件工具按每次调用的路径在 Platform VFS 与 BoundEnvironment 之间路由。
+   * <p>文件工具按每次调用的路径在平台资源读取与 BoundEnvironment 之间路由。
    */
   @Test
   void builtinToolsAreExactlyTheFiveFileToolsPlusFourHostCapabilities() {
@@ -314,9 +314,12 @@ class BuiltinHarnessContributorTest {
     assertFalse(descriptor.description().isBlank());
     assertFalse(descriptor.description().contains("workdir"));
     if ("read".equals(toolName)) {
-      // read 的模型提示词必须声明两种 vfs: 只读形态，避免模型猜测不存在的路径。
-      assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
-      assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
+      // read 的模型提示词必须声明两种平台资源命名空间。
+      assertTrue(descriptor.description().contains("resource://files/<uuid>"));
+      assertTrue(
+          descriptor
+              .description()
+              .contains("resource://skills/<package>/<version>/<skill>/<relativePath>"));
     }
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
@@ -418,7 +421,7 @@ class BuiltinHarnessContributorTest {
 
   /** 五个真实 FileTool：名字、顺序与 capability 绑定必须与 Contributor 冻结的清单一致。 */
   private static List<Tool> stubFileTools() {
-    VfsGateway vfsGateway = mock(VfsGateway.class);
+    ResourceReadGateway vfsGateway = mock(ResourceReadGateway.class);
     return List.of(
         new FileTool(
             "read",

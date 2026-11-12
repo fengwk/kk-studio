@@ -7,14 +7,21 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedGet;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.DownloadTicket;
+import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.util.Map;
 import java.util.Objects;
@@ -37,9 +44,16 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
   private static final String FALLBACK_NAME_PREFIX = "resource-";
 
   private final StorageUploadService uploadService;
+  private final StorageBlobManager blobManager;
+  private final S3PresignService presignService;
 
-  public StorageDaemonResourceTicketService(StorageUploadService uploadService) {
+  public StorageDaemonResourceTicketService(
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager,
+      S3PresignService presignService) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.presignService = Objects.requireNonNull(presignService, "presignService");
   }
 
   @Override
@@ -98,6 +112,31 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
       // 已被消费或已被后台回收：释放本就幂等。
     } catch (RuntimeException error) {
       log.warn("cannot release daemon resource upload {}", uploadId);
+    }
+  }
+
+  @Override
+  public DownloadTicket download(
+      EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(transferId, "transferId");
+    Objects.requireNonNull(blobId, "blobId");
+    try {
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null
+          || blob.getState() != StorageBlobState.ACTIVE
+          || blob.getArchiveIndex() == null) {
+        return new DownloadTicket.Failed("resource download is unavailable");
+      }
+      var presigned = presignService.presignDownload(StorageObjectKeys.blobOriginal(blobId), null);
+      return new DownloadTicket.Ready(
+          new DaemonPresignedGet(
+              presigned.getMethod(), presigned.getUrl(), presigned.getExpiresAt().toEpochMilli()),
+          blob.getSizeBytes(),
+          blob.getSha256());
+    } catch (RuntimeException failure) {
+      return new DownloadTicket.Failed("resource download is unavailable");
     }
   }
 

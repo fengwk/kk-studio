@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
-import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
@@ -31,8 +30,6 @@ import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ReadinessProbe;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.SessionFileLimits;
-import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
@@ -242,27 +239,6 @@ public class S3StorageConfiguration {
   public SessionBlobRefManager sessionBlobRefManager(
       SessionBlobRefRepository refRepository, StorageBlobManager blobManager) {
     return new SessionBlobRefManager(refRepository, blobManager);
-  }
-
-  /** Session 文件存储服务：revision 乐观锁、配额限制与 Blob 生命周期。 */
-  @Bean
-  public SessionFileStore sessionFileStore(
-      SessionFileRepository sessionFileRepository,
-      StorageBlobRepository blobRepository,
-      StorageUploadService uploadService,
-      StorageBlobContentService blobContentService,
-      SessionBlobRefManager refManager,
-      Clock clock,
-      PlatformTransactionManager transactionManager) {
-    return new SessionFileStore(
-        sessionFileRepository,
-        blobRepository,
-        uploadService,
-        blobContentService,
-        refManager,
-        clock,
-        transactionManager,
-        SessionFileLimits.DEFAULT);
   }
 
   private S3Configuration newS3Configuration() {

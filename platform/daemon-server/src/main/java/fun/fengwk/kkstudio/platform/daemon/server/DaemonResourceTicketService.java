@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedGet;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 
 import java.util.Objects;
@@ -50,6 +51,37 @@ public interface DaemonResourceTicketService {
    * @param uploadId 该传输已确定的全局上传 id；为 {@code null} 表示尚未申请到上传
    */
   void release(EnvironmentId environmentId, String invocationId, UUID uploadId);
+
+  /** Issue a one-time GET ticket for an archive registered to an active invocation. */
+  DownloadTicket download(
+      EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId);
+
+  /** Result of a registered archive download request. */
+  sealed interface DownloadTicket permits DownloadTicket.Ready, DownloadTicket.Failed {
+
+    record Ready(DaemonPresignedGet presignedGet, long size, String sha256)
+        implements DownloadTicket {
+
+      public Ready {
+        Objects.requireNonNull(presignedGet, "presignedGet");
+        if (size < 0) {
+          throw new IllegalArgumentException("size must not be negative");
+        }
+        if (sha256 == null || !sha256.matches("[0-9a-f]{64}")) {
+          throw new IllegalArgumentException("sha256 must be lowercase hexadecimal");
+        }
+      }
+    }
+
+    record Failed(String message) implements DownloadTicket {
+
+      public Failed {
+        if (message == null || message.isBlank()) {
+          throw new IllegalArgumentException("message must not be blank");
+        }
+      }
+    }
+  }
 
   /** 协议校验通过的一次上传申请。 */
   record TransferRequest(UUID transferId, String mediaType, String name, long size, String sha256) {
