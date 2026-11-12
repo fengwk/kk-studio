@@ -103,9 +103,15 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
 
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, materialized.get(0).contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, materialized.get(0).contents().get(1));
     assertEquals("image/png", image.mediaType());
     assertEquals(IMAGE_DATA_URI, image.source());
+    ProviderTextBlock imageLabel =
+        assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
+    assertTrue(imageLabel.text().contains("resource://files/" + BLOB_ID));
+    assertTrue(imageLabel.text().contains("Original size: 1 x 1"));
+    assertTrue(imageLabel.text().contains("Display size: 1 x 1"));
+    assertFalse(imageLabel.text().contains("Multiply coordinates"));
     verify(contentService).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
     // 内联路径绝不触碰预签名能力。
     verify(blobManager, never()).presignOriginalUrl(any());
@@ -204,9 +210,12 @@ class ProviderResourceMaterializerTest {
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
     stubContent(contentService, BLOB_ID, "image/png", BYTES);
+    ProviderResourceBlock scaledToolImage =
+        ProviderResourceBlock.media(
+            BLOB_ID, "scan.png", "tiny preview", null, 4000, 2000, 1280, 640);
     ProviderToolResultBlock toolResult =
         new ProviderToolResultBlock(
-            "call-image", "read", List.of(IMAGE_RESOURCE), false, "{\"bytes\":3}");
+            "call-image", "read", List.of(scaledToolImage), false, "{\"bytes\":3}");
     ProviderMediaCapabilities userOnly =
         new ProviderMediaCapabilities(Set.of(ModelInputModality.IMAGE), Set.of());
     ProviderMediaCapabilities toolOnly =
@@ -231,8 +240,14 @@ class ProviderResourceMaterializerTest {
         assertInstanceOf(ProviderTextBlock.class, userMedia.contents().get(0));
     assertTrue(source.text().contains("call-image"), source.text());
     assertTrue(source.text().contains(BLOB_ID.toString()), source.text());
+    ProviderTextBlock imageLabel =
+        assertInstanceOf(ProviderTextBlock.class, userMedia.contents().get(1));
+    assertTrue(imageLabel.text().startsWith("Tool call call-image image: resource://files/"));
+    assertTrue(imageLabel.text().contains("Original size: 4000 x 2000"));
+    assertTrue(imageLabel.text().contains("Display size: 1280 x 640"));
+    assertTrue(imageLabel.text().contains("Multiply coordinates … to map to the original image."));
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, userMedia.contents().get(1));
+        assertInstanceOf(ProviderImageBlock.class, userMedia.contents().get(2));
     assertEquals(IMAGE_DATA_URI, image.source());
     verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
 
@@ -248,8 +263,11 @@ class ProviderResourceMaterializerTest {
                 .get(0)
                 .contents()
                 .get(0));
+    ProviderTextBlock nativeImageLabel =
+        assertInstanceOf(ProviderTextBlock.class, inlined.contents().get(0));
+    assertTrue(nativeImageLabel.text().startsWith("Image: resource://files/"));
     ProviderImageBlock nativeImage =
-        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(1));
     assertEquals(IMAGE_DATA_URI, nativeImage.source());
     IllegalArgumentException userError =
         assertThrows(
@@ -470,7 +488,7 @@ class ProviderResourceMaterializerTest {
             .materialize(List.of(message), Set.of(ModelInputModality.IMAGE), ALL_MEDIA)
             .get(0)
             .contents()
-            .get(0));
+            .get(1));
 
     StorageBlob deleting = activeBlob("image/png", BYTES.length);
     deleting.setState(StorageBlobState.DELETING);
@@ -506,9 +524,9 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
 
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(1)).source());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(1).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(1).contents().get(1)).source());
     verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
   }
 
@@ -526,6 +544,24 @@ class ProviderResourceMaterializerTest {
 
     assertEquals(1280, materializedImageWidth(materializer, tieredResource(ImageInputTier.P720)));
     assertEquals(1920, materializedImageWidth(materializer, tieredResource(ImageInputTier.P1080)));
+    ProviderTextBlock label =
+        assertInstanceOf(
+            ProviderTextBlock.class,
+            materializer
+                .materialize(
+                    List.of(
+                        new ProviderMessage(
+                            ProviderMessageRole.USER,
+                            List.of(tieredResource(ImageInputTier.P720)))),
+                    Set.of(ModelInputModality.IMAGE),
+                    ALL_MEDIA)
+                .get(0)
+                .contents()
+                .get(0));
+    assertTrue(label.text().startsWith("Image: resource://files/" + BLOB_ID));
+    assertTrue(label.text().contains("Original size: 4000 x 2000"));
+    assertTrue(label.text().contains("Display size: 1280 x 640"));
+    assertTrue(label.text().contains("Multiply coordinates … to map to the original image."));
     // 档位是缓存 key 的组成部分：两次读取不会互相复用转化结果。
     verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
   }
@@ -588,6 +624,40 @@ class ProviderResourceMaterializerTest {
 
     assertEquals(IMAGE_DATA_URI, image.source());
     verify(contentService).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
+  }
+
+  /** 意图：持久模型视图的真实尺寸与缩放事实进入图片标签，而非源图片的声明推测。 */
+  @Test
+  void persistedModelViewDimensionsDriveImageLabel() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    ProviderImageModelViewService modelViewService = mock(ProviderImageModelViewService.class);
+    UUID viewBlobId = OTHER_BLOB_ID;
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+    when(modelViewService.resolve(BLOB_ID, "image/png", BYTES.length, ImageInputTier.P720))
+        .thenReturn(
+            new ProviderImageModelViewService.ModelView(
+                viewBlobId, "image/png", BYTES.length, 4000, 2000, 1280, 640, true));
+    stubContent(contentService, viewBlobId, "image/png", BYTES);
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(
+            blobManager, contentService, () -> ImageInputTier.P720, modelViewService);
+
+    List<ProviderMessage> messages =
+        materializer.materialize(
+            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(tieredResource(null)))),
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+
+    ProviderTextBlock label =
+        assertInstanceOf(ProviderTextBlock.class, messages.get(0).contents().get(0));
+    assertTrue(label.text().contains("Original size: 4000 x 2000"));
+    assertTrue(label.text().contains("Display size: 1280 x 640"));
+    assertTrue(label.text().contains("Multiply coordinates … to map to the original image."));
+    ProviderImageBlock image =
+        assertInstanceOf(ProviderImageBlock.class, messages.get(0).contents().get(1));
+    assertEquals(IMAGE_DATA_URI, image.source());
+    verify(contentService).readBlobContent(viewBlobId, defaultReaderLimits().maxBlobBytes());
   }
 
   /** 意图：缩放后的实际字符数只有在读取完成后才知道，request 预算必须按实际产物记账，而不是按原始大小。 */
@@ -694,7 +764,7 @@ class ProviderResourceMaterializerTest {
                 .get(0));
 
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(1));
     assertEquals(
         1280, TestImages.decode(image.mediaType(), decodeSource(image.source())).getWidth());
   }
@@ -816,7 +886,7 @@ class ProviderResourceMaterializerTest {
                 mediaCapabilities)
             .get(0)
             .contents()
-            .get(0));
+            .get(1));
   }
 
   private static byte[] decodeSource(String dataUri) {
@@ -943,7 +1013,7 @@ class ProviderResourceMaterializerTest {
                     ALL_MEDIA)
                 .get(0)
                 .contents()
-                .get(0));
+                .get(1));
 
     assertEquals(IMAGE_DATA_URI, image.source());
   }
@@ -1196,9 +1266,9 @@ class ProviderResourceMaterializerTest {
     assertEquals(ProviderMessageRole.ASSISTANT, materialized.get(1).role());
     assertEquals(ProviderMessageRole.USER, materialized.get(2).role());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(1)).source());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(2).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(2).contents().get(1)).source());
     assertSame(replayState, materialized.get(1).replayState());
     assertTrue(materialized.get(1).hasReplayState());
     assertEquals(2, materialized.get(1).contents().size());
@@ -1394,6 +1464,8 @@ class ProviderResourceMaterializerTest {
     blob.setId(BLOB_ID);
     blob.setMediaType(mediaType);
     blob.setSizeBytes(sizeBytes);
+    blob.setWidth(1L);
+    blob.setHeight(1L);
     blob.setState(StorageBlobState.ACTIVE);
     return blob;
   }

@@ -83,7 +83,7 @@ final class ProviderInlineBlobReader {
   /**
    * 读取 blob 原始内容并按 {@code tier} 物化图片后生成内联 data URI：命中档位框保留原字节，超出时按显示方向等比缩小。
    *
-   * <p>{@link ImageInputTier#ORIGINAL} 与未指定档位等价（都是原字节），共用同一缓存 key；其他档位各自独立记账，绝不互相复用转化结果。
+   * <p>{@link ImageInputTier#ORIGINAL} 与未指定档位都保留原字节；显式档位各自独立缓存，以保留缩放尺寸事实。
    * 转化后的字符数只有在读取完成后才知道，因此这里在取值后再次校验调用方预算（缓存命中同样受本次调用约束）。
    *
    * @param tier 目标档位，不能为空
@@ -123,7 +123,7 @@ final class ProviderInlineBlobReader {
               + limits.maxBlobBytes()
               + " bytes");
     }
-    // ORIGINAL 与未指定档位都是原字节，共用同一缓存 key；缩放档位各自独立，绝不把某一档位的转化结果当作另一档位。
+    // ORIGINAL 与未指定档位都表示原字节，其他档位独立缓存其转换结果。
     BlobKey key =
         new BlobKey(
             blobId, safeMediaType, sizeBytes, tier == null || tier.isOriginal() ? null : tier);
@@ -183,7 +183,7 @@ final class ProviderInlineBlobReader {
       ProviderImageScaler.Scaled scaled =
           ProviderImageScaler.scale(key.mediaType(), bytes, key.tier(), limits.maxBlobBytes());
       // 转化后的字符数由实际编码结果决定，调用方预算由 readImage 在拿到产物后统一校验。
-      return toInline(key.blobId(), scaled.mediaType(), scaled.bytes(), Long.MAX_VALUE);
+      return toInline(key.blobId(), scaled, Long.MAX_VALUE);
     } finally {
       downloads.release();
     }
@@ -236,7 +236,21 @@ final class ProviderInlineBlobReader {
     if (dataUri.length() > maxDataUriChars) {
       throw new IllegalStateException("blob content exceeds the inline size allowed for " + blobId);
     }
-    return new InlineBlob(mediaType, dataUri);
+    return new InlineBlob(mediaType, dataUri, null);
+  }
+
+  private static InlineBlob toInline(
+      UUID blobId, ProviderImageScaler.Scaled scaled, long maxDataUriChars) {
+    InlineBlob inline = toInline(blobId, scaled.mediaType(), scaled.bytes(), maxDataUriChars);
+    return new InlineBlob(
+        inline.mediaType(),
+        inline.dataUri(),
+        new ImageDimensions(
+            scaled.originalWidth(),
+            scaled.originalHeight(),
+            scaled.width(),
+            scaled.height(),
+            scaled.resized()));
   }
 
   private static String requireSafeMediaType(String mediaType) {
@@ -264,8 +278,16 @@ final class ProviderInlineBlobReader {
   /** 不可变 Blob 事实：UUID + MIME + 大小 + 图片档位，任一变化都对应新的 key（档位为 null 表示原字节）。 */
   private record BlobKey(UUID blobId, String mediaType, long sizeBytes, ImageInputTier tier) {}
 
-  /** 内联产物：{@code mediaType} 与 data URI header 一致（按档位缩放后可能与权威 MIME 不同）。 */
-  record InlineBlob(String mediaType, String dataUri) {
+  /** 原图与实际提供给模型的显示尺寸，以及是否缩小。 */
+  record ImageDimensions(
+      int originalWidth,
+      int originalHeight,
+      int displayWidth,
+      int displayHeight,
+      boolean resized) {}
+
+  /** 内联产物：图片档位路径同时携带用于模型可读标签的权威缩放尺寸。 */
+  record InlineBlob(String mediaType, String dataUri, ImageDimensions dimensions) {
 
     InlineBlob {
       Objects.requireNonNull(mediaType, "mediaType");

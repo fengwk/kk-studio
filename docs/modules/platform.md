@@ -523,7 +523,7 @@ complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD �
 
 [`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
 用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
-`kk-studio.storage.media` 配置。用户上传的已缩放图片将原始尺寸与存储尺寸保存在 durable Resource 中，Provider 读取时直接发送存储字节。插件原图保持不变；首次需要缩放时按原图与档位生成独立 Blob，并在 `storage_image_model_view` 持久化原图、档位、模型视图 Blob 与尺寸。模型视图由该关联持有引用，原图最后一个引用释放时同事务删除关联并释放模型视图。Provider attempt 读取缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期；持久模型视图不会因缓存淘汰而重算。
+`kk-studio.storage.media` 配置。用户上传的已缩放图片将原始尺寸与存储尺寸保存在 durable Resource 中，Provider 读取时直接发送存储字节。图片前的英文标签包含 `resource://files/<uuid>`、原始尺寸和显示尺寸；仅当图像实际缩放时提示将坐标映射回原图。插件原图保持不变；首次需要缩放时按原图与档位生成独立 Blob，并在 `storage_image_model_view` 持久化原图、档位、模型视图 Blob 与尺寸。模型视图由该关联持有引用，原图最后一个引用释放时同事务删除关联并释放模型视图。被移到用户消息的工具图片以 `Tool call <toolCallId> image:` 标出来源。Provider attempt 读取缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期；持久模型视图不会因缓存淘汰而重算。
 
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。

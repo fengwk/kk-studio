@@ -252,7 +252,10 @@ public final class ProviderResourceMaterializer {
       return List.of(new ProviderTextBlock(fallbackText(resource, blob)));
     }
     if (modality == ModelInputModality.IMAGE) {
-      return List.of(inlineImage(resource, blob, budget));
+      ImageProjection image = inlineImage(resource, blob, budget);
+      return List.of(
+          new ProviderTextBlock(formatImageLabel(resource.blobId(), image.dimensions(), null)),
+          image.block());
     }
     return List.of(inlineMediaBlock(resource, blob, modality, budget));
   }
@@ -269,7 +272,7 @@ public final class ProviderResourceMaterializer {
       if (content instanceof ProviderToolResultBlock result) {
         List<ProviderContentBlock> nested = new ArrayList<>(result.contents().size());
         for (ProviderContentBlock block : result.contents()) {
-          nested.add(
+          nested.addAll(
               materializeToolResultBlock(
                   block,
                   result.toolCallId(),
@@ -300,7 +303,7 @@ public final class ProviderResourceMaterializer {
         message.role(), List.copyOf(contents), message.replayState(), message.reasoningEffort());
   }
 
-  private ProviderContentBlock materializeToolResultBlock(
+  private List<ProviderContentBlock> materializeToolResultBlock(
       ProviderContentBlock block,
       String toolCallId,
       Set<ModelInputModality> inputModalities,
@@ -308,38 +311,54 @@ public final class ProviderResourceMaterializer {
       InlineBudget budget,
       List<DeferredMedia> deferred) {
     if (!(block instanceof ProviderResourceBlock resource)) {
-      return block;
+      return List.of(block);
     }
     if (resource.isExternalizedText()) {
-      return new ProviderTextBlock(formatExternalizedText(resource));
+      return List.of(new ProviderTextBlock(formatExternalizedText(resource)));
     }
     StorageBlob blob = blobManager.getBlob(resource.blobId());
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
-      return new ProviderTextBlock(fallbackText(resource, null));
+      return List.of(new ProviderTextBlock(fallbackText(resource, null)));
     }
     ModelInputModality modality = modalityOf(blob.getMediaType());
     if (modality == null) {
       // DOCUMENT 只接受 application/pdf：其它应用文件保持既有文本回退，绝不编造媒体。
-      return new ProviderTextBlock(fallbackText(resource, blob));
+      return List.of(new ProviderTextBlock(fallbackText(resource, blob)));
     }
     boolean modelSupports = inputModalities.contains(modality);
     if (modelSupports && mediaCapabilities.supports(modality, true)) {
-      return inlineMediaBlock(resource, blob, modality, budget);
+      if (modality == ModelInputModality.IMAGE) {
+        ImageProjection image = inlineImage(resource, blob, budget);
+        return List.of(
+            new ProviderTextBlock(formatImageLabel(resource.blobId(), image.dimensions(), null)),
+            image.block());
+      }
+      return List.of(inlineMediaBlock(resource, blob, modality, budget));
     }
     if (modelSupports && mediaCapabilities.supports(modality, false)) {
-      ProviderContentBlock media =
-          modality == ModelInputModality.IMAGE
-              ? inlineImage(resource, blob, budget)
-              : inlineMediaBlock(resource, blob, modality, budget);
-      deferred.add(
-          new DeferredMedia(
-              toolCallId,
-              resource.blobId(),
-              resource.name(),
-              blob.getMediaType(),
-              blob.getSizeBytes(),
-              media));
-      return new ProviderTextBlock(deferredToolMediaText(resource, blob));
+      if (modality == ModelInputModality.IMAGE) {
+        ImageProjection image = inlineImage(resource, blob, budget);
+        deferred.add(
+            new DeferredMedia(
+                toolCallId,
+                resource.blobId(),
+                resource.name(),
+                blob.getMediaType(),
+                blob.getSizeBytes(),
+                image.block(),
+                image.dimensions()));
+      } else {
+        deferred.add(
+            new DeferredMedia(
+                toolCallId,
+                resource.blobId(),
+                resource.name(),
+                blob.getMediaType(),
+                blob.getSizeBytes(),
+                inlineMediaBlock(resource, blob, modality, budget),
+                null));
+      }
+      return List.of(new ProviderTextBlock(deferredToolMediaText(resource, blob)));
     }
     throw new IllegalArgumentException(
         toolResourceRejectedMessage(resource, blob, inputModalities, mediaCapabilities));
@@ -367,6 +386,11 @@ public final class ProviderResourceMaterializer {
           .append(", ")
           .append(item.sizeBytes())
           .append(" bytes)");
+      if (item.imageDimensions() != null) {
+        blocks.add(
+            new ProviderTextBlock(
+                formatImageLabel(item.blobId(), item.imageDimensions(), item.toolCallId())));
+      }
       blocks.add(item.media());
     }
     blocks.add(0, new ProviderTextBlock(note.toString()));
@@ -394,7 +418,7 @@ public final class ProviderResourceMaterializer {
               + " bytes");
     }
     if (modality == ModelInputModality.IMAGE) {
-      return inlineImage(resource, blob, budget);
+      return inlineImage(resource, blob, budget).block();
     }
     long required =
         ProviderInlineBlobReader.estimatedDataUriChars(blob.getMediaType(), blob.getSizeBytes());
@@ -415,7 +439,7 @@ public final class ProviderResourceMaterializer {
    * 图片按冻结档位物化：{@link ImageInputTier#ORIGINAL} 与未指定档位的媒体一样保留原字节，字符数由声明事实确定，因此先记账再读取；
    * 缩放档位的实际字节数只有读取完成后才知道，先把本次剩余预算交给读取器，再按实际 data URI 字符数记账。
    */
-  private ProviderImageBlock inlineImage(
+  private ImageProjection inlineImage(
       ProviderResourceBlock resource, StorageBlob blob, InlineBudget budget) {
     if (resource.displayWidth() != null) {
       long required =
@@ -424,7 +448,15 @@ public final class ProviderResourceMaterializer {
       String source =
           blobReader.readDataUri(
               resource.blobId(), blob.getMediaType(), blob.getSizeBytes(), required);
-      return new ProviderImageBlock(blob.getMediaType(), source);
+      return new ImageProjection(
+          new ProviderImageBlock(blob.getMediaType(), source),
+          new ProviderInlineBlobReader.ImageDimensions(
+              resource.originalWidth(),
+              resource.originalHeight(),
+              resource.displayWidth(),
+              resource.displayHeight(),
+              !resource.originalWidth().equals(resource.displayWidth())
+                  || !resource.originalHeight().equals(resource.displayHeight())));
     }
     // 未指定图片档位的媒体按系统设置的默认档位；显式档位保持冻结值。
     ImageInputTier tier =
@@ -438,7 +470,14 @@ public final class ProviderResourceMaterializer {
       budget.reserve(required);
       String source =
           blobReader.readDataUri(view.blobId(), view.mediaType(), view.sizeBytes(), required);
-      return new ProviderImageBlock(view.mediaType(), source);
+      return new ImageProjection(
+          new ProviderImageBlock(view.mediaType(), source),
+          new ProviderInlineBlobReader.ImageDimensions(
+              view.originalWidth(),
+              view.originalHeight(),
+              view.displayWidth(),
+              view.displayHeight(),
+              view.resized()));
     }
     boolean original = tier.isOriginal();
     long allowedChars =
@@ -455,7 +494,19 @@ public final class ProviderResourceMaterializer {
     if (!original) {
       budget.reserve(inline.dataUri().length());
     }
-    return new ProviderImageBlock(inline.mediaType(), inline.dataUri());
+    ProviderInlineBlobReader.ImageDimensions dimensions = inline.dimensions();
+    if (dimensions == null) {
+      if (blob.getWidth() == null || blob.getHeight() == null) {
+        throw new IllegalStateException(
+            "image dimensions are unavailable for " + resource.blobId());
+      }
+      int width = Math.toIntExact(blob.getWidth());
+      int height = Math.toIntExact(blob.getHeight());
+      dimensions =
+          new ProviderInlineBlobReader.ImageDimensions(width, height, width, height, false);
+    }
+    return new ImageProjection(
+        new ProviderImageBlock(inline.mediaType(), inline.dataUri()), dimensions);
   }
 
   /** 图片无法送达用户位置时的显式失败信息：只包含资源名、MIME 与位置，不包含任何内容。 */
@@ -543,6 +594,26 @@ public final class ProviderResourceMaterializer {
     return text.substring(0, text.length() - 1);
   }
 
+  private static String formatImageLabel(
+      UUID blobId, ProviderInlineBlobReader.ImageDimensions dimensions, String toolCallId) {
+    String prefix = toolCallId == null ? "Image: " : "Tool call " + toolCallId + " image: ";
+    StringBuilder label =
+        new StringBuilder(prefix)
+            .append(SessionResourceUri.format(blobId))
+            .append("\nOriginal size: ")
+            .append(dimensions.originalWidth())
+            .append(" x ")
+            .append(dimensions.originalHeight())
+            .append("\nDisplay size: ")
+            .append(dimensions.displayWidth())
+            .append(" x ")
+            .append(dimensions.displayHeight());
+    if (dimensions.resized()) {
+      label.append("\nMultiply coordinates … to map to the original image.");
+    }
+    return label.toString();
+  }
+
   /** 被移动到后续 USER 消息的工具结果媒体在 tool result 内保留的确定性文本事实。 */
   private static String deferredToolMediaText(ProviderResourceBlock resource, StorageBlob blob) {
     return PromptRenderer.render(
@@ -597,12 +668,16 @@ public final class ProviderResourceMaterializer {
     }
   }
 
-  /** 工具结果中因协议原生位置不可用而延迟到 USER 消息的媒体：保留真实来源与已构造的 attempt-only media 块。 */
+  private record ImageProjection(
+      ProviderImageBlock block, ProviderInlineBlobReader.ImageDimensions dimensions) {}
+
+  /** 工具结果中因协议原生位置不可用而延迟到 USER 消息的媒体。 */
   private record DeferredMedia(
       String toolCallId,
       UUID blobId,
       String name,
       String mediaType,
       long sizeBytes,
-      ProviderContentBlock media) {}
+      ProviderContentBlock media,
+      ProviderInlineBlobReader.ImageDimensions imageDimensions) {}
 }
