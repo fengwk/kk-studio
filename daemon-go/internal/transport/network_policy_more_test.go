@@ -8,12 +8,17 @@ import (
 	"testing"
 )
 
-// TRN-T-117, TRN-T-119 ensure the explicit client refuses redirects and honors cancellation.
+// TRN-T-095, TRN-T-117, TRN-T-119 verify redirects are not followed and requests honor cancellation.
 func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	var targetHits int
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { targetHits++; w.WriteHeader(http.StatusNoContent) }))
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHits++
+		w.WriteHeader(http.StatusNoContent)
+	}))
 	defer target.Close()
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
 	defer redirect.Close()
 	policy, err := NewProxyPolicy("")
 	if err != nil {
@@ -39,7 +44,7 @@ func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	}
 }
 
-// TRN-T-112, TRN-T-119 verify that an explicit proxy is used for the request target.
+// TRN-T-092, TRN-T-112, TRN-T-119 verify an explicit proxy receives absolute-form HTTP requests.
 func TestProxy_ExplicitHTTPProxySelection(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.RequestURI, "http://origin.invalid/") {

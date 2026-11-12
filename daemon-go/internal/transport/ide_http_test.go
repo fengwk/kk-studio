@@ -19,7 +19,7 @@ func (f viewResolverFunc) ResolveView(ctx context.Context, r ViewRequest) (ViewU
 	return f(ctx, r)
 }
 
-// TRN-T-033, TRN-T-034
+// TRN-T-033, TRN-T-034, TRN-T-035
 func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RequestURI() != "/base/api?q=one" {
@@ -41,7 +41,7 @@ func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	}
 	var released atomic.Int32
 	resolver := viewResolverFunc(func(_ context.Context, view ViewRequest) (ViewUpstream, error) {
-		if view.ViewID != ideTestID || view.BindingEpoch != 8 || view.Mode != "http" || view.Path != "/api" {
+		if view.ViewID != ideTestID || view.BindingEpoch != 8 || view.Mode != "http" || view.Path != "/api?q=one" {
 			t.Errorf("view request=%+v", view)
 		}
 		return ViewUpstream{Host: "127.0.0.1", Port: mustPort(t, portText), Path: "/base", Headers: http.Header{"X-Upstream": []string{"private"}}, Cookie: "session=private", Release: func() { released.Add(1) }}, nil
