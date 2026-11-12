@@ -60,13 +60,15 @@ func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 // RUN-T-018 fails and cancels an invocation when its progress payload cannot be encoded safely.
 func TestRuntimeProgressEncodingFailureCancelsCallAndFails(t *testing.T) {
 	progressReturned := make(chan error, 1)
+	callCancelled := make(chan bool, 1)
 	options := runtimeOptionsForTest()
 	options.Capabilities = map[string]CapabilityExecutor{
-		"echo": func(_ context.Context, call CapabilityCall, capabilityContext CapabilityContext) (CapabilityResult, error) {
+		"echo": func(ctx context.Context, call CapabilityCall, capabilityContext CapabilityContext) (CapabilityResult, error) {
 			progressReturned <- capabilityContext.Progress(CapabilityResult{
 				CallID:   call.InvocationID,
 				Contents: []ResultContent{{Type: "binary", Bytes: []byte("not allowed in progress")}},
 			})
+			callCancelled <- ctx.Err() != nil
 			return CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`)}, nil
 		},
 	}
@@ -81,6 +83,14 @@ func TestRuntimeProgressEncodingFailureCancelsCallAndFails(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("progress callback did not return")
+	}
+	select {
+	case cancelled := <-callCancelled:
+		if !cancelled {
+			t.Fatal("progress encoding failure did not cancel the active invocation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("capability executor did not report cancellation state")
 	}
 	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
 		for _, frame := range frames {
