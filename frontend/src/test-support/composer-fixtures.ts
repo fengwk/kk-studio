@@ -46,6 +46,11 @@ export function fakeStorage(overrides: {
               sizeBytes: null,
             },
             expiresAt: 0,
+            format: null,
+            originalWidth: null,
+            originalHeight: null,
+            storedWidth: null,
+            storedHeight: null,
           }
     },
   )
@@ -64,6 +69,11 @@ export function fakeStorage(overrides: {
       storedWidth: null,
       storedHeight: null,
       expiresAt: 0,
+      format: null,
+      originalWidth: null,
+      originalHeight: null,
+      storedWidth: null,
+      storedHeight: null,
     }
   })
   const deleteUpload = vi.fn(async () => undefined)

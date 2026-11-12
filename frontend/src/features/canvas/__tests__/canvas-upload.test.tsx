@@ -28,6 +28,11 @@ function pendingReservation(id: string = UPLOAD_ID): StorageUploadDTO {
     type: 'PENDING',
     presignedPut: PENDING_PUT,
     expiresAt: EXPIRES_AT,
+    format: null,
+    originalWidth: null,
+    originalHeight: null,
+    storedWidth: null,
+    storedHeight: null,
   }
 }
 
@@ -37,6 +42,11 @@ function readyReservation(id: string = UPLOAD_ID): StorageUploadDTO {
     type: 'READY',
     blobId: 'blob-existing',
     expiresAt: EXPIRES_AT,
+    format: null,
+    originalWidth: null,
+    originalHeight: null,
+    storedWidth: null,
+    storedHeight: null,
   }
 }
 

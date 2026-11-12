@@ -2,6 +2,29 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return {
+    ...actual,
+    request: vi.fn((route: string) => {
+      if (route === 'GET /api/platform/settings') {
+        return Promise.resolve({ storageMedia: { imageTier: '720P' } })
+      }
+      return actual.request(route as never, {} as never)
+    }),
+  }
+})
+vi.mock('@/features/thread/composer/image-scaler', () => ({
+  scaleImageFile: vi.fn(async (file: File) => ({
+    file,
+    format: file.type.slice('image/'.length),
+    originalWidth: 1,
+    originalHeight: 1,
+    storedWidth: 1,
+    storedHeight: 1,
+  })),
+}))
 import {
   ThreadComposer,
 } from '@/features/thread/runtime/thread-panel/ThreadComposer'
@@ -2125,6 +2148,11 @@ describe('ThreadComposer attachment pills', () => {
         type: 'READY',
         blobId: 'blob-existing',
         expiresAt: 0,
+        format: null,
+        originalWidth: null,
+        originalHeight: null,
+        storedWidth: null,
+        storedHeight: null,
       }),
     })
     render(<PillHarness service={service} />)

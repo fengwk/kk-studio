@@ -375,12 +375,22 @@ storageService.reserveUpload = async () => ({
     sizeBytes: null,
   },
   expiresAt: Date.now() + 900_000,
+  format: null,
+  originalWidth: null,
+  originalHeight: null,
+  storedWidth: null,
+  storedHeight: null,
 })
 storageService.completeUpload = async (uploadId: string) => ({
   id: uploadId,
   type: 'READY',
   blobId: 'blob-1',
   expiresAt: Date.now() + 900_000,
+  format: null,
+  originalWidth: null,
+  originalHeight: null,
+  storedWidth: null,
+  storedHeight: null,
 })
 
 interface ProgressEventLike {

@@ -224,6 +224,18 @@ export function ThreadComposer({
     [changeDraft, parts, updateImageTier],
   )
 
+  useEffect(() => {
+    for (const part of parts) {
+      if (part.type !== 'attachment' || part.imageTier) {
+        continue
+      }
+      const upload = uploads.find((item) => item.localId === part.uploadId || item.uploadId === part.uploadId)
+      if (upload?.imageTier) {
+        editorApiRef.current?.updateAttachmentImageTier([part.uploadId], upload.imageTier)
+      }
+    }
+  }, [parts, uploads])
+
   const slashQuery = slashQueryOf(parts)
   const slashMode = slashQuery != null
 
