@@ -2,8 +2,10 @@ package search
 
 import (
 	"context"
+	binaryencoding "encoding/binary"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	goruntime "runtime"
@@ -381,6 +383,162 @@ func TestMultilineGrepTimeoutPreservesPartialResults(t *testing.T) {
 	want := []string{"a.txt:1:a", "a.txt:2:b", "b.txt:1:a", "b.txt:2:b"}
 	if err != nil || !outcome.Incomplete || outcome.StopReason != "TIMED_OUT" || !reflect.DeepEqual(outcome.Results, want) {
 		t.Fatalf("outcome=%#v err=%v want=%v", outcome, err, want)
+	}
+}
+
+// COD-N-018: ignored directories and glob-matching ignored files are bounded hint entries.
+func TestFindCollectsIgnoreSkippedPaths(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, ".gitignore", "node_modules/\nsecret.txt\n")
+	put(t, root, "node_modules/inside.txt", "hidden")
+	put(t, root, "secret.txt", "hidden")
+	put(t, root, "visible.txt", "visible")
+	outcome, err := FindContext(context.Background(), root, "*.txt", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.ToSlash(filepath.Join(root, "node_modules")) + "/", filepath.ToSlash(filepath.Join(root, "secret.txt"))}
+	if !reflect.DeepEqual(outcome.IgnoreSkipped, want) || outcome.IgnoreSkippedCount != 2 || !reflect.DeepEqual(outcome.Results, []string{"visible.txt"}) {
+		t.Fatalf("outcome=%#v want ignored=%v", outcome, want)
+	}
+}
+
+// COD-N-018: only structurally valid Git directories and gitdir pointers establish a repository root.
+func TestGitMarkerRequiresValidRepository(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		setup     func(string) error
+		wantValid bool
+	}{
+		{name: "plain-file", setup: func(root string) error {
+			return os.WriteFile(filepath.Join(root, ".git"), []byte("not a gitdir"), 0o600)
+		}},
+		{name: "broken-pointer", setup: func(root string) error {
+			return os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: missing\n"), 0o600)
+		}},
+		{name: "missing-head", setup: func(root string) error { return os.MkdirAll(filepath.Join(root, ".git"), 0o700) }},
+		{name: "missing-objects", setup: func(root string) error {
+			gitDir := filepath.Join(root, ".git")
+			if err := os.MkdirAll(gitDir, 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o600); err != nil {
+				return err
+			}
+			return os.Mkdir(filepath.Join(gitDir, "refs"), 0o700)
+		}},
+		{name: "valid-gitdir-file", wantValid: true, setup: func(root string) error {
+			gitDir := filepath.Join(root, "git-data")
+			for _, name := range []string{"objects", "refs"} {
+				if err := os.MkdirAll(filepath.Join(gitDir, name), 0o700); err != nil {
+					return err
+				}
+			}
+			if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o600); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: git-data\n"), 0o600)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := test.setup(root); err != nil {
+				t.Fatal(err)
+			}
+			got := findGitDir(root)
+			if (got != "") != test.wantValid {
+				t.Fatalf("findGitDir=%q want valid=%v", got, test.wantValid)
+			}
+		})
+	}
+}
+
+// COD-N-017: malformed BOM-encoded text is not searched as UTF-16.
+func TestGrepUTF16RejectsOddByteCount(t *testing.T) {
+	if _, valid := normalizeSearchText([]byte{0xff, 0xfe, 'x'}); valid {
+		t.Fatal("odd-length UTF-16 payload accepted")
+	}
+}
+
+// COD-N-017: UTF-16 BOM files are decoded for matching and preserve Unicode output.
+func TestGrepUTF16BOM(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		order binaryencoding.ByteOrder
+		bom   []byte
+	}{
+		{name: "little-endian", order: binaryencoding.LittleEndian, bom: []byte{0xff, 0xfe}},
+		{name: "big-endian", order: binaryencoding.BigEndian, bom: []byte{0xfe, 0xff}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			file := filepath.Join(root, "utf16.txt")
+			data := append([]byte(nil), test.bom...)
+			for _, unit := range []uint16{'c', 'a', 'f', 0x00e9, '\n'} {
+				var encoded [2]byte
+				test.order.PutUint16(encoded[:], unit)
+				data = append(data, encoded[:]...)
+			}
+			if err := os.WriteFile(file, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outcome, err := GrepContext(context.Background(), root, "café", true, false, "", 10)
+			if err != nil || !reflect.DeepEqual(outcome.Results, []string{"utf16.txt:1:café"}) {
+				t.Fatalf("results=%v err=%v", outcome.Results, err)
+			}
+		})
+	}
+}
+
+// COD-N-017: overlong lines are excerpted around the matching code point.
+func TestCenteredExcerpt(t *testing.T) {
+	line := strings.Repeat("a", 600)
+	got := centeredExcerpt(line, 300)
+	excerpt := strings.TrimPrefix(got, "... ")
+	excerpt = strings.TrimSuffix(excerpt, " ... (line truncated to 500 chars)")
+	if len([]rune(excerpt)) != 440 || excerpt != strings.Repeat("a", 440) || !strings.HasPrefix(got, "... ") || !strings.HasSuffix(got, " ... (line truncated to 500 chars)") {
+		t.Fatalf("centered excerpt=%q", got)
+	}
+	if got := centeredExcerpt("short", 2); got != "short" {
+		t.Fatalf("short line excerpt=%q", got)
+	}
+}
+
+// COD-N-011: an invalid nested .git marker is ignored and Git remains the oracle.
+func TestInvalidNestedGitMarkerKeepsOuterRepositoryScope(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	put(t, root, ".gitignore", "ignored.txt\n")
+	if err := os.MkdirAll(filepath.Join(root, "nested", ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, "nested/ignored.txt", "ignored")
+	put(t, root, "nested/keep.txt", "keep")
+	put(t, root, "broken/.git", "gitdir: missing\n")
+	put(t, root, "broken/ignored.txt", "ignored")
+	put(t, root, "broken/keep.txt", "keep")
+	files, err := FindContext(context.Background(), root, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "ls-files", "-co", "--exclude-standard")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files oracle: %v", err)
+	}
+	var want []string
+	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if path != "" {
+			want = append(want, filepath.ToSlash(path))
+		}
+	}
+	if !reflect.DeepEqual(files.Results, want) {
+		t.Fatalf("Find=%v Git oracle=%v", files.Results, want)
+	}
+	if nearestGitRoot(filepath.Join(root, "nested")) != root {
+		t.Fatalf("invalid nested marker established a repository boundary")
 	}
 }
 

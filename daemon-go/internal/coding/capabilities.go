@@ -439,10 +439,10 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) runtime.CapabilityResult {
-	if len(outcome.Results) == 0 && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
-		return textResult(call.InvocationID, emptyText)
-	}
 	text := strings.Join(outcome.Results, "\n")
+	if text == "" && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
+		text = emptyText
+	}
 	if len(outcome.Skipped) > 0 {
 		describe := strings.Join(outcome.Skipped[:min(len(outcome.Skipped), 10)], ", ")
 		if len(outcome.Skipped) > 10 {
@@ -465,6 +465,12 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 		}
 		seconds := strconv.FormatFloat(float64(call.TimeoutMillis)/1000, 'f', -1, 64)
 		text += "[Search timed out after " + seconds + "s; results are incomplete. Narrow the path or pattern, or raise timeout_seconds.]"
+	}
+	if len(outcome.Results) == 0 && outcome.IgnoreSkippedCount > 0 {
+		if text != "" {
+			text += "\n"
+		}
+		text += formatIgnoreSkippedHint(outcome.IgnoreSkipped, outcome.IgnoreSkippedCount)
 	}
 	result := textResult(call.InvocationID, text)
 	if exceedsInlineOutput(text) {
@@ -489,6 +495,18 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 		result.Details = mustJSON(details)
 	}
 	return result
+}
+
+func formatIgnoreSkippedHint(paths []string, count int) string {
+	shown := paths[:min(len(paths), 10)]
+	entries := strings.Join(shown, ", ")
+	if count > len(shown) {
+		if entries != "" {
+			entries += ", "
+		}
+		entries += fmt.Sprintf("… and %d more", count-len(shown))
+	}
+	return "[No matches. Not searched because of ignore rules: " + entries + "]"
 }
 
 func exceedsInlineOutput(text string) bool {

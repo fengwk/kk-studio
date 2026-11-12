@@ -3,12 +3,14 @@ package search
 import (
 	"bytes"
 	"context"
+	binaryencoding "encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"regexp/syntax"
 	"sync"
+	"unicode/utf16"
 )
 
 var fileBuffers = sync.Pool{New: func() any { buffer := make([]byte, 0, 256*1024); return &buffer }}
@@ -80,7 +82,8 @@ func releaseBuffer(buf []byte) {
 }
 
 func grepFile(data []byte, path, pattern string, literal, ignoreCase bool, re *regexp.Regexp, required []byte) []string {
-	if len(data) == 0 || binary(data) {
+	data, validText := normalizeSearchText(data)
+	if !validText || len(data) == 0 || binary(data) {
 		return nil
 	}
 	lines := &lineCollector{data: data, path: path, end: lineEnd(data, 0), number: 1, lastOutput: -1}
@@ -234,7 +237,8 @@ func hasCrossLineOperator(ast *syntax.Regexp) bool {
 }
 
 func grepMultilineFile(data []byte, path string, re *regexp.Regexp, maxMatches int) ([]string, int) {
-	if len(data) == 0 || binary(data) {
+	data, validText := normalizeSearchText(data)
+	if !validText || len(data) == 0 || binary(data) {
 		return nil, 0
 	}
 	normalized := stripCRLF(data)
@@ -331,9 +335,54 @@ func (c *lineCollector) add(pos int) {
 	if !ok || start == c.lastOutput {
 		return
 	}
-	text := bytes.TrimSuffix(c.data[start:end], []byte{'\r'})
-	c.out = append(c.out, fmt.Sprintf("%s:%d:%s", c.path, c.number, string(text)))
+	line := bytes.TrimSuffix(c.data[start:end], []byte{'\r'})
+	text := centeredExcerpt(string(line), len([]rune(string(line[:max(0, pos-start)]))))
+	c.out = append(c.out, fmt.Sprintf("%s:%d:%s", c.path, c.number, text))
 	c.lastOutput = start
+}
+
+func centeredExcerpt(line string, matchStart int) string {
+	points := []rune(line)
+	if len(points) <= 440 {
+		return line
+	}
+	start := max(0, matchStart-220)
+	end := min(len(points), start+440)
+	if end == len(points) {
+		start = max(0, end-440)
+	}
+	text := string(points[start:end])
+	if start > 0 {
+		text = "... " + text
+	}
+	if end < len(points) {
+		text += " ... (line truncated to 500 chars)"
+	}
+	return text
+}
+
+func normalizeSearchText(data []byte) ([]byte, bool) {
+	if len(data) < 2 {
+		return data, true
+	}
+	littleEndian := bytes.HasPrefix(data, []byte{0xff, 0xfe})
+	bigEndian := bytes.HasPrefix(data, []byte{0xfe, 0xff})
+	if !littleEndian && !bigEndian {
+		return data, true
+	}
+	data = data[2:]
+	if len(data)%2 != 0 {
+		return nil, false
+	}
+	units := make([]uint16, len(data)/2)
+	for i := range units {
+		if littleEndian {
+			units[i] = binaryencoding.LittleEndian.Uint16(data[i*2:])
+		} else {
+			units[i] = binaryencoding.BigEndian.Uint16(data[i*2:])
+		}
+	}
+	return []byte(string(utf16.Decode(units))), true
 }
 func lineEnd(data []byte, start int) int {
 	if start >= len(data) {
