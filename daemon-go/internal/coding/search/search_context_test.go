@@ -36,6 +36,21 @@ func TestNoFilesReadAfterLimit(t *testing.T) {
 	}
 }
 
+// COD-F-010
+func TestGrepExactLimitDoesNotReportLimitReached(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\nx\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := GrepContext(context.Background(), root, "x", true, false, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(outcome.Results, []string{"a.txt:1:x", "a.txt:2:x"}) || outcome.LimitReached || outcome.Incomplete {
+		t.Fatalf("outcome=%#v", outcome)
+	}
+}
+
 // COD-N-014
 func TestFindContextReturnsPartialOnDeadlineAndCancellationError(t *testing.T) {
 	root := t.TempDir()

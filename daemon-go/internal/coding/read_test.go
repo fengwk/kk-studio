@@ -15,10 +15,10 @@ import (
 // COD-F-002
 func TestReadTextHeaderFormatsRangeAndNewlineMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sample.txt")
-	if err := os.WriteFile(path, []byte("a\nb\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	arguments, err := json.Marshal(map[string]any{"path": path, "offset": 1, "limit": 2})
+	arguments, err := json.Marshal(map[string]any{"path": path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestReadTextHeaderFormatsRangeAndNewlineMetadata(t *testing.T) {
 	if err != nil || result.Error {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
-	want := "path: " + filepath.ToSlash(path) + "\nends_with_newline: yes\nrange: 1:1-2:1\n\n1|a\n2|b"
+	want := "path: " + filepath.ToSlash(path) + "\nends_with_newline: yes\nrange: 1:1-3:5\n\n1|alpha\n2|beta\n3|gamma"
 	if result.Contents[0].Text != want {
 		t.Fatalf("text=%q want=%q", result.Contents[0].Text, want)
 	}

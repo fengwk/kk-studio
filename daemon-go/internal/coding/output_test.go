@@ -87,6 +87,52 @@ func TestReadMediaAtLimit(t *testing.T) {
 	}
 }
 
+// COD-N-002
+func TestReadImageRejectsInputOverOutputLimitBeforeDecode(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 2, 3))); err != nil {
+		t.Fatal(err)
+	}
+	data := append(encoded.Bytes(), bytes.Repeat([]byte{'x'}, (1<<20)+1-encoded.Len())...)
+	path := filepath.Join(t.TempDir(), "large.png")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	call := runtime.CapabilityCall{InvocationID: "large-image", Arguments: mustJSON(map[string]any{"path": path}), MaxOutputBytes: 1 << 20, ImageInputTier: runtime.ImageInputTierOriginal}
+	result, err := Provider{}.Capabilities()["fs.read"](context.Background(), call, runtime.CapabilityContext{})
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "The file was not read.") || !strings.Contains(string(result.Details), `"code":"INVALID_ARGUMENT"`) {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
+// COD-N-002: each non-image media signature at exactly the input limit remains readable.
+func TestReadMediaAtLimitAcrossTypes(t *testing.T) {
+	const limit = 1 << 20
+	for _, tc := range []struct {
+		name   string
+		mime   string
+		prefix []byte
+	}{
+		{name: "pdf", mime: "application/pdf", prefix: []byte("%PDF")},
+		{name: "wav", mime: "audio/wav", prefix: []byte{'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E'}},
+		{name: "mp4", mime: "video/mp4", prefix: []byte{0, 0, 0, 12, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}},
+		{name: "mp3", mime: "audio/mpeg", prefix: []byte{'I', 'D', '3', 4, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append(append([]byte(nil), tc.prefix...), bytes.Repeat([]byte{'x'}, limit-len(tc.prefix))...)
+			path := filepath.Join(t.TempDir(), "media."+tc.name)
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			call := runtime.CapabilityCall{InvocationID: "media", Arguments: mustJSON(map[string]any{"path": path}), MaxOutputBytes: limit}
+			result, err := Provider{}.Capabilities()["fs.read"](context.Background(), call, runtime.CapabilityContext{})
+			if err != nil || result.Error || len(result.Contents) != 1 || result.Contents[0].MediaType != tc.mime || int64(len(result.Contents[0].Bytes)) != limit || !bytes.Equal(result.Contents[0].Bytes, data) {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+		})
+	}
+}
+
 // COD-N-003
 func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	var encoded bytes.Buffer

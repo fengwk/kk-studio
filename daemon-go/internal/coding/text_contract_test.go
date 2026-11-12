@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+// COD-T-099, COD-T-102: decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
+func TestReadTextWindowReaderPreservesMultibyteCharactersAcrossChunks(t *testing.T) {
+	utf16Data, err := EncodeText("a中😀\n", "UTF-16LE", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "utf8", data: []byte("a中😀\n"), want: "1|a中😀"},
+		{name: "utf16le", data: utf16Data, want: "1|a中😀"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window, err := ReadTextWindowReader(&singleByteReader{reader: bytes.NewReader(tc.data)}, WindowOptions{Offset: 1, Limit: 1})
+			if err != nil || window.Body != tc.want || window.EndsWithNewline == nil || !*window.EndsWithNewline {
+				t.Fatalf("window=%#v err=%v", window, err)
+			}
+		})
+	}
+}
+
+type singleByteReader struct{ reader *bytes.Reader }
+
+func (r *singleByteReader) Read(buffer []byte) (int, error) {
+	if len(buffer) > 1 {
+		buffer = buffer[:1]
+	}
+	return r.reader.Read(buffer)
+}
+
 // COD-T-212, COD-T-213: number only the projected lines and apply column offset to the first line.
 func TestReadTextWindowProjectionAndColumnOffset(t *testing.T) {
 	lines := make([]string, 10)
@@ -79,7 +111,7 @@ func TestReadTextWindowEOFMetadataAtRequestedOffset(t *testing.T) {
 // COD-T-219, COD-T-224, COD-T-226: UTF-8 rejects malformed encodings at all buffer splits and cannot encode surrogate bytes.
 func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 	sequences := [][]byte{
-		{0xc0, 0x81}, {0xe0, 0x81, 0x81}, {0xf0, 0x8f, 0xbf, 0xbf},
+		{0x80}, {0xe4, 0x41}, {0xe4}, {0xc0, 0x81}, {0xe0, 0x81, 0x81}, {0xf0, 0x8f, 0xbf, 0xbf},
 		{0xed, 0xa0, 0x80}, {0xf4, 0x90, 0x80, 0x80},
 	}
 	for _, data := range sequences {

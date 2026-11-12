@@ -69,14 +69,14 @@ func TestReadCapabilityListsDirectoryAndRejectsMissingPath(t *testing.T) {
 func TestFormatTextWindowCoversOptionalHeadersAndTruncation(t *testing.T) {
 	ended := true
 	got := formatTextWindow("dir/file.txt", TextWindow{Body: "1|one", StartLine: 1, StartColumn: 1, EndLine: 1, EndColumn: 4, EndsWithNewline: &ended, Truncated: true, TruncationReason: "line_limit", NextLine: 2, NextColumn: 1})
-	for _, want := range []string{"path: dir/file.txt", "ends_with_newline: yes", "range: 1:1-1:4", "truncation_reason: line_limit", "next: 2:1", "[TRUNCATED: More file content remains."} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("formatted window missing %q: %q", want, got)
-		}
+	want := "path: dir/file.txt\nends_with_newline: yes\nrange: 1:1-1:4\ntruncated: yes\ntruncation_reason: line_limit\nnext: 2:1\n\n1|one\n\n[TRUNCATED: More file content remains. Next position: line 2, column 1.]"
+	if got != want {
+		t.Fatalf("formatted window=%q want=%q", got, want)
 	}
 	got = formatTextWindow("empty", TextWindow{Empty: true, Truncated: true, NextLine: 3, NextColumn: 2})
-	if !strings.Contains(got, "range: empty") || !strings.Contains(got, "Next position: line 3, column 2") {
-		t.Fatalf("empty truncated window=%q", got)
+	want = "path: empty\nrange: empty\ntruncated: yes\ntruncation_reason: \nnext: 3:2\n[TRUNCATED: More file content remains. Next position: line 3, column 2.]"
+	if got != want {
+		t.Fatalf("empty truncated window=%q want=%q", got, want)
 	}
 }
 

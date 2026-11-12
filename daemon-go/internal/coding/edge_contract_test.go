@@ -39,11 +39,12 @@ func TestReadLSPHeader(t *testing.T) {
 
 // COD-T-024: unavailable support and null languages omit the LSP status header.
 func TestReadNoLSPHeader(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "file.txt")
+	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, []byte("content\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for name, status := range map[string]func(string) (string, bool){
+		"no-hook":          nil,
 		"unavailable":      func(string) (string, bool) { return "go", false },
 		"missing-language": func(string) (string, bool) { return "", true },
 	} {
