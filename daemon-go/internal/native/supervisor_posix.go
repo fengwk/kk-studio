@@ -28,9 +28,10 @@ const (
 
 // PosixSupervisor supervises each command in a private process session.
 type PosixSupervisor struct {
-	mu        sync.Mutex
-	closed    bool
-	processes map[int]*posixProcess
+	mu                     sync.Mutex
+	closed                 bool
+	processes              map[int]*posixProcess
+	snapshotDirectChildren func(int, []int) ([]sessionMember, error)
 }
 
 // NewSupervisor enables the required host process adoption behavior and returns a POSIX supervisor.
@@ -40,7 +41,10 @@ func NewSupervisor() (Supervisor, error) {
 			return nil, fmt.Errorf("cannot enable process subreaper: %w", err)
 		}
 	}
-	return &PosixSupervisor{processes: make(map[int]*posixProcess)}, nil
+	return &PosixSupervisor{
+		processes:              make(map[int]*posixProcess),
+		snapshotDirectChildren: directChildren,
+	}, nil
 }
 
 func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedProcess, error) {
@@ -64,11 +68,13 @@ func (s *PosixSupervisor) Start(ctx context.Context, spec ProcessSpec) (ManagedP
 	var baselinePIDs []int
 	baselineKnown := false
 	if runtime.GOOS == "linux" {
-		if baseline, err := directChildren(os.Getpid(), nil); err == nil {
-			baselineKnown = true
-			for _, child := range baseline {
-				baselinePIDs = append(baselinePIDs, child.PID)
-			}
+		baseline, err := s.snapshotDirectChildren(os.Getpid(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("cannot snapshot pre-existing process children: %w", err)
+		}
+		baselineKnown = true
+		for _, child := range baseline {
+			baselinePIDs = append(baselinePIDs, child.PID)
 		}
 	}
 	dir, err := createStateDir()

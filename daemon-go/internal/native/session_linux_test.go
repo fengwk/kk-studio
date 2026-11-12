@@ -18,6 +18,31 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// NAT-T-089
+func TestLinuxSupervisor_UnknownBaselineFailsBeforeStartingCommand(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	snapshotErr := errors.New("process list is unreadable")
+	posixSupervisor := supervisor.(*PosixSupervisor)
+	posixSupervisor.snapshotDirectChildren = func(int, []int) ([]sessionMember, error) {
+		return nil, snapshotErr
+	}
+	marker := filepath.Join(t.TempDir(), "command-started")
+	_, err = supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "printf started > " + strconv.Quote(marker)},
+	})
+	if !errors.Is(err, snapshotErr) {
+		t.Fatalf("Start() error = %v, want baseline error", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("command marker exists or cannot be inspected: %v", err)
+	}
+}
+
 // NAT-T-059
 func TestLinuxSession_DirectChildren(t *testing.T) {
 	child := exec.Command("/bin/sleep", "30")
