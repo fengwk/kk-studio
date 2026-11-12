@@ -137,7 +137,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool)}
 	if options.EnvironmentConfig != nil {
 		options.EnvironmentConfig.AddSessionHooks(nil, nil, func(previous, next config.DaemonConfig) {
-			if previous.StudioURL != next.StudioURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL) {
+			if previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL) {
 				runtime.dropActiveConnection()
 			}
 		})

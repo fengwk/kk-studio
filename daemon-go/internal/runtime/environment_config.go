@@ -291,14 +291,14 @@ func (r *EnvironmentConfigRuntime) apply(request *configRequest) ConfigApplyResu
 		}
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "Studio configuration version is older than the daemon cache"}
 	}
+	if initialized && bytes.Equal(request.content, acceptedBytes) {
+		candidate := current
+		candidate.ConfigVersion = request.version
+		return r.persistAndPublish(request, current, candidate, nil, false)
+	}
 	candidate, err := config.BuildEnvironmentConfig(current, request.version, request.wire)
 	if err != nil {
 		return r.failed(request.version, err)
-	}
-	if initialized && bytes.Equal(request.content, acceptedBytes) {
-		candidate = current
-		candidate.ConfigVersion = request.version
-		return r.persistAndPublish(request, current, candidate, nil, false)
 	}
 	previous := current
 	var runtimePrevious *config.DaemonConfig
@@ -318,7 +318,7 @@ func (r *EnvironmentConfigRuntime) apply(request *configRequest) ConfigApplyResu
 	}
 	if prepared.Config().ConfigVersion != request.version {
 		r.abort(previous, candidate, prepared)
-		return r.failed(request.version, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "config"})
+		return r.failed(request.version, &config.EnvironmentConfigError{Code: "VALIDATION_FAILED"})
 	}
 	candidate = cloneDaemonConfig(prepared.Config())
 	return r.persistAndPublish(request, previous, candidate, prepared, true)
@@ -350,26 +350,27 @@ func (r *EnvironmentConfigRuntime) persistAndPublish(request *configRequest, pre
 		return ConfigApplyResult{Kind: ConfigFailed, Version: request.version, Code: "PERSIST_FAILED"}
 	}
 	r.mu.Lock()
-	closed = r.closed
-	r.mu.Unlock()
-	if closed {
+	if r.closed {
+		r.mu.Unlock()
 		r.abort(previous, candidate, prepared)
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "configuration runtime is closed"}
 	}
+	var cleanup func() error
 	if publishResources {
-		cleanup, publishErr := prepared.Publish()
+		var publishErr error
+		cleanup, publishErr = prepared.Publish()
 		if publishErr != nil {
+			r.mu.Unlock()
 			r.report(publishErr)
 			r.abort(previous, candidate, prepared)
 			return ConfigApplyResult{Kind: ConfigFatal, Message: "prepared environment resources could not be published"}
 		}
-		r.trackCleanup(cleanup)
 	}
-	r.mu.Lock()
 	r.current = cloneDaemonConfig(candidate)
 	r.acceptedBytes = append([]byte(nil), request.content...)
 	r.initialized = true
 	r.mu.Unlock()
+	r.trackCleanup(cleanup)
 	if err := r.options.Status.ApplyConfiguration(request.version, candidate.ProxyURL); err != nil {
 		r.report(err)
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "runtime status could not be updated"}

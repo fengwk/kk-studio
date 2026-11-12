@@ -47,6 +47,15 @@ func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
 	if prepareCalls != 1 || writes != 2 || manager.Current().ConfigVersion != 2 {
 		t.Fatalf("prepares=%d writes=%d currentVersion=%d", prepareCalls, writes, manager.Current().ConfigVersion)
 	}
+	if result, err := manager.Submit(context.Background(), 2, configurationOf(initial)); err != nil || result.Kind != ConfigConfirmed {
+		t.Fatalf("same-version confirmation = %+v, %v", result, err)
+	}
+	if result, err := manager.Submit(context.Background(), 1, configurationOf(initial)); err != nil || result.Kind != ConfigStale {
+		t.Fatalf("stale version = %+v, %v", result, err)
+	}
+	if _, err := manager.Submit(context.Background(), 2, changedConfiguration(initial, "https://drift.example")); err == nil || err.Error() != "the same environment config version must not change its content" {
+		t.Fatalf("same-version content drift error = %v", err)
+	}
 }
 
 // RUN-T-191 merges concurrent first-version work and retains only the highest pending snapshot.
@@ -132,6 +141,24 @@ func TestEnvironmentConfigValidationFailureKeepsCurrentSnapshot(t *testing.T) {
 	}
 }
 
+// RUN-T-195 retires prepared resources when the preparation result carries a different version.
+func TestEnvironmentConfigPreparedVersionMismatchRetiresCandidate(t *testing.T) {
+	initial := initialRuntimeConfig()
+	candidate := initial
+	candidate.ConfigVersion = 99
+	prepared := &testPreparedConfiguration{config: candidate}
+	manager := newTestEnvironmentConfigRuntime(t, initial, func(_ context.Context, _ config.DaemonConfig, _ *config.DaemonConfig) (PreparedConfiguration, error) {
+		return prepared, nil
+	}, &testCacheWriter{})
+	result, err := manager.Submit(context.Background(), 1, configurationOf(initial))
+	if err != nil || result.Kind != ConfigFailed || result.Code != "VALIDATION_FAILED" || result.Field != "" {
+		t.Fatalf("mismatched prepared version = %+v, %v", result, err)
+	}
+	if prepared.publishCalls != 0 || prepared.retireCalls != 1 || manager.HasAppliedConfiguration() {
+		t.Fatalf("published=%d retired=%d initialized=%t", prepared.publishCalls, prepared.retireCalls, manager.HasAppliedConfiguration())
+	}
+}
+
 // RUN-T-199 does not publish a prepared candidate if private cache persistence fails.
 func TestEnvironmentConfigPersistenceFailureRetiresCandidate(t *testing.T) {
 	initial := initialRuntimeConfig()
@@ -152,7 +179,8 @@ func TestEnvironmentConfigPersistenceFailureRetiresCandidate(t *testing.T) {
 func TestEnvironmentConfigCloseWaitsAndRejectsPendingWork(t *testing.T) {
 	initial := initialRuntimeConfig()
 	release, started := make(chan struct{}), make(chan struct{})
-	preparer := &testConfigurationPreparer{started: started, release: release}
+	prepared := &testPreparedConfiguration{config: initial}
+	preparer := &testConfigurationPreparer{started: started, release: release, prepared: prepared}
 	manager := newTestEnvironmentConfigRuntime(t, initial, preparer.prepare, &testCacheWriter{})
 	applyDone := make(chan ConfigApplyResult, 1)
 	go func() {
@@ -178,9 +206,15 @@ func TestEnvironmentConfigCloseWaitsAndRejectsPendingWork(t *testing.T) {
 	}
 	close(release)
 	select {
-	case <-applyDone:
+	case result := <-applyDone:
+		if result.Kind != ConfigFatal || result.Message != "configuration runtime is closed" {
+			t.Fatalf("active candidate after close = %+v", result)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("active submission did not settle after release")
+	}
+	if prepared.publishCalls != 0 || prepared.retireCalls != 1 || manager.HasAppliedConfiguration() {
+		t.Fatalf("closed candidate published=%d retired=%d initialized=%t", prepared.publishCalls, prepared.retireCalls, manager.HasAppliedConfiguration())
 	}
 	select {
 	case <-closeDone:
