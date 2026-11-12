@@ -117,6 +117,11 @@ type IDEService interface {
 	ApplyLease(*protocol.IdeLease, time.Time)
 }
 
+// IDEUpdateAdmission exposes the IDE service's state that can block managed updates.
+type IDEUpdateAdmission interface {
+	CanStartUpdate() bool
+}
+
 // Connection exchanges decoded control envelopes with the runtime. Transport implements it.
 type Connection interface {
 	Receive(context.Context) (*protocol.Envelope, error)

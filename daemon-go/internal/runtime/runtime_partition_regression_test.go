@@ -14,6 +14,21 @@ type temporarySweeperFunc func(time.Duration) (int, error)
 
 func (f temporarySweeperFunc) Sweep(ttl time.Duration) (int, error) { return f(ttl) }
 
+type blockingIDEAdmission struct {
+	entered   chan struct{}
+	release   chan struct{}
+	canUpdate bool
+}
+
+func (s *blockingIDEAdmission) HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult {
+	close(s.entered)
+	<-s.release
+	return &protocol.IdeResult{}
+}
+
+func (*blockingIDEAdmission) ApplyLease(*protocol.IdeLease, time.Time) {}
+func (s *blockingIDEAdmission) CanStartUpdate() bool                   { return s.canUpdate }
+
 type TypeError struct{ message string }
 
 func (e *TypeError) Error() string { return e.message }
@@ -130,6 +145,53 @@ func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 				t.Fatalf("IDE busy decision = %+v, want rejection %q", decision, tc.want)
 			}
 		})
+	}
+}
+
+// RUN-T-130 derives IDE update admission from the production IDE service and tracks active commands.
+func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
+	ide := &blockingIDEAdmission{entered: make(chan struct{}), release: make(chan struct{}), canUpdate: true}
+	options := runtimeOptionsForTest()
+	options.IDE = ide
+	r, connection := newReadyRuntimeForTest(t, options)
+
+	finished := make(chan error, 1)
+	go func() {
+		finished <- r.handle(context.Background(), &protocol.Envelope{
+			MessageType: protocol.MessageType_IDE_COMMAND,
+			Payload:     &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{}},
+		})
+	}()
+	select {
+	case <-ide.entered:
+	case <-time.After(time.Second):
+		t.Fatal("IDE command did not start")
+	}
+	if got := r.options.IDECommandCount(); got != 1 {
+		t.Fatalf("active IDE command count = %d, want 1", got)
+	}
+	if got := r.updateBusyReason(nil); got != "IDE command is in progress" {
+		t.Fatalf("active IDE command busy reason = %q", got)
+	}
+	close(ide.release)
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("IDE command did not finish")
+	}
+	if got := r.options.IDECommandCount(); got != 0 {
+		t.Fatalf("active IDE command count after completion = %d, want 0", got)
+	}
+	if !connection.sent(protocol.MessageType_IDE_RESULT) {
+		t.Fatal("IDE command result was not sent")
+	}
+
+	ide.canUpdate = false
+	if got := r.updateBusyReason(nil); got != "IDE views, cleanup or data streams are active" {
+		t.Fatalf("IDE service busy reason = %q", got)
 	}
 }
 
