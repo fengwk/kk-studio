@@ -91,7 +91,8 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           test_json="$RUNNER_TEMP/go-test.json"
-          if ! go test -json ./... > "$test_json"; then
+          # Avoid package-level CPU contention in process-startup and image tests on hosted runners.
+          if ! go test -p 1 -json ./... > "$test_json"; then
             cat "$test_json"
             exit 1
           fi
@@ -120,11 +121,12 @@ jobs:
           path: ${{ runner.temp }}/native-coverage.out
           if-no-files-found: error
       - name: Race test
+        # Keep package-level load bounded while process-supervision tests exercise their own concurrency.
         if: runner.os == 'Linux' || runner.os == 'macOS'
         working-directory: daemon-go
         env:
           CGO_ENABLED: '1'
-        run: go test -race ./...
+        run: go test -p 1 -race ./...
 
   native-coverage:
     needs: test

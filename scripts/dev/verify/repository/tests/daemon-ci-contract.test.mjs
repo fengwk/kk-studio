@@ -17,6 +17,8 @@ const smoke = readFileSync(path.join(root, 'scripts/daemon/smoke-archive.sh'), '
 test('Go daemon CI builds all six static targets and is reusable by release and Docker workflows', () => {
   assert.match(goCi, /workflow_call:/)
   assert.match(goCi, /POSTGRES_VERSION: '17'/)
+  assert.match(goCi, /go test -p 1 -json/)
+  assert.match(goCi, /go test -p 1 -race/)
   assert.match(goCi, /CGO_ENABLED=0 go build/)
   for (const target of ['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64', 'windows/amd64', 'windows/arm64']) {
     assert.ok(goCi.includes(target), `missing cross-compile target ${target}`)
