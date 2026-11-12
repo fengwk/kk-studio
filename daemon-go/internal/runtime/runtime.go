@@ -112,7 +112,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 		}
 	}
 	if options.InitialReconnectDelay == 0 {
-		options.InitialReconnectDelay = 250 * time.Millisecond
+		options.InitialReconnectDelay = time.Second
 	}
 	if options.MaxReconnectDelay == 0 {
 		options.MaxReconnectDelay = 30 * time.Second

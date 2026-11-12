@@ -49,6 +49,10 @@ func TestNewRuntimeRejectsInvalidOptions(t *testing.T) {
 			}
 		})
 	}
+	defaultOptions, err := NewRuntime(valid)
+	if err != nil || defaultOptions.options.InitialReconnectDelay != time.Second {
+		t.Fatalf("default reconnect delay = %v, err=%v", defaultOptions.options.InitialReconnectDelay, err)
+	}
 
 	manager := newTestEnvironmentConfigRuntime(t, initialRuntimeConfig(), (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
 	bad := valid
