@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchSessionResource } from '@/shared/api/resource-service'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
+import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/resource-service', () => ({
@@ -38,6 +39,21 @@ describe('resource URI markdown', () => {
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
   })
 
+  it('resolves resource references embedded in tool output while preserving the URI text', async () => {
+    vi.mocked(fetchSessionResource).mockResolvedValueOnce(new Blob(['tool output'], { type: 'text/plain' }))
+    const view = render(
+      <ResourceSessionContext.Provider value={SESSION_ID}>
+        <ResourceUriText text={`Attached resource: ${RESOURCE_URI}, available.`} />
+      </ResourceSessionContext.Provider>,
+    )
+
+    expect(view.container.textContent).toContain(RESOURCE_URI)
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    expect(await screen.findByText('tool output')).toBeInTheDocument()
+    expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false)
+  })
+
   it('revokes an inline image object URL when its markdown is unmounted', async () => {
     vi.mocked(fetchSessionResource).mockResolvedValueOnce(new Blob(['image'], { type: 'image/png' }))
     const createObjectURL = vi.fn(() => 'blob:resource-preview')
@@ -58,6 +74,36 @@ describe('resource URI markdown', () => {
     view.unmount()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:resource-preview')
     vi.unstubAllGlobals()
+  })
+
+  it('revokes an image URL when its resource URI changes', async () => {
+    const nextResourceId = '22345678-1234-1234-1234-123456789abc'
+    vi.mocked(fetchSessionResource)
+      .mockResolvedValueOnce(new Blob(['first'], { type: 'image/png' }))
+      .mockResolvedValueOnce(new Blob(['second'], { type: 'image/png' }))
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce('blob:first-resource')
+      .mockReturnValueOnce('blob:second-resource')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    })
+    const renderImage = (resourceId: string) => (
+      <ResourceSessionContext.Provider value={SESSION_ID}>
+        <MarkdownRenderer content={`![diagram](resource://files/${resourceId})`} />
+      </ResourceSessionContext.Provider>
+    )
+    const view = render(renderImage(RESOURCE_ID))
+    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute('src', 'blob:first-resource')
+
+    view.rerender(renderImage(nextResourceId))
+
+    expect(await screen.findByRole('img', { name: 'diagram' })).toHaveAttribute('src', 'blob:second-resource')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:first-resource')
+    view.unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:second-resource')
   })
 
   it('renders unknown resource schemes as inert text', () => {

@@ -132,6 +132,6 @@ function ResourcePreview({ blob, label }: { blob: Blob; label: string }) {
       ? <span role="status">{t('ai.resource.loading')}</span>
       : <img src={imageUrl} alt={label} />
   }
-  if (text != null) return <pre>{text}</pre>
+  if (text != null) return <span className="md-resource-text-preview">{text}</span>
   return <span role="status">{t('ai.resource.previewUnsupported')}</span>
 }
