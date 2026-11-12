@@ -60,7 +60,7 @@ func TestDownload_TicketValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &ResourceDownloader{Requester: tc.requester}
-			if _, err := d.Download(context.Background(), tc.transfer); err == nil {
+			if _, err := d.RequestTicket(context.Background(), tc.transfer); err == nil {
 				t.Fatal("invalid ticket accepted")
 			}
 		})
@@ -177,7 +177,14 @@ func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
 		ticketRequests++
 		return testDownloadTicket(transferID, "http://storage.example/archive", []byte("x")), nil
 	})}
-	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download size failed" || got != nil {
+	download := func() ([]byte, error) {
+		ticket, err := d.RequestTicket(context.Background(), transferID)
+		if err != nil {
+			return nil, err
+		}
+		return d.Download(context.Background(), ticket)
+	}
+	if got, err := download(); err == nil || err.Error() != "resource download size failed" || got != nil {
 		t.Fatalf("oversized download=%q err=%v", got, err)
 	}
 	if body.read != 2 || !body.closed || ticketRequests != 1 || storageRequests != 1 {
@@ -192,7 +199,7 @@ func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
 		ticketRequests++
 		return expired, nil
 	})
-	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download ticket expired" || got != nil {
+	if got, err := download(); err == nil || err.Error() != "resource download ticket expired" || got != nil {
 		t.Fatalf("expired download=%q err=%v", got, err)
 	}
 	if ticketRequests != 1 || storageRequests != 0 {
@@ -206,7 +213,7 @@ func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
 		ticketRequests++
 		return missingExpiry, nil
 	})
-	if got, err := d.Download(context.Background(), transferID); err == nil || err.Error() != "resource download ticket is invalid" || got != nil {
+	if got, err := download(); err == nil || err.Error() != "resource download ticket is invalid" || got != nil {
 		t.Fatalf("ticket without expiry download=%q err=%v", got, err)
 	}
 	if ticketRequests != 1 || storageRequests != 0 {

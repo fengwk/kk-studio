@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TRN-T-095 verifies outbound HTTP requests do not follow redirects.
+// TRN-T-095, TRN-T-117, TRN-T-119 verify redirects are not followed and requests honor cancellation.
 func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	var targetHits int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -44,7 +44,7 @@ func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	}
 }
 
-// TRN-T-092 verifies an explicit proxy receives absolute-form HTTP requests.
+// TRN-T-092, TRN-T-112, TRN-T-119 verify an explicit proxy receives absolute-form HTTP requests.
 func TestProxy_ExplicitHTTPProxySelection(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.RequestURI, "http://origin.invalid/") {

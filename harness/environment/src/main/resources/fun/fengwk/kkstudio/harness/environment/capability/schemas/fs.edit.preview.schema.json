@@ -3,7 +3,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "Absolute path on the target daemon's file system of the text file to edit, or a writable `vfs:/sessions/<sessionId>/...` path in the conversation directory. It must be a regular text file: directories, devices, FIFOs and binary files are rejected before any write. Relative paths are rejected; `vfs:/skills` and `vfs:/resources` are read-only."
+      "description": "Absolute path on the selected Environment's file system of the text file to edit. It must be a regular text file: directories, devices, FIFOs and binary files are rejected before any write. Relative paths are rejected."
     },
     "old_string": {
       "type": "string",

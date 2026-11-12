@@ -10,6 +10,7 @@ import {
   ResourceBlobUrlContext,
   type ResourceBlobUrls,
 } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
+import { ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
 import { useBoundThreadPanelLabels } from '@/features/thread/runtime/useBoundThreadPanelViews'
 import { UnconfirmedExecutionsPanel } from '@/features/thread/runtime/UnconfirmedExecutionsPanel'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
@@ -139,16 +140,18 @@ export function ThreadPane({
     onDismissActionError: activity.onDismissActionError,
   }
   return (
-    <ResourceBlobUrlContext.Provider value={useBlobUrlResolver()}>
-      <ThreadPanel
-        heading={heading}
-        transcript={transcript}
-        mainView={views.mainView}
-        controls={controls}
-        activity={panelActivity}
-        slots={{ footer: <ThreadStatusFooter {...labels} /> }}
-      />
-    </ResourceBlobUrlContext.Provider>
+    <ResourceSessionContext.Provider value={projection.sessionId ?? null}>
+      <ResourceBlobUrlContext.Provider value={useBlobUrlResolver()}>
+        <ThreadPanel
+          heading={heading}
+          transcript={transcript}
+          mainView={views.mainView}
+          controls={controls}
+          activity={panelActivity}
+          slots={{ footer: <ThreadStatusFooter {...labels} /> }}
+        />
+      </ResourceBlobUrlContext.Provider>
+    </ResourceSessionContext.Provider>
   )
 }
 

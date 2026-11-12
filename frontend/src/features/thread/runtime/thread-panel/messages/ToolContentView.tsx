@@ -14,6 +14,7 @@ import type {
   ToolContent,
 } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
+import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import './resource-attachments.css'
 
 /**
@@ -40,7 +41,7 @@ function ToolContentItem({ content }: { content: ToolContent }) {
   if (content.type === 'text') {
     return (
       <ToolOutputViewport bounded={false}>
-        {content.text}
+        <ResourceUriText text={content.text} />
       </ToolOutputViewport>
     )
   }
@@ -48,7 +49,7 @@ function ToolContentItem({ content }: { content: ToolContent }) {
     const text = formatJsonContent(content.value)
     return (
       <ToolOutputViewport bounded={false} className="is-json">
-        {text}
+        <ResourceUriText text={text} />
       </ToolOutputViewport>
     )
   }

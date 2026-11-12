@@ -474,38 +474,6 @@ class DatabaseTurnResolverTest {
     assertFalse(stale.contains("date"), stale);
   }
 
-  /** 子 Agent 的会话目录必须按执行根会话生成，而不是按当前子会话生成。 */
-  @Test
-  void systemPromptSessionDirectoriesUseExecutionRootSession() {
-    UUID childSessionId = new UUID(0L, 200L);
-    UUID executionRootSessionId = new UUID(0L, 300L);
-    EntryPath childPath =
-        new EntryPath(
-            List.of(
-                new Entry(id(1), childSessionId, null, new RootPayload(settings("default")), NOW)));
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-
-    TurnResolver.Resolved resolved =
-        assertInstanceOf(
-            TurnResolver.Resolved.class,
-            fixture.resolver.resolve(THREAD_ID, executionRootSessionId, childPath, null));
-    String instruction = resolved.spec().systemInstruction();
-
-    assertTrue(
-        instruction.contains(
-            "<session_dir>vfs:/sessions/" + executionRootSessionId + "/</session_dir>"),
-        instruction);
-    assertTrue(
-        instruction.contains(
-            "<thread_dir>vfs:/sessions/"
-                + executionRootSessionId
-                + "/threads/"
-                + THREAD_ID
-                + "/</thread_dir>"),
-        instruction);
-    assertFalse(instruction.contains(childSessionId.toString()), instruction);
-  }
-
   @Test
   void filtersRequiredToolsAndPreservesOptionalAndSkillsWhenBranchHasNoEnvironment() {
     // 未选择 Environment 的 branch：REQUIRED 工具在规划期被过滤掉；OPTIONAL（如 read）保持声明但冻结为 null 路由。

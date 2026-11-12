@@ -44,7 +44,11 @@ func TestDownload_RequestTicketThenFetchAndVerify(t *testing.T) {
 		}
 		return testDownloadTicket(id, server.URL, body), nil
 	})}
-	got, err := d.Download(context.Background(), transfer)
+	ticket, err := d.RequestTicket(context.Background(), transfer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.Download(context.Background(), ticket)
 	if err != nil || string(got) != string(body) {
 		t.Fatalf("Download=%q err=%v", got, err)
 	}
@@ -67,13 +71,17 @@ func TestDownload_RejectsFailedTicketAndDoesNotFollowRedirect(t *testing.T) {
 	failed := &ResourceDownloader{Requester: ticketRequesterFunc(func(context.Context, string) (*protocol.ResourceDownloadTicket, error) {
 		return &protocol.ResourceDownloadTicket{TransferId: proto.String(transfer), State: protocol.TicketState_TICKET_FAILED, Message: proto.String("secret detail")}, nil
 	})}
-	if _, err := failed.Download(context.Background(), transfer); err == nil || err.Error() != "resource download ticket failed" {
+	if _, err := failed.RequestTicket(context.Background(), transfer); err == nil || err.Error() != "resource download ticket failed" {
 		t.Fatalf("failed ticket error=%v", err)
 	}
 	d := &ResourceDownloader{Client: &http.Client{Transport: &http.Transport{Proxy: nil}}, Requester: ticketRequesterFunc(func(context.Context, string) (*protocol.ResourceDownloadTicket, error) {
 		return testDownloadTicket(transfer, redirect.URL, []byte("x")), nil
 	})}
-	if _, err := d.Download(context.Background(), transfer); err == nil || err.Error() != "resource download storage status 302 failed" {
+	ticket, err := d.RequestTicket(context.Background(), transfer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Download(context.Background(), ticket); err == nil || err.Error() != "resource download storage status 302 failed" {
 		t.Fatalf("redirect error=%v", err)
 	}
 	if targetHits.Load() != 0 {

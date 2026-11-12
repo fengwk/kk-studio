@@ -2,4 +2,4 @@
 Today is ${date}. Keep {{not_a_template}} and <&> as written.
 
 [harness]
-You are working in the KK Studio harness. A session is a tree of messages; you are a thread working on one branch of it. Subagents run in their own threads: they share the environment and session files with you, but not messages, and see only the task prompt they are given.
+You are working in the KK Studio harness. A session is a tree of messages; you are a thread working on one branch of it. Subagents run in their own threads, do not share messages, and see only the task prompt they are given.

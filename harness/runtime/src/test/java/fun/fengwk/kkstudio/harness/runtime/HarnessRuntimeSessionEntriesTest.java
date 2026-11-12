@@ -97,40 +97,36 @@ class HarnessRuntimeSessionEntriesTest {
   }
 
   @Test
-  void sessionAndParentQueriesReturnOnlyTheirThreadKinds() {
+  void sessionThreadQueryReturnsOnlyUserThreads() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    UUID subagentId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.threads()
-                  .insert(
-                      new ThreadState(
-                          id,
-                          baseline.sessionId(),
-                          baseline.threadId(),
-                          baseline.rootEntryId(),
-                          HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                          "subagent",
-                          baseline.threadId(),
-                          false,
-                          ThreadKind.SUBAGENT,
-                          ThreadConstraints.NONE,
-                          ThreadExecutionControl.RUNNABLE,
-                          0L,
-                          1,
-                          0,
-                          T1,
-                          T1));
-              return id;
-            });
+    store.transaction(
+        tx -> {
+          UUID subagentId = tx.nextId();
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      subagentId,
+                      baseline.sessionId(),
+                      baseline.threadId(),
+                      baseline.rootEntryId(),
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "subagent",
+                      baseline.threadId(),
+                      false,
+                      ThreadKind.SUBAGENT,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      T1,
+                      T1));
+          return null;
+        });
 
     assertEquals(
         List.of(baseline.threadId()),
         runtime.listThreadsBySession(baseline.sessionId()).stream().map(ThreadState::id).toList());
-    assertEquals(
-        List.of(subagentId),
-        runtime.listSubagentsByParent(baseline.threadId()).stream().map(ThreadState::id).toList());
   }
 
   @Test

@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.spi.ResourceReadGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -102,7 +102,7 @@ class BuiltinHistoryRenderersTest {
             "read.md",
             EnvironmentCapabilityIds.FS_READ,
             ToolSideEffect.READ_ONLY,
-            mock(VfsGateway.class));
+            mock(ResourceReadGateway.class));
 
     // 构造 3: TaskTool（依赖轻量接口，使用 mock 构造）
     Tool taskTool = new TaskTool(mock(SubagentRunner.class));

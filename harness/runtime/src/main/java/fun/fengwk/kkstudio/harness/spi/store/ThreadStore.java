@@ -35,9 +35,6 @@ public interface ThreadStore {
   /** 按 UUID 升序读取直接子 Thread。 */
   List<ThreadState> listChildren(UUID parentThreadId);
 
-  /** 按 UUID 升序读取父 Thread 的 SUBAGENT 子线程。 */
-  List<ThreadState> listSubagents(UUID parentThreadId);
-
   /** 由不可变 parent 链派生 head-to-root 祖先（包含自身）。 */
   List<UUID> findAncestorChain(UUID threadId);
 

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
@@ -32,7 +33,7 @@ const (
 	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
 )
 
-// ExpectedFile identifies a user-approved file snapshot for fs.edit.
+// ExpectedFile identifies a user-approved file snapshot for a write or edit.
 type ExpectedFile struct {
 	Path   string
 	SHA256 string
@@ -92,6 +93,7 @@ type CapabilityContext struct {
 	Processes            native.Supervisor
 	Resources            ResourceUploader
 	Progress             Progress
+	FileChanged          func(string)
 	ConfirmExecutionExit func()
 }
 
@@ -109,3 +111,11 @@ type Connection interface {
 	Send(context.Context, *protocol.Envelope) error
 	Close() error
 }
+
+// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation policy.
+type ConnectionFactory interface {
+	Connect(context.Context) (Connection, error)
+}
+
+// ErrRegistrationRejected marks an authentication rejection that must not be retried.
+var ErrRegistrationRejected = errors.New("daemon registration rejected")

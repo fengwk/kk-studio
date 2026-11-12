@@ -8,30 +8,8 @@ import (
 	"testing"
 )
 
-// TRN-T-111 verifies only an explicitly configured proxy is used and invalid targets do not fall back.
+// TRN-T-111 verifies only an explicitly configured proxy is used and failures do not fall back.
 func TestProxy_ExplicitNoFallback(t *testing.T) {
-	policy, err := NewProxyPolicy("http://proxy.example:8080")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"http://public.example", "https://public.example", "ws://public.example", "wss://public.example"} {
-		if !policy.UseProxy(target) {
-			t.Errorf("proxy not selected for %s", target)
-		}
-	}
-	for _, target := range []string{"file:///tmp/data", "not-a-url", "http:/missing-host"} {
-		if policy.UseProxy(target) {
-			t.Errorf("proxy selected for unsupported target %q", target)
-		}
-	}
-	direct, err := NewProxyPolicy("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if direct.UseProxy("http://public.example") {
-		t.Fatal("direct policy selected a proxy")
-	}
-
 	var targetHits, proxyHits atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		targetHits.Add(1)
@@ -48,11 +26,11 @@ func TestProxy_ExplicitNoFallback(t *testing.T) {
 		_ = conn.Close()
 	}))
 	defer proxyServer.Close()
-	deadProxy, err := NewProxyPolicy(proxyServer.URL)
+	policy, err := NewProxyPolicy(proxyServer.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := deadProxy.HTTPClient().Get(target.URL)
+	resp, err := policy.HTTPClient().Get(target.URL)
 	if err == nil {
 		if resp != nil {
 			_ = resp.Body.Close()
@@ -61,6 +39,32 @@ func TestProxy_ExplicitNoFallback(t *testing.T) {
 	}
 	if proxyHits.Load() != 1 || targetHits.Load() != 0 {
 		t.Fatalf("failed proxy requests=%d direct target requests=%d", proxyHits.Load(), targetHits.Load())
+	}
+}
+
+// TRN-T-112 verifies configured proxies apply to public and loopback destinations without bypass rules.
+func TestProxy_ExplicitProxyAppliesToDestinations(t *testing.T) {
+	p, err := NewProxyPolicy("http://proxy.example:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := p.HTTPClient().Transport.(*http.Transport).Proxy
+	for _, target := range []string{"http://public.example", "http://127.0.0.1"} {
+		request, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := proxy(request)
+		if err != nil || got == nil || got.String() != "http://proxy.example:8080" {
+			t.Errorf("proxy(%q)=%v, %v", target, got, err)
+		}
+	}
+	direct, err := NewProxyPolicy("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct.HTTPClient().Transport.(*http.Transport).Proxy != nil {
+		t.Fatal("direct policy configured an HTTP proxy")
 	}
 }
 

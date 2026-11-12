@@ -19,7 +19,7 @@
       },
       "input_image": {
         "type": "string",
-        "description": "First frame or keyframe image: a public HTTP(S) image URL or a vfs:/resources/<blobId> image resource of the current session."
+        "description": "First frame or keyframe image: a public HTTP(S) image URL or a resource://files/<uuid> image resource of the current session."
       },
       "last_frame_image": {
         "type": "string",
@@ -35,7 +35,7 @@
         "description": "Reference images, MiniMax-H3 only, up to 9 entries. Reference sets are mutually exclusive with keyframe inputs.",
         "items": {
           "type": "string",
-          "description": "A public HTTP(S) image URL or a vfs:/resources/<blobId> image resource of the current session."
+          "description": "A public HTTP(S) image URL or a resource://files/<uuid> image resource of the current session."
         }
       },
       "reference_videos": {
@@ -43,7 +43,7 @@
         "description": "Reference videos, MiniMax-H3 only, up to 3 entries; supply the matching durations in reference_video_durations.",
         "items": {
           "type": "string",
-          "description": "A public HTTP(S) video URL or a vfs:/resources/<blobId> video resource of the current session."
+          "description": "A public HTTP(S) video URL or a resource://files/<uuid> video resource of the current session."
         }
       },
       "reference_video_durations": {
@@ -59,7 +59,7 @@
         "description": "Reference audio tracks, MiniMax-H3 only, up to 3 entries; they cannot be used without a reference image or video.",
         "items": {
           "type": "string",
-          "description": "A public HTTP(S) audio URL or a vfs:/resources/<blobId> audio resource of the current session."
+          "description": "A public HTTP(S) audio URL or a resource://files/<uuid> audio resource of the current session."
         }
       },
       "resolution": {
