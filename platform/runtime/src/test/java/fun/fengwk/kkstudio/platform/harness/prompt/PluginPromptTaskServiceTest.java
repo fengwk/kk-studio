@@ -41,10 +41,10 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -141,7 +141,7 @@ class PluginPromptTaskServiceTest {
     assertEquals(taskId, target.threadId());
     assertEquals(null, target.parentThreadId());
     assertEquals(null, target.expectedParentHeadEntryId());
-    assertEquals(SpawnTrigger.PLUGIN, target.trigger());
+    assertEquals(ThreadKind.PLUGIN_TASK, target.kind());
     assertEquals(JoinDelivery.RECEIPT_ONLY, target.delivery());
     assertEquals(PluginPromptTaskService.invocationId(taskId), target.ticketId());
     assertEquals(SETTINGS, target.settings());
@@ -592,7 +592,7 @@ class PluginPromptTaskServiceTest {
             "prompt-task",
             threadId,
             false,
-            SpawnTrigger.USER,
+            ThreadKind.USER,
             ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,

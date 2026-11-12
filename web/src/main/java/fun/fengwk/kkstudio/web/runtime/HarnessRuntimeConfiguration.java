@@ -65,6 +65,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Web 组合根：把 platform 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
@@ -262,7 +263,7 @@ public class HarnessRuntimeConfiguration {
       HarnessWorkDispatcher dispatcher,
       LocalExecutionLifecycle executionLifecycle,
       ToolProcessor toolProcessor,
-      ProcessorLeaseConfig processorLeaseConfig,
+      Supplier<ProcessorLeaseConfig> processorLeaseConfigProvider,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
     return new HarnessRuntimeLifecycle(
         properties.isWorkersEnabled(),
@@ -271,6 +272,6 @@ public class HarnessRuntimeConfiguration {
         toolProcessor,
         daemonServerProvider,
         properties.getDrainTimeout(),
-        processorLeaseConfig.leaseDuration());
+        () -> processorLeaseConfigProvider.get().leaseDuration());
   }
 }

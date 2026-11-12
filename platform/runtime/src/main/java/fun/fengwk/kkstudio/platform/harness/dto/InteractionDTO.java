@@ -67,6 +67,7 @@ public sealed interface InteractionDTO
       String toolName,
       String argumentsJson,
       @Nullable JsonNode approval,
+      int queuedSameFileCount,
       Instant createdAt)
       implements InteractionDTO {}
 

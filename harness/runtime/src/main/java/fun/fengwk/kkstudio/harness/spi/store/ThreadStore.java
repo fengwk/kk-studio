@@ -26,8 +26,11 @@ public interface ThreadStore {
   /** 更新 Thread current state；要求行已在本事务锁定。 */
   void update(ThreadState thread);
 
-  /** 按 {@code (createdAt, id)} 升序读取 Session 全部 Thread。 */
+  /** 按 {@code (createdAt, id)} 升序读取 Session 的全部 Thread，供生命周期内部操作使用。 */
   List<ThreadState> listBySession(UUID sessionId);
+
+  /** 按 {@code (createdAt, id)} 升序读取 Session 的 USER Thread。 */
+  List<ThreadState> listUserBySession(UUID sessionId);
 
   /** 按 UUID 升序读取直接子 Thread。 */
   List<ThreadState> listChildren(UUID parentThreadId);

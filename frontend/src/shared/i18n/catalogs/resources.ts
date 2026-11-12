@@ -606,6 +606,10 @@ export const resourcesCatalog = {
     'en-US': 'No candidate Tools',
     'zh-CN': '暂无候选 Tools',
   },
+  'ai.catalog.form.searchCapabilities': {
+    'en-US': 'Search by name or description',
+    'zh-CN': '按名称或描述搜索',
+  },
   'ai.catalog.form.noCandidateSkills': {
     'en-US': 'No candidate Skills',
     'zh-CN': '暂无候选 Skills',

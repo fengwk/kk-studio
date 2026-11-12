@@ -37,9 +37,9 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
@@ -466,7 +466,7 @@ class HarnessRuntimeTreeLockTest {
                   "child-branch",
                   rootThreadId,
                   false,
-                  SpawnTrigger.MODEL_TOOL,
+                  ThreadKind.SUBAGENT,
                   ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
@@ -756,7 +756,7 @@ class HarnessRuntimeTreeLockTest {
                       "main",
                       threadId,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,

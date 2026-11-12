@@ -445,13 +445,13 @@ class HarnessWorkDispatcherHandoffTest {
                 (threadId, rootSessionId, path, preparation) -> {
                   throw new AssertionError("resolver must not be called for a quiescent thread");
                 }),
-            new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(() -> Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
     ModelProcessor modelProcessor =
         new ModelProcessor(
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
+            new ModelProcessorConfig(() -> leaseConfig, () -> noRetry, () -> Duration.ofSeconds(5)),
             clock,
             processorScheduler,
             Runnable::run,
@@ -463,10 +463,10 @@ class HarnessWorkDispatcherHandoffTest {
             toolGateway,
             sink,
             new ToolProcessorConfig(
-                leaseConfig,
+                () -> leaseConfig,
                 () -> noRetry,
-                Duration.ofSeconds(7),
-                Duration.ofSeconds(9),
+                () -> Duration.ofSeconds(7),
+                () -> Duration.ofSeconds(9),
                 Duration.ofMinutes(10)),
             clock,
             processorScheduler,
@@ -563,7 +563,7 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
+            new ModelProcessorConfig(() -> leaseConfig, () -> noRetry, () -> Duration.ofSeconds(5)),
             clock,
             processorScheduler,
             Runnable::run,
@@ -575,10 +575,10 @@ class HarnessWorkDispatcherHandoffTest {
             toolGateway,
             sink,
             new ToolProcessorConfig(
-                leaseConfig,
+                () -> leaseConfig,
                 () -> noRetry,
-                Duration.ofSeconds(7),
-                Duration.ofSeconds(9),
+                () -> Duration.ofSeconds(7),
+                () -> Duration.ofSeconds(9),
                 Duration.ofMinutes(10)),
             clock,
             processorScheduler,

@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -541,6 +542,35 @@ public final class HarnessRuntime {
   }
 
   /**
+   * Count unfinished edit/write siblings after the requested invocation that target the same file.
+   * This read-only query does not lock the Thread or load its Entry history.
+   */
+  public int countQueuedSameFileMutationsAfter(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return store.transaction(
+        tx -> {
+          ToolInvocation current = tx.tools().find(invocationId).orElse(null);
+          if (current == null) {
+            return 0;
+          }
+          var key = ToolFileMutationOrder.key(current);
+          if (key.isEmpty()) {
+            return 0;
+          }
+          int count = 0;
+          for (ToolInvocation candidate :
+              tx.tools().loadByAssistantEntry(current.assistantEntryId())) {
+            if (candidate.callIndex() > current.callIndex()
+                && !candidate.status().isTerminal()
+                && ToolFileMutationOrder.key(candidate).filter(key.get()::equals).isPresent()) {
+              count++;
+            }
+          }
+          return count;
+        });
+  }
+
+  /**
    * 在单个短事务内读取一页待处理 Interaction（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}），按 {@code
    * (createdAt, id)} 稳定升序的 keyset 游标分页。
    *
@@ -829,7 +859,7 @@ public final class HarnessRuntime {
           if (tx.sessions().find(sessionId).isEmpty()) {
             throw DomainException.notFound("session", "session " + sessionId + " does not exist");
           }
-          return tx.threads().listBySession(sessionId);
+          return tx.threads().listUserBySession(sessionId);
         });
   }
 

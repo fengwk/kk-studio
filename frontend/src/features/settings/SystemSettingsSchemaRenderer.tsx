@@ -6,7 +6,6 @@ import {
   SettingsSelectField,
   SettingsSwitchRow,
   SettingsTextField,
-  type ApplyTiming,
 } from '@/features/settings/settings-primitives'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
 import { SettingsModelSelectionField } from '@/features/settings/SettingsModelSelectionField'
@@ -18,7 +17,6 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import type {
-  SystemSettingsSchemaApplyTiming,
   SystemSettingsSchemaDTO,
   SystemSettingsSchemaFieldDTO,
 } from '@/shared/api/generated/contracts'
@@ -26,10 +24,12 @@ import type {
 export function SystemSettingsSchemaRenderer({
   schema,
   draft,
+  fieldErrors = {},
   onChange,
 }: {
   schema: SystemSettingsSchemaDTO
   draft: SystemSettingsSectionsDraft
+  fieldErrors?: Record<string, string>
   onChange: (next: SystemSettingsSectionsDraft) => void
 }) {
   const { t } = useI18n()
@@ -42,13 +42,13 @@ export function SystemSettingsSchemaRenderer({
               <SettingsCard
                 key={group.key}
                 title={t(requireTranslationKey(group.labelKey))}
-                timing={groupTiming(group)}
               >
                 {group.fields.map((field) => (
                   <SchemaField
                     key={field.path}
                     field={field}
                     draft={draft}
+                    error={fieldErrors[field.path]}
                     onChange={onChange}
                   />
                 ))}
@@ -61,29 +61,15 @@ export function SystemSettingsSchemaRenderer({
   )
 }
 
-/**
- * 生效时机徽标只出现在卡片上：显式 applyTiming 优先；未声明且 group.restartRequired 时回退为重启。
- */
-function groupTiming(
-  group: SystemSettingsSchemaDTO['sections'][number]['groups'][number],
-): ApplyTiming | undefined {
-  const explicit = toApplyTiming(group.applyTiming)
-  if (explicit != null) {
-    return explicit
-  }
-  if (group.restartRequired) {
-    return 'restart'
-  }
-  return undefined
-}
-
 function SchemaField({
   field,
   draft,
+  error,
   onChange,
 }: {
   field: SystemSettingsSchemaFieldDTO
   draft: SystemSettingsSectionsDraft
+  error?: string
   onChange: (next: SystemSettingsSectionsDraft) => void
 }) {
   const { t } = useI18n()
@@ -115,6 +101,7 @@ function SchemaField({
           min={field.min ?? undefined}
           max={field.max ?? undefined}
           hint={hint}
+          error={error}
           onChange={update}
         />
       )
@@ -185,20 +172,5 @@ function SchemaField({
           onChange={update}
         />
       )
-  }
-}
-
-function toApplyTiming(
-  value: SystemSettingsSchemaApplyTiming | null | undefined,
-): ApplyTiming | undefined {
-  switch (value) {
-    case 'NEXT_INVOCATION':
-      return 'nextInvocation'
-    case 'NEXT_HTTP_REQUEST':
-      return 'nextHttpRequest'
-    case 'RESTART':
-      return 'restart'
-    default:
-      return undefined
   }
 }

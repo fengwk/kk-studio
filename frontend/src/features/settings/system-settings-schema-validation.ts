@@ -4,7 +4,6 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import type {
-  SystemSettingsSchemaApplyTiming,
   SystemSettingsSchemaDTO,
   SystemSettingsSchemaFieldDTO,
   SystemSettingsSchemaFieldType,
@@ -20,12 +19,6 @@ const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'MODEL_SELECTION',
   'PERMISSION',
   'INTEGER_LIST',
-])
-
-const APPLY_TIMINGS = new Set<SystemSettingsSchemaApplyTiming>([
-  'NEXT_INVOCATION',
-  'NEXT_HTTP_REQUEST',
-  'RESTART',
 ])
 
 /**
@@ -50,7 +43,6 @@ export function validateSystemSettingsSchema(
         || !isTranslationKey(section.labelKey)
         || !nonBlank(section.descriptionKey)
         || !isTranslationKey(section.descriptionKey)
-        || typeof section.restartRequired !== 'boolean'
         || !Array.isArray(section.groups)
         || section.groups.length === 0
       ) {
@@ -67,8 +59,6 @@ export function validateSystemSettingsSchema(
           || !isTranslationKey(group.labelKey)
           || !nonBlank(group.descriptionKey)
           || !isTranslationKey(group.descriptionKey)
-          || typeof group.restartRequired !== 'boolean'
-          || (group.applyTiming != null && !APPLY_TIMINGS.has(group.applyTiming))
           || !Array.isArray(group.fields)
           || group.fields.length === 0
         ) {

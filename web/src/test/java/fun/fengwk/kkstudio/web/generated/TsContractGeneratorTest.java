@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
@@ -99,6 +100,11 @@ class TsContractGeneratorTest {
       throw new UnsupportedOperationException();
     }
 
+    @GetMapping("/stream")
+    ResponseEntity<StreamingResponseBody> stream() {
+      throw new UnsupportedOperationException();
+    }
+
     @PostMapping("/optional")
     void optional(@RequestBody(required = false) FixtureDTO.Create body) {}
   }
@@ -124,6 +130,13 @@ class TsContractGeneratorTest {
           }
         """);
     assertTrue(generated.contains("body?: FixtureCreate"));
+    assertContains(
+        generated,
+        """
+          'GET /api/widgets/stream': {
+            response: Blob
+          }
+        """);
     assertTrue(generated.contains("responseType: 'text'"));
     assertTrue(generated.contains("responseType: 'blob'"));
     assertTrue(

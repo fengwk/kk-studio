@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -70,22 +69,6 @@ type IdeCommandService interface {
 	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
 	ApplyLease(*protocol.IdeLease, time.Time)
 	Close(context.Context) error
-}
-
-// IDEViewRequest is the desired transport contract while internal/transport retains its string epoch.
-type IDEViewRequest struct {
-	ViewID       string
-	BindingEpoch int64
-	Mode         string
-	Method       string
-	Path         string
-	Headers      http.Header
-}
-
-// IDEViewUpstream carries transport cancellation until internal/transport adds Context.
-type IDEViewUpstream struct {
-	Context context.Context
-	transport.ViewUpstream
 }
 
 type viewState string
@@ -366,11 +349,11 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 	if err != nil {
 		return nil, err
 	}
-	if err := ensurePrivateDirectory(s.paths.ViewsDir); err != nil {
+	if err := native.EnsurePrivateDirectory(s.paths.ViewsDir); err != nil {
 		return nil, NewError("managed workspace directory is unavailable", "UNAVAILABLE")
 	}
 	workspacePath := filepath.Join(s.paths.ViewsDir, parsed.viewID+".code-workspace")
-	if err := writePrivateFile(workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
+	if err := native.WritePrivateFile(workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
 		return nil, NewError("managed workspace could not be written", "UNAVAILABLE")
 	}
 	workspacePath, err = filepath.EvalSymlinks(workspacePath)
@@ -426,7 +409,7 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 		createdAt: s.scheduler.Now(), streams: make(map[*activeIdeStream]struct{}), sessionGeneration: session.Generation,
 	}
 	s.bridge.Assign(view.viewID, view.workspacePath, epoch, directory)
-	s.resolver.BindView(view.viewID, strconv.FormatInt(epoch, 10), session.Port, session.Cookie)
+	s.resolver.BindView(view.viewID, epoch, session.Port, session.Cookie)
 	s.mu.Lock()
 	_, _ = s.commitRevisionLocked()
 	s.views[view.viewID] = view
@@ -585,7 +568,7 @@ func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *view
 		s.mu.Unlock()
 		if current && err == nil {
 			s.bridge.Assign(view.viewID, workspacePath, newEpoch, directory)
-			s.resolver.BindView(view.viewID, strconv.FormatInt(newEpoch, 10), session.Port, session.Cookie)
+			s.resolver.BindView(view.viewID, newEpoch, session.Port, session.Cookie)
 			s.mu.Lock()
 			view.bindingPending = false
 			s.scheduleExpiryLocked(view, time.Time{})
@@ -624,7 +607,7 @@ func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *view
 				s.mu.Unlock()
 				if current && err == nil {
 					s.bridge.Assign(view.viewID, workspacePath, newEpoch, directory)
-					s.resolver.BindView(view.viewID, strconv.FormatInt(newEpoch, 10), session.Port, session.Cookie)
+					s.resolver.BindView(view.viewID, newEpoch, session.Port, session.Cookie)
 					s.mu.Lock()
 					view.bindingPending = false
 					s.scheduleExpiryLocked(view, time.Time{})
@@ -680,7 +663,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	if !s.isCurrentOpen(view) || result.Directory != directory {
 		return nil, NewError("view binding changed", "VIEW_GONE")
 	}
-	if err := writePrivateFile(view.workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
+	if err := native.WritePrivateFile(view.workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
 		return nil, NewError("managed workspace could not be updated", "UNAVAILABLE")
 	}
 	s.mu.Lock()
@@ -919,7 +902,7 @@ func (s *Service) performClose(ctx context.Context, view *viewRecord, mode Manag
 	}
 	s.clearExpiry(view)
 	s.bridge.Revoke(view.viewID, epoch)
-	s.resolver.UnbindView(view.viewID, strconv.FormatInt(epoch, 10))
+	s.resolver.UnbindView(view.viewID, epoch)
 	if err := os.Remove(view.workspacePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, s.cleanupFailed(view, NewError("managed workspace could not be removed", "CLEANUP_FAILED"))
 	}
@@ -1106,50 +1089,31 @@ func (s *Service) clearExpiryLocked(view *viewRecord) {
 	}
 }
 
-// ResolveView adapts the current shared string-epoch contract to the IDE-local int64 contract.
-// Remove this adapter when internal/transport adopts int64 BindingEpoch and ViewUpstream.Context.
+// ResolveView authorizes the current view binding and returns a cancellable local upstream.
 func (s *Service) ResolveView(ctx context.Context, request transport.ViewRequest) (transport.ViewUpstream, error) {
-	validated, err := ValidateBindingEpoch(request.BindingEpoch)
-	if err != nil {
-		return transport.ViewUpstream{}, err
+	if request.BindingEpoch <= 0 {
+		return transport.ViewUpstream{}, NewError("bindingEpoch is invalid", "UNAVAILABLE")
 	}
-	epoch, err := strconv.ParseInt(validated, 10, 64)
-	if err != nil {
-		return transport.ViewUpstream{}, NewError("bindingEpoch is out of range", "UNAVAILABLE")
-	}
-	upstream, err := s.ResolveViewWithContext(ctx, IDEViewRequest{
-		ViewID: request.ViewID, BindingEpoch: epoch, Mode: request.Mode, Method: request.Method,
-		Path: request.Path, Headers: request.Headers,
-	})
-	return upstream.ViewUpstream, err
-}
-
-// ResolveViewWithContext is the IDE-local target contract; it is replaced by ViewResolver.ResolveView after transport alignment.
-func (s *Service) ResolveViewWithContext(ctx context.Context, request IDEViewRequest) (IDEViewUpstream, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return IDEViewUpstream{}, NewError("IDE service is closed", "UNAVAILABLE")
+		return transport.ViewUpstream{}, NewError("IDE service is closed", "UNAVAILABLE")
 	}
 	view := s.views[request.ViewID]
 	if view == nil || view.state != viewOpen || view.bindingPending || view.bindingEpoch != request.BindingEpoch {
 		s.mu.Unlock()
-		return IDEViewUpstream{}, NewError("view is not open for this binding epoch", "VIEW_GONE")
+		return transport.ViewUpstream{}, NewError("view is not open for this binding epoch", "VIEW_GONE")
 	}
 	if s.manager.Session() == nil {
 		s.mu.Unlock()
-		return IDEViewUpstream{}, NewError("code-server is not running", "UNAVAILABLE")
+		return transport.ViewUpstream{}, NewError("code-server is not running", "UNAVAILABLE")
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
-	transportRequest := transport.ViewRequest{
-		ViewID: request.ViewID, BindingEpoch: strconv.FormatInt(request.BindingEpoch, 10),
-		Mode: request.Mode, Method: request.Method, Path: request.Path, Headers: request.Headers,
-	}
-	upstream, err := s.resolver.ResolveView(streamCtx, transportRequest)
+	upstream, err := s.resolver.ResolveView(streamCtx, request)
 	if err != nil {
 		cancel()
 		s.mu.Unlock()
-		return IDEViewUpstream{}, err
+		return transport.ViewUpstream{}, err
 	}
 	stream := &activeIdeStream{viewID: view.viewID, epoch: view.bindingEpoch, cancel: cancel, release: upstream.Release, done: make(chan struct{})}
 	view.streams[stream] = struct{}{}
@@ -1157,8 +1121,9 @@ func (s *Service) ResolveViewWithContext(ctx context.Context, request IDEViewReq
 	s.cancelIdleLocked()
 	s.mu.Unlock()
 	// Wait for the transport's Release after cancellation so idle stop follows actual stream teardown.
+	upstream.Context = streamCtx
 	upstream.Release = func() { s.releaseStream(stream) }
-	return IDEViewUpstream{Context: streamCtx, ViewUpstream: upstream}, nil
+	return upstream, nil
 }
 
 func (s *Service) releaseStream(stream *activeIdeStream) {
@@ -1354,7 +1319,7 @@ func (s *Service) Close(ctx context.Context) error {
 	s.mu.Unlock()
 	for _, view := range views {
 		s.bridge.Revoke(view.viewID, view.bindingEpoch)
-		s.resolver.UnbindView(view.viewID, view.bindingEpochString())
+		s.resolver.UnbindView(view.viewID, view.bindingEpoch)
 	}
 	var failures []error
 	if err := s.bridge.Close(ctx); err != nil {
@@ -1405,7 +1370,7 @@ func (s *Service) processExited(_ uint64) {
 	for _, view := range views {
 		s.abortViewStreams(view)
 		s.bridge.Revoke(view.viewID, view.bindingEpoch)
-		s.resolver.UnbindView(view.viewID, view.bindingEpochString())
+		s.resolver.UnbindView(view.viewID, view.bindingEpoch)
 	}
 	s.emit(IdeServiceEvent{Kind: "process-exit", Message: "code-server exited; IDE views were invalidated"})
 	go func() {
@@ -1720,8 +1685,7 @@ type IdeSnapshot struct {
 	Views    []*protocol.IdeViewSummary
 }
 
-func (v *viewRecord) bindingEpochString() string { return strconv.FormatInt(v.bindingEpoch, 10) }
-func (s *Service) currentCrashEpoch() uint64     { s.mu.Lock(); defer s.mu.Unlock(); return s.crashEpoch }
+func (s *Service) currentCrashEpoch() uint64 { s.mu.Lock(); defer s.mu.Unlock(); return s.crashEpoch }
 func currentGeneration(manager CodeServerManager) uint64 {
 	session := manager.Session()
 	if session == nil {

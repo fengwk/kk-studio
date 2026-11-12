@@ -164,7 +164,7 @@ public final class ModelExecution
             this.store,
             Objects.requireNonNull(scheduler, "scheduler"),
             Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
-            Objects.requireNonNull(config, "config").leaseConfig(),
+            Objects.requireNonNull(config, "config").leaseConfigProvider().get(),
             this::abandon);
     ModelCheckpointCommitter checkpoints =
         new ModelCheckpointCommitter(this.store, builtinStore, this.claim, invocationId, attempt);

@@ -95,7 +95,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             wrapped,
             new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, fixture.resolver))),
             new ThreadProcessorConfig(
-                RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
+                () -> RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
     var baseline = seedBaseline(store);
     seedCommand(
         store, baseline.threadId(), new UserMessageCommandPayload(userMessage("session-first")));
@@ -762,7 +762,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                 List.of(
                     fakeDriver, HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
             new ThreadProcessorConfig(
-                RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
+                () -> RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
 
     BranchSettings fakeSettings =
         new BranchSettings("fake-agent", new ExecutionSelection(fakeDriver.id(), "{}"), null);

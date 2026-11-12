@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +28,7 @@ var filteredHeaders = map[string]struct{}{
 }
 
 type resolverBinding struct {
-	epoch   string
+	epoch   int64
 	port    int
 	cookie  string
 	streams map[uint64]context.CancelFunc
@@ -44,7 +45,7 @@ type Resolver struct {
 func NewResolver() *Resolver { return &Resolver{bindings: make(map[string]*resolverBinding)} }
 
 // BindView publishes a new current binding and immediately cancels streams from its predecessor.
-func (r *Resolver) BindView(viewID, epoch string, port int, cookie string) {
+func (r *Resolver) BindView(viewID string, epoch int64, port int, cookie string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if old := r.bindings[viewID]; old != nil {
@@ -56,7 +57,7 @@ func (r *Resolver) BindView(viewID, epoch string, port int, cookie string) {
 }
 
 // UnbindView removes only the matching binding; stale close operations cannot revoke a newer epoch.
-func (r *Resolver) UnbindView(viewID, epoch string) {
+func (r *Resolver) UnbindView(viewID string, epoch int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	binding := r.bindings[viewID]
@@ -78,10 +79,10 @@ func (r *Resolver) ResolveView(ctx context.Context, request transport.ViewReques
 	if err != nil {
 		return transport.ViewUpstream{}, err
 	}
-	epoch, err := ValidateBindingEpoch(request.BindingEpoch)
-	if err != nil {
-		return transport.ViewUpstream{}, err
+	if request.BindingEpoch <= 0 {
+		return transport.ViewUpstream{}, NewError("bindingEpoch is invalid", "UNAVAILABLE")
 	}
+	epoch := strconv.FormatInt(request.BindingEpoch, 10)
 	path, err := upstreamPath(request, viewID, epoch)
 	if err != nil {
 		return transport.ViewUpstream{}, err
@@ -92,7 +93,7 @@ func (r *Resolver) ResolveView(ctx context.Context, request transport.ViewReques
 	}
 	r.mu.Lock()
 	binding := r.bindings[viewID]
-	if binding == nil || binding.epoch != epoch {
+	if binding == nil || binding.epoch != request.BindingEpoch {
 		r.mu.Unlock()
 		return transport.ViewUpstream{}, NewError("view is not open for this binding epoch", "VIEW_GONE")
 	}

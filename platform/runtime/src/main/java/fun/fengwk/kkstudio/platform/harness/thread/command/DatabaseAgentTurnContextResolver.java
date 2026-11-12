@@ -110,8 +110,6 @@ public final class DatabaseAgentTurnContextResolver {
           systemInstruction(
               agent.systemPrompt(),
               currentEnvironment,
-              rootSessionId,
-              threadId,
               tools.bindings().stream().map(binding -> binding.descriptor().name()).toList(),
               promptSkills(environmentId, skills),
               subagentBindings);
@@ -346,21 +344,13 @@ public final class DatabaseAgentTurnContextResolver {
   private String systemInstruction(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
-      UUID rootSessionId,
-      UUID threadId,
       List<String> toolNames,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagentBindings) {
     String instruction =
         promptComposer.compose(
             new AgentPromptInput(
-                systemPrompt,
-                currentEnvironment,
-                rootSessionId,
-                threadId,
-                toolNames,
-                skills,
-                subagentBindings));
+                systemPrompt, currentEnvironment, toolNames, skills, subagentBindings));
     if (instruction == null || instruction.isBlank()) {
       throw rejection("system instruction must not be blank");
     }

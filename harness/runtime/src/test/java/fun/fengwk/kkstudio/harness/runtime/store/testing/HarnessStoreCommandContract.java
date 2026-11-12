@@ -28,6 +28,10 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -995,6 +999,41 @@ public abstract class HarnessStoreCommandContract {
                     tx.commands().loadCancelledByRequest(otherThreadId, TestIds.id(1)).stream()
                         .allMatch(c -> c.threadId().equals(otherThreadId)))
             .equals(Boolean.TRUE));
+  }
+
+  /** Session 列表只公开 USER Thread。 */
+  @Test
+  void userThreadQueryFiltersByKind() {
+    store.transaction(
+        tx -> {
+          UUID childThreadId = tx.nextId();
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      baseline.sessionId(),
+                      baseline.threadId(),
+                      baseline.rootEntryId(),
+                      StoreTestSupport.CREATION_REQUEST_HASH,
+                      "subagent",
+                      baseline.threadId(),
+                      false,
+                      ThreadKind.SUBAGENT,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      T0,
+                      T0));
+          return null;
+        });
+
+    assertEquals(
+        List.of(baseline.threadId()),
+        store.transaction(tx -> tx.threads().listUserBySession(baseline.sessionId())).stream()
+            .map(ThreadState::id)
+            .toList());
   }
 
   /** listThreadsBySession：按 (created_at, id) 确定性序返回同 Session 的 Thread，跨 Session 不混入。 */

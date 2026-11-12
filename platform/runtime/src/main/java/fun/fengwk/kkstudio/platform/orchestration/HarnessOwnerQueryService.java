@@ -75,6 +75,36 @@ public class HarnessOwnerQueryService {
     return List.copyOf(summaries);
   }
 
+  /** 验证 Session 仍归属于唯一产品 owner；未归属或不存在时统一返回 404。 */
+  public void requireOwnedSession(UUID sessionId) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    HarnessRuntime runtime = requireRuntime();
+    runtime.getSession(sessionId);
+    List<ThreadState> roots =
+        runtime.listThreadsBySession(sessionId).stream()
+            .filter(thread -> thread.parentThreadId() == null)
+            .toList();
+    if (roots.isEmpty()) {
+      throw DomainException.notFound("session");
+    }
+    if (roots.size() != 1) {
+      throw new IllegalStateException("Session has multiple root threads: " + sessionId);
+    }
+    UUID rootThreadId = roots.getFirst().id();
+    int owners = 0;
+    for (SessionOwnership ownership : ownerships) {
+      if (ownership.findOwner(rootThreadId, sessionId).isPresent()) {
+        owners++;
+      }
+    }
+    if (owners == 0) {
+      throw DomainException.notFound("session");
+    }
+    if (owners > 1) {
+      throw new IllegalStateException("Session has multiple owners: " + sessionId);
+    }
+  }
+
   /** 按存储创建顺序返回一页 Session Entry；Entry DTO 的 wire 编码由 web runtime mapper 负责。 */
   public SessionEntryPage listSessionEntries(UUID sessionId, UUID afterEntryId, int limit) {
     Objects.requireNonNull(sessionId, "sessionId");
@@ -126,6 +156,7 @@ public class HarnessOwnerQueryService {
     ThreadState thread = snapshot.thread();
     HarnessThreadSummaryDTO dto = new HarnessThreadSummaryDTO();
     dto.setThreadId(thread.id().toString());
+    dto.setKind(thread.kind());
     dto.setParentThreadId(
         thread.parentThreadId() == null ? null : thread.parentThreadId().toString());
     dto.setName(thread.name());

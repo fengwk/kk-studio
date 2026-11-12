@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -17,10 +19,21 @@ type CapabilityCall struct {
 	Arguments      json.RawMessage
 	TimeoutMillis  int64
 	MaxOutputBytes int64
+	ImageInputTier ImageInputTier
 	ExpectedFile   *ExpectedFile
 }
 
-// ExpectedFile identifies a user-approved file snapshot for fs.edit.
+// ImageInputTier is the image scaling tier carried by each INVOKE; it selects the box that
+// local images are scaled into before they leave the daemon.
+type ImageInputTier string
+
+const (
+	ImageInputTierP720     ImageInputTier = "P720"
+	ImageInputTierP1080    ImageInputTier = "P1080"
+	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
+)
+
+// ExpectedFile identifies a user-approved file snapshot for a write or edit.
 type ExpectedFile struct {
 	Path   string
 	SHA256 string
@@ -53,6 +66,24 @@ type ResourceUploader interface {
 	Upload(ctx context.Context, invocationID string, content ResultContent) (ResultContent, error)
 }
 
+// ResourceUploadError carries an explicit cleanup fact across the uploader boundary. Cause is
+// retained for local inspection but is deliberately excluded from Error to avoid leaking tickets.
+type ResourceUploadError struct {
+	Stage            string
+	Category         string
+	CleanupConfirmed bool
+	Cause            error
+}
+
+func (e *ResourceUploadError) Error() string {
+	if e.Category == "ticket-failed" {
+		return "resource upload ticket failed"
+	}
+	return fmt.Sprintf("resource upload failed during %s (%s); cleanupConfirmed=%t", e.Stage, e.Category, e.CleanupConfirmed)
+}
+
+func (e *ResourceUploadError) Unwrap() error { return e.Cause }
+
 // Progress reports a non-terminal capability result to runtime.
 type Progress func(CapabilityResult) error
 
@@ -62,6 +93,7 @@ type CapabilityContext struct {
 	Processes            native.Supervisor
 	Resources            ResourceUploader
 	Progress             Progress
+	FileChanged          func(string)
 	ConfirmExecutionExit func()
 }
 
@@ -79,3 +111,11 @@ type Connection interface {
 	Send(context.Context, *protocol.Envelope) error
 	Close() error
 }
+
+// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation policy.
+type ConnectionFactory interface {
+	Connect(context.Context) (Connection, error)
+}
+
+// ErrRegistrationRejected marks an authentication rejection that must not be retried.
+var ErrRegistrationRejected = errors.New("daemon registration rejected")

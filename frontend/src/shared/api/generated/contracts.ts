@@ -1367,33 +1367,6 @@ export interface HarnessSessionEntryPageDTO {
   nextCursor: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileContentDTO */
-export interface HarnessSessionFileContentDTO {
-  sessionId: string
-  path: string
-  sizeBytes: string
-  revision: number
-  updatedAt: number
-  text: string
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileEntryDTO */
-export interface HarnessSessionFileEntryDTO {
-  name: string
-  path: string
-  directory: boolean
-  sizeBytes?: string | null
-  revision?: number | null
-  updatedAt?: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileListDTO */
-export interface HarnessSessionFileListDTO {
-  sessionId: string
-  path: string
-  entries: HarnessSessionFileEntryDTO[]
-}
-
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO */
 export interface HarnessSessionSummaryDTO {
   sessionId: string
@@ -1508,6 +1481,7 @@ export interface HarnessThreadStreamCatchupDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO */
 export interface HarnessThreadSummaryDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   createdAt: number
@@ -1521,6 +1495,7 @@ export interface HarnessThreadSummaryDTO {
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO */
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
+  kind: ThreadKind
   parentThreadId: string | null
   name: string
   agentName: string
@@ -1665,6 +1640,7 @@ export interface InteractionApproval {
   toolName: string
   argumentsJson: string
   approval?: unknown | null
+  queuedSameFileCount: number
   createdAt: number
 }
 
@@ -2726,7 +2702,6 @@ export const STORAGE_URL_METHOD_VALUES: readonly StorageUrlMethod[] = [
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO */
 export interface SystemSettingsAdvancedDTO {
-  resourceMaxBytes: string
   processorLeaseDurationMillis: string
   processorHeartbeatIntervalMillis: string
   threadResolveFailureDelayMillis: string
@@ -2749,7 +2724,6 @@ export interface SystemSettingsAiRuntimeDTO {
   retryMaxDelayMillis: string
   compactionModel?: HarnessModelSelectionDTO | null
   compactionKeepRecentTokens: number
-  compactionReserveTokens: number
   subagentMaxDepth: number
   subagentMaxConcurrency: number
   subagentMaxTotalConcurrency: number
@@ -2778,21 +2752,8 @@ export interface SystemSettingsDTO {
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO */
 export interface SystemSettingsEnvironmentDTO {
-  maxResourceBytes: string
   heartbeatTimeoutMillis: string
 }
-
-/** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO.ApplyTiming */
-export type SystemSettingsSchemaApplyTiming =
-  | 'NEXT_INVOCATION'
-  | 'NEXT_HTTP_REQUEST'
-  | 'RESTART'
-
-export const SYSTEM_SETTINGS_SCHEMA_APPLY_TIMING_VALUES: readonly SystemSettingsSchemaApplyTiming[] = [
-  'NEXT_INVOCATION',
-  'NEXT_HTTP_REQUEST',
-  'RESTART',
-]
 
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO */
 export interface SystemSettingsSchemaDTO {
@@ -2838,8 +2799,6 @@ export interface SystemSettingsSchemaGroupDTO {
   key: string
   labelKey: string
   descriptionKey: string
-  restartRequired: boolean
-  applyTiming?: SystemSettingsSchemaApplyTiming | null
   fields: SystemSettingsSchemaFieldDTO[]
 }
 
@@ -2854,7 +2813,6 @@ export interface SystemSettingsSchemaSectionDTO {
   key: string
   labelKey: string
   descriptionKey: string
-  restartRequired: boolean
   groups: SystemSettingsSchemaGroupDTO[]
 }
 
@@ -2874,6 +2832,7 @@ export interface SystemSettingsStorageMediaDTO {
 /** Java：fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO */
 export interface SystemSettingsToolDTO {
   permission: Record<string, SystemSettingsToolPermissionRuleDTO[]>
+  maxOutputMib: number
   modelGatewayBusyRetryMillis: string
   toolGatewayOverloadRetryMillis: string
 }
@@ -2935,6 +2894,22 @@ export const THREAD_EXECUTION_CONTROL_VALUES: readonly ThreadExecutionControl[] 
   'STOPPED',
 ]
 
+/** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadKind */
+export type ThreadKind =
+  | 'USER'
+  | 'SUBAGENT'
+  | 'COMPACTION'
+  | 'CONTROLLER_TASK'
+  | 'PLUGIN_TASK'
+
+export const THREAD_KIND_VALUES: readonly ThreadKind[] = [
+  'USER',
+  'SUBAGENT',
+  'COMPACTION',
+  'CONTROLLER_TASK',
+  'PLUGIN_TASK',
+]
+
 /** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus */
 export type ThreadRuntimeStatus =
   | 'RUNNING'
@@ -2967,6 +2942,7 @@ export interface ToolInvocationDTO {
   status: ToolInvocationStatus
   attempt: number
   toolCallId: string
+  queuedBehindToolCallId: string | null
   toolName: string
   rendererKey: string
   environmentId: string | null
@@ -3174,19 +3150,9 @@ export interface ApiRoutes {
     query: { cursor?: string; limit?: number }
     response: HarnessSessionEntryPageDTO
   }
-  'GET /api/harness/sessions/{sessionId}/files': {
-    path: { sessionId: string }
-    query: { path?: string }
-    response: HarnessSessionFileListDTO
-  }
-  'GET /api/harness/sessions/{sessionId}/files/content': {
-    path: { sessionId: string }
-    query: { columnOffset?: number; limit?: number; offset?: number; path: string }
-    response: HarnessSessionFileContentDTO
-  }
-  'GET /api/harness/sessions/{sessionId}/files/download': {
-    path: { sessionId: string }
-    query: { path: string }
+  'GET /api/harness/sessions/{sessionId}/resources/{resourceId}': {
+    path: { resourceId: string; sessionId: string }
+    query: { download?: boolean }
     response: Blob
     responseType: 'blob'
   }
@@ -3687,7 +3653,7 @@ export interface ApiRoutes {
 }
 
 export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
-  'GET /api/harness/sessions/{sessionId}/files/download': 'blob',
+  'GET /api/harness/sessions/{sessionId}/resources/{resourceId}': 'blob',
   'GET /api/platform/environments/{environmentId}/install-script': 'text',
   'GET /api/platform/environments/{environmentId}/uninstall-script': 'text',
 }

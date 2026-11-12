@@ -6,8 +6,6 @@ import lombok.Data;
 @Data
 public class SystemSettingsAdvancedDTO {
 
-  private Long resourceMaxBytes;
-
   private Long processorLeaseDurationMillis;
 
   private Long processorHeartbeatIntervalMillis;

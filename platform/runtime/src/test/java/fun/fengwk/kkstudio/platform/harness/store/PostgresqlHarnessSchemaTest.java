@@ -85,7 +85,7 @@ class PostgresqlHarnessSchemaTest {
             "name",
             "root_thread_id",
             "yolo_enabled",
-            "spawn_trigger",
+            "kind",
             "constraints",
             "execution_control",
             "input_through_sequence",
@@ -300,10 +300,10 @@ class PostgresqlHarnessSchemaTest {
         sessionId);
     jdbc.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " root_thread_id, yolo_enabled, kind, constraints, execution_control,"
             + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
-            + " 'thread-exit', ?, false, 'MODEL_TOOL',"
+            + " 'thread-exit', ?, false, 'SUBAGENT',"
             + " '{\"maxOutputTokens\":null,"
             + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
             + " statement_timestamp(), statement_timestamp())",
@@ -544,11 +544,11 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId);
     jdbc.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " root_thread_id, yolo_enabled, kind, constraints, execution_control,"
             + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, ?,"
             + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
-            + " 'thread-demo', ?, false, 'MODEL_TOOL',"
+            + " 'thread-demo', ?, false, 'SUBAGENT',"
             + " '{\"maxOutputTokens\":null,"
             + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
             + " statement_timestamp(), statement_timestamp())",
@@ -649,9 +649,8 @@ class PostgresqlHarnessSchemaTest {
       String receiptJson) {
     jdbc.update(
         "insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding,"
-            + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
-            + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
-            + " '{\"customEntries\":[]}'::jsonb, null,"
+            + " status, attempt, approval, result, error, created_at, updated_at, input_receipt)"
+            + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb, null,"
             + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
         id,
         threadId,
@@ -736,7 +735,7 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId);
     jdbc.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " root_thread_id, yolo_enabled, kind, constraints, execution_control,"
             + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, ?,"
             + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
@@ -835,19 +834,43 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         rootEntryId,
         threadId);
 
+    // Thread kind 是非空封闭枚举，数据库拒绝未知值与 null。
+    DataIntegrityViolationException exInvalidKind =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-invalid-kind', ?, false, 'UNKNOWN', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    UUID.fromString("00000000-0000-0000-0000-000000000024"),
+                    sessionId,
+                    rootEntryId,
+                    UUID.fromString("00000000-0000-0000-0000-000000000024")));
+    assertTrue(exInvalidKind.getMessage().contains("ck_harness_thread_kind"));
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-null-kind', ?, false, null, '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000026"),
+                sessionId,
+                rootEntryId,
+                UUID.fromString("00000000-0000-0000-0000-000000000026")));
+
     // 5. thread name null（not null 拒绝）
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
@@ -859,7 +882,7 @@ class PostgresqlHarnessSchemaTest {
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
@@ -870,7 +893,7 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
@@ -904,7 +927,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                         + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNING', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     parentThreadId,
                     sessionId,
@@ -919,7 +942,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                         + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 2, 2, 0, statement_timestamp(), statement_timestamp())",
                     parentThreadId,
                     sessionId,
@@ -932,7 +955,7 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent-thread', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 parentThreadId,
                 sessionId,
@@ -945,8 +968,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     childThreadId,
@@ -962,8 +985,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     nonExistentParentId,
@@ -976,8 +999,8 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'STOPPED', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'STOPPED', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 childThreadId,
                 sessionId,
                 parentThreadId,
@@ -1024,15 +1047,15 @@ class PostgresqlHarnessSchemaTest {
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId,
         parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1109,15 +1132,15 @@ class PostgresqlHarnessSchemaTest {
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId,
         parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1180,15 +1203,15 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId,
         parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1252,7 +1275,7 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
             + " values (?, ?, null, ?, ?, 'parent', ?, false, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
@@ -1260,8 +1283,8 @@ class PostgresqlHarnessSchemaTest {
         hash,
         parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, 'child', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, kind, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, ?, 'child', ?, false, 'SUBAGENT', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1290,6 +1313,21 @@ class PostgresqlHarnessSchemaTest {
             "select delivery from harness_thread_join where invocation_id = ?",
             String.class,
             pendingInvocation));
+
+    UUID synchronousInvocation = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'SETTLE_TOOL_RESULT')",
+        synchronousInvocation,
+        hash,
+        parentThreadId,
+        childThreadId);
+    assertEquals(
+        "SETTLE_TOOL_RESULT",
+        jdbc.queryForObject(
+            "select delivery from harness_thread_join where invocation_id = ?",
+            String.class,
+            synchronousInvocation));
 
     // 1. 未知 delivery → ck_harness_thread_join_delivery_kind
     DataIntegrityViolationException exDelivery =

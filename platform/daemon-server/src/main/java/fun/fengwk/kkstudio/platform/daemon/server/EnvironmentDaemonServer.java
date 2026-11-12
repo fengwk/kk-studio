@@ -247,7 +247,6 @@ public final class EnvironmentDaemonServer
     return Settings.newBuilder()
         .setResourceBudgets(
             ResourceBudgets.newBuilder()
-                .setMaxResourceBytes(settings.maxResourceBytes())
                 .setTemporaryResourceTtlSeconds(settings.temporaryResourceTtlSeconds())
                 .setTemporaryResourceCleanupIntervalSeconds(
                     settings.temporaryResourceCleanupIntervalSeconds()))
@@ -261,6 +260,19 @@ public final class EnvironmentDaemonServer
       return;
     }
     scheduleConfigSync(environmentId);
+  }
+
+  /** 系统设置变化时对在线 Daemon 重新下发 SETTINGS。 */
+  public void resyncSettings() {
+    List<DaemonConnectionSession> current;
+    synchronized (inventory) {
+      current = List.copyOf(sessions.values());
+    }
+    for (DaemonConnectionSession session : current) {
+      if (!session.refreshSettings()) {
+        LOG.log(Level.WARNING, "cannot refresh SETTINGS for " + session.identity());
+      }
+    }
   }
 
   /** LISTEN 重连或 resync：对本节点当前持有的全部会话重新读取权威配置。 */
@@ -375,11 +387,14 @@ public final class EnvironmentDaemonServer
       }
       invocationTracker.register(active);
 
+      EnvironmentServerSettings currentSettings = settings();
       Invoke.Builder invokeBuilder =
           Invoke.newBuilder()
               .setCapabilityId(descriptor.id().value())
               .setArgumentsJson(request.call().argumentsJson())
-              .setTimeoutMillis(request.timeout().toMillis());
+              .setTimeoutMillis(request.timeout().toMillis())
+              .setMaxOutputBytes(currentSettings.maxOutputBytes())
+              .setImageInputTier(currentSettings.imageInputTier());
       if (request.expectedFile() != null) {
         invokeBuilder.setExpectedFile(
             ExpectedFile.newBuilder()

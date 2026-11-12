@@ -12,10 +12,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
+import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
@@ -60,13 +63,22 @@ public class HarnessThreadController {
   }
 
   /**
-   * 查询目标 Thread 所属执行树：任意节点返回同一真实根下的完整节点列表。
+   * 查询目标 Thread 所属执行树的根与全部 SUBAGENT 后代；排除内部 COMPACTION 节点。
    *
-   * <p>纯查询，不创建 Command / Entry / Work，也不触碰 version。可见性与 Thread 快照相同。
+   * <p>纯查询，不创建 Command / Entry / Work，也不触碰 version。目标为 COMPACTION 时按不可公开资源返回 404。
    */
   @GetMapping("/{threadId}/tree")
   public List<HarnessThreadTreeNodeDTO> getTree(@PathVariable UUID threadId) {
-    return HarnessRuntimeResponseMapper.toThreadTreeDtos(runtime.getThreadTree(threadId));
+    List<ThreadTreeNode> nodes = runtime.getThreadTree(threadId);
+    if (nodes.stream()
+        .anyMatch(
+            node ->
+                node.thread().id().equals(threadId)
+                    && node.thread().kind() == ThreadKind.COMPACTION)) {
+      throw DomainException.notFound("thread", "thread " + threadId + " does not exist");
+    }
+    return HarnessRuntimeResponseMapper.toThreadTreeDtos(
+        nodes.stream().filter(node -> node.thread().kind() != ThreadKind.COMPACTION).toList());
   }
 
   /**

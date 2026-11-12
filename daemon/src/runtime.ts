@@ -108,7 +108,6 @@ export class Runtime {
       processes: options.processes,
       outbound: this.outbound,
       maxConcurrentInvocations,
-      maxResourceBytes: () => this.session.maxResourceBytes,
       uploader: () => this.resources.uploader,
       isStarted: () => this.connection.isStarted(),
       isUpdateHeld: () => this.updates.isAdmissionHeld,

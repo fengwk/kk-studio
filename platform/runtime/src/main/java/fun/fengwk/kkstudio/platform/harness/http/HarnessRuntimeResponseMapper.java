@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
@@ -53,9 +54,11 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -85,6 +88,7 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(node, "node");
     HarnessThreadTreeNodeDTO dto = new HarnessThreadTreeNodeDTO();
     dto.setThreadId(node.thread().id().toString());
+    dto.setKind(node.thread().kind());
     dto.setParentThreadId(
         node.thread().parentThreadId() == null ? null : node.thread().parentThreadId().toString());
     dto.setName(node.thread().name());
@@ -201,6 +205,42 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  private record ToolFileMutationGroup(UUID assistantEntryId, ToolFileMutationOrder.Key fileKey) {}
+
+  private static List<ToolInvocationDTO> toToolInvocationDtos(List<ToolInvocation> invocations) {
+    Map<ToolFileMutationGroup, TreeMap<Integer, ToolInvocation>> grouped = new HashMap<>();
+    List<ToolFileMutationOrder.Key> fileKeys = new ArrayList<>(invocations.size());
+    for (ToolInvocation invocation : invocations) {
+      ToolFileMutationOrder.Key key = ToolFileMutationOrder.key(invocation).orElse(null);
+      fileKeys.add(key);
+      if (key != null) {
+        grouped
+            .computeIfAbsent(
+                new ToolFileMutationGroup(invocation.assistantEntryId(), key),
+                unused -> new TreeMap<>())
+            .put(invocation.callIndex(), invocation);
+      }
+    }
+
+    List<ToolInvocationDTO> dtos = new ArrayList<>(invocations.size());
+    for (int index = 0; index < invocations.size(); index++) {
+      ToolInvocation invocation = invocations.get(index);
+      ToolInvocationDTO dto = toToolInvocationDto(invocation);
+      ToolFileMutationOrder.Key key = fileKeys.get(index);
+      if (key != null) {
+        Map.Entry<Integer, ToolInvocation> previous =
+            grouped
+                .get(new ToolFileMutationGroup(invocation.assistantEntryId(), key))
+                .lowerEntry(invocation.callIndex());
+        if (previous != null) {
+          dto.setQueuedBehindToolCallId(previous.getValue().call().id());
+        }
+      }
+      dtos.add(dto);
+    }
+    return List.copyOf(dtos);
+  }
+
   public static ToolInvocationDTO toToolInvocationDto(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
     ToolInvocationDTO dto = new ToolInvocationDTO();
@@ -258,8 +298,7 @@ public final class HarnessRuntimeResponseMapper {
     GenerationProjection generation = snapshot.generation();
     dto.setActiveAssistantOutput(
         generation == null ? null : toActiveAssistantOutputDto(generation));
-    dto.setToolInvocations(
-        mapAll(snapshot.toolSiblings(), HarnessRuntimeResponseMapper::toToolInvocationDto));
+    dto.setToolInvocations(toToolInvocationDtos(snapshot.toolSiblings()));
     dto.setGenerationFailures(
         mapAll(
             snapshot.generationFailures(), failure -> toGenerationFailureDto(failure, generation)));

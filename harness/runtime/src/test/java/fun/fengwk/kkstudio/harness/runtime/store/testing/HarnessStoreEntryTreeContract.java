@@ -42,8 +42,8 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.Session;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -142,7 +142,7 @@ public abstract class HarnessStoreEntryTreeContract {
             root.name(),
             first.threadId(),
             false,
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             ThreadConstraints.NONE,
             root.executionControl(),
             root.inputThroughSequence(),

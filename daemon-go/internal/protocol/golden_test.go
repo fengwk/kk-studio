@@ -9,7 +9,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestGoldenMessagesRoundTripExactly(t *testing.T) {
+// TRN-N-003
+func TestProtocol_GoldenDecodeReencodeByteIdentical(t *testing.T) {
 	const goldenDir = "../../../platform/daemon-server/src/main/protocol/golden"
 	entries, err := os.ReadDir(goldenDir)
 	if err != nil {

@@ -35,6 +35,7 @@ import type {
 } from '@/features/thread/runtime/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
+import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import './tool-card.css'
 
@@ -85,12 +86,6 @@ export function ToolMessageBlock({
   const notice = approvalState
     ? (translatedReason ? `${rawState} — ${translatedReason}` : approvalState)
     : null
-  const stateLabel = view.executionState === 'environment'
-    ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
-    : view.executionState === 'succeeded' && view.toolName === 'task'
-      ? t('ai.runtime.tool.accepted')
-      : t(`ai.runtime.tool.${view.executionState}`)
-
   const normalizedName = view.toolName.trim().toLowerCase()
   const isBash = normalizedName === 'bash'
   const isMcp = isMcpToolName(normalizedName)
@@ -98,8 +93,17 @@ export function ToolMessageBlock({
   const isAskUser = normalizedName === 'ask_user'
   const isMutation = normalizedName === 'write' || normalizedName === 'edit'
   const showTextPreview = isBash || isMcp
+  const parsedTaskReceipt = isTask ? parseTaskReceipt(view.resultMessage?.details) : null
+  // 旧版通用工具错误可能携带过期受理详情；失败时只信任 task.result 终态回执中的子 Thread。
   const taskReceipt: TaskToolReceipt | null =
-    isTask && !view.hasError ? parseTaskReceipt(view.resultMessage?.details) : null
+    view.executionState === 'failed' && parsedTaskReceipt?.status === 'accepted'
+      ? null
+      : parsedTaskReceipt
+  const stateLabel = view.executionState === 'environment'
+    ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
+    : taskReceipt != null
+      ? t(`ai.runtime.tool.task.${taskReceipt.status}`)
+      : t(`ai.runtime.tool.${view.executionState}`)
 
   const errorText = view.errorText?.trim() ? view.errorText : undefined
   const errorTrimmed = errorText?.trim() ?? ''
@@ -145,7 +149,10 @@ export function ToolMessageBlock({
     isMutationSuccess: view.isMutationSuccess,
     showTextPreview,
   })
-  const rendererResult = Renderer != null && view.resultMessage != null && (taskReceipt == null)
+  const rendererResult =
+    Renderer != null
+    && view.resultMessage != null
+    && (taskReceipt == null || taskReceipt.status === 'completed' || taskReceipt.status === 'failed' || taskReceipt.status === 'cancelled')
   const rendererResultMessage = rendererResult
     ? withoutExactError(view.resultMessage!, errorTrimmed, isBash)
     : undefined
@@ -174,7 +181,9 @@ export function ToolMessageBlock({
           placement={isBash ? 'before' : 'after'}
         >
           {textWindow.text !== '' ? (
-            <ToolOutputViewport bounded={false}>{textWindow.text}</ToolOutputViewport>
+            <ToolOutputViewport bounded={false}>
+              <ResourceUriText text={textWindow.text} />
+            </ToolOutputViewport>
           ) : null}
         </DisclosureHint>
       )
@@ -329,6 +338,12 @@ export function ToolMessageBlock({
             <span className="thread-tool-name">{summary.name}</span>
             {view.executionState === 'environment'
               ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
+            {message.invocationStatus === 'READY' && message.queuedBehindToolCallUnfinished
+              ? (
+                <span className="thread-tool-state-label">
+                  {' · '}{t('ai.runtime.tool.waitingForPreviousFileChange')}
+                </span>
+              ) : null}
             {summary.detail ? (
               <>
                 {' '}

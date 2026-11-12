@@ -53,6 +53,7 @@ describe('useInteractionsController', () => {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approval: { required: true },
+    queuedSameFileCount: 0,
     createdAt: 1790467260000,
   }
 

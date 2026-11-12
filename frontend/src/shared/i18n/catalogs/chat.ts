@@ -917,6 +917,11 @@ export const chatCatalog = {
   'ai.runtime.tool.running': { 'en-US': 'Running', 'zh-CN': '执行中' },
   'ai.runtime.tool.succeeded': { 'en-US': 'Succeeded', 'zh-CN': '成功' },
   'ai.runtime.tool.accepted': { 'en-US': 'Delegation accepted', 'zh-CN': '委派已受理' },
+  'ai.runtime.tool.task.accepted': { 'en-US': 'Accepted', 'zh-CN': '已受理' },
+  'ai.runtime.tool.task.running': { 'en-US': 'Subagent running', 'zh-CN': '子代理运行中' },
+  'ai.runtime.tool.task.completed': { 'en-US': 'Completed', 'zh-CN': '已完成' },
+  'ai.runtime.tool.task.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
+  'ai.runtime.tool.task.cancelled': { 'en-US': 'Cancelled', 'zh-CN': '已取消' },
   'ai.runtime.tool.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },
   'ai.runtime.tool.cancelled': { 'en-US': 'Stopped', 'zh-CN': '已停止' },
   'ai.runtime.tool.unknown': { 'en-US': 'Execution outcome unknown', 'zh-CN': '执行结果未知' },
@@ -2103,108 +2108,68 @@ export const chatCatalog = {
     'en-US': 'Reason',
     'zh-CN': '审批原因',
   },
+  'ai.interaction.denyReason': {
+    'en-US': 'Reason for denial (optional)',
+    'zh-CN': '拒绝原因（可选）',
+  },
+  'ai.interaction.denyReasonOptional': {
+    'en-US': 'Enter a reason, if you want',
+    'zh-CN': '可填写拒绝原因',
+  },
+  'ai.interaction.session': {
+    'en-US': 'Session',
+    'zh-CN': '会话',
+  },
+  'ai.interaction.unreadableArguments': {
+    'en-US': 'Tool parameters could not be read.',
+    'zh-CN': '无法读取工具参数。',
+  },
   'ai.interaction.environmentWaitingCount': {
     'en-US': '{{count}} tool calls waiting for {{environmentName}}',
     'zh-CN': '{{count}} 个工具调用等待 {{environmentName}} 上线',
   },
-  'ai.sessionFiles.action': {
-    'en-US': 'Files',
-    'zh-CN': '文件',
+  'ai.resource.unsupported': {
+    'en-US': 'Skill resources are not available yet',
+    'zh-CN': '技能资源暂不可用',
   },
-  'ai.sessionFiles.title': {
-    'en-US': 'Session files',
-    'zh-CN': '会话文件',
+  'ai.interaction.queuedSameFile.one': {
+    'en-US': '1 more change to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 1 个修改将依次请求审批',
   },
-  'ai.sessionFiles.noSession': {
-    'en-US': 'Select or create a session first',
-    'zh-CN': '先选择或创建会话',
+  'ai.interaction.queuedSameFile.other': {
+    'en-US': '{{count}} more changes to this file will ask for approval after this one',
+    'zh-CN': '处理后，此文件还有 {{count}} 个修改将依次请求审批',
   },
-  'ai.sessionFiles.root': {
-    'en-US': 'Session root',
-    'zh-CN': '会话根目录',
+  'ai.runtime.tool.waitingForPreviousFileChange': {
+    'en-US': 'Waiting for the earlier change to this file',
+    'zh-CN': '等待前一个对此文件的修改',
   },
-  'ai.sessionFiles.up': {
-    'en-US': 'Up one level',
-    'zh-CN': '上一级',
+  'ai.resource.unavailable': {
+    'en-US': 'Resource is unavailable in this session',
+    'zh-CN': '此 Session 中资源不可用',
   },
-  'ai.sessionFiles.listLabel': {
-    'en-US': 'Session file list',
-    'zh-CN': '会话文件列表',
+  'ai.resource.image': {
+    'en-US': 'Resource image',
+    'zh-CN': '资源图片',
   },
-  'ai.sessionFiles.previewLabel': {
-    'en-US': 'Session file preview',
-    'zh-CN': '会话文件预览',
+  'ai.resource.preview': {
+    'en-US': 'Preview',
+    'zh-CN': '预览',
   },
-  'ai.sessionFiles.loading': {
-    'en-US': 'Loading files',
-    'zh-CN': '正在加载文件',
-  },
-  'ai.sessionFiles.loadingPreview': {
-    'en-US': 'Loading preview',
-    'zh-CN': '正在加载预览',
-  },
-  'ai.sessionFiles.empty': {
-    'en-US': 'This directory is empty',
-    'zh-CN': '此目录为空',
-  },
-  'ai.sessionFiles.emptyFile': {
-    'en-US': 'This file is empty',
-    'zh-CN': '文件为空',
-  },
-  'ai.sessionFiles.listFailed': {
-    'en-US': 'Failed to load the file list',
-    'zh-CN': '文件列表加载失败',
-  },
-  'ai.sessionFiles.previewFailed': {
-    'en-US': 'Failed to preview the file',
-    'zh-CN': '文件预览失败',
-  },
-  'ai.sessionFiles.downloadFailed': {
-    'en-US': 'Failed to download the file',
-    'zh-CN': '文件下载失败',
-  },
-  'ai.sessionFiles.notFound': {
-    'en-US': 'File not found or no access',
-    'zh-CN': '文件不存在或无权访问',
-  },
-  'ai.sessionFiles.unreadable': {
-    'en-US': 'This file cannot be previewed as text',
-    'zh-CN': '此文件不能作为文本预览',
-  },
-  'ai.sessionFiles.selectHint': {
-    'en-US': 'Select a file to preview it',
-    'zh-CN': '选择文件以预览',
-  },
-  'ai.sessionFiles.windowRange': {
-    'en-US': 'Lines {{range}}',
-    'zh-CN': '行 {{range}}',
-  },
-  'ai.sessionFiles.truncated': {
-    'en-US': 'Window truncated',
-    'zh-CN': '窗口已截断',
-  },
-  'ai.sessionFiles.previousWindow': {
-    'en-US': 'Previous page',
-    'zh-CN': '上一页',
-  },
-  'ai.sessionFiles.nextWindow': {
-    'en-US': 'Next page',
-    'zh-CN': '下一页',
-  },
-  'ai.sessionFiles.download': {
+  'ai.resource.download': {
     'en-US': 'Download',
     'zh-CN': '下载',
   },
-  'ai.sessionFiles.downloadNamed': {
-    'en-US': 'Download {{name}}',
-    'zh-CN': '下载 {{name}}',
+  'ai.resource.loading': {
+    'en-US': 'Loading resource',
+    'zh-CN': '正在加载资源',
   },
-  'ai.sessionFiles.updatedAt': {
-    'en-US': 'Updated {{time}}',
-    'zh-CN': '更新于 {{time}}',
+  'ai.resource.previewFailed': {
+    'en-US': 'Resource could not be loaded',
+    'zh-CN': '资源加载失败',
   },
-  'ai.sessionFiles.readOnly': {
-    'en-US': 'Read-only browsing. Editing is done by the Agent.',
-    'zh-CN': '只读浏览，编辑由 Agent 完成。',
+  'ai.resource.previewUnsupported': {
+    'en-US': 'This resource cannot be previewed inline',
+    'zh-CN': '此资源无法内联预览',
   },
 } satisfies LocaleCatalog

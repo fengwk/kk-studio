@@ -300,7 +300,7 @@ class ThreadExecutionFactsTest {
                       thread.name(),
                       thread.rootThreadId(),
                       thread.yoloEnabled(),
-                      thread.spawnTrigger(),
+                      thread.kind(),
                       thread.constraints(),
                       control,
                       thread.inputThroughSequence(),

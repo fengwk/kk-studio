@@ -83,8 +83,8 @@ class PostgresqlNotificationLoopTest {
                     CANVAS_CHANNEL,
                     ignored -> canvasNotifications.incrementAndGet(),
                     canvasResyncs::incrementAndGet)),
-            Duration.ofMillis(10),
-            Duration.ofMillis(1));
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(1));
 
     loop.start();
     loop.start();
@@ -114,6 +114,58 @@ class PostgresqlNotificationLoopTest {
   }
 
   @Test
+  void notificationPollIntervalIsReadAgainForTheNextPoll() throws Exception {
+    FakeConnection connection = new FakeConnection();
+    connection.notifications.add(new PGNotification[] {notification(WORK_CHANNEL, "")});
+    SequencedDataSource dataSource = new SequencedDataSource(connection::connection);
+    AtomicInteger pollMillis = new AtomicInteger(10);
+    PostgresqlNotificationLoop loop =
+        new PostgresqlNotificationLoop(
+            dataSource,
+            List.of(
+                new PostgresqlNotificationHandler(
+                    WORK_CHANNEL, ignored -> pollMillis.set(20), () -> {})),
+            () -> Duration.ofMillis(pollMillis.get()),
+            () -> Duration.ofMillis(1));
+
+    loop.start();
+    assertTrue(connection.notificationDelivered.await(5, TimeUnit.SECONDS));
+    await(() -> connection.notificationPollMillis.get() == 20);
+    loop.close();
+
+    assertEquals(20, connection.notificationPollMillis.get());
+  }
+
+  @Test
+  void reconnectBackoffUsesTheLatestValueForEachRetry() throws Exception {
+    FakeConnection first = new FakeConnection();
+    first.failNotificationPoll.set(true);
+    FakeConnection second = new FakeConnection();
+    second.failNotificationPoll.set(true);
+    FakeConnection third = new FakeConnection();
+    SequencedDataSource dataSource =
+        new SequencedDataSource(first::connection, second::connection, third::connection);
+    AtomicInteger nextBackoff = new AtomicInteger(10);
+    List<Integer> selectedBackoffs = new CopyOnWriteArrayList<>();
+    PostgresqlNotificationLoop loop =
+        new PostgresqlNotificationLoop(
+            dataSource,
+            handlers(ignored -> {}, () -> {}),
+            () -> Duration.ofMillis(10),
+            () -> {
+              int value = nextBackoff.getAndSet(20);
+              selectedBackoffs.add(value);
+              return Duration.ofMillis(value);
+            });
+
+    loop.start();
+    assertTrue(third.notificationPollEntered.await(5, TimeUnit.SECONDS));
+    loop.close();
+
+    assertEquals(List.of(10, 20), selectedBackoffs);
+  }
+
+  @Test
   void reconnectRunsResyncAgainAfterAllChannelsAreRegistered() throws Exception {
     FakeConnection disconnected = new FakeConnection();
     disconnected.failNotificationPoll.set(true);
@@ -125,8 +177,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             dataSource,
             handlers(ignored -> {}, resyncs::incrementAndGet),
-            Duration.ofMillis(10),
-            Duration.ofMillis(1));
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(1));
 
     loop.start();
     assertTrue(reconnected.notificationPollEntered.await(5, TimeUnit.SECONDS));
@@ -149,8 +201,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             new SequencedDataSource(connection::connection),
             handlers(ignored -> notifications.incrementAndGet(), resyncs::incrementAndGet),
-            Duration.ofSeconds(5),
-            Duration.ofSeconds(1));
+            () -> Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(1));
 
     loop.start();
     assertTrue(connection.notificationPollEntered.await(5, TimeUnit.SECONDS));
@@ -181,8 +233,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             new SequencedDataSource(connection::connection),
             handlers(ignored -> {}, () -> {}),
-            Duration.ofSeconds(5),
-            Duration.ofSeconds(1));
+            () -> Duration.ofSeconds(5),
+            () -> Duration.ofSeconds(1));
 
     loop.start();
     assertTrue(connection.notificationPollEntered.await(5, TimeUnit.SECONDS));
@@ -201,7 +253,7 @@ class PostgresqlNotificationLoopTest {
   }
 
   @Test
-  void rejectsUnsafeOrDuplicateChannelsAndInvalidIntervals() {
+  void rejectsUnsafeOrDuplicateChannels() {
     assertThrows(
         IllegalArgumentException.class,
         () -> new PostgresqlNotificationHandler("valid;notify evil", ignored -> {}, () -> {}));
@@ -219,41 +271,15 @@ class PostgresqlNotificationLoopTest {
         IllegalArgumentException.class,
         () ->
             new PostgresqlNotificationLoop(
-                dataSource, List.of(), Duration.ofMillis(1), Duration.ofMillis(1)));
+                dataSource, List.of(), () -> Duration.ofMillis(1), () -> Duration.ofMillis(1)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PostgresqlNotificationLoop(
                 dataSource,
                 List.of(duplicate, duplicate),
-                Duration.ofMillis(1),
-                Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlNotificationLoop(
-                dataSource, List.of(duplicate), Duration.ZERO, Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlNotificationLoop(
-                dataSource, List.of(duplicate), Duration.ofNanos(1_500_000), Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlNotificationLoop(
-                dataSource,
-                List.of(duplicate),
-                Duration.ofMillis((long) Integer.MAX_VALUE + 1),
-                Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlNotificationLoop(
-                dataSource,
-                List.of(duplicate),
-                Duration.ofMillis(1),
-                Duration.ofSeconds(Long.MAX_VALUE)));
+                () -> Duration.ofMillis(1),
+                () -> Duration.ofMillis(1)));
   }
 
   @Test
@@ -264,8 +290,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             new SequencedDataSource(),
             List.of(handler),
-            Duration.ofMillis(1),
-            Duration.ofMillis(1));
+            () -> Duration.ofMillis(1),
+            () -> Duration.ofMillis(1));
     AtomicBoolean callbackRan = new AtomicBoolean();
 
     stopped.stop();
@@ -287,8 +313,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             new SequencedDataSource(connection::connection),
             handlers(ignored -> {}, () -> {}),
-            Duration.ofMillis(10),
-            Duration.ofMillis(10));
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(10));
     try {
       loop.start();
       assertTrue(loop.isRunning());
@@ -338,8 +364,8 @@ class PostgresqlNotificationLoopTest {
                         }
                       }
                     })),
-            Duration.ofMillis(10),
-            Duration.ofMillis(1));
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofMillis(1));
 
     loop.start();
     assertTrue(resyncEntered.await(5, TimeUnit.SECONDS));
@@ -379,8 +405,8 @@ class PostgresqlNotificationLoopTest {
         new PostgresqlNotificationLoop(
             new SequencedDataSource(unsupported::connection),
             handlers(ignored -> {}, () -> {}),
-            Duration.ofMillis(10),
-            Duration.ofSeconds(10));
+            () -> Duration.ofMillis(10),
+            () -> Duration.ofSeconds(10));
 
     loop.start();
     assertTrue(unsupported.closedLatch.await(5, TimeUnit.SECONDS));

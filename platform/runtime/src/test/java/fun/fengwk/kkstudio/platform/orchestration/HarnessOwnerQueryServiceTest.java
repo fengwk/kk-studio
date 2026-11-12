@@ -34,9 +34,9 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** owner SPI 分派与 Runtime 摘要投影契约。 */
@@ -77,6 +78,41 @@ class HarnessOwnerQueryServiceTest {
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     service = new HarnessOwnerQueryService(List.of(ownership), runtimes);
+  }
+
+  /** Session 访问控制必须基于唯一 root Thread 的唯一产品归属。 */
+  @Test
+  void requiresSessionOwnedByExactlyOneProductOwner() {
+    UUID sessionId = id(800);
+    UUID rootThreadId = id(801);
+    when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "session", T0));
+    when(runtime.listThreadsBySession(sessionId))
+        .thenReturn(List.of(thread(rootThreadId, sessionId, id(802), T0, T1)));
+    when(ownership.findOwner(rootThreadId, sessionId))
+        .thenReturn(
+            Optional.of(new SessionOwnerDisplay("CHAT", "chat-id", "Chat", "/chats/chat-id")));
+
+    service.requireOwnedSession(sessionId);
+
+    verify(runtime).getSession(sessionId);
+    verify(ownership).findOwner(rootThreadId, sessionId);
+  }
+
+  /** 无 owner 的 Session 必须不可访问。 */
+  @Test
+  void rejectsSessionWithoutProductOwner() {
+    UUID sessionId = id(810);
+    UUID rootThreadId = id(811);
+    when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "session", T0));
+    when(runtime.listThreadsBySession(sessionId))
+        .thenReturn(List.of(thread(rootThreadId, sessionId, id(812), T0, T1)));
+    when(ownership.findOwner(rootThreadId, sessionId)).thenReturn(Optional.empty());
+
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.requireOwnedSession(sessionId));
+
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    verify(ownership).findOwner(rootThreadId, sessionId);
   }
 
   /** 不存在或重复的 kind 必须在查询前拒绝。 */
@@ -244,7 +280,7 @@ class HarnessOwnerQueryServiceTest {
             root.name(),
             rootId,
             false,
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
@@ -359,7 +395,7 @@ class HarnessOwnerQueryServiceTest {
         "thread",
         threadId,
         false,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

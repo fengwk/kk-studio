@@ -61,7 +61,6 @@ function makeSettingsEnvelope(overrides: Partial<Settings> = {}): Envelope {
       case: 'settings',
       value: create(SettingsSchema, {
         resourceBudgets: create(ResourceBudgetsSchema, {
-          maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 60n,
           temporaryResourceCleanupIntervalSeconds: 30n,
         }),
@@ -124,6 +123,7 @@ function invokeEnvelope(invocationId = 'inv-1', args: Record<string, unknown> = 
         capabilityId: 'fs.read',
         argumentsJson: JSON.stringify(args),
         timeoutMillis: 60_000n,
+        maxOutputBytes: 16n * 1024n * 1024n,
       }),
     },
   })
@@ -827,7 +827,6 @@ describe('runtime temporary resource policy', () => {
           case: 'settings',
           value: create(SettingsSchema, {
             resourceBudgets: create(ResourceBudgetsSchema, {
-              maxResourceBytes: 1048576n,
               temporaryResourceTtlSeconds: 7n,
               temporaryResourceCleanupIntervalSeconds: 1n,
             }),
@@ -882,7 +881,6 @@ describe('runtime temporary resource policy', () => {
             case: 'settings',
             value: create(SettingsSchema, {
               resourceBudgets: create(ResourceBudgetsSchema, {
-                maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 7n,
                 temporaryResourceCleanupIntervalSeconds: 1n,
               }),

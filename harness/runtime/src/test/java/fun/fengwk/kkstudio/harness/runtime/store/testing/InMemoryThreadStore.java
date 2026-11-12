@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
@@ -115,6 +116,13 @@ final class InMemoryThreadStore implements ThreadStore {
         .sorted(
             Comparator.comparing(ThreadState::createdAt)
                 .thenComparing(ThreadState::id, UuidOrder.COMPARATOR))
+        .toList();
+  }
+
+  @Override
+  public List<ThreadState> listUserBySession(UUID sessionId) {
+    return listBySession(sessionId).stream()
+        .filter(thread -> thread.kind() == ThreadKind.USER)
         .toList();
   }
 

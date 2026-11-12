@@ -319,7 +319,7 @@ RUNNING、EXIT_PENDING 与 WAITING 都计入活跃数，停止控制独立展示
 长路径在剩余宽度自然折行，不横滚；状态与展开图标占不收缩的尾部。
 工具状态直接保留 invocation 的 READY（排队或权威环境等待）、WAITING_APPROVAL、WAITING_INPUT、
 RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 标记 `aria-busy`；
-没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
+没有 invocation 的模型调用草稿不表示已运行或成功。task 卡片将子 Thread 的冻结 Join 结果呈现为完成、失败或取消，并保留子 Thread 导航；仅 Join 的完成状态表达执行成功，不替用户验证报告内容。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
 `/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。
@@ -496,22 +496,9 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 宿主返回的权限或不存在等原因原样展示，超过上限的列表标注截断。移动端弹窗全屏，
 行、展开、帮助与上级按钮的可点击区域不小于 44px；目录说明由可访问的 `?` 提示展开，不使用括号补说明。
 
-### 会话文件面板
+### Resource URI 预览
 
-对话顶栏的“文件”入口打开当前焦点 pane 所属 Session 的只读文件面板
-（[`SessionFilesDialog`](../../frontend/src/features/chat/session-files/SessionFilesDialog.tsx)）。
-没有 Session 的草稿 pane 禁用入口并提示先选择或创建会话；面板不提供上传、重命名或删除，编辑由 Agent 的文件工具完成。
-前端只消费生成契约的三个端点：`GET /api/harness/sessions/{sessionId}/files` 列直属条目、
-`/files/content` 读取有界文本窗口、`/files/download` 下载完整字节，会话坐标只在路径里，不再携带产品 owner。
-列表返回的条目路径是会话内相对路径，面板自行拼成 `vfs:/sessions/<sessionId>/...` 再请求子目录、预览或下载；
-进入子目录只加载该层，上一级回到父目录。
-
-文本预览按服务端 `read` 同源的窗口格式展示：解析 `range`、`truncated` 与 `next` 后逐页回看，
-不把截断标记混入正文；图片按扩展名直接读取下载字节生成本地预览 URL。下载使用响应中的附件文件名。
-后端 404 统一提示“文件不存在或无权访问”，`validation` 且 reason 为
-`SESSION_FILE_NOT_TEXT` 时提示“此文件不能作为文本预览”并保留下载动作，
-两种错误都单独展示后端原因，不用括号拼接。面板使用共享 `Dialog` 与 `modal-body`/`modal-footer`；
-窄屏全屏覆盖、操作区不小于 44px，并处理安全区域。
+[`MarkdownRenderer`](../../frontend/src/shared/ui/markdown/MarkdownRenderer.tsx) 拦截 Markdown 与工具输出中的 `resource://` 链接，阻止浏览器将 URI 当作导航地址。文件资源通过当前 Session 的 `/api/harness/sessions/{sessionId}/resources/{resourceId}` 接口读取；图片以鉴权请求生成的本地 Blob URL 内联预览，其他文件提供预览或下载入口。复制 Markdown 与文本时保留原始 Resource URI。没有当前 Session 时不请求资源接口，显示不可用状态。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

@@ -20,9 +20,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
@@ -106,7 +106,7 @@ final class AcceptCommandsControl {
                   target.rootSettings(),
                   null,
                   target.yoloEnabled(),
-                  SpawnTrigger.USER,
+                  ThreadKind.USER,
                   ThreadConstraints.NONE,
                   commands);
           ThreadState existing = locked.threads.get(target.threadId());
@@ -122,7 +122,7 @@ final class AcceptCommandsControl {
               target.threadId(),
               target.rootSettings(),
               target.yoloEnabled(),
-              SpawnTrigger.USER,
+              ThreadKind.USER,
               ThreadConstraints.NONE,
               creationRequestHash,
               commands,
@@ -142,7 +142,7 @@ final class AcceptCommandsControl {
       UUID rootThreadId,
       BranchSettings rootSettings,
       boolean yoloEnabled,
-      SpawnTrigger trigger,
+      ThreadKind kind,
       ThreadConstraints constraints,
       String creationRequestHash,
       List<NewThreadCommand> commands,
@@ -163,7 +163,7 @@ final class AcceptCommandsControl {
             Names.rootThreadName(),
             rootThreadId,
             yoloEnabled,
-            trigger,
+            kind,
             constraints,
             ThreadExecutionControl.RUNNABLE,
             0L,
@@ -260,7 +260,7 @@ final class AcceptCommandsControl {
                   target.threadName(),
                   target.threadId(),
                   target.yoloEnabled(),
-                  SpawnTrigger.USER,
+                  ThreadKind.USER,
                   ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
@@ -384,7 +384,7 @@ final class AcceptCommandsControl {
                   Names.rootThreadName(),
                   target.threadId(),
                   target.yoloEnabled(),
-                  SpawnTrigger.USER,
+                  ThreadKind.USER,
                   ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,

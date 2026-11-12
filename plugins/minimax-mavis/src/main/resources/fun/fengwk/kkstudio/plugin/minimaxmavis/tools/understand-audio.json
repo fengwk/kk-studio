@@ -9,7 +9,7 @@
         "description": "Audio inputs to analyze, 1-10 entries.",
         "items": {
           "type": "string",
-          "description": "A public HTTP(S) audio URL or a vfs:/resources/<blobId> audio resource of the current session."
+          "description": "A public HTTP(S) audio URL or a resource://files/<uuid> audio resource of the current session."
         }
       },
       "prompt": {

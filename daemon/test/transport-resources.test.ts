@@ -195,14 +195,12 @@ describe('resource transfer client', () => {
       (reason: unknown) => reason,
     )
     controller.abort()
-    // 诊断链只含安全文案：错误本体是固定分类文案，cause 是平台给出的有界票据 message；
-    // 预签名 URL 与签名 headers 绝不进入任何一层。
+    // 平台票据的安全文案直接成为调用失败文本，不回显预签名 URL 或 headers。
     expect(error).toBeInstanceOf(ResourceUploadError)
     const typed = error as ResourceUploadError
+    expect(typed.message).toBe('storage quota exhausted')
     expect(typed.message).not.toContain('s3.example.com')
-    expect(typed.cause).toBeInstanceOf(Error)
-    expect((typed.cause as Error).message).toBe('storage quota exhausted')
-    expect(JSON.stringify(typed.cause)).not.toContain('s3.example.com')
+    expect(typed.cause).toBeUndefined()
   })
 
   it('rejects when the invocation signal is already aborted', async () => {

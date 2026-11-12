@@ -154,9 +154,9 @@ export class ResourceUploadError extends Error {
     stage: ResourceUploadStage,
     category: ResourceUploadErrorCategory,
     cleanupConfirmed: boolean,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; message?: string },
   ) {
-    super(`resource upload failed during ${stage} (${category})`, options)
+    super(options?.message ?? `resource upload failed during ${stage} (${category})`, options)
     this.name = 'ResourceUploadError'
     this.stage = stage
     this.category = category
@@ -171,6 +171,8 @@ export function isResourceUploadError(error: unknown): error is ResourceUploadEr
 
 export interface CapabilityContext {
   config: DaemonConfig
+  /** INVOKE 中冻结的单次工具输出上限。 */
+  maxOutputBytes: number
   signal: AbortSignal
   processes: ProcessSupervisor
   resources: ResourceUploader
@@ -319,6 +321,6 @@ export function errorResult(callId: string, message: string, code?: string): Cap
     callId,
     error: true,
     details: code ? { code } : {},
-    contents: [{ type: 'text', text: `Error: ${message}` }],
+    contents: [{ type: 'text', text: code === 'OUTPUT_TOO_LARGE' ? message : `Error: ${message}` }],
   }
 }

@@ -6,7 +6,8 @@ import {
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { useI18n } from '@/shared/i18n'
-import { interactionIdentity } from '@/shared/lib/interactions'
+import { interactionIdentity, interactionOwnerLabel } from '@/shared/lib/interactions'
+import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
 import { InteractionOwnerSource } from '@/features/thread/runtime/interactions/InteractionOwnerSource'
 import { useInteractionsController } from '@/features/thread/runtime/interactions/useInteractionsController'
@@ -25,6 +26,19 @@ export function InteractionsPage() {
     loadMore,
     removeItem,
   } = useInteractionsController()
+  const sessionGroups = new Map<string, typeof items>()
+  for (const item of items) {
+    const key = item.type === 'ENVIRONMENT_WAIT' ? `root:${item.rootThreadId}` : item.sessionId
+    const group = sessionGroups.get(key) ?? []
+    group.push(item)
+    sessionGroups.set(key, group)
+  }
+  const groups = Array.from(sessionGroups.entries()).map(([key, group]) => ({
+    key,
+    items: [...group].sort((left, right) => right.createdAt - left.createdAt),
+    title: group[0]?.owner.title?.trim() || interactionOwnerLabel(group[0]!.owner, t),
+    threadId: group[0]?.rootThreadId,
+  }))
 
   return (
     <div className="interactions-page-layout">
@@ -82,22 +96,40 @@ export function InteractionsPage() {
                 </div>
               </>
             ) : null}
-            {items.map((item) => (
-              <div key={interactionIdentity(item)} className="interaction-feed-item">
-                <header className="interaction-item-header">
-                  <div className="interaction-item-meta">
-                    <InteractionOwnerSource item={item} />
-                  </div>
+            {groups.map((group) => (
+              <section className="interactions-session-group" key={group.key}>
+                <header className="interactions-session-header">
+                  <h2>{group.title}</h2>
+                  {group.threadId ? (
+                    <ThreadLink
+                      threadId={group.threadId}
+                      className="interactions-session-link"
+                      aria-label={`${t('ai.interaction.session')}: ${group.title}`}
+                    >
+                      {t('ai.interaction.session')}
+                    </ThreadLink>
+                  ) : null}
                 </header>
+                <div className="interactions-session-items">
+                  {group.items.map((item) => (
+                    <div key={interactionIdentity(item)} className="interaction-feed-item">
+                      <header className="interaction-item-header">
+                        <div className="interaction-item-meta">
+                          <InteractionOwnerSource item={item} />
+                        </div>
+                      </header>
 
-                <div className="interaction-item-body">
-                  <InteractionCardBody
-                    item={item}
-                    onSuccess={item.type === 'ENVIRONMENT_WAIT'
-                      ? undefined : () => removeItem(item.toolInvocationId)}
-                  />
+                      <div className="interaction-item-body">
+                        <InteractionCardBody
+                          item={item}
+                          onSuccess={item.type === 'ENVIRONMENT_WAIT'
+                            ? undefined : () => removeItem(item.toolInvocationId)}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              </section>
             ))}
 
             {hasMore ? (

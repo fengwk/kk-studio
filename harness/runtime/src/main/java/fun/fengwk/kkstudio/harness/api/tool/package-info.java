@@ -10,7 +10,9 @@
  * fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt} 记录人工介入事实，{@link
  * fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError} 是终态输出。
  *
- * <p>本包只承载不变量与纯状态转换，不含执行、调度、编排与编码：wire 编解码在 {@code fun.fengwk.kkstudio.harness.codec}，随调用传递、绝不持久化的
- * transient 执行请求属于端口契约，放在 {@code fun.fengwk.kkstudio.harness.spi}。
+ * <p>{@link fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder} 从冻结 binding
+ * 与调用参数计算同一批文件修改调用的词法路径键，供调度和查询投影共享；不访问文件系统。 本包不含执行、调度、编排与编码：wire 编解码在 {@code
+ * fun.fengwk.kkstudio.harness.codec}，随调用传递、绝不持久化的 transient 执行请求属于端口契约，放在 {@code
+ * fun.fengwk.kkstudio.harness.spi}。
  */
 package fun.fengwk.kkstudio.harness.api.tool;

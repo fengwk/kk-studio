@@ -39,6 +39,6 @@ public class HarnessResourceConfiguration {
         uploadService,
         blobManager,
         refManager,
-        Math.toIntExact(snapshot.get().advanced().resourceMaxBytes()));
+        () -> Math.multiplyExact(snapshot.get().tool().maxOutputMib(), 1_048_576));
   }
 }

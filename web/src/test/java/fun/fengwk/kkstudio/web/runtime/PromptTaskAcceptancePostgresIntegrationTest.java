@@ -28,8 +28,8 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
@@ -266,7 +266,7 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
         null,
         false,
         ThreadConstraints.NONE,
-        SpawnTrigger.PLUGIN,
+        ThreadKind.PLUGIN_TASK,
         JoinDelivery.RECEIPT_ONLY,
         new SpawnRequest.Budget(null, 1, 1, Integer.MAX_VALUE),
         PluginPromptTaskService.invocationId(taskId),

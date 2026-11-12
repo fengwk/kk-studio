@@ -233,7 +233,6 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('composer-editor-harness')
     expect(keys).toContain('model-browser-harness')
     expect(keys).toContain('settings-catalog-harness')
-    expect(keys).toContain('session-files-harness')
     expect(inputs['custom-message-queue-harness']).toBe(
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )

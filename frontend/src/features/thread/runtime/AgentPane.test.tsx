@@ -406,7 +406,8 @@ function snapshot(
 function pendingInvocation(): ToolInvocationDTO {
   return {
     id: 'waiting-tool', threadId: 'thread-1', turnStartEntryId: 'turn-1', assistantEntryId: 'assistant-1', callIndex: 0,
-    status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
+    status: 'READY', attempt: 1, toolCallId: 'call-1', queuedBehindToolCallId: null,
+    toolName: 'bash', rendererKey: 'bash',
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
     requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"pwd"}', approval: null, result: null, error: null,
@@ -567,6 +568,7 @@ function treeNode(
 ): HarnessThreadTreeNodeDTO {
   return {
     threadId,
+    kind: parentThreadId == null ? 'USER' as const : 'SUBAGENT' as const,
     parentThreadId,
     name,
     agentName: parentThreadId == null ? 'assistant' : 'coder',
@@ -593,6 +595,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approval: { reason: '需要确认', decision: null },
+    queuedSameFileCount: 0,
     createdAt: 1785232801000,
   }
 }
@@ -691,7 +694,7 @@ describe('AgentPane orchestration', () => {
       firstMessagePreview: null, threadCount: 1,
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
-      threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
+      threadId: THREAD_ID, kind: 'USER', parentThreadId: null, name: 'thread-name',
       createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
       execution: thread().branchSettings.execution, headMessagePreview: null,
     }])
@@ -1170,6 +1173,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID,
+      kind: 'USER',
       name: 'Thread Name',
       parentThreadId: null,
       createdAt: 0,
@@ -1356,6 +1360,7 @@ describe('AgentPane orchestration', () => {
     const threadB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     const summary = (threadId: string, name: string): HarnessThreadSummaryDTO => ({
       threadId,
+      kind: 'USER',
       parentThreadId: null,
       name,
       createdAt: 0,
@@ -1666,6 +1671,7 @@ describe('AgentPane orchestration', () => {
     })
     expect(threadSelectionItem({
       threadId: THREAD_ID,
+      kind: 'USER',
       parentThreadId: null,
       name: 'Named Thread',
       createdAt: 0,
@@ -1774,6 +1780,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       {
         threadId: THREAD_ID,
+        kind: 'USER',
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
@@ -1787,6 +1794,7 @@ describe('AgentPane orchestration', () => {
       },
       {
         threadId: workerId,
+        kind: 'SUBAGENT',
         parentThreadId: THREAD_ID,
         name: 'worker',
         agentName: 'coder',
@@ -1810,6 +1818,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       {
         threadId: THREAD_ID,
+        kind: 'USER',
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
@@ -1845,6 +1854,7 @@ describe('AgentPane orchestration', () => {
     )
     vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [{
       threadId,
+      kind: 'USER',
       parentThreadId: null,
       name: threadId === THREAD_ID ? 'tree A' : 'tree B',
       agentName: 'assistant',
@@ -1857,6 +1867,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: 1774958400,
     }, {
       threadId: threadId === THREAD_ID ? childA : childB,
+      kind: 'SUBAGENT',
       parentThreadId: threadId,
       name: threadId === THREAD_ID ? 'active A' : 'active B',
       agentName: 'coder',
@@ -1881,6 +1892,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: threadB,
+      kind: 'USER',
       parentThreadId: null,
       name: 'thread B',
       status: 'IDLE',
@@ -2153,6 +2165,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID,
+      kind: 'USER',
       parentThreadId: null,
       name: 'thread one',
       createdAt: 0,
@@ -3630,6 +3643,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       act(() => {
         result.current.selectThread({
           threadId: 't-2',
+          kind: 'USER',
           parentThreadId: null,
           name: 'Thread 2',
           status: 'IDLE',

@@ -42,10 +42,10 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -516,7 +516,7 @@ class HarnessRuntimeManualCompactionTest {
                       "main",
                       threadId,
                       false,
-                      SpawnTrigger.USER,
+                      ThreadKind.USER,
                       ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
@@ -592,7 +592,7 @@ class HarnessRuntimeManualCompactionTest {
         seedChildThread(
             fixture.store,
             parentThreadId,
-            SpawnTrigger.RUNTIME,
+            ThreadKind.COMPACTION,
             COMPACTION_CONSTRAINTS,
             JoinDelivery.SETTLE_OWNER_TURN,
             false);
@@ -601,7 +601,7 @@ class HarnessRuntimeManualCompactionTest {
         seedChildThread(
             fixture.store,
             compactionChild,
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             COMPACTION_CONSTRAINTS,
             JoinDelivery.NOTIFY_PARENT,
             true);
@@ -639,7 +639,7 @@ class HarnessRuntimeManualCompactionTest {
   private static UUID seedChildThread(
       InMemoryHarnessStore store,
       UUID parentThreadId,
-      SpawnTrigger trigger,
+      ThreadKind trigger,
       ThreadConstraints constraints,
       JoinDelivery delivery,
       boolean matchedJoin) {

@@ -17,6 +17,7 @@ import {
   type Progress,
 } from './generated/control_pb.js'
 import type { UploadedResource } from './runtime-resources.js'
+import { toolOutputExceededMessage } from './tool-output-limit.js'
 
 const FALLBACK_FAILURE_MESSAGE = 'capability execution failed'
 
@@ -63,7 +64,7 @@ export async function encodeCompletedProto(
       size = content.bytes.byteLength
     }
     if (size > maximumResourceBytes - aggregate) {
-      throw new Error(`aggregate resource bytes exceed maximumResourceBytes: maximum=${maximumResourceBytes}`)
+      throw new Error(toolOutputExceededMessage(aggregate + size, maximumResourceBytes))
     }
     aggregate += size
   }

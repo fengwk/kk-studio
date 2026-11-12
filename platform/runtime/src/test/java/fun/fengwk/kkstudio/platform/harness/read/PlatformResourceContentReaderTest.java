@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +21,8 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -42,6 +45,8 @@ class PlatformResourceContentReaderTest {
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
     reader = new PlatformResourceContentReader(refs, blobManager, blobs);
+    when(blobManager.getBlob(any()))
+        .thenAnswer(invocation -> activeBlob(invocation.getArgument(0)));
   }
 
   /** 测试意图：缺少会话身份或目标 Blob 时在入口拒绝，绝不进入存储层。 */
@@ -85,31 +90,28 @@ class PlatformResourceContentReaderTest {
                 sessionId, TurnMediaCapabilities.NONE, blobId, null, null, null, "resource", null));
   }
 
-  /** 测试意图：没有会话引用的 URI 不暴露 Blob 是否存在或内容。 */
+  /** 测试意图：资源读取时幂等建立当前 Session 持有。 */
   @Test
-  void rejectsUnreferencedBlobBeforeOpeningStream() {
+  void readingResourceEstablishesSessionHold() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, false);
-    assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
-            .getMessage()
-            .contains("not referenced"));
-    verifyNoInteractions(blobs);
+    when(blobs.withBlobStream(eq(blobId), any(), any())).thenReturn("1|blob-content");
+
+    assertTrue(read(sessionId, blobId).contains("1|blob-content"));
+    verify(refs).retainRef(sessionId, blobId);
   }
 
-  /** 测试意图：已授权但 Blob 不存在时映射为读工具错误。 */
+  /** 测试意图：不存在或已释放的资源不会被持有或读取。 */
   @Test
-  void mapsMissingBlob() {
+  void rejectsMissingBlob() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, true);
-    when(blobs.withBlobStream(eq(blobId), any(), any()))
-        .thenThrow(DomainException.notFound("blob", "unknown blob: " + blobId));
+    when(blobManager.getBlob(blobId)).thenReturn(null);
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
-            .contains("resource not found"));
+            .contains("resource is not available"));
+    verifyNoInteractions(blobs);
   }
 
   /** 测试意图：存储异常、空结果与非法编码分别输出明确错误，不能产生伪造的空文本。 */
@@ -117,7 +119,6 @@ class PlatformResourceContentReaderTest {
   void reportsUnavailableAndInvalidContent() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, true);
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
@@ -142,12 +143,41 @@ class PlatformResourceContentReaderTest {
             .contains("binary"));
   }
 
+  /** 测试意图：缺少 MIME 元数据时按普通文本读取，避免空类型触发媒体送达路径。 */
+  @Test
+  void readsBlobWithMissingMediaTypeAsText() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = activeBlob(blobId);
+    blob.setMediaType(null);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    when(blobs.withBlobStream(eq(blobId), any(), any())).thenReturn("1|blob-content");
+
+    assertTrue(read(sessionId, blobId).contains("1|blob-content"));
+  }
+
+  /** 测试意图：底层 Blob 缺失转换为资源 404，其它领域错误原样传播。 */
+  @Test
+  void mapsMissingBlobAndPreservesOtherDomainErrors() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(DomainException.notFound("blob"));
+    assertTrue(
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
+            .getMessage()
+            .contains("resource not found"));
+
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(DomainException.notFound("other"));
+    assertThrows(DomainException.class, () -> read(sessionId, blobId));
+  }
+
   /** 测试意图：只在保留 Blob 流的生命周期内执行文本窗口投影。 */
   @Test
   void formatsAuthorizedStream() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenAnswer(
             invocation -> {
@@ -158,19 +188,18 @@ class PlatformResourceContentReaderTest {
     assertTrue(read(sessionId, blobId).contains("1|blob-content"));
   }
 
-  /** 测试意图：读取预算由入口传入并在各阶段复用同一对象，会话鉴权耗时计入同一预算。 */
+  /** 测试意图：读取预算由入口传入并在各阶段复用同一对象，资源查询耗时计入同一预算。 */
   @Test
   void passesSameDeadlineAndMeasuresAuthCost() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, true);
     ReadDeadline entryDeadline = ReadDeadline.after(Duration.ofSeconds(60));
-    // 会话引用校验耗时也必须计入同一读取预算。
-    when(refs.contains(sessionId, blobId))
+    // Blob metadata lookup is part of the same read deadline.
+    when(blobManager.getBlob(blobId))
         .thenAnswer(
             invocation -> {
               sleepQuietly(300L);
-              return true;
+              return activeBlob(blobId);
             });
     when(blobs.withBlobStream(eq(blobId), eq(entryDeadline), any()))
         .thenAnswer(
@@ -191,7 +220,6 @@ class PlatformResourceContentReaderTest {
   void mapsTimeoutAndInterruptFailures() {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new StorageReadTimeoutException("blob read timed out: " + blobId));
     assertTrue(
@@ -207,8 +235,14 @@ class PlatformResourceContentReaderTest {
             .contains("resource read interrupted"));
   }
 
-  private void authorize(UUID sessionId, UUID blobId, boolean allowed) {
-    when(refs.contains(sessionId, blobId)).thenReturn(allowed);
+  private static StorageBlob activeBlob(UUID blobId) {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType("text/plain");
+    blob.setSizeBytes(12L);
+    blob.setSha256("a".repeat(64));
+    blob.setState(StorageBlobState.ACTIVE);
+    return blob;
   }
 
   private static void sleepQuietly(long millis) {
