@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 
 import java.io.IOException;
+import java.util.List;
 
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
@@ -1115,6 +1116,7 @@ class ControlProtocolCodecTest {
         Invoke.newBuilder()
             .setCapabilityId(ControlProtocolFixtures.CAPABILITY_ID)
             .setTimeoutMillis(0)
+            .setImageInputTier(ImageInputTier.P720)
             .build();
     assertThrows(
         ControlProtocolException.class,
@@ -1122,6 +1124,27 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 ControlProtocolFixtures.envelope(
                     MessageType.INVOKE, Envelope.newBuilder().setInvoke(missingArguments))));
+
+    Invoke missingImageTier =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .clearImageInputTier()
+            .build();
+    Invoke unspecifiedImageTier =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setImageInputTier(ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED)
+            .build();
+    Invoke unknownImageTier =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setImageInputTierValue(99)
+            .build();
+    for (Invoke invalidTier : List.of(missingImageTier, unspecifiedImageTier, unknownImageTier)) {
+      assertThrows(
+          ControlProtocolException.class,
+          () ->
+              ControlProtocolCodec.encodeBinary(
+                  ControlProtocolFixtures.envelope(
+                      MessageType.INVOKE, Envelope.newBuilder().setInvoke(invalidTier))));
+    }
 
     Invoke invalidOutputLimit =
         ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()

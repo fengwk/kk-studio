@@ -42,6 +42,13 @@ enum MessageType {
   ENVIRONMENT_CONFIG = 27;
 }
 
+enum ImageInputTier {
+  IMAGE_INPUT_TIER_UNSPECIFIED = 0;
+  P720 = 1;
+  P1080 = 2;
+  ORIGINAL = 3;
+}
+
 enum OperatingSystem {
   OPERATING_SYSTEM_UNSPECIFIED = 0;
   WINDOWS = 1;
@@ -239,6 +246,7 @@ message Invoke {
   optional int64 timeout_millis = 3;
   optional ExpectedFile expected_file = 4;
   optional int64 max_output_bytes = 5;
+  optional ImageInputTier image_input_tier = 6;
 }
 
 message ExpectedFile {

@@ -149,7 +149,7 @@ Daemon -> HEARTBEAT(runtime_status, ide_lease_round)*
 Daemon -> RUNTIME_STATUS(runtime_status)
 Studio -> TEMPORARY_RESOURCE_POLICY
 
-Studio -> INVOKE(max_output_bytes)
+Studio -> INVOKE(max_output_bytes, image_input_tier)
 Daemon -> STARTED
 Daemon -> PROGRESS*
 Daemon -> RESOURCE_UPLOAD_REQUEST
@@ -172,7 +172,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes`，其值为发送时当前系统工具输出上限（MiB）换算的字节数；Daemon 按该调用冻结的值检查媒体读取与结果编码。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
+`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节，图片档位读取当前系统图片档位，值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值；TypeScript Daemon 校验图片档位，但不消费它。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
 同一连接上随后下发 `ENVIRONMENT_CONFIG` 完整卡片配置快照（`version` + `studio_url`、
 `bash_executable`、LSP servers、`proxy_url`）；Daemon 应用成功后才回执 `READY`。后续配置变更仍使用
 `ENVIRONMENT_CONFIG` 下发完整快照，不重复发送 READY；配置校验失败时已有可用快照继续运行并上报

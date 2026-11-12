@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonRegistration;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentConfigSource;
@@ -97,6 +98,7 @@ public class EnvironmentServerConfiguration {
     return new EnvironmentServerSettings(
         Duration.ofMillis(environment.heartbeatTimeoutMillis()),
         (long) settings.tool().maxOutputMib() * 1_048_576L,
+        ImageInputTier.valueOf(storageMedia.imageTier().name()),
         storageMedia.temporaryResourceTtlSeconds(),
         storageMedia.temporaryResourceCleanupIntervalSeconds());
   }

@@ -387,12 +387,14 @@ public final class EnvironmentDaemonServer
       }
       invocationTracker.register(active);
 
+      EnvironmentServerSettings currentSettings = settings();
       Invoke.Builder invokeBuilder =
           Invoke.newBuilder()
               .setCapabilityId(descriptor.id().value())
               .setArgumentsJson(request.call().argumentsJson())
               .setTimeoutMillis(request.timeout().toMillis())
-              .setMaxOutputBytes(settings().maxOutputBytes());
+              .setMaxOutputBytes(currentSettings.maxOutputBytes())
+              .setImageInputTier(currentSettings.imageInputTier());
       if (request.expectedFile() != null) {
         invokeBuilder.setExpectedFile(
             ExpectedFile.newBuilder()

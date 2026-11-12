@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.HostInfo;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.OperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Progress;
@@ -591,12 +592,16 @@ final class EnvironmentDaemonServerTestSupport {
     void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
       settings.set(
           new EnvironmentServerSettings(
-              Duration.ofSeconds(60), 16L * 1024 * 1024, ttlSeconds, cleanupIntervalSeconds));
+              Duration.ofSeconds(60),
+              16L * 1024 * 1024,
+              ImageInputTier.P720,
+              ttlSeconds,
+              cleanupIntervalSeconds));
     }
 
     private static EnvironmentServerSettings defaultSettings() {
       return new EnvironmentServerSettings(
-          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
+          Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L);
     }
 
     void failRegistrationDirectory() {

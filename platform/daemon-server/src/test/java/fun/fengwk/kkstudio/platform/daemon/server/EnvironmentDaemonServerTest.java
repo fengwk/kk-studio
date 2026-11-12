@@ -68,6 +68,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLeaseBinding;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Started;
@@ -888,7 +889,8 @@ class EnvironmentDaemonServerTest {
     assertEquals(Duration.ofSeconds(60), firstHandle.terminalDeliveryGrace());
 
     fixture.settings.set(
-        new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(15), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L));
     EnvironmentCapabilityExecutionHandle secondHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
     assertEquals(Duration.ofSeconds(15), secondHandle.terminalDeliveryGrace());
@@ -2832,22 +2834,43 @@ class EnvironmentDaemonServerTest {
   void settingsRejectNonPositiveBounds() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ZERO, 1024L, ImageInputTier.P720, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 0L, ImageInputTier.P720, 259200L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 0L, 1800L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 259200L, 0L));
     assertThrows(
         NullPointerException.class,
-        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
+        () -> new EnvironmentServerSettings(null, 1024L, ImageInputTier.P720, 259200L, 1800L));
+    assertThrows(
+        NullPointerException.class,
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, null, 259200L, 1800L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(1),
+                1024L,
+                ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED,
+                259200L,
+                1800L));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
+        new EnvironmentServerSettings(
+                Duration.ofSeconds(1), 1024L, ImageInputTier.P720, 259200L, 1800L)
             .heartbeatTimeout());
   }
 
@@ -3579,10 +3602,30 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         fixture.settings.get().maxOutputBytes(),
         channel.lastEnvelope().getInvoke().getMaxOutputBytes());
+    assertEquals(ImageInputTier.P720, channel.lastEnvelope().getInvoke().getImageInputTier());
     assertTrue(channel.lastEnvelope().getInvoke().hasExpectedFile());
     assertEquals(
         "/srv/repo/README.md", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
     assertEquals("a".repeat(64), channel.lastEnvelope().getInvoke().getExpectedFile().getSha256());
+  }
+
+  /** 测试意图：每次 INVOKE 读取当前系统图片档位，设置变更只影响后续调用。 */
+  @Test
+  void eachInvokeUsesTheCurrentImageInputTier() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-image-input-tier");
+
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    Envelope firstInvoke = channel.lastEnvelope();
+    assertEquals(ImageInputTier.P720, firstInvoke.getInvoke().getImageInputTier());
+
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.ORIGINAL, 259200L, 1800L));
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
+
+    assertEquals(2, channel.countOf(MessageType.INVOKE));
+    assertEquals(ImageInputTier.ORIGINAL, channel.lastEnvelope().getInvoke().getImageInputTier());
   }
 
   @Test

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.daemon.server;
 
+import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
+
 import java.time.Duration;
 import java.util.Objects;
 
@@ -7,6 +9,7 @@ import java.util.Objects;
 public record EnvironmentServerSettings(
     Duration heartbeatTimeout,
     long maxOutputBytes,
+    ImageInputTier imageInputTier,
     long temporaryResourceTtlSeconds,
     long temporaryResourceCleanupIntervalSeconds) {
 
@@ -17,6 +20,11 @@ public record EnvironmentServerSettings(
     }
     if (maxOutputBytes <= 0L) {
       throw new IllegalArgumentException("maxOutputBytes must be positive");
+    }
+    imageInputTier = Objects.requireNonNull(imageInputTier, "imageInputTier");
+    if (imageInputTier == ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED
+        || imageInputTier == ImageInputTier.UNRECOGNIZED) {
+      throw new IllegalArgumentException("imageInputTier must be a supported image tier");
     }
     if (temporaryResourceTtlSeconds <= 0L) {
       throw new IllegalArgumentException("temporaryResourceTtlSeconds must be positive");

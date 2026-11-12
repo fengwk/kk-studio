@@ -2,6 +2,7 @@ import { fromBinary, toBinary } from '@bufbuild/protobuf'
 
 import {
   EnvelopeSchema,
+  ImageInputTier,
   IdeAction,
   IdeOpenMode,
   IdeViewState,
@@ -525,6 +526,13 @@ function validateInvoke(invoke: Invoke): void {
   parseJsonObject(invoke.argumentsJson, 'invoke.argumentsJson', MAX_ARGUMENTS_JSON_UTF8_BYTES)
   requireSafeLong(invoke.timeoutMillis, 'invoke.timeoutMillis', 0n, MAX_SAFE_BIGINT)
   requireSafeLong(invoke.maxOutputBytes, 'invoke.maxOutputBytes', 1n, MAX_SAFE_BIGINT)
+  if (
+    invoke.imageInputTier !== ImageInputTier.P720 &&
+    invoke.imageInputTier !== ImageInputTier.P1080 &&
+    invoke.imageInputTier !== ImageInputTier.ORIGINAL
+  ) {
+    throw new Error('invoke.imageInputTier is required and must be a supported image tier')
+  }
   if (invoke.expectedFile !== undefined) {
     if (capabilityId !== 'fs.edit') {
       throw new Error('invoke.expectedFile is only valid for fs.edit')

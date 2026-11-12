@@ -13,6 +13,7 @@ import {
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
+  ImageInputTier,
   EnvironmentConfigSchema,
   DaemonConfigurationSchema,
   LspConfigurationSchema,
@@ -156,6 +157,7 @@ function validInvoke() {
     argumentsJson: ARGUMENTS_JSON,
     timeoutMillis: TIMEOUT_MILLIS,
     maxOutputBytes: 16n * 1024n * 1024n,
+    imageInputTier: ImageInputTier.P720,
   })
 }
 
@@ -299,6 +301,18 @@ describe('control binary codec', () => {
       timeoutMillis: 0n,
     })
     expect(() => encodeBinary(envelope(MessageType.INVOKE, missing))).toThrow(/capabilityId/)
+  })
+
+  it('requires a supported image input tier on each invoke', () => {
+    const invalidTiers = [
+      undefined,
+      ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED,
+      (ImageInputTier.ORIGINAL + 1) as ImageInputTier,
+    ]
+    for (const imageInputTier of invalidTiers) {
+      const invoke = create(InvokeSchema, { ...validInvoke(), imageInputTier })
+      expect(() => encodeBinary(envelope(MessageType.INVOKE, invoke))).toThrow(/imageInputTier/)
+    }
   })
 
   it('rejects unsafe integers, UTF-8 overflow and invalid resource metadata', () => {
@@ -725,6 +739,7 @@ describe('control binary codec', () => {
               argumentsJson: '{}',
               timeoutMillis: 0n,
               maxOutputBytes: 16n * 1024n * 1024n,
+              imageInputTier: ImageInputTier.P720,
               expectedFile: create(ExpectedFileSchema, {
                 path: 'test.txt',
                 sha256: 'a'.repeat(64),
