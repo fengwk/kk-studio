@@ -205,7 +205,6 @@ func TestDeleteStagingIsIdempotent(t *testing.T) {
 	}
 }
 
-// COD-T-014
 func TestOutputSpoolCloseRemovesUnpublishedSpill(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
