@@ -228,13 +228,13 @@ func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	if err := json.Unmarshal(preview.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
 	}
-	if review.SHA256 == "" || !strings.Contains(review.Diff, "- 1|old") || !strings.Contains(review.Diff, "+ 1|new") {
+	if review.SHA256 == nil || *review.SHA256 == "" || !strings.Contains(review.Diff, "- 1|old") || !strings.Contains(review.Diff, "+ 1|new") {
 		t.Fatalf("review=%#v", review)
 	}
-	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "new\n"}, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256}); result.Error {
+	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "new\n"}, &runtime.ExpectedFile{Path: review.Path, SHA256: *review.SHA256}); result.Error {
 		t.Fatalf("approved write failed: %#v", result)
 	}
-	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "stale"}, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256}); !result.Error || !strings.Contains(result.Contents[0].Text, staleWriteReviewMessage) {
+	if result := invokeCoding(t, provider, "fs.write", map[string]any{"path": path, "content": "stale"}, &runtime.ExpectedFile{Path: review.Path, SHA256: *review.SHA256}); !result.Error || !strings.Contains(result.Contents[0].Text, staleWriteReviewMessage) {
 		t.Fatalf("stale write accepted: %#v", result)
 	}
 }
@@ -250,10 +250,22 @@ func TestWriteApprovalPreviewNewTarget(t *testing.T) {
 	if err := json.Unmarshal(result.Contents[0].JSON, &review); err != nil {
 		t.Fatal(err)
 	}
-	if !review.NewFile || review.Content != "new file\n" {
-		t.Fatalf("review=%#v", review)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(result.Contents[0].JSON, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if review.SHA256 != nil || !strings.Contains(review.Diff, "+ 1|new file") || len(fields) != 3 || fields["path"] == nil || fields["diff"] == nil || string(fields["sha256"]) != "null" {
+		t.Fatalf("review=%#v fields=%v", review, fields)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("preview created file: %v", err)
+	}
+	approved := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "new file\n"}, &runtime.ExpectedFile{Path: review.Path})
+	if approved.Error {
+		t.Fatalf("approved new file write failed: %#v", approved)
+	}
+	stale := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "replacement"}, &runtime.ExpectedFile{Path: review.Path})
+	if !stale.Error || !strings.Contains(stale.Contents[0].Text, staleWriteReviewMessage) {
+		t.Fatalf("write without approved hash overwrote existing file: %#v", stale)
 	}
 }
