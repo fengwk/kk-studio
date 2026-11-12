@@ -248,6 +248,112 @@ func TestOpenOutputStoreRejectsNonDirectoryRoot(t *testing.T) {
 }
 
 // COD-F-015
+func TestOutputStoreDataDirCacheAndMissingRoots(t *testing.T) {
+	if _, err := TextOutputStoreForDataDir(""); err == nil {
+		t.Fatal("empty data directory accepted")
+	}
+	dataDir := t.TempDir()
+	first, err := TextOutputStoreForDataDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := TextOutputStoreForDataDir(dataDir)
+	if err != nil || first != second {
+		t.Fatalf("cached store=%p second=%p err=%v", first, second, err)
+	}
+	if err := os.RemoveAll(first.Root()); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := first.Sweep(time.Minute); err != nil || removed != 0 {
+		t.Fatalf("missing-root sweep removed=%d err=%v", removed, err)
+	}
+	if paths, err := first.ListFilesWithSuffix(".log"); err != nil || paths != nil {
+		t.Fatalf("missing-root paths=%v err=%v", paths, err)
+	}
+}
+
+// COD-F-015
+func TestOutputStoreAcquireRejectsUnregisteredWorkspace(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(store.Root(), "not-a-uuid", "output.log")
+	store.Acquire(invalid)()
+	workspace := filepath.Join(store.Root(), "11111111-1111-4111-8111-111111111111")
+	if err := os.Mkdir(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store.Acquire(filepath.Join(workspace, "output.log"))()
+	if len(store.leases) != 0 {
+		t.Fatalf("unregistered workspace acquired leases: %v", store.leases)
+	}
+}
+
+// COD-F-015
+func TestOutputSpoolKeepsShortOverlappingPreviewAndIgnoresWritesAfterTruncation(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "short-lines", defaultCaptureBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write([]byte(strings.Repeat("x\n", inlineOutputLines+1)))
+	result := spool.Finish(false, "")
+	if result.Error || !strings.Contains(result.Contents[0].Text, "x\n") || strings.Contains(result.Contents[0].Text, "bytes omitted") {
+		t.Fatalf("overlapping preview=%q", result.Contents[0].Text)
+	}
+	limited, err := NewOutputSpool(store, "truncated", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited.Write(bytes.Repeat([]byte("a"), inlineOutputBytes+1))
+	captured := limited.captured
+	limited.Write([]byte("later"))
+	if limited.captured != captured || !limited.IsCaptureTruncated() || limited.TotalBytes() != int64(inlineOutputBytes+6) {
+		t.Fatalf("capture=%d total=%d truncated=%v", limited.captured, limited.TotalBytes(), limited.IsCaptureTruncated())
+	}
+	_ = limited.Close()
+}
+
+// COD-F-015
+func TestOutputSpoolFinishCleansUpAfterClosedStagingFile(t *testing.T) {
+	store, err := OpenTextOutputStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool, err := NewOutputSpool(store, "closed-file", defaultCaptureBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Write(bytes.Repeat([]byte("x"), inlineOutputBytes+1))
+	staging := spool.staging
+	if err := spool.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result := spool.Finish(false, "")
+	if result.Error || !strings.Contains(result.Contents[0].Text, "could not be saved to local storage") {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging file was not removed: %v", err)
+	}
+}
+
+// COD-F-015
+func TestOpenTextOutputStoreRejectsInvalidParent(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "tmp"), []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenTextOutputStore(dataDir); err == nil {
+		t.Fatal("non-directory parent accepted")
+	}
+}
+
+// COD-F-015
 func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	if _, err := NewOutputSpool(nil, "invalid", 1); err == nil {
 		t.Fatal("nil output store accepted")
