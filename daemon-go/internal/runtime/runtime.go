@@ -47,6 +47,7 @@ type RuntimeOptions struct {
 	Status                   *StatusTracker
 	MaxConcurrentInvocations int
 	HeartbeatInterval        time.Duration
+	IDECommandTimeout        time.Duration
 	HostInfo                 *protocol.HostInfo
 	Update                   update.Runner
 	ReportError              func(error)
@@ -96,6 +97,13 @@ type Runtime struct {
 	exitRequested          map[string]bool
 	exitCleanupUnconfirmed map[string]bool
 	ideCommandCount        atomic.Int32
+	ideMu                  sync.Mutex
+	ideCommands            map[string]*ideCommandCall
+	ideWG                  sync.WaitGroup
+	ideLeaseMu             sync.Mutex
+	ideLeaseRound          int64
+	ideLeaseSentAt         time.Time
+	ideLeaseConsumed       bool
 	resourceMu             sync.Mutex
 	resourceRequests       map[resourceExchangeKey]chan *protocol.Envelope
 	wg                     sync.WaitGroup
@@ -160,6 +168,12 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if options.HeartbeatInterval < 0 {
 		return nil, errors.New("heartbeat interval must not be negative")
 	}
+	if options.IDECommandTimeout == 0 {
+		options.IDECommandTimeout = 30 * time.Second
+	}
+	if options.IDECommandTimeout < 0 {
+		return nil, errors.New("IDE command timeout must be positive")
+	}
 	var err error
 	hostInfo := options.HostInfo
 	if hostInfo == nil {
@@ -174,7 +188,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
 	if options.IDECommandCount == nil {
 		runtime.options.IDECommandCount = func() int { return int(runtime.ideCommandCount.Load()) }
 	}
@@ -248,6 +262,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 		<-heartbeatDone
 		<-sweepDone
 		r.dropActiveConnection()
+		r.cancelIDECommands(nil)
+		r.ideWG.Wait()
 		r.stopUpdateForShutdown()
 		if r.options.EnvironmentConfig != nil {
 			r.options.EnvironmentConfig.Close()
@@ -297,8 +313,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 }
 
 func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection) error {
+	connectionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer r.cancelIDECommands(active)
 	for {
-		envelope, err := active.connection.Receive(ctx)
+		envelope, err := active.connection.Receive(connectionCtx)
 		if err != nil {
 			return err
 		}
@@ -308,7 +327,7 @@ func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection)
 		if !r.isActiveConnection(active) {
 			return errors.New("stale control connection generation")
 		}
-		if err := r.handle(ctx, envelope); err != nil {
+		if err := r.handleWithIDEContext(ctx, connectionCtx, envelope); err != nil {
 			return err
 		}
 	}
@@ -334,6 +353,7 @@ func doubledDelay(delay, maximum time.Duration) time.Duration {
 
 func (r *Runtime) attachConnection(connection Connection) *activeConnection {
 	r.setTemporaryResourcePolicyActive(false)
+	r.clearIDELeaseRound()
 	r.mu.Lock()
 	r.generation++
 	active := &activeConnection{generation: r.generation, connection: connection}
@@ -352,11 +372,13 @@ func (r *Runtime) isActiveConnection(active *activeConnection) bool {
 }
 
 func (r *Runtime) dropConnection(active *activeConnection) {
+	r.cancelIDECommands(active)
 	r.mu.Lock()
 	if r.connection != active {
 		r.mu.Unlock()
 		return
 	}
+	r.clearIDELeaseRound()
 	r.connection = nil
 	r.bound = false
 	r.ready = false
@@ -375,6 +397,10 @@ func (r *Runtime) dropActiveConnection() {
 }
 
 func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
+	return r.handleWithIDEContext(ctx, ctx, e)
+}
+
+func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.Envelope) error {
 	if e.MessageType == protocol.MessageType_SETTINGS {
 		return r.handleSettings(e)
 	}
@@ -412,15 +438,14 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		}
 		return r.routeResourceTicket(e)
 	case protocol.MessageType_IDE_COMMAND:
-		if !ready || r.options.IDE == nil {
+		if !ready {
 			return r.sendBoundError(e.InvocationId, "IDE command requires a READY bound connection")
 		}
 		request, ok := e.Payload.(*protocol.Envelope_IdeCommand)
 		if !ok || request.IdeCommand == nil {
 			return errors.New("IDE command payload is invalid")
 		}
-		result := r.handleIDECommand(ctx, request.IdeCommand)
-		return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_IDE_RESULT, InvocationId: e.InvocationId, Payload: &protocol.Envelope_IdeResult{IdeResult: result}}, true)
+		return r.acceptIDECommand(ideCtx, e.GetInvocationId(), request.IdeCommand)
 	case protocol.MessageType_IDE_LEASE:
 		if !ready || r.options.IDE == nil {
 			return errors.New("IDE lease requires a READY bound connection")
@@ -429,7 +454,11 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		if !ok || lease.IdeLease == nil {
 			return errors.New("IDE lease payload is invalid")
 		}
-		r.options.IDE.ApplyLease(lease.IdeLease, time.Now())
+		roundStartedAt, err := r.consumeIDELease(lease.IdeLease, time.Now())
+		if err != nil {
+			return err
+		}
+		r.options.IDE.ApplyLease(lease.IdeLease, roundStartedAt)
 		return nil
 	case protocol.MessageType_TEMPORARY_RESOURCE_POLICY:
 		if !ready {
@@ -444,12 +473,6 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 	default:
 		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
-}
-
-func (r *Runtime) handleIDECommand(ctx context.Context, command *protocol.IdeCommand) *protocol.IdeResult {
-	r.ideCommandCount.Add(1)
-	defer r.ideCommandCount.Add(-1)
-	return r.options.IDE.HandleCommand(ctx, command)
 }
 
 // RequestTicket requests one binary upload ticket and waits for its correlated control response.
@@ -1393,7 +1416,15 @@ func (r *Runtime) heartbeatLoop(ctx context.Context, done chan<- struct{}) {
 			r.mu.RUnlock()
 			if bound {
 				h := &protocol.Heartbeat{RuntimeStatus: r.runtimeSnapshot()}
-				_ = r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: h}}, false)
+				if r.options.IDE != nil && r.options.IDE.HasActiveViews() {
+					round, _ := r.newIDELeaseRound()
+					h.IdeLeaseRound = int64Ptr(round)
+				} else {
+					r.clearIDELeaseRound()
+				}
+				if err := r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: h}}, false); err != nil {
+					r.clearIDELeaseRound()
+				}
 			}
 		}
 	}

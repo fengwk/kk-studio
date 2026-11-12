@@ -3,7 +3,10 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"log/slog"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -151,6 +154,9 @@ func (r *EnvironmentConfigRuntime) Submit(ctx context.Context, version int64, wi
 		return ConfigApplyResult{Kind: ConfigFailed, Version: version, Code: "VALIDATION_FAILED", Field: "config"}, nil
 	}
 	wire = proto.Clone(wire).(*protocol.DaemonConfiguration)
+	if wire.Lsp != nil && len(wire.Lsp.Servers) == 0 && len(wire.Lsp.ProtoReflect().GetUnknown()) == 0 {
+		wire.Lsp = nil
+	}
 	content, err := configContent(wire)
 	if err != nil {
 		return ConfigApplyResult{}, err
@@ -162,7 +168,9 @@ func (r *EnvironmentConfigRuntime) Submit(ctx context.Context, version int64, wi
 		return ConfigApplyResult{Kind: ConfigFatal, Message: "configuration runtime is closed"}, nil
 	}
 	if version == r.current.ConfigVersion && !bytes.Equal(content, r.acceptedBytes) {
+		accepted := append([]byte(nil), r.acceptedBytes...)
 		r.mu.Unlock()
+		logConfigContentMismatch(version, accepted, content)
 		return ConfigApplyResult{}, errors.New("the same environment config version must not change its content")
 	}
 	if version < r.current.ConfigVersion {
@@ -181,7 +189,9 @@ func (r *EnvironmentConfigRuntime) Submit(ctx context.Context, version int64, wi
 	}
 	if request := sameRequest(r.active, r.pending, version); request != nil {
 		if !bytes.Equal(request.content, content) {
+			accepted := append([]byte(nil), request.content...)
 			r.mu.Unlock()
+			logConfigContentMismatch(version, accepted, content)
 			return ConfigApplyResult{}, errors.New("the same environment config version must not change its content")
 		}
 		request.waiters = append(request.waiters, waiter)
@@ -449,14 +459,26 @@ func configContent(configuration *protocol.DaemonConfiguration) ([]byte, error) 
 	return proto.MarshalOptions{Deterministic: true}.Marshal(configuration)
 }
 
+func logConfigContentMismatch(version int64, accepted, received []byte) {
+	acceptedHash := sha256.Sum256(accepted)
+	receivedHash := sha256.Sum256(received)
+	slog.Debug("same-version environment configuration content mismatch",
+		"version", version,
+		"accepted_sha256", hex.EncodeToString(acceptedHash[:]),
+		"received_sha256", hex.EncodeToString(receivedHash[:]),
+	)
+}
+
 func configurationOf(value config.DaemonConfig) *protocol.DaemonConfiguration {
 	wire := &protocol.DaemonConfiguration{
 		StudioUrl:      value.StudioURL,
 		BashExecutable: cloneConfigString(value.BashExecutableSetting),
 		ProxyUrl:       cloneConfigString(value.ProxyURL),
-		Lsp:            &protocol.LspConfiguration{},
 	}
 	for _, server := range value.LSP {
+		if wire.Lsp == nil {
+			wire.Lsp = &protocol.LspConfiguration{}
+		}
 		wire.Lsp.Servers = append(wire.Lsp.Servers, &protocol.LspServer{
 			Id:                server.ID,
 			Command:           append([]string(nil), server.Command...),

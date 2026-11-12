@@ -199,6 +199,16 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("missing invocation recovery=%v err=%v, want RECOVER_NOT_FOUND", recovered, err)
 	}
 
+	const ideInvocation = "123e4567-e89b-42d3-a456-426614174007"
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_IDE_COMMAND, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(ideInvocation),
+		Payload: &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{Action: protocol.IdeAction_LIST_VIEWS}},
+	})
+	ideResult, err := readControlEnvelopeResult(response.Body)
+	if err != nil || ideResult.MessageType != protocol.MessageType_IDE_RESULT || ideResult.GetInvocationId() != ideInvocation || !ideResult.GetIdeResult().GetOk() || ideResult.GetIdeResult().Revision == nil {
+		t.Fatalf("production IDE command result=%v err=%v", ideResult, err)
+	}
+
 	cases := []struct {
 		name, capability, arguments, invocation, want string
 	}{

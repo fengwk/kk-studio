@@ -115,6 +115,7 @@ type CapabilityProvider interface {
 type IDEService interface {
 	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
 	ApplyLease(*protocol.IdeLease, time.Time)
+	HasActiveViews() bool
 }
 
 // IDEUpdateAdmission exposes the IDE service's state that can block managed updates.

@@ -30,6 +30,9 @@ func TestRuntimeHeartbeatsAfterEnvironmentBinding(t *testing.T) {
 	c.waitFor(t, func(frames []*protocol.Envelope) bool {
 		for _, frame := range frames {
 			if frame.MessageType == protocol.MessageType_HEARTBEAT {
+				if frame.GetHeartbeat().IdeLeaseRound != nil {
+					t.Fatal("heartbeat without active IDE views advertised an IDE lease round")
+				}
 				return true
 			}
 		}
