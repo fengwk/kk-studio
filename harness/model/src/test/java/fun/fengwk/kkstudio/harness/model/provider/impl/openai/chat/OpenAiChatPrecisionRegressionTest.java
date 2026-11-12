@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -106,8 +107,9 @@ class OpenAiChatPrecisionRegressionTest {
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
-    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
-    JsonNode opaque = textBlock.providerBlockData().nativeFields().path("vendor_opaque");
+    ProviderOpaqueBlock opaqueBlock =
+        (ProviderOpaqueBlock) completion.response().blocks().getLast();
+    JsonNode opaque = opaqueBlock.providerBlockData().nativeFields().path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");
@@ -115,7 +117,7 @@ class OpenAiChatPrecisionRegressionTest {
     assertPreservedScale(opaque.path("ratio"), "1.10");
 
     ProviderMessage assistant =
-        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(textBlock));
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("messages")
@@ -142,8 +144,9 @@ class OpenAiChatPrecisionRegressionTest {
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
-    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
-    JsonNode items = textBlock.providerBlockData().nativeFields().path("vendor_items");
+    ProviderOpaqueBlock opaqueBlock =
+        (ProviderOpaqueBlock) completion.response().blocks().getLast();
+    JsonNode items = opaqueBlock.providerBlockData().nativeFields().path("vendor_items");
     assertEquals(4, items.size());
     assertExactNumber(items.get(0).path("index"), "0");
     assertEquals("a", items.get(0).path("v").asString(""));
@@ -157,7 +160,7 @@ class OpenAiChatPrecisionRegressionTest {
     assertEquals("d", items.get(3).path("v").asString(""));
 
     ProviderMessage assistant =
-        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(textBlock));
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("messages")

@@ -843,40 +843,11 @@ class AnthropicRequestEncoderTest {
             null));
   }
 
-  /** Redacted thinking remains a typed block and is replayed with the same message order. */
-  @Test
-  void encodesRedactedThinkingInReplay() throws IOException {
-    ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
-    ProviderMessage assistantMsg =
-        asstMsg(
-            List.of(
-                new ProviderRedactedThinkingBlock("abc=="),
-                new ProviderTextBlock("response text")));
-    JsonNode asstWire =
-        MAPPER
-            .readTree(
-                encoder
-                    .encode(
-                        request(
-                            defaultVariant(),
-                            List.of(userMsg, assistantMsg),
-                            List.of(),
-                            ProviderCacheControl.none()),
-                        descriptor)
-                    .bodyUtf8Bytes())
-            .path("messages")
-            .get(1);
-    assertEquals("redacted_thinking", asstWire.path("content").get(0).path("type").asString(""));
-    assertEquals("abc==", asstWire.path("content").get(0).path("data").asString(""));
-    assertEquals("response text", asstWire.path("content").get(1).path("text").asString(""));
-  }
-
   @Test
   void rejectsMalformedAssistantToolCallInFallback() {
     ProviderMessage badToolCallMsg =
         asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "not-json"))),
-            null);
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "not-json"))));
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -958,8 +929,7 @@ class AnthropicRequestEncoderTest {
   void rejectsAssistantToolCallWithNonObjectJsonInFallback() {
     ProviderMessage badAsst =
         asstMsg(
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "[1, 2, 3]"))),
-            null);
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "[1, 2, 3]"))));
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -1085,8 +1055,7 @@ class AnthropicRequestEncoderTest {
         asstMsg(
             List.of(
                 new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")),
-                new ProviderToolCallBlock(new ProviderToolCall("c2", "calc", "{}"))),
-            null);
+                new ProviderToolCallBlock(new ProviderToolCall("c2", "calc", "{}"))));
     ProviderMessage results =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -1524,8 +1493,7 @@ class AnthropicRequestEncoderTest {
     for (String badArg : invalidArguments) {
       // 1. Fallback 场景（无 replayState）
       ProviderMessage asstFallback =
-          asstMsg(
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))), null);
+          asstMsg(List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))));
       ProviderRequest reqFallback =
           request(
               defaultVariant(),

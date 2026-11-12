@@ -207,7 +207,15 @@ class AnthropicContinuationReplayTest {
     assertEquals("duplicate compaction block in replay payload", duplicateError.getMessage());
 
     ProviderException misplacedError =
-        assertRejected(List.of(new ProviderTextBlock("before"), compactionBlock("s")));
+        assertRejected(
+            List.of(
+                new ProviderTextBlock(
+                    "before",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        descriptor.affinity("claude-3-5-sonnet"),
+                        NODES.objectNode())),
+                compactionBlock("s")));
     assertEquals(
         "compaction block must be the first content block of the replay message",
         misplacedError.getMessage());

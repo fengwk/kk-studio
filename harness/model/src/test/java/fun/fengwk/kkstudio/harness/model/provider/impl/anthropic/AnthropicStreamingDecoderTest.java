@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,19 +25,23 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
@@ -360,27 +365,25 @@ class AnthropicStreamingDecoderTest {
     assertNull(usage.reasoningTokens());
     assertEquals(175, usage.categorizedTokens());
 
-    // 校验 replayState 包含完整的原生 payload
-    assertNotNull(completion.replayState());
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, completion.replayState().format());
-    // affinity 由 Provider/连接世代/wire 模型决定，与历史前缀无关
-    assertEquals(descriptor.affinity("claude-3-5-sonnet"), completion.replayState().affinity());
+    // Provider-native information remains attached to the corresponding ordered assistant blocks.
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(4, blocks.size());
+    assertInstanceOf(ProviderThinkingBlock.class, blocks.get(0));
+    ProviderThinkingBlock thinking = (ProviderThinkingBlock) blocks.get(0);
+    assertEquals("Plan: call weather API.", thinking.thinking());
+    assertEquals("sig_xyz", thinking.providerBlockData().signature());
+    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, thinking.providerBlockData().protocol());
 
-    JsonNode replayContent = completion.replayState().payload().path("content");
-    assertEquals(4, replayContent.size());
-    assertEquals("thinking", replayContent.get(0).path("type").asString(""));
-    assertEquals("Plan: call weather API.", replayContent.get(0).path("thinking").asString(""));
-    assertEquals("sig_xyz", replayContent.get(0).path("signature").asString(""));
-
-    assertEquals("redacted_thinking", replayContent.get(1).path("type").asString(""));
-    assertEquals("encrypted_blob", replayContent.get(1).path("data").asString(""));
-
-    assertEquals("text", replayContent.get(2).path("type").asString(""));
-    assertEquals("I will check the weather.", replayContent.get(2).path("text").asString(""));
-
-    assertEquals("tool_use", replayContent.get(3).path("type").asString(""));
-    assertEquals("call_weather_1", replayContent.get(3).path("id").asString(""));
-    assertEquals("Hangzhou", replayContent.get(3).path("input").path("city").asString(""));
+    assertInstanceOf(ProviderRedactedThinkingBlock.class, blocks.get(1));
+    ProviderRedactedThinkingBlock redacted = (ProviderRedactedThinkingBlock) blocks.get(1);
+    assertEquals("encrypted_blob", redacted.data());
+    assertInstanceOf(ProviderTextBlock.class, blocks.get(2));
+    assertEquals("I will check the weather.", ((ProviderTextBlock) blocks.get(2)).text());
+    assertInstanceOf(ProviderToolCallBlock.class, blocks.get(3));
+    assertEquals("call_weather_1", ((ProviderToolCallBlock) blocks.get(3)).toolCall().id());
+    assertEquals(
+        "{\"city\":\"Hangzhou\"}",
+        ((ProviderToolCallBlock) blocks.get(3)).toolCall().argumentsJson());
   }
 
   /**
@@ -945,12 +948,14 @@ class AnthropicStreamingDecoderTest {
     assertEquals("time", finalCalls.get(1).name());
     assertEquals("{\"zone\": \"UTC\"}", finalCalls.get(1).argumentsJson());
 
-    // 断言 replay 顺序
-    assertNotNull(completion.replayState());
-    JsonNode replayContent = completion.replayState().payload().path("content");
-    assertEquals(2, replayContent.size());
-    assertEquals("call_1", replayContent.get(0).path("id").asString(""));
-    assertEquals("call_2", replayContent.get(1).path("id").asString(""));
+    // Tool call blocks retain their observed order and provider protocol metadata.
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size());
+    assertEquals("call_1", ((ProviderToolCallBlock) blocks.get(0)).toolCall().id());
+    assertEquals("call_2", ((ProviderToolCallBlock) blocks.get(1)).toolCall().id());
+    assertEquals(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        ((ProviderToolCallBlock) blocks.get(0)).providerBlockData().protocol());
   }
 
   // --- 辅助工厂方法 ---

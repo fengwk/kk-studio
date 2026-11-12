@@ -750,7 +750,13 @@ class AnthropicThinkingTest {
                 NODES.objectNode()));
     ProviderMessage assistant =
         new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, List.of(thinking, new ProviderTextBlock("Text")));
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                thinking,
+                new ProviderTextBlock(
+                    "Text",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, NODES.objectNode()))));
     ProviderRequest followUp =
         new ProviderRequest(
             modelDesc,
