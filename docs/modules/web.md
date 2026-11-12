@@ -320,7 +320,7 @@ SPA fallback 仅适用于 GET、非 API/actuator/ws/ide 且末段无扩展名的
 通知重连与静态 SPA。Harness 端点测试按端点族拆分，领域夹具集中在 `HarnessRuntimeTestFixtures`；
 架构与依赖边界由 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 统一检查，模块内不重复写架构测试。
 Spring 集成基座使用真实 PostgreSQL。
-Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
+[`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java) 以真实 Go Daemon 与 code-server 验证受管视图；
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、

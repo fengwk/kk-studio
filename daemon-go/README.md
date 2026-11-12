@@ -1,6 +1,6 @@
 # Go Daemon
 
-Go rewrite of the Environment Daemon, currently an engineering skeleton alongside the TypeScript implementation. Migration behavior and acceptance contracts are specified in `.workspace/rebuild-1.0/daemon-go/`; those specifications remain authoritative.
+The Go Environment Daemon is the production daemon implementation. Java integration tests and E2E fixtures build its binary directly; the IDE extension remains JavaScript under `ide-extension/`. Protocol, capability, and runtime contracts are shared with Studio through generated protocol code and byte-identical capability schemas.
 
 ## Development
 

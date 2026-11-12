@@ -6,7 +6,7 @@
 
 Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、Issue 或委派提示词给出；`read` 的 `path` 可以是 `resource://files/<uuid>`，也可以是 Environment 上的绝对本地路径；`resource://skills/<package>/<version>/<skill>/<relativePath>` 当前明确返回不可用。`write`、`edit`、`grep`、`find` 只接受 Environment 绝对路径。LSP 的 `path` 必须是绝对本地路径，相对路径直接拒绝；bash 要求显式绝对 `workdir`。子 Agent 使用执行根当前 Environment，并从自己的对话历史执行；并行 Thread 共享所选宿主文件系统，文件隔离由任务安排与部署决定。
 
-宿主文件能力由 Node.js Daemon 的 TypeScript 实现；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
+宿主文件能力由 Go Environment Daemon 实现；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
 
 ## 文件读取
 
@@ -30,7 +30,7 @@ lsp: supported (typescript)
 
 未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 仅在读取到文件 EOF 时输出，描述整个文件；窗口已填满且确认还有内容时省略该字段，并停止读取。窗口之后的非法编码不影响当前窗口读取。元数据所需扫描保持有界内存并支持取消。
 
-本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.ts`](../../daemon/src/coding/text.ts)，按同一 offset/column_offset、行数与码点预算和截断判据读取。窗口填满并确认还有后续内容后，本地读取立即停止，不扫描到 EOF。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；超时或取消直接中止连接。受管资源按执行上下文中本次调用所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
+本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.go`](../../daemon-go/internal/coding/text.go)，按同一 offset/column_offset、行数与码点预算和截断判据读取。窗口填满并确认还有后续内容后，本地读取立即停止，不扫描到 EOF。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；超时或取消直接中止连接。受管资源按执行上下文中本次调用所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
 
 Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，可信内置 `read` 放宽为 320 KiB / 2020 行，以容纳完整读取窗口及 header/footer，仍受终态 JSON 与资源硬上限约束。目录清单的展示上界为 48 KiB，分页默认和最大 2000；图片与目录维持独立返回语义。
 
@@ -41,12 +41,12 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 同一 Assistant 调用批次中的 Environment `edit` / `write` 按冻结的 Environment 与绝对 `path` 词法身份串行：同一目标文件只允许最早的未结束调用进入预检与执行；前项成功、失败、拒绝或取消后，再派发下一项。不同文件仍可并行。路径只按目标文件系统词法折叠分隔符、`.` 与 `..`，Windows 路径另忽略大小写；不解析符号链接。非 Environment 路径和无法解析的参数不参与此排序。审批逐项请求，因此后续 edit 的预览在前项写入之后生成。
 
 需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。
-diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，由统一的 review 传输预算约束。
+Daemon 使用 Go diff 实现计算变更，保留变更行与上下文；行尾与 EOF 缺失换行标记纳入 review 结果，由统一的 review 传输预算约束。
 完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
-grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。Daemon 检索调用随包提供的 ripgrep（rg）：`fs.find` 解析 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。超时或取消时终止 rg 进程并等待 stdio 和进程退出；超时与取消保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配会完整输出该匹配展开的所有行，输出总量仍受现有 50 KiB / 2000 行转存保护，截断提示按匹配数说明。
+Go Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两项工具都可用 `glob` 限定相对搜索根的路径；grep 的 `pattern` 可包含换行，跨行匹配不另设 `multiline` 开关。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时或取消保留已收集的 partial 匹配，并显式标记 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。
 
-grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、分层规则、否定规则和 .git/info/exclude，支持 .git 文件形式的 worktree。不因调用目录变化而改变同一目标的忽略行为。不引入 Environment 根目录。
+grep/find 按 Git 仓库边界应用忽略规则：仓库内只使用仓库根到目标文件之间的 `.gitignore` 与该仓库 `.git/info/exclude`；嵌套仓库只使用自身规则；仓库根以上的 `.gitignore` 和全局 Git excludes 不生效。仓库外仅使用搜索根及其以下的 `.gitignore`。支持 `.git` 文件形式的 worktree；隐藏文件会搜索，`.git` 会跳过，符号链接不跟随。忽略路径在结果中被略过；若没有匹配，会提示最多 10 个因忽略规则未搜索的路径。要搜索被忽略目录，可将其本身作为 `path`；直接传入的文件路径会被搜索。
 
 ## 命令执行
 
