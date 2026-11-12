@@ -25,7 +25,7 @@ func ensurePrivateDirectory(path string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.Mkdir(path, 0700); err != nil {
+	if err := os.MkdirAll(path, 0700); err != nil {
 		return err
 	}
 	return setWindowsOwnerOnly(path)

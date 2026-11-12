@@ -46,6 +46,17 @@ func TestWindowsPrivateFS_OwnerOnlyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWindowsPrivateFS_CreatesNestedDirectory verifies missing parent directories are created.
+func TestWindowsPrivateFS_CreatesNestedDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "ide", "private")
+	if err := ensurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestWindowsPrivateFS_RejectDirectoriesAsFiles checks both read and write file boundaries.
 func TestWindowsPrivateFS_RejectDirectoriesAsFiles(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
