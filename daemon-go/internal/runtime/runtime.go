@@ -352,14 +352,8 @@ func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
 		}
 		return r.handleInvoke(ctx, e)
 	case protocol.MessageType_CANCEL:
-		if !ready {
-			return nil
-		}
 		return r.handleCancel(e)
 	case protocol.MessageType_RECOVER:
-		if !ready {
-			return nil
-		}
 		return r.handleRecover(e)
 	case protocol.MessageType_UPDATE:
 		if !ready || e.EnvironmentId == nil || *e.EnvironmentId == "" {
@@ -950,7 +944,12 @@ func (r *Runtime) handleCancel(e *protocol.Envelope) error {
 	}
 	entry, ok := r.journal.Get(id)
 	if ok && entry.State != InvocationRunning {
-		return r.replay(entry)
+		r.mu.RLock()
+		ready := r.ready
+		r.mu.RUnlock()
+		if ready {
+			return r.replay(entry)
+		}
 	}
 	return nil
 }
@@ -958,9 +957,25 @@ func (r *Runtime) handleRecover(e *protocol.Envelope) error {
 	if e.InvocationId == nil {
 		return nil
 	}
-	entry, ok := r.journal.Get(*e.InvocationId)
+	id := *e.InvocationId
+	r.mu.RLock()
+	ready := r.ready
+	r.mu.RUnlock()
+	entry, ok := r.journal.Get(id)
+	if !ready {
+		if !ok || entry.State != InvocationRunning {
+			return nil
+		}
+		r.callsMu.Lock()
+		_, active := r.calls[id]
+		r.callsMu.Unlock()
+		if !active {
+			return nil
+		}
+		return r.replay(entry)
+	}
 	if !ok {
-		return r.sendRecoverNotFound(*e.InvocationId)
+		return r.sendRecoverNotFound(id)
 	}
 	return r.replay(entry)
 }
@@ -972,7 +987,7 @@ func (r *Runtime) replay(entry JournalEntry) error {
 	if err := proto.Unmarshal(entry.Terminal, &frame); err != nil {
 		return errors.New("journal terminal frame is invalid")
 	}
-	if err := r.sendBound(&frame, true); err != nil {
+	if err := r.sendBound(&frame, false); err != nil {
 		return err
 	}
 	if entry.Exited {
@@ -1011,10 +1026,10 @@ func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, stat
 	if !r.journal.Complete(id, state, data) {
 		return nil
 	}
-	return r.sendBound(frame, true)
+	return r.sendBound(frame, false)
 }
 func (r *Runtime) sendStarted(id string, replayed bool) error {
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: &protocol.Started{Replayed: boolPtr(replayed)}}}, true)
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_STARTED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Started{Started: &protocol.Started{Replayed: boolPtr(replayed)}}}, false)
 }
 func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	entry, ok := r.journal.Get(id)
@@ -1031,13 +1046,13 @@ func (r *Runtime) sendProgress(id string, result CapabilityResult) error {
 	if err != nil {
 		return err
 	}
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_PROGRESS, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Progress{Progress: &protocol.Progress{Result: encoded}}}, true)
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_PROGRESS, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Progress{Progress: &protocol.Progress{Result: encoded}}}, false)
 }
 func (r *Runtime) sendRecoverNotFound(id string) error {
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_RECOVER_NOT_FOUND, InvocationId: stringPtr(id), Payload: &protocol.Envelope_RecoverNotFound{RecoverNotFound: &protocol.RecoverNotFound{}}}, true)
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_RECOVER_NOT_FOUND, InvocationId: stringPtr(id), Payload: &protocol.Envelope_RecoverNotFound{RecoverNotFound: &protocol.RecoverNotFound{}}}, false)
 }
 func (r *Runtime) sendExecutionExited(id string) error {
-	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_EXECUTION_EXITED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_ExecutionExited{ExecutionExited: &protocol.ExecutionExited{}}}, true)
+	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_EXECUTION_EXITED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_ExecutionExited{ExecutionExited: &protocol.ExecutionExited{}}}, false)
 }
 func (r *Runtime) sendError(id *string, message string) error {
 	return r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_ERROR, InvocationId: id, Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: stringPtr(message)}}}, false)
@@ -1126,11 +1141,11 @@ func (r *Runtime) heartbeatLoop(ctx context.Context, done chan<- struct{}) {
 			return
 		case <-ticker.C:
 			r.mu.RLock()
-			bound, ready := r.bound, r.ready
+			bound := r.bound
 			r.mu.RUnlock()
-			if bound && ready {
+			if bound {
 				h := &protocol.Heartbeat{RuntimeStatus: r.runtimeSnapshot()}
-				_ = r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: h}}, true)
+				_ = r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: h}}, false)
 			}
 		}
 	}
