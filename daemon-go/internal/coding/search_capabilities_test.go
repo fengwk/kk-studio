@@ -190,7 +190,7 @@ func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 	}
 }
 
-// COD-T-043: skipped multiline files remain visible in the standard search summary.
+// COD-T-019, COD-T-020, COD-T-043: skipped paths are summarized without failing the result.
 func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	dataDir := t.TempDir()
 	for _, tc := range []struct {

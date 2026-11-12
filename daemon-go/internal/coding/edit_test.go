@@ -86,6 +86,44 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	}
 }
 
+// COD-T-016
+func TestEditMultilineInsert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "insert.txt")
+	if err := os.WriteFile(path, []byte("a\r\nc\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nc", "new_string": "a\nb\nc"}, nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
+		t.Fatalf("edit=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != "a\r\nb\r\nc\r\n" {
+		t.Fatalf("inserted file=%q", written)
+	}
+}
+
+// COD-T-017
+func TestEditMultilineDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delete.txt")
+	if err := os.WriteFile(path, []byte("a\r\nb\r\nc\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nb\nc", "new_string": "a\nc"}, nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
+		t.Fatalf("edit=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != "a\r\nc\r\n" {
+		t.Fatalf("deleted file=%q", written)
+	}
+}
+
 // COD-T-098
 func TestEditPreservesMixedLineEndings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.txt")

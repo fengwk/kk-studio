@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// COD-T-001
+// COD-T-122
 func TestOutputLimitsAndInlineThreshold(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -44,6 +44,9 @@ func TestOutputLineCountHandlesCRLFOnce(t *testing.T) {
 	spool.Write([]byte("\nb\nlast"))
 	if got := spool.totalLines(); got != 3 {
 		t.Fatalf("line count=%d want=3", got)
+	}
+	if got := spool.TotalBytes(); got != 9 {
+		t.Fatalf("byte count=%d want=9", got)
 	}
 	_ = spool.Close()
 }
