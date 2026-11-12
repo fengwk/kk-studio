@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -34,6 +33,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -43,7 +44,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/** 验证 OpenAI Responses SSE 流式状态机的事件聚合、截断诊断、用量归一化与回放状态生成。 */
+/** 验证 OpenAI Responses SSE 流式状态机的事件聚合、截断诊断、用量归一化与原生 block 生成。 */
 class OpenAiResponsesStreamAccumulatorTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
@@ -149,7 +150,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(" World", ((ProviderStreamEvent.TextDelta) emittedEvents.get(1)).text());
   }
 
-  /** 意图：refusal 是正常完成的可见助手文本，终态不得与流式 delta 重复，且原生形态可回放。 */
+  /** 意图：refusal 是正常完成的可见助手文本，终态不得与流式 delta 重复，且保留 block 元数据。 */
   @Test
   void test_refusalStreamProducesVisibleCompletedTextWithoutDuplication() throws Exception {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
@@ -335,7 +336,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertTrue(ex.getMessage().contains("premature EOF"));
   }
 
-  /** 意图：验证 incomplete_details 包含 max_output_tokens 时映射为 LENGTH，未闭合工具生成诊断且禁止回放。 */
+  /** 意图：验证 incomplete_details 包含 max_output_tokens 时映射为 LENGTH，未闭合工具生成诊断且不生成工具 block。 */
   @Test
   void test_incompleteLengthWithTruncatedToolCall() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -360,10 +361,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("call_abc", resp.toolCallDiagnostics().get(0).id());
     assertTrue(
         resp.toolCalls().isEmpty(), "truncated tool call must not be synthesized into toolCalls");
-    assertNull(accumulator.replayState());
+    assertTrue(resp.blocks().isEmpty());
   }
 
-  /** 意图：验证 incomplete_details 包含 content_filter 时映射为 FILTERED，撤回工具且禁止回放。 */
+  /** 意图：验证 incomplete_details 包含 content_filter 时映射为 FILTERED，并清空工具与 response blocks。 */
   @Test
   void test_incompleteContentFilterYieldsFilteredStopReason() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -381,7 +382,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(GenerationStopReason.FILTERED, resp.stopReason());
     assertTrue(resp.toolCalls().isEmpty());
     assertTrue(resp.toolCallDiagnostics().isEmpty());
-    assertNull(accumulator.replayState());
+    assertTrue(resp.blocks().isEmpty());
   }
 
   /** 意图：验证三种错误事件均由状态机立即派发为异常，而非等待终态或在 finish 时才失败。 */
@@ -731,9 +732,9 @@ class OpenAiResponsesStreamAccumulatorTest {
     }
   }
 
-  /** 意图：验证 LENGTH 终态下参数畸形的工具调用生成诊断，不进入 toolCalls 也不进入 replay。 */
+  /** 意图：验证 LENGTH 终态下参数畸形的工具调用生成诊断，不进入 toolCalls 或 response blocks。 */
   @Test
-  void test_lengthDiagnosesMalformedToolCallArgumentsAndDisablesReplay() throws Exception {
+  void test_lengthDiagnosesMalformedToolCallArgumentsWithoutToolBlock() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -759,12 +760,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(1, resp.toolCallDiagnostics().size());
     assertEquals("call_abc", resp.toolCallDiagnostics().get(0).id());
     assertEquals("{\"query\": \"par", resp.toolCallDiagnostics().get(0).partialArguments());
-    assertNull(
-        accumulator.replayState(),
-        "replay state must be disabled when tool arguments are truncated");
+    assertTrue(resp.blocks().isEmpty(), "truncated tool call must not produce a response block");
   }
 
-  /** 意图：验证当模型显式产出合法的空对象 arguments "{}" 时，正常保留在 toolCalls 与 replayState 中。 */
+  /** 意图：验证当模型显式产出合法的空对象 arguments "{}" 时，正常保留在 toolCalls 与原生工具 block 中。 */
   @Test
   void test_retainsValidExplicitEmptyObjectToolCallArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -790,13 +789,13 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
     assertEquals(1, resp.toolCalls().size());
     assertEquals("{}", resp.toolCalls().get(0).argumentsJson());
-    assertNotNull(accumulator.replayState());
-    assertEquals(
-        "{}",
-        accumulator.replayState().payload().get("output").get(0).get("arguments").asString(""));
+    ProviderToolCallBlock toolBlock = (ProviderToolCallBlock) resp.blocks().get(0);
+    assertEquals("item_1", toolBlock.providerBlockData().itemId());
+    assertEquals("function_call", toolBlock.providerBlockData().itemType());
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, toolBlock.providerBlockData().protocol());
   }
 
-  /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的合法空对象 "{}" 产出 tool call 与 replay。 */
+  /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的合法空对象 "{}" 产出 tool call block。 */
   @Test
   void test_completeTerminalOnlyValidEmptyObjectArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -815,12 +814,9 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("get_time", resp.toolCalls().get(0).name());
     assertEquals("{}", resp.toolCalls().get(0).argumentsJson());
 
-    assertNotNull(accumulator.replayState());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output").get(0);
-    assertEquals("function_call", replayOutput.path("type").asString(""));
-    assertEquals("call_term_1", replayOutput.path("call_id").asString(""));
-    assertEquals("get_time", replayOutput.path("name").asString(""));
-    assertEquals("{}", replayOutput.path("arguments").asString(""));
+    ProviderToolCallBlock toolBlock = (ProviderToolCallBlock) resp.blocks().get(0);
+    assertEquals("function_call", toolBlock.providerBlockData().itemType());
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, toolBlock.providerBlockData().protocol());
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若缺失 arguments 则抛出 INVALID_RESPONSE。 */
@@ -939,9 +935,9 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("tool call missing name", ex.getMessage());
   }
 
-  /** 意图：验证 LENGTH 终态下仅在 terminal output 出现的不完整 tool call 生成诊断且禁用回放。 */
+  /** 意图：验证 LENGTH 终态下仅在 terminal output 出现的不完整 tool call 生成诊断且不生成工具 block。 */
   @Test
-  void test_lengthTerminalOnlyIncompleteToolCallProducesDiagnosticAndNoReplay() throws Exception {
+  void test_lengthTerminalOnlyIncompleteToolCallProducesDiagnosticWithoutToolBlock() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -961,9 +957,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("call_term_trunc", resp.toolCallDiagnostics().get(0).id());
     assertEquals("search", resp.toolCallDiagnostics().get(0).name());
     assertEquals("{\"query\": \"part", resp.toolCallDiagnostics().get(0).partialArguments());
-    assertNull(
-        accumulator.replayState(),
-        "replay state must be disabled when tool arguments are truncated");
+    assertTrue(resp.blocks().isEmpty(), "truncated tool call must not produce a response block");
   }
 
   /** 意图：验证显式 usage: null 作为最新快照清空前一 usage 状态，随后 finish/response 抛出 INVALID_RESPONSE。 */
@@ -1026,10 +1020,9 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertTrue(
         resp.toolCalls().isEmpty(),
         "tool call from stream must be purged when terminal output has no tools");
-    assertNotNull(accumulator.replayState());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asString(""));
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(0);
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
   /** 意图：验证当 terminal response 提供 output 时，前序流式 tool 被 terminal output 中的 tool 权威替换。 */
@@ -1067,11 +1060,11 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("new_tool", resp.toolCalls().get(0).name());
     assertEquals("{}", resp.toolCalls().get(0).argumentsJson());
 
-    assertNotNull(accumulator.replayState());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals("call_2", replayOutput.get(0).path("call_id").asString(""));
-    assertEquals("new_tool", replayOutput.get(0).path("name").asString(""));
+    ProviderToolCallBlock toolBlock = (ProviderToolCallBlock) resp.blocks().get(0);
+    assertEquals("item_2", toolBlock.providerBlockData().itemId());
+    assertEquals("function_call", toolBlock.providerBlockData().itemType());
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, toolBlock.providerBlockData().protocol());
+    assertEquals(ProviderType.OPENAI_RESPONSES, toolBlock.providerBlockData().affinity().providerType());
   }
 
   /** 意图：验证 response 中显式提供非 Array 的 output 字段（如对象、标量或 null）时严格抛出 INVALID_RESPONSE。 */
@@ -1207,17 +1200,18 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertFalse(
         resp.thinking().contains("Draft"), "draft thinking must not survive terminal replacement");
 
-    // 验证 replayState
-    assertNotNull(accumulator.replayState());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
-    assertEquals("message", replayOutput.get(1).path("type").asString(""));
+    assertEquals(2, resp.blocks().size());
+    ProviderThinkingBlock thinkingBlock = (ProviderThinkingBlock) resp.blocks().get(0);
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
+    assertEquals("summary_text", thinkingBlock.providerBlockData().contentType());
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(1);
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
-  /** 意图：验证 terminal response 显式提供空的 output 数组时，前序流式草稿文本、思考内容与工具调用被完全清空，且无 replayState。 */
+  /** 意图：验证 terminal response 显式提供空的 output 数组时，前序流式草稿文本、思考内容、工具调用与 blocks 被完全清空。 */
   @Test
-  void test_terminalEmptyOutputClearsStreamedContentAndReplay() throws Exception {
+  void test_terminalEmptyOutputClearsStreamedContentAndBlocks() throws Exception {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
@@ -1254,8 +1248,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         "", resp.thinking(), "streamed draft thinking must be cleared by terminal empty output");
     assertTrue(
         resp.toolCalls().isEmpty(), "streamed tool calls must be cleared by terminal empty output");
-    assertNull(
-        accumulator.replayState(), "replay state must be null when terminal output is empty");
+    assertTrue(resp.blocks().isEmpty(), "response blocks must be empty when terminal output is empty");
   }
 
   /** 意图：验证 terminal response 显式提供仅包含 message 的 output 时，前序流式思考内容被完全清除，终态权威。 */
@@ -1306,18 +1299,17 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("Replacement message only", resp.text());
     assertEquals(
         "", resp.thinking(), "streamed thinking must not survive when omitted by terminal output");
-    assertNotNull(accumulator.replayState());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asString(""));
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(0);
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
   /**
-   * 意图：验证 response.created 携带 output:[] 时，随后通过 output_item 流式接收文本， 且 terminal completed response 省略
-   * output 字段时，最终文本与 raw replay 正确保留，不被初始 snapshot 误清。
+   * 意图：验证 response.created 携带 output:[] 时，随后通过 output_item 流式接收文本，且 terminal response 省略
+   * output 字段时，最终文本与消息 block 正确保留，不被初始 snapshot 误清。
    */
   @Test
-  void test_createdWithEmptyOutputAndStreamedItemDonePreservesReplayWhenTerminalOmitsOutput()
+  void test_createdWithEmptyOutputAndStreamedItemDonePreservesBlockWhenTerminalOmitsOutput()
       throws Exception {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
@@ -1362,24 +1354,21 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
     assertEquals("Hello streamed world", resp.text());
 
-    assertNotNull(
-        accumulator.replayState(), "replay state must not be cleared by created output:[]");
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertNotNull(replayOutput);
-    assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asString(""));
-    assertEquals(
-        "Hello streamed world",
-        replayOutput.get(0).path("content").get(0).path("text").asString(""));
+    assertEquals(1, resp.blocks().size());
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(0);
+    assertEquals("Hello streamed world", textBlock.text());
+    assertEquals("msg_1", textBlock.providerBlockData().itemId());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
   /**
-   * 意图：验证 response.created 携带 output:[] 时，随后仅收到纯文本 delta（无 output_item.done）， 且 terminal completed
-   * response 省略 output 字段时，最终文本与合成 replay 均正确保留。
+   * 意图：验证 response.created 携带 output:[] 时，随后仅收到纯文本 delta（无 output_item.done），且 terminal completed
+   * response 省略 output 字段时，最终文本仍正确保留。
    */
   @Test
   void
-      test_createdWithEmptyOutputAndPureTextDeltasPreservesSynthesizedReplayWhenTerminalOmitsOutput()
+      test_createdWithEmptyOutputAndPureTextDeltasPreservesTextWhenTerminalOmitsOutput()
           throws Exception {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
@@ -1418,19 +1407,16 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
     assertEquals("Pure streamed delta", resp.text());
 
-    assertNotNull(accumulator.replayState(), "replay state must be synthesized from textBuffer");
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertNotNull(replayOutput);
-    assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asString(""));
-    assertEquals(
-        "Pure streamed delta",
-        replayOutput.get(0).path("content").get(0).path("text").asString(""));
+    assertEquals(1, resp.blocks().size());
+    ProviderTextBlock textBlock = (ProviderTextBlock) resp.blocks().get(0);
+    assertEquals("Pure streamed delta", textBlock.text());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
-  /** 意图：验证 terminal output 的兼容文本简写在终态结果与标准化 replay 中均被无损保留。 */
+  /** 意图：验证 terminal output 的兼容文本简写在终态结果与原生 blocks 中均被无损保留。 */
   @Test
-  void test_terminalTextualMessageAndReasoningContentPreservedInReplay() throws Exception {
+  void test_terminalTextualMessageAndReasoningContentPreservedInBlocks() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1457,12 +1443,15 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("Final answer", response.text());
     assertEquals("Condensed reasoning", response.thinking());
 
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(
-        "Condensed reasoning",
-        replayOutput.get(0).path("summary").get(0).path("text").asString(""));
-    assertEquals(
-        "Final answer", replayOutput.get(1).path("content").get(0).path("text").asString(""));
+    assertEquals(2, response.blocks().size());
+    ProviderThinkingBlock thinkingBlock = (ProviderThinkingBlock) response.blocks().get(0);
+    assertEquals("Condensed reasoning", thinkingBlock.thinking());
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
+    assertEquals("summary_text", thinkingBlock.providerBlockData().contentType());
+    ProviderTextBlock textBlock = (ProviderTextBlock) response.blocks().get(1);
+    assertEquals("Final answer", textBlock.text());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
   }
 
   /**
@@ -1633,9 +1622,11 @@ class OpenAiResponsesStreamAccumulatorTest {
                 + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"enc_terminal\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"s1\"}]}]}}"));
 
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals("enc_terminal", replayOutput.get(0).path("encrypted_content").asString(""));
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) accumulator.response().blocks().get(0);
+    assertEquals("enc_terminal", thinkingBlock.providerBlockData().encryptedContent());
+    assertEquals("rs_1", thinkingBlock.providerBlockData().itemId());
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
   }
 
   /** 意图：验证 terminal output 的 reasoning summary 权威覆盖流式累积的 summary 内容。 */
@@ -1661,11 +1652,12 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderResponse resp = accumulator.response();
     assertEquals("terminal summary", resp.thinking());
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(
-        "terminal summary", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
-    // 同时保留了未被 terminal 显式覆盖的流式 encrypted_content
-    assertEquals("enc_s", replayOutput.get(0).path("encrypted_content").asString(""));
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) resp.blocks().get(0);
+    assertEquals("terminal summary", thinkingBlock.thinking());
+    assertEquals("enc_s", thinkingBlock.providerBlockData().encryptedContent());
+    assertEquals("rs_1", thinkingBlock.providerBlockData().itemId());
+    assertEquals("summary_text", thinkingBlock.providerBlockData().contentType());
   }
 
   /** 意图：验证当 terminal output 的 reasoning id 与流式不同时判定为冲突，流式项被替换且不继承其 encrypted_content。 */
@@ -1690,12 +1682,12 @@ class OpenAiResponsesStreamAccumulatorTest {
                 + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_terminal\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"term summary\"}]}]}}"));
 
-    JsonNode replayOutput = accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals(
-        "term summary", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
-    // 由于 ID冲突，不得继承 rs_stream 的 encrypted_content
-    assertFalse(replayOutput.get(0).has("encrypted_content"));
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) accumulator.response().blocks().get(0);
+    assertEquals("term summary", thinkingBlock.thinking());
+    assertEquals("rs_terminal", thinkingBlock.providerBlockData().itemId());
+    assertEquals("reasoning", thinkingBlock.providerBlockData().itemType());
+    assertNull(thinkingBlock.providerBlockData().encryptedContent());
   }
 
   /** 意图：验证 terminal output 的 message content 权威覆盖流式 text delta。 */
@@ -1776,10 +1768,10 @@ class OpenAiResponsesStreamAccumulatorTest {
 
   /**
    * 意图：验证 terminal output 中的未知官方 item（web/file search、code interpreter、image generation、custom tool
-   * call 等）作为不透明事实被完整冻结进 replay，而不是被静默丢弃；已知类型仍按既有归一化处理。
+   * call 等）作为不透明事实保留在各自的原生 block 中，而不是被静默丢弃；已知类型仍按既有归一化处理。
    */
   @Test
-  void test_unknownTerminalOutputItemsAreFrozenIntactForReplay() throws Exception {
+  void test_unknownTerminalOutputItemsArePreservedInBlocks() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1858,11 +1850,11 @@ class OpenAiResponsesStreamAccumulatorTest {
   }
 
   /**
-   * 意图：验证仅通过流式 output_item.done 到达的未知 item 同样进入 replay；而缺少非空白 string type 的碎片
-   * 绝不冻结（冻结它只会让下一轮编码必然失败）。
+   * 意图：验证仅通过流式 output_item.done 到达的未知 item 同样保留为原生 block；缺少非空白 string type 的碎片
+   * 不进入 blocks。
    */
   @Test
-  void test_streamedUnknownItemsFrozenButTypeLessFragmentsAreNot() throws Exception {
+  void test_streamedUnknownItemsBecomeBlocksButTypeLessFragmentsDoNot() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1882,13 +1874,14 @@ class OpenAiResponsesStreamAccumulatorTest {
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream_opaque\",\"status\":\"completed\","
                 + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
 
-    assertNotNull(accumulator.replayState());
-    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"code_interpreter_call\",\"id\":\"ci_1\",\"status\":\"completed\",\"code\":\"1+1\"}"),
-        replayOutput.get(0));
+    ProviderResponse response = accumulator.response();
+    assertEquals(1, response.blocks().size());
+    ProviderOpaqueBlock codeInterpreter = (ProviderOpaqueBlock) response.blocks().get(0);
+    assertEquals("code_interpreter_call", codeInterpreter.providerBlockData().itemType());
+    assertEquals("ci_1", codeInterpreter.providerBlockData().itemId());
+    assertEquals("completed", codeInterpreter.providerBlockData().nativeFields().path("item").path("status").asString(""));
+    assertEquals("1+1", codeInterpreter.providerBlockData().nativeFields().path("item").path("code").asString(""));
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, codeInterpreter.providerBlockData().protocol());
   }
 
   /**
@@ -1922,26 +1915,46 @@ class OpenAiResponsesStreamAccumulatorTest {
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_slots\",\"status\":\"completed\","
                 + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
 
-    assertNotNull(accumulator.replayState());
-    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
-    assertEquals(2, replayOutput.size());
+    ProviderResponse response = accumulator.response();
+    assertEquals(2, response.blocks().size());
+    ProviderOpaqueBlock completedSearch = (ProviderOpaqueBlock) response.blocks().get(0);
+    assertEquals("web_search_call", completedSearch.providerBlockData().itemType());
+    assertEquals("ws_1", completedSearch.providerBlockData().itemId());
     assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
-                + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}"),
-        replayOutput.get(0));
+        "completed",
+        completedSearch
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("status")
+            .asString(""));
     assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"in_progress\"}"),
-        replayOutput.get(1));
+        "weather",
+        completedSearch
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("action")
+            .path("query")
+            .asString(""));
+    ProviderOpaqueBlock addedImage = (ProviderOpaqueBlock) response.blocks().get(1);
+    assertEquals("image_generation_call", addedImage.providerBlockData().itemType());
+    assertEquals("img_1", addedImage.providerBlockData().itemId());
+    assertEquals(
+        "in_progress",
+        addedImage
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("status")
+            .asString(""));
   }
 
   /**
-   * 意图：验证已知 message 的 added（官方形态下 content 为空）不被当作 replay 事实 —— 文本仍由流式 delta 与终态决定， 不会因为一个未完成的 added
-   * 帧而把已有文本从 replay 中挤掉。
+   * 意图：验证已知 message 的空 added 事件不覆盖流式 delta，terminal 省略 output 时最终 response 保留文本 block。
    */
   @Test
-  void test_knownMessageAddedWithoutDoneKeepsSynthesizedTextReplay() throws Exception {
+  void test_knownMessageAddedWithoutDoneKeepsStreamedTextBlock() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1960,11 +1973,16 @@ class OpenAiResponsesStreamAccumulatorTest {
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_msg_added\",\"status\":\"completed\","
                 + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
 
-    assertNotNull(accumulator.replayState());
-    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
-    assertEquals(1, replayOutput.size());
-    assertEquals("message", replayOutput.get(0).path("type").asString(""));
-    assertEquals("streamed", replayOutput.get(0).path("content").get(0).path("text").asString(""));
+    ProviderResponse response = accumulator.response();
+    assertEquals("streamed", response.text());
+    assertEquals(1, response.blocks().size());
+    ProviderTextBlock textBlock = (ProviderTextBlock) response.blocks().get(0);
+    assertEquals("streamed", textBlock.text());
+    assertEquals("message", textBlock.providerBlockData().itemType());
+    assertEquals("output_text", textBlock.providerBlockData().contentType());
+    assertNull(textBlock.providerBlockData().itemId());
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, textBlock.providerBlockData().protocol());
+    assertEquals(ProviderType.OPENAI_RESPONSES, textBlock.providerBlockData().affinity().providerType());
   }
 
   @Test
