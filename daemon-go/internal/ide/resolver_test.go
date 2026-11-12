@@ -9,15 +9,19 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/transport"
 )
 
-// IDE-T-135
+// IDE-F-010/IDE-T-135 verifies the frozen route, private-header filter, manager cookie, and WebSocket protocols.
 func TestFrozenViewProxyResolution(t *testing.T) {
 	resolver := NewResolver()
 	resolver.BindView("123e4567-e89b-12d3-a456-426614174000", 1, 8123, "code-server-session=session")
 	upstream, err := resolver.ResolveView(context.Background(), transport.ViewRequest{
 		ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: 1, Mode: "WS",
 		Method: "GET", Path: "/?folder=a", Headers: http.Header{
-			"X-Test": {"value"}, "Connection": {"upgrade"}, "Cookie": {"evil=1"},
-			"Sec-Websocket-Protocol": {"first, second"},
+			"X-Test": {"value"}, "Host": {"attacker.invalid"}, "Connection": {"upgrade"},
+			"Keep-Alive": {"timeout=5"}, "Proxy-Authenticate": {"Basic"}, "Proxy-Authorization": {"secret"},
+			"Te": {"trailers"}, "Trailer": {"X-End"}, "Transfer-Encoding": {"chunked"}, "Upgrade": {"websocket"},
+			"Cookie": {"evil=1"}, "Authorization": {"Bearer evil"}, "Origin": {"https://evil.invalid"},
+			"Referer": {"https://evil.invalid/"}, "Sec-Websocket-Key": {"secret"}, "Sec-Websocket-Version": {"13"},
+			"Sec-Websocket-Extensions": {"permessage-deflate"}, "Sec-Websocket-Protocol": {"first, second"},
 		},
 	})
 	if err != nil {
@@ -27,8 +31,17 @@ func TestFrozenViewProxyResolution(t *testing.T) {
 	if upstream.Host != "127.0.0.1" || upstream.Port != 8123 || upstream.Path != "/__kk/ide/view/123e4567-e89b-12d3-a456-426614174000/1/?folder=a" {
 		t.Fatalf("unexpected upstream: %#v", upstream)
 	}
-	if upstream.Cookie != "code-server-session=session" || upstream.Headers.Get("X-Test") != "value" || upstream.Headers.Get("Connection") != "" || upstream.Headers.Get("Cookie") != "" {
+	if upstream.Cookie != "code-server-session=session" || upstream.Headers.Get("X-Test") != "value" {
 		t.Fatalf("unexpected upstream headers/cookie: %#v", upstream)
+	}
+	for _, name := range []string{
+		"Host", "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer",
+		"Transfer-Encoding", "Upgrade", "Cookie", "Authorization", "Origin", "Referer", "Sec-Websocket-Key",
+		"Sec-Websocket-Version", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol",
+	} {
+		if got := upstream.Headers.Get(name); got != "" {
+			t.Errorf("private header %q forwarded: %q", name, got)
+		}
 	}
 	if len(upstream.Protocols) != 2 || upstream.Protocols[0] != "first" {
 		t.Fatalf("protocols = %#v", upstream.Protocols)
