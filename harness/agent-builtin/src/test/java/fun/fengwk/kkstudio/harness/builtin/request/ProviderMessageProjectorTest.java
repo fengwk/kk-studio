@@ -75,7 +75,7 @@ class ProviderMessageProjectorTest {
                                     new TextMessageContent("tool output"),
                                     new JsonMessageContent("{\"found\":true}")),
                                 true,
-                                "{\"code\":\"NOT_FOUND\"}")))));
+                                "{\"code\":\"NOT_FOUND\"}"))))));
 
     assertEquals(
         List.of(ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),

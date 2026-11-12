@@ -63,15 +63,17 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionLifecycle;
@@ -506,12 +508,11 @@ abstract class ModelProcessorTestSupport {
                           basis.userEntryId(),
                           new BuiltinHistoryPayloadMapper()
                               .assistantPayload(
-                                  toolResponse(
+                                  nativeToolResponse(
                                       "answer",
                                       new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
                                   requestWithTool().toolBindings()),
-                          NOW.plusMillis(3),
-                          sampleReplayState()));
+                          NOW.plusMillis(3)));
               tx.threads()
                   .update(
                       tx.threads()
@@ -804,10 +805,10 @@ abstract class ModelProcessorTestSupport {
                       List.of(),
                       now,
                       now,
-                      null,
                       group == null
                           ? null
-                          : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0)));
+                          : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0),
+                      null));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
           tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
@@ -977,6 +978,26 @@ abstract class ModelProcessorTestSupport {
         text, null, List.of(call), GenerationStopReason.COMPLETE, usage(), "req-1", null, null);
   }
 
+  private static ProviderResponse nativeToolResponse(String text, ProviderToolCall call) {
+    ProviderBlockData providerData =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "provider-a", "model-a"),
+            JsonNodeFactory.instance.objectNode().put("token", 42));
+    return new ProviderResponse(
+        List.of(
+            new ProviderTextBlock(text),
+            new ProviderToolCallBlock(call, providerData)),
+        GenerationStopReason.COMPLETE,
+        usage(),
+        "req-1",
+        null,
+        null,
+        List.of(),
+        null,
+        null);
+  }
+
   static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
@@ -1016,12 +1037,6 @@ abstract class ModelProcessorTestSupport {
         "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
 
-  static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
-        ProviderReplayFormat.OPENAI_RESPONSES,
-        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "provider-a", "model-a"),
-        JsonNodeFactory.instance.objectNode().put("token", 42));
-  }
 
   /**
    * 可编排的 fake Gateway：每次 admit 取队列头的一个结果。{@link #queueControlled} 排入一次受测试线程控制的阻塞运行——测试通过 {@link
@@ -1182,7 +1197,7 @@ abstract class ModelProcessorTestSupport {
     }
 
     void succeed(ProviderResponse response) {
-      succeed(new ProviderCompletion(response, null));
+      succeed(new ProviderCompletion(response));
     }
 
     void fail(ModelInvocationError error) {

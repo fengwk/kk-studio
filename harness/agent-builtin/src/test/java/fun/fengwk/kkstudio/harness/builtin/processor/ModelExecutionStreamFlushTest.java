@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -49,9 +48,6 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -966,7 +962,7 @@ class ModelExecutionStreamFlushTest {
     // 投递合法 FILTERED 响应（内容被过滤为空，不作为前缀）
     execution.finish(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(response("", GenerationStopReason.FILTERED), null)));
+            new ProviderCompletion(response("", GenerationStopReason.FILTERED))));
 
     // 校验：恰好单次 UPDATE 为 SUCCEEDED，checkpoint 撤回为 null
     assertEquals(
@@ -1029,7 +1025,7 @@ class ModelExecutionStreamFlushTest {
     // 投递合法 FILTERED 响应
     execution.finish(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(response("", GenerationStopReason.FILTERED), null)));
+            new ProviderCompletion(response("", GenerationStopReason.FILTERED))));
 
     // 校验：单次 UPDATE 为 SUCCEEDED，checkpoint 保持 null，未刷批次被丢弃未发布
     assertEquals(
@@ -1090,7 +1086,7 @@ class ModelExecutionStreamFlushTest {
             "",
             List.of(new ProviderToolCall("call-1", "tool", "{}")),
             GenerationStopReason.FILTERED);
-    execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(illegalFiltered, null)));
+    execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(illegalFiltered)));
 
     ModelInvocation finalModel =
         store
@@ -1102,40 +1098,36 @@ class ModelExecutionStreamFlushTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, finalModel.error().kind());
   }
 
-  /**
-   * 意图：验证 provider native replay state 的保留集合与「非撤下终态」一致——CONTINUE 续写请求必须原样携带上游 native 字段，FILTERED
-   * 这类协议撤下态则不保留。
-   */
+  /** CONTINUE and FILTERED terminal completions both retain their semantic response facts. */
   @Test
-  void continuationTerminalRetainsProviderReplayStateWhileFilteredDropsIt() {
+  void continuationAndFilteredTerminalsRetainResponseResults() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     Fixture continuationFixture = createFixture(flushConfig, NO_RETRY);
     continuationFixture.start();
-    ProviderReplayState replayState = sampleReplayState();
 
+    ProviderResponse continuationResponse = response("paused", GenerationStopReason.CONTINUE);
     continuationFixture
         .listener()
-        .onSucceeded(
-            new ProviderCompletion(response("paused", GenerationStopReason.CONTINUE), replayState));
+        .onSucceeded(new ProviderCompletion(continuationResponse));
 
     ModelInvocation continued = continuationFixture.currentModel();
     assertEquals(ModelInvocationStatus.SUCCEEDED, continued.status());
     assertEquals(GenerationStopReason.CONTINUE, continued.result().stopReason());
     assertNull(continued.resultEntryId());
-    assertEquals(replayState, continued.providerReplayState());
+    assertEquals(continuationResponse.blocks(), continued.result().blocks());
 
     Fixture filteredFixture = createFixture(flushConfig, NO_RETRY);
     filteredFixture.start();
 
+    ProviderResponse filteredResponse = response("", GenerationStopReason.FILTERED);
     filteredFixture
         .listener()
-        .onSucceeded(
-            new ProviderCompletion(response("", GenerationStopReason.FILTERED), replayState));
+        .onSucceeded(new ProviderCompletion(filteredResponse));
 
     ModelInvocation filtered = filteredFixture.currentModel();
     assertEquals(ModelInvocationStatus.SUCCEEDED, filtered.status());
-    assertNull(filtered.providerReplayState());
+    assertEquals(filteredResponse.blocks(), filtered.result().blocks());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1365,7 +1357,7 @@ class ModelExecutionStreamFlushTest {
     }
 
     ProcessResult onSucceeded(ProviderResponse response) {
-      return end(new ModelGateway.Succeeded(new ProviderCompletion(response, null)));
+      return end(new ModelGateway.Succeeded(new ProviderCompletion(response)));
     }
 
     ProcessResult onSucceeded(ProviderCompletion completion) {
@@ -1460,14 +1452,6 @@ class ModelExecutionStreamFlushTest {
 
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
-  }
-
-  /** 测试用 native replay state：CONTINUE 等非撤下终态必须原样保留它（FILTERED 不保留）。 */
-  private static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
-        ProviderReplayFormat.OPENAI_RESPONSES,
-        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "minimax", "minimax-m2"),
-        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static ModelCost cost() {
