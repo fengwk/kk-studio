@@ -30,7 +30,10 @@ type WindowOptions struct {
 type TextWindow struct {
 	Body             string
 	StartLine        int
+	StartColumn      int
 	EndLine          int
+	EndColumn        int
+	Empty            bool
 	EndsWithNewline  *bool
 	Truncated        bool
 	TruncationReason string
@@ -134,18 +137,24 @@ func ReadTextWindow(text string, options WindowOptions) (TextWindow, error) {
 	if options.ColumnOffset < 0 {
 		return TextWindow{}, errors.New("column_offset must be a positive integer")
 	}
+	if options.ColumnOffset == 0 {
+		options.ColumnOffset = 1
+	}
 	text = stringsReplaceCRLF(text)
 	lines := splitLines(text)
 	if options.Offset > len(lines) {
-		return TextWindow{StartLine: 0, EndLine: 0}, nil
+		ends := strings.HasSuffix(text, "\n")
+		return TextWindow{Empty: true, EndsWithNewline: &ends}, nil
 	}
 	start := options.Offset - 1
 	end := min(len(lines), start+options.Limit)
 	selected := append([]string(nil), lines[start:end]...)
-	if options.ColumnOffset > len([]rune(selected[0])) {
-		return TextWindow{}, errors.New("column_offset exceeds the first line length")
+	firstRunes := []rune(selected[0])
+	columnIndex := options.ColumnOffset - 1
+	if columnIndex >= len(firstRunes) && len(firstRunes) > 0 || columnIndex > 0 && len(firstRunes) == 0 {
+		return TextWindow{}, fmt.Errorf("column_offset %d is out of range: line %d has %d columns", options.ColumnOffset, options.Offset, len(firstRunes))
 	}
-	selected[0] = string([]rune(selected[0])[options.ColumnOffset:])
+	selected[0] = string(firstRunes[columnIndex:])
 	truncated, reason := false, ""
 	count := 0
 	for i, line := range selected {
@@ -157,30 +166,49 @@ func ReadTextWindow(text string, options WindowOptions) (TextWindow, error) {
 			break
 		}
 		count += len(runes)
-		if i < len(selected)-1 {
-			count++
-		}
+	}
+	if !truncated && count >= MaxReadCodePoints && end < len(lines) {
+		truncated, reason = true, "character_limit"
 	}
 	if !truncated && end < len(lines) {
 		truncated, reason = true, "line_limit"
 	}
-	window := TextWindow{Body: numberedLines(selected, start+1), StartLine: start + 1, EndLine: start + len(selected), Truncated: truncated, TruncationReason: reason}
-	if !truncated || end == len(lines) {
+	startColumn := 1
+	if start == 0 {
+		startColumn = options.ColumnOffset
+	}
+	lastColumn := 1
+	if len(selected) > 0 {
+		lastStartColumn := 1
+		if start+len(selected)-1 == start {
+			lastStartColumn = options.ColumnOffset
+		}
+		lastColumn = max(1, lastStartColumn-1+len([]rune(selected[len(selected)-1])))
+	}
+	window := TextWindow{Body: numberedLines(selected, start+1), StartLine: start + 1, StartColumn: startColumn, EndLine: start + len(selected), EndColumn: lastColumn, Truncated: truncated, TruncationReason: reason}
+	if !truncated {
 		ends := strings.HasSuffix(text, "\n")
 		window.EndsWithNewline = &ends
 	}
 	if truncated {
-		window.NextLine = window.EndLine + 1
-		window.NextColumn = 1
+		if reason == "character_limit" {
+			window.NextLine = window.EndLine
+			window.NextColumn = window.EndColumn + 1
+		} else {
+			window.NextLine = window.EndLine + 1
+			window.NextColumn = 1
+		}
 	}
 	return window, nil
 }
 
-func stringsReplaceCRLF(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
+func stringsReplaceCRLF(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
 
 func splitLines(s string) []string {
 	if s == "" {
-		return []string{""}
+		return nil
 	}
 	parts := bytes.Split([]byte(s), []byte("\n"))
 	if len(parts) > 1 && len(parts[len(parts)-1]) == 0 {

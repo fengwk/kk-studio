@@ -146,14 +146,28 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	if args.Offset == 0 {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(call.Arguments, &raw); err != nil {
+		return errorResult(call.InvocationID, errors.New("invalid arguments")), nil
+	}
+	if _, exists := raw["offset"]; !exists {
 		args.Offset = 1
 	}
-	if args.Limit == 0 {
+	if _, exists := raw["limit"]; !exists {
 		args.Limit = DefaultReadLimit
 	}
-	if args.Offset < 1 || args.Limit < 1 || args.Limit > MaxReadLimit || args.ColumnOffset < 0 {
-		return errorResult(call.InvocationID, errors.New("invalid read window")), nil
+	if args.Offset < 1 || args.Offset > 2147483647 {
+		return errorResult(call.InvocationID, errors.New("offset must be a positive integer")), nil
+	}
+	if args.Limit < 1 || args.Limit > MaxReadLimit {
+		return errorResult(call.InvocationID, errors.New("limit must be a positive integer no greater than 2000")), nil
+	}
+	if column, exists := raw["column_offset"]; exists && string(column) != "null" {
+		if err := json.Unmarshal(column, &args.ColumnOffset); err != nil || args.ColumnOffset < 1 {
+			return errorResult(call.InvocationID, errors.New("column_offset must be a positive integer")), nil
+		}
+	} else {
+		args.ColumnOffset = 1
 	}
 	if err := ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -244,7 +258,36 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	return textResult(call.InvocationID, fmt.Sprintf("path: %s\nrange: %d:%d-%d:%d\n\n%s", args.Path, window.StartLine, 1, window.EndLine, 1, window.Body)), nil
+	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
+}
+
+func formatTextWindow(path string, window TextWindow) string {
+	lines := []string{"path: " + filepath.ToSlash(path)}
+	if window.EndsWithNewline != nil {
+		value := "no"
+		if *window.EndsWithNewline {
+			value = "yes"
+		}
+		lines = append(lines, "ends_with_newline: "+value)
+	}
+	if window.Empty {
+		lines = append(lines, "range: empty")
+	} else {
+		lines = append(lines, fmt.Sprintf("range: %d:%d-%d:%d", window.StartLine, window.StartColumn, window.EndLine, window.EndColumn))
+	}
+	if window.Truncated {
+		lines = append(lines, "truncated: yes", "truncation_reason: "+window.TruncationReason, fmt.Sprintf("next: %d:%d", window.NextLine, window.NextColumn))
+	}
+	if window.Body != "" {
+		lines = append(lines, "", window.Body)
+	}
+	if window.Truncated {
+		if window.Body != "" {
+			lines = append(lines, "")
+		}
+		lines = append(lines, fmt.Sprintf("[TRUNCATED: More file content remains. Next position: line %d, column %d.]", window.NextLine, window.NextColumn))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func writeCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {

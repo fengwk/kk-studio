@@ -42,6 +42,25 @@ func TestReadWindowStopsAtLineLimit(t *testing.T) {
 	}
 }
 
+// COD-T-022
+func TestReadWindowColumnOffsetUsesOneBasedColumnsAndCRSeparators(t *testing.T) {
+	window, err := ReadTextWindow("abcdef\rnext\r\n", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window.Body != "1|cdef" || window.StartColumn != 3 || window.EndColumn != 6 || window.NextLine != 2 || window.NextColumn != 1 || !window.Truncated {
+		t.Fatalf("window=%#v", window)
+	}
+}
+
+// COD-F-002
+func TestReadWindowEmptyRangeForEmptyFile(t *testing.T) {
+	window, err := ReadTextWindow("", WindowOptions{Offset: 1, Limit: 10})
+	if err != nil || !window.Empty || window.Body != "" || window.EndsWithNewline == nil || *window.EndsWithNewline {
+		t.Fatalf("window=%#v err=%v", window, err)
+	}
+}
+
 // COD-T-117
 func TestMediaSniffIgnoresExtensionAndDetectsMagic(t *testing.T) {
 	if got := DetectMediaType([]byte("%PDF-anything")); got != "application/pdf" {
