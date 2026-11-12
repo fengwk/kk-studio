@@ -133,12 +133,14 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		executionExited = true
 	}
 	var readErr error
-	select {
-	case readErr = <-readErrors:
-	default:
+	for len(readErrors) > 0 {
+		streamErr := <-readErrors
+		streamClosedByWait := errors.Is(streamErr, os.ErrClosed) && waitErr == nil && terminationResult == nil
+		if !streamClosedByWait {
+			readErr = errors.Join(readErr, streamErr)
+		}
 	}
-	streamClosedByWait := errors.Is(readErr, os.ErrClosed) && waitErr == nil && terminationResult == nil
-	if readErr != nil && !streamClosedByWait && ctx.Err() == nil {
+	if readErr != nil && ctx.Err() == nil {
 		result := spool.Finish(true, "")
 		result.Error = true
 		result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
