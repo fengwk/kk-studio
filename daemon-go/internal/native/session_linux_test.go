@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -39,6 +41,105 @@ func TestLinuxSupervisor_UnknownBaselineFailsBeforeStartingCommand(t *testing.T)
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("command marker exists or cannot be inspected: %v", err)
+	}
+}
+
+func linuxStatRecord(pid, parent, sid, threads int, start string) []byte {
+	fields := make([]string, 20)
+	for index := range fields {
+		fields[index] = "0"
+	}
+	fields[0] = "S"
+	fields[1] = strconv.Itoa(parent)
+	fields[3] = strconv.Itoa(sid)
+	fields[17] = strconv.Itoa(threads)
+	fields[19] = start
+	return []byte(fmt.Sprintf("%d (command with ) delimiter) %s", pid, strings.Join(fields, " ")))
+}
+
+// NAT-F-006 verifies process snapshot errors and disappearing entries never become an empty successful snapshot.
+func TestLinuxProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"noise", "0", "-1", "10", "20", "30", "40", "50"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	readDirError := errors.New("injected proc directory error")
+	api := linuxProcessSnapshotAPI{
+		readDir:  func(string) ([]os.DirEntry, error) { return nil, readDirError },
+		readFile: func(string) ([]byte, error) { return nil, nil },
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); !errors.Is(err, readDirError) || members != nil {
+		t.Fatalf("directory error = %+v, %v", members, err)
+	}
+
+	fileError := errors.New("injected stat read error")
+	api.readDir = os.ReadDir
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 1, 1, "123"), nil
+		case "20", "30":
+			return nil, os.ErrNotExist
+		case "40":
+			return nil, fileError
+		default:
+			return nil, nil
+		}
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); !errors.Is(err, fileError) || members != nil {
+		t.Fatalf("stat read error = %+v, %v", members, err)
+	}
+
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 4, 2, "123"), nil
+		case "20":
+			return nil, os.ErrNotExist
+		case "30":
+			return nil, unix.ESRCH
+		case "40":
+			return []byte("10 (short) S 1"), nil
+		case "50":
+			return linuxStatRecord(50, 1, 4, 2, "not-a-number"), nil
+		default:
+			return nil, nil
+		}
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); err == nil || members != nil {
+		t.Fatalf("malformed stat record = %+v, %v", members, err)
+	}
+	api.readFile = func(path string) ([]byte, error) {
+		if filepath.Base(filepath.Dir(path)) == "50" {
+			return linuxStatRecord(50, 1, 4, 2, "not-a-number"), nil
+		}
+		return linuxStatRecord(10, 1, 4, 2, "123"), nil
+	}
+	if members, err := linuxProcessMembersWithAPI(root, api); err == nil || members != nil {
+		t.Fatalf("invalid stat field = %+v, %v", members, err)
+	}
+	api.readFile = func(path string) ([]byte, error) {
+		switch filepath.Base(filepath.Dir(path)) {
+		case "10":
+			return linuxStatRecord(10, 1, 4, 2, "123"), nil
+		case "20":
+			return nil, os.ErrNotExist
+		case "30":
+			return nil, unix.ESRCH
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	members, err := linuxProcessMembersWithAPI(root, api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []sessionMember{{PID: 10, Parent: 1, Session: 4, Identity: "123", State: "S", Threads: 2}}
+	if !reflect.DeepEqual(members, want) {
+		t.Fatalf("members = %+v, want %+v", members, want)
 	}
 }
 
