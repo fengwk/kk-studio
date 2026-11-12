@@ -30,6 +30,17 @@ public class StorageUpload {
   /** 客户端声明的小写十六进制 SHA-256（64 字符）。 */
   private String declaredSha256;
 
+  /** Client-asserted image MIME subtype and dimensions; null for non-image uploads. */
+  private String format;
+
+  private Integer originalWidth;
+
+  private Integer originalHeight;
+
+  private Integer storedWidth;
+
+  private Integer storedHeight;
+
   /** 显式删除/消费的耐久请求时刻；非 null 后由后台清理并最终删除整行。 */
   private Instant cleanupRequestedAt;
 

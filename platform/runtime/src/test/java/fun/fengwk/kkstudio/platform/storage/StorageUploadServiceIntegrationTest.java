@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
+import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
@@ -108,6 +110,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   // 本类显式驱动 expireOnce，禁用会异步消费相同 cleanup rows 的后台 maintenance。
   @MockitoBean private StorageMaintenance storageMaintenance;
   @MockitoBean private StorageBlobPreviewService blobPreviewService;
+  @MockitoSpyBean private FfmpegStorageMediaProbe mediaProbe;
   // 用于在「行登记」与「写窗口」之间的精确窗口上做确定性交错（默认透传真实实现，每个测试后由 Spring 重置）。
   @MockitoSpyBean private StorageUploadRepository uploadRepository;
 
@@ -442,6 +445,12 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     missingSize.setSizeBytes(null);
     missingSize.setSha256(sha256Hex(new byte[] {1}));
     assertValidation(() -> storageUploadService.reserve(missingSize), "sizeBytes");
+    StorageUploadReserveRequestDTO missingImageMetadata = new StorageUploadReserveRequestDTO();
+    missingImageMetadata.setFilename("a.png");
+    missingImageMetadata.setMediaType("image/png");
+    missingImageMetadata.setSizeBytes(1L);
+    missingImageMetadata.setSha256(sha256Hex(new byte[] {1}));
+    assertValidation(() -> storageUploadService.reserve(missingImageMetadata), "format");
 
     byte[] content = new byte[] {7};
     StorageUploadDTO upload =
@@ -486,6 +495,29 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId()))),
         "complete must delete the temp upload object");
+  }
+
+  @Test
+  void completeUsesClientImageFactsWithoutProbingUploadedBytes() throws Exception {
+    byte[] content = tinyPng();
+    StorageUploadPendingDTO pending =
+        pendingOf(reserve("scaled.png", "image/png", content.length, sha256Hex(content)));
+    assertEquals("png", pending.getFormat());
+    assertEquals(1, pending.getOriginalWidth());
+    assertEquals(1, pending.getOriginalHeight());
+    assertEquals(1, pending.getStoredWidth());
+    assertEquals(1, pending.getStoredHeight());
+    putUploadContent(pending.getId(), content, "image/png");
+
+    StorageUploadReadyDTO ready =
+        readyOf(storageUploadService.complete(UUID.fromString(pending.getId())));
+
+    assertEquals("png", ready.getFormat());
+    assertEquals(1, ready.getOriginalWidth());
+    assertEquals(1, ready.getStoredWidth());
+    assertEquals(1L, blobRow(ready.getBlobId()).width());
+    assertEquals(1L, blobRow(ready.getBlobId()).height());
+    verify(mediaProbe, never()).probe(any(), any());
   }
 
   @Test
@@ -1451,6 +1483,14 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     request.setMediaType(mediaType);
     request.setSizeBytes(size);
     request.setSha256(sha256);
+    String normalizedMediaType = mediaType.trim();
+    if (normalizedMediaType.startsWith("image/")) {
+      request.setFormat(normalizedMediaType.substring("image/".length()));
+      request.setOriginalWidth(1);
+      request.setOriginalHeight(1);
+      request.setStoredWidth(1);
+      request.setStoredHeight(1);
+    }
     return storageUploadService.reserve(request);
   }
 

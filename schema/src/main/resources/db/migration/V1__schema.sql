@@ -47,6 +47,11 @@ create table storage_upload (
     declared_media_type varchar(256)   not null,
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
+    image_format        varchar(32),
+    original_width      integer,
+    original_height     integer,
+    stored_width        integer,
+    stored_height       integer,
     cleanup_requested_at timestamptz(3),
     cleanup_token       uuid,
     cleanup_until       timestamptz(3),
@@ -56,6 +61,20 @@ create table storage_upload (
     constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
     constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_upload_image_metadata_pair check (
+        (image_format is null and original_width is null and original_height is null
+            and stored_width is null and stored_height is null)
+        or (image_format is not null and original_width is not null and original_height is not null
+            and stored_width is not null and stored_height is not null)
+    ),
+    constraint ck_storage_upload_image_dimensions check (
+        original_width is null or (original_width > 0 and original_height > 0
+            and stored_width > 0 and stored_height > 0)
+    ),
+    constraint ck_storage_upload_image_format check (
+        image_format is null or (image_format ~ '^[a-z0-9][a-z0-9.+-]{0,31}$'
+            and declared_media_type = 'image/' || image_format)
+    ),
     constraint ck_storage_upload_cleanup_pair check (
         (cleanup_token is null) = (cleanup_until is null)
     ),

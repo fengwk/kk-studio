@@ -506,12 +506,12 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
 挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
 `DELETE /uploads/{uploadId}` 返回 204；`{uploadId}`、`{blobId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
-联合：PENDING 携带 `presignedPut`，READY 只携带 `blobId`；两者都带响应时刻的 `expiresAt`（Instant）。
+联合：PENDING 携带 `presignedPut`，READY 携带 `blobId`；两者都回显可空图片事实与响应时刻的 `expiresAt`（Instant）。
 blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
 DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
 
-上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
-内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
+上传使用 reserve → 浏览器 PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
+complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD 与 copy，再短事务绑定 Blob；
 上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
