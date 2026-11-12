@@ -752,6 +752,9 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 		publishQuietly(args[0], errorFile, "helper-launch-failure")
 		return 1
 	}
+	terminated := make(chan os.Signal, 1)
+	signal.Notify(terminated, syscall.SIGTERM)
+	defer signal.Stop(terminated)
 	if err := publishText(args[0], scopeFile, fmt.Sprint(os.Getpid())); err != nil {
 		publishQuietly(args[0], errorFile, "helper-posix-failure")
 		return 1
@@ -763,9 +766,6 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 	}
 	ownerClosed := make(chan struct{})
 	go func() { _, _ = io.Copy(io.Discard, owner); close(ownerClosed) }()
-	terminated := make(chan os.Signal, 1)
-	signal.Notify(terminated, syscall.SIGTERM)
-	defer signal.Stop(terminated)
 	deadline := time.NewTimer(scopeStartBudget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(scopePollInterval)
