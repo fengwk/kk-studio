@@ -203,7 +203,7 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader(output)), stderr: io.NopCloser(strings.NewReader(stderr)), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, spec: &processSpec}
 	var progress []runtime.CapabilityResult
 	confirmed := 0
-	workdir := filepath.Join(t.TempDir(), "working dir")
+	workdir := filepath.Join(t.TempDir(), "working dir ' quote $ 中文")
 	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "call"}, runtime.CapabilityContext{Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process}, Progress: func(r runtime.CapabilityResult) error { progress = append(progress, r); return nil }, ConfirmExecutionExit: func() { confirmed++ }}, "printf output", workdir)
 	wantArgs := []string{"-lc", `cd -- "$1" || exit 1; shift; printf output`, "bash", workdir}
 	if processSpec.Executable != "bash" || processSpec.Directory != workdir || !reflect.DeepEqual(processSpec.Args, wantArgs) {
@@ -229,7 +229,8 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(captured), output) || !strings.Contains(string(captured), stderr) || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
+	capturedText := string(captured)
+	if strings.ReplaceAll(capturedText, stderr, "") != output || strings.Count(capturedText, stderr) != 1 || len(captured) != len(output)+len(stderr) || details.TextOutput.TotalBytes != int64(len(output)+len(stderr)) || filepath.Ext(details.TextOutput.Path) != ".log" || details.Process.Outcome != "EXITED" || details.Process.ExitCode != 0 {
 		t.Fatalf("details=%s captured=%d", result.Details, len(captured))
 	}
 	if confirmed != 1 {

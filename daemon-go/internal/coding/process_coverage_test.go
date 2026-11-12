@@ -13,6 +13,27 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
+func TestProcessOutputClosesBeforeExitConfirmation(t *testing.T) {
+	var events []string
+	closeProcessOutputBeforeExitConfirmation(
+		func() { events = append(events, "close") },
+		true,
+		func() { events = append(events, "confirm") },
+	)
+	if got := strings.Join(events, ","); got != "close,confirm" {
+		t.Fatalf("lifecycle=%q", got)
+	}
+	events = nil
+	closeProcessOutputBeforeExitConfirmation(
+		func() { events = append(events, "close") },
+		false,
+		func() { events = append(events, "confirm") },
+	)
+	if got := strings.Join(events, ","); got != "close" {
+		t.Fatalf("unconverged lifecycle=%q", got)
+	}
+}
+
 type startErrorSupervisor struct{ err error }
 
 func (s startErrorSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {

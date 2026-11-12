@@ -24,10 +24,13 @@ const (
 // ExecuteProcess runs the supplied shell command under native process-tree supervision.
 func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, command, workdir string) (runtime.CapabilityResult, error) {
 	executionExited := true
+	var spool *OutputSpool
 	defer func() {
-		if executionExited && capability.ConfirmExecutionExit != nil {
-			capability.ConfirmExecutionExit()
-		}
+		closeProcessOutputBeforeExitConfirmation(func() {
+			if spool != nil {
+				_ = spool.Close()
+			}
+		}, executionExited, capability.ConfirmExecutionExit)
 	}()
 	if strings.TrimSpace(command) == "" {
 		return errorResult(call.InvocationID, rejectInput("command must be a non-empty string")), nil
@@ -45,11 +48,10 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	if err != nil {
 		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
 	}
-	spool, err := NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
+	spool, err = NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
 	if err != nil {
 		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
 	}
-	defer spool.Close()
 	shell := "bash"
 	if capability.Config.BashExecutable != nil && *capability.Config.BashExecutable != "" {
 		shell = *capability.Config.BashExecutable
@@ -202,6 +204,13 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	details["process"] = processDetails
 	result.Details = mustJSON(details)
 	return result, nil
+}
+
+func closeProcessOutputBeforeExitConfirmation(closeOutput func(), executionExited bool, confirm func()) {
+	closeOutput()
+	if executionExited && confirm != nil {
+		confirm()
+	}
 }
 
 type processEmitter struct {

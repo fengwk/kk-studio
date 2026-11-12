@@ -102,6 +102,9 @@ func TestRuntimeExitConfirmationAfterTerminal(t *testing.T) {
 	r.noteExecutionExit("exit-after-terminal")
 	r.publishRequestedExit("exit-after-terminal")
 	r.publishRequestedExit("exit-after-terminal")
+	if got := countFrames(connection.frames(), protocol.MessageType_COMPLETED); got != 1 {
+		t.Fatalf("completed terminals=%d, want one", got)
+	}
 	if got := countFrames(connection.frames(), protocol.MessageType_EXECUTION_EXITED); got != 1 {
 		t.Fatalf("exit confirmations=%d, want one", got)
 	}

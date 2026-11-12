@@ -120,6 +120,19 @@ func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 	}
 }
 
+// COD-N-020: reaching N stops content reads and emits the exact limit notice.
+func TestGrepExactLimitNoticeText(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": root, "pattern": "x", "literal": true, "limit": 1}, nil)
+	want := "a.txt:1:x\n\n[1 matches limit reached. Refine the pattern or raise limit.]"
+	if result.Error || result.Contents[0].Text != want {
+		t.Fatalf("result=%#v want text %q", result, want)
+	}
+}
+
 // COD-F-012, COD-F-014
 func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	arguments, err := json.Marshal(map[string]any{"path": t.TempDir(), "pattern": "[", "literal": false})
