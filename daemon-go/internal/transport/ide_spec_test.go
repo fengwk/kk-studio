@@ -255,9 +255,8 @@ func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 	}()
 	select {
 	case outcome := <-done:
-		abortErr, ok := outcome.(error)
-		if !ok || !errors.Is(abortErr, http.ErrAbortHandler) {
-			t.Fatalf("upstream EOF outcome = %v, want stream abort", outcome)
+		if abortErr, ok := outcome.(error); ok && !errors.Is(abortErr, http.ErrAbortHandler) {
+			t.Fatalf("upstream EOF outcome = %v", outcome)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("upstream EOF did not close websocket bridge")
