@@ -179,7 +179,8 @@ func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 	supervisor := &fakeSupervisor{earlyExit: &native.ProcessExit{Code: 9}, terminateErr: cleanupErr}
 	_, err := Launch(context.Background(), ServerConfig{ID: "dead", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
 	var bootstrap *LspBootstrapError
-	if !errors.As(err, &bootstrap) || bootstrap.Converged || !errors.Is(err, cleanupErr) || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 9)" {
+	var aggregate *LspAggregateError
+	if !errors.As(err, &bootstrap) || bootstrap.Converged || !errors.As(err, &aggregate) || aggregate.Error() != "LSP launch failed and cleanup failed" || len(aggregate.Errors) != 2 || !errors.Is(err, cleanupErr) || bootstrap.Error() != "LSP server 'dead' exited before initialization (exit code 9)" {
 		t.Fatalf("launch cleanup error = %#v", err)
 	}
 }

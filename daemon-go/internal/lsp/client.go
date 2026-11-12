@@ -93,7 +93,11 @@ func Launch(ctx context.Context, server ServerConfig, root, executable string, p
 		c.exited <- exit
 		cleanup := process.Terminate(context.Background(), 0)
 		if cleanup != nil {
-			return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' exited before initialization (exit code %d)", server.ID, exit.Code), Converged: false, Cause: errors.Join(errors.New("server exited early"), cleanup)}
+			return nil, &LspBootstrapError{
+				Message:   fmt.Sprintf("LSP server '%s' exited before initialization (exit code %d)", server.ID, exit.Code),
+				Converged: false,
+				Cause:     &LspAggregateError{Message: "LSP launch failed and cleanup failed", Errors: []error{errors.New("server exited early"), cleanup}},
+			}
 		}
 		return nil, &LspBootstrapError{Message: fmt.Sprintf("LSP server '%s' exited before initialization (exit code %d)", server.ID, exit.Code), Converged: true, Cause: errors.New("server exited early")}
 	case e := <-c.exitErr:
@@ -350,7 +354,13 @@ func (c *Client) finishStop(grace time.Duration) {
 	}
 	terminateErr := c.process.Terminate(context.Background(), grace)
 	if disposeErr != nil && terminateErr != nil {
-		c.stopErr = errors.Join(&LspError{Message: "LSP connection disposal failed during shutdown", Cause: disposeErr}, &LspError{Message: "LSP server process termination failed during shutdown", Cause: terminateErr})
+		c.stopErr = &LspAggregateError{
+			Message: "LSP client shutdown failed",
+			Errors: []error{
+				&LspError{Message: "LSP connection disposal failed during shutdown", Cause: disposeErr},
+				&LspError{Message: "LSP server process termination failed during shutdown", Cause: terminateErr},
+			},
+		}
 	} else if disposeErr != nil {
 		c.stopErr = &LspError{Message: "LSP connection disposal failed during shutdown", Cause: disposeErr}
 	} else if terminateErr != nil {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +46,7 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		}
 	})
 
-	t.Run("sanitized bootstrap failure", func(t *testing.T) {
+	t.Run("bootstrap failure preserves safe text", func(t *testing.T) {
 		root := t.TempDir()
 		executable := filepath.Join(root, "fake-lsp")
 		if err := os.WriteFile(executable, []byte("fake"), 0700); err != nil {
@@ -60,8 +59,8 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		}
 		confirmed := 0
 		result, err := facade.Capabilities()[call.CapabilityID](context.Background(), call, runtime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
-		want := "The capability failed while running and the underlying error is not repeated to avoid leaking details"
-		if err != nil || !result.Error || result.Contents[0].Text != want || strings.Contains(result.Contents[0].Text, "secret spawn details") || confirmed != 1 {
+		want := "LSP server 'go' cannot be started: " + executable
+		if err != nil || !result.Error || result.Contents[0].Text != want || confirmed != 1 {
 			t.Fatalf("result=%#v err=%v confirmations=%d", result, err, confirmed)
 		}
 		if err := facade.Close(); err != nil {

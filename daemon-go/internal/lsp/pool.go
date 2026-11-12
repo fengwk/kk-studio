@@ -236,11 +236,11 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 	}
 	if err != nil && client != nil {
 		if stopErr := client.Stop(p.options.ShutdownGrace); stopErr != nil {
-			var be *LspBootstrapError
-			if errors.As(err, &be) {
-				err = &LspBootstrapError{Message: be.Message, Converged: false, Cause: errors.Join(be.Cause, stopErr)}
-			} else {
-				err = &LspBootstrapError{Message: err.Error(), Converged: false, Cause: errors.Join(err, stopErr)}
+			const message = "LSP client startup failed and cleanup failed"
+			err = &LspBootstrapError{
+				Message:   message,
+				Converged: false,
+				Cause:     &LspAggregateError{Message: message, Errors: []error{err, stopErr}},
 			}
 		} else {
 			b.retryable = true

@@ -271,6 +271,10 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 		if errors.As(err, &lspErr) {
 			return capabilityFailure(call.InvocationID, lspErr.Error()), nil
 		}
+		var bootstrap *LspBootstrapError
+		if errors.As(err, &bootstrap) {
+			return capabilityFailure(call.InvocationID, bootstrap.Error()), nil
+		}
 		return capabilityFailure(call.InvocationID, "The capability failed while running and the underlying error is not repeated to avoid leaking details"), nil
 	}
 	confirm()

@@ -336,7 +336,8 @@ func TestPool_InitializeCleanupFailure(t *testing.T) {
 	confirmed := 0
 	_, firstErr := pool.LeaseWithExit(context.Background(), file, func() { confirmed++ })
 	var bootstrap *LspBootstrapError
-	if !errors.As(firstErr, &bootstrap) || bootstrap.Converged || !errors.Is(firstErr, cleanupErr) || confirmed != 0 {
+	var aggregate *LspAggregateError
+	if !errors.As(firstErr, &bootstrap) || bootstrap.Converged || bootstrap.Error() != "LSP client startup failed and cleanup failed" || !errors.As(firstErr, &aggregate) || aggregate.Error() != "LSP client startup failed and cleanup failed" || len(aggregate.Errors) != 2 || !errors.Is(firstErr, cleanupErr) || confirmed != 0 {
 		t.Fatalf("initialize cleanup error=%v confirmed=%d", firstErr, confirmed)
 	}
 	_, secondErr := pool.LeaseWithExit(context.Background(), file, func() { confirmed++ })
