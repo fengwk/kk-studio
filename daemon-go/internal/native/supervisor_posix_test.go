@@ -4,8 +4,11 @@ package native
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -197,11 +200,52 @@ func TestPOSIXSupervisor_StartAfterClose(t *testing.T) {
 	}
 }
 
-// A clean helper exit without command-exit evidence must remain an unknown status.
-func TestPOSIXExitFallback_DoesNotInventSuccess(t *testing.T) {
-	exit := readExitFallback(stateTestDir(t), nil)
+// Exit fallback must preserve unknown status, prefer published evidence, and decode helper wait results.
+func TestPOSIXExitFallback_PreservesExitEvidence(t *testing.T) {
+	dir := stateTestDir(t)
+	exit := readExitFallback(dir, nil)
 	if exit.Code != nil || exit.Signal != nil {
-		t.Fatalf("exit fallback fabricated status: %+v", exit)
+		t.Fatalf("clean helper exit without command evidence fabricated status: %+v", exit)
+	}
+
+	code := 7
+	signal := "SIGTERM"
+	payload, err := json.Marshal(exitReport{ExitCode: &code, Signal: &signal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publish(dir, exitFile, payload); err != nil {
+		t.Fatal(err)
+	}
+	exit = readExitFallback(dir, nil)
+	if exit.Code == nil || *exit.Code != code || exit.Signal == nil || *exit.Signal != signal {
+		t.Fatalf("published exit report not preserved: %+v", exit)
+	}
+	if err := publishText(dir, errorFile, "helper-failure"); err != nil {
+		t.Fatal(err)
+	}
+	exit = readExitFallback(dir, nil)
+	if exit.Code != nil || exit.Signal != nil {
+		t.Fatalf("startup failure reported an exit status: %+v", exit)
+	}
+
+	waitErr := exec.Command("sh", "-c", "exit 23").Run()
+	if waitErr == nil {
+		t.Fatal("expected non-zero exit status")
+	}
+	exit = readExitFallback(stateTestDir(t), waitErr)
+	if exit.Code == nil || *exit.Code != 23 || exit.Signal != nil {
+		t.Fatalf("helper wait exit fallback = %+v, want code 23", exit)
+	}
+
+	signalErr := exec.Command("sh", "-c", "kill -TERM $$").Run()
+	exit = readExitFallback(stateTestDir(t), signalErr)
+	if exit.Signal == nil || *exit.Signal == "" || exit.Code != nil {
+		t.Fatalf("helper wait signal fallback = %+v, want a signal", exit)
+	}
+	exit = readExitFallback(stateTestDir(t), errors.New("wait failed"))
+	if exit.Code != nil || exit.Signal != nil {
+		t.Fatalf("unknown helper wait error reported an exit status: %+v", exit)
 	}
 }
 
