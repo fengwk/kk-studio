@@ -2068,7 +2068,7 @@ class EnvironmentDaemonServerTest {
       FakeControlChannel channel = fixture.connectReady("path-" + descriptor.id().value());
       String fields =
           switch (descriptor.id().value()) {
-            case "fs.write" -> ",\"content\":\"text\"";
+            case "fs.write", "fs.write.preview" -> ",\"content\":\"text\"";
             case "fs.edit", "fs.edit.preview" -> ",\"old_string\":\"old\",\"new_string\":\"new\"";
             case "fs.find", "fs.grep" -> ",\"pattern\":\"text\"";
             case "lsp.goto-definition" -> ",\"line\":1";
@@ -3656,6 +3656,28 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         "/srv/repo/README.md", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
     assertEquals("a".repeat(64), channel.lastEnvelope().getInvoke().getExpectedFile().getSha256());
+  }
+
+  @Test
+  void invokeWithNewFileExpectedFileOmitsShaFromEnvelope() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-new-file-expected-file");
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE);
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            descriptor,
+            new EnvironmentCapabilityCall(
+                CALL_ONE.toString(), "{\"path\":\"/srv/repo/new.txt\",\"content\":\"new\"}"),
+            Duration.ofSeconds(5),
+            new ExpectedFile("/srv/repo/new.txt", null));
+
+    fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());
+
+    assertTrue(channel.lastEnvelope().getInvoke().hasExpectedFile());
+    assertEquals(
+        "/srv/repo/new.txt", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
+    assertFalse(channel.lastEnvelope().getInvoke().getExpectedFile().hasSha256());
   }
 
   /** 测试意图：每次 INVOKE 读取当前系统图片档位，设置变更只影响后续调用。 */

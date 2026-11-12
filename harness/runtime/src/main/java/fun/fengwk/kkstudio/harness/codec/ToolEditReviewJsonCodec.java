@@ -18,7 +18,11 @@ public final class ToolEditReviewJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("path", review.expectedFile().path());
     node.put("diff", review.diff());
-    node.put("sha256", review.expectedFile().sha256());
+    if (review.expectedFile().sha256() == null) {
+      node.putNull("sha256");
+    } else {
+      node.put("sha256", review.expectedFile().sha256());
+    }
     return node;
   }
 
@@ -32,7 +36,7 @@ public final class ToolEditReviewJsonCodec {
     return new ToolEditReview(
         new ExpectedFile(
             InvocationJsonSupport.text(node, "path", CONTEXT),
-            InvocationJsonSupport.text(node, "sha256", CONTEXT)),
+            InvocationJsonSupport.nullableText(node, "sha256", CONTEXT)),
         InvocationJsonSupport.text(node, "diff", CONTEXT));
   }
 }

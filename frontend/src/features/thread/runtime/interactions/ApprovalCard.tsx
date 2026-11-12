@@ -54,7 +54,7 @@ export function ApprovalCard({
   const isMutation = isWrite || isEdit
 
   const editReview = useMemo(() => extractApprovalEditReview(approval), [approval])
-  const isEditMissingReview = isEdit && !editReview
+  const isMutationMissingReview = isMutation && !editReview
 
   const mutationPreview = useMemo(() => {
     if (!isMutation) return null
@@ -66,7 +66,7 @@ export function ApprovalCard({
 
   const handleDecision = async (decision: 'ALLOW' | 'DENY') => {
     if (busy || isNonRecoverable || decided) return
-    if (decision === 'ALLOW' && isEditMissingReview) return
+    if (decision === 'ALLOW' && isMutationMissingReview) return
     setBusy(true)
     setError(null)
 
@@ -155,7 +155,7 @@ export function ApprovalCard({
         </div>
       ) : null}
 
-      {isEditMissingReview ? (
+      {isMutationMissingReview ? (
         <div className="interaction-error-banner">
           <AlertCircle size={16} aria-hidden="true" />
           <span>{t('ai.runtime.mutation.reviewMissing')}</span>
@@ -203,7 +203,7 @@ export function ApprovalCard({
         <Button
           variant="primary"
           className="interaction-allow-btn"
-          disabled={busy || isNonRecoverable || isEditMissingReview}
+          disabled={busy || isNonRecoverable || isMutationMissingReview}
           onClick={() => handleDecision('ALLOW')}
         >
           {t('ai.interaction.allow')}

@@ -32,6 +32,26 @@ describe('tool previews', () => {
     ])
   })
 
+  it('uses the canonical write review diff instead of proposed content for approval', () => {
+    const preview = previewForToolCall(
+      'write',
+      '{"path":"relative.txt","content":"proposed"}',
+      {
+        editReview: {
+          path: '/canonical/new.txt',
+          diff: '+1|proposed',
+          sha256: null,
+        },
+      },
+    )
+
+    expect(preview).toMatchObject({
+      kind: 'write',
+      path: '/canonical/new.txt',
+      review: { diff: '+1|proposed', sha256: null },
+    })
+  })
+
   it('keeps parsed content while write arguments are still streaming', () => {
     const parsed = parseToolArguments('{"path":"App.java","content":"one\\ntwo\\nthree\\nfour\\nfive\\nsix\\nseven\\neight')
     const preview = formatWritePreview(parsed)

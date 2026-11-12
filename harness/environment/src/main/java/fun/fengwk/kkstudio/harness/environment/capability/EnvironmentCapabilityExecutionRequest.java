@@ -42,8 +42,15 @@ public record EnvironmentCapabilityExecutionRequest(
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must not be negative");
     }
-    if (expectedFile != null && !EnvironmentCapabilityIds.FS_EDIT.equals(descriptor.id())) {
-      throw new IllegalArgumentException("expectedFile is only valid for fs.edit");
+    if (expectedFile != null) {
+      boolean edit = EnvironmentCapabilityIds.FS_EDIT.equals(descriptor.id());
+      boolean write = EnvironmentCapabilityIds.FS_WRITE.equals(descriptor.id());
+      if (!edit && !write) {
+        throw new IllegalArgumentException("expectedFile is only valid for fs.edit or fs.write");
+      }
+      if (edit && expectedFile.sha256() == null) {
+        throw new IllegalArgumentException("expectedFile.sha256 is required for fs.edit");
+      }
     }
     if ((resourceDownload != null)
         != EnvironmentCapabilityIds.SKILL_INSTALL.equals(descriptor.id())) {

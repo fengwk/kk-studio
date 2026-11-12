@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityD
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
@@ -48,8 +49,16 @@ final class EditReviewPreflight {
 
   static ToolGateway.PreflightResult prepare(
       EnvironmentCapabilityTransport transport, ToolInvocationRequest request, String reason) {
+    return prepare(transport, request, reason, EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
+  }
+
+  static ToolGateway.PreflightResult prepare(
+      EnvironmentCapabilityTransport transport,
+      ToolInvocationRequest request,
+      String reason,
+      EnvironmentCapabilityId previewCapabilityId) {
     EnvironmentCapabilityDescriptor descriptor =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
+        EnvironmentCapabilityCatalog.require(previewCapabilityId);
     String previewId = UUID.randomUUID().toString();
     CompletableFuture<EnvironmentCapabilityResult> completion = new CompletableFuture<>();
     EnvironmentCapabilityExecutionHandle handle;
@@ -88,6 +97,11 @@ final class EditReviewPreflight {
       EnvironmentCapabilityResult result =
           completion.get(descriptor.defaultTimeout().toMillis(), TimeUnit.MILLISECONDS);
       ToolEditReview review = decode(previewId, result);
+      if (EnvironmentCapabilityIds.FS_EDIT_PREVIEW.equals(previewCapabilityId)
+          && review.expectedFile().sha256() == null) {
+        throw new IllegalArgumentException(
+            "Edit preview must return a SHA-256 for an existing file");
+      }
       // Use the real model call ID and a maximal replacement count to reserve the
       // complete canonical result before approval, including its structured review.
       ObjectNode details = JsonNodeFactory.instance.objectNode();

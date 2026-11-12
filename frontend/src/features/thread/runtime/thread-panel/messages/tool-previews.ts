@@ -13,6 +13,7 @@ interface WriteCallPreview {
   content: string
   hasContent: boolean
   lines: string[]
+  review?: EditReview
 }
 
 type EditCallPreview =
@@ -34,7 +35,7 @@ type EditCallPreview =
       mode: 'review'
       path: string
       diff: string
-      sha256: string
+      sha256: string | null
       lines: string[]
     }
 
@@ -74,7 +75,7 @@ export function previewForToolCall(
   const name = toolName.trim().toLowerCase()
   const parsed = parseToolArguments(rawArguments)
   if (name === 'write') {
-    return formatWritePreview(parsed)
+    return formatWritePreview(parsed, options)
   }
   if (name === 'edit') {
     return formatEditPreview(parsed, options)
@@ -82,17 +83,22 @@ export function previewForToolCall(
   return null
 }
 
-export function formatWritePreview(parsed: ParsedToolArguments): WriteCallPreview {
+export function formatWritePreview(
+  parsed: ParsedToolArguments,
+  options?: EditPreviewOptions,
+): WriteCallPreview {
   const hasContent = 'content' in parsed.values
   const content = stringField(parsed.values.content)
   const workdir = stringField(parsed.values.workdir)
+  const review = options?.editReview ?? undefined
   return {
     kind: 'write',
-    path: stringField(parsed.values.path),
+    path: review?.path ?? stringField(parsed.values.path),
     workdir: workdir || undefined,
     content,
     hasContent,
     lines: splitContentLines(content),
+    review,
   }
 }
 

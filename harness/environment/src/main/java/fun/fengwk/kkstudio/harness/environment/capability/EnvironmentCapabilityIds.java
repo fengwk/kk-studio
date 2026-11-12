@@ -11,6 +11,9 @@ public final class EnvironmentCapabilityIds {
   public static final EnvironmentCapabilityId FS_EDIT_PREVIEW =
       new EnvironmentCapabilityId("fs.edit.preview");
 
+  public static final EnvironmentCapabilityId FS_WRITE_PREVIEW =
+      new EnvironmentCapabilityId("fs.write.preview");
+
   public static final EnvironmentCapabilityId PROCESS_EXEC =
       new EnvironmentCapabilityId("process.exec");
   public static final EnvironmentCapabilityId FS_GREP = new EnvironmentCapabilityId("fs.grep");

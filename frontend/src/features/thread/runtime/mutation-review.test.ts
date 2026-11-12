@@ -45,7 +45,10 @@ describe('mutation-review parser and extractor', () => {
     expect(parseEditReview({ path: '/foo', diff: null, sha256: validSha })).toBeNull()
     expect(parseEditReview({ path: '/foo', diff: 123, sha256: validSha })).toBeNull()
 
-    // Missing, padded or invalid sha256 (must be exact 64 lowercase hex, no trim acceptance)
+    // A new-file write review has no prior content hash; other values remain strict.
+    expect(parseEditReview({ path: '/foo', diff: '+a', sha256: null })).toEqual({
+      path: '/foo', diff: '+a', sha256: null,
+    })
     expect(parseEditReview({ path: '/foo', diff: '+a', sha256: '' })).toBeNull()
     expect(parseEditReview({ path: '/foo', diff: '+a', sha256: 'abc' })).toBeNull()
     expect(parseEditReview({ path: '/foo', diff: '+a', sha256: ` ${validSha}` })).toBeNull()
