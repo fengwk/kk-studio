@@ -2,6 +2,8 @@ package ide
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -44,23 +46,46 @@ func TestLiveRepliesProtocol(t *testing.T) {
 		t.Fatalf("invalid LIST_VIEWS reply: %v", listed)
 	}
 
+	next := filepath.Join(root, "next")
+	if err := os.Mkdir(next, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root,
-		map[string]map[string]any{"changeDirectory": {"directory": root}})
-	changed := service.HandleCommand(context.Background(), &protocol.IdeCommand{
-		Action: protocol.IdeAction_CHANGE_DIRECTORY, ViewId: stringPointer(opened.GetViewId()),
-		BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch()),
-		Directory: stringPointer(root), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999"),
-	})
+		map[string]map[string]any{"changeDirectory": {"directory": next}})
+	changedResult := make(chan *protocol.IdeResult, 1)
+	go func() {
+		changedResult <- service.HandleCommand(context.Background(), &protocol.IdeCommand{
+			Action: protocol.IdeAction_CHANGE_DIRECTORY, ViewId: stringPointer(opened.GetViewId()),
+			BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch()),
+			Directory: stringPointer(next), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999"),
+		})
+	}()
+	nextCtx, cancelNext := context.WithCancel(context.Background())
+	nextStream, nextReader := openManualBridgeStream(t, nextCtx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
+	if _, err := nextReader.ReadString('\n'); err != nil {
+		cancelNext()
+		t.Fatal(err)
+	}
+	var changed *protocol.IdeResult
+	select {
+	case changed = <-changedResult:
+	case <-time.After(time.Second):
+		cancelHost()
+		cancelNext()
+		t.Fatal("CHANGE_DIRECTORY did not receive replacement-host confirmation")
+	}
 	cancelHost()
+	cancelNext()
+	_ = nextStream.Body.Close()
 	deadline := time.Now().Add(time.Second)
 	for service.ActiveStreamCount() != 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	if service.ActiveStreamCount() != 0 {
-		t.Fatal("bridge stream remained active after host cancellation")
+		t.Fatal("bridge streams remained active after host cancellation")
 	}
 	validateLiveIDEReply(t, changed, true)
-	if !changed.GetOk() || changed.GetDirectory() != root {
+	if !changed.GetOk() || changed.GetDirectory() != next {
 		t.Fatalf("invalid CHANGE_DIRECTORY reply: %v", changed)
 	}
 
