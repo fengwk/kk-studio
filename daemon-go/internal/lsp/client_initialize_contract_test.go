@@ -10,13 +10,23 @@ import (
 // LSP-T-073 checks required initialize capability fields and the initialized notification.
 func TestProtocol_InitializeContract(t *testing.T) {
 	paramsCh := make(chan json.RawMessage, 1)
-	supervisor := &fakeSupervisor{initializeParams: paramsCh}
+	events := make(chan fakeRequest, 16)
+	supervisor := &fakeSupervisor{initializeParams: paramsCh, events: events}
 	client, err := Launch(context.Background(), ServerConfig{ID: "jdtls", Command: []string{"jdtls"}}, t.TempDir(), "/jdtls", supervisor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Initialize(context.Background(), time.Second); err != nil {
 		t.Fatal(err)
+	}
+	initializeEvent := takeFakeEvent(t, events, "initialize")
+	if _, err := json.Marshal(initializeEvent.Params); err != nil {
+		t.Fatal(err)
+	}
+	initializedEvent := takeFakeEvent(t, events, "initialized")
+	var initializedParams map[string]any
+	if err := json.Unmarshal(initializedEvent.Params, &initializedParams); err != nil || len(initializedParams) != 0 {
+		t.Fatalf("initialized params=%s err=%v", initializedEvent.Params, err)
 	}
 	var params struct {
 		ProcessID        int    `json:"processId"`
