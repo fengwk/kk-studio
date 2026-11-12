@@ -150,13 +150,14 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("missing invocation recovery=%v err=%v, want RECOVER_NOT_FOUND", recovered, err)
 	}
 
+	// Keep the command alive briefly so stdout delivery does not depend on scheduling at process exit.
 	cases := []struct {
 		name, capability, arguments, invocation, want string
 	}{
 		{"read", "fs.read", fmt.Sprintf(`{"path":%q}`, file), "123e4567-e89b-42d3-a456-426614174001", "needle original"},
 		{"grep", "fs.grep", fmt.Sprintf(`{"path":%q,"pattern":"needle","literal":true}`, directory), "123e4567-e89b-42d3-a456-426614174002", "needle original"},
 		{"edit", "fs.edit", fmt.Sprintf(`{"path":%q,"old_string":"original","new_string":"edited"}`, file), "123e4567-e89b-42d3-a456-426614174003", "edited"},
-		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
+		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e; sleep 0.1","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
