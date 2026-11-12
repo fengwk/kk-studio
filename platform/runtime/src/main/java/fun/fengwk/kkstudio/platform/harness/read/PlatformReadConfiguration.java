@@ -4,6 +4,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.spi.SkillLoadGateway;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -23,9 +25,18 @@ public class PlatformReadConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public SkillLoadGateway platformSkillLoadGateway(
+      SkillPackageRepository skillPackageRepository, SkillArchiveFileReader archiveFileReader) {
+    return new PlatformSkillLoadGateway(skillPackageRepository, archiveFileReader);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public PlatformResourceReadGateway platformResourceReadGateway(
-      PlatformResourceContentReader reader) {
-    return new PlatformResourceReadGateway(reader);
+      PlatformResourceContentReader reader,
+      SkillPackageRepository skillPackageRepository,
+      SkillArchiveFileReader skillArchiveFileReader) {
+    return new PlatformResourceReadGateway(reader, skillPackageRepository, skillArchiveFileReader);
   }
 
   @Bean

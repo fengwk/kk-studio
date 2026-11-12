@@ -1,0 +1,24 @@
+{
+  "description": "Install a skill from its Platform-managed archive.",
+  "properties": {
+    "transferId": {
+      "description": "Opaque resource download transfer identifier.",
+      "type": "string"
+    },
+    "package": {
+      "description": "Skill package name.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Current skill package version.",
+      "type": "string"
+    },
+    "skill": {
+      "description": "Skill name within the package.",
+      "type": "string"
+    }
+  },
+  "required": ["transferId", "package", "version", "skill"],
+  "type": "object",
+  "additionalProperties": false
+}

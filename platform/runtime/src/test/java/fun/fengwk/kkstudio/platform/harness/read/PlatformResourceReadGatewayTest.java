@@ -23,10 +23,16 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -47,24 +53,44 @@ class PlatformResourceReadGatewayTest {
           Duration.ZERO);
 
   @Test
-  void returnsExplicitUnavailableErrorForSkillsResources() {
+  void readsEncodedSkillResourcePathFromTheCurrentArchive() {
     PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
-    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
-    ToolResult result =
-        gateway.read(request("resource://skills/pkg/1.0.0/skill/read.md", null), ignored -> {});
+    SkillPackageRepository packages = mock(SkillPackageRepository.class);
+    SkillArchiveFileReader archive = mock(SkillArchiveFileReader.class);
+    UUID blobId = UUID.fromString("77777777-8888-4999-aaaa-bbbbbbbbbbbb");
+    when(packages.getPackage("pkg name"))
+        .thenReturn(
+            new SkillPackage(
+                "pkg name",
+                "description",
+                "1.0.0",
+                blobId,
+                List.of(new SkillManifestEntry("skill", "description")),
+                Instant.parse("2026-01-01T00:00:00Z"),
+                1L,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2026-01-01T00:00:00Z"),
+                null));
+    when(archive.readFile(blobId, "skill/guide file.md"))
+        .thenReturn("skill contents".getBytes(StandardCharsets.UTF_8));
+    PlatformResourceReadGateway gateway =
+        new PlatformResourceReadGateway(reader, packages, archive);
 
-    assertTrue(result.error());
-    assertEquals(
-        "skill resources are not available yet",
-        ((TextResultContent) result.contents().getFirst()).text());
-    verify(reader, never())
-        .readResource(any(), any(), any(), any(), any(), any(), any(), any(ReadDeadline.class));
+    ToolResult result =
+        gateway.read(
+            request("resource://skills/pkg%20name/1.0.0/skill/guide%20file.md", null),
+            ignored -> {});
+
+    assertTrue(!result.error());
+    assertTrue(
+        ((TextResultContent) result.contents().getFirst()).text().contains("skill contents"));
+    verify(archive).readFile(blobId, "skill/guide file.md");
   }
 
   @Test
   void returnsExplicitErrorForFileUriWithoutExecutionContext() {
     PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
-    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+    PlatformResourceReadGateway gateway = gateway(reader);
 
     ToolResult result =
         gateway.read(
@@ -81,7 +107,7 @@ class PlatformResourceReadGatewayTest {
   @Test
   void rejectsMalformedResourceUriWithoutCallingReader() {
     PlatformResourceContentReader reader = mock(PlatformResourceContentReader.class);
-    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+    PlatformResourceReadGateway gateway = gateway(reader);
 
     ToolResult result =
         gateway.read(request("resource://other/id", context(ROOT_SESSION_ID)), ignored -> {});
@@ -104,7 +130,7 @@ class PlatformResourceReadGatewayTest {
             eq("resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
             any(ReadDeadline.class)))
         .thenReturn(new PlatformResourceContentReader.ResourceRead.Text("content"));
-    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+    PlatformResourceReadGateway gateway = gateway(reader);
     ToolExecutionContext context = context(ROOT_SESSION_ID);
 
     ToolResult result =
@@ -145,7 +171,7 @@ class PlatformResourceReadGatewayTest {
             eq("resource://files/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
             any(ReadDeadline.class)))
         .thenReturn(new PlatformResourceContentReader.ResourceRead.Media(resource, null));
-    PlatformResourceReadGateway gateway = new PlatformResourceReadGateway(reader);
+    PlatformResourceReadGateway gateway = gateway(reader);
 
     ToolResult result =
         gateway.read(
@@ -154,6 +180,11 @@ class PlatformResourceReadGatewayTest {
             ignored -> {});
 
     assertEquals(resource, ((ResourceResultContent) result.contents().getFirst()).resource());
+  }
+
+  private static PlatformResourceReadGateway gateway(PlatformResourceContentReader reader) {
+    return new PlatformResourceReadGateway(
+        reader, mock(SkillPackageRepository.class), mock(SkillArchiveFileReader.class));
   }
 
   private static ToolExecutionRequest request(String path, ToolExecutionContext context) {

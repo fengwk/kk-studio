@@ -43,10 +43,16 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
 
   private final List<Tool> fileTools;
   private final Tool taskTool;
+  private final Tool skillLoadTool;
 
   public BuiltinHarnessContributor(List<Tool> fileTools, Tool taskTool) {
+    this(fileTools, taskTool, null);
+  }
+
+  public BuiltinHarnessContributor(List<Tool> fileTools, Tool taskTool, Tool skillLoadTool) {
     this.fileTools = List.copyOf(Objects.requireNonNull(fileTools, "fileTools"));
     this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
+    this.skillLoadTool = skillLoadTool;
     if (this.fileTools.size() != FILE_TOOL_NAMES.size()) {
       throw new IllegalArgumentException("fileTools must contain exactly " + FILE_TOOL_NAMES);
     }
@@ -68,6 +74,11 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
       throw new IllegalArgumentException(
           "taskTool descriptor name must be \"task\", got "
               + (taskDescriptor == null ? "null" : "\"" + taskDescriptor.name() + "\""));
+    }
+    if (skillLoadTool != null
+        && (skillLoadTool.descriptor() == null
+            || !"load_skill".equals(skillLoadTool.descriptor().name()))) {
+      throw new IllegalArgumentException("skillLoadTool descriptor name must be \"load_skill\"");
     }
   }
 
@@ -112,8 +123,11 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY);
 
-    // Internal server-side tool
+    // Internal server-side tools
     registrar.registerTool("runtime.task", taskTool, ToolVisibility.INTERNAL, 0);
+    if (skillLoadTool != null) {
+      registrar.registerTool("runtime.load-skill", skillLoadTool, ToolVisibility.INTERNAL, 0);
+    }
 
     // 人工输入工具：Runtime 在 dispatch 前按 provenance 把内置 ask_user 冻结为 WAITING_INPUT。
     registrar.registerTool("ask-user", new AskUserTool(), ToolVisibility.SELECTABLE, 0);
