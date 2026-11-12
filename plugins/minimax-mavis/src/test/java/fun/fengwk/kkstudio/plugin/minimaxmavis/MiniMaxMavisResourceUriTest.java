@@ -16,9 +16,9 @@ import java.util.UUID;
 
 class MiniMaxMavisResourceUriTest {
 
-  /** 顶层与嵌套数组中的 vfs: 资源都经网关授权解析，其他取值原样保留。 */
+  /** 顶层与嵌套数组中的 Resource URI 都经网关授权解析，其他取值原样保留。 */
   @Test
-  void resolvesNestedVfsResourcesAndKeepsPlainValues() {
+  void resolvesNestedResourcesAndKeepsPlainValues() {
     PluginResourceGateway gateway = mock(PluginResourceGateway.class);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
     JsonMapper mapper = JsonMapper.builder().build();

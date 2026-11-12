@@ -64,9 +64,9 @@ class SessionResourceUriTest {
   void rejectsNonCanonicalPrefix() {
     UUID blobId = UUID.randomUUID();
 
-    assertTrue(SessionResourceUri.parse("vfs:/other/" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:/resources" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:resources/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://other/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource:/files/" + blobId).isEmpty());
   }
 
   /** 其他 scheme（如 http/https）必须确定性拒绝。 */

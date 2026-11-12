@@ -8,6 +8,7 @@ import { CodeBlock } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
 import { MermaidBlock } from '@/shared/ui/markdown/MermaidBlock'
 import { MarkdownSegmentSourceContext } from '@/shared/ui/markdown/markdownTableSource'
+import { ResourceUri } from '@/shared/ui/markdown/ResourceUri'
 import { splitMarkdownSegments } from '@/shared/ui/markdown/splitMarkdownSegments'
 import 'katex/dist/katex.min.css'
 import 'highlight.js/styles/github-dark.min.css'
@@ -137,11 +138,19 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 function createMarkdownComponents(): Components {
   return {
     table: MarkdownTable,
-    a: ({ href, children }) => (
-      <a href={href} target="_blank" rel="noreferrer noopener">
-        {children}
-      </a>
-    ),
+    a: ({ href, children }) => {
+      if (href?.startsWith('resource://')) {
+        return <ResourceUri uri={href} label={nodeText(children)} />
+      }
+      return (
+        <a href={href} target="_blank" rel="noreferrer noopener">
+          {children}
+        </a>
+      )
+    },
+    img: ({ src, alt }) => src?.startsWith('resource://')
+      ? <ResourceUri uri={src} label={alt ?? undefined} image />
+      : <img src={src} alt={alt ?? ''} />,
     code: ({ className: codeClassName, children, ...props }) => {
       const language = /language-([a-z0-9_+-]+)/i.exec(codeClassName || '')?.[1]?.toLowerCase()
       const raw = nodeText(children).replace(/\n$/, '')

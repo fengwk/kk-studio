@@ -116,7 +116,7 @@ class FileToolTest {
     assertTrue(((TextResultContent) result.contents().get(0)).text().contains("read-only"));
   }
 
-  /** 绝对路径在绑定环境上执行同名 capability，不触碰 VFS。 */
+  /** 本地绝对路径在绑定环境上执行同名 capability，不触碰平台资源读取。 */
   @Test
   void absolutePathsExecuteOnTheBoundEnvironmentOnly() throws Exception {
     ResourceReadGateway gateway = mock(ResourceReadGateway.class);
@@ -139,7 +139,7 @@ class FileToolTest {
     verify(gateway, never()).read(any(), any());
   }
 
-  /** 无环境时非 vfs: 路径不派发：声明未执行，并给出 vfs:/sessions/<rootSessionId>/ 与选择环境两条路径。 */
+  /** 无 Environment 时本地路径不派发，并明确提示选择 Environment。 */
   @Test
   void absolutePathsWithoutEnvironmentAreNotExecuted() throws Exception {
     ResourceReadGateway gateway = mock(ResourceReadGateway.class);
@@ -160,7 +160,6 @@ class FileToolTest {
     String message = ((TextResultContent) result.contents().get(0)).text();
     assertTrue(message.contains("needs an Environment"), message);
     assertTrue(message.contains("The tool was not executed."), message);
-    verify(gateway, never()).write(any(), any());
     verify(environment, never()).execute(any(), any(), any());
   }
 

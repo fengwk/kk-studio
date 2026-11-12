@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.util.List;
 
 /**
- * 测试用内置文件工具装配：与生产装配同构的 5 个 {@link FileTool}，VFS 端口用 Mockito 桩替换。
+ * 测试用内置文件工具装配：与生产装配同构的 5 个 {@link FileTool}，Resource 读取网关用 Mockito 桩替换。
  *
  * <p>名称与顺序必须与 {@code BuiltinHarnessContributor} 冻结的清单一致，否则 Contributor 构造会拒绝。
  */

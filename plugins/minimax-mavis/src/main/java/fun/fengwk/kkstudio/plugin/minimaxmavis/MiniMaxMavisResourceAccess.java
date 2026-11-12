@@ -23,9 +23,9 @@ import java.util.UUID;
 /**
  * 媒体输入解析与生成结果暂存。
  *
- * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code resource://files/<blobId>}」。公开 URL 原样交给
- * Provider；{@code vfs:} 资源必须经 {@link PluginResourceGateway} 解析成受控短期 HTTPS 地址，因此 Plugin 自己从不读取
- * Resource 字节，也不会把 Session 凭据或本地路径交给第三方。
+ * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code resource://files/<uuid>}」。公开 URL 原样交给
+ * Provider；资源 URI 必须经 {@link PluginResourceGateway} 解析成受控短期 HTTPS 地址，因此 Plugin 自己从不读取 Resource
+ * 字节，也不会把 Session 凭据或本地路径交给第三方。
  *
  * <p>生成类与下载类能力的响应里只有第三方临时地址：这些地址会被 {@link #stageOutputs} 逐个流式暂存为全局 Blob 上传引用 （{@code
  * blob-upload:<uploadId>}），历史里只留下稳定 Resource，绝不保留临时 CDN URL。
@@ -53,10 +53,10 @@ public final class MiniMaxMavisResourceAccess {
   }
 
   /**
-   * 把参数里的 {@code vfs:} 资源就地解析为受控短期 URL，其余取值原样保留。
+   * 把参数里的 {@code resource://} URI 就地解析为受控短期 URL，其余取值原样保留。
    *
-   * @param sessionId 本次调用所属会话 id（来自 Tool invocation context）；它是资源鉴权的唯一身份来源，因此缺失时 {@code vfs:}
-   *     资源必须确定性失败而不是退化为未鉴权访问
+   * @param sessionId 本次调用所属会话 id（来自 Tool invocation context）；它是资源鉴权的唯一身份来源，因此缺失时资源 URI
+   *     必须确定性失败而不是退化为未鉴权访问
    * @throws PluginResourceUnavailableException 需要资源但没有网关、拿不到调用上下文，或资源无法在契约内解析
    */
   public JsonNode resolveInputs(UUID sessionId, JsonNode arguments) {

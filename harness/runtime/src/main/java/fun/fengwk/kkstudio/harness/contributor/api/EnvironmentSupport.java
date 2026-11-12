@@ -10,11 +10,11 @@ package fun.fengwk.kkstudio.harness.contributor.api;
  *   <caption>支持级别语义</caption>
  *   <tr><th>级别</th><th>无 Environment</th><th>有 Environment</th></tr>
  *   <tr><td>{@link #NONE}</td><td>展示，不绑定</td><td>展示，不绑定</td></tr>
- *   <tr><td>{@link #ROUTED}</td><td>展示，不绑定；{@code vfs:} 路径仍可执行</td><td>展示；按每次调用的参数决定执行位置</td></tr>
+ *   <tr><td>{@link #ROUTED}</td><td>展示，不绑定；资源 URI 读取仍可执行</td><td>展示；按每次调用的参数决定执行位置</td></tr>
  *   <tr><td>{@link #REQUIRED}</td><td>不进入模型 Tool declarations</td><td>展示并绑定当前 Environment</td></tr>
  * </table>
  *
- * <p>文件工具声明 {@link #ROUTED}：工具层面不固定执行位置，每次调用按 {@code path} 参数决定走 Platform VFS 还是绑定环境；{@link
+ * <p>文件工具声明 {@link #ROUTED}：工具层面不固定执行位置，{@code read} 按 {@code path} 在平台资源读取与绑定环境间分流；{@link
  * #REQUIRED} 只用于 {@code bash} 与 LSP 这类只能出现在环境上的工具。
  */
 public enum EnvironmentSupport {

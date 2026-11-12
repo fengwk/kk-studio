@@ -41,7 +41,7 @@ public final class FileTool implements Tool {
   /** 统一读取工具的稳定模型可见名：平台按它识别读取结果的内联上限。 */
   public static final String READ_NAME = "read";
 
-  /** 五个文件工具在一次调用上的 VFS 操作。 */
+  /** 五个文件工具各自调用的 Environment capability 操作。 */
   public enum Operation {
     READ,
     WRITE,
@@ -82,7 +82,7 @@ public final class FileTool implements Tool {
     return descriptor;
   }
 
-  /** 本工具对应的 VFS 操作，平台据此识别 edit 审批等按操作区分的执行契约。 */
+  /** 本工具对应的 Environment capability 操作。 */
   public Operation operation() {
     return operation;
   }

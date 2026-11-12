@@ -268,7 +268,7 @@ class MiniMaxMavisToolFailureTest {
 
   /**
    * 参数包含合法 resource://files/<uuid>： 有网关 + context + 合法 URI → 请求正常执行成功； 发送给远端的 request body 中使用解析后的
-   * HTTPS URL 且不出现原始 vfs: 引用； 且断言调用了资源网关恰好一次。
+   * HTTPS URL 且不出现原始 Resource URI； 且断言调用了资源网关恰好一次。
    */
   @Test
   void sessionResourceWithGatewayIsResolvedToHttpsInRequestBody() {

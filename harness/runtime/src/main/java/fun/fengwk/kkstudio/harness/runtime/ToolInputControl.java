@@ -387,7 +387,7 @@ final class ToolInputControl {
     tx.tools().update(List.of(updated));
     tx.threads().update(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
-      // 批准后重建 Work 时同样只要求环境专用工具：逐调用路由的工具不得因为 vfs: 路径等待环境。
+      // 批准后重建 Work 时同样只要求环境专用工具；逐调用路由的读工具根据参数选择资源读取或 Environment。
       EnvironmentId environmentId =
           tool.binding() != null
                   && tool.binding().environmentSupport() == EnvironmentSupport.REQUIRED

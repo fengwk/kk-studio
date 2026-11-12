@@ -454,8 +454,7 @@ public final class ThreadProcessor {
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
           readyRequested = true;
-          // 只有只能在环境上执行的工具才把 Work 路由到环境：逐调用路由的文件工具由 Platform VFS 与
-          // 执行时的参数决定位置，vfs: 路径不得等待环境上线。
+          // 只有只能在环境上执行的工具才把 Work 路由到环境；read 按 URI 或本地路径选择平台或 Environment。
           EnvironmentId environmentId = requiredEnvironmentId(invocation);
           tx.work().request(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
         }

@@ -120,7 +120,7 @@ class StoragePluginResourceGatewayTest {
         "resource://files/00000000-0000-0000-0000-00000000000A",
         "resource://files/A87D0E54-6A92-4C61-B9D1-331B2D98822A",
         "resource://files/00000000-0000-0000-0000-000000000001/extra",
-        "vfs:/other/00000000-0000-0000-0000-000000000001",
+        "resource://other/00000000-0000-0000-0000-000000000001",
         "resource://files/00000000-0000-0000-0000-000000000001?download=true",
         "resource://files/00000000-0000-0000-0000-000000000001#fragment",
         "resource://files/",

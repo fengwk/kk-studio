@@ -7,7 +7,7 @@
     },
     "path": {
       "type": "string",
-      "description": "Absolute path on the target daemon's file system of the directory to search in, or a `vfs:/sessions/<sessionId>/...` conversation directory. Required. There is no implicit default — the model must always state the search root. Relative paths are rejected; results are reported as absolute or `vfs:` paths. Only paths are matched, never file contents."
+      "description": "Absolute path on the selected Environment's file system of the directory to search in. Required. There is no implicit default — the model must always state the search root. Relative paths are rejected; results are reported as absolute paths. Only paths are matched, never file contents."
     },
     "limit": {
       "type": "integer",

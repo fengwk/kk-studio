@@ -99,11 +99,7 @@ Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platfo
 
 `POST /api/chat/chats`、`PUT /api/chat/chats/{chatId}` 与 `PUT /api/chat/chats/{chatId}/yolo` 的字段语义见 [Chat](chat.md)。
 
-会话文件面板是只读 HTTP：`GET /api/harness/sessions/{sessionId}/files?path` 列目录、
-`GET .../files/content?path&offset&limit&columnOffset` 返回有界文本窗口与 revision、大小、更新时间，
-`GET .../files/download?path` 返回完整字节并带附件文件名。`path` 使用 `vfs:/sessions/<sessionId>/...` 坐标且必须属于该 Session；
-Session 不存在、跨会话路径与不存在的文件都返回 404，不可作为文本返回的内容以 `validation` + reason `SESSION_FILE_NOT_TEXT` 拒绝。
-写操作只由文件工具发起，不在此开放。
+`GET /api/harness/sessions/{sessionId}/resources/{resourceId}?download=false` 流式返回 Session 持有的资源用于预览；`download=true` 强制作为附件下载。接口仅允许 `session_blob_ref` 中存在该资源引用且 Blob 处于 ACTIVE 状态的 Session，其他情况返回 404；响应使用 Blob 的媒体类型，不返回对象存储地址，并设置禁止缓存与内容嗅探的安全头。
 
 Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
