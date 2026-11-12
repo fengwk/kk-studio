@@ -7,9 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
-
-	"github.com/gofrs/flock"
 )
 
 const (
@@ -24,8 +23,15 @@ var ErrDirectoryLockTimeout = errors.New("the directory lock was not released in
 // DirectoryLock is a kernel-backed lock released when its owning process exits.
 type DirectoryLock interface{ Close() error }
 
+type directoryLockHandle interface {
+	TryLock() (bool, error)
+	Unlock() error
+	Close() error
+}
+
 type directoryLock struct {
-	lock   *flock.Flock
+	mu     sync.Mutex
+	handle directoryLockHandle
 	closed bool
 }
 
@@ -33,6 +39,10 @@ func AcquireDirectoryLock(directory, name string) (DirectoryLock, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("the directory lock is not supported on %s", runtime.GOOS)
 	}
+	return acquireDirectoryLock(directory, name, openPlatformLockHandle)
+}
+
+func acquireDirectoryLock(directory, name string, openHandle func(string) (directoryLockHandle, error)) (DirectoryLock, error) {
 	if name != DaemonLockFileName && name != InstallLockFileName {
 		return nil, errors.New("invalid directory lock file name")
 	}
@@ -54,30 +64,52 @@ func AcquireDirectoryLock(directory, name string) (DirectoryLock, error) {
 	} else {
 		return nil, err
 	}
-	lock := flock.New(path)
-	locked, err := lock.TryLock()
+	handle, err := openHandle(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot acquire the directory lock: %w", err)
 	}
+	locked, lockErr := handle.TryLock()
+	if lockErr != nil {
+		return nil, errors.Join(fmt.Errorf("cannot acquire the directory lock: %w", lockErr), closeUnacquiredLock(handle))
+	}
 	if !locked {
+		if err := handle.Close(); err != nil {
+			return nil, fmt.Errorf("cannot close the busy directory lock handle: %w", err)
+		}
 		return nil, fmt.Errorf("%w: %s", ErrDirectoryLockBusy, directory)
 	}
 	if err := verifyPrivateFile(path); err != nil {
-		_ = lock.Unlock()
-		return nil, err
+		return nil, errors.Join(err, unlockAndClose(handle))
 	}
-	return &directoryLock{lock: lock}, nil
+	return &directoryLock{handle: handle}, nil
+}
+
+func closeUnacquiredLock(handle directoryLockHandle) error {
+	if err := handle.Close(); err != nil {
+		return fmt.Errorf("cannot close the directory lock handle: %w", err)
+	}
+	return nil
+}
+
+func unlockAndClose(handle directoryLockHandle) error {
+	var failures []error
+	if err := handle.Unlock(); err != nil {
+		failures = append(failures, fmt.Errorf("cannot release the directory lock: %w", err))
+	}
+	if err := handle.Close(); err != nil {
+		failures = append(failures, fmt.Errorf("cannot close the directory lock handle: %w", err))
+	}
+	return errors.Join(failures...)
 }
 
 func (l *directoryLock) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.closed {
 		return nil
 	}
-	if err := l.lock.Unlock(); err != nil {
-		return fmt.Errorf("cannot release the directory lock: %w", err)
-	}
 	l.closed = true
-	return nil
+	return unlockAndClose(l.handle)
 }
 
 func WaitForDirectoryLock(ctx context.Context, directory, name string, timeout time.Duration) error {
