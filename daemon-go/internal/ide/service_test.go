@@ -1417,7 +1417,7 @@ func TestForceCloseUnreachableView(t *testing.T) {
 	}
 }
 
-// IDE-T-149 verifies a snapshot is persisted on authorized force-close and can be restored.
+// IDE-T-130 verifies an authorized force-close snapshot can be restored.
 func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1474,7 +1474,7 @@ func (tracker *fakeDescendantTracker) TrackDescendant(_ context.Context, _ int, 
 	return nil
 }
 
-// IDE-T-149 verifies backup restore rejects disconnected, rejected, corrupt, and closed-view cases safely.
+// IDE-T-093 verifies restore rejects disconnected, rejected, corrupt, and closed-view cases without losing the backup.
 func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1777,3 +1777,61 @@ func (s *fakeIdeScheduler) Advance(delta time.Duration) {
 func stringPointer(value string) *string { return &value }
 func int64Pointer(value int64) *int64    { return &value }
 func boolPointer(value bool) *bool       { return &value }
+
+// IDE-T-013 verifies compact helper output omits empty optional values and reads manager generations safely.
+func TestOptionalServiceHelpers(t *testing.T) {
+	if optionalStringPtr("") != nil {
+		t.Fatal("empty optional string was materialized")
+	}
+	if value := optionalStringPtr("parent"); value == nil || *value != "parent" {
+		t.Fatalf("optional string=%v", value)
+	}
+	if currentGeneration(&fakeCodeServerManager{}) != 0 {
+		t.Fatal("generation without session was nonzero")
+	}
+	manager := &fakeCodeServerManager{session: &CodeServerSession{Generation: 7}}
+	if currentGeneration(manager) != 7 {
+		t.Fatalf("generation=%d", currentGeneration(manager))
+	}
+}
+
+// IDE-T-114 verifies workspace removal failure remains explicit and retryable.
+func TestWorkspaceRemovalFailureRetainsClosingView(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	workspace := opened.GetWorkspacePath()
+	if err := os.Remove(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	service.views[opened.GetViewId()].forceAllowed = true
+	service.mu.Unlock()
+	result := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	state := service.GetViewState(opened.GetViewId())
+	service.mu.Lock()
+	cleanupFailed := service.views[opened.GetViewId()].cleanupFailed
+	service.mu.Unlock()
+	if result.GetCode() != "CLEANUP_FAILED" || state == nil || state.GetState() != protocol.IdeViewState_CLOSING || !cleanupFailed {
+		t.Fatalf("close=%v state=%v cleanupFailed=%v", result, state, cleanupFailed)
+	}
+}

@@ -157,6 +157,9 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":3}`)); status != http.StatusBadRequest {
 		t.Fatalf("non-string ID status=%d", status)
 	}
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"invalid-documents","documents":"bad"}`)); status != http.StatusBadRequest {
+		t.Fatalf("invalid result shape status=%d", status)
+	}
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"unknown","ok":true}`)); status != http.StatusNoContent {
 		t.Fatalf("unknown ID status=%d", status)
 	}
@@ -201,6 +204,9 @@ func TestBridgePTYFailureBoundaries(t *testing.T) {
 		}
 	}
 	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":42}`)); status != http.StatusNoContent {
+		t.Fatalf("PTY event without listeners status=%d", status)
+	}
 	bridge.OnPTY(func(string, int) error { return fmt.Errorf("internal path should not cross boundary") })
 	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":42}`)); status != http.StatusInternalServerError {
 		t.Fatalf("PTY callback failure status=%d", status)

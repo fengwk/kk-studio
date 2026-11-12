@@ -313,6 +313,29 @@ func TestRecoveryAggregateQuota(t *testing.T) {
 	}
 }
 
+// IDE-T-150 verifies recovery record validation rejects invalid metadata and document fields.
+func TestValidateRecoveryBackupFields(t *testing.T) {
+	valid := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}}
+	if err := validateBackup(valid); err != nil {
+		t.Fatalf("valid backup rejected: %v", err)
+	}
+	invalid := []RecoveryBackup{
+		{ViewID: "bad", BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "0", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "relative", CreatedAt: "now", Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", Documents: []RecoveryDocument{}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now"},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: make([]RecoveryDocument, 257)},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "relative", Text: "x"}}},
+		{ViewID: valid.ViewID, BindingEpoch: "1", Directory: "/workspace", CreatedAt: "now", Documents: []RecoveryDocument{{Path: "/workspace/a", Text: string([]byte{0xff})}}},
+	}
+	for index, backup := range invalid {
+		if err := validateBackup(backup); err == nil {
+			t.Errorf("invalid backup %d accepted", index)
+		}
+	}
+}
+
 // IDE-T-150
 func TestCorruptRecoveryVariants(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}

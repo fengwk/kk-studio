@@ -218,6 +218,145 @@ func TestBridgeConnectionWaiterLifecycle(t *testing.T) {
 	}
 }
 
+// IDE-T-025/026 verifies connection waits return for admitted streams, cancellation, and bridge closure.
+func TestWaitForConnectionBoundaries(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	bridge.Assign(viewID, "/managed/view.code-workspace", 1, "/managed")
+	stream := &bridgeStream{messages: make(chan []byte, 1), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	bridge.views[viewID].stream = stream
+	bridge.mu.Unlock()
+	if err := bridge.WaitForConnection(context.Background(), viewID); err != nil {
+		t.Fatalf("connected wait=%v", err)
+	}
+	bridge.mu.Lock()
+	bridge.views[viewID].stream = nil
+	bridge.mu.Unlock()
+	waitingCtx, cancel := context.WithCancel(context.Background())
+	waiting := make(chan error, 1)
+	go func() { waiting <- bridge.WaitForConnection(waitingCtx, viewID) }()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		bridge.mu.Lock()
+		count := len(bridge.waiters[viewID])
+		bridge.mu.Unlock()
+		if count != 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-waiting:
+		if FailureCode(err) != "BUSY" {
+			t.Fatalf("cancelled waiting result=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled waiter remained blocked")
+	}
+	if err := bridge.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.WaitForConnection(context.Background(), viewID); FailureCode(err) != "UNAVAILABLE" {
+		t.Fatalf("closed bridge wait=%v", err)
+	}
+}
+
+// IDE-T-014 verifies assigning a replacement workspace retires old streams, waiters, pending commands, and indexes.
+func TestAssignRebindFencesOldBinding(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	oldWorkspace := "/managed/old.code-workspace"
+	newWorkspace := "/managed/new.code-workspace"
+	bridge.Assign(viewID, oldWorkspace, 1, "/managed")
+	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
+	pending := make(chan BridgeResult, 1)
+	waiter := make(chan error, 1)
+	bridge.mu.Lock()
+	bridge.views[viewID].stream = stream
+	bridge.views[viewID].hostID = stream.hostID
+	bridge.pending["old"] = &bridgePending{viewID: viewID, epoch: 1, result: pending}
+	bridge.waiters[viewID] = map[chan error]struct{}{waiter: {}}
+	bridge.mu.Unlock()
+	bridge.Assign(viewID, newWorkspace, 2, "/managed")
+	if result := <-pending; result.Code != "VIEW_GONE" {
+		t.Fatalf("old command result=%+v", result)
+	}
+	if err := <-waiter; FailureCode(err) != "VIEW_GONE" {
+		t.Fatalf("old waiter=%v", err)
+	}
+	select {
+	case <-stream.retired:
+	default:
+		t.Fatal("old stream was not retired")
+	}
+	bridge.mu.Lock()
+	oldID, newID := bridge.byKey[bridge.pathKey(oldWorkspace)], bridge.byKey[bridge.pathKey(newWorkspace)]
+	view := bridge.views[viewID]
+	bridge.mu.Unlock()
+	if oldID != "" || newID != viewID || view.epoch != 2 {
+		t.Fatalf("old route=%q new route=%q view=%+v", oldID, newID, view)
+	}
+	bridge.Assign(viewID, newWorkspace, 3, "/managed")
+	bridge.mu.Lock()
+	view = bridge.views[viewID]
+	bridge.mu.Unlock()
+	if view.epoch != 3 || bridge.pathKey(newWorkspace) != view.key {
+		t.Fatalf("same-path rebind=%+v", view)
+	}
+}
+
+// IDE-T-017 verifies a queued command resolves as VIEW_GONE when its stream is retired.
+func TestRequestStreamRetirement(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	bridge.Assign(viewID, "/managed/view.code-workspace", 1, "/managed")
+	stream := &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	bridge.views[viewID].stream = stream
+	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	bridge.mu.Unlock()
+	requestResult := make(chan BridgeResult, 1)
+	requestError := make(chan error, 1)
+	go func() {
+		result, err := bridge.Request(context.Background(), viewID, BridgeCommand{Op: "inspect"}, BridgeRequestOptions{ExpectedEpoch: 1})
+		requestResult <- result
+		requestError <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		bridge.mu.Lock()
+		pending := len(bridge.pending)
+		bridge.mu.Unlock()
+		if pending > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	stream.close(true)
+	select {
+	case result := <-requestResult:
+		err := <-requestError
+		if err != nil || result.Code != "VIEW_GONE" || result.Message != "ide window was closed" {
+			t.Fatalf("retired request result=%+v err=%v", result, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("retired request remained blocked")
+	}
+}
+
 // IDE-T-021 verifies pending bridge commands are fenced by epoch and directory-transition outcomes.
 func TestBridgePendingLifecycleFences(t *testing.T) {
 	makeBridge := func(epoch int64) (*Bridge, *bridgeView, *bridgeStream) {
@@ -227,6 +366,17 @@ func TestBridgePendingLifecycleFences(t *testing.T) {
 		return bridge, view, stream
 	}
 	const viewID = "11111111-1111-4111-8111-111111111111"
+
+	t.Run("missing pending and stale stream are ignored", func(t *testing.T) {
+		bridge, view, stream := makeBridge(3)
+		bridge.resolvePending("missing", BridgeResult{OK: true})
+		other := &bridgeStream{hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", retired: make(chan struct{})}
+		view.stream = other
+		bridge.streamDisconnected(viewID, stream)
+		if view.stream != other {
+			t.Fatal("stale stream disconnected the current host")
+		}
+	})
 
 	t.Run("directory transition accepted", func(t *testing.T) {
 		bridge, view, stream := makeBridge(3)

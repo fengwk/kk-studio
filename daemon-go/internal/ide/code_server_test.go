@@ -148,6 +148,17 @@ func TestPathsAndLaunchResolution(t *testing.T) {
 	if _, err := ResolveCodeServerLaunch(filepath.Join(root, "missing")); err == nil || err.Error() != "code-server runtime is not installed" {
 		t.Fatalf("missing runtime error = %v", err)
 	}
+	partial := filepath.Join(root, "partial")
+	partialNode := filepath.Join(partial, "runtime", "code-server", "lib", nodeName)
+	if err := os.MkdirAll(filepath.Dir(partialNode), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partialNode, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveCodeServerLaunch(partial); err == nil || err.Error() != "code-server runtime is not installed" {
+		t.Fatalf("missing entrypoint error=%v", err)
+	}
 }
 
 // IDE-T-029 verifies a short, private POSIX session socket directory and cleanup after close.
@@ -260,15 +271,20 @@ func installFakeDistribution(t *testing.T, root string) {
 }
 
 type fakeSupervisor struct {
-	mu              sync.Mutex
-	countN          int
-	proc            *fakeProcess
-	specs           []native.ProcessSpec
-	startErr        error
-	startHook       func()
-	healthStatus    int
-	loginStatus     int
-	omitLoginCookie bool
+	mu               sync.Mutex
+	countN           int
+	proc             *fakeProcess
+	specs            []native.ProcessSpec
+	startErr         error
+	startHook        func(context.Context)
+	healthStatus     int
+	loginStatus      int
+	omitLoginCookie  bool
+	resetLogin       bool
+	terminateErr     error
+	terminateGate    chan struct{}
+	terminateEntered chan struct{}
+	terminateOnce    sync.Once
 }
 
 func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (native.ManagedProcess, error) {
@@ -278,7 +294,7 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 		return nil, s.startErr
 	}
 	if s.startHook != nil {
-		s.startHook()
+		s.startHook(ctx)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -325,6 +341,13 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 		w.WriteHeader(status)
 	})
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if s.resetLogin {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = connection.Close()
+			}
+			return
+		}
 		_ = r.ParseForm()
 		if r.Form.Get("password") != password {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -340,7 +363,7 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 		w.WriteHeader(http.StatusFound)
 	})
 	server := &http.Server{Handler: mux}
-	process := &fakeProcess{pid: 313, stdout: stdoutR, stderr: stderrR, stdoutW: stdoutW, stderrW: stderrW, server: server, listener: listener, exit: make(chan native.ProcessExit, 1)}
+	process := &fakeProcess{pid: 312 + s.countN, stdout: stdoutR, stderr: stderrR, stdoutW: stdoutW, stderrW: stderrW, server: server, listener: listener, exit: make(chan native.ProcessExit, 1), terminateErr: s.terminateErr, terminateGate: s.terminateGate, terminateEntered: s.terminateEntered, terminateOnce: &s.terminateOnce}
 	s.proc = process
 	go server.Serve(listener)
 	return process, nil
@@ -356,6 +379,11 @@ type fakeProcess struct {
 	server           *http.Server
 	listener         net.Listener
 	exit             chan native.ProcessExit
+	terminateErr     error
+	terminateCalls   int
+	terminateGate    chan struct{}
+	terminateEntered chan struct{}
+	terminateOnce    *sync.Once
 	once             sync.Once
 }
 
@@ -377,6 +405,20 @@ func (p *fakeProcess) Wait(ctx context.Context) (native.ProcessExit, error) {
 	}
 }
 func (p *fakeProcess) Terminate(ctx context.Context, _ time.Duration) error {
+	p.terminateCalls++
+	if p.terminateEntered != nil && p.terminateOnce != nil {
+		p.terminateOnce.Do(func() { close(p.terminateEntered) })
+	}
+	if p.terminateGate != nil {
+		select {
+		case <-p.terminateGate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if p.terminateErr != nil {
+		return p.terminateErr
+	}
 	p.once.Do(func() {
 		_ = p.server.Close()
 		_ = p.listener.Close()
