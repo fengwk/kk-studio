@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.api.history.NativeCompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -101,6 +102,33 @@ class EntryPathTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new EntryPath(List.of(root, baseline, start, change)));
+  }
+
+  @Test
+  void reducesSystemBaselineAndOnlyChangedSections() {
+    Entry root = root(settings("root"));
+    Entry baseline =
+        new Entry(
+            id(2L),
+            SESSION_ID,
+            id(1L),
+            new SystemPayload(
+                Map.of("agent", "<agent>old</agent>", "harness", "<harness>stable</harness>"),
+                List.of(),
+                List.of(),
+                true),
+            time(id(2L)));
+    SystemContext current = SystemContext.reduce(List.of(root, baseline));
+    SystemPayload change =
+        current.changeTo(new SystemContext(Map.of("agent", "<agent>new</agent>"), List.of()));
+    Entry delta = new Entry(id(3L), SESSION_ID, id(2L), change, time(id(3L)));
+
+    SystemContext effective =
+        new EntryPath(List.of(root, baseline, delta)).systemContext().orElseThrow();
+
+    assertEquals(Map.of("agent", "<agent>new</agent>"), effective.sections());
+    assertEquals("<agent>new</agent>", effective.systemInstruction());
+    assertEquals(List.of("harness"), change.removedSections());
   }
 
   @Test

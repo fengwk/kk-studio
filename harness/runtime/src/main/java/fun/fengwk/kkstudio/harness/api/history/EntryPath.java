@@ -88,6 +88,13 @@ public record EntryPath(List<Entry> entries) {
     return root();
   }
 
+  /** 返回沿路径归约的请求 system context；尚无 SYSTEM 基线时返回空。 */
+  public Optional<SystemContext> systemContext() {
+    boolean hasSystem =
+        entries.stream().anyMatch(entry -> entry.payload() instanceof SystemPayload);
+    return hasSystem ? Optional.of(SystemContext.reduce(entries)) : Optional.empty();
+  }
+
   /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */
   public BranchSettings baseSettings() {
     BranchSettings settings = ((RootPayload) root().payload()).settings();

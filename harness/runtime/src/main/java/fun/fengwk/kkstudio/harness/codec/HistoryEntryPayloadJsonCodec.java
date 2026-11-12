@@ -85,7 +85,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static final Set<String> ROOT_FIELDS = orderedSet("settings");
   private static final Set<String> SYSTEM_FIELDS =
-      orderedSet("sections", "addedTools", "removedTools", "baseline");
+      orderedSet("sections", "removedSections", "addedTools", "removedTools", "baseline");
   private static final Set<String> TURN_START_FIELDS =
       orderedSet(
           "reason",
@@ -230,6 +230,8 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     ObjectNode sections = node.putObject("sections");
     value.sections().forEach(sections::put);
+    ArrayNode removedSections = node.putArray("removedSections");
+    value.removedSections().forEach(removedSections::add);
     ArrayNode added = node.putArray("addedTools");
     value.addedTools().forEach(binding -> added.add(TOOL_BINDING_CODEC.encodeNode(binding)));
     ArrayNode removed = node.putArray("removedTools");
@@ -513,6 +515,15 @@ public final class HistoryEntryPayloadJsonCodec {
               }
               sections.put(entry.getKey(), entry.getValue().stringValue());
             });
+    ArrayNode removedSectionValues =
+        HistoryValueCodecs.requireArray(node.get("removedSections"), context + ".removedSections");
+    List<String> removedSections = new ArrayList<>(removedSectionValues.size());
+    for (JsonNode item : removedSectionValues) {
+      if (!item.isString()) {
+        throw new IllegalArgumentException("SYSTEM.removedSections[] must be text");
+      }
+      removedSections.add(item.stringValue());
+    }
     ArrayNode added =
         HistoryValueCodecs.requireArray(node.get("addedTools"), context + ".addedTools");
     List<ToolBinding> addedTools = new ArrayList<>(added.size());
@@ -532,7 +543,7 @@ public final class HistoryEntryPayloadJsonCodec {
       throw new IllegalArgumentException("SYSTEM.baseline must be boolean");
     }
     return new SystemPayload(
-        sections, addedTools, removedTools, node.get("baseline").booleanValue());
+        sections, removedSections, addedTools, removedTools, node.get("baseline").booleanValue());
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {

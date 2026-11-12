@@ -11,10 +11,19 @@ import java.util.Objects;
 /** Immutable baseline or append-only delta of the model request context. */
 public record SystemPayload(
     Map<String, String> sections,
+    List<String> removedSections,
     List<ToolBinding> addedTools,
     List<String> removedTools,
     boolean baseline)
     implements EntryPayload {
+
+  public SystemPayload(
+      Map<String, String> sections,
+      List<ToolBinding> addedTools,
+      List<String> removedTools,
+      boolean baseline) {
+    this(sections, List.of(), addedTools, removedTools, baseline);
+  }
 
   public SystemPayload {
     Objects.requireNonNull(sections, "sections");
@@ -27,12 +36,20 @@ public record SystemPayload(
           copiedSections.put(name, text);
         });
     sections = Collections.unmodifiableMap(copiedSections);
+    removedSections = List.copyOf(Objects.requireNonNull(removedSections, "removedSections"));
+    if (removedSections.stream().anyMatch(name -> name == null || name.isBlank())) {
+      throw new IllegalArgumentException("removedSections must contain non-blank names");
+    }
     addedTools = List.copyOf(Objects.requireNonNull(addedTools, "addedTools"));
     removedTools = List.copyOf(Objects.requireNonNull(removedTools, "removedTools"));
-    if (baseline && (!removedTools.isEmpty() || sections.isEmpty())) {
+    if (baseline && (!removedSections.isEmpty() || !removedTools.isEmpty() || sections.isEmpty())) {
       throw new IllegalArgumentException("baseline SYSTEM must contain sections and no removals");
     }
-    if (!baseline && sections.isEmpty() && addedTools.isEmpty() && removedTools.isEmpty()) {
+    if (!baseline
+        && sections.isEmpty()
+        && removedSections.isEmpty()
+        && addedTools.isEmpty()
+        && removedTools.isEmpty()) {
       throw new IllegalArgumentException("SYSTEM change must change text or tools");
     }
   }
