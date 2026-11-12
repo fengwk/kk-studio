@@ -1163,9 +1163,17 @@ func TestChangeDirectoryReply(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("replacement host did not confirm directory")
 	}
-	workspace, err := os.ReadFile(opened.GetWorkspacePath())
-	if err != nil || !strings.Contains(string(workspace), next) {
-		t.Fatalf("workspace=%q err=%v", workspace, err)
+	workspaceBytes, err := os.ReadFile(opened.GetWorkspacePath())
+	var workspace struct {
+		Folders []struct {
+			Path string `json:"path"`
+		} `json:"folders"`
+	}
+	if err == nil {
+		err = json.Unmarshal(workspaceBytes, &workspace)
+	}
+	if err != nil || len(workspace.Folders) != 1 || workspace.Folders[0].Path != next {
+		t.Fatalf("workspace=%q err=%v", workspaceBytes, err)
 	}
 }
 
