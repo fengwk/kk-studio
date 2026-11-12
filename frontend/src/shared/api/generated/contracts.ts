@@ -1367,33 +1367,6 @@ export interface HarnessSessionEntryPageDTO {
   nextCursor: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileContentDTO */
-export interface HarnessSessionFileContentDTO {
-  sessionId: string
-  path: string
-  sizeBytes: string
-  revision: number
-  updatedAt: number
-  text: string
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileEntryDTO */
-export interface HarnessSessionFileEntryDTO {
-  name: string
-  path: string
-  directory: boolean
-  sizeBytes?: string | null
-  revision?: number | null
-  updatedAt?: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileListDTO */
-export interface HarnessSessionFileListDTO {
-  sessionId: string
-  path: string
-  entries: HarnessSessionFileEntryDTO[]
-}
-
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO */
 export interface HarnessSessionSummaryDTO {
   sessionId: string
@@ -3177,19 +3150,9 @@ export interface ApiRoutes {
     query: { cursor?: string; limit?: number }
     response: HarnessSessionEntryPageDTO
   }
-  'GET /api/harness/sessions/{sessionId}/files': {
-    path: { sessionId: string }
-    query: { path?: string }
-    response: HarnessSessionFileListDTO
-  }
-  'GET /api/harness/sessions/{sessionId}/files/content': {
-    path: { sessionId: string }
-    query: { columnOffset?: number; limit?: number; offset?: number; path: string }
-    response: HarnessSessionFileContentDTO
-  }
-  'GET /api/harness/sessions/{sessionId}/files/download': {
-    path: { sessionId: string }
-    query: { path: string }
+  'GET /api/harness/sessions/{sessionId}/resources/{resourceId}': {
+    path: { resourceId: string; sessionId: string }
+    query: { download?: boolean }
     response: Blob
     responseType: 'blob'
   }
@@ -3205,10 +3168,6 @@ export interface ApiRoutes {
   'GET /api/harness/threads/{threadId}/compaction-availability': {
     path: { threadId: string }
     response: HarnessManualCompactionDTO
-  }
-  'GET /api/harness/threads/{threadId}/subagents': {
-    path: { threadId: string }
-    response: HarnessThreadTreeNodeDTO[]
   }
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }
@@ -3694,7 +3653,7 @@ export interface ApiRoutes {
 }
 
 export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
-  'GET /api/harness/sessions/{sessionId}/files/download': 'blob',
+  'GET /api/harness/sessions/{sessionId}/resources/{resourceId}': 'blob',
   'GET /api/platform/environments/{environmentId}/install-script': 'text',
   'GET /api/platform/environments/{environmentId}/uninstall-script': 'text',
 }

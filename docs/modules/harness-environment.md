@@ -43,9 +43,7 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
 `workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
-接受目标主机上的绝对路径或 `vfs:` 路径，相对路径直接拒绝，且不接受 `workdir`。其中 `fs.write`、`fs.edit`、
-`fs.edit.preview`、`fs.grep` 与 `fs.find` 只接受 `vfs:/sessions/<sessionId>/...` 会话路径；`fs.read`
-还接受只读的 `vfs:/resources/<blobId>` 与 `vfs:/skills/<package>/<skill>/...`。三个 `lsp.*` 能力的本地 `path`
+在 Daemon 执行时只接受目标主机上的绝对路径，相对路径直接拒绝，且不接受 `workdir`。Harness 的 `read` 工具会先拦截 `resource://` URI 并交给平台读取器，只有本地绝对路径才发送给 `fs.read`；其他文件工具也只接受 Environment 绝对路径。三个 `lsp.*` 能力的本地 `path`
 必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。

@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -234,6 +235,26 @@ class GlobalStorageToolResultHistoryMaterializerTest {
 
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
+  }
+
+  /** 文本输出传递资源 URI 时，也为当前 Session 建立持有。 */
+  @Test
+  void retainsResourceReferencesMentionedInTextOutput() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    stubBlob(blobs, blobId, "image/png", 3L);
+    String text = "See resource://files/" + blobId + " for the image.";
+
+    materializer(uploads, blobs, refs)
+        .materialize(
+            sessionId,
+            "tool",
+            new ToolResult("call", List.of(new TextResultContent(text)), false, "{}"));
+
+    verify(refs).retainRef(sessionId, blobId);
   }
 
   private static GlobalStorageToolResultHistoryMaterializer materializer(

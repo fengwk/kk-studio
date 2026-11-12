@@ -1,5 +1,0 @@
-Task accepted. thread_id: {{threadId}}.
-The subagent runs asynchronously in an isolated session and reports back later as a separate message; it can complete, fail, or be cancelled, so do not wait or poll for it.
-Continue other independent work now, or yield if none remains.
-To continue this subagent later, call task with thread_id {{threadId}}, subagent_type, and prompt.{{#replaced}}
-This continuation replaces the previous pending wait on this subagent thread; only one consolidated result will be reported for the latest prompt.{{/replaced}}

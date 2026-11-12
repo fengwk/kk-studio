@@ -8,7 +8,6 @@ import { SubagentTreePanel } from '@/features/thread/runtime/SubagentTreePanel'
 import { useActiveThreadTree } from '@/features/thread/runtime/useActiveThreadTree'
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
@@ -16,7 +15,6 @@ import { setLocale } from '@/shared/i18n'
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadTree: vi.fn(),
-    getThreadSubagents: vi.fn(),
   },
 }))
 
@@ -155,11 +153,6 @@ describe('ActiveThreadTree', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(harnessService.getThreadSubagents).mockImplementation(async (parentId) => {
-      const latestTree = vi.mocked(harnessService.getThreadTree).mock.results.at(-1)?.value
-      const nodes: HarnessThreadTreeNodeDTO[] = latestTree == null ? [] : await latestTree
-      return nodes.filter((node) => node.parentThreadId === parentId && node.kind === 'SUBAGENT')
-    })
     setLocale('zh-CN')
   })
 

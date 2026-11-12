@@ -107,8 +107,8 @@ describe('HTTP client', () => {
     expect(await request('GET /api/platform/environments/{environmentId}/uninstall-script', {
       path: { environmentId: 'env-1' }, query: { operatingSystem: 'linux' },
     })).toBe('script')
-    const blob = await request('GET /api/harness/sessions/{sessionId}/files/download', {
-      path: { sessionId: 's' }, query: { path: 'x' },
+    const blob = await request('GET /api/harness/sessions/{sessionId}/resources/{resourceId}', {
+      path: { sessionId: 's', resourceId: 'r' }, query: { download: true },
     })
     expect(await blob.text()).toBe('bytes')
   })
@@ -129,8 +129,8 @@ describe('HTTP client', () => {
     await expect(request('GET /api/platform/environments/{environmentId}/uninstall-script', {
       path: { environmentId: 'env-1' }, query: { operatingSystem: 'linux' },
     })).resolves.toBeUndefined()
-    await expect(request('GET /api/harness/sessions/{sessionId}/files/download', {
-      path: { sessionId: 's' }, query: { path: 'x' },
+    await expect(request('GET /api/harness/sessions/{sessionId}/resources/{resourceId}', {
+      path: { sessionId: 's', resourceId: 'r' }, query: { download: true },
     })).resolves.toBeUndefined()
     await expect(request('GET /api/canvas/canvases', {}))
       .rejects.toMatchObject({ status: 404, code: 'not_found' })

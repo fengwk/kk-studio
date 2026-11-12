@@ -334,7 +334,7 @@ class ProjectDtoMapperTest {
     IssueEvidenceDTO dto = mapper.toDto(evidence);
     assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
     assertEquals(blobId.toString().toLowerCase(), dto.getBlobId());
-    assertEquals("vfs:/resources/" + blobId.toString().toLowerCase(), dto.getUri());
+    assertEquals("resource://files/" + blobId.toString().toLowerCase(), dto.getUri());
     assertEquals("evidence.txt", dto.getName());
     assertEquals("coder", dto.getActorAgentName());
     assertEquals(runId.toString().toLowerCase(), dto.getRunId());

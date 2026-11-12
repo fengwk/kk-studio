@@ -177,21 +177,6 @@ final class PostgresqlThreadStore implements ThreadStore {
   }
 
   @Override
-  public List<ThreadState> listSubagents(UUID parentThreadId) {
-    tx.checkOpen();
-    Objects.requireNonNull(parentThreadId, "parentThreadId");
-    return tx.queryList(
-        """
-        select *
-        from harness_thread
-        where parent_thread_id = ? and kind = 'SUBAGENT'
-        order by id
-        """,
-        PostgresqlHarnessRows.THREAD,
-        parentThreadId);
-  }
-
-  @Override
   public void update(ThreadState thread) {
     tx.checkOpen();
     Objects.requireNonNull(thread, "thread");

@@ -21,32 +21,15 @@ export function useActiveThreadTree(boundThreadId: string | null) {
     queryKey: queryKeys.threads.tree(boundThreadId ?? ''),
     queryFn: async () => {
       const nodes = await harnessService.getThreadTree(boundThreadId ?? '')
-      // 普通 tree 只提供 USER 根；执行树的 SUBAGENT 节点逐父 Thread 独立读取。
+      // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
       const tree = projectThreadTree(nodes)
       if (tree.root == null) {
-        throw new Error('thread tree does not contain a USER root')
+        throw new Error('thread tree does not contain an execution root')
       }
-      const allNodes = [...nodes]
-      let parents = [tree.root.threadId]
-      while (parents.length > 0) {
-        const batches = await Promise.all(
-          parents.map((parentId) =>
-            queryClient.fetchQuery({
-              queryKey: queryKeys.threads.subagents(parentId),
-              queryFn: () => harnessService.getThreadSubagents(parentId),
-            }),
-          ),
-        )
-        const children = batches.flat()
-        allNodes.push(...children)
-        parents = children.map((child) => child.threadId)
-      }
-      // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
-      const fullTree = projectThreadTree(allNodes)
-      if (!fullTree.nodesById.has(boundThreadId ?? '')) {
+      if (!tree.nodesById.has(boundThreadId ?? '')) {
         throw new Error('thread tree does not contain requested bound thread')
       }
-      return allNodes
+      return nodes
     },
     enabled: Boolean(boundThreadId),
   })
