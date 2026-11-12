@@ -196,3 +196,12 @@ func TestWindowsSupervisor_CloseAggregatesProcessFailures(t *testing.T) {
 		t.Fatalf("supervisor close = %v", err)
 	}
 }
+
+// TestWindowsSupervisor_TrackDescendantReportsMembershipQueryFailure verifies a failed native membership check is returned.
+func TestWindowsSupervisor_TrackDescendantReportsMembershipQueryFailure(t *testing.T) {
+	process := &windowsProcess{job: windows.Handle(0x12345678)}
+	supervisor := &windowsSupervisor{processes: map[int]*windowsProcess{1: process}}
+	if err := supervisor.TrackDescendant(context.Background(), 1, 0); err == nil {
+		t.Fatal("descendant membership query failure was discarded")
+	}
+}
