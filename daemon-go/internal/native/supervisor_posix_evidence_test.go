@@ -69,6 +69,41 @@ func TestPOSIXCleanupFailedStart_BudgetAndFailureEvidence(t *testing.T) {
 	}
 }
 
+// NAT-F-007 verifies failed POSIX termination is typed, cached, and does not repeat signalling.
+func TestPOSIXTerminate_FailureCachesConvergenceError(t *testing.T) {
+	stream, err := os.OpenFile(filepath.Join(t.TempDir(), "stream"), os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	convergeErr := errors.New("injected scope convergence failure")
+	calls := 0
+	process := &posixProcess{
+		owner:  stream,
+		stdin:  stream,
+		stdout: stream,
+		stderr: stream,
+		convergeScope: func(_ context.Context, _ int, grace time.Duration) error {
+			calls++
+			if grace != 0 {
+				t.Errorf("negative grace normalized to %s, want 0", grace)
+			}
+			return convergeErr
+		},
+	}
+	firstErr := process.Terminate(context.Background(), -time.Millisecond)
+	var notConverged *ProcessScopeNotConvergedError
+	if !errors.As(firstErr, &notConverged) || !errors.Is(firstErr, convergeErr) {
+		t.Fatalf("termination error = %v, want typed convergence failure", firstErr)
+	}
+	if secondErr := process.Terminate(context.Background(), time.Second); secondErr != firstErr {
+		t.Fatalf("second termination error %v differs from cached error %v", secondErr, firstErr)
+	}
+	if calls != 1 {
+		t.Fatalf("scope convergence calls = %d, want 1", calls)
+	}
+}
+
 // NAT-T-001
 func TestPOSIXSupervisor_UnprovenConvergenceRetainsEvidence(t *testing.T) {
 	supervisor, err := NewSupervisor()
