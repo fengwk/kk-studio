@@ -104,7 +104,7 @@ func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Error || !bytes.Equal(result.Contents[0].Bytes, encoded.Bytes()) {
+	if result.Error || result.Contents[0].MediaType != "image/png" || !bytes.Equal(result.Contents[0].Bytes, encoded.Bytes()) {
 		t.Fatalf("result=%#v", result)
 	}
 	var details struct {

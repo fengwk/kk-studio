@@ -119,6 +119,10 @@ func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "Created ") || changed != 1 {
 		t.Fatalf("create=%#v changed=%d err=%v", result, changed, err)
 	}
+	created, err := os.ReadFile(path)
+	if err != nil || string(created) != "first" {
+		t.Fatalf("created file=%q err=%v", created, err)
+	}
 	preview, err := PreviewWrite(path, "second")
 	if err != nil {
 		t.Fatal(err)

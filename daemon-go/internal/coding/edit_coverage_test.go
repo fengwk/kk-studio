@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-F-008
+// COD-T-093, COD-T-095, COD-T-096
 func TestEditCapabilityRejectsInvalidReplacementCases(t *testing.T) {
 	for _, test := range []struct {
 		name    string

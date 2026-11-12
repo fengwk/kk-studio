@@ -143,6 +143,49 @@ func TestEditPreservesMixedLineEndings(t *testing.T) {
 	}
 }
 
+// COD-T-093: duplicate matches are rejected without changing the file.
+func TestEditMultipleMatchesAreRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multiple.txt")
+	if err := os.WriteFile(path, []byte("old old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "use replace_all") {
+		t.Fatalf("result=%#v", result)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil || string(written) != "old old" {
+		t.Fatalf("written=%q err=%v", written, err)
+	}
+}
+
+// COD-T-095 and COD-T-096: missing and empty search strings are rejected without writes.
+func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unchanged.txt")
+	const original = "source"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		old  string
+		want string
+	}{{"missing", "absent", "Could not find old_string"}, {"empty", "", "old_string must not be empty"}} {
+		t.Run(test.name, func(t *testing.T) {
+			result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": test.old, "new_string": "new"}, nil)
+			if !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
+				t.Fatalf("result=%#v", result)
+			}
+			written, err := os.ReadFile(path)
+			if err != nil || string(written) != original {
+				t.Fatalf("written=%q err=%v", written, err)
+			}
+		})
+	}
+}
+
+// COD-T-097 is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
+
 // COD-N-018
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "write.txt")
