@@ -608,10 +608,7 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		}
 		switch result.Kind {
 		case ConfigFailed:
-			if ready {
-				return r.sendStatus()
-			}
-			return nil
+			return r.sendStatus()
 		case ConfigFatal:
 			return fmt.Errorf("%w: environment configuration is inconsistent", ErrRuntimeFatal)
 		default:
