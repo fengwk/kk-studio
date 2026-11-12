@@ -69,9 +69,9 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -199,7 +199,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           // COMPACTION join
           ThreadJoin join = tx.joins().find(compaction.joinInvocationId()).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
-          assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
+          assertEquals(ThreadKind.COMPACTION, childThread.kind());
           assertEquals(new ThreadConstraints(4096, false), childThread.constraints());
           assertEquals(baseline.threadId(), join.parentThreadId());
           assertEquals(compaction.childThreadId(), join.childThreadId());
@@ -331,7 +331,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   new SpawnRequest.Continuation(child.headEntryId(), child.nextCommandSequence()),
                   false,
                   ThreadConstraints.NONE,
-                  SpawnTrigger.RUNTIME,
+                  ThreadKind.COMPACTION,
                   JoinDelivery.NOTIFY_PARENT,
                   SpawnRequest.Budget.unlimited(),
                   id(99001),
@@ -364,7 +364,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   new SpawnRequest.Continuation(child.headEntryId(), original.sequence()),
                   false,
                   ThreadConstraints.NONE,
-                  SpawnTrigger.RUNTIME,
+                  ThreadKind.COMPACTION,
                   JoinDelivery.SETTLE_OWNER_TURN,
                   SpawnRequest.Budget.unlimited(),
                   owner.invocationId(),
@@ -2142,7 +2142,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       thread.name(),
                       thread.rootThreadId(),
                       thread.yoloEnabled(),
-                      thread.spawnTrigger(),
+                      thread.kind(),
                       thread.constraints(),
                       ThreadExecutionControl.STOPPED,
                       thread.inputThroughSequence(),
@@ -2213,7 +2213,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   "child",
                   rootThreadId,
                   false,
-                  SpawnTrigger.MODEL_TOOL,
+                  ThreadKind.SUBAGENT,
                   constraints.merge(parent.constraints()),
                   ThreadExecutionControl.RUNNABLE,
                   0L,

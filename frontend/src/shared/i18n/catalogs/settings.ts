@@ -9,6 +9,10 @@ export const settingsCatalog = {
     'en-US': 'Settings',
     'zh-CN': '设置',
   },
+  'settings.subtitle': {
+    'en-US': 'Changes take effect as soon as you save. Calls already in progress keep the values they started with.',
+    'zh-CN': '设置保存后立即生效，进行中的调用沿用开始时的值。',
+  },
   'settings.retry': {
     'en-US': 'Retry',
     'zh-CN': '重试',
@@ -534,18 +538,6 @@ export const settingsCatalog = {
     'en-US': 'Settings save toolbar',
     'zh-CN': '设置保存工具条',
   },
-  'settings.applyTiming.nextInvocation': {
-    'en-US': 'Takes effect on next invocation',
-    'zh-CN': '下次调用生效',
-  },
-  'settings.applyTiming.nextHttpRequest': {
-    'en-US': 'Takes effect on new HTTP requests',
-    'zh-CN': '新发起请求生效',
-  },
-  'settings.applyTiming.restart': {
-    'en-US': 'Restart required',
-    'zh-CN': '重启后生效',
-  },
   'settings.error.load': {
     'en-US': 'Failed to load settings.',
     'zh-CN': '设置加载失败。',
@@ -734,15 +726,6 @@ export const settingsCatalog = {
       'Approximate amount of recent conversation, in tokens, kept verbatim when compacting; earlier content is merged into the summary. Models with a small context window use half the window instead.',
     'zh-CN': '压缩时保留原文的最近对话量，按 token 估算；更早的内容合并为摘要。上下文窗口较小的模型按窗口的一半计算。',
   },
-  'settings.field.aiRuntime.compactionReserveTokens': {
-    'en-US': 'Reply reserve tokens',
-    'zh-CN': '回复预留 token',
-  },
-  'settings.field.aiRuntime.compactionReserveTokens.hint': {
-    'en-US':
-      "Space reserved for the model's reply: compaction starts when the conversation exceeds the context window minus this value. The reserve never exceeds the model's maximum output; models with a separate input limit use that limit instead.",
-    'zh-CN': '为模型回复预留的空间：对话超过“上下文窗口减去此值”时自动压缩。实际预留不超过模型的最大输出；单独限制输入长度的模型按输入上限判断。',
-  },
   'settings.field.modelSelection.unset': {
     'en-US': 'Not set',
     'zh-CN': '未设置',
@@ -842,8 +825,16 @@ export const settingsCatalog = {
     'zh-CN': '工具网关与技能加载',
   },
   'settings.section.tool.gateway.description': {
-    'en-US': 'Retry and skill-load budgets. Applies to the next invocation.',
-    'zh-CN': '重试与技能加载预算；对下一次调用立即生效。',
+    'en-US': 'Tool output size and retry budgets.',
+    'zh-CN': '工具输出大小与重试预算。',
+  },
+  'settings.field.tool.maxOutputMib': {
+    'en-US': 'Tool output size limit (MiB)',
+    'zh-CN': '工具输出大小上限（MiB）',
+  },
+  'settings.field.tool.maxOutputMib.hint': {
+    'en-US': 'Maximum content a single tool call can return, including text, files, images, audio, and video. Calls that exceed this limit fail and report the actual size.',
+    'zh-CN': '单次工具调用可以返回的最大内容，包括文本、文件、图片、音频和视频。超出时调用失败，并告知实际大小。',
   },
   'settings.field.tool.modelGatewayBusyRetryMillis': {
     'en-US': 'Model gateway busy retry (ms)',
@@ -940,16 +931,8 @@ export const settingsCatalog = {
     'zh-CN': '运行预算',
   },
   'settings.section.environment.runtime.description': {
-    'en-US': 'Heartbeat and resource limits. Applies to the next check or request.',
-    'zh-CN': '心跳与资源上限；对下一次判定或请求立即生效。',
-  },
-  'settings.field.environment.maxResourceBytes': {
-    'en-US': 'Max resource bytes',
-    'zh-CN': '最大资源字节数',
-  },
-  'settings.field.environment.maxResourceBytes.hint': {
-    'en-US': 'Maximum bytes allowed for a single Environment resource. Larger resource writes are rejected.',
-    'zh-CN': '单个 Environment 资源允许的最大字节数。超出限制时将拒绝写入。',
+    'en-US': 'Heartbeat timeout for runtime environments.',
+    'zh-CN': '运行环境的心跳超时时间。',
   },
   'settings.field.environment.heartbeatTimeoutMillis': {
     'en-US': 'Heartbeat timeout (ms)',
@@ -1104,14 +1087,6 @@ export const settingsCatalog = {
   'settings.section.advanced.workNotification.description': {
     'en-US': 'Work notification polling and reconnection budgets.',
     'zh-CN': '工作通知轮询与重连预算。',
-  },
-  'settings.field.advanced.resourceMaxBytes': {
-    'en-US': 'Max resource bytes',
-    'zh-CN': '最大资源字节数',
-  },
-  'settings.field.advanced.resourceMaxBytes.hint': {
-    'en-US': 'Maximum byte size limit for individual resource objects loaded and cached in memory.',
-    'zh-CN': '系统允许加载与缓存的单个资源对象的最大字节数上限。',
   },
   'settings.field.advanced.processorLeaseDurationMillis': {
     'en-US': 'Processor lease duration (ms)',

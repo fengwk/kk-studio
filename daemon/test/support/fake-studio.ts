@@ -179,7 +179,6 @@ export class FakeStudioPeer {
                 case: 'settings',
                 value: create(SettingsSchema, {
                   resourceBudgets: create(ResourceBudgetsSchema, {
-                    maxResourceBytes: 1048576n,
                     temporaryResourceTtlSeconds: 60n,
                     temporaryResourceCleanupIntervalSeconds: 30n,
                   }),

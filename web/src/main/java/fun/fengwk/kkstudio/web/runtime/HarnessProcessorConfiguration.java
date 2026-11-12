@@ -52,8 +52,8 @@ import java.util.function.Supplier;
 /**
  * Processor 组合：重试与 HTTP 策略、lease/processor 配置、调度与心跳执行器、退出确认 journal，以及三个 Processor 工厂。
  *
- * <p>Advanced 软策略在装配期从共享 {@link SystemSettingsSnapshot} 读取（DB 变更需重启）；aiRuntime 的 retry 经 {@link
- * Supplier} 每次判定点现读。本组合不持有任何硬编码的重复默认值。
+ * <p>Advanced 软策略通过 {@link Supplier} 在每次使用时从共享 {@link SystemSettingsSnapshot} 读取；aiRuntime 的 retry
+ * 也在每次判定点现读。本组合不持有任何硬编码的重复默认值。
  *
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod} 交给 Spring 持有生命周期。processor 关闭与 executor
  * shutdown 由 Spring 按依赖逆序 destroy 保证。
@@ -103,34 +103,40 @@ public class HarnessProcessorConfiguration {
 
   /** Model / Tool processor 共用的 claim/lease 与 heartbeat 节奏。 */
   @Bean
-  public ProcessorLeaseConfig processorLeaseConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
-    return new ProcessorLeaseConfig(
-        Duration.ofMillis(advanced.processorLeaseDurationMillis()),
-        Duration.ofMillis(advanced.processorHeartbeatIntervalMillis()));
+  public Supplier<ProcessorLeaseConfig> processorLeaseConfigProvider(
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    return () -> {
+      SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+      return new ProcessorLeaseConfig(
+          Duration.ofMillis(advanced.processorLeaseDurationMillis()),
+          Duration.ofMillis(advanced.processorHeartbeatIntervalMillis()));
+    };
   }
 
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
       CompactionConfigProvider compactionConfigProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
-        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()), compactionConfigProvider);
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().threadResolveFailureDelayMillis()),
+        compactionConfigProvider);
   }
 
   @Bean
   public ModelProcessorConfig modelProcessorConfig(
-      ProcessorLeaseConfig leaseConfig,
+      Supplier<ProcessorLeaseConfig> leaseConfigProvider,
       Supplier<InvocationRetryPolicy> retryPolicyProvider,
       Function<String, ModelHttpErrorPolicy> modelHttpErrorPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot,
       ToolHistoryActionResolver toolHistoryActionResolver) {
     return new ModelProcessorConfig(
-        leaseConfig,
+        leaseConfigProvider,
         retryPolicyProvider,
-        Duration.ofMillis(
-            systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
         ModelStreamConfig.DEFAULT,
         toolHistoryActionResolver,
         modelHttpErrorPolicyProvider);
@@ -138,15 +144,18 @@ public class HarnessProcessorConfiguration {
 
   @Bean
   public ToolProcessorConfig toolProcessorConfig(
-      ProcessorLeaseConfig leaseConfig,
+      Supplier<ProcessorLeaseConfig> leaseConfigProvider,
       Supplier<InvocationRetryPolicy> retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(
-        leaseConfig,
+        leaseConfigProvider,
         retryPolicyProvider,
-        Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
-        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()),
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().toolPreflightFailureDelayMillis()),
+        () ->
+            Duration.ofMillis(
+                systemSettingsSnapshot.get().advanced().toolDispatchBusyFallbackDelayMillis()),
         ToolProcessorConfig.DEFAULT_REATTACH_WINDOW);
   }
 

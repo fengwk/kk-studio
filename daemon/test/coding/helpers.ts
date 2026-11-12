@@ -39,6 +39,7 @@ export interface ContextOverrides {
 export function makeContext(dataDir: string, overrides: ContextOverrides = {}): CapabilityContext {
   return {
     config: overrides.config ?? makeConfig(dataDir),
+    maxOutputBytes: 16 * 1024 * 1024,
     signal: overrides.signal ?? new AbortController().signal,
     processes: overrides.processes ?? ({} as CapabilityContext['processes']),
     resources: {} as CapabilityContext['resources'],

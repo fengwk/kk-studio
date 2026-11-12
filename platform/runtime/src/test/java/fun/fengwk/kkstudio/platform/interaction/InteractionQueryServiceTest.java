@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -919,7 +919,7 @@ class InteractionQueryServiceTest {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
     when(thread.name()).thenReturn("nightly report");
-    when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
+    when(thread.kind()).thenReturn(ThreadKind.CONTROLLER_TASK);
     EntryCurrentState entryState = mock(EntryCurrentState.class);
     when(entryState.baseSettings())
         .thenReturn(

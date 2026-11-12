@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;

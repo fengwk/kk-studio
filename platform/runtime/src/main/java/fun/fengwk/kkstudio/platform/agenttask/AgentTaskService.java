@@ -63,7 +63,7 @@ public class AgentTaskService {
                 request.continuation(),
                 request.yoloEnabled(),
                 ThreadConstraints.NONE,
-                request.trigger(),
+                request.kind(),
                 child
                     ? (request.async()
                         ? JoinDelivery.NOTIFY_PARENT

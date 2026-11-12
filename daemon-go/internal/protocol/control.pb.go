@@ -149,6 +149,58 @@ func (MessageType) EnumDescriptor() ([]byte, []int) {
 	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{0}
 }
 
+type ImageInputTier int32
+
+const (
+	ImageInputTier_IMAGE_INPUT_TIER_UNSPECIFIED ImageInputTier = 0
+	ImageInputTier_P720                         ImageInputTier = 1
+	ImageInputTier_P1080                        ImageInputTier = 2
+	ImageInputTier_ORIGINAL                     ImageInputTier = 3
+)
+
+// Enum value maps for ImageInputTier.
+var (
+	ImageInputTier_name = map[int32]string{
+		0: "IMAGE_INPUT_TIER_UNSPECIFIED",
+		1: "P720",
+		2: "P1080",
+		3: "ORIGINAL",
+	}
+	ImageInputTier_value = map[string]int32{
+		"IMAGE_INPUT_TIER_UNSPECIFIED": 0,
+		"P720":                         1,
+		"P1080":                        2,
+		"ORIGINAL":                     3,
+	}
+)
+
+func (x ImageInputTier) Enum() *ImageInputTier {
+	p := new(ImageInputTier)
+	*p = x
+	return p
+}
+
+func (x ImageInputTier) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImageInputTier) Descriptor() protoreflect.EnumDescriptor {
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[1].Descriptor()
+}
+
+func (ImageInputTier) Type() protoreflect.EnumType {
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[1]
+}
+
+func (x ImageInputTier) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImageInputTier.Descriptor instead.
+func (ImageInputTier) EnumDescriptor() ([]byte, []int) {
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{1}
+}
+
 type OperatingSystem int32
 
 const (
@@ -188,11 +240,11 @@ func (x OperatingSystem) String() string {
 }
 
 func (OperatingSystem) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[1].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[2].Descriptor()
 }
 
 func (OperatingSystem) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[1]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[2]
 }
 
 func (x OperatingSystem) Number() protoreflect.EnumNumber {
@@ -201,7 +253,7 @@ func (x OperatingSystem) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OperatingSystem.Descriptor instead.
 func (OperatingSystem) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{1}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{2}
 }
 
 type Architecture int32
@@ -237,11 +289,11 @@ func (x Architecture) String() string {
 }
 
 func (Architecture) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[2].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[3].Descriptor()
 }
 
 func (Architecture) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[2]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[3]
 }
 
 func (x Architecture) Number() protoreflect.EnumNumber {
@@ -250,7 +302,7 @@ func (x Architecture) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Architecture.Descriptor instead.
 func (Architecture) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{2}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{3}
 }
 
 type TicketState int32
@@ -289,11 +341,11 @@ func (x TicketState) String() string {
 }
 
 func (TicketState) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[3].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[4].Descriptor()
 }
 
 func (TicketState) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[3]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[4]
 }
 
 func (x TicketState) Number() protoreflect.EnumNumber {
@@ -302,7 +354,7 @@ func (x TicketState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TicketState.Descriptor instead.
 func (TicketState) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{3}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{4}
 }
 
 type UpdatePhase int32
@@ -341,11 +393,11 @@ func (x UpdatePhase) String() string {
 }
 
 func (UpdatePhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[4].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[5].Descriptor()
 }
 
 func (UpdatePhase) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[4]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[5]
 }
 
 func (x UpdatePhase) Number() protoreflect.EnumNumber {
@@ -354,7 +406,7 @@ func (x UpdatePhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UpdatePhase.Descriptor instead.
 func (UpdatePhase) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{4}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{5}
 }
 
 type IdeAction int32
@@ -405,11 +457,11 @@ func (x IdeAction) String() string {
 }
 
 func (IdeAction) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[5].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[6].Descriptor()
 }
 
 func (IdeAction) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[5]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[6]
 }
 
 func (x IdeAction) Number() protoreflect.EnumNumber {
@@ -418,7 +470,7 @@ func (x IdeAction) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use IdeAction.Descriptor instead.
 func (IdeAction) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{5}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{6}
 }
 
 type IdeOpenMode int32
@@ -454,11 +506,11 @@ func (x IdeOpenMode) String() string {
 }
 
 func (IdeOpenMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[6].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[7].Descriptor()
 }
 
 func (IdeOpenMode) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[6]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[7]
 }
 
 func (x IdeOpenMode) Number() protoreflect.EnumNumber {
@@ -467,7 +519,7 @@ func (x IdeOpenMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use IdeOpenMode.Descriptor instead.
 func (IdeOpenMode) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{6}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{7}
 }
 
 type IdeViewState int32
@@ -503,11 +555,11 @@ func (x IdeViewState) String() string {
 }
 
 func (IdeViewState) Descriptor() protoreflect.EnumDescriptor {
-	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[7].Descriptor()
+	return file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[8].Descriptor()
 }
 
 func (IdeViewState) Type() protoreflect.EnumType {
-	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[7]
+	return &file_platform_daemon_server_src_main_protocol_control_proto_enumTypes[8]
 }
 
 func (x IdeViewState) Number() protoreflect.EnumNumber {
@@ -516,7 +568,7 @@ func (x IdeViewState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use IdeViewState.Descriptor instead.
 func (IdeViewState) EnumDescriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{7}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{8}
 }
 
 type Envelope struct {
@@ -1116,7 +1168,6 @@ func (x *Settings) GetResourceBudgets() *ResourceBudgets {
 
 type ResourceBudgets struct {
 	state                                   protoimpl.MessageState `protogen:"open.v1"`
-	MaxResourceBytes                        *int64                 `protobuf:"varint,1,opt,name=max_resource_bytes,json=maxResourceBytes,proto3,oneof" json:"max_resource_bytes,omitempty"`
 	TemporaryResourceTtlSeconds             *int64                 `protobuf:"varint,2,opt,name=temporary_resource_ttl_seconds,json=temporaryResourceTtlSeconds,proto3,oneof" json:"temporary_resource_ttl_seconds,omitempty"`
 	TemporaryResourceCleanupIntervalSeconds *int64                 `protobuf:"varint,3,opt,name=temporary_resource_cleanup_interval_seconds,json=temporaryResourceCleanupIntervalSeconds,proto3,oneof" json:"temporary_resource_cleanup_interval_seconds,omitempty"`
 	unknownFields                           protoimpl.UnknownFields
@@ -1151,13 +1202,6 @@ func (x *ResourceBudgets) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ResourceBudgets.ProtoReflect.Descriptor instead.
 func (*ResourceBudgets) Descriptor() ([]byte, []int) {
 	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ResourceBudgets) GetMaxResourceBytes() int64 {
-	if x != nil && x.MaxResourceBytes != nil {
-		return *x.MaxResourceBytes
-	}
-	return 0
 }
 
 func (x *ResourceBudgets) GetTemporaryResourceTtlSeconds() int64 {
@@ -1950,13 +1994,15 @@ func (x *UpdateProgress) GetTotalBytes() int64 {
 }
 
 type Invoke struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CapabilityId  *string                `protobuf:"bytes,1,opt,name=capability_id,json=capabilityId,proto3,oneof" json:"capability_id,omitempty"`
-	ArgumentsJson *string                `protobuf:"bytes,2,opt,name=arguments_json,json=argumentsJson,proto3,oneof" json:"arguments_json,omitempty"`
-	TimeoutMillis *int64                 `protobuf:"varint,3,opt,name=timeout_millis,json=timeoutMillis,proto3,oneof" json:"timeout_millis,omitempty"`
-	ExpectedFile  *ExpectedFile          `protobuf:"bytes,4,opt,name=expected_file,json=expectedFile,proto3,oneof" json:"expected_file,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CapabilityId   *string                `protobuf:"bytes,1,opt,name=capability_id,json=capabilityId,proto3,oneof" json:"capability_id,omitempty"`
+	ArgumentsJson  *string                `protobuf:"bytes,2,opt,name=arguments_json,json=argumentsJson,proto3,oneof" json:"arguments_json,omitempty"`
+	TimeoutMillis  *int64                 `protobuf:"varint,3,opt,name=timeout_millis,json=timeoutMillis,proto3,oneof" json:"timeout_millis,omitempty"`
+	ExpectedFile   *ExpectedFile          `protobuf:"bytes,4,opt,name=expected_file,json=expectedFile,proto3,oneof" json:"expected_file,omitempty"`
+	MaxOutputBytes *int64                 `protobuf:"varint,5,opt,name=max_output_bytes,json=maxOutputBytes,proto3,oneof" json:"max_output_bytes,omitempty"`
+	ImageInputTier *ImageInputTier        `protobuf:"varint,6,opt,name=image_input_tier,json=imageInputTier,proto3,enum=kkstudio.environment.control.ImageInputTier,oneof" json:"image_input_tier,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Invoke) Reset() {
@@ -2015,6 +2061,20 @@ func (x *Invoke) GetExpectedFile() *ExpectedFile {
 		return x.ExpectedFile
 	}
 	return nil
+}
+
+func (x *Invoke) GetMaxOutputBytes() int64 {
+	if x != nil && x.MaxOutputBytes != nil {
+		return *x.MaxOutputBytes
+	}
+	return 0
+}
+
+func (x *Invoke) GetImageInputTier() ImageInputTier {
+	if x != nil && x.ImageInputTier != nil {
+		return *x.ImageInputTier
+	}
+	return ImageInputTier_IMAGE_INPUT_TIER_UNSPECIFIED
 }
 
 type ExpectedFile struct {
@@ -4110,14 +4170,12 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x0etarget_version\x18\x01 \x01(\tH\x00R\rtargetVersion\x88\x01\x01B\x11\n" +
 	"\x0f_target_versionJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\fartifact_urlR\x0fartifact_sha256\"\x9f\x01\n" +
 	"\bSettings\x12X\n" +
-	"\x10resource_budgets\x18\x01 \x01(\v2-.kkstudio.environment.control.ResourceBudgetsR\x0fresourceBudgetsJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\fdisplay_nameR\tproxy_urlR\x0eno_proxy_hosts\"\xdb\x02\n" +
-	"\x0fResourceBudgets\x121\n" +
-	"\x12max_resource_bytes\x18\x01 \x01(\x03H\x00R\x10maxResourceBytes\x88\x01\x01\x12H\n" +
-	"\x1etemporary_resource_ttl_seconds\x18\x02 \x01(\x03H\x01R\x1btemporaryResourceTtlSeconds\x88\x01\x01\x12a\n" +
-	"+temporary_resource_cleanup_interval_seconds\x18\x03 \x01(\x03H\x02R'temporaryResourceCleanupIntervalSeconds\x88\x01\x01B\x15\n" +
-	"\x13_max_resource_bytesB!\n" +
+	"\x10resource_budgets\x18\x01 \x01(\v2-.kkstudio.environment.control.ResourceBudgetsR\x0fresourceBudgetsJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\fdisplay_nameR\tproxy_urlR\x0eno_proxy_hosts\"\xab\x02\n" +
+	"\x0fResourceBudgets\x12H\n" +
+	"\x1etemporary_resource_ttl_seconds\x18\x02 \x01(\x03H\x00R\x1btemporaryResourceTtlSeconds\x88\x01\x01\x12a\n" +
+	"+temporary_resource_cleanup_interval_seconds\x18\x03 \x01(\x03H\x01R'temporaryResourceCleanupIntervalSeconds\x88\x01\x01B!\n" +
 	"\x1f_temporary_resource_ttl_secondsB.\n" +
-	",_temporary_resource_cleanup_interval_seconds\"\x89\x01\n" +
+	",_temporary_resource_cleanup_interval_secondsJ\x04\b\x01\x10\x02R\x12max_resource_bytes\"\x89\x01\n" +
 	"\x11EnvironmentConfig\x12\x1d\n" +
 	"\aversion\x18\x01 \x01(\x03H\x00R\aversion\x88\x01\x01\x12I\n" +
 	"\x06config\x18\x02 \x01(\v21.kkstudio.environment.control.DaemonConfigurationR\x06configB\n" +
@@ -4196,16 +4254,20 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"totalBytes\x88\x01\x01B\x11\n" +
 	"\x0f_target_versionB\x13\n" +
 	"\x11_downloaded_bytesB\x0e\n" +
-	"\f_total_bytes\"\xaa\x02\n" +
+	"\f_total_bytes\"\xe0\x03\n" +
 	"\x06Invoke\x12(\n" +
 	"\rcapability_id\x18\x01 \x01(\tH\x00R\fcapabilityId\x88\x01\x01\x12*\n" +
 	"\x0earguments_json\x18\x02 \x01(\tH\x01R\rargumentsJson\x88\x01\x01\x12*\n" +
 	"\x0etimeout_millis\x18\x03 \x01(\x03H\x02R\rtimeoutMillis\x88\x01\x01\x12T\n" +
-	"\rexpected_file\x18\x04 \x01(\v2*.kkstudio.environment.control.ExpectedFileH\x03R\fexpectedFile\x88\x01\x01B\x10\n" +
+	"\rexpected_file\x18\x04 \x01(\v2*.kkstudio.environment.control.ExpectedFileH\x03R\fexpectedFile\x88\x01\x01\x12-\n" +
+	"\x10max_output_bytes\x18\x05 \x01(\x03H\x04R\x0emaxOutputBytes\x88\x01\x01\x12[\n" +
+	"\x10image_input_tier\x18\x06 \x01(\x0e2,.kkstudio.environment.control.ImageInputTierH\x05R\x0eimageInputTier\x88\x01\x01B\x10\n" +
 	"\x0e_capability_idB\x11\n" +
 	"\x0f_arguments_jsonB\x11\n" +
 	"\x0f_timeout_millisB\x10\n" +
-	"\x0e_expected_file\"X\n" +
+	"\x0e_expected_fileB\x13\n" +
+	"\x11_max_output_bytesB\x13\n" +
+	"\x11_image_input_tier\"X\n" +
 	"\fExpectedFile\x12\x17\n" +
 	"\x04path\x18\x01 \x01(\tH\x00R\x04path\x88\x01\x01\x12\x1b\n" +
 	"\x06sha256\x18\x02 \x01(\tH\x01R\x06sha256\x88\x01\x01B\a\n" +
@@ -4496,7 +4558,12 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x05ERROR\x10\x18\x12\x1d\n" +
 	"\x19RESOURCE_DOWNLOAD_REQUEST\x10\x19\x12\x1c\n" +
 	"\x18RESOURCE_DOWNLOAD_TICKET\x10\x1a\x12\x16\n" +
-	"\x12ENVIRONMENT_CONFIG\x10\x1b*_\n" +
+	"\x12ENVIRONMENT_CONFIG\x10\x1b*U\n" +
+	"\x0eImageInputTier\x12 \n" +
+	"\x1cIMAGE_INPUT_TIER_UNSPECIFIED\x10\x00\x12\b\n" +
+	"\x04P720\x10\x01\x12\t\n" +
+	"\x05P1080\x10\x02\x12\f\n" +
+	"\bORIGINAL\x10\x03*_\n" +
 	"\x0fOperatingSystem\x12 \n" +
 	"\x1cOPERATING_SYSTEM_UNSPECIFIED\x10\x00\x12\v\n" +
 	"\aWINDOWS\x10\x01\x12\a\n" +
@@ -4552,138 +4619,140 @@ func file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP() [
 	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescData
 }
 
-var file_platform_daemon_server_src_main_protocol_control_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_platform_daemon_server_src_main_protocol_control_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
 var file_platform_daemon_server_src_main_protocol_control_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_platform_daemon_server_src_main_protocol_control_proto_goTypes = []any{
 	(MessageType)(0),                // 0: kkstudio.environment.control.MessageType
-	(OperatingSystem)(0),            // 1: kkstudio.environment.control.OperatingSystem
-	(Architecture)(0),               // 2: kkstudio.environment.control.Architecture
-	(TicketState)(0),                // 3: kkstudio.environment.control.TicketState
-	(UpdatePhase)(0),                // 4: kkstudio.environment.control.UpdatePhase
-	(IdeAction)(0),                  // 5: kkstudio.environment.control.IdeAction
-	(IdeOpenMode)(0),                // 6: kkstudio.environment.control.IdeOpenMode
-	(IdeViewState)(0),               // 7: kkstudio.environment.control.IdeViewState
-	(*Envelope)(nil),                // 8: kkstudio.environment.control.Envelope
-	(*UpgradeRequired)(nil),         // 9: kkstudio.environment.control.UpgradeRequired
-	(*Settings)(nil),                // 10: kkstudio.environment.control.Settings
-	(*ResourceBudgets)(nil),         // 11: kkstudio.environment.control.ResourceBudgets
-	(*EnvironmentConfig)(nil),       // 12: kkstudio.environment.control.EnvironmentConfig
-	(*DaemonConfiguration)(nil),     // 13: kkstudio.environment.control.DaemonConfiguration
-	(*LspConfiguration)(nil),        // 14: kkstudio.environment.control.LspConfiguration
-	(*LspServer)(nil),               // 15: kkstudio.environment.control.LspServer
-	(*Ready)(nil),                   // 16: kkstudio.environment.control.Ready
-	(*HostInfo)(nil),                // 17: kkstudio.environment.control.HostInfo
-	(*Heartbeat)(nil),               // 18: kkstudio.environment.control.Heartbeat
-	(*RuntimeStatus)(nil),           // 19: kkstudio.environment.control.RuntimeStatus
-	(*RuntimeSnapshot)(nil),         // 20: kkstudio.environment.control.RuntimeSnapshot
-	(*RuntimeBody)(nil),             // 21: kkstudio.environment.control.RuntimeBody
-	(*ConfigurationStatus)(nil),     // 22: kkstudio.environment.control.ConfigurationStatus
-	(*ConfigurationError)(nil),      // 23: kkstudio.environment.control.ConfigurationError
-	(*UpdateProgress)(nil),          // 24: kkstudio.environment.control.UpdateProgress
-	(*Invoke)(nil),                  // 25: kkstudio.environment.control.Invoke
-	(*ExpectedFile)(nil),            // 26: kkstudio.environment.control.ExpectedFile
-	(*Started)(nil),                 // 27: kkstudio.environment.control.Started
-	(*Progress)(nil),                // 28: kkstudio.environment.control.Progress
-	(*Completed)(nil),               // 29: kkstudio.environment.control.Completed
-	(*CapabilityResult)(nil),        // 30: kkstudio.environment.control.CapabilityResult
-	(*Content)(nil),                 // 31: kkstudio.environment.control.Content
-	(*TextContent)(nil),             // 32: kkstudio.environment.control.TextContent
-	(*JsonContent)(nil),             // 33: kkstudio.environment.control.JsonContent
-	(*ResourceContent)(nil),         // 34: kkstudio.environment.control.ResourceContent
-	(*Failed)(nil),                  // 35: kkstudio.environment.control.Failed
-	(*Cancel)(nil),                  // 36: kkstudio.environment.control.Cancel
-	(*Cancelled)(nil),               // 37: kkstudio.environment.control.Cancelled
-	(*Recover)(nil),                 // 38: kkstudio.environment.control.Recover
-	(*RecoverNotFound)(nil),         // 39: kkstudio.environment.control.RecoverNotFound
-	(*ExecutionExited)(nil),         // 40: kkstudio.environment.control.ExecutionExited
-	(*ResourceUploadRequest)(nil),   // 41: kkstudio.environment.control.ResourceUploadRequest
-	(*ResourceUploadTicket)(nil),    // 42: kkstudio.environment.control.ResourceUploadTicket
-	(*PresignedPut)(nil),            // 43: kkstudio.environment.control.PresignedPut
-	(*PresignedGet)(nil),            // 44: kkstudio.environment.control.PresignedGet
-	(*ResourceDownloadRequest)(nil), // 45: kkstudio.environment.control.ResourceDownloadRequest
-	(*ResourceDownloadTicket)(nil),  // 46: kkstudio.environment.control.ResourceDownloadTicket
-	(*ResourceUploadCommit)(nil),    // 47: kkstudio.environment.control.ResourceUploadCommit
-	(*TemporaryResourcePolicy)(nil), // 48: kkstudio.environment.control.TemporaryResourcePolicy
-	(*Update)(nil),                  // 49: kkstudio.environment.control.Update
-	(*UpdateResult)(nil),            // 50: kkstudio.environment.control.UpdateResult
-	(*IdeCommand)(nil),              // 51: kkstudio.environment.control.IdeCommand
-	(*IdeResult)(nil),               // 52: kkstudio.environment.control.IdeResult
-	(*IdeDirectoryListing)(nil),     // 53: kkstudio.environment.control.IdeDirectoryListing
-	(*IdeDirectoryEntry)(nil),       // 54: kkstudio.environment.control.IdeDirectoryEntry
-	(*IdeViewSummary)(nil),          // 55: kkstudio.environment.control.IdeViewSummary
-	(*IdeLease)(nil),                // 56: kkstudio.environment.control.IdeLease
-	(*IdeLeaseBinding)(nil),         // 57: kkstudio.environment.control.IdeLeaseBinding
-	(*Error)(nil),                   // 58: kkstudio.environment.control.Error
-	nil,                             // 59: kkstudio.environment.control.PresignedPut.HeadersEntry
+	(ImageInputTier)(0),             // 1: kkstudio.environment.control.ImageInputTier
+	(OperatingSystem)(0),            // 2: kkstudio.environment.control.OperatingSystem
+	(Architecture)(0),               // 3: kkstudio.environment.control.Architecture
+	(TicketState)(0),                // 4: kkstudio.environment.control.TicketState
+	(UpdatePhase)(0),                // 5: kkstudio.environment.control.UpdatePhase
+	(IdeAction)(0),                  // 6: kkstudio.environment.control.IdeAction
+	(IdeOpenMode)(0),                // 7: kkstudio.environment.control.IdeOpenMode
+	(IdeViewState)(0),               // 8: kkstudio.environment.control.IdeViewState
+	(*Envelope)(nil),                // 9: kkstudio.environment.control.Envelope
+	(*UpgradeRequired)(nil),         // 10: kkstudio.environment.control.UpgradeRequired
+	(*Settings)(nil),                // 11: kkstudio.environment.control.Settings
+	(*ResourceBudgets)(nil),         // 12: kkstudio.environment.control.ResourceBudgets
+	(*EnvironmentConfig)(nil),       // 13: kkstudio.environment.control.EnvironmentConfig
+	(*DaemonConfiguration)(nil),     // 14: kkstudio.environment.control.DaemonConfiguration
+	(*LspConfiguration)(nil),        // 15: kkstudio.environment.control.LspConfiguration
+	(*LspServer)(nil),               // 16: kkstudio.environment.control.LspServer
+	(*Ready)(nil),                   // 17: kkstudio.environment.control.Ready
+	(*HostInfo)(nil),                // 18: kkstudio.environment.control.HostInfo
+	(*Heartbeat)(nil),               // 19: kkstudio.environment.control.Heartbeat
+	(*RuntimeStatus)(nil),           // 20: kkstudio.environment.control.RuntimeStatus
+	(*RuntimeSnapshot)(nil),         // 21: kkstudio.environment.control.RuntimeSnapshot
+	(*RuntimeBody)(nil),             // 22: kkstudio.environment.control.RuntimeBody
+	(*ConfigurationStatus)(nil),     // 23: kkstudio.environment.control.ConfigurationStatus
+	(*ConfigurationError)(nil),      // 24: kkstudio.environment.control.ConfigurationError
+	(*UpdateProgress)(nil),          // 25: kkstudio.environment.control.UpdateProgress
+	(*Invoke)(nil),                  // 26: kkstudio.environment.control.Invoke
+	(*ExpectedFile)(nil),            // 27: kkstudio.environment.control.ExpectedFile
+	(*Started)(nil),                 // 28: kkstudio.environment.control.Started
+	(*Progress)(nil),                // 29: kkstudio.environment.control.Progress
+	(*Completed)(nil),               // 30: kkstudio.environment.control.Completed
+	(*CapabilityResult)(nil),        // 31: kkstudio.environment.control.CapabilityResult
+	(*Content)(nil),                 // 32: kkstudio.environment.control.Content
+	(*TextContent)(nil),             // 33: kkstudio.environment.control.TextContent
+	(*JsonContent)(nil),             // 34: kkstudio.environment.control.JsonContent
+	(*ResourceContent)(nil),         // 35: kkstudio.environment.control.ResourceContent
+	(*Failed)(nil),                  // 36: kkstudio.environment.control.Failed
+	(*Cancel)(nil),                  // 37: kkstudio.environment.control.Cancel
+	(*Cancelled)(nil),               // 38: kkstudio.environment.control.Cancelled
+	(*Recover)(nil),                 // 39: kkstudio.environment.control.Recover
+	(*RecoverNotFound)(nil),         // 40: kkstudio.environment.control.RecoverNotFound
+	(*ExecutionExited)(nil),         // 41: kkstudio.environment.control.ExecutionExited
+	(*ResourceUploadRequest)(nil),   // 42: kkstudio.environment.control.ResourceUploadRequest
+	(*ResourceUploadTicket)(nil),    // 43: kkstudio.environment.control.ResourceUploadTicket
+	(*PresignedPut)(nil),            // 44: kkstudio.environment.control.PresignedPut
+	(*PresignedGet)(nil),            // 45: kkstudio.environment.control.PresignedGet
+	(*ResourceDownloadRequest)(nil), // 46: kkstudio.environment.control.ResourceDownloadRequest
+	(*ResourceDownloadTicket)(nil),  // 47: kkstudio.environment.control.ResourceDownloadTicket
+	(*ResourceUploadCommit)(nil),    // 48: kkstudio.environment.control.ResourceUploadCommit
+	(*TemporaryResourcePolicy)(nil), // 49: kkstudio.environment.control.TemporaryResourcePolicy
+	(*Update)(nil),                  // 50: kkstudio.environment.control.Update
+	(*UpdateResult)(nil),            // 51: kkstudio.environment.control.UpdateResult
+	(*IdeCommand)(nil),              // 52: kkstudio.environment.control.IdeCommand
+	(*IdeResult)(nil),               // 53: kkstudio.environment.control.IdeResult
+	(*IdeDirectoryListing)(nil),     // 54: kkstudio.environment.control.IdeDirectoryListing
+	(*IdeDirectoryEntry)(nil),       // 55: kkstudio.environment.control.IdeDirectoryEntry
+	(*IdeViewSummary)(nil),          // 56: kkstudio.environment.control.IdeViewSummary
+	(*IdeLease)(nil),                // 57: kkstudio.environment.control.IdeLease
+	(*IdeLeaseBinding)(nil),         // 58: kkstudio.environment.control.IdeLeaseBinding
+	(*Error)(nil),                   // 59: kkstudio.environment.control.Error
+	nil,                             // 60: kkstudio.environment.control.PresignedPut.HeadersEntry
 }
 var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int32{
 	0,  // 0: kkstudio.environment.control.Envelope.message_type:type_name -> kkstudio.environment.control.MessageType
-	10, // 1: kkstudio.environment.control.Envelope.settings:type_name -> kkstudio.environment.control.Settings
-	16, // 2: kkstudio.environment.control.Envelope.ready:type_name -> kkstudio.environment.control.Ready
-	18, // 3: kkstudio.environment.control.Envelope.heartbeat:type_name -> kkstudio.environment.control.Heartbeat
-	19, // 4: kkstudio.environment.control.Envelope.runtime_status:type_name -> kkstudio.environment.control.RuntimeStatus
-	25, // 5: kkstudio.environment.control.Envelope.invoke:type_name -> kkstudio.environment.control.Invoke
-	27, // 6: kkstudio.environment.control.Envelope.started:type_name -> kkstudio.environment.control.Started
-	28, // 7: kkstudio.environment.control.Envelope.progress:type_name -> kkstudio.environment.control.Progress
-	29, // 8: kkstudio.environment.control.Envelope.completed:type_name -> kkstudio.environment.control.Completed
-	35, // 9: kkstudio.environment.control.Envelope.failed:type_name -> kkstudio.environment.control.Failed
-	36, // 10: kkstudio.environment.control.Envelope.cancel:type_name -> kkstudio.environment.control.Cancel
-	37, // 11: kkstudio.environment.control.Envelope.cancelled:type_name -> kkstudio.environment.control.Cancelled
-	38, // 12: kkstudio.environment.control.Envelope.recover:type_name -> kkstudio.environment.control.Recover
-	39, // 13: kkstudio.environment.control.Envelope.recover_not_found:type_name -> kkstudio.environment.control.RecoverNotFound
-	40, // 14: kkstudio.environment.control.Envelope.execution_exited:type_name -> kkstudio.environment.control.ExecutionExited
-	41, // 15: kkstudio.environment.control.Envelope.resource_upload_request:type_name -> kkstudio.environment.control.ResourceUploadRequest
-	42, // 16: kkstudio.environment.control.Envelope.resource_upload_ticket:type_name -> kkstudio.environment.control.ResourceUploadTicket
-	47, // 17: kkstudio.environment.control.Envelope.resource_upload_commit:type_name -> kkstudio.environment.control.ResourceUploadCommit
-	48, // 18: kkstudio.environment.control.Envelope.temporary_resource_policy:type_name -> kkstudio.environment.control.TemporaryResourcePolicy
-	49, // 19: kkstudio.environment.control.Envelope.update:type_name -> kkstudio.environment.control.Update
-	50, // 20: kkstudio.environment.control.Envelope.update_result:type_name -> kkstudio.environment.control.UpdateResult
-	51, // 21: kkstudio.environment.control.Envelope.ide_command:type_name -> kkstudio.environment.control.IdeCommand
-	52, // 22: kkstudio.environment.control.Envelope.ide_result:type_name -> kkstudio.environment.control.IdeResult
-	56, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
-	58, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
-	45, // 25: kkstudio.environment.control.Envelope.resource_download_request:type_name -> kkstudio.environment.control.ResourceDownloadRequest
-	46, // 26: kkstudio.environment.control.Envelope.resource_download_ticket:type_name -> kkstudio.environment.control.ResourceDownloadTicket
-	12, // 27: kkstudio.environment.control.Envelope.environment_config:type_name -> kkstudio.environment.control.EnvironmentConfig
-	11, // 28: kkstudio.environment.control.Settings.resource_budgets:type_name -> kkstudio.environment.control.ResourceBudgets
-	13, // 29: kkstudio.environment.control.EnvironmentConfig.config:type_name -> kkstudio.environment.control.DaemonConfiguration
-	14, // 30: kkstudio.environment.control.DaemonConfiguration.lsp:type_name -> kkstudio.environment.control.LspConfiguration
-	15, // 31: kkstudio.environment.control.LspConfiguration.servers:type_name -> kkstudio.environment.control.LspServer
-	17, // 32: kkstudio.environment.control.Ready.host_info:type_name -> kkstudio.environment.control.HostInfo
-	20, // 33: kkstudio.environment.control.Ready.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	1,  // 34: kkstudio.environment.control.HostInfo.operating_system:type_name -> kkstudio.environment.control.OperatingSystem
-	2,  // 35: kkstudio.environment.control.HostInfo.architecture:type_name -> kkstudio.environment.control.Architecture
-	20, // 36: kkstudio.environment.control.Heartbeat.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	20, // 37: kkstudio.environment.control.RuntimeStatus.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	21, // 38: kkstudio.environment.control.RuntimeSnapshot.status:type_name -> kkstudio.environment.control.RuntimeBody
-	24, // 39: kkstudio.environment.control.RuntimeBody.update:type_name -> kkstudio.environment.control.UpdateProgress
-	22, // 40: kkstudio.environment.control.RuntimeBody.configuration:type_name -> kkstudio.environment.control.ConfigurationStatus
-	23, // 41: kkstudio.environment.control.ConfigurationStatus.error:type_name -> kkstudio.environment.control.ConfigurationError
-	26, // 42: kkstudio.environment.control.Invoke.expected_file:type_name -> kkstudio.environment.control.ExpectedFile
-	30, // 43: kkstudio.environment.control.Progress.result:type_name -> kkstudio.environment.control.CapabilityResult
-	30, // 44: kkstudio.environment.control.Completed.result:type_name -> kkstudio.environment.control.CapabilityResult
-	31, // 45: kkstudio.environment.control.CapabilityResult.contents:type_name -> kkstudio.environment.control.Content
-	32, // 46: kkstudio.environment.control.Content.text:type_name -> kkstudio.environment.control.TextContent
-	33, // 47: kkstudio.environment.control.Content.json:type_name -> kkstudio.environment.control.JsonContent
-	34, // 48: kkstudio.environment.control.Content.resource:type_name -> kkstudio.environment.control.ResourceContent
-	3,  // 49: kkstudio.environment.control.ResourceUploadTicket.state:type_name -> kkstudio.environment.control.TicketState
-	43, // 50: kkstudio.environment.control.ResourceUploadTicket.presigned_put:type_name -> kkstudio.environment.control.PresignedPut
-	59, // 51: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
-	3,  // 52: kkstudio.environment.control.ResourceDownloadTicket.state:type_name -> kkstudio.environment.control.TicketState
-	44, // 53: kkstudio.environment.control.ResourceDownloadTicket.presigned_get:type_name -> kkstudio.environment.control.PresignedGet
-	4,  // 54: kkstudio.environment.control.UpdateResult.phase:type_name -> kkstudio.environment.control.UpdatePhase
-	5,  // 55: kkstudio.environment.control.IdeCommand.action:type_name -> kkstudio.environment.control.IdeAction
-	6,  // 56: kkstudio.environment.control.IdeCommand.mode:type_name -> kkstudio.environment.control.IdeOpenMode
-	55, // 57: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
-	53, // 58: kkstudio.environment.control.IdeResult.directory_listing:type_name -> kkstudio.environment.control.IdeDirectoryListing
-	54, // 59: kkstudio.environment.control.IdeDirectoryListing.children:type_name -> kkstudio.environment.control.IdeDirectoryEntry
-	7,  // 60: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
-	57, // 61: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	11, // 1: kkstudio.environment.control.Envelope.settings:type_name -> kkstudio.environment.control.Settings
+	17, // 2: kkstudio.environment.control.Envelope.ready:type_name -> kkstudio.environment.control.Ready
+	19, // 3: kkstudio.environment.control.Envelope.heartbeat:type_name -> kkstudio.environment.control.Heartbeat
+	20, // 4: kkstudio.environment.control.Envelope.runtime_status:type_name -> kkstudio.environment.control.RuntimeStatus
+	26, // 5: kkstudio.environment.control.Envelope.invoke:type_name -> kkstudio.environment.control.Invoke
+	28, // 6: kkstudio.environment.control.Envelope.started:type_name -> kkstudio.environment.control.Started
+	29, // 7: kkstudio.environment.control.Envelope.progress:type_name -> kkstudio.environment.control.Progress
+	30, // 8: kkstudio.environment.control.Envelope.completed:type_name -> kkstudio.environment.control.Completed
+	36, // 9: kkstudio.environment.control.Envelope.failed:type_name -> kkstudio.environment.control.Failed
+	37, // 10: kkstudio.environment.control.Envelope.cancel:type_name -> kkstudio.environment.control.Cancel
+	38, // 11: kkstudio.environment.control.Envelope.cancelled:type_name -> kkstudio.environment.control.Cancelled
+	39, // 12: kkstudio.environment.control.Envelope.recover:type_name -> kkstudio.environment.control.Recover
+	40, // 13: kkstudio.environment.control.Envelope.recover_not_found:type_name -> kkstudio.environment.control.RecoverNotFound
+	41, // 14: kkstudio.environment.control.Envelope.execution_exited:type_name -> kkstudio.environment.control.ExecutionExited
+	42, // 15: kkstudio.environment.control.Envelope.resource_upload_request:type_name -> kkstudio.environment.control.ResourceUploadRequest
+	43, // 16: kkstudio.environment.control.Envelope.resource_upload_ticket:type_name -> kkstudio.environment.control.ResourceUploadTicket
+	48, // 17: kkstudio.environment.control.Envelope.resource_upload_commit:type_name -> kkstudio.environment.control.ResourceUploadCommit
+	49, // 18: kkstudio.environment.control.Envelope.temporary_resource_policy:type_name -> kkstudio.environment.control.TemporaryResourcePolicy
+	50, // 19: kkstudio.environment.control.Envelope.update:type_name -> kkstudio.environment.control.Update
+	51, // 20: kkstudio.environment.control.Envelope.update_result:type_name -> kkstudio.environment.control.UpdateResult
+	52, // 21: kkstudio.environment.control.Envelope.ide_command:type_name -> kkstudio.environment.control.IdeCommand
+	53, // 22: kkstudio.environment.control.Envelope.ide_result:type_name -> kkstudio.environment.control.IdeResult
+	57, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
+	59, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
+	46, // 25: kkstudio.environment.control.Envelope.resource_download_request:type_name -> kkstudio.environment.control.ResourceDownloadRequest
+	47, // 26: kkstudio.environment.control.Envelope.resource_download_ticket:type_name -> kkstudio.environment.control.ResourceDownloadTicket
+	13, // 27: kkstudio.environment.control.Envelope.environment_config:type_name -> kkstudio.environment.control.EnvironmentConfig
+	12, // 28: kkstudio.environment.control.Settings.resource_budgets:type_name -> kkstudio.environment.control.ResourceBudgets
+	14, // 29: kkstudio.environment.control.EnvironmentConfig.config:type_name -> kkstudio.environment.control.DaemonConfiguration
+	15, // 30: kkstudio.environment.control.DaemonConfiguration.lsp:type_name -> kkstudio.environment.control.LspConfiguration
+	16, // 31: kkstudio.environment.control.LspConfiguration.servers:type_name -> kkstudio.environment.control.LspServer
+	18, // 32: kkstudio.environment.control.Ready.host_info:type_name -> kkstudio.environment.control.HostInfo
+	21, // 33: kkstudio.environment.control.Ready.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	2,  // 34: kkstudio.environment.control.HostInfo.operating_system:type_name -> kkstudio.environment.control.OperatingSystem
+	3,  // 35: kkstudio.environment.control.HostInfo.architecture:type_name -> kkstudio.environment.control.Architecture
+	21, // 36: kkstudio.environment.control.Heartbeat.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	21, // 37: kkstudio.environment.control.RuntimeStatus.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	22, // 38: kkstudio.environment.control.RuntimeSnapshot.status:type_name -> kkstudio.environment.control.RuntimeBody
+	25, // 39: kkstudio.environment.control.RuntimeBody.update:type_name -> kkstudio.environment.control.UpdateProgress
+	23, // 40: kkstudio.environment.control.RuntimeBody.configuration:type_name -> kkstudio.environment.control.ConfigurationStatus
+	24, // 41: kkstudio.environment.control.ConfigurationStatus.error:type_name -> kkstudio.environment.control.ConfigurationError
+	27, // 42: kkstudio.environment.control.Invoke.expected_file:type_name -> kkstudio.environment.control.ExpectedFile
+	1,  // 43: kkstudio.environment.control.Invoke.image_input_tier:type_name -> kkstudio.environment.control.ImageInputTier
+	31, // 44: kkstudio.environment.control.Progress.result:type_name -> kkstudio.environment.control.CapabilityResult
+	31, // 45: kkstudio.environment.control.Completed.result:type_name -> kkstudio.environment.control.CapabilityResult
+	32, // 46: kkstudio.environment.control.CapabilityResult.contents:type_name -> kkstudio.environment.control.Content
+	33, // 47: kkstudio.environment.control.Content.text:type_name -> kkstudio.environment.control.TextContent
+	34, // 48: kkstudio.environment.control.Content.json:type_name -> kkstudio.environment.control.JsonContent
+	35, // 49: kkstudio.environment.control.Content.resource:type_name -> kkstudio.environment.control.ResourceContent
+	4,  // 50: kkstudio.environment.control.ResourceUploadTicket.state:type_name -> kkstudio.environment.control.TicketState
+	44, // 51: kkstudio.environment.control.ResourceUploadTicket.presigned_put:type_name -> kkstudio.environment.control.PresignedPut
+	60, // 52: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
+	4,  // 53: kkstudio.environment.control.ResourceDownloadTicket.state:type_name -> kkstudio.environment.control.TicketState
+	45, // 54: kkstudio.environment.control.ResourceDownloadTicket.presigned_get:type_name -> kkstudio.environment.control.PresignedGet
+	5,  // 55: kkstudio.environment.control.UpdateResult.phase:type_name -> kkstudio.environment.control.UpdatePhase
+	6,  // 56: kkstudio.environment.control.IdeCommand.action:type_name -> kkstudio.environment.control.IdeAction
+	7,  // 57: kkstudio.environment.control.IdeCommand.mode:type_name -> kkstudio.environment.control.IdeOpenMode
+	56, // 58: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
+	54, // 59: kkstudio.environment.control.IdeResult.directory_listing:type_name -> kkstudio.environment.control.IdeDirectoryListing
+	55, // 60: kkstudio.environment.control.IdeDirectoryListing.children:type_name -> kkstudio.environment.control.IdeDirectoryEntry
+	8,  // 61: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
+	58, // 62: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
+	63, // [63:63] is the sub-list for method output_type
+	63, // [63:63] is the sub-list for method input_type
+	63, // [63:63] is the sub-list for extension type_name
+	63, // [63:63] is the sub-list for extension extendee
+	0,  // [0:63] is the sub-list for field type_name
 }
 
 func init() { file_platform_daemon_server_src_main_protocol_control_proto_init() }
@@ -4771,7 +4840,7 @@ func file_platform_daemon_server_src_main_protocol_control_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc), len(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc)),
-			NumEnums:      8,
+			NumEnums:      9,
 			NumMessages:   52,
 			NumExtensions: 0,
 			NumServices:   0,

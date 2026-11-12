@@ -111,7 +111,8 @@ class PostgresqlSubagentContinuationTest {
         new ThreadProcessor(
             store,
             registry,
-            new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
+            new ThreadProcessorConfig(
+                () -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   @AfterEach

@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.spi.work.ClaimedExecutionSupport;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -104,8 +105,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.executionExecutor = Objects.requireNonNull(executionExecutor, "executionExecutor");
-    this.executions =
-        new ClaimedExecutionSupport<>(store, BuiltinWorkType.MODEL, config.leaseConfig());
+    this.executions = new ClaimedExecutionSupport<>(store, BuiltinWorkType.MODEL);
   }
 
   private static BuiltinStore requireBuiltinStore(HarnessStore store) {
@@ -130,18 +130,22 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
    * @return 启动为 STARTED，重排为 RESCHEDULED，已收敛为 TERMINATED，失权或重复投递为 LOST_OWNERSHIP
    */
   public ProcessResult process(ClaimedWork claim) {
+    ProcessorLeaseConfig leaseConfig = config.leaseConfigProvider().get();
+    Duration admitFailureDelay = config.admitFailureDelayProvider().get();
     ClaimAdmissionGuard.Ticket<ModelExecution> ticket = executions.admit(claim);
     if (ticket == null) {
       return ProcessResult.LOST_OWNERSHIP;
     }
     try (ticket) {
       Prepare prepare =
-          store.transaction(core -> prepareLocked(core, builtinStore.in(core), claim, core.now()));
+          store.transaction(
+              core -> prepareLocked(core, builtinStore.in(core), claim, core.now(), leaseConfig));
       return switch (prepare) {
         case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
         case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
         case Prepare.Retry ignored -> ProcessResult.RESCHEDULED;
-        case Prepare.Dispatched dispatched -> start(claim, dispatched, ticket);
+        case Prepare.Dispatched dispatched -> start(
+            claim, dispatched, ticket, leaseConfig, admitFailureDelay);
       };
     } catch (ClaimLostSignal ignored) {
       return ProcessResult.LOST_OWNERSHIP;
@@ -185,6 +189,16 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     return executions.hasActiveExecution();
   }
 
+  private ModelProcessorConfig executionConfig(ProcessorLeaseConfig leaseConfig) {
+    return new ModelProcessorConfig(
+        () -> leaseConfig,
+        config.retryPolicyProvider(),
+        config.admitFailureDelayProvider(),
+        config.streamConfig(),
+        config.toolHistoryActionResolver(),
+        config.httpErrorPolicyProvider());
+  }
+
   /**
    * 登记 execution 并启动 heartbeat，在调用线程上完成物化请求、准入与 RUNNING 持久化，只把阻塞的 Provider 运行与终态提交交给一个虚拟线程。
    * 因此返回值如实反映本次处理：Busy / 准入异常为 RESCHEDULED，确定性拒绝为 TERMINATED，已开始运行为 STARTED。
@@ -192,7 +206,9 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
   private ProcessResult start(
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
-      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket,
+      ProcessorLeaseConfig leaseConfig,
+      Duration admitFailureDelay) {
     ModelExecution execution =
         new ModelExecution(
             store,
@@ -203,7 +219,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
             Math.addExact(dispatched.attempt(), 1),
             dispatched.ownerSettledSummary(),
             actualRequest(dispatched).toolBindings(),
-            config,
+            executionConfig(leaseConfig),
             actualRequest(dispatched).model().providerName(),
             clock,
             scheduler,
@@ -213,7 +229,9 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
             lifecycle);
     if (!ticket.attach(execution)) {
       execution.abandon();
-      return executions.isClosed() ? abortStart(claim) : ProcessResult.LOST_OWNERSHIP;
+      return executions.isClosed()
+          ? abortStart(claim, admitFailureDelay)
+          : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
     try {
@@ -223,9 +241,9 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
           || ticket.isSuperseded()) {
         // close 已拍快照、scheduler 拒绝导致无法维持 lease，或 close / cancel 在 heartbeat 启动窗口内获胜：不启动，按 reschedule
         // 实际结果返回。
-        return abortStart(claim);
+        return abortStart(claim, admitFailureDelay);
       }
-      ProcessResult result = admitAndRun(execution, claim, dispatched, ticket);
+      ProcessResult result = admitAndRun(execution, claim, dispatched, ticket, admitFailureDelay);
       if (result == ProcessResult.STARTED) {
         started = true;
       }
@@ -237,8 +255,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     }
   }
 
-  private ProcessResult abortStart(ClaimedWork claim) {
-    return reschedule(claim, config.admitFailureDelay())
+  private ProcessResult abortStart(ClaimedWork claim, Duration admitFailureDelay) {
+    return reschedule(claim, admitFailureDelay)
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
@@ -248,7 +266,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       ModelExecution execution,
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
-      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket,
+      Duration admitFailureDelay) {
     UUID invocationId = claim.target().id();
     ProviderRequest providerRequest;
     try {
@@ -288,7 +307,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
           "model gateway admission failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
-      return abortStart(claim);
+      return abortStart(claim, admitFailureDelay);
     }
     return switch (admission) {
       case ModelGateway.Busy busy -> {
@@ -301,7 +320,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
             ? ProcessResult.TERMINATED
             : ProcessResult.LOST_OWNERSHIP;
       }
-      case ModelGateway.Admitted admitted -> runAdmitted(execution, claim, admitted, ticket);
+      case ModelGateway.Admitted admitted -> runAdmitted(
+          execution, claim, admitted, ticket, admitFailureDelay);
     };
   }
 
@@ -310,11 +330,12 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       ModelExecution execution,
       ClaimedWork claim,
       ModelGateway.Admitted admitted,
-      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket,
+      Duration admitFailureDelay) {
     if (execution.abandoned() || ticket.isSuperseded()) {
       // close / cancel / supersede 在准入期间获胜：尚未登记执行，只释放一次名额。
       closeAdmitted(admitted);
-      return abortStart(claim);
+      return abortStart(claim, admitFailureDelay);
     }
     try {
       if (!execution.markRunning()) {
@@ -397,7 +418,11 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
 
   /** 在事务内按 own Thread -> Model -> Work 锁序锁定并校验状态，不取树锁/祖先锁，依据 durable status 路由准备结果。 */
   private Prepare prepareLocked(
-      HarnessStore.Transaction core, BuiltinStore.Transaction tx, ClaimedWork claim, Instant now) {
+      HarnessStore.Transaction core,
+      BuiltinStore.Transaction tx,
+      ClaimedWork claim,
+      Instant now,
+      ProcessorLeaseConfig leaseConfig) {
     UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
@@ -412,7 +437,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       return new Prepare.Lost();
     }
     return switch (model.status()) {
-      case READY -> prepareReady(core, tx, claim, thread, model, now);
+      case READY -> prepareReady(core, tx, claim, thread, model, now, leaseConfig);
       case RUNNING -> recoverRunning(tx, claim, thread, model, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, model, now);
     };
@@ -424,7 +449,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       ClaimedWork claim,
       ThreadState thread,
       ModelInvocation model,
-      Instant now) {
+      Instant now,
+      ProcessorLeaseConfig leaseConfig) {
     ModelGroupExecution group = model.requestSpec().groupExecution();
     ModelGroupProgress progress = model.groupProgress();
     int memberIndex = 0;
@@ -455,7 +481,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       return new Prepare.Lost();
     }
     // 运行前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    executions.ensureLeaseMargin(tx, claim);
+    executions.ensureLeaseMargin(tx, claim, leaseConfig);
     // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：拒绝引用缺失或类型错误的 turn start。
     Entry turnStart =
         tx.entries()

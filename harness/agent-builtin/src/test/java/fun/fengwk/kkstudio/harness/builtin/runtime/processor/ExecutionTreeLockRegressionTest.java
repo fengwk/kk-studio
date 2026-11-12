@@ -137,7 +137,7 @@ class ExecutionTreeLockRegressionTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, IMMEDIATE_STREAM),
+                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, IMMEDIATE_STREAM),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -242,7 +242,8 @@ class ExecutionTreeLockRegressionTest {
             1,
             false,
             List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -294,10 +295,10 @@ class ExecutionTreeLockRegressionTest {
             1,
             fixture.request,
             new ToolProcessorConfig(
-                ToolProcessorTestSupport.LEASE_CONFIG,
+                ToolProcessorTestSupport.LEASE_CONFIG_PROVIDER,
                 () -> ToolProcessorTestSupport.NO_RETRY,
-                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY_PROVIDER,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY_PROVIDER,
                 ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             fixture.scheduler,

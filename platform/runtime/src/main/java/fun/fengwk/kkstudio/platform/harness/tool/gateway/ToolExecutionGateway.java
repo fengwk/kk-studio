@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -92,6 +93,30 @@ public final class ToolExecutionGateway implements ToolGateway {
       Supplier<Duration> retryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
+    this(
+        toolCatalogSource,
+        capabilityTransport,
+        vfsEditReviewSource,
+        permissionEvaluator,
+        toolSettingsProvider,
+        resourceStager,
+        () -> resourceMaxBytes,
+        retryDelay,
+        clock,
+        admission);
+  }
+
+  public ToolExecutionGateway(
+      RuntimeToolCatalogSource toolCatalogSource,
+      EnvironmentCapabilityTransport capabilityTransport,
+      VfsEditReviewSource vfsEditReviewSource,
+      PermissionEvaluator permissionEvaluator,
+      ToolSettingsProvider toolSettingsProvider,
+      ToolResourceStager resourceStager,
+      IntSupplier outputLimitBytes,
+      Supplier<Duration> retryDelay,
+      Clock clock,
+      ConcurrencyAdmission admission) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.vfsEditReviewSource = Objects.requireNonNull(vfsEditReviewSource, "vfsEditReviewSource");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
@@ -99,7 +124,8 @@ public final class ToolExecutionGateway implements ToolGateway {
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.finalizer =
         new ToolResultFinalizer(
-            Objects.requireNonNull(resourceStager, "resourceStager"), resourceMaxBytes);
+            Objects.requireNonNull(resourceStager, "resourceStager"),
+            Objects.requireNonNull(outputLimitBytes, "outputLimitBytes"));
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.remoteExecution = new RemoteToolExecution(capabilityTransport, finalizer);
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");

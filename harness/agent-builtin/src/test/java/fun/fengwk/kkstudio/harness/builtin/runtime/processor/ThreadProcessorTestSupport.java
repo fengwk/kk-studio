@@ -34,9 +34,9 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -178,7 +178,7 @@ public final class ThreadProcessorTestSupport {
         name,
         threadId,
         false,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         constraints,
         ThreadExecutionControl.RUNNABLE,
         0L,
@@ -1411,7 +1411,7 @@ public final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               targetStore,
               registry,
-              new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, configProvider));
+              new ThreadProcessorConfig(() -> RESOLVE_FAILURE_DELAY, configProvider));
     }
 
     /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */

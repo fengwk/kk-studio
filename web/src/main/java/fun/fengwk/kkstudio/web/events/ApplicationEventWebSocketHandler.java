@@ -32,6 +32,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * 浏览器事件通道 {@code /ws/events} 的 Spring WebSocket 适配器。
@@ -50,16 +51,14 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   public static final String PATH = "/ws/events";
 
   static final long PING_INTERVAL_MILLIS = 15_000L;
+  static final long HEARTBEAT_CHECK_INTERVAL_MILLIS = 1_000L;
   static final long PONG_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(45);
 
   private final ApplicationEventHub hub;
   private final EventFrameCodec codec;
   private final UUID eventNodeId;
   private final IdeBrowserUseRegistry browserUseRegistry;
-  private final int senderCapacity;
-  private final long maxBytes;
-  private final long sendTimeoutMillis;
-  private final long heartbeatIntervalMillis;
+  private final Supplier<ApplicationEventSettings> settingsProvider;
   private final ScheduledExecutorService heartbeatScheduler;
   private final LongSupplier nanoClock;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
@@ -70,7 +69,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   public ApplicationEventWebSocketHandler(
       ApplicationEventHub hub,
       EventFrameCodec codec,
-      ApplicationEventSettings settings,
+      Supplier<ApplicationEventSettings> settingsProvider,
       @Qualifier("nodeInstanceId") UUID eventNodeId,
       IdeBrowserUseRegistry browserUseRegistry,
       @Qualifier("applicationEventHeartbeatScheduler")
@@ -78,11 +77,37 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     this(
         hub,
         codec,
-        settings,
+        settingsProvider,
         eventNodeId,
         browserUseRegistry,
         heartbeatScheduler,
         System::nanoTime);
+  }
+
+  ApplicationEventWebSocketHandler(
+      ApplicationEventHub hub,
+      EventFrameCodec codec,
+      Supplier<ApplicationEventSettings> settingsProvider,
+      UUID eventNodeId,
+      IdeBrowserUseRegistry browserUseRegistry,
+      ScheduledExecutorService heartbeatScheduler,
+      LongSupplier nanoClock) {
+    this.hub = Objects.requireNonNull(hub, "hub");
+    this.codec = Objects.requireNonNull(codec, "codec");
+    this.eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
+    this.browserUseRegistry = Objects.requireNonNull(browserUseRegistry, "browserUseRegistry");
+    this.settingsProvider = Objects.requireNonNull(settingsProvider, "settingsProvider");
+    this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
+    this.heartbeatTask =
+        heartbeatScheduler.scheduleAtFixedRate(
+            this::heartbeatTick,
+            HEARTBEAT_CHECK_INTERVAL_MILLIS,
+            HEARTBEAT_CHECK_INTERVAL_MILLIS,
+            TimeUnit.MILLISECONDS);
+    this.pingTask =
+        heartbeatScheduler.scheduleAtFixedRate(
+            this::ping, PING_INTERVAL_MILLIS, PING_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
   }
 
   ApplicationEventWebSocketHandler(
@@ -93,46 +118,22 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       IdeBrowserUseRegistry browserUseRegistry,
       ScheduledExecutorService heartbeatScheduler,
       LongSupplier nanoClock) {
-    this.hub = Objects.requireNonNull(hub, "hub");
-    this.codec = Objects.requireNonNull(codec, "codec");
-    this.eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
-    this.browserUseRegistry = Objects.requireNonNull(browserUseRegistry, "browserUseRegistry");
-    this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
-    if (settings.queueCapacity() <= 0) {
-      throw new IllegalArgumentException("senderCapacity must be positive");
-    }
-    if (settings.maxBytes() <= 0) {
-      throw new IllegalArgumentException("maxBytes must be positive");
-    }
-    if (settings.sendTimeoutMillis() <= 0) {
-      throw new IllegalArgumentException("sendTimeoutMillis must be positive");
-    }
-    if (settings.heartbeatIntervalMillis() <= 0) {
-      throw new IllegalArgumentException("heartbeatIntervalMillis must be positive");
-    }
-    this.senderCapacity = settings.queueCapacity();
-    this.maxBytes = settings.maxBytes();
-    this.sendTimeoutMillis = settings.sendTimeoutMillis();
-    this.heartbeatIntervalMillis = settings.heartbeatIntervalMillis();
-    this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
-    this.heartbeatTask =
-        heartbeatScheduler.scheduleAtFixedRate(
-            this::heartbeat,
-            settings.heartbeatIntervalMillis(),
-            settings.heartbeatIntervalMillis(),
-            TimeUnit.MILLISECONDS);
-    this.pingTask =
-        heartbeatScheduler.scheduleAtFixedRate(
-            this::ping, PING_INTERVAL_MILLIS, PING_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
+    this(
+        hub, codec, () -> settings, eventNodeId, browserUseRegistry, heartbeatScheduler, nanoClock);
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) {
+    ApplicationEventSettings settings = Objects.requireNonNull(settingsProvider.get(), "settings");
     Session nativeSession = requireNativeSession(session);
     // 先构造发送器再登记：发送器构造失败时不会留下无主的 IDE 使用登记。
     AsyncTextSender sender =
         new AsyncTextSender(
-            nativeSession, senderCapacity, maxBytes, sendTimeoutMillis, heartbeatScheduler);
+            nativeSession,
+            settings.queueCapacity(),
+            settings.maxBytes(),
+            settings.sendTimeoutMillis(),
+            heartbeatScheduler);
     ConnectionIdentity identity = new ConnectionIdentity(eventNodeId, UUID.randomUUID());
     long generation = browserUseRegistry.register(identity);
     ConnectionState state =
@@ -142,7 +143,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             browserUseRegistry,
             identity,
             generation,
-            heartbeatIntervalMillis,
+            settings.heartbeatIntervalMillis(),
             sender,
             nanoClock.getAsLong());
     ConnectionState previous = connections.putIfAbsent(session.getId(), state);
@@ -196,10 +197,17 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     }
   }
 
-  /** 单次共享文本 heartbeat tick；只向每连接的 AsyncTextSender 非阻塞入队。 */
+  /** 测试接缝：立即为所有连接发送一次 heartbeat。 */
   void heartbeat() {
     for (ConnectionState state : connections.values()) {
-      state.heartbeat();
+      state.heartbeatNow();
+    }
+  }
+
+  private void heartbeatTick() {
+    long nowNanos = nanoClock.getAsLong();
+    for (ConnectionState state : connections.values()) {
+      state.heartbeat(nowNanos);
     }
   }
 
@@ -249,6 +257,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final Object closeLock = new Object();
     private long lastPongNanos;
+    private long lastHeartbeatNanos;
     private volatile boolean closed;
 
     private ConnectionState(
@@ -268,6 +277,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       this.heartbeatIntervalMillis = heartbeatIntervalMillis;
       this.sender = sender;
       this.lastPongNanos = nowNanos;
+      this.lastHeartbeatNanos = nowNanos;
     }
 
     private void start() {
@@ -390,14 +400,29 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    private void heartbeat() {
+    private void heartbeat(long nowNanos) {
       synchronized (closeLock) {
-        if (closed) {
+        if (closed
+            || nowNanos - lastHeartbeatNanos
+                < TimeUnit.MILLISECONDS.toNanos(heartbeatIntervalMillis)) {
           return;
         }
-        if (!sender.enqueue(codec.heartbeat())) {
-          fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
+        lastHeartbeatNanos = nowNanos;
+        enqueueHeartbeat();
+      }
+    }
+
+    private void heartbeatNow() {
+      synchronized (closeLock) {
+        if (!closed) {
+          enqueueHeartbeat();
         }
+      }
+    }
+
+    private void enqueueHeartbeat() {
+      if (!sender.enqueue(codec.heartbeat())) {
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }
     }
 

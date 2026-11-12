@@ -39,7 +39,7 @@ class ClaimedExecutionSupportTest {
           UUID.randomUUID(),
           NOW.plusSeconds(60));
   private final ClaimedExecutionSupport<ClaimAdmissionGuard.GuardedExecution> support =
-      new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL, LEASE);
+      new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL);
 
   private void transactions() {
     when(tx.work()).thenReturn(work);
@@ -91,7 +91,7 @@ class ClaimedExecutionSupportTest {
   void leaseMarginUsesTheCallerTransaction() {
     // 续租直接委托传入事务，不读取 JVM 时钟，也不另开事务。
     transactions();
-    support.ensureLeaseMargin(tx, claim);
+    support.ensureLeaseMargin(tx, claim, LEASE);
     verify(work).renew(claim, LEASE.leaseDuration());
   }
 

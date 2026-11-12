@@ -39,9 +39,9 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.Session;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -128,7 +128,7 @@ class SubagentTaskRunnerTest {
                 "main",
                 parentThreadId,
                 true,
-                SpawnTrigger.USER,
+                ThreadKind.USER,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -269,7 +269,7 @@ class SubagentTaskRunnerTest {
     assertEquals(parentThreadId, accepted1.parentThreadId());
     assertEquals(target, accepted1.settings());
     // 模型发起的子代理：通知父 Thread，票据即 invocation。
-    assertEquals(SpawnTrigger.MODEL_TOOL, accepted1.trigger());
+    assertEquals(ThreadKind.SUBAGENT, accepted1.kind());
     assertEquals(JoinDelivery.NOTIFY_PARENT, accepted1.delivery());
     assertEquals(invocationId, accepted1.ticketId());
     // 源 prompt 与票据同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
@@ -321,7 +321,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -411,7 +411,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -622,7 +622,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
@@ -965,7 +965,7 @@ class SubagentTaskRunnerTest {
                 "child",
                 parentThreadId,
                 false,
-                SpawnTrigger.MODEL_TOOL,
+                ThreadKind.SUBAGENT,
                 ThreadConstraints.NONE,
                 ThreadExecutionControl.RUNNABLE,
                 0L,

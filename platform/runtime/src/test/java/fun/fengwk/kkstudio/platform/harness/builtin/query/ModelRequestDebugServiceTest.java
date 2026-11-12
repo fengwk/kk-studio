@@ -42,9 +42,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -292,7 +292,7 @@ class ModelRequestDebugServiceTest {
             "child",
             THREAD_ID,
             false,
-            SpawnTrigger.MODEL_TOOL,
+            ThreadKind.SUBAGENT,
             ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
@@ -745,7 +745,7 @@ class ModelRequestDebugServiceTest {
         "thread",
         THREAD_ID,
         false,
-        SpawnTrigger.USER,
+        ThreadKind.USER,
         ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,

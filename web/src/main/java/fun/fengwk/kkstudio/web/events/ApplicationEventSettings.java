@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.web.events;
 /**
  * 浏览器事件通道的软策略配置。
  *
- * <p>由 {@link ApplicationEventConfiguration} 用一次数据库 SystemSettings.Advanced 快照构造：queueCapacity 对应
+ * <p>由 {@link ApplicationEventConfiguration} 从当前 SystemSettings.Advanced 快照构造：queueCapacity 对应
  * {@code applicationEventQueueCapacity}（既是每连接发送队列帧容量，也是 Hub 单订阅/建立期缓冲上限），maxBytes 对应 {@code
  * applicationEventMaxBytes}，sendTimeoutMillis 对应 {@code applicationEventSendTimeoutMillis}，
- * heartbeatIntervalMillis 对应 {@code applicationEventHeartbeatIntervalMillis}。
+ * heartbeatIntervalMillis 对应 {@code applicationEventHeartbeatIntervalMillis}。每条连接使用其建立时的配置快照。
  *
  * @param queueCapacity 每连接发送队列的帧容量（>0）
  * @param maxBytes 每连接待发 UTF-8 字节上限（>0）

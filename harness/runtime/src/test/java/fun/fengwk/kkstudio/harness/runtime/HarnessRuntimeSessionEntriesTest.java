@@ -20,6 +20,9 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -91,6 +94,43 @@ class HarnessRuntimeSessionEntriesTest {
     assertEquals(
         1L,
         store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()).version());
+  }
+
+  @Test
+  void sessionAndParentQueriesReturnOnlyTheirThreadKinds() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    UUID subagentId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.threads()
+                  .insert(
+                      new ThreadState(
+                          id,
+                          baseline.sessionId(),
+                          baseline.threadId(),
+                          baseline.rootEntryId(),
+                          HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                          "subagent",
+                          baseline.threadId(),
+                          false,
+                          ThreadKind.SUBAGENT,
+                          ThreadConstraints.NONE,
+                          ThreadExecutionControl.RUNNABLE,
+                          0L,
+                          1,
+                          0,
+                          T1,
+                          T1));
+              return id;
+            });
+
+    assertEquals(
+        List.of(baseline.threadId()),
+        runtime.listThreadsBySession(baseline.sessionId()).stream().map(ThreadState::id).toList());
+    assertEquals(
+        List.of(subagentId),
+        runtime.listSubagentsByParent(baseline.threadId()).stream().map(ThreadState::id).toList());
   }
 
   @Test

@@ -98,7 +98,8 @@ export function ModelSelectionPicker({
         required={modelRequired}
         onChange={onModelChange}
       />
-      {showVariant && selectedModel?.type !== 'GROUP' ? (
+      {/* 只有已选的具体模型才有变体；未选模型或选中模型组时不显示。 */}
+      {showVariant && modelName && selectedModel?.type !== 'GROUP' ? (
         <>
           {variantFieldLabel ? (
             <span className="model-selection-variant-label">{variantFieldLabel}</span>

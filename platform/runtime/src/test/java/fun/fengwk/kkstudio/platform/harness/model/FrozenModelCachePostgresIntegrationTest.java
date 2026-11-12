@@ -92,7 +92,7 @@ class FrozenModelCachePostgresIntegrationTest extends PostgresSpringTestSupport 
         rootId);
     jdbc.update(
         "insert into harness_thread (id,session_id,head_entry_id,creation_request_hash,name,"
-            + "root_thread_id,spawn_trigger,constraints,execution_control,next_command_sequence,"
+            + "root_thread_id,kind,constraints,execution_control,next_command_sequence,"
             + "version,created_at,updated_at) values (?,?,?,repeat('a',64),'cache',?,'USER',"
             + "'{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb,"
             + "'RUNNABLE',1,0,now(),now())",

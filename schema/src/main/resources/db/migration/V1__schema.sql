@@ -248,12 +248,12 @@ comment on column system_setting.updated_at is '最后更新时间（毫秒精�
 insert into system_setting (id, config) values (
     1,
     '{
-      "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
-      "aiRuntime":{"compactionKeepRecentTokens":20000,"compactionReserveTokens":16384,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
-      "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
+      "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
+      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
+      "environment":{"heartbeatTimeoutMillis":60000},
       "backendNetwork":{"noProxyHosts":"localhost,127.*,::1"},
       "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"imageTier":"720P","s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
-      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
+      "tool":{"maxOutputMib":16,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
     }'::jsonb
 );
 
@@ -348,7 +348,7 @@ create table harness_thread (
     name varchar(256) not null,
     root_thread_id uuid not null,
     yolo_enabled boolean not null default false,
-    spawn_trigger varchar(16) not null,
+    kind varchar(24) not null,
     constraints jsonb not null,
     execution_control varchar(16) not null,
     input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
@@ -370,8 +370,8 @@ create table harness_thread (
     constraint ck_harness_thread_parent_not_self check (
         parent_thread_id is null or parent_thread_id <> id
     ),
-    constraint ck_harness_thread_spawn_trigger check (
-        spawn_trigger in ('USER', 'MODEL_TOOL', 'RUNTIME', 'CONTROLLER', 'PLUGIN')
+    constraint ck_harness_thread_kind check (
+        kind in ('USER', 'SUBAGENT', 'COMPACTION', 'CONTROLLER_TASK', 'PLUGIN_TASK')
     ),
     constraint ck_harness_thread_constraints check (
         jsonb_typeof(constraints) = 'object'
@@ -390,7 +390,7 @@ create table harness_thread (
     )
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，spawn_trigger 与 constraints 是创建时冻结的来源与执行约束，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，kind 与 constraints 是创建时冻结的用途与执行约束，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
@@ -399,7 +399,7 @@ comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREA
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
 comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
-comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
+comment on column harness_thread.kind is '不可变 Thread 用途：USER / SUBAGENT / COMPACTION / CONTROLLER_TASK / PLUGIN_TASK';
 comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
@@ -674,7 +674,7 @@ comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可
 comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
 comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
 comment on column harness_thread_join.agent is '本次执行的 Agent 名';
-comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；RECEIPT_ONLY 只冻结结果（无父 Thread）';
+comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；SETTLE_TOOL_RESULT 冻结结果并结算父 Thread 中等待它的同步 task 调用；RECEIPT_ONLY 只冻结结果（无父 Thread）';
 comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
 comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
 comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
