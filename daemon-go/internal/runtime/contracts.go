@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -31,7 +34,7 @@ const (
 	ImageInputTierOriginal ImageInputTier = "ORIGINAL"
 )
 
-// ExpectedFile identifies a user-approved file snapshot for fs.edit.
+// ExpectedFile identifies a user-approved file snapshot for a write or edit.
 type ExpectedFile struct {
 	Path   string
 	SHA256 string
@@ -64,6 +67,29 @@ type ResourceUploader interface {
 	Upload(ctx context.Context, invocationID string, content ResultContent) (ResultContent, error)
 }
 
+// TemporaryResourceSweeper removes expired daemon-managed temporary resources.
+type TemporaryResourceSweeper interface {
+	Sweep(ttl time.Duration) (int, error)
+}
+
+// ResourceUploadError carries an explicit cleanup fact across the uploader boundary. Cause is
+// retained for local inspection but is deliberately excluded from Error to avoid leaking tickets.
+type ResourceUploadError struct {
+	Stage            string
+	Category         string
+	CleanupConfirmed bool
+	Cause            error
+}
+
+func (e *ResourceUploadError) Error() string {
+	if e.Category == "ticket-failed" {
+		return "resource upload ticket failed"
+	}
+	return fmt.Sprintf("resource upload failed during %s (%s); cleanupConfirmed=%t", e.Stage, e.Category, e.CleanupConfirmed)
+}
+
+func (e *ResourceUploadError) Unwrap() error { return e.Cause }
+
 // Progress reports a non-terminal capability result to runtime.
 type Progress func(CapabilityResult) error
 
@@ -73,6 +99,7 @@ type CapabilityContext struct {
 	Processes            native.Supervisor
 	Resources            ResourceUploader
 	Progress             Progress
+	FileChanged          func(string)
 	ConfirmExecutionExit func()
 }
 
@@ -84,9 +111,31 @@ type CapabilityProvider interface {
 	Capabilities() map[string]CapabilityExecutor
 }
 
+// IDEService handles protocol IDE commands and leases without coupling runtime to the IDE package.
+type IDEService interface {
+	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
+	ApplyLease(*protocol.IdeLease, time.Time)
+}
+
+// IDEUpdateAdmission exposes the IDE service's state that can block managed updates.
+type IDEUpdateAdmission interface {
+	CanStartUpdate() bool
+}
+
 // Connection exchanges decoded control envelopes with the runtime. Transport implements it.
 type Connection interface {
 	Receive(context.Context) (*protocol.Envelope, error)
 	Send(context.Context, *protocol.Envelope) error
 	Close() error
 }
+
+// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation policy.
+type ConnectionFactory interface {
+	Connect(context.Context) (Connection, error)
+}
+
+var (
+	ErrForbiddenInboundFrame = errors.New("forbidden inbound frame")
+	ErrRuntimeFatal          = errors.New("runtime entered a fatal state")
+)
+var ErrRegistrationRejected = errors.New("daemon registration rejected")
