@@ -11,6 +11,47 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// NAT-T-049 verifies deterministic parent-before-child session ordering.
+func TestDarwinSession_ParentFirst(t *testing.T) {
+	members := []sessionMember{
+		{PID: 30, Parent: 20},
+		{PID: 20, Parent: 10},
+		{PID: 10, Parent: 999},
+	}
+	ordered, err := parentsBeforeChildren(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := make(map[int]int, len(ordered))
+	for index, member := range ordered {
+		positions[member.PID] = index
+	}
+	if positions[10] >= positions[20] || positions[20] >= positions[30] {
+		t.Fatalf("session members are not parent-first: %+v", ordered)
+	}
+}
+
+func deepDarwinSessionChain(size int) []sessionMember {
+	members := make([]sessionMember, size)
+	for index := range members {
+		members[index] = sessionMember{PID: index + 1, Parent: index}
+	}
+	return members
+}
+
+// NAT-T-050 verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
+func TestDarwinSession_AmbiguousSnapshot(t *testing.T) {
+	for _, members := range [][]sessionMember{
+		{{PID: 10}, {PID: 10}},
+		{{PID: 10, Parent: 20}, {PID: 20, Parent: 10}},
+		deepDarwinSessionChain(maxSessionTreeDepth + 1),
+	} {
+		if _, err := parentsBeforeChildren(members); err == nil {
+			t.Fatal("ambiguous process snapshot was accepted")
+		}
+	}
+}
+
 // NAT-T-048 verifies that the Darwin process snapshot carries fencing identity and parent data.
 func TestDarwinSessionSnapshotIncludesParentAndIdentity(t *testing.T) {
 	pid := os.Getpid()

@@ -459,6 +459,10 @@ func convergeSessionExcept(ctx context.Context, sid int, grace time.Duration, ex
 		if len(active) == 0 {
 			return nil
 		}
+		active, err = parentsBeforeChildren(active)
+		if err != nil {
+			return err
+		}
 		signal := syscall.SIGTERM
 		if time.Since(started) >= grace {
 			signal = syscall.SIGKILL

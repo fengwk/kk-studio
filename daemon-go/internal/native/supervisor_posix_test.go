@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
-// NAT-N-001, NAT-T-115, NAT-T-118
+// NAT-N-001, NAT-T-115
 func TestPOSIXSupervisor_NaturalExitDrains(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -49,6 +49,93 @@ func TestPOSIXSupervisor_NaturalExitDrains(t *testing.T) {
 	}
 	if exit.Code == nil || *exit.Code != 21 {
 		t.Fatalf("exit = %+v", exit)
+	}
+}
+
+// NAT-T-114 verifies that environment values supplied to the daemon reach the command.
+func TestPOSIXSupervisor_InheritedEnvironment(t *testing.T) {
+	t.Setenv("KK_STUDIO_NATIVE_TEST_ENV", "inherited")
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "printf '%s' \"$KK_STUDIO_NATIVE_TEST_ENV\""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(process.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := process.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "inherited" {
+		t.Fatalf("inherited environment output = %q", output)
+	}
+}
+
+// NAT-T-118 verifies that stdin EOF allows the command to exit with its own code.
+func TestPOSIXSupervisor_StdinEOF(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", "cat >/dev/null; exit 23"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Stdin().Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	exit, err := process.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit.Code == nil || *exit.Code != 23 {
+		t.Fatalf("exit after stdin EOF = %+v", exit)
+	}
+}
+
+// NAT-T-128 verifies terminating one process scope leaves another live scope untouched.
+func TestPOSIXSupervisor_ScopeIsolation(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	first, err := supervisor.Start(context.Background(), ProcessSpec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := supervisor.Start(context.Background(), ProcessSpec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := first.Terminate(ctx, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer waitCancel()
+	if _, err := second.Wait(waitCtx); err == nil {
+		t.Fatal("unrelated process scope exited when the first scope terminated")
+	}
+	if err := second.Terminate(ctx, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
 	}
 }
 

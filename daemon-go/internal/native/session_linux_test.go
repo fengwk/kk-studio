@@ -43,6 +43,55 @@ func TestLinuxSupervisor_UnknownBaselineFailsBeforeStartingCommand(t *testing.T)
 	}
 }
 
+// NAT-T-049 verifies deterministic parent-before-child session ordering.
+func TestLinuxSession_ParentFirst(t *testing.T) {
+	members := []sessionMember{
+		{PID: 30, Parent: 20},
+		{PID: 20, Parent: 10},
+		{PID: 10, Parent: 999},
+		{PID: 40, Parent: 10},
+	}
+	ordered, err := parentsBeforeChildren(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := make(map[int]int, len(ordered))
+	for index, member := range ordered {
+		positions[member.PID] = index
+	}
+	for _, member := range members {
+		if parentIndex, ok := positions[member.Parent]; ok && positions[member.PID] <= parentIndex {
+			t.Fatalf("child %d did not follow parent %d: %+v", member.PID, member.Parent, ordered)
+		}
+	}
+}
+
+func deepSessionChain(size int) []sessionMember {
+	members := make([]sessionMember, size)
+	for index := range members {
+		members[index] = sessionMember{PID: index + 1, Parent: index}
+	}
+	return members
+}
+
+// NAT-T-050 verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
+func TestLinuxSession_AmbiguousSnapshot(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		members []sessionMember
+	}{
+		{name: "duplicate", members: []sessionMember{{PID: 10}, {PID: 10}}},
+		{name: "cycle", members: []sessionMember{{PID: 10, Parent: 20}, {PID: 20, Parent: 10}}},
+		{name: "too deep", members: deepSessionChain(maxSessionTreeDepth + 1)},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := parentsBeforeChildren(testCase.members); err == nil {
+				t.Fatal("ambiguous process snapshot was accepted")
+			}
+		})
+	}
+}
+
 // NAT-T-059
 func TestLinuxSession_DirectChildren(t *testing.T) {
 	child := exec.Command("/bin/sleep", "30")
