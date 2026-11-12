@@ -51,7 +51,10 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}))
 	defer server.Close()
 
-	directory := t.TempDir()
+	directory := filepath.Join(t.TempDir(), "daemon")
+	if err := native.EnsurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
 	configPath := filepath.Join(directory, "daemon.json")
 	executable, err := os.Executable()
 	if err != nil {
