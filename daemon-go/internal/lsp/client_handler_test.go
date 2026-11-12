@@ -25,18 +25,19 @@ func checkNullResponse(name string) func(*testing.T, json.RawMessage) {
 }
 
 func TestProtocol_ServerRequests(t *testing.T) {
+	root := t.TempDir()
 	methods := []struct {
 		method string
 		params any
 		check  func(*testing.T, json.RawMessage)
 	}{{"workspace/configuration", map[string]any{"items": []any{map[string]any{}, map[string]any{}}}, func(t *testing.T, raw json.RawMessage) {
 		var got []map[string]any
-		if err := json.Unmarshal(raw, &got); err != nil || len(got) != 2 {
+		if err := json.Unmarshal(raw, &got); err != nil || len(got) != 2 || len(got[0]) != 0 || len(got[1]) != 0 {
 			t.Fatalf("configuration result = %s, %v", raw, err)
 		}
 	}}, {"workspace/workspaceFolders", nil, func(t *testing.T, raw json.RawMessage) {
 		var got []map[string]string
-		if err := json.Unmarshal(raw, &got); err != nil || len(got) != 1 || got[0]["name"] != "workspace" {
+		if err := json.Unmarshal(raw, &got); err != nil || len(got) != 1 || got[0]["name"] != "workspace" || got[0]["uri"] != pathURI(root) {
 			t.Fatalf("workspace folders = %s, %v", raw, err)
 		}
 	}}, {"workspace/applyEdit", nil, func(t *testing.T, raw json.RawMessage) {
@@ -48,7 +49,7 @@ func TestProtocol_ServerRequests(t *testing.T) {
 	for _, item := range methods {
 		t.Run(item.method, func(t *testing.T) {
 			serverSide, clientSide := net.Pipe()
-			client := &Client{root: t.TempDir()}
+			client := &Client{root: root}
 			conn := jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(clientSide, newLSPCodec()), rpcHandler(client.handleRequest))
 			t.Cleanup(func() { _ = conn.Close(); _ = serverSide.Close() })
 			params, err := json.Marshal(item.params)
@@ -76,7 +77,7 @@ func TestProtocol_ServerRequests(t *testing.T) {
 	for _, method := range []string{"window/showMessage", "window/logMessage", "telemetry/event", "textDocument/publishDiagnostics"} {
 		t.Run("ignored "+method, func(t *testing.T) {
 			serverSide, clientSide := net.Pipe()
-			client := &Client{root: t.TempDir()}
+			client := &Client{root: root}
 			conn := jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(clientSide, newLSPCodec()), rpcHandler(client.handleRequest))
 			defer func() { _ = conn.Close(); _ = serverSide.Close() }()
 			serverSide.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
@@ -94,7 +95,7 @@ func TestProtocol_ServerRequests(t *testing.T) {
 
 // LSP-T-078 and LSP-T-097 verify static capabilities and JDTLS-specific support.
 func TestClient_StaticAndJDTLSSupport(t *testing.T) {
-	plain := &Client{capabilities: map[string]json.RawMessage{"definitionProvider": json.RawMessage("true")}}
+	plain := &Client{capabilities: ServerCapabilities{DefinitionProvider: true}}
 	if !plain.Supports("textDocument/definition") || plain.Supports("textDocument/unknown") {
 		t.Fatal("plain server capability selection is incorrect")
 	}

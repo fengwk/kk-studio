@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -74,6 +73,9 @@ func TestProtocol_Crash(t *testing.T) {
 		requestResult <- client.call(context.Background(), "slow/request", map[string]any{}, nil, func() {}, func() { finished <- struct{}{} })
 	}()
 	waitForFakeRequest(t, supervisor.process, "slow/request")
+	if _, err = supervisor.process.stderrW.Write([]byte("private server stderr")); err != nil {
+		t.Fatal(err)
+	}
 	supervisor.process.exitOnce.Do(func() { supervisor.process.done <- native.ProcessExit{Code: 11} })
 	select {
 	case <-client.exitSignal:
@@ -243,7 +245,7 @@ func TestProtocol_CapabilityRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.mu.Lock()
-	client.capabilities = map[string]json.RawMessage{"definitionProvider": json.RawMessage("false"), "workspaceSymbolProvider": json.RawMessage("null")}
+	client.capabilities = ServerCapabilities{}
 	client.mu.Unlock()
 	if _, err = client.Definition(context.Background(), "unused.go", 1, 0); err == nil || err.Error() != "LSP server 'plain' does not advertise go-to-definition support." {
 		t.Fatalf("definition error = %v", err)

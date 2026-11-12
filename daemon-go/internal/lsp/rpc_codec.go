@@ -13,7 +13,10 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-const maxBannerBytes = 8192
+const (
+	maxBannerBytes  = 8192
+	maxMessageBytes = 64 * 1024 * 1024
+)
 
 // lspCodec adapts LSP Content-Length framing to jsonrpc2 object transport.
 type lspCodec struct{ first bool }
@@ -102,6 +105,9 @@ func (c *lspCodec) ReadObject(r *bufio.Reader, value any) error {
 	}
 	if length < 0 {
 		return errors.New("missing LSP Content-Length")
+	}
+	if length > maxMessageBytes {
+		return fmt.Errorf("LSP message of %d bytes exceeds the 64 MiB limit", length)
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(r, body); err != nil {
