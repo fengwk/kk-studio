@@ -157,22 +157,20 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 		}
 		matches := grepFile(data, filepath.ToSlash(rel), pattern, literal, ignoreCase, re, required)
 		release()
-		if limit > 0 && len(matches) > limit-len(outcome.Results) {
+		limitReached := limit > 0 && len(matches) >= limit-len(outcome.Results)
+		if limitReached {
 			matches = matches[:limit-len(outcome.Results)]
-			outcome.Results = append(outcome.Results, matches...)
-			outcome.LimitReached = true
-			if !readTimedOut {
-				outcome.StopReason = "LIMIT"
-			}
-			break
 		}
 		outcome.Results = append(outcome.Results, matches...)
-		if readTimedOut {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return outcome, context.Canceled
+		}
+		if readTimedOut || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			outcome.Incomplete = true
 			outcome.StopReason = "TIMED_OUT"
 			break
 		}
-		if limit > 0 && len(outcome.Results) >= limit {
+		if limitReached || limit > 0 && len(outcome.Results) >= limit {
 			outcome.LimitReached = true
 			if outcome.StopReason == "" {
 				outcome.StopReason = "LIMIT"

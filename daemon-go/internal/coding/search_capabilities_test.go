@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengwk/kk-studio/daemon/internal/coding/search"
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
@@ -71,5 +72,34 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	searchDetails := details["search"].(map[string]any)
 	if searchDetails["outcome"] != "CANCELLED" || searchDetails["incomplete"] != true {
 		t.Fatalf("details=%v", details)
+	}
+}
+
+// COD-F-015
+func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
+	dataDir := t.TempDir()
+	lines := make([]string, inlineOutputLines+1)
+	for i := range lines {
+		lines[i] = "path.txt:1:match"
+	}
+	text := strings.Join(lines, "\n")
+	result := formatSearchResult(runtime.CapabilityCall{InvocationID: "large"}, dataDir, search.SearchOutcome{Results: lines}, 5000, "No matches found", "matches")
+	if result.Error || !strings.Contains(result.Contents[0].Text, "[Full output:") {
+		t.Fatalf("result=%#v", result)
+	}
+	var details struct {
+		TextOutput struct {
+			Path string `json:"path"`
+		} `json:"textOutput"`
+	}
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	full, err := os.ReadFile(details.TextOutput.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(full) != text {
+		t.Fatalf("stored bytes=%d want=%d", len(full), len(text))
 	}
 }
