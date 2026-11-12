@@ -318,6 +318,12 @@ func sanitizeOutputName(value string) string {
 	return b.String()
 }
 
+type outputFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+}
+
 // OutputSpool bounds retained process output, spills complete captures and keeps a bounded preview.
 type OutputSpool struct {
 	mu                                   sync.Mutex
@@ -325,7 +331,7 @@ type OutputSpool struct {
 	callID                               string
 	budget                               int64
 	memory                               []byte
-	file                                 *os.File
+	file                                 outputFile
 	staging                              string
 	captured, total, lineBreaks          int64
 	last                                 byte
