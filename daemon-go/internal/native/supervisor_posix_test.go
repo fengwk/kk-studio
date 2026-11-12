@@ -200,6 +200,23 @@ func TestPOSIXSupervisor_StartAfterClose(t *testing.T) {
 	}
 }
 
+func TestContainsTrackedAnchor_RequiresExactIdentity(t *testing.T) {
+	tracked := trackedSession{ChildPID: 42, Session: 40, Identity: "start-1"}
+	members := []sessionMember{{PID: 42, Session: 40, Identity: "start-1"}}
+	if !containsTrackedAnchor(members, tracked) {
+		t.Fatal("exact tracked identity was not found")
+	}
+	for _, changed := range []sessionMember{
+		{PID: 43, Session: 40, Identity: "start-1"},
+		{PID: 42, Session: 41, Identity: "start-1"},
+		{PID: 42, Session: 40, Identity: "start-2"},
+	} {
+		if containsTrackedAnchor([]sessionMember{changed}, tracked) {
+			t.Fatalf("changed tracked identity was accepted: %+v", changed)
+		}
+	}
+}
+
 // Exit fallback must preserve unknown status, prefer published evidence, and decode helper wait results.
 func TestPOSIXExitFallback_PreservesExitEvidence(t *testing.T) {
 	dir := stateTestDir(t)
