@@ -24,6 +24,8 @@ type sessionMember struct {
 
 func (m sessionMember) isLive() bool { return m.State != "Z" && m.State != "X" && m.State != "x" }
 
+// Darwin does not support Linux's child-subreaper behavior; orphaned children
+// are reparented to launchd rather than adopted by this process.
 func directChildren(ownerPID int, excludedPIDs []int) ([]sessionMember, error) { return nil, nil }
 
 func convergeAdoptedChildren(ctx context.Context, ownerPID int, grace time.Duration, excludedPIDs []int) error {
@@ -46,7 +48,7 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("cannot inspect process scope member")
+			return nil, fmt.Errorf("cannot inspect process scope member: %w", err)
 		}
 		if got != sid {
 			continue
@@ -57,7 +59,13 @@ func sessionMembers(sid int) ([]sessionMember, error) {
 		if proc.Proc.P_stat == 5 {
 			state = "Z"
 		}
-		members = append(members, sessionMember{PID: pid, Session: got, Identity: identity, State: state})
+		members = append(members, sessionMember{
+			PID:      pid,
+			Parent:   int(proc.Eproc.Ppid),
+			Session:  got,
+			Identity: identity,
+			State:    state,
+		})
 	}
 	return members, nil
 }
