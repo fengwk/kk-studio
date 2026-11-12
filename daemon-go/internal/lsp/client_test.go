@@ -171,6 +171,8 @@ func (p *fakeProcess) serve() {
 			}
 			if p.allowProcessExit != nil {
 				<-p.allowProcessExit
+				p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: 0} })
+				return
 			}
 		}
 		if req.Method == p.blockMethod || len(req.ID) == 0 {
