@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -131,22 +132,24 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	if terminationResult == nil && (waitErr == nil || ctx.Err() != nil) {
 		executionExited = true
 	}
+	var readErr error
 	select {
-	case <-readErrors:
-		if ctx.Err() == nil {
-			result := spool.Finish(true, "")
-			result.Error = true
-			result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
-			var details map[string]any
-			if err := json.Unmarshal(result.Details, &details); err != nil {
-				details = make(map[string]any)
-			}
-			details["code"] = "FAILED"
-			details["process"] = map[string]string{"outcome": "EXITED"}
-			result.Details = mustJSON(details)
-			return result, nil
-		}
+	case readErr = <-readErrors:
 	default:
+	}
+	streamClosedByWait := errors.Is(readErr, os.ErrClosed) && waitErr == nil && terminationResult == nil
+	if readErr != nil && !streamClosedByWait && ctx.Err() == nil {
+		result := spool.Finish(true, "")
+		result.Error = true
+		result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
+		var details map[string]any
+		if err := json.Unmarshal(result.Details, &details); err != nil {
+			details = make(map[string]any)
+		}
+		details["code"] = "FAILED"
+		details["process"] = map[string]string{"outcome": "EXITED"}
+		result.Details = mustJSON(details)
+		return result, nil
 	}
 	if terminationResult != nil {
 		return errorResult(call.InvocationID, failRun("the process scope did not converge; processes may still be running", "FAILED")), nil

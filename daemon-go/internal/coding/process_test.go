@@ -155,6 +155,12 @@ func (p *shellManagedProcess) Terminate(context.Context, time.Duration) error {
 
 type failingReadCloser struct{ data []byte }
 
+type closeOnWaitReadCloser struct {
+	data   []byte
+	closed chan struct{}
+	once   sync.Once
+}
+
 type cancelOnReadCloser struct {
 	ctx       context.Context
 	ready     chan struct{}
@@ -175,6 +181,20 @@ func (r *cancelOnReadCloser) Read(p []byte) (int, error) {
 	return 0, io.ErrClosedPipe
 }
 func (*cancelOnReadCloser) Close() error { return nil }
+
+func (r *closeOnWaitReadCloser) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	<-r.closed
+	return 0, os.ErrClosed
+}
+func (r *closeOnWaitReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
 
 func (r *failingReadCloser) Read(p []byte) (int, error) {
 	if len(r.data) == 0 {
@@ -746,6 +766,26 @@ func TestProcessReadErrorPreservesCapturedPrefix(t *testing.T) {
 	text := result.Contents[0].Text
 	if !strings.HasPrefix(text, "captured prefix") || !strings.Contains(text, "the process output stream failed while reading.") {
 		t.Fatalf("text=%q", text)
+	}
+}
+
+// A supervisor may close output pipes after a successful Wait; that is not a process read failure.
+func TestProcessWaitClosedOutputStreamsAfterNaturalExit(t *testing.T) {
+	dataDir := t.TempDir()
+	stdout := &closeOnWaitReadCloser{data: []byte("captured prefix"), closed: make(chan struct{})}
+	process := &fakeProcess{
+		stdout: stdout,
+		stderr: io.NopCloser(strings.NewReader("")),
+		wait: func(context.Context) (native.ProcessExit, error) {
+			_ = stdout.Close()
+			return testProcessExit(0), nil
+		},
+	}
+	result, err := ExecuteProcess(context.Background(), runtime.CapabilityCall{InvocationID: "wait-closed"}, runtime.CapabilityContext{
+		Config: config.DaemonConfig{DataDir: dataDir}, Processes: fakeSupervisor{process},
+	}, "true", dataDir)
+	if err != nil || result.Error || !strings.Contains(result.Contents[0].Text, "captured prefix") || strings.Contains(result.Contents[0].Text, "output stream failed while reading") {
+		t.Fatalf("result=%#v err=%v", result, err)
 	}
 }
 
