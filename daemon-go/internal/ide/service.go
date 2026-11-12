@@ -580,6 +580,9 @@ func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *view
 	if registerErr == nil {
 		registerErr = NewError("managed view did not accept the new binding epoch", "CLEANUP_FAILED")
 	}
+	if s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
+		registerErr = NewError("code-server generation changed during resume", "BUSY")
+	}
 	// A lost management response is reconciled only from the native registry.
 	nativeViews, listErr := s.manager.ListViews(context.Background())
 	if listErr == nil && s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {

@@ -63,7 +63,7 @@ func TestStartupTerminationFailure(t *testing.T) {
 	installFakeDistribution(t, root)
 	supervisor := &fakeSupervisor{loginStatus: http.StatusUnauthorized, terminateErr: errors.New("cannot terminate")}
 	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{})
-	if _, err := manager.EnsureStarted(context.Background()); err == nil || !strings.Contains(SafeMessage(err), "could not be terminated") {
+	if _, err := manager.EnsureStarted(context.Background()); SafeMessage(err) != "code-server startup failed (code-server login failed) and could not be terminated" {
 		t.Fatalf("startup error=%v", err)
 	}
 	if err := manager.Close(context.Background()); err == nil || err.Error() != "cannot terminate" {
