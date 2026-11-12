@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	defaultFindLimit = 1000
-	defaultGrepLimit = 100
-	maxSearchLimit   = 100000
+	defaultFindLimit          = 1000
+	defaultGrepLimit          = 100
+	maxSearchLimit            = 100000
+	maxDirectoryResponseBytes = 48 * 1024
 )
 
 type arguments struct {
@@ -42,11 +43,20 @@ type arguments struct {
 }
 
 // Provider supplies the filesystem and in-process search capability handlers.
-type Provider struct{}
+type Provider struct {
+	// LSPStatus reports the available language for the optional fs.read header.
+	LSPStatus func(file string) (language string, available bool)
+}
 
-func (Provider) Capabilities() map[string]runtime.CapabilityExecutor {
+func (p Provider) Capabilities() map[string]runtime.CapabilityExecutor {
+	read := runtime.CapabilityExecutor(readCapability)
+	if p.LSPStatus != nil {
+		read = func(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+			return readCapabilityWithLSPStatus(ctx, call, capability, p.LSPStatus)
+		}
+	}
 	handlers := map[string]runtime.CapabilityExecutor{
-		"fs.read":          readCapability,
+		"fs.read":          read,
 		"fs.write":         writeCapability,
 		"fs.write.preview": previewWriteCapability,
 		"fs.edit":          editCapability,
@@ -158,6 +168,10 @@ func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 }
 
 func readCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+	return readCapabilityWithLSPStatus(ctx, call, capability, nil)
+}
+
+func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, lspStatus func(file string) (language string, available bool)) (runtime.CapabilityResult, error) {
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -214,7 +228,37 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		return textResult(call.InvocationID, strings.Join(names, "\n")), nil
+		prefix := fmt.Sprintf("path: %s\nkind: directory\n", filepath.ToSlash(args.Path))
+		if args.Offset > len(names) {
+			return textResult(call.InvocationID, prefix+fmt.Sprintf("\n[Showing 0 entries of %d.]", len(names))), nil
+		}
+		start := args.Offset - 1
+		end := min(len(names), start+args.Limit)
+		page := make([]string, 0, end-start)
+		actualEnd := start
+		for index := start; index < end; index++ {
+			candidateEnd := index + 1
+			candidateBytes := len(prefix) + 1 + len(names[index])
+			if candidateEnd < len(names) {
+				tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, candidateEnd, len(names), candidateEnd+1)
+				candidateBytes += 2 + len(tail)
+			}
+			if candidateBytes > maxDirectoryResponseBytes {
+				if index == start {
+					message := fmt.Sprintf("directory read response exceeds %d bytes on first entry: %d bytes", maxDirectoryResponseBytes, candidateBytes)
+					return errorResult(call.InvocationID, errors.New(message)), nil
+				}
+				break
+			}
+			page = append(page, names[index])
+			actualEnd = candidateEnd
+		}
+		result := prefix + "\n" + strings.Join(page, "\n")
+		if actualEnd < len(names) {
+			tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, actualEnd, len(names), actualEnd+1)
+			result += "\n\n" + tail
+		}
+		return textResult(call.InvocationID, result), nil
 	}
 	if !info.Mode().IsRegular() {
 		return errorResult(call.InvocationID, failRun("path is not a regular file", "INVALID_ARGUMENT")), nil
@@ -282,6 +326,12 @@ func readCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if closeErr != nil {
 		return errorResult(call.InvocationID, closeErr), nil
 	}
+	if lspStatus != nil {
+		language, available := lspStatus(args.Path)
+		if available && language != "" {
+			window.LSPStatus = "supported (" + language + ")"
+		}
+	}
 	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
 }
 
@@ -301,6 +351,9 @@ func formatTextWindow(path string, window TextWindow) string {
 	}
 	if window.Truncated {
 		lines = append(lines, "truncated: yes", "truncation_reason: "+window.TruncationReason, fmt.Sprintf("next: %d:%d", window.NextLine, window.NextColumn))
+	}
+	if window.LSPStatus != "" {
+		lines = append(lines, "lsp: "+window.LSPStatus)
 	}
 	if window.Body != "" {
 		lines = append(lines, "", window.Body)

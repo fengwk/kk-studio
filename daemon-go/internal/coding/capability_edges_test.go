@@ -44,8 +44,9 @@ func TestReadDirectoryAndBinaryFile(t *testing.T) {
 		}
 	}
 	directory := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": root}, nil)
-	if directory.Error || directory.Contents[0].Text != "a.txt\nz.txt" {
-		t.Fatalf("directory=%#v", directory)
+	wantDirectory := "path: " + filepath.ToSlash(root) + "\nkind: directory\n\na.txt\nz.txt"
+	if directory.Error || directory.Contents[0].Text != wantDirectory {
+		t.Fatalf("directory=%#v want=%q", directory, wantDirectory)
 	}
 	binaryPath := filepath.Join(root, "binary.dat")
 	if err := os.WriteFile(binaryPath, []byte{0, 1, 2, 3}, 0600); err != nil {

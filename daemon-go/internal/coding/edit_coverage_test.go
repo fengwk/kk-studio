@@ -52,10 +52,13 @@ func TestEditCapabilityRejectsMissingPathAndDirectory(t *testing.T) {
 	if err := os.Mkdir(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{missing, directory} {
-		result, err := editCapability(context.Background(), capabilityCall(t, "reject", map[string]any{"path": path, "old_string": "a", "new_string": "b"}), runtime.CapabilityContext{})
-		if err != nil || !result.Error {
-			t.Fatalf("path=%s result=%#v err=%v", path, result, err)
+	for _, test := range []struct {
+		path string
+		want string
+	}{{missing, "does not exist"}, {directory, "path must be a file"}} {
+		result, err := editCapability(context.Background(), capabilityCall(t, "reject", map[string]any{"path": test.path, "old_string": "a", "new_string": "b"}), runtime.CapabilityContext{})
+		if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
+			t.Fatalf("path=%s result=%#v err=%v want=%q", test.path, result, err, test.want)
 		}
 	}
 }

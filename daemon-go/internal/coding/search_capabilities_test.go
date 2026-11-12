@@ -185,7 +185,7 @@ func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	binaryResult := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": binaryFile, "pattern": "x", "literal": true}, nil)
-	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "ripgrep failed while searching") {
+	if !binaryResult.Error || !strings.Contains(binaryResult.Contents[0].Text, "file appears to be binary") {
 		t.Fatalf("direct binary result=%#v", binaryResult)
 	}
 }

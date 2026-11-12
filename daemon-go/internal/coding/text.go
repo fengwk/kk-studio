@@ -31,6 +31,7 @@ type WindowOptions struct {
 
 type TextWindow struct {
 	Body             string
+	LSPStatus        string
 	StartLine        int
 	StartColumn      int
 	EndLine          int

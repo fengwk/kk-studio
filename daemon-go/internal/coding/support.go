@@ -108,6 +108,8 @@ func classifySearchError(err error) error {
 		return rejectInput("Invalid glob: " + diagnostic)
 	case lower == "root is not a directory":
 		return rejectInput("path is not a directory")
+	case lower == "directly specified file is binary":
+		return failRun("file appears to be binary", "CODEC")
 	default:
 		return failRun("ripgrep failed while searching; results are incomplete", "FAILED")
 	}
