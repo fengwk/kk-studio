@@ -11,6 +11,7 @@ import (
 	"regexp/syntax"
 	"sync"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 var fileBuffers = sync.Pool{New: func() any { buffer := make([]byte, 0, 256*1024); return &buffer }}
@@ -336,7 +337,11 @@ func (c *lineCollector) add(pos int) {
 		return
 	}
 	line := bytes.TrimSuffix(c.data[start:end], []byte{'\r'})
-	text := centeredExcerpt(string(line), len([]rune(string(line[:max(0, pos-start)]))))
+	text := string(line)
+	if len(line) > 440 {
+		matchOffset := min(max(0, pos-start), len(line))
+		text = centeredExcerpt(text, utf8.RuneCount(line[:matchOffset]))
+	}
 	c.out = append(c.out, fmt.Sprintf("%s:%d:%s", c.path, c.number, text))
 	c.lastOutput = start
 }

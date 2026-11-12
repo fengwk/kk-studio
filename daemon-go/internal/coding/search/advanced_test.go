@@ -508,6 +508,24 @@ func TestCenteredExcerpt(t *testing.T) {
 	}
 }
 
+// Long Unicode lines are excerpted by code point without splitting a match.
+func TestGrepLongUnicodeLineCenteredExcerpt(t *testing.T) {
+	root := t.TempDir()
+	line := strings.Repeat("界", 300) + "needle" + strings.Repeat("界", 300)
+	if err := os.WriteFile(filepath.Join(root, "unicode.txt"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Grep(root, "needle", false, false, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "unicode.txt:1:... " + strings.Repeat("界", 220) + "needle" + strings.Repeat("界", 214) + " ... (line truncated to 500 chars)"
+	if !reflect.DeepEqual(got, []string{want}) {
+		t.Fatalf("grep=%q want=%q", got, want)
+	}
+}
+
 // COD-N-011: an invalid nested .git marker is ignored and Git remains the oracle.
 func TestInvalidNestedGitMarkerKeepsOuterRepositoryScope(t *testing.T) {
 	root := t.TempDir()

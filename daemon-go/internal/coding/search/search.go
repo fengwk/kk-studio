@@ -40,14 +40,14 @@ func Find(root, glob string, limit int) ([]string, error) {
 
 // FindContext returns available paths when a deadline expires and a cancellation error when canceled.
 func FindContext(ctx context.Context, root, glob string, limit int) (SearchOutcome, error) {
-	files, ignored, ignoredCount, timedOut, limitReached, err := findWithContext(ctx, root, glob, limit, min(runtime.NumCPU(), 8))
+	discovered, err := findWithContext(ctx, root, glob, limit, min(runtime.NumCPU(), 8))
 	if err != nil {
 		return SearchOutcome{}, err
 	}
-	outcome := SearchOutcome{Results: files, IgnoreSkipped: ignored, IgnoreSkippedCount: ignoredCount, LimitReached: limitReached, Incomplete: timedOut}
-	if timedOut {
+	outcome := SearchOutcome{Results: discovered.files, IgnoreSkipped: discovered.ignored, IgnoreSkippedCount: discovered.ignoredCount, LimitReached: discovered.limitReached, Incomplete: discovered.timedOut}
+	if discovered.timedOut {
 		outcome.StopReason = "TIMED_OUT"
-	} else if limitReached {
+	} else if discovered.limitReached {
 		outcome.StopReason = "LIMIT"
 	}
 	return outcome, nil
@@ -128,7 +128,7 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 	if limit < 0 {
 		return SearchOutcome{}, errors.New("limit cannot be negative")
 	}
-	files, ignored, ignoredCount, timedOut, _, err := findWithContext(ctx, root, glob, 0, min(runtime.NumCPU(), 8))
+	discovered, err := findWithContext(ctx, root, glob, 0, min(runtime.NumCPU(), 8))
 	if err != nil {
 		return SearchOutcome{}, err
 	}
@@ -166,12 +166,12 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 		return SearchOutcome{}, err
 	}
 	directFile := !rootInfo.IsDir()
-	outcome := SearchOutcome{IgnoreSkipped: ignored, IgnoreSkippedCount: ignoredCount, Incomplete: timedOut}
-	if timedOut {
+	outcome := SearchOutcome{IgnoreSkipped: discovered.ignored, IgnoreSkippedCount: discovered.ignoredCount, Incomplete: discovered.timedOut}
+	if discovered.timedOut {
 		outcome.StopReason = "TIMED_OUT"
 	}
 	multilineMatchCount := 0
-	for _, rel := range files {
+	for _, rel := range discovered.files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if errors.Is(ctxErr, context.DeadlineExceeded) {
 				outcome.Incomplete = true
@@ -250,8 +250,8 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 }
 
 func findWith(root, glob string, limit, workers int) ([]string, error) {
-	files, _, _, _, _, err := findWithContext(context.Background(), root, glob, limit, workers)
-	return files, err
+	result, err := findWithContext(context.Background(), root, glob, limit, workers)
+	return result.files, err
 }
 
 func searchFilePath(root, rel string, directFile bool) string {
@@ -270,37 +270,45 @@ func isGitMetadataPath(path string) bool {
 	return false
 }
 
-func findWithContext(ctx context.Context, root, glob string, limit, workers int) ([]string, []string, int, bool, bool, error) {
+type findResult struct {
+	files        []string
+	ignored      []string
+	ignoredCount int
+	timedOut     bool
+	limitReached bool
+}
+
+func findWithContext(ctx context.Context, root, glob string, limit, workers int) (findResult, error) {
 	if limit < 0 {
-		return nil, nil, 0, false, false, errors.New("limit cannot be negative")
+		return findResult{}, errors.New("limit cannot be negative")
 	}
 	if err := ctx.Err(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, nil, 0, true, false, nil
+			return findResult{timedOut: true}, nil
 		}
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	abs, err = filepath.EvalSymlinks(abs)
 	if err != nil {
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	if isGitMetadataPath(abs) {
-		return nil, nil, 0, false, false, nil
+		return findResult{}, nil
 	}
 	if !info.IsDir() {
-		return []string{filepath.ToSlash(abs)}, nil, 0, false, false, nil
+		return findResult{files: []string{filepath.ToSlash(abs)}}, nil
 	}
 	if glob != "" {
 		if _, err = doublestar.Match(glob, "probe"); err != nil {
-			return nil, nil, 0, false, false, fmt.Errorf("invalid glob: %w", err)
+			return findResult{}, fmt.Errorf("invalid glob: %w", err)
 		}
 	}
 	rootScope := nearestGitRoot(abs)
@@ -309,14 +317,14 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	}
 	rootMatcher, err := newIgnoreMatcherAt(rootScope, abs)
 	if err != nil {
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	// An explicitly selected ignored directory is the search boundary, not an ignored descendant.
 	if rootMatcher.Ignored(abs, true) {
 		rootScope = abs
 		rootMatcher, err = newIgnoreMatcherAt(rootScope, abs)
 		if err != nil {
-			return nil, nil, 0, false, false, err
+			return findResult{}, err
 		}
 	}
 	type directoryScope struct {
@@ -416,10 +424,10 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	})
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return nil, nil, 0, false, false, context.Canceled
+		return findResult{}, context.Canceled
 	}
 	if err != nil && !timedOut {
-		return nil, nil, 0, false, false, err
+		return findResult{}, err
 	}
 	scopes.Range(func(_, value any) bool {
 		files = append(files, value.(*directoryScope).files...)
@@ -430,7 +438,7 @@ func findWithContext(ctx context.Context, root, glob string, limit, workers int)
 	if limitReached {
 		files = files[:limit]
 	}
-	return files, ignoredPaths, ignoredCount, timedOut, limitReached, nil
+	return findResult{files: files, ignored: ignoredPaths, ignoredCount: ignoredCount, timedOut: timedOut, limitReached: limitReached}, nil
 }
 
 func globMatch(pattern, rel string) bool {
