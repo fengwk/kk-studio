@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +86,11 @@ func TestEnvironmentConfigInitialQueueKeepsHighestPendingVersion(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first configuration preparation did not start")
 	}
+	sameVersionDone := make(chan ConfigApplyResult, 1)
+	go func() {
+		result, _ := manager.Submit(context.Background(), 1, configurationOf(initial))
+		sameVersionDone <- result
+	}()
 	secondDone := make(chan ConfigApplyResult, 1)
 	go func() {
 		result, _ := manager.Submit(context.Background(), 2, changedConfiguration(initial, "https://v2.example"))
@@ -98,7 +104,7 @@ func TestEnvironmentConfigInitialQueueKeepsHighestPendingVersion(t *testing.T) {
 	}()
 	waitForPendingVersion(t, manager, 3)
 	close(release)
-	for _, done := range []<-chan ConfigApplyResult{firstDone, secondDone, thirdDone} {
+	for _, done := range []<-chan ConfigApplyResult{firstDone, sameVersionDone, secondDone, thirdDone} {
 		select {
 		case result := <-done:
 			if result.Kind != ConfigApplied {
@@ -305,8 +311,12 @@ func newTestEnvironmentConfigRuntime(t *testing.T, initial config.DaemonConfig, 
 }
 
 func initialRuntimeConfig() config.DaemonConfig {
-	bash := "/bin/bash"
-	bashSetting := "bash"
+	lspExecutable, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	bash := lspExecutable
+	bashSetting := lspExecutable
 	return config.DaemonConfig{
 		EnvironmentID:         "env",
 		ConfigVersion:         1,
@@ -317,7 +327,7 @@ func initialRuntimeConfig() config.DaemonConfig {
 		GatewayURL:            "wss://studio.example/ws/daemon",
 		BashExecutable:        &bash,
 		BashExecutableSetting: &bashSetting,
-		LSP:                   []config.LSPServerConfig{{ID: "go", Command: []string{"gopls"}, Extensions: []string{".go"}}},
+		LSP:                   []config.LSPServerConfig{{ID: "go", Command: []string{lspExecutable}, Extensions: []string{".go"}}},
 		DistributionDir:       "/app",
 	}
 }

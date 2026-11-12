@@ -40,38 +40,48 @@ func BuildEnvironmentConfig(base DaemonConfig, version int64, input *protocol.Da
 	if bashSetting != nil && (strings.TrimSpace(*bashSetting) == "" || hasControl(*bashSetting)) {
 		return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "bashExecutable"}
 	}
-	bash := "bash"
-	if bashSetting != nil {
-		bash = *bashSetting
+	bash, err := ResolveBash(bashSetting)
+	if err != nil {
+		return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "bashExecutable"}
 	}
-	if input.Lsp == nil || len(input.Lsp.Servers) == 0 || len(input.Lsp.ProtoReflect().GetUnknown()) != 0 {
-		return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp"}
+	lsp := make([]LSPServerConfig, 0)
+	if input.Lsp != nil {
+		if len(input.Lsp.Servers) == 0 || len(input.Lsp.ProtoReflect().GetUnknown()) != 0 {
+			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp"}
+		}
+		lsp = make([]LSPServerConfig, 0, len(input.Lsp.Servers))
 	}
-	lsp := make([]LSPServerConfig, 0, len(input.Lsp.Servers))
-	seen := make(map[string]struct{}, len(input.Lsp.Servers))
-	for _, server := range input.Lsp.Servers {
-		if server == nil || len(server.ProtoReflect().GetUnknown()) != 0 || !lspServerID.MatchString(server.GetId()) {
-			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
-		}
-		if _, exists := seen[server.GetId()]; exists {
-			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
-		}
-		candidate := LSPServerConfig{ID: server.Id, Command: cloneStrings(server.Command), Extensions: cloneStrings(server.Extensions), RootMarkers: cloneStrings(server.RootMarkers), FirstMatchMarkers: cloneStrings(server.FirstMatchMarkers)}
-		if !validStringList(candidate.Command, true) || !validStringList(candidate.Extensions, true) || !validStringList(candidate.RootMarkers, false) || !validStringList(candidate.FirstMatchMarkers, false) {
-			return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id}
-		}
-		for _, extension := range candidate.Extensions {
-			if len(extension) < 2 || !strings.HasPrefix(extension, ".") || hasControl(extension) || strings.ContainsAny(extension, `/\\`) {
-				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".extensions"}
+	if input.Lsp != nil {
+		seen := make(map[string]struct{}, len(input.Lsp.Servers))
+		for _, server := range input.Lsp.Servers {
+			if server == nil || len(server.ProtoReflect().GetUnknown()) != 0 || !lspServerID.MatchString(server.GetId()) {
+				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
 			}
-		}
-		for _, marker := range append(append([]string(nil), candidate.RootMarkers...), candidate.FirstMatchMarkers...) {
-			if !validRelativePath(marker) {
-				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".markers"}
+			if _, exists := seen[server.GetId()]; exists {
+				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers"}
 			}
+			candidate := LSPServerConfig{ID: server.Id, Command: cloneStrings(server.Command), Extensions: normalizeExtensions(server.Extensions), RootMarkers: normalizeMarkers(server.RootMarkers), FirstMatchMarkers: normalizeMarkers(server.FirstMatchMarkers)}
+			if !validStringList(candidate.Command, true) || !validStringList(candidate.Extensions, true) || !validStringList(candidate.RootMarkers, false) || !validStringList(candidate.FirstMatchMarkers, false) {
+				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id}
+			}
+			for _, extension := range candidate.Extensions {
+				if len(extension) < 2 || !strings.HasPrefix(extension, ".") || hasControl(extension) || strings.ContainsAny(extension, `/\\`) {
+					return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".extensions"}
+				}
+			}
+			for _, marker := range append(append([]string(nil), candidate.RootMarkers...), candidate.FirstMatchMarkers...) {
+				if !validRelativePath(marker) {
+					return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".markers"}
+				}
+			}
+			resolved, err := ResolveExecutable(candidate.Command[0])
+			if err != nil {
+				return DaemonConfig{}, &EnvironmentConfigError{Code: "VALIDATION_FAILED", Field: "lsp.servers." + server.Id + ".command"}
+			}
+			candidate.Command[0] = resolved
+			seen[server.GetId()] = struct{}{}
+			lsp = append(lsp, candidate)
 		}
-		seen[server.GetId()] = struct{}{}
-		lsp = append(lsp, candidate)
 	}
 	base.ConfigVersion = version
 	base.StudioURL = studio

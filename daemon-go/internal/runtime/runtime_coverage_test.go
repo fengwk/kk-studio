@@ -123,8 +123,8 @@ func TestRuntimeHandleControlFrameEdges(t *testing.T) {
 	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_ERROR}); err == nil || err.Error() != "control server rejected the connection" {
 		t.Fatalf("server error frame = %v", err)
 	}
-	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType(999)}); err != nil {
-		t.Fatalf("unsupported frame send error = %v", err)
+	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_READY}); !errors.Is(err, ErrForbiddenInboundFrame) {
+		t.Fatalf("forbidden READY frame error = %v", err)
 	}
 	if err := r.handleSettings(&protocol.Envelope{EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{TemporaryResourceTtlSeconds: int64Ptr(-1)}}}}); err == nil || err.Error() != "settings.resourceBudgets is invalid" {
 		t.Fatalf("invalid resource budget error = %v", err)
