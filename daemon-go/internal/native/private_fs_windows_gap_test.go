@@ -7,7 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
+
+type failingWindowsPrivatePathAPI struct {
+	coverageWindowsPrivatePathAPI
+	securityErr error
+}
+
+func (api failingWindowsPrivatePathAPI) Security(string) (*windows.SID, *windows.ACL, bool, error) {
+	return nil, nil, false, api.securityErr
+}
 
 type secureFailureWindowsPrivateFileAPI struct {
 	nativeWindowsPrivateFileAPI
@@ -102,5 +113,40 @@ func TestWindowsPrivatePath_NativeSecurityQueryErrors(t *testing.T) {
 	}
 	if err := verifyWindowsOwner(missing); err == nil {
 		t.Fatal("owner verification for a missing path succeeded")
+	}
+	api := failingWindowsPrivatePathAPI{
+		coverageWindowsPrivatePathAPI: coverageWindowsPrivatePathAPI{attrs: windows.FILE_ATTRIBUTE_NORMAL},
+		securityErr:                   errors.New("injected native security query failure"),
+	}
+	if err := verifyWindowsOwnerOnlyWithAPI("private", api); !errors.Is(err, api.securityErr) {
+		t.Fatalf("injected security query error = %v", err)
+	}
+}
+
+// TestWindowsPrivatePath_OwnerVerificationFailures checks owner query errors and foreign ownership fail closed.
+func TestWindowsPrivatePath_OwnerVerificationFailures(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryErr := errors.New("injected owner query failure")
+	cases := []struct {
+		name string
+		api  coverageWindowsPrivatePathAPI
+	}{
+		{name: "current user query", api: coverageWindowsPrivatePathAPI{userErr: queryErr}},
+		{name: "security query", api: coverageWindowsPrivatePathAPI{securityErr: queryErr}},
+		{name: "foreign owner", api: coverageWindowsPrivatePathAPI{user: user.User.Sid, owner: foreign}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if err := verifyWindowsOwnerWithAPI("private", test.api); err == nil {
+				t.Fatal("invalid ownership evidence was accepted")
+			}
+		})
 	}
 }

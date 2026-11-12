@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,19 @@ func newWindowsCoverageProcess(t *testing.T) *windowsProcess {
 		done:        make(chan struct{}),
 		waitFailure: make(chan struct{}),
 		helperCode:  errorExitUnknown,
+	}
+}
+
+// TestWindowsSupervisor_StartReportsChildLaunchFailure verifies helper startup rejects a nonexistent executable.
+func TestWindowsSupervisor_StartReportsChildLaunchFailure(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	missing := filepath.Join(t.TempDir(), "missing-child.exe")
+	if _, err := supervisor.Start(context.Background(), ProcessSpec{Executable: missing}); err == nil {
+		t.Fatal("Start accepted a missing child executable")
 	}
 }
 
@@ -197,5 +211,17 @@ func TestWindowsSupervisor_MergeEnvironmentDropsInvalidEntries(t *testing.T) {
 	got := mergeWindowsEnvironment([]string{"A=1", "malformed", "=empty", "NODE_CHANNEL_FD=4", "NUL=x\x00y"}, nil)
 	if len(got) != 1 || got[0] != "A=1" {
 		t.Fatalf("merged environment = %v", got)
+	}
+}
+
+// TestWindowsSupervisor_EnvironmentBlockNormalizesKeysAndRejectsInvalidNames verifies Win32 block entry filtering.
+func TestWindowsSupervisor_EnvironmentBlockNormalizesKeysAndRejectsInvalidNames(t *testing.T) {
+	got := windowsEnvironmentBlock([]string{"A=first", "a=last", "bad", "=empty", "NODE_CHANNEL_FD=7", "BAD=embedded\x00nul", "BAD=equals=allowed"})
+	want := windowsEnvironmentBlock([]string{"a=last", "BAD=equals=allowed"})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environment block = %v, want %v", got, want)
+	}
+	if len(got) < 2 || got[len(got)-1] != 0 || got[len(got)-2] != 0 {
+		t.Fatalf("environment block is not double-NUL terminated: %v", got)
 	}
 }
