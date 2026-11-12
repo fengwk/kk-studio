@@ -349,6 +349,9 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 	if err != nil {
 		return nil, err
 	}
+	if err := native.EnsurePrivateDirectory(s.paths.IDEDir); err != nil {
+		return nil, NewError("managed workspace directory is unavailable", "UNAVAILABLE")
+	}
 	if err := native.EnsurePrivateDirectory(s.paths.ViewsDir); err != nil {
 		return nil, NewError("managed workspace directory is unavailable", "UNAVAILABLE")
 	}

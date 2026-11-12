@@ -256,7 +256,7 @@ func TestDiagnosticTailUsesCharacterLimit(t *testing.T) {
 }
 
 func fakeIDEConfig(root string) config.DaemonConfig {
-	return config.DaemonConfig{DataDir: filepath.Join(root, "data"), DistributionDir: root}
+	return config.DaemonConfig{DataDir: root, DistributionDir: root}
 }
 
 func installFakeDistribution(t *testing.T, root string) {
