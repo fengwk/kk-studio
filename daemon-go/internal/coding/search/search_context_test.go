@@ -83,24 +83,16 @@ func TestFindCollectsUnreadablePathsAsSkipped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "readable.txt"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	walker := func(_ *fastwalk.Config, walkRoot string, callback fs.WalkDirFunc) error {
-		rootInfo, err := os.Stat(walkRoot)
-		if err != nil {
-			return err
-		}
-		if err := callback(filepath.ToSlash(walkRoot), fs.FileInfoToDirEntry(rootInfo), nil); err != nil {
-			return err
-		}
-		blockedPath := filepath.ToSlash(filepath.Join(walkRoot, "blocked"))
-		if err := callback(blockedPath, nil, os.ErrPermission); err != nil {
-			return err
-		}
-		readablePath := filepath.ToSlash(filepath.Join(walkRoot, "readable.txt"))
-		readableInfo, err := os.Stat(filepath.FromSlash(readablePath))
-		if err != nil {
-			return err
-		}
-		return callback(readablePath, fs.FileInfoToDirEntry(readableInfo), nil)
+	walker := func(config *fastwalk.Config, walkRoot string, callback fs.WalkDirFunc) error {
+		return fastwalk.Walk(config, walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+			if filepath.Base(filepath.FromSlash(path)) == "blocked" {
+				if err := callback(path, nil, os.ErrPermission); err != nil {
+					return err
+				}
+				return filepath.SkipDir
+			}
+			return callback(path, entry, walkErr)
+		})
 	}
 	result, err := findWithWalker(context.Background(), root, "", 0, 1, walker)
 	if err != nil {

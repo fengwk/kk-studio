@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// COD-N-018
+// COD-N-021
 func TestWriteReviewAndExpectedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "review.txt")
 	if err := os.WriteFile(path, []byte("first\nold\nlast\n"), 0o600); err != nil {
@@ -44,7 +44,7 @@ func TestWriteCreatesMissingParentDirectories(t *testing.T) {
 	}
 }
 
-// COD-N-018
+// COD-N-021
 func TestWriteReviewForNewFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	review, err := PreviewWrite(path, "new contents\n")
