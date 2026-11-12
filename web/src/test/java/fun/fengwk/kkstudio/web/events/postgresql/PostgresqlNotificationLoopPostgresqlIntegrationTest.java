@@ -60,8 +60,8 @@ class PostgresqlNotificationLoopPostgresqlIntegrationTest {
                         notificationReceived.countDown();
                       },
                       resynced::countDown)),
-              Duration.ofSeconds(5),
-              Duration.ofMillis(10));
+              () -> Duration.ofSeconds(5),
+              () -> Duration.ofMillis(10));
       try {
         loop.start();
         assertTrue(resynced.await(5, TimeUnit.SECONDS), "listener must resync before polling");
@@ -113,8 +113,8 @@ class PostgresqlNotificationLoopPostgresqlIntegrationTest {
                           secondResync.countDown();
                         }
                       })),
-              Duration.ofSeconds(5),
-              Duration.ofMillis(10));
+              () -> Duration.ofSeconds(5),
+              () -> Duration.ofMillis(10));
       try {
         loop.start();
         assertTrue(firstResync.await(5, TimeUnit.SECONDS), "initial listener resync must finish");
@@ -165,8 +165,8 @@ class PostgresqlNotificationLoopPostgresqlIntegrationTest {
                           unexpectedResync.countDown();
                         }
                       })),
-              Duration.ofSeconds(5),
-              Duration.ofMillis(10));
+              () -> Duration.ofSeconds(5),
+              () -> Duration.ofMillis(10));
       try {
         loop.start();
         assertTrue(firstResync.await(5, TimeUnit.SECONDS), "initial listener resync must finish");

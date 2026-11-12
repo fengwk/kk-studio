@@ -66,6 +66,7 @@ describe('LSP generation hot swap', () => {
     const controller = new AbortController()
     const context: CapabilityContext = {
       config: initial,
+      maxOutputBytes: 16 * 1024 * 1024,
       signal: controller.signal,
       processes: supervisor,
       resources: uploader,

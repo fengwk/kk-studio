@@ -274,12 +274,6 @@ public final class ControlProtocolValidator {
       throw new ControlProtocolException("settings.resourceBudgets is required");
     }
     ResourceBudgets budgets = settings.getResourceBudgets();
-    requireInt64(
-        budgets.hasMaxResourceBytes(),
-        budgets.getMaxResourceBytes(),
-        "settings.resourceBudgets.maxResourceBytes",
-        1,
-        DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
     requirePositive(
         budgets.hasTemporaryResourceTtlSeconds(),
         budgets.getTemporaryResourceTtlSeconds(),
@@ -544,6 +538,19 @@ public final class ControlProtocolValidator {
         "invoke.timeoutMillis",
         0,
         DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
+    requireInt64(
+        invoke.hasMaxOutputBytes(),
+        invoke.getMaxOutputBytes(),
+        "invoke.maxOutputBytes",
+        1,
+        DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT);
+    if (!invoke.hasImageInputTier()) {
+      throw new ControlProtocolException("invoke.imageInputTier is required");
+    }
+    if (invoke.getImageInputTier() == ImageInputTier.IMAGE_INPUT_TIER_UNSPECIFIED
+        || invoke.getImageInputTier() == ImageInputTier.UNRECOGNIZED) {
+      throw new ControlProtocolException("invoke.imageInputTier must be a supported image tier");
+    }
     if (invoke.hasExpectedFile()) {
       validateExpectedFile(capabilityId, invoke.getExpectedFile());
     }

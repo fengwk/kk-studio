@@ -304,6 +304,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
           capabilityVersion: rawPayload.capabilityVersion ?? '3',
           argumentsJson: JSON.stringify(rawPayload.arguments ?? {}),
           timeoutMillis: BigInt(rawPayload.timeoutMillis ?? 0),
+          maxOutputBytes: BigInt(rawPayload.maxOutputBytes ?? 16 * 1024 * 1024),
         }),
       },
     })
@@ -332,7 +333,6 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         case: 'settings',
         value: create(SettingsSchema, {
           resourceBudgets: create(ResourceBudgetsSchema, {
-            maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
             temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),
             temporaryResourceCleanupIntervalSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceCleanupIntervalSeconds ?? 30),
           }),
@@ -581,7 +581,6 @@ async function handshake(setup: Setup): Promise<void> {
       environmentId: ENV,
       payload: {
         resourceBudgets: {
-          maxResourceBytes: 1024 * 1024,
           temporaryResourceTtlSeconds: 60,
           temporaryResourceCleanupIntervalSeconds: 30,
         },
@@ -646,6 +645,38 @@ describe('runtime handshake', () => {
 })
 
 describe('runtime invocation lifecycle', () => {
+  it('uses the output budget carried by each INVOKE', async () => {
+    const budgets: number[] = []
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          budgets.push(context.maxOutputBytes)
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('INVOKE', {
+        environmentId: ENV,
+        invocationId: 'inv-small-budget',
+        payload: { ...invokePayload(), maxOutputBytes: 7 },
+      }),
+    )
+    await waitFor(() => budgets.length === 1)
+    setup.transport.receive(
+      serverMessage('INVOKE', {
+        environmentId: ENV,
+        invocationId: 'inv-large-budget',
+        payload: { ...invokePayload(), maxOutputBytes: 19 },
+      }),
+    )
+    await waitFor(() => budgets.length === 2)
+
+    expect(budgets).toEqual([7, 19])
+    setup.runtime.close()
+  })
+
   it('executes INVOKE and emits STARTED then COMPLETED', async () => {
     const calls: string[] = []
     const setup = buildRuntime({
@@ -859,7 +890,6 @@ describe('runtime invocation lifecycle', () => {
           environmentId: ENV,
           payload: {
             resourceBudgets: {
-              maxResourceBytes: 1024 * 1024,
               temporaryResourceTtlSeconds: 60,
               temporaryResourceCleanupIntervalSeconds: 30,
             },
@@ -1406,7 +1436,7 @@ describe('runtime resource upload', () => {
       },
     })
     await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: { ...invokePayload(), maxOutputBytes: 1024 * 1024 } }))
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
     expect(uploads).toBe(0)
     setup.runtime.close()

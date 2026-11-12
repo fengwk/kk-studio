@@ -73,7 +73,6 @@ async function handshake(setup: Setup): Promise<void> {
         case: 'settings',
         value: create(SettingsSchema, {
           resourceBudgets: create(ResourceBudgetsSchema, {
-            maxResourceBytes: 1048576n,
             temporaryResourceTtlSeconds: 60n,
             temporaryResourceCleanupIntervalSeconds: 30n,
           }),
@@ -135,6 +134,7 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
                 capabilityId,
                 argumentsJson: JSON.stringify(args),
                 timeoutMillis: 10_000n,
+                maxOutputBytes: 16n * 1024n * 1024n,
               }),
             },
           }),
@@ -207,6 +207,7 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
                 capabilityId,
                 argumentsJson: JSON.stringify(args),
                 timeoutMillis: 10_000n,
+                maxOutputBytes: 16n * 1024n * 1024n,
               }),
             },
           }),

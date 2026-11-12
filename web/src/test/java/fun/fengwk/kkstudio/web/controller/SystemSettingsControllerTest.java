@@ -49,10 +49,10 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         // 压缩模型默认未配置（可空引用在 wire 上省略）；回复预留默认 16,384。
         .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
         .andExpect(jsonPath("$.aiRuntime.compactionKeepRecentTokens").value(20000))
-        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384))
+        .andExpect(jsonPath("$.tool.maxOutputMib").value(16))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
-        .andExpect(jsonPath("$.environment.maxResourceBytes").value("16777216"))
-        .andExpect(jsonPath("$.environment.maxResourceBytes").isString())
+        .andExpect(jsonPath("$.environment.heartbeatTimeoutMillis").value("60000"))
+        .andExpect(jsonPath("$.environment.maxResourceBytes").doesNotExist())
         .andExpect(jsonPath("$.backendNetwork.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value("localhost,127.*,::1"))
         .andExpect(jsonPath("$.advanced.applicationEventQueueCapacity").value(512))
@@ -112,12 +112,6 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
                 .value("aiRuntime.compactionKeepRecentTokens"))
         .andExpect(jsonPath("$.sections[0].groups[2].fields[1].type").value("INTEGER"))
         .andExpect(jsonPath("$.sections[0].groups[2].fields[1].min").value(1))
-        .andExpect(
-            jsonPath("$.sections[0].groups[2].fields[2].path")
-                .value("aiRuntime.compactionReserveTokens"))
-        .andExpect(jsonPath("$.sections[0].groups[2].fields[2].type").value("INTEGER"))
-        .andExpect(jsonPath("$.sections[0].groups[2].fields[2].min").value(1))
-        .andExpect(jsonPath("$.sections[0].groups[2].fields.length()").value(3))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(jsonPath("$.sections[0].groups[0].fields[1].options[0].value").value("FIXED"))
@@ -127,45 +121,14 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[0].value").value("allow"))
         .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[1].value").value("ask"))
         .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[2].value").value("deny"))
-        // group 最小结构：key/labelKey/restartRequired/applyTiming。
         .andExpect(jsonPath("$.sections[1].groups[0].key").value("tool.permission"))
-        .andExpect(jsonPath("$.sections[1].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        // 四组顺序固定；全部对下一 invocation 生效。
-        .andExpect(jsonPath("$.sections[0].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[0].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[0].groups[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[0].groups[3].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[0].groups[3].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[0].groups.length()").value(4))
-        // restartRequired section 标记：aiRuntime live，tool 不需要重启。
-        .andExpect(jsonPath("$.sections[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[1].groups[1].key").value("tool.gateway"))
-        .andExpect(jsonPath("$.sections[1].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[1].groups[1].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[2].key").value("environment"))
-        .andExpect(jsonPath("$.sections[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[2].groups[0].key").value("environment.runtime"))
-        .andExpect(jsonPath("$.sections[2].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.sections[2].groups.length()").value(1))
-        // backendNetwork 唯一全局分组，保存后新请求生效，不暴露模块覆盖。
-        .andExpect(jsonPath("$.sections[3].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[3].groups.length()").value(1))
-        .andExpect(jsonPath("$.sections[3].groups[0].key").value("backendNetwork.proxy"))
-        .andExpect(jsonPath("$.sections[3].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[3].groups[0].applyTiming").value("NEXT_HTTP_REQUEST"))
-        .andExpect(jsonPath("$.sections[3].groups[0].fields.length()").value(2))
-        .andExpect(jsonPath("$.sections[3].groups[0].fields[0].max").value(2048))
-        .andExpect(jsonPath("$.sections[3].groups[0].fields[1].max").value(4096))
-        .andExpect(jsonPath("$.sections[4].key").value("storageMedia"))
-        .andExpect(jsonPath("$.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
-        .andExpect(jsonPath("$.sections[4].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
+        .andExpect(jsonPath("$.sections[1].groups[1].fields[0].path").value("tool.maxOutputMib"))
+        .andExpect(jsonPath("$.sections[1].groups[1].fields[0].min").value(1))
+        .andExpect(jsonPath("$.sections[1].groups[1].fields[0].max").value(100))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields.length()").value(2))
+        .andExpect(jsonPath("$.sections[2].groups[0].fields[0].min").value(30000))
+        .andExpect(jsonPath("$.sections[0].restartRequired").doesNotExist())
+        .andExpect(jsonPath("$.sections[1].groups[0].applyTiming").doesNotExist());
   }
 
   @Test
@@ -344,6 +307,41 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value("localhost,127.*,::1"));
   }
 
+  @Test
+  public void processorHeartbeatCrossFieldViolationReturnsFieldError() throws Exception {
+    String body =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "0");
+              update.withObject("advanced").put("processorHeartbeatIntervalMillis", "15001");
+            });
+    mockMvc
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.errors['advanced.processorHeartbeatIntervalMillis']")
+                .value(
+                    "advanced.processorHeartbeatIntervalMillis must not exceed half of processorLeaseDurationMillis"));
+  }
+
+  @Test
+  public void heartbeatTimeoutBelowDaemonHeartbeatWindowReturnsFieldError() throws Exception {
+    String body =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "0");
+              update.withObject("environment").put("heartbeatTimeoutMillis", "29999");
+            });
+    mockMvc
+        .perform(
+            put("/api/platform/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.errors['environment.heartbeatTimeoutMillis']")
+                .value("environment.heartbeatTimeoutMillis must be at least 30000"));
+  }
+
   /** 完整 wire 请求严格拒绝缺 backendNetwork、缺 bypass、错误类型和额外运行期开关。 */
   @Test
   public void rejectsMissingAndMalformedNetworkWireFields() throws Exception {
@@ -378,7 +376,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
 
   /** 压缩模型引用与预算的完整 wire 往返：设置模型（含组）、清空回 null、非法引用 400。 */
   @Test
-  public void compactionModelAndReserveTokensRoundTrip() throws Exception {
+  public void compactionModelRoundTrips() throws Exception {
     String withModel =
         bodyFromGet(
             update -> {
@@ -387,7 +385,6 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
                   .withObject("aiRuntime")
                   .withObject("compactionModel")
                   .put("modelName", "fallback-group");
-              update.withObject("aiRuntime").put("compactionReserveTokens", 8192);
             });
     mockMvc
         .perform(
@@ -398,7 +395,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.version").value("1"))
         .andExpect(jsonPath("$.aiRuntime.compactionModel.modelName").value("fallback-group"))
         .andExpect(jsonPath("$.aiRuntime.compactionModel.variant").doesNotExist())
-        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(8192));
+        .andExpect(jsonPath("$.aiRuntime.compactionKeepRecentTokens").value(20000));
     mockMvc
         .perform(get("/api/platform/settings"))
         .andExpect(status().isOk())
@@ -409,7 +406,6 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
             update -> {
               update.put("expectedVersion", "1");
               update.withObject("aiRuntime").putNull("compactionModel");
-              update.withObject("aiRuntime").put("compactionReserveTokens", 16384);
             });
     mockMvc
         .perform(
@@ -417,7 +413,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"))
         .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
-        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384));
+        .andExpect(jsonPath("$.aiRuntime.compactionKeepRecentTokens").value(20000));
 
     Consumer<ObjectNode> stringModel =
         update -> update.withObject("aiRuntime").put("compactionModel", "not-an-object");
@@ -426,10 +422,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
     Consumer<ObjectNode> blankModelName =
         update ->
             update.withObject("aiRuntime").withObject("compactionModel").put("modelName", " ");
-    Consumer<ObjectNode> zeroReserve =
-        update -> update.withObject("aiRuntime").put("compactionReserveTokens", 0);
-    for (Consumer<ObjectNode> invalid :
-        List.of(stringModel, variantWithoutModel, blankModelName, zeroReserve)) {
+    for (Consumer<ObjectNode> invalid : List.of(stringModel, variantWithoutModel, blankModelName)) {
       String body =
           bodyFromGet(
               update -> {
@@ -446,7 +439,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"))
         .andExpect(jsonPath("$.aiRuntime.compactionModel").doesNotExist())
-        .andExpect(jsonPath("$.aiRuntime.compactionReserveTokens").value(16384));
+        .andExpect(jsonPath("$.aiRuntime.compactionKeepRecentTokens").value(20000));
   }
 
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {

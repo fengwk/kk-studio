@@ -96,12 +96,12 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
     MvcResult result =
         mockMvc.perform(get("/api/platform/settings")).andExpect(status().isOk()).andReturn();
 
-    JsonNode resourceMaxBytes =
+    JsonNode eventMaxBytes =
         objectMapper
             .readTree(result.getResponse().getContentAsString())
             .path("advanced")
-            .path("resourceMaxBytes");
-    assertTrue(resourceMaxBytes.isString(), "Long must be serialized as a decimal string");
-    assertTrue(resourceMaxBytes.asText().matches("\\d+"), "Long must contain only digits");
+            .path("applicationEventMaxBytes");
+    assertTrue(eventMaxBytes.isString(), "Long must be serialized as a decimal string");
+    assertTrue(eventMaxBytes.asText().matches("\\d+"), "Long must contain only digits");
   }
 }

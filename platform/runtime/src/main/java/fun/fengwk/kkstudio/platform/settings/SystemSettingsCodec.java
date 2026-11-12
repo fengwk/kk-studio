@@ -207,6 +207,7 @@ public class SystemSettingsCodec {
     }
     return new SystemSettings.Tool(
         toPermission(dto.getPermission()),
+        requiredInt(dto.getMaxOutputMib(), "tool.maxOutputMib"),
         requiredMillis(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
         requiredMillis(
             dto.getToolGatewayOverloadRetryMillis(), "tool.toolGatewayOverloadRetryMillis"));
@@ -225,7 +226,6 @@ public class SystemSettingsCodec {
         requiredMillis(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
         toModelSelection(dto.getCompactionModel(), "aiRuntime.compactionModel"),
         requiredInt(dto.getCompactionKeepRecentTokens(), "aiRuntime.compactionKeepRecentTokens"),
-        requiredInt(dto.getCompactionReserveTokens(), "aiRuntime.compactionReserveTokens"),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
@@ -265,7 +265,6 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("environment is required");
     }
     return new SystemSettings.Environment(
-        requiredMillis(dto.getMaxResourceBytes(), "environment.maxResourceBytes"),
         requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
   }
 
@@ -313,7 +312,6 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("advanced is required");
     }
     return new SystemSettings.Advanced(
-        requiredMillis(dto.getResourceMaxBytes(), "advanced.resourceMaxBytes"),
         requiredMillis(
             dto.getProcessorLeaseDurationMillis(), "advanced.processorLeaseDurationMillis"),
         requiredMillis(
@@ -392,6 +390,7 @@ public class SystemSettingsCodec {
               permission.put(toolName, ruleDtos);
             });
     dto.setPermission(permission);
+    dto.setMaxOutputMib(tool.maxOutputMib());
     dto.setModelGatewayBusyRetryMillis(tool.modelGatewayBusyRetryMillis());
     dto.setToolGatewayOverloadRetryMillis(tool.toolGatewayOverloadRetryMillis());
     return dto;
@@ -405,7 +404,6 @@ public class SystemSettingsCodec {
     dto.setRetryMaxDelayMillis(aiRuntime.retryMaxDelayMillis());
     dto.setCompactionModel(fromModelSelection(aiRuntime.compactionModel()));
     dto.setCompactionKeepRecentTokens(aiRuntime.compactionKeepRecentTokens());
-    dto.setCompactionReserveTokens(aiRuntime.compactionReserveTokens());
     dto.setSubagentMaxDepth(aiRuntime.subagentMaxDepth());
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
@@ -417,7 +415,6 @@ public class SystemSettingsCodec {
   private static SystemSettingsEnvironmentDTO fromEnvironment(
       SystemSettings.Environment environment) {
     SystemSettingsEnvironmentDTO dto = new SystemSettingsEnvironmentDTO();
-    dto.setMaxResourceBytes(environment.maxResourceBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
     return dto;
   }
@@ -440,7 +437,6 @@ public class SystemSettingsCodec {
 
   private static SystemSettingsAdvancedDTO fromAdvanced(SystemSettings.Advanced advanced) {
     SystemSettingsAdvancedDTO dto = new SystemSettingsAdvancedDTO();
-    dto.setResourceMaxBytes(advanced.resourceMaxBytes());
     dto.setProcessorLeaseDurationMillis(advanced.processorLeaseDurationMillis());
     dto.setProcessorHeartbeatIntervalMillis(advanced.processorHeartbeatIntervalMillis());
     dto.setThreadResolveFailureDelayMillis(advanced.threadResolveFailureDelayMillis());

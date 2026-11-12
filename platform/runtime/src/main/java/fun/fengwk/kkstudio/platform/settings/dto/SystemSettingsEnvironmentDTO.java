@@ -6,7 +6,5 @@ import lombok.Data;
 @Data
 public class SystemSettingsEnvironmentDTO {
 
-  private Long maxResourceBytes;
-
   private Long heartbeatTimeoutMillis;
 }

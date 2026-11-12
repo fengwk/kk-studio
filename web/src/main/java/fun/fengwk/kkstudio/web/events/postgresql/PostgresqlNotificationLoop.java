@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Web 进程共享的 PostgreSQL notification loop。
@@ -30,8 +31,8 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   private final DataSource dataSource;
   private final Map<String, PostgresqlNotificationHandler> handlers;
-  private final int notificationPollMillis;
-  private final long reconnectBackoffMillis;
+  private final Supplier<Duration> notificationPollIntervalProvider;
+  private final Supplier<Duration> reconnectBackoffProvider;
   private final Object lifecycleLock = new Object();
 
   private volatile boolean running;
@@ -42,13 +43,15 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
   public PostgresqlNotificationLoop(
       DataSource dataSource,
       Collection<PostgresqlNotificationHandler> handlers,
-      Duration notificationPollInterval,
-      Duration reconnectBackoff) {
+      Supplier<Duration> notificationPollIntervalProvider,
+      Supplier<Duration> reconnectBackoffProvider) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
     this.handlers = indexHandlers(handlers);
-    this.notificationPollMillis =
-        requirePositiveWholeMillisInt(notificationPollInterval, "notificationPollInterval");
-    this.reconnectBackoffMillis = requirePositiveWholeMillis(reconnectBackoff, "reconnectBackoff");
+    this.notificationPollIntervalProvider =
+        Objects.requireNonNull(
+            notificationPollIntervalProvider, "notificationPollIntervalProvider");
+    this.reconnectBackoffProvider =
+        Objects.requireNonNull(reconnectBackoffProvider, "reconnectBackoffProvider");
   }
 
   @Override
@@ -179,7 +182,10 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       }
       handlers.values().forEach(this::resync);
       while (currentGenerationRunning()) {
-        PGNotification[] notifications = pgConnection.getNotifications(notificationPollMillis);
+        PGNotification[] notifications =
+            pgConnection.getNotifications(
+                requirePositiveWholeMillisInt(
+                    notificationPollIntervalProvider.get(), "notificationPollInterval"));
         if (!currentGenerationRunning()) {
           return;
         }
@@ -255,7 +261,7 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   private void sleepBeforeReconnect() {
     try {
-      Thread.sleep(reconnectBackoffMillis);
+      Thread.sleep(requirePositiveWholeMillis(reconnectBackoffProvider.get(), "reconnectBackoff"));
     } catch (InterruptedException ignored) {
       Thread.currentThread().interrupt();
     }
