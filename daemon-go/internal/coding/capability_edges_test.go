@@ -44,7 +44,7 @@ func TestReadDirectoryAndBinaryFile(t *testing.T) {
 		}
 	}
 	directory := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": root}, nil)
-	wantDirectory := "path: " + filepath.ToSlash(root) + "\nkind: directory\n\na.txt\nz.txt"
+	wantDirectory := "path: " + filepath.ToSlash(resolvedTestPath(t, root)) + "\nkind: directory\n\na.txt\nz.txt"
 	if directory.Error || directory.Contents[0].Text != wantDirectory {
 		t.Fatalf("directory=%#v want=%q", directory, wantDirectory)
 	}

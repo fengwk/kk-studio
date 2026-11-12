@@ -91,7 +91,7 @@ func TestWriteCapabilityResolvesMissingTargetThroughSymlinkedParent(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(realParent, "nested", "new.txt")
+	want := filepath.Join(resolvedTestPath(t, realParent), "nested", "new.txt")
 	if preview.Path != want {
 		t.Fatalf("preview path=%q want resolved path=%q", preview.Path, want)
 	}
@@ -117,4 +117,13 @@ func TestWriteReviewForNewFile(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("preview created file: %v", err)
 	}
+}
+
+func resolvedTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }

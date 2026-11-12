@@ -27,7 +27,7 @@ func TestReadTextHeaderFormatsRangeAndNewlineMetadata(t *testing.T) {
 	if err != nil || result.Error {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
-	want := "path: " + filepath.ToSlash(path) + "\nends_with_newline: yes\nrange: 1:1-3:5\n\n1|alpha\n2|beta\n3|gamma"
+	want := "path: " + filepath.ToSlash(resolvedTestPath(t, path)) + "\nends_with_newline: yes\nrange: 1:1-3:5\n\n1|alpha\n2|beta\n3|gamma"
 	if result.Contents[0].Text != want {
 		t.Fatalf("text=%q want=%q", result.Contents[0].Text, want)
 	}
