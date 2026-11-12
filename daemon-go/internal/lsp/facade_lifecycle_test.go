@@ -50,6 +50,48 @@ func TestFacade_GenerationSwap(t *testing.T) {
 	}
 }
 
+// LSP-F-026 verifies publish swaps subsequent generation acquisitions while an old lease stays alive.
+func TestFacade_PublishRoutesGenerations(t *testing.T) {
+	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
+	first, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing-go"}, Extensions: []string{".go"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	old := facade.current
+	oldLease, releaseOld := old.acquire()
+	if oldLease != old.service || oldLease == nil {
+		t.Fatal("old generation did not provide its service")
+	}
+	second, err := facade.Prepare([]config.LSPServerConfig{{ID: "java", Command: []string{"missing-java"}, Extensions: []string{".java"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	if facade.current == old || facade.current.service == old.service {
+		t.Fatal("publish did not install a new service generation")
+	}
+	if _, ok := facade.current.service.Discovery.Server("file.java"); !ok {
+		t.Fatal("new service generation did not publish the java server")
+	}
+	if old.service.Pool.closing {
+		t.Fatal("old generation closed while its lease was active")
+	}
+	releaseOld()
+	select {
+	case <-old.done:
+	case <-time.After(time.Second):
+		t.Fatal("old generation was not retired after releasing its lease")
+	}
+	if err := facade.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // LSP-T-038 validates prepared-generation retirement and rejects duplicate configurations.
 func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
 	var nilGeneration *PreparedGeneration

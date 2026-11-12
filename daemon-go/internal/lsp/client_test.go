@@ -17,6 +17,11 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
+type fakeRequest struct {
+	Method string
+	Params json.RawMessage
+}
+
 type fakeSupervisor struct {
 	mu               sync.Mutex
 	process          *fakeProcess
@@ -29,6 +34,7 @@ type fakeSupervisor struct {
 	allowProcessExit chan struct{}
 	shutdownParams   chan json.RawMessage
 	initializeParams chan json.RawMessage
+	events           chan fakeRequest
 	startEntered     chan struct{}
 	startGate        chan struct{}
 	startErr         error
@@ -61,6 +67,7 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	process.allowProcessExit = s.allowProcessExit
 	process.shutdownParams = s.shutdownParams
 	process.initializeParams = s.initializeParams
+	process.events = s.events
 	process.terminateErr = s.terminateErr
 	process.terminateGate = s.terminateGate
 	process.waitErr = s.waitErr
@@ -88,6 +95,7 @@ type fakeProcess struct {
 	allowProcessExit chan struct{}
 	shutdownParams   chan json.RawMessage
 	initializeParams chan json.RawMessage
+	events           chan fakeRequest
 	requests         chan string
 	cancelled        chan struct{}
 	stdinR           *io.PipeReader
@@ -161,6 +169,12 @@ func (p *fakeProcess) serve() {
 		select {
 		case p.requests <- req.Method:
 		default:
+		}
+		if p.events != nil {
+			select {
+			case p.events <- fakeRequest{Method: req.Method, Params: append(json.RawMessage(nil), req.Params...)}:
+			default:
+			}
 		}
 		if req.Method == "$/cancelRequest" {
 			p.cancelled <- struct{}{}

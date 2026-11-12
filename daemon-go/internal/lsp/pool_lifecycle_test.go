@@ -163,12 +163,12 @@ func TestPool_CloseReportsCleanupFailure(t *testing.T) {
 	}
 }
 
-// LSP-T-053 preserves other waiters when one caller cancels during a shared boot.
+// LSP-T-053 preserves other waiters when one caller times out during a shared boot.
 func TestPool_IndependentWaiters(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	supervisor.startEntered = make(chan struct{}, 1)
 	supervisor.startGate = make(chan struct{})
-	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstCtx, cancelFirst := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancelFirst()
 	var confirmed atomic.Int32
 	firstResult := make(chan error, 1)
@@ -193,14 +193,14 @@ func TestPool_IndependentWaiters(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	cancelFirst()
 	select {
 	case err := <-firstResult:
-		if err == nil || err.Error() != "Operation cancelled" {
-			t.Fatalf("cancelled waiter error = %v", err)
+		var timeout *LspTimeoutError
+		if !errors.As(err, &timeout) || err.Error() != "Operation timed out" {
+			t.Fatalf("timed out waiter error = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("cancelled waiter waited for startup")
+		t.Fatal("timed out waiter waited for startup")
 	}
 	if confirmed.Load() != 0 {
 		t.Fatal("cancelled waiter was confirmed before startup converged")
