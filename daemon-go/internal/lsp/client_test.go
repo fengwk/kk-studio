@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,6 +43,8 @@ type fakeSupervisor struct {
 	terminateErr     error
 	terminateGate    <-chan struct{}
 	waitErr          error
+	oversizedMethod  string
+	oversizedStarts  int
 }
 
 func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
@@ -60,6 +63,9 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 		return nil, startErr
 	}
 	process := newFakeProcess(s.blockMethod)
+	if s.starts <= s.oversizedStarts {
+		process.oversizedMethod = s.oversizedMethod
+	}
 	process.errorMethod = s.errorMethod
 	process.emptyMethod = s.emptyMethod
 	process.exitBlocks = s.exitBlocks
@@ -88,6 +94,7 @@ func (*fakeSupervisor) Close(context.Context) error { return nil }
 
 type fakeProcess struct {
 	blockMethod      string
+	oversizedMethod  string
 	errorMethod      string
 	emptyMethod      string
 	exitBlocks       bool
@@ -205,6 +212,10 @@ func (p *fakeProcess) serve() {
 				return
 			}
 		}
+		if req.Method == p.oversizedMethod {
+			_, _ = fmt.Fprintf(p.stdoutW, "Content-Length: %d\r\n\r\n", maxMessageBytes+1)
+			continue
+		}
 		if req.Method == p.blockMethod || len(req.ID) == 0 {
 			continue
 		}
@@ -262,7 +273,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pos["character"] != 5 {
+	if pos.Character != 5 {
 		t.Fatalf("UTF-8 position = %v", pos)
 	}
 	locations, err := client.Definition(context.Background(), file, 1, 1)

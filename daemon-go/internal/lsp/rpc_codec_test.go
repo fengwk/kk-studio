@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,22 @@ func TestLSPCodec_ReadFramedMessages(t *testing.T) {
 }
 
 // LSP-T-080 through LSP-T-082 validate malformed headers, bodies, and write failures.
+func TestLSPCodec_RejectsOversizedMessageBeforeReadingBody(t *testing.T) {
+	declaredLength := maxMessageBytes + 1
+	wire := "Content-Length: " + strconv.Itoa(declaredLength) + "\r\n\r\n"
+	var recorded error
+	codec := &recordingCodec{codec: newLSPCodec(), onReadError: func(err error) { recorded = err }}
+	var value any
+	err := codec.ReadObject(bufio.NewReader(strings.NewReader(wire)), &value)
+	want := "LSP message of " + strconv.Itoa(declaredLength) + " bytes exceeds the 64 MiB limit"
+	if err == nil || err.Error() != want {
+		t.Fatalf("oversized message error = %v, want %q", err, want)
+	}
+	if recorded == nil || recorded.Error() != want {
+		t.Fatalf("recorded transport error = %v, want %q", recorded, want)
+	}
+}
+
 func TestLSPCodec_FramesRejectInvalidInputAndWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name, wire, want string

@@ -17,7 +17,7 @@ func TestPosition_EncodingsAndBounds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if pos["line"] != 0 || pos["character"] != test.want {
+		if pos.Line != 0 || pos.Character != test.want {
 			t.Errorf("%s position = %v, want character %d", test.encoding, pos, test.want)
 		}
 	}
@@ -45,14 +45,11 @@ func TestPosition_UnicodeRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if position["line"] != 1 || position["character"] != test.wire {
+		if position.Line != 1 || position.Character != test.wire {
 			t.Errorf("%s input position = %v, want wire column %d", test.encoding, position, test.wire)
 		}
 		client := &Client{positionEncoding: test.encoding}
-		locations, err := client.formatDefinitionLocations([]byte(`[{"uri":"` + pathURI(path) + `","range":{"start":{"line":1,"character":` + strconv.Itoa(test.wire) + `}}}]`))
-		if err != nil {
-			t.Fatal(err)
-		}
+		locations := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"`+pathURI(path)+`","range":{"start":{"line":1,"character":`+strconv.Itoa(test.wire)+`}}}]`))
 		want := filepath.FromSlash(path) + ":2:3"
 		if len(locations) != 1 || locations[0] != want {
 			t.Errorf("%s output locations = %v, want %q", test.encoding, locations, want)
@@ -63,14 +60,14 @@ func TestPosition_UnicodeRoundTrip(t *testing.T) {
 // Unreadable and non-file targets retain a 1-based server column when text conversion is unavailable.
 func TestPosition_OutputFallback(t *testing.T) {
 	client := &Client{positionEncoding: "utf-16"}
-	locations, err := client.formatDefinitionLocations([]byte(`[{"uri":"jdt://contents/java.base/java/lang/String.class","range":{"start":{"line":0,"character":4}}}]`))
-	if err != nil || len(locations) != 1 || locations[0] != "jdt://contents/java.base/java/lang/String.class:1:5" {
-		t.Fatalf("jdt locations = %v, %v", locations, err)
+	locations := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"jdt://contents/java.base/java/lang/String.class","range":{"start":{"line":0,"character":4}}}]`))
+	if len(locations) != 1 || locations[0] != "jdt://contents/java.base/java/lang/String.class:1:5" {
+		t.Fatalf("jdt locations = %v", locations)
 	}
 	missingPath := filepath.Join(t.TempDir(), "missing.go")
-	locations, err = client.formatDefinitionLocations([]byte(`[{"uri":"` + pathURI(missingPath) + `","range":{"start":{"line":0,"character":4}}}]`))
-	if err != nil || len(locations) != 1 || locations[0] != missingPath+":1:5" {
-		t.Fatalf("unreadable file locations = %v, %v", locations, err)
+	locations = client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"`+pathURI(missingPath)+`","range":{"start":{"line":0,"character":4}}}]`))
+	if len(locations) != 1 || locations[0] != missingPath+":1:5" {
+		t.Fatalf("unreadable file locations = %v", locations)
 	}
 	if got, ok := documentColumn("😀x", 1, "utf-16"); ok || got != 0 {
 		t.Fatalf("mid-surrogate offset = %d, %v, want unconvertible", got, ok)
@@ -79,8 +76,8 @@ func TestPosition_OutputFallback(t *testing.T) {
 	if err := os.WriteFile(path, []byte("😀x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	locations, err = client.formatDefinitionLocations([]byte(`[{"uri":"` + pathURI(path) + `","range":{"start":{"line":0,"character":1}}}]`))
-	if err != nil || len(locations) != 1 || locations[0] != path+":1:2" {
-		t.Fatalf("mid-surrogate locations = %v, %v", locations, err)
+	locations = client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"`+pathURI(path)+`","range":{"start":{"line":0,"character":1}}}]`))
+	if len(locations) != 1 || locations[0] != path+":1:2" {
+		t.Fatalf("mid-surrogate locations = %v", locations)
 	}
 }

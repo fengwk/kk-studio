@@ -43,7 +43,7 @@ type Client struct {
 	transportErr         error
 	shutdownGrace        time.Duration
 	mu                   sync.RWMutex
-	capabilities         map[string]json.RawMessage
+	capabilities         ServerCapabilities
 	positionEncoding     string
 	jdtls                bool
 	documents            map[string]document
@@ -134,18 +134,19 @@ func (c *Client) handleRequest(ctx context.Context, conn *jsonrpc2.Conn, req *js
 	var result any
 	switch req.Method {
 	case "workspace/configuration":
-		var params struct {
-			Items []json.RawMessage `json:"items"`
-		}
+		var params WorkspaceConfigurationParams
 		if req.Params != nil {
 			_ = json.Unmarshal(*req.Params, &params)
 		}
-		result = make([]map[string]any, len(params.Items))
+		result = WorkspaceConfigurationResult(make([]WorkspaceConfigurationItem, len(params.Items)))
 	case "workspace/workspaceFolders":
-		uri := pathURI(c.root)
-		result = []map[string]any{{"uri": uri, "name": "workspace"}}
+		var params WorkspaceFoldersParams
+		if req.Params != nil {
+			_ = json.Unmarshal(*req.Params, &params)
+		}
+		result = WorkspaceFoldersResult{{URI: pathURI(c.root), Name: "workspace"}}
 	case "workspace/applyEdit":
-		result = map[string]bool{"applied": false}
+		result = WorkspaceApplyEditResult{}
 	case "window/showMessageRequest", "client/registerCapability", "client/unregisterCapability", "window/workDoneProgress/create":
 		result = nil
 	case "window/showMessage", "window/logMessage", "telemetry/event", "textDocument/publishDiagnostics":
@@ -211,28 +212,38 @@ func (c *Client) Initialize(ctx context.Context, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = 180 * time.Second
 	}
-	params := map[string]any{"processId": c.process.PID(), "rootUri": pathURI(c.root), "rootPath": c.root, "workspaceFolders": []map[string]string{{"uri": pathURI(c.root), "name": "workspace"}}, "capabilities": map[string]any{"general": map[string]any{"positionEncodings": []string{"utf-16", "utf-8"}}, "workspace": map[string]any{"workspaceFolders": true, "configuration": false, "applyEdit": false}, "textDocument": map[string]any{"synchronization": map[string]any{"willSave": false, "willSaveWaitUntil": false, "didSave": true}, "definition": map[string]any{"linkSupport": true}}}}
+	params := InitializeParams{
+		Capabilities: ClientCapabilities{
+			General:   GeneralClientCapabilities{PositionEncodings: []string{"utf-16", "utf-8"}},
+			Workspace: WorkspaceClientCapabilities{WorkspaceFolders: true},
+			TextDocument: TextDocumentClientCapabilities{
+				Synchronization: TextDocumentSyncClientCapabilities{DidSave: true},
+				Definition:      DefinitionClientCapabilities{LinkSupport: true},
+			},
+		},
+		ProcessID:        c.process.PID(),
+		RootPath:         c.root,
+		RootURI:          pathURI(c.root),
+		WorkspaceFolders: []WorkspaceFolder{{Name: "workspace", URI: pathURI(c.root)}},
+	}
 	if c.jdtls {
-		params["initializationOptions"] = map[string]any{"extendedClientCapabilities": map[string]bool{"classFileContentsSupport": true}}
+		params.InitializationOptions = &InitializationClientCapabilities{
+			ExtendedClientCapabilities: ExtendedClientCapabilities{ClassFileContentsSupport: true},
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	var response struct {
-		Capabilities map[string]json.RawMessage `json:"capabilities"`
-	}
+	var response InitializeResult
 	if err := c.Call(ctx, "initialize", params, &response); err != nil {
 		return err
 	}
 	c.mu.Lock()
 	c.capabilities = response.Capabilities
-	if raw := response.Capabilities["positionEncoding"]; len(raw) > 0 {
-		var e string
-		if json.Unmarshal(raw, &e) == nil && strings.TrimSpace(e) != "" {
-			c.positionEncoding = e
-		}
+	if encoding := response.Capabilities.PositionEncoding; strings.TrimSpace(encoding) != "" {
+		c.positionEncoding = encoding
 	}
 	c.mu.Unlock()
-	return c.Notify(context.Background(), "initialized", map[string]any{})
+	return c.Notify(context.Background(), "initialized", InitializedParams{})
 }
 
 // Call sends one request and redacts server-provided error details.
@@ -312,7 +323,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 		finish()
 		return nil
 	case <-ctx.Done():
-		_ = c.conn.Notify(context.Background(), "$/cancelRequest", map[string]any{"id": id})
+		_ = c.conn.Notify(context.Background(), "$/cancelRequest", CancelRequestParams{ID: id})
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			message := fmt.Sprintf("LSP request timed out (%s).", method)
 			if hasDeadline {
@@ -403,11 +414,14 @@ func (c *Client) Supports(method string) bool {
 	default:
 		return c.jdtls
 	}
-	raw, ok := c.capabilities[field]
-	if !ok || string(raw) == "false" || string(raw) == "null" {
+	switch field {
+	case "definitionProvider":
+		return bool(c.capabilities.DefinitionProvider)
+	case "workspaceSymbolProvider":
+		return bool(c.capabilities.WorkspaceSymbolProvider)
+	default:
 		return false
 	}
-	return true
 }
 
 // Stop is idempotent and shares the same cleanup result between callers.
@@ -435,7 +449,7 @@ func (c *Client) finishStop(grace time.Duration) {
 		if grace > 0 {
 			_ = c.conn.Call(ctx, "shutdown", nil, nil)
 		}
-		_ = c.conn.Notify(context.Background(), "exit", map[string]any{})
+		_ = c.conn.Notify(context.Background(), "exit", InitializedParams{})
 		if grace > 0 && c.exitSignal != nil {
 			timer := time.NewTimer(grace)
 			select {

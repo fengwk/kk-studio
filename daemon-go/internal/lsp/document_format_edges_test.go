@@ -10,19 +10,17 @@ import (
 
 // LSP-T-075 and LSP-T-077 exercise malformed and incomplete definition/symbol results.
 func TestDocument_FormattingEdges(t *testing.T) {
-	locations, err := formatLocations(json.RawMessage(`[{"targetUri":"jdt://contents/module/Type.class","targetRange":{"start":{"line":2,"character":4}}},null,{"uri":"custom://host/path"},{"uri":""}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	locations := formatLocations(mustDefinitionResult(t, `[{"targetUri":"jdt://contents/module/Type.class","targetRange":{"start":{"line":2,"character":4}}},null,{"uri":"custom://host/path"},{"uri":""}]`))
 	wantLocations := []string{"jdt://contents/module/Type.class:3:5", "custom://host/path", "unknown"}
 	if !reflect.DeepEqual(locations, wantLocations) {
 		t.Fatalf("locations = %v, want %v", locations, wantLocations)
 	}
-	if _, err := formatLocations(json.RawMessage(`[`)); err == nil {
+	var malformed DefinitionResult
+	if err := json.Unmarshal([]byte(`[`), &malformed); err == nil {
 		t.Fatal("malformed location list unexpectedly succeeded")
 	}
 
-	symbols, err := formatSymbols(json.RawMessage(`[{"kind":99,"location":{"uri":"file:///tmp/Type.java"}},null,{"name":"Named","kind":1}]`), 10)
+	symbols, err := formatSymbols(mustWorkspaceSymbolsResult(t, `[{"kind":99,"location":{"uri":"file:///tmp/Type.java"}},null,{"name":"Named","kind":1}]`), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +28,8 @@ func TestDocument_FormattingEdges(t *testing.T) {
 	if !reflect.DeepEqual(symbols, wantSymbols) {
 		t.Fatalf("symbols = %v, want %v", symbols, wantSymbols)
 	}
-	if _, err := formatSymbols(json.RawMessage(`{}`), 10); err == nil {
+	var invalidSymbols WorkspaceSymbolsResult
+	if err := json.Unmarshal([]byte(`{}`), &invalidSymbols); err == nil {
 		t.Fatal("non-array symbols unexpectedly succeeded")
 	}
 }

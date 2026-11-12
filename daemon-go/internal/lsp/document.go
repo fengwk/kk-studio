@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -38,15 +37,15 @@ func (c *Client) Sync(path string) error {
 	if !opened {
 		c.documents[abs] = document{text: decoded.Text, version: 1}
 		c.mu.Unlock()
-		return c.Notify(context.Background(), "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": language, "version": 1, "text": decoded.Text}})
+		return c.Notify(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: decoded.Text, URI: uri, Version: 1}})
 	}
 	version := old.version + 1
 	c.documents[abs] = document{text: decoded.Text, version: version}
 	c.mu.Unlock()
-	if err := c.Notify(context.Background(), "textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": version}, "contentChanges": []map[string]string{{"text": decoded.Text}}}); err != nil {
+	if err := c.Notify(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: decoded.Text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
 		return err
 	}
-	return c.Notify(context.Background(), "textDocument/didSave", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	return c.Notify(context.Background(), "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
 }
 func languageID(ext, fallback string) string {
 	switch strings.ToLower(ext) {
@@ -84,9 +83,9 @@ func (c *Client) Refresh(path string) {
 	}
 }
 
-func (c *Client) Position(path string, line, character int) (map[string]int, error) {
+func (c *Client) Position(path string, line, character int) (Position, error) {
 	if err := c.Sync(path); err != nil {
-		return nil, err
+		return Position{}, err
 	}
 	abs, _ := filepath.Abs(path)
 	c.mu.RLock()
@@ -96,15 +95,15 @@ func (c *Client) Position(path string, line, character int) (map[string]int, err
 	return documentPosition(doc.text, line, character, encoding)
 }
 
-func documentPosition(document string, line, character int, encoding string) (map[string]int, error) {
+func documentPosition(document string, line, character int, encoding string) (Position, error) {
 	lines := strings.Split(document, "\n")
 	if line < 1 || line > len(lines) {
-		return nil, &LspError{Message: fmt.Sprintf("line %d is beyond the end of the synchronized document", line)}
+		return Position{}, &LspError{Message: fmt.Sprintf("line %d is beyond the end of the synchronized document", line)}
 	}
 	text := strings.TrimSuffix(lines[line-1], "\r")
 	runes := []rune(text)
 	if character < 1 || character-1 > len(runes) {
-		return nil, &LspError{Message: fmt.Sprintf("character %d is beyond line %d of the synchronized document (%d code points)", character, line, len(runes))}
+		return Position{}, &LspError{Message: fmt.Sprintf("character %d is beyond line %d of the synchronized document (%d code points)", character, line, len(runes))}
 	}
 	offset := 0
 	for _, r := range runes[:character-1] {
@@ -121,7 +120,7 @@ func documentPosition(document string, line, character int, encoding string) (ma
 			}
 		}
 	}
-	return map[string]int{"line": line - 1, "character": offset}, nil
+	return Position{Line: line - 1, Character: offset}, nil
 }
 func (c *Client) Definition(ctx context.Context, path string, line, character int, tracking ...func()) ([]string, error) {
 	if !c.Supports("textDocument/definition") {
@@ -131,20 +130,20 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	if err != nil {
 		return nil, err
 	}
-	var result json.RawMessage
+	var result DefinitionResult
 	onSent, onFinished := trackingCallbacks(tracking)
-	if err = c.call(ctx, "textDocument/definition", map[string]any{"textDocument": map[string]string{"uri": pathURI(path)}, "position": pos}, &result, onSent, onFinished); err != nil {
+	if err = c.call(ctx, "textDocument/definition", DefinitionParams{TextDocument: TextDocumentIdentifier{URI: pathURI(path)}, Position: pos}, &result, onSent, onFinished); err != nil {
 		return nil, err
 	}
-	return c.formatDefinitionLocations(result)
+	return c.formatDefinitionLocations(result), nil
 }
 func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, tracking ...func()) ([]string, error) {
 	if !c.Supports("workspace/symbol") {
 		return nil, &LspError{Message: fmt.Sprintf("LSP server '%s' does not advertise workspace symbol support.", c.server.ID)}
 	}
-	var result json.RawMessage
+	var result WorkspaceSymbolsResult
 	onSent, onFinished := trackingCallbacks(tracking)
-	if err := c.call(ctx, "workspace/symbol", map[string]string{"query": query}, &result, onSent, onFinished); err != nil {
+	if err := c.call(ctx, "workspace/symbol", WorkspaceSymbolParams{Query: query}, &result, onSent, onFinished); err != nil {
 		return nil, err
 	}
 	return formatSymbols(result, limit)
@@ -170,7 +169,7 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 		if !c.jdtls {
 			return "", &LspError{Message: "lsp_java_decompile is only supported by jdtls."}
 		}
-		err = c.call(ctx, "java/classFileContents", map[string]string{"uri": match}, &result, onSent, onFinished)
+		err = c.call(ctx, "java/classFileContents", TextDocumentIdentifier{URI: match}, &result, onSent, onFinished)
 	} else {
 		localPath := strings.TrimSpace(target)
 		if strings.HasPrefix(localPath, "file:") {
@@ -189,7 +188,7 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 		if e != nil || !info.Mode().IsRegular() {
 			return "", &LspError{Message: "target is not a readable class file: " + localPath}
 		}
-		err = c.call(ctx, "workspace/executeCommand", map[string]any{"command": "java.decompile", "arguments": []string{pathURI(localPath)}}, &result, onSent, onFinished)
+		err = c.call(ctx, "workspace/executeCommand", ExecuteCommandParams{Command: "java.decompile", Arguments: []string{pathURI(localPath)}}, &result, onSent, onFinished)
 	}
 	if err != nil {
 		return "", err
@@ -200,12 +199,12 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 	return result, nil
 }
 
-func formatLocations(raw json.RawMessage) ([]string, error) {
-	return formatLocationsWithColumn(raw, func(_ string, _ int, character int) int { return character + 1 })
+func formatLocations(result DefinitionResult) []string {
+	return formatLocationsWithColumn(result, func(_ string, _ int, character int) int { return character + 1 })
 }
 
-func (c *Client) formatDefinitionLocations(raw json.RawMessage) ([]string, error) {
-	return formatLocationsWithColumn(raw, func(uri string, line, character int) int {
+func (c *Client) formatDefinitionLocations(result DefinitionResult) []string {
+	return formatLocationsWithColumn(result, func(uri string, line, character int) int {
 		return c.definitionColumn(uri, line, character)
 	})
 }
@@ -271,66 +270,39 @@ func documentColumn(text string, offset int, encoding string) (int, bool) {
 	return column, offset == 0
 }
 
-func formatLocationsWithColumn(raw json.RawMessage, column func(string, int, int) int) ([]string, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return []string{"No results found"}, nil
-	}
-	var values []json.RawMessage
-	if raw[0] == '[' {
-		if err := json.Unmarshal(raw, &values); err != nil {
-			return nil, err
-		}
-	} else {
-		values = []json.RawMessage{raw}
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		var item map[string]json.RawMessage
-		if json.Unmarshal(value, &item) != nil {
+func formatLocationsWithColumn(result DefinitionResult, column func(string, int, int) int) []string {
+	out := make([]string, 0, len(result))
+	for _, item := range result {
+		var uri string
+		var locationRange *Range
+		if item.Link != nil {
+			uri = item.Link.TargetURI
+			locationRange = &item.Link.TargetSelectionRange
+		} else if item.Location != nil {
+			uri = item.Location.URI
+			locationRange = item.Location.Range
+		} else {
 			continue
 		}
-		uriData, hasTarget := item["targetUri"]
-		rangeData := item["range"]
-		if hasTarget {
-			uriData = item["targetUri"]
-			rangeData = item["targetSelectionRange"]
-			if len(rangeData) == 0 || string(rangeData) == "null" {
-				rangeData = item["targetRange"]
-			}
-		} else if _, ok := item["uri"]; !ok {
-			continue
-		}
-		location := "unknown"
-		uri := readString(uriData)
-		if sourceURI, ok := item["uri"]; ok && !hasTarget {
-			uri = readString(sourceURI)
-		}
-		location = locationTextWithColumn(uri, rangeData, column)
-		out = append(out, location)
+		out = append(out, locationTextWithColumn(uri, locationRange, column))
 	}
 	if len(out) == 0 {
-		return []string{"No results found"}, nil
+		return []string{"No results found"}
 	}
-	return out, nil
+	return out
 }
-func locationTextWithColumn(uri string, rangeData json.RawMessage, column func(string, int, int) int) string {
+
+func locationTextWithColumn(uri string, locationRange *Range, column func(string, int, int) int) string {
 	if uri == "" {
 		return "unknown"
 	}
 	location := locationPath(uri)
-	var position struct {
-		Start *struct {
-			Line      int `json:"line"`
-			Character int `json:"character"`
-		} `json:"start"`
-	}
-	if len(rangeData) == 0 || json.Unmarshal(rangeData, &position) != nil || position.Start == nil {
+	if locationRange == nil || locationRange.Start == nil {
 		return location
 	}
-	line := position.Start.Line
-	return fmt.Sprintf("%s:%d:%d", location, line+1, column(uri, line, position.Start.Character))
+	line := locationRange.Start.Line
+	return fmt.Sprintf("%s:%d:%d", location, line+1, column(uri, line, locationRange.Start.Character))
 }
-func readString(raw json.RawMessage) string { var s string; _ = json.Unmarshal(raw, &s); return s }
 func locationPath(value string) string {
 	u, err := url.Parse(value)
 	if err == nil && u.Scheme == "file" {
@@ -355,37 +327,26 @@ func fileURIPath(uri *url.URL) (string, error) {
 	}
 	return filepath.FromSlash(path), nil
 }
-func formatSymbols(raw json.RawMessage, limit int) ([]string, error) {
-	if limit <= 0 || len(raw) == 0 || string(raw) == "null" {
+func formatSymbols(result WorkspaceSymbolsResult, limit int) ([]string, error) {
+	if limit <= 0 || len(result) == 0 {
 		return []string{"No symbols found"}, nil
 	}
-	var values []json.RawMessage
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, err
-	}
 	kinds := []string{"File", "Module", "Namespace", "Package", "Class", "Method", "Property", "Field", "Constructor", "Enum", "Interface", "Function", "Variable", "Constant", "String", "Number", "Boolean", "Array", "Object", "Key", "Null", "EnumMember", "Struct", "Event", "Operator", "TypeParameter"}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		var item map[string]json.RawMessage
-		if json.Unmarshal(value, &item) != nil || item == nil {
-			continue
-		}
-		name := readString(item["name"])
+	out := make([]string, 0, min(len(result), limit))
+	for _, item := range result {
+		name := item.Name
 		if name == "" {
 			name = "unknown"
 		}
-		kind := readString(item["kind"])
+		kind := item.Kind.String
 		if kind == "" {
-			var number int
-			if json.Unmarshal(item["kind"], &number) == nil && number >= 1 && number <= len(kinds) {
-				kind = kinds[number-1]
+			if item.Kind.IsNumber && item.Kind.Number >= 1 && item.Kind.Number <= len(kinds) {
+				kind = kinds[item.Kind.Number-1]
 			} else {
 				kind = "unknown"
 			}
 		}
-		var location map[string]json.RawMessage
-		_ = json.Unmarshal(item["location"], &location)
-		uri := readString(location["uri"])
+		uri := item.Location.URI
 		if uri == "" {
 			uri = "unknown"
 		}

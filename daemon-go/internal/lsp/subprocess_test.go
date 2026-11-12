@@ -309,12 +309,11 @@ func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 	if err = client.Initialize(context.Background(), 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	var capabilities map[string]json.RawMessage
 	client.mu.RLock()
-	capabilities = client.capabilities
+	experimentalData := append(json.RawMessage(nil), client.capabilities.Experimental...)
 	client.mu.RUnlock()
 	var experimental map[string]string
-	if err = json.Unmarshal(capabilities["experimental"], &experimental); err != nil || experimental["inherited"] != inherited {
+	if err = json.Unmarshal(experimentalData, &experimental); err != nil || experimental["inherited"] != inherited {
 		t.Fatalf("inherited environment capability=%v err=%v", experimental, err)
 	}
 	if err = client.Stop(time.Second); err != nil {
