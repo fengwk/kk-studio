@@ -66,6 +66,41 @@ func TestDocumentSyncVersionsAndLanguageID(t *testing.T) {
 	client.Refresh(path)
 }
 
+// LSP-T-102 verifies an unchanged document does not emit didChange or didSave.
+func TestDocument_UnchangedContentSendsNoNotifications(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte("package source\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := &fakeSupervisor{}
+	client, err := Launch(context.Background(), ServerConfig{ID: "go", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Initialize(context.Background(), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Sync(path); err != nil {
+		t.Fatal(err)
+	}
+	for len(supervisor.process.requests) > 0 {
+		<-supervisor.process.requests
+	}
+	if err := client.Sync(path); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case method := <-supervisor.process.requests:
+		if method == "textDocument/didChange" || method == "textDocument/didSave" {
+			t.Fatalf("unchanged document emitted %s", method)
+		}
+	default:
+	}
+	if err := client.Stop(time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // LSP-T-097 verifies both JDT URI and local class-file decompilation paths.
 func TestProtocol_JavaDecompile(t *testing.T) {
 	root := t.TempDir()

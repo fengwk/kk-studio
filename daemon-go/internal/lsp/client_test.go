@@ -28,6 +28,7 @@ type fakeSupervisor struct {
 	exitSeen         chan struct{}
 	allowProcessExit chan struct{}
 	shutdownParams   chan json.RawMessage
+	initializeParams chan json.RawMessage
 	startEntered     chan struct{}
 	startGate        chan struct{}
 	startErr         error
@@ -42,7 +43,14 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	s.starts++
 	startErr, earlyExit := s.startErr, s.earlyExit
 	if startErr != nil {
+		startEntered, startGate := s.startEntered, s.startGate
 		s.mu.Unlock()
+		if startEntered != nil {
+			startEntered <- struct{}{}
+		}
+		if startGate != nil {
+			<-startGate
+		}
 		return nil, startErr
 	}
 	process := newFakeProcess(s.blockMethod)
@@ -52,6 +60,7 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 	process.exitSeen = s.exitSeen
 	process.allowProcessExit = s.allowProcessExit
 	process.shutdownParams = s.shutdownParams
+	process.initializeParams = s.initializeParams
 	process.terminateErr = s.terminateErr
 	process.terminateGate = s.terminateGate
 	process.waitErr = s.waitErr
@@ -78,6 +87,7 @@ type fakeProcess struct {
 	exitSeen         chan struct{}
 	allowProcessExit chan struct{}
 	shutdownParams   chan json.RawMessage
+	initializeParams chan json.RawMessage
 	requests         chan string
 	cancelled        chan struct{}
 	stdinR           *io.PipeReader
@@ -155,6 +165,12 @@ func (p *fakeProcess) serve() {
 		if req.Method == "$/cancelRequest" {
 			p.cancelled <- struct{}{}
 			continue
+		}
+		if req.Method == "initialize" && p.initializeParams != nil {
+			select {
+			case p.initializeParams <- append(json.RawMessage(nil), req.Params...):
+			default:
+			}
 		}
 		if req.Method == "shutdown" && p.shutdownParams != nil {
 			select {

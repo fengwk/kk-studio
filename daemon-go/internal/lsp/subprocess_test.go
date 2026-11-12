@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,11 +23,12 @@ const subprocessHelperMode = "KK_LSP_SUBPROCESS_HELPER"
 func TestLSPSubprocessHelper(t *testing.T) {
 	switch os.Getenv(subprocessHelperMode) {
 	case "env":
-		_, _ = fmt.Fprintf(os.Stdout, "KK_RESULT=%s\n", mustJSON(map[string]string{
+		result := mustJSON(map[string]string{
 			"coverage":  os.Getenv("GOCOVERDIR"),
 			"inherited": os.Getenv("KK_LSP_INHERITED"),
 			"override":  os.Getenv("KK_LSP_OVERRIDE"),
-		}))
+		})
+		_ = os.WriteFile(os.Getenv("KK_LSP_RESULT_FILE"), []byte(result), 0600)
 	case "lsp":
 		serveSubprocessLSP()
 	}
@@ -243,15 +244,12 @@ func TestSubprocessSupervisor_Environment(t *testing.T) {
 	}
 	for _, explicit := range []bool{false, true} {
 		supervisor := &execHelperSupervisor{}
-		env := []string{subprocessHelperMode + "=env", "KK_LSP_OVERRIDE=child"}
+		resultFile := filepath.Join(temp, "result")
+		env := []string{subprocessHelperMode + "=env", "KK_LSP_OVERRIDE=child", "KK_LSP_RESULT_FILE=" + resultFile}
 		if explicit {
 			env = append(env, "GOCOVERDIR="+explicitCoverage)
 		}
 		process, err := supervisor.Start(context.Background(), native.ProcessSpec{Executable: os.Args[0], Args: []string{"-test.run=^TestLSPSubprocessHelper$"}, Directory: temp, Env: env})
-		if err != nil {
-			t.Fatal(err)
-		}
-		stdout, err := io.ReadAll(process.Stdout())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -261,13 +259,13 @@ func TestSubprocessSupervisor_Environment(t *testing.T) {
 		if err = supervisor.Close(context.Background()); err != nil {
 			t.Fatal(err)
 		}
+		data, err := os.ReadFile(resultFile)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var result map[string]string
-		for _, line := range strings.Split(string(stdout), "\n") {
-			if strings.HasPrefix(line, "KK_RESULT=") {
-				if err = json.Unmarshal([]byte(strings.TrimPrefix(line, "KK_RESULT=")), &result); err != nil {
-					t.Fatal(err)
-				}
-			}
+		if err = json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
 		}
 		if result["coverage"] != "" || result["inherited"] != "inherited" || result["override"] != "child" {
 			t.Fatalf("child environment = %#v", result)

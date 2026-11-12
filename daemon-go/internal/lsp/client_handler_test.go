@@ -15,6 +15,15 @@ import (
 )
 
 // LSP-T-083 checks server-request responses and client notification handling.
+func checkNullResponse(name string) func(*testing.T, json.RawMessage) {
+	return func(t *testing.T, raw json.RawMessage) {
+		t.Helper()
+		if string(raw) != "null" {
+			t.Fatalf("%s result = %s, want null", name, raw)
+		}
+	}
+}
+
 func TestProtocol_ServerRequests(t *testing.T) {
 	methods := []struct {
 		method string
@@ -35,11 +44,7 @@ func TestProtocol_ServerRequests(t *testing.T) {
 		if err := json.Unmarshal(raw, &got); err != nil || got["applied"] {
 			t.Fatalf("apply edit result = %s, %v", raw, err)
 		}
-	}}, {"client/registerCapability", nil, func(t *testing.T, raw json.RawMessage) {
-		if string(raw) != "null" {
-			t.Fatalf("register result = %s", raw)
-		}
-	}}}
+	}}, {"client/registerCapability", nil, checkNullResponse("register")}, {"client/unregisterCapability", nil, checkNullResponse("unregister")}, {"window/workDoneProgress/create", nil, checkNullResponse("progress")}, {"window/showMessageRequest", nil, checkNullResponse("showMessageRequest")}}
 	for _, item := range methods {
 		t.Run(item.method, func(t *testing.T) {
 			serverSide, clientSide := net.Pipe()
@@ -68,18 +73,22 @@ func TestProtocol_ServerRequests(t *testing.T) {
 			item.check(t, envelope.Result)
 		})
 	}
-	serverSide, clientSide := net.Pipe()
-	client := &Client{root: t.TempDir()}
-	conn := jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(clientSide, newLSPCodec()), rpcHandler(client.handleRequest))
-	defer func() { _ = conn.Close(); _ = serverSide.Close() }()
-	serverSide.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
-	notification := &jsonrpc2.Request{Method: "window/logMessage", Notif: true}
-	rpcHandler(client.handleRequest).Handle(context.Background(), conn, notification)
-	var buf [1]byte
-	if _, err := serverSide.Read(buf[:]); err != io.EOF {
-		if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
-			t.Fatalf("notification response read error = %v", err)
-		}
+	for _, method := range []string{"window/showMessage", "window/logMessage", "telemetry/event", "textDocument/publishDiagnostics"} {
+		t.Run("ignored "+method, func(t *testing.T) {
+			serverSide, clientSide := net.Pipe()
+			client := &Client{root: t.TempDir()}
+			conn := jsonrpc2.NewConn(context.Background(), jsonrpc2.NewBufferedStream(clientSide, newLSPCodec()), rpcHandler(client.handleRequest))
+			defer func() { _ = conn.Close(); _ = serverSide.Close() }()
+			serverSide.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+			notification := &jsonrpc2.Request{Method: method, Notif: true}
+			rpcHandler(client.handleRequest).Handle(context.Background(), conn, notification)
+			var buf [1]byte
+			if _, err := serverSide.Read(buf[:]); err != io.EOF {
+				if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
+					t.Fatalf("notification response read error = %v", err)
+				}
+			}
+		})
 	}
 }
 

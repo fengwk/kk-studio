@@ -16,7 +16,7 @@ func TestLSPCodec_ReadFramedMessages(t *testing.T) {
 	wire := "banner output\ncontent-length: " + string(rune('0'+len(body)/10)) + string(rune('0'+len(body)%10)) + "\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n" + body
 	codec := newLSPCodec()
 	var first json.RawMessage
-	if err := codec.ReadObject(bufio.NewReader(strings.NewReader(wire)), &first); err != nil {
+	if err := codec.ReadObject(bufio.NewReader(oneByteReader{reader: strings.NewReader(wire)}), &first); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(first, []byte(body)) {
@@ -49,6 +49,15 @@ func TestLSPCodec_FramesRejectInvalidInputAndWrites(t *testing.T) {
 	if err := codec.WriteObject(bodyWriter, map[string]any{}); err == nil || err.Error() != "writer failed" {
 		t.Fatalf("body write error = %v", err)
 	}
+}
+
+type oneByteReader struct{ reader io.Reader }
+
+func (r oneByteReader) Read(data []byte) (int, error) {
+	if len(data) > 1 {
+		data = data[:1]
+	}
+	return r.reader.Read(data)
 }
 
 type failingWriter struct{}

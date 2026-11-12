@@ -23,6 +23,7 @@ func TestCodec_Decode(t *testing.T) {
 		{"nul", []byte("a\x00b"), "", "", 0, "file appears to be binary: contains NUL character"},
 		{"control", []byte{1}, "", "", 0, "file appears to be binary"},
 		{"empty", nil, "", "utf-8", 0, ""},
+		{"single byte", []byte{'a'}, "a", "utf-8", 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
