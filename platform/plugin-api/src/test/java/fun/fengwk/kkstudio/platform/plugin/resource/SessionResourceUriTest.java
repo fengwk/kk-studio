@@ -20,7 +20,7 @@ class SessionResourceUriTest {
 
     String uri = SessionResourceUri.format(blobId);
 
-    assertEquals("vfs:/resources/3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", uri);
+    assertEquals("resource://files/3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", uri);
     assertEquals(Optional.of(blobId), SessionResourceUri.parse(uri));
     assertThrows(NullPointerException.class, () -> SessionResourceUri.format(null));
   }
@@ -29,7 +29,7 @@ class SessionResourceUriTest {
   @Test
   void parsesCanonicalFormSuccessfully() {
     UUID expectedBlobId = UUID.randomUUID();
-    String uri = "vfs:/resources/" + expectedBlobId;
+    String uri = "resource://files/" + expectedBlobId;
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -41,7 +41,7 @@ class SessionResourceUriTest {
   @Test
   void rejectsUppercaseUuid() {
     String uppercaseUuid = "A87D0E54-6A92-4C61-B9D1-331B2D98822A";
-    String uri = "vfs:/resources/" + uppercaseUuid;
+    String uri = "resource://files/" + uppercaseUuid;
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -52,7 +52,7 @@ class SessionResourceUriTest {
   @Test
   void rejectsExtraPathSegments() {
     UUID blobId = UUID.randomUUID();
-    String uri = "vfs:/resources/" + blobId + "/extra";
+    String uri = "resource://files/" + blobId + "/extra";
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -64,9 +64,9 @@ class SessionResourceUriTest {
   void rejectsNonCanonicalPrefix() {
     UUID blobId = UUID.randomUUID();
 
-    assertTrue(SessionResourceUri.parse("vfs:/other/" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:/resources" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:resources/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://other/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("resource:/files/" + blobId).isEmpty());
   }
 
   /** 其他 scheme（如 http/https）必须确定性拒绝。 */
@@ -84,8 +84,8 @@ class SessionResourceUriTest {
   void rejectsQueryAndFragment() {
     UUID blobId = UUID.randomUUID();
 
-    assertTrue(SessionResourceUri.parse("vfs:/resources/" + blobId + "?download=1").isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:/resources/" + blobId + "#section").isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files/" + blobId + "?download=1").isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files/" + blobId + "#section").isEmpty());
   }
 
   /** 空 UUID、空串或 null 必须确定性拒绝。 */
@@ -94,24 +94,25 @@ class SessionResourceUriTest {
     assertTrue(SessionResourceUri.parse(null).isEmpty());
     assertTrue(SessionResourceUri.parse("").isEmpty());
     assertTrue(SessionResourceUri.parse("   ").isEmpty());
-    assertTrue(SessionResourceUri.parse("vfs:/resources/").isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files/").isEmpty());
   }
 
   /** 格式错误（如缺少连字符或包含非法字符）的 UUID 必须确定性拒绝。 */
   @Test
   void rejectsMalformedUuidCharacters() {
-    assertTrue(SessionResourceUri.parse("vfs:/resources/not-a-valid-uuid-format-here").isEmpty());
+    assertTrue(SessionResourceUri.parse("resource://files/not-a-valid-uuid-format-here").isEmpty());
     assertTrue(
-        SessionResourceUri.parse("vfs:/resources/00000000000000000000000000000000").isEmpty());
+        SessionResourceUri.parse("resource://files/00000000000000000000000000000000").isEmpty());
     assertTrue(
-        SessionResourceUri.parse("vfs:/resources/00000000-0000-0000-0000-00000000000g").isEmpty());
+        SessionResourceUri.parse("resource://files/00000000-0000-0000-0000-00000000000g")
+            .isEmpty());
   }
 
   /** 规范 UUID 之后的续写一律整体不匹配：路径、查询、片段、更长的 hex/字母 token 都不能被截断成「规范 URI」。 */
   @Test
   void parseRejectsContinuationSuffixes() {
     UUID blobId = UUID.randomUUID();
-    String canonical = "vfs:/resources/" + blobId;
+    String canonical = "resource://files/" + blobId;
     List<String> suffixes =
         List.of(
             "/suffix", // 路径续写

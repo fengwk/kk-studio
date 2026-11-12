@@ -741,9 +741,7 @@ func (p *windowsProcess) Terminate(ctx context.Context, _ time.Duration) error {
 	converged := false
 	if p.job != 0 {
 		_ = windows.TerminateJobObject(p.job, 1)
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), windowsDrainBudget)
-		err := awaitWindowsJobEmpty(cleanupCtx, p.job, windowsDrainBudget)
-		cancel()
+		err := awaitWindowsJobEmpty(context.Background(), p.job, windowsDrainBudget)
 		if err != nil {
 			convergenceErrors = append(convergenceErrors, err)
 		} else {

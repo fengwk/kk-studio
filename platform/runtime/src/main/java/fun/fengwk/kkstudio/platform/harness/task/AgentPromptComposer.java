@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 /** 只按实际注入能力组合 system prompt 各段落；全部文案来自 Markdown 模板。 */
@@ -26,7 +25,6 @@ public final class AgentPromptComposer {
   private static final List<String> FILE_TOOL_ORDER =
       List.of("read", "write", "edit", "find", "grep");
 
-  private static final String READ_TOOL = "read";
   private static final String WRITE_TOOL = "write";
   private static final String EDIT_TOOL = "edit";
   private static final String BASH_TOOL = "bash";
@@ -49,7 +47,7 @@ public final class AgentPromptComposer {
     if (hasText(input.agentInstructions())) {
       sections.add(render("agent.md", Map.of("agent", input.agentInstructions())));
     }
-    sections.add(render("harness.md", harnessValues(input.currentEnvironment(), capabilities)));
+    sections.add(render("harness.md", harnessValues()));
     if (hasPaths(input.currentEnvironment(), capabilities)) {
       sections.add(render("paths.md", pathsValues(input.currentEnvironment(), capabilities)));
     }
@@ -79,43 +77,24 @@ public final class AgentPromptComposer {
     return render("skill.md", Map.of("name", skill.name(), "description", skill.description()));
   }
 
-  private static Map<String, Object> harnessValues(
-      CurrentEnvironmentContext environment, Capabilities capabilities) {
-    boolean hasEnvironment = environment.environmentId() != null;
-    String environmentMemoryFile =
-        hasEnvironment
-            ? "MEMORY-" + environment.environmentName() + ".md"
-            : "MEMORY-<environment name>.md";
-    return Map.of(
-        "memory",
-        capabilities.read(),
-        "canWrite",
-        capabilities.canWrite(),
-        "hasEnvironment",
-        hasEnvironment,
-        "environmentMemoryFile",
-        environmentMemoryFile);
+  private static Map<String, Object> harnessValues() {
+    return Map.of();
   }
 
   private static boolean hasPaths(
       CurrentEnvironmentContext environment, Capabilities capabilities) {
-    return (environment.environmentId() != null && !capabilities.hostTools().isEmpty())
-        || !capabilities.vfsTools().isEmpty();
+    return environment.environmentId() != null && !capabilities.hostTools().isEmpty();
   }
 
   private static Map<String, Object> pathsValues(
       CurrentEnvironmentContext environment, Capabilities capabilities) {
     boolean hasAbsolute =
         environment.environmentId() != null && !capabilities.hostTools().isEmpty();
-    boolean hasVfs = !capabilities.vfsTools().isEmpty();
-    Map<String, Object> values = new LinkedHashMap<>();
-    values.put("hasAbsolute", hasAbsolute);
-    values.put("absoluteTools", hasAbsolute ? toolList(capabilities.hostTools()) : "");
-    values.put("hasVfs", hasVfs);
-    values.put("vfsTools", hasVfs ? toolList(capabilities.vfsTools()) : "");
-    values.put("hasBash", capabilities.bash());
-    values.put("canWrite", capabilities.canWrite());
-    return values;
+    return Map.of(
+        "hasAbsolute",
+        hasAbsolute,
+        "absoluteTools",
+        hasAbsolute ? toolList(capabilities.hostTools()) : "");
   }
 
   private static Map<String, Object> environmentValues(
@@ -123,13 +102,10 @@ public final class AgentPromptComposer {
     CurrentEnvironmentContext environment = input.currentEnvironment();
     boolean hasEnvironment = environment.environmentId() != null;
     boolean commands = capabilities.bash() || capabilities.lsp();
-    String sessionDirectory = sessionDirectory(input.rootSessionId());
-    String tempDirectory = null;
-    if (hasEnvironment && (capabilities.write() || capabilities.bash())) {
-      tempDirectory = environment.tempDirectory() == null ? "unknown" : environment.tempDirectory();
-    } else if (!hasEnvironment && capabilities.write()) {
-      tempDirectory = sessionDirectory + "tmp/";
-    }
+    String tempDirectory =
+        hasEnvironment && (capabilities.write() || capabilities.edit() || capabilities.bash())
+            ? environment.tempDirectory() == null ? "unknown" : environment.tempDirectory()
+            : null;
     Map<String, Object> values = new LinkedHashMap<>();
     values.put("hasEnvironment", hasEnvironment);
     values.put("commandsAndFiles", commands && capabilities.fileTools());
@@ -146,12 +122,6 @@ public final class AgentPromptComposer {
     values.put("home", valueOrUnknown(environment.homeDirectory()));
     values.put("hasTempDir", tempDirectory != null);
     values.put("tempDir", tempDirectory == null ? "" : tempDirectory);
-    values.put("hasSessionDir", capabilities.fileTools());
-    values.put("sessionDir", capabilities.fileTools() ? sessionDirectory : "");
-    values.put("hasThreadDir", capabilities.fileTools());
-    values.put(
-        "threadDir",
-        capabilities.fileTools() ? sessionDirectory + "threads/" + input.threadId() + "/" : "");
     return values;
   }
 
@@ -163,10 +133,6 @@ public final class AgentPromptComposer {
 
   private static String valueOrUnknown(String value) {
     return value == null ? "unknown" : value;
-  }
-
-  private static String sessionDirectory(UUID rootSessionId) {
-    return "vfs:/sessions/" + rootSessionId + "/";
   }
 
   private static String skillEntries(List<SkillPromptEntry> skills) {
@@ -214,42 +180,28 @@ public final class AgentPromptComposer {
 
   /** 本 turn 实际注入工具的能力视图：只回答 prompt 需要知道的分类与顺序。 */
   private record Capabilities(
-      boolean read,
       boolean write,
       boolean edit,
       boolean bash,
       boolean lsp,
       boolean fileTools,
-      List<String> hostTools,
-      List<String> vfsTools) {
+      List<String> hostTools) {
 
     private static Capabilities of(List<String> toolNames) {
       Set<String> names = Set.copyOf(toolNames);
-      boolean read = names.contains(READ_TOOL);
       boolean write = names.contains(WRITE_TOOL);
       boolean edit = names.contains(EDIT_TOOL);
       boolean bash = names.contains(BASH_TOOL);
       List<String> lspTools =
           names.stream().filter(name -> name.startsWith("lsp_")).sorted().toList();
-      List<String> vfsTools = FILE_TOOL_ORDER.stream().filter(names::contains).toList();
-      List<String> hostTools = new ArrayList<>(vfsTools);
+      List<String> fileTools = FILE_TOOL_ORDER.stream().filter(names::contains).toList();
+      List<String> hostTools = new ArrayList<>(fileTools);
       if (bash) {
         hostTools.add(BASH_TOOL);
       }
       hostTools.addAll(lspTools);
       return new Capabilities(
-          read,
-          write,
-          edit,
-          bash,
-          !lspTools.isEmpty(),
-          !vfsTools.isEmpty(),
-          List.copyOf(hostTools),
-          vfsTools);
-    }
-
-    private boolean canWrite() {
-      return write || edit;
+          write, edit, bash, !lspTools.isEmpty(), !fileTools.isEmpty(), List.copyOf(hostTools));
     }
 
     private boolean hasEnvironmentTools() {

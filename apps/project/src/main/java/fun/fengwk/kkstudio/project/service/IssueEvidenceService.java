@@ -33,7 +33,7 @@ public class IssueEvidenceService {
   static final int MAX_EVIDENCE_LIMIT = 100;
 
   /** 托管资源 URI 前缀：与平台 {@code SessionResourceUri} 的规范形态一致；project 不反向依赖 platform，故只在此保留协议常量。 */
-  private static final String RESOURCE_URI_PREFIX = "vfs:/resources/";
+  private static final String RESOURCE_URI_PREFIX = "resource://files/";
 
   private final IssueEvidenceRepository issueEvidenceRepository;
   private final IssueRepository issueRepository;

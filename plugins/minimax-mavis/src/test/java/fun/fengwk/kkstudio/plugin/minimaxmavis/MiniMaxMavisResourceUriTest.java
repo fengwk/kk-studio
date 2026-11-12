@@ -16,15 +16,15 @@ import java.util.UUID;
 
 class MiniMaxMavisResourceUriTest {
 
-  /** 顶层与嵌套数组中的 vfs: 资源都经网关授权解析，其他取值原样保留。 */
+  /** 顶层与嵌套数组中的 Resource URI 都经网关授权解析，其他取值原样保留。 */
   @Test
-  void resolvesNestedVfsResourcesAndKeepsPlainValues() {
+  void resolvesNestedResourcesAndKeepsPlainValues() {
     PluginResourceGateway gateway = mock(PluginResourceGateway.class);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
     JsonMapper mapper = JsonMapper.builder().build();
     UUID session = UUID.fromString("11111111-2222-3333-4444-555555555555");
     String id = "12345678-1234-1234-1234-123456789abc";
-    String resource = "vfs:/resources/" + id;
+    String resource = "resource://files/" + id;
     when(gateway.resolveSessionResource(session, resource))
         .thenReturn(URI.create("https://example.com/blob"));
 

@@ -35,6 +35,7 @@ import type {
 } from '@/features/thread/runtime/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
+import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import './tool-card.css'
 
@@ -180,7 +181,9 @@ export function ToolMessageBlock({
           placement={isBash ? 'before' : 'after'}
         >
           {textWindow.text !== '' ? (
-            <ToolOutputViewport bounded={false}>{textWindow.text}</ToolOutputViewport>
+            <ToolOutputViewport bounded={false}>
+              <ResourceUriText text={textWindow.text} />
+            </ToolOutputViewport>
           ) : null}
         </DisclosureHint>
       )

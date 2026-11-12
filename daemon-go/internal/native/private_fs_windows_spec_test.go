@@ -16,6 +16,9 @@ import (
 // TestWindowsPrivateFS_OwnerOnlyRoundTrip verifies directory and file ACL read-back on Windows.
 func TestWindowsPrivateFS_OwnerOnlyRoundTrip(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(directory, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := ensurePrivateDirectory(directory); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +72,21 @@ func windowsPrivatePathOwner(path string) (*windows.SID, error) {
 	}
 	owner, _, err := descriptor.Owner()
 	return owner, err
+}
+
+// TestWindowsPrivateFS_CreatesNestedDirectory verifies missing parents are also protected.
+func TestWindowsPrivateFS_CreatesNestedDirectory(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "ide", "private")
+	if err := ensurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPrivateDirectory(filepath.Dir(directory)); err != nil {
+		t.Fatalf("created parent directory is not private: %v", err)
+	}
 }
 
 // TestWindowsPrivateFS_RejectDirectoriesAsFiles checks both read and write file boundaries.

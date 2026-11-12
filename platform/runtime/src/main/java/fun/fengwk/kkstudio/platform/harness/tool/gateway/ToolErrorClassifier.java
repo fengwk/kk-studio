@@ -39,7 +39,6 @@ final class ToolErrorClassifier {
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
   static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
-  static final String VFS_READ_ONLY_KIND = "VFS_READ_ONLY";
 
   /** 确定性拒绝的下一步：同一调用在修复前会得到同样结果，不构成自动重试建议。 */
   static final String DETERMINISTIC_REJECTION_NEXT_ACTION =

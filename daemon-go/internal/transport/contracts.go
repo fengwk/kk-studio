@@ -8,7 +8,7 @@ import (
 // ViewRequest is the parsed identity and request metadata for an IDE data-channel route.
 type ViewRequest struct {
 	ViewID       string
-	BindingEpoch string
+	BindingEpoch int64
 	Mode         string
 	Method       string
 	Path         string
@@ -17,6 +17,7 @@ type ViewRequest struct {
 
 // ViewUpstream is a validated loopback destination returned by the authoritative IDE service.
 type ViewUpstream struct {
+	Context   context.Context
 	Host      string
 	Port      int
 	Path      string

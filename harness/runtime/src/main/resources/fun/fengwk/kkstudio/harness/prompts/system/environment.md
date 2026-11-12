@@ -8,6 +8,4 @@
 {{/hasOs}}{{#hasUser}}  <user>{{user}}</user>
 {{/hasUser}}{{#hasHome}}  <home>{{home}}</home>
 {{/hasHome}}{{#hasTempDir}}  <temp_dir>{{tempDir}}</temp_dir>
-{{/hasTempDir}}{{#hasSessionDir}}  <session_dir>{{sessionDir}}</session_dir>
-{{/hasSessionDir}}{{#hasThreadDir}}  <thread_dir>{{threadDir}}</thread_dir>
-{{/hasThreadDir}}</current_environment>
+{{/hasTempDir}}</current_environment>

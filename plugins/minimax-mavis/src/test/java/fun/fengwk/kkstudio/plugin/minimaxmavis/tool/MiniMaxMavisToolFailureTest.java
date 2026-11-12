@@ -63,7 +63,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>凭据 6 种不可用原因收敛为对应 MAVIS_CREDENTIAL_<REASON>，且不调用任何 transport；
  *   <li>catalog 缺少当前 endpoint 收敛为 MAVIS_CAPABILITY_UNAVAILABLE，且未向 MCP endpoint 发送调用；
  *   <li>非幂等生成能力在无网关时于发送前失败，收敛为 MAVIS_RESOURCE_UNAVAILABLE，transport 完全未被调用；
- *   <li>vfs:/resources/<uuid> 参数在无网关、有网关和非法形态下的确定性行为；
+ *   <li>resource://files/<uuid> 参数在无网关、有网关和非法形态下的确定性行为；
  *   <li>网络传输异常或超时收敛为 MAVIS_CALL_FAILED，且去敏机制确保错误信息绝不泄露 token 明文。
  * </ul>
  */
@@ -228,7 +228,7 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 参数包含 vfs:/resources/<uuid>： 无网关 → 即使携带 invocation context 也确定性以 MAVIS_RESOURCE_UNAVAILABLE
+   * 参数包含 resource://files/<uuid>： 无网关 → 即使携带 invocation context 也确定性以 MAVIS_RESOURCE_UNAVAILABLE
    * 失败且不发送网络请求。
    */
   @Test
@@ -248,7 +248,7 @@ class MiniMaxMavisToolFailureTest {
             accessWithoutGateway,
             executor);
 
-    String arguments = "{\"image\":\"vfs:/resources/" + VALID_BLOB_UUID + "\"}";
+    String arguments = "{\"image\":\"resource://files/" + VALID_BLOB_UUID + "\"}";
     ToolCall call = new ToolCall("call-res-nogw", tool.descriptor().name(), arguments);
     UUID threadId = UUID.fromString("22222222-3333-4444-5555-666666666666");
     ToolExecutionRequest request =
@@ -267,8 +267,8 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 参数包含合法 vfs:/resources/<uuid>： 有网关 + context + 合法 URI → 请求正常执行成功； 发送给远端的 request body 中使用解析后的
-   * HTTPS URL 且不出现原始 vfs: 引用； 且断言调用了资源网关恰好一次。
+   * 参数包含合法 resource://files/<uuid>： 有网关 + context + 合法 URI → 请求正常执行成功； 发送给远端的 request body 中使用解析后的
+   * HTTPS URL 且不出现原始 Resource URI； 且断言调用了资源网关恰好一次。
    */
   @Test
   void sessionResourceWithGatewayIsResolvedToHttpsInRequestBody() {
@@ -288,7 +288,7 @@ class MiniMaxMavisToolFailureTest {
             executor);
 
     UUID threadId = UUID.fromString("11111111-2222-3333-4444-555555555555");
-    String arguments = "{\"image\":\"vfs:/resources/" + VALID_BLOB_UUID + "\"}";
+    String arguments = "{\"image\":\"resource://files/" + VALID_BLOB_UUID + "\"}";
     ToolCall call = new ToolCall("call-res-resolved", tool.descriptor().name(), arguments);
     ToolExecutionRequest request =
         new ToolExecutionRequest(
@@ -310,7 +310,7 @@ class MiniMaxMavisToolFailureTest {
         invokeRequest.body().contains("https://resolved.files.local/" + VALID_BLOB_UUID),
         "Request body must contain resolved https URL");
     assertFalse(
-        invokeRequest.body().contains("vfs:/resources/"),
+        invokeRequest.body().contains("resource://files/"),
         "Request body must not contain raw session resource reference");
   }
 
@@ -337,7 +337,7 @@ class MiniMaxMavisToolFailureTest {
             executor);
 
     UUID expectedThreadId = UUID.fromString("98765432-abcd-ef01-2345-6789abcdef01");
-    String resourceUri = "vfs:/resources/" + VALID_BLOB_UUID;
+    String resourceUri = "resource://files/" + VALID_BLOB_UUID;
     String arguments = "{\"image\":\"" + resourceUri + "\"}";
     ToolCall call = new ToolCall("call-thread-id-check", tool.descriptor().name(), arguments);
     ToolExecutionRequest request =
@@ -366,7 +366,7 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 有网关但 context 缺失： 参数包含 vfs:/resources/<canonical-uuid> 且请求不带 context（使用 3 参构造
+   * 有网关但 context 缺失： 参数包含 resource://files/<canonical-uuid> 且请求不带 context（使用 3 参构造
    * ToolExecutionRequest）时， 必须在发送前确定性失败，结果为 error 且错误信息以 MAVIS_RESOURCE_UNAVAILABLE 开头； transport
    * 完全没有被调用（包括目录 tools 请求），且假网关的 resolveSessionResource 完全未被调用。
    */
@@ -387,7 +387,7 @@ class MiniMaxMavisToolFailureTest {
             accessWithGateway,
             executor);
 
-    String arguments = "{\"image\":\"vfs:/resources/" + VALID_BLOB_UUID + "\"}";
+    String arguments = "{\"image\":\"resource://files/" + VALID_BLOB_UUID + "\"}";
     ToolCall call = new ToolCall("call-res-no-ctx", tool.descriptor().name(), arguments);
     // 3 参构造，无 context (request.context() == null)
     ToolExecutionRequest request =
@@ -424,9 +424,9 @@ class MiniMaxMavisToolFailureTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "vfs:/resources/11111111-2222-3333-4444-55555555555A", // 大写字母
-        "vfs:/resources/11111111-2222-3333-4444-555555555555/extra", // 多余 path
-        "vfs:/other/11111111-2222-3333-4444-555555555555" // 非 resources 路径
+        "resource://files/11111111-2222-3333-4444-55555555555A", // 大写字母
+        "resource://files/11111111-2222-3333-4444-555555555555/extra", // 多余 path
+        "resource://other/11111111-2222-3333-4444-555555555555" // 非 files 命名空间
       })
   void malformedSessionResourceUriFailsDeterministically(String malformedUri) {
     PluginCredentialAccess credentialAccess = validCredentialAccess();
@@ -944,7 +944,7 @@ class MiniMaxMavisToolFailureTest {
   /** 参数里的 session 资源按数组/对象结构递归解析，非资源取值原样保留（直接驱动资源适配的公开入口）。 */
   @Test
   void resolveInputsRecursivelyResolvesNestedSessionResources() throws Exception {
-    String resource = "vfs:/resources/" + VALID_BLOB_UUID;
+    String resource = "resource://files/" + VALID_BLOB_UUID;
     JsonNode arguments =
         JSON.readTree(
             "{\"image\":\""
@@ -980,7 +980,7 @@ class MiniMaxMavisToolFailureTest {
             new MiniMaxMavisCapabilityCache(client),
             new MiniMaxMavisResourceAccess(new HttpDownloadGateway()),
             executor);
-    String arguments = "{\"image\":\"vfs:/resources/" + VALID_BLOB_UUID + "\"}";
+    String arguments = "{\"image\":\"resource://files/" + VALID_BLOB_UUID + "\"}";
     ToolCall call = new ToolCall("call-bad-download", tool.descriptor().name(), arguments);
     UUID threadId = UUID.fromString("44444444-5555-6666-7777-888888888888");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
@@ -1338,7 +1338,7 @@ class MiniMaxMavisToolFailureTest {
     public URI resolveSessionResource(UUID sessionId, String resourceUri) {
       resolvedSessionIds.add(sessionId);
       resolvedUris.add(resourceUri);
-      String id = resourceUri.substring("vfs:/resources/".length());
+      String id = resourceUri.substring("resource://files/".length());
       return URI.create("https://resolved.files.local/" + id);
     }
 

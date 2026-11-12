@@ -162,6 +162,7 @@ func (*pollingWindowsJobAPI) AwaitJobEmpty(context.Context, windows.Handle, time
 func TestWindowsJobProtocol_PollsUntilCommandExit(t *testing.T) {
 	api := &pollingWindowsJobAPI{statuses: []uint32{uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_OBJECT_0)}}
 	ownerInput, ownerWriter := io.Pipe()
+	defer ownerInput.Close()
 	defer ownerWriter.Close()
 	dir := stateTestDir(t)
 	if err := publishText(dir, permitFile, "permit"); err != nil {
@@ -195,10 +196,11 @@ func TestWindowsJobProtocol_PublishesExitBeforeClosingHandles(t *testing.T) {
 	if err := publishText(dir, permitFile, "permit"); err != nil {
 		t.Fatal(err)
 	}
-	api := &observedWindowsJobProtocolAPI{stateDir: dir, fakeWindowsJobProtocolAPI: fakeWindowsJobProtocolAPI{waitStatus: uint32(windows.WAIT_OBJECT_0), exitCode: 7}}
 	ownerInput, ownerWriter := io.Pipe()
+	defer ownerInput.Close()
+	defer ownerWriter.Close()
+	api := &observedWindowsJobProtocolAPI{stateDir: dir, fakeWindowsJobProtocolAPI: fakeWindowsJobProtocolAPI{waitStatus: uint32(windows.WAIT_OBJECT_0), exitCode: 7}}
 	result := runWindowsJobProtocolWithAPI(dir, 5, windows.ProcessInformation{Process: 10, Thread: 11, ProcessId: 12}, ownerInput, api)
-	_ = ownerWriter.Close()
 	if result != 0 || !reflect.DeepEqual(api.exitPublishedWhen, []bool{true, true, true}) {
 		t.Fatalf("result/exit-before-close = %d/%v", result, api.exitPublishedWhen)
 	}
