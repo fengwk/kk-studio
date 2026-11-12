@@ -304,6 +304,8 @@ public final class ProviderResponseJsonCodec {
     putNullableText(encoded, "itemType", data.itemType());
     putNullableText(encoded, "contentType", data.contentType());
     encoded.put("refusal", data.refusal());
+    putNullableBoolean(encoded, "thought", data.thought());
+    encoded.put("itemStart", data.itemStart());
     encoded.set("nativeFields", data.nativeFields());
   }
 
@@ -324,6 +326,8 @@ public final class ProviderResponseJsonCodec {
             "itemType",
             "contentType",
             "refusal",
+            "thought",
+            "itemStart",
             "nativeFields"),
         Set.of(),
         "providerBlockData");
@@ -342,6 +346,8 @@ public final class ProviderResponseJsonCodec {
         decodeNullableText(encoded, "itemType"),
         decodeNullableText(encoded, "contentType"),
         bool(encoded, "refusal"),
+        decodeNullableBoolean(encoded, "thought"),
+        bool(encoded, "itemStart"),
         encoded.get("nativeFields"));
   }
 
@@ -351,6 +357,25 @@ public final class ProviderResponseJsonCodec {
     } else {
       node.put(field, value);
     }
+  }
+
+  private void putNullableBoolean(ObjectNode node, String field, Boolean value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value.booleanValue());
+    }
+  }
+
+  private Boolean decodeNullableBoolean(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException("expected boolean at " + field);
+    }
+    return value.booleanValue();
   }
 
   private void requireBlockFields(ObjectNode node, Set<String> fields, String label) {

@@ -905,9 +905,15 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
         fields.set("itemFields", itemFields);
         first = false;
       }
-      JsonNode annotations = contentPart.get("annotations");
-      if (annotations != null) {
-        fields.set("annotations", annotations.deepCopy());
+      Set<String> semanticContentFields =
+          switch (contentType) {
+            case "output_text" -> Set.of("type", "text");
+            case "refusal" -> Set.of("type", "refusal");
+            default -> Set.of("type");
+          };
+      ObjectNode contentFields = copyFields(contentPart, semanticContentFields);
+      if (!contentFields.isEmpty()) {
+        fields.set("contentFields", contentFields);
       }
       String text =
           "refusal".equals(contentType)
@@ -919,7 +925,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
         fields.put("refusal", true);
         blocks.add(new ProviderTextBlock(text, responseBlockData(fields)));
       } else {
-        fields.set("content", contentPart.deepCopy());
         blocks.add(new ProviderOpaqueBlock("message_content", responseBlockData(fields)));
       }
     }
@@ -995,6 +1000,8 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
         itemType,
         contentType,
         refusal,
+        null,
+        nativeFields.has("itemFields") || nativeFields.has("item"),
         nativeFields);
   }
 

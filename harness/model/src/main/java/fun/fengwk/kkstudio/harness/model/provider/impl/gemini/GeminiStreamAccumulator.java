@@ -567,7 +567,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
     for (TrackedPart part : trackedParts) {
       boolean hasSemanticText = part.hasText || part.thought;
       if (hasSemanticText) {
-        ProviderBlockData textData = blockData(part.rawPart, Set.of("text"));
+        ProviderBlockData textData = blockData(part.rawPart, Set.of("text", "thought"));
         if (part.thought) {
           responseBlocks.add(new ProviderThinkingBlock(part.text.toString(), textData));
         } else {
@@ -578,8 +578,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
         if (this.stopReason != GenerationStopReason.FILTERED) {
           responseBlocks.add(
               new ProviderToolCallBlock(
-                  effectiveToolCalls.get(toolCallIndex++),
-                  blockData(part.rawPart, Set.of("functionCall", "text"))));
+                  effectiveToolCalls.get(toolCallIndex++), functionCallBlockData(part.rawPart)));
         }
       } else if (!hasSemanticText) {
         responseBlocks.add(
@@ -617,11 +616,51 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
             ? rawPart.path("thoughtSignature").stringValue()
             : null;
     nativeFields.remove("thoughtSignature");
+    Boolean thought =
+        rawPart.path("thought").isBoolean() ? rawPart.path("thought").booleanValue() : null;
+    nativeFields.remove("thought");
     return new ProviderBlockData(
         ProviderReplayFormat.GEMINI_CONTENT,
         descriptor.affinity(request.model().modelId()),
         signature,
         null,
+        null,
+        null,
+        null,
+        false,
+        thought,
+        nativeFields);
+  }
+
+  private ProviderBlockData functionCallBlockData(ObjectNode rawPart) {
+    ObjectNode nativeFields = rawPart.deepCopy();
+    nativeFields.remove("functionCall");
+    nativeFields.remove("text");
+    nativeFields.remove("thought");
+    nativeFields.remove("thoughtSignature");
+    JsonNode functionCall = rawPart.get("functionCall");
+    if (functionCall != null && functionCall.isObject()) {
+      ObjectNode functionCallFields = ((ObjectNode) functionCall).deepCopy();
+      functionCallFields.remove("name");
+      functionCallFields.remove("id");
+      functionCallFields.remove("args");
+      if (!functionCallFields.isEmpty()) {
+        nativeFields.set("functionCall", functionCallFields);
+      }
+    }
+    String signature =
+        rawPart.path("thoughtSignature").isString()
+            ? rawPart.path("thoughtSignature").stringValue()
+            : null;
+    return new ProviderBlockData(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        descriptor.affinity(request.model().modelId()),
+        signature,
+        null,
+        null,
+        null,
+        null,
+        false,
         null,
         nativeFields);
   }

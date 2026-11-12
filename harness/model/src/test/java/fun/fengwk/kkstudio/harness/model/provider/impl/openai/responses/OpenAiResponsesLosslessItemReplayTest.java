@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -71,6 +73,9 @@ class OpenAiResponsesLosslessItemReplayTest {
       "{\"id\":\"fc_1\",\"type\":\"function_call\",\"status\":\"completed\",\"call_id\":\"call_1\","
           + "\"name\":\"query\",\"arguments\":\"{\\\"q\\\":\\\"Paris\\\"}\","
           + "\"future_member\":{\"nested\":true}}";
+  private static final String UNKNOWN_ITEM =
+      "{\"id\":\"ws_1\",\"type\":\"web_search_call\",\"status\":\"completed\","
+          + "\"action\":{\"query\":\"Paris\"}}";
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -150,6 +155,105 @@ class OpenAiResponsesLosslessItemReplayTest {
                         createDescriptor())
                     .bodyUtf8Bytes())
             .get("input");
+  }
+
+  private ArrayNode encodeNextRequest(List<ProviderContentBlock> assistantBlocks) throws Exception {
+    return (ArrayNode)
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            List.of(
+                                userMessage(),
+                                new ProviderMessage(ProviderMessageRole.ASSISTANT, assistantBlocks),
+                                new ProviderMessage(
+                                    ProviderMessageRole.USER,
+                                    List.of(new ProviderTextBlock("thanks"))))),
+                        createDescriptor())
+                    .bodyUtf8Bytes())
+            .get("input");
+  }
+
+  @Test
+  void responseBlocksReplayOrderedNativeItemsWithoutReplayState() throws Exception {
+    ProviderCompletion completion =
+        accumulateTerminalItems(MESSAGE_ITEM, REASONING_ITEM, FUNCTION_CALL_ITEM, UNKNOWN_ITEM);
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    ArrayNode input = encodeNextRequest(blocks);
+
+    assertEquals(6, input.size());
+    assertEquals(MAPPER.readTree(MESSAGE_ITEM), input.get(1));
+    assertEquals(MAPPER.readTree(REASONING_ITEM), input.get(2));
+    assertEquals(MAPPER.readTree(FUNCTION_CALL_ITEM), input.get(3));
+    assertEquals(MAPPER.readTree(UNKNOWN_ITEM), input.get(4));
+  }
+
+  @Test
+  void crossModelBlocksUseReadableThinkingAsTextAndDropOpaqueAndEncryptedFields() throws Exception {
+    var otherAffinity = createDescriptor().affinity("gpt-4o");
+    List<ProviderContentBlock> blocks =
+        List.of(
+            new ProviderThinkingBlock(
+                "private thought",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    "encrypted",
+                    "rs_1",
+                    "reasoning",
+                    "summary_text",
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderTextBlock(
+                "answer",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    null,
+                    "msg_1",
+                    "message",
+                    "output_text",
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderOpaqueBlock(
+                "web_search_call",
+                new ProviderBlockData(
+                    ProviderReplayFormat.OPENAI_RESPONSES,
+                    otherAffinity,
+                    null,
+                    null,
+                    "ws_1",
+                    "web_search_call",
+                    null,
+                    false,
+                    null,
+                    true,
+                    MAPPER.createObjectNode())));
+    JsonNode encoded =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        List.of(
+                            userMessage(),
+                            new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks))),
+                    createDescriptor())
+                .bodyUtf8Bytes());
+    ArrayNode input = (ArrayNode) encoded.path("input");
+
+    assertEquals(2, input.size());
+    assertEquals("message", input.get(1).path("type").asString(""));
+    assertEquals(
+        "private thoughtanswer", input.get(1).path("content").get(0).path("text").asString(""));
+    assertFalse(input.get(1).has("encrypted_content"));
+    assertFalse(input.get(1).path("content").get(0).has("thought"));
   }
 
   /**

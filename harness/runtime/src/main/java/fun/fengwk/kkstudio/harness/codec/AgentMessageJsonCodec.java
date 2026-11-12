@@ -357,6 +357,8 @@ public final class AgentMessageJsonCodec {
     putNullableText(providerData, "itemType", data.itemType());
     putNullableText(providerData, "contentType", data.contentType());
     providerData.put("refusal", data.refusal());
+    putNullableBoolean(providerData, "thought", data.thought());
+    providerData.put("itemStart", data.itemStart());
     providerData.set("nativeFields", data.nativeFields());
   }
 
@@ -376,6 +378,8 @@ public final class AgentMessageJsonCodec {
             "itemType",
             "contentType",
             "refusal",
+            "thought",
+            "itemStart",
             "nativeFields"),
         "content.providerBlockData");
     ProviderReplayFormat protocol = ProviderReplayFormat.fromWireValue(text(data, "protocol"));
@@ -404,6 +408,8 @@ public final class AgentMessageJsonCodec {
         decodeNullableText(data, "itemType"),
         decodeNullableText(data, "contentType"),
         bool(data, "refusal"),
+        decodeNullableBoolean(data, "thought"),
+        bool(data, "itemStart"),
         data.get("nativeFields"));
   }
 
@@ -551,6 +557,25 @@ public final class AgentMessageJsonCodec {
     } else {
       node.put(field, value);
     }
+  }
+
+  private static void putNullableBoolean(ObjectNode node, String field, Boolean value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value.booleanValue());
+    }
+  }
+
+  private static Boolean decodeNullableBoolean(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(field + " must be boolean or null");
+    }
+    return value.booleanValue();
   }
 
   private static void putNullableLong(ObjectNode node, String field, Long value) {

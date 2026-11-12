@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -21,6 +22,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -387,6 +390,14 @@ public final class OpenAiResponsesRequestEncoder {
         }
       }
       case ASSISTANT -> {
+        List<ObjectNode> blockReplayItems =
+            buildBlockReplayItems(descriptor, model.modelId(), msg.contents());
+        if (blockReplayItems != null) {
+          for (ObjectNode item : blockReplayItems) {
+            inputItems.add(item);
+          }
+          return;
+        }
         ProviderReplayState replayState = msg.replayState();
         if (replayState != null
             && canReplay(replayState, descriptor, model.modelId(), msg.contents())) {
@@ -452,58 +463,223 @@ public final class OpenAiResponsesRequestEncoder {
             + block.getClass().getSimpleName());
   }
 
+  private static List<ObjectNode> buildBlockReplayItems(
+      ProviderDescriptor descriptor, String requestedModel, List<ProviderContentBlock> blocks) {
+    if (blocks.isEmpty()) {
+      return null;
+    }
+    var affinity = descriptor.affinity(requestedModel);
+    ArrayNode output = NODES.arrayNode();
+    ObjectNode currentItem = null;
+
+    for (ProviderContentBlock block : blocks) {
+      ProviderBlockData data = providerBlockData(block);
+      if (data == null
+          || data.protocol() != ProviderReplayFormat.OPENAI_RESPONSES
+          || !data.affinity().equals(affinity)) {
+        return null;
+      }
+      if (data.itemStart()) {
+        if (currentItem != null) {
+          output.add(currentItem);
+        }
+        currentItem = beginReplayItem(data);
+      } else if (currentItem == null) {
+        return null;
+      }
+      if (!appendReplayBlock(currentItem, block, data)) {
+        return null;
+      }
+    }
+    if (currentItem == null) {
+      return null;
+    }
+    output.add(currentItem);
+    if (declinesReplay(output, blocks)) {
+      return null;
+    }
+    List<ObjectNode> items = new ArrayList<>(output.size());
+    for (JsonNode item : output) {
+      items.add((ObjectNode) item.deepCopy());
+    }
+    return items;
+  }
+
+  private static ObjectNode beginReplayItem(ProviderBlockData data) {
+    ObjectNode item = NODES.objectNode();
+    JsonNode nativeFields = data.nativeFields();
+    JsonNode itemFields = nativeFields.get("itemFields");
+    if (itemFields != null) {
+      mergeNativeFields(item, itemFields);
+    }
+    JsonNode rawItem = nativeFields.get("item");
+    if (rawItem != null) {
+      mergeNativeFields(item, rawItem);
+    }
+    if (data.itemId() != null) {
+      item.put("id", data.itemId());
+    }
+    if (data.itemType() == null || data.itemType().isBlank()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI Responses block item type");
+    }
+    item.put("type", data.itemType());
+    if ("message".equals(data.itemType())) {
+      item.put("role", "assistant");
+      if (!item.path("content").isArray()) {
+        item.putArray("content");
+      }
+    } else if ("reasoning".equals(data.itemType())) {
+      if (data.encryptedContent() != null) {
+        item.put("encrypted_content", data.encryptedContent());
+      }
+      if (!item.path("summary").isArray()) {
+        item.putArray("summary");
+      }
+    }
+    return item;
+  }
+
+  private static boolean appendReplayBlock(
+      ObjectNode item, ProviderContentBlock block, ProviderBlockData data) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      if (!"message".equals(data.itemType())
+          || !Set.of("output_text", "refusal").contains(data.contentType())) {
+        return false;
+      }
+      ObjectNode content = item.withArray("content").addObject();
+      mergeNativeFields(content, data.nativeFields().get("contentFields"));
+      content.put("type", data.contentType());
+      if (data.refusal()) {
+        content.put("refusal", textBlock.text());
+      } else {
+        content.put("text", textBlock.text());
+      }
+      JsonNode annotations = data.nativeFields().get("annotations");
+      if (annotations != null) {
+        content.set("annotations", annotations.deepCopy());
+      }
+      return true;
+    }
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      if (!"reasoning".equals(data.itemType()) || data.contentType() == null) {
+        return false;
+      }
+      ObjectNode summary = item.withArray("summary").addObject();
+      summary.put("type", data.contentType());
+      summary.put("text", thinkingBlock.thinking());
+      return true;
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      if (!"function_call".equals(data.itemType()) || !data.itemStart()) {
+        return false;
+      }
+      ProviderToolCall call = toolCallBlock.toolCall();
+      ProviderJsonHelper.parseStrictJsonObject(
+          call.argumentsJson(), "function_call arguments must be a JSON object");
+      item.put("call_id", call.id());
+      item.put("name", call.name());
+      item.put("arguments", call.argumentsJson());
+      return true;
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      if ("message_content".equals(opaqueBlock.blockType())) {
+        if (!"message".equals(data.itemType()) || data.contentType() == null) {
+          return false;
+        }
+        JsonNode fields = data.nativeFields();
+        JsonNode contentFields = fields.get("content");
+        if (contentFields == null || !contentFields.isObject()) {
+          return false;
+        }
+        ObjectNode content = item.withArray("content").addObject();
+        mergeNativeFields(content, contentFields);
+        content.put("type", data.contentType());
+        return true;
+      }
+      return data.itemStart() && data.itemType() != null;
+    }
+    return false;
+  }
+
+  private static ProviderBlockData providerBlockData(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      return textBlock.providerBlockData();
+    }
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      return thinkingBlock.providerBlockData();
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      return toolCallBlock.providerBlockData();
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      return opaqueBlock.providerBlockData();
+    }
+    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+      return redactedBlock.providerBlockData();
+    }
+    return null;
+  }
+
+  private static void mergeNativeFields(ObjectNode target, JsonNode fields) {
+    if (fields == null) {
+      return;
+    }
+    if (!fields.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI Responses block native fields");
+    }
+    for (var field : fields.properties()) {
+      target.set(field.getKey(), field.getValue().deepCopy());
+    }
+  }
+
   private static void encodeAssistantSemanticFallback(
       List<ProviderContentBlock> contents, ArrayNode inputItems) {
     StringBuilder textBuf = new StringBuilder();
-    StringBuilder thinkBuf = new StringBuilder();
-    List<ProviderToolCallBlock> toolCalls = new ArrayList<>();
 
     for (ProviderContentBlock block : contents) {
       if (block instanceof ProviderTextBlock textBlock) {
         textBuf.append(textBlock.text());
       } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
-        thinkBuf.append(thinkingBlock.thinking());
+        if (thinkingBlock.thinking() != null) {
+          textBuf.append(thinkingBlock.thinking());
+        }
       } else if (block instanceof ProviderJsonBlock jsonBlock) {
-        // assistant JSON 诊断（如 tool_call_diagnostic）降级为普通文本。
         textBuf.append(jsonBlock.json());
       } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
-        toolCalls.add(toolCallBlock);
+        flushAssistantText(textBuf, inputItems);
+        ProviderToolCall call = toolCallBlock.toolCall();
+        ProviderJsonHelper.parseStrictJsonObject(
+            call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
+        ObjectNode item = inputItems.addObject();
+        item.put("type", "function_call");
+        item.put("call_id", call.id());
+        item.put("name", call.name());
+        item.put("arguments", call.argumentsJson());
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Opaque and redacted provider content is same-model-only.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "Unsupported assistant content block: " + block.getClass().getSimpleName());
       }
     }
+    flushAssistantText(textBuf, inputItems);
+  }
 
-    if (!thinkBuf.isEmpty()) {
-      ObjectNode reasoning = inputItems.addObject();
-      reasoning.put("type", "reasoning");
-      ArrayNode summary = reasoning.putArray("summary");
-      ObjectNode summaryItem = summary.addObject();
-      summaryItem.put("type", "summary_text");
-      summaryItem.put("text", thinkBuf.toString());
+  private static void flushAssistantText(StringBuilder text, ArrayNode inputItems) {
+    if (text.isEmpty()) {
+      return;
     }
-
-    if (!textBuf.isEmpty()) {
-      ObjectNode msg = inputItems.addObject();
-      msg.put("type", "message");
-      msg.put("role", "assistant");
-      ArrayNode contentArr = msg.putArray("content");
-      ObjectNode contentBlock = contentArr.addObject();
-      contentBlock.put("type", "output_text");
-      contentBlock.put("text", textBuf.toString());
-    }
-
-    for (ProviderToolCallBlock call : toolCalls) {
-      ProviderToolCall tc = call.toolCall();
-      ProviderJsonHelper.parseStrictJsonObject(
-          tc.argumentsJson(), "toolCall argumentsJson must be a JSON object");
-      ObjectNode fc = inputItems.addObject();
-      fc.put("type", "function_call");
-      fc.put("call_id", tc.id());
-      fc.put("name", tc.name());
-      fc.put("arguments", tc.argumentsJson());
-    }
+    ObjectNode message = inputItems.addObject();
+    message.put("type", "message");
+    message.put("role", "assistant");
+    ObjectNode content = message.putArray("content").addObject();
+    content.put("type", "output_text");
+    content.put("text", text.toString());
+    text.setLength(0);
   }
 
   /**
@@ -697,9 +873,9 @@ public final class OpenAiResponsesRequestEncoder {
                 }
                 replayText.append(block.get("refusal").stringValue());
               }
-              default -> throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay message content block type must be 'output_text' or 'refusal'");
+              default -> {
+                // Unknown content unions are opaque native facts and do not contribute text.
+              }
             }
           }
         }
@@ -827,6 +1003,9 @@ public final class OpenAiResponsesRequestEncoder {
         ProviderJsonHelper.parseStrictJsonObject(
             tc.argumentsJson(), "durable tool call arguments must be a JSON object");
         durableToolCalls.add(tc);
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Opaque and redacted provider content carries no comparable assistant semantics.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,

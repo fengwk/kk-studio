@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -949,7 +950,7 @@ class GeminiRequestEncoderTest {
     assertEquals(3, parts.size());
     // 原顺序保持：0 is thought, 1 is text, 2 is functionCall
     assertEquals("Deep thought", parts.get(0).get("text").asString(""));
-    assertTrue(parts.get(0).get("thought").asBoolean(false));
+    assertFalse(parts.get(0).has("thought"));
     assertEquals("Answer text", parts.get(1).get("text").asString(""));
     assertFalse(parts.get(1).has("thought"));
     assertEquals("toolA", parts.get(2).get("functionCall").get("name").asString(""));
@@ -1001,6 +1002,136 @@ class GeminiRequestEncoderTest {
     assertEquals(2, parts.size());
     assertEquals("sig_123", parts.get(0).get("thoughtSignature").asString(""));
     assertTrue(parts.get(0).get("thought").asBoolean(false));
+  }
+
+  @Test
+  void replaysGeminiBlocksOnlyForMatchingAffinityAndDropsSignaturesAcrossModels() throws Exception {
+    ProviderReplayAffinity affinity = descriptor().affinity("gemini-2.5-flash");
+    ObjectNode functionCallFields = MAPPER.createObjectNode();
+    functionCallFields.putObject("functionCall").put("futureCallField", "call-extra");
+    functionCallFields.put("futurePartField", "part-extra");
+    List<ProviderContentBlock> blocks =
+        List.of(
+            new ProviderThinkingBlock(
+                "private thought",
+                new ProviderBlockData(
+                    ProviderReplayFormat.GEMINI_CONTENT,
+                    affinity,
+                    "thought-signature",
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderTextBlock(
+                "answer",
+                new ProviderBlockData(
+                    ProviderReplayFormat.GEMINI_CONTENT,
+                    affinity,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    null,
+                    MAPPER.createObjectNode())),
+            new ProviderToolCallBlock(
+                new ProviderToolCall("call-1", "lookup", "{}"),
+                new ProviderBlockData(
+                    ProviderReplayFormat.GEMINI_CONTENT,
+                    affinity,
+                    "tool-signature",
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    null,
+                    functionCallFields)));
+
+    ProviderRequest sameModelRequest =
+        new ProviderRequest(
+            model(true),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks)),
+            List.of(),
+            ProviderCacheControl.none());
+    ArrayNode sameModelParts =
+        (ArrayNode)
+            MAPPER
+                .readTree(encoder.encode(sameModelRequest, descriptor()).bodyUtf8Bytes())
+                .path("contents")
+                .get(1)
+                .path("parts");
+    assertEquals(3, sameModelParts.size());
+    assertEquals("thought-signature", sameModelParts.get(0).path("thoughtSignature").asString(""));
+    assertEquals("answer", sameModelParts.get(1).path("text").asString(""));
+    assertEquals(
+        "call-extra",
+        sameModelParts.get(2).path("functionCall").path("futureCallField").asString(""));
+    assertEquals("part-extra", sameModelParts.get(2).path("futurePartField").asString(""));
+    assertEquals("tool-signature", sameModelParts.get(2).path("thoughtSignature").asString(""));
+
+    ProviderReplayAffinity otherModel = descriptor().affinity("gemini-2.5-pro");
+    List<ProviderContentBlock> crossModelBlocks =
+        List.of(
+            new ProviderThinkingBlock(
+                "private thought",
+                new ProviderBlockData(
+                    ProviderReplayFormat.GEMINI_CONTENT,
+                    otherModel,
+                    "thought-signature",
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    true,
+                    MAPPER.createObjectNode())),
+            new ProviderToolCallBlock(
+                new ProviderToolCall("call-1", "lookup", "{}"),
+                new ProviderBlockData(
+                    ProviderReplayFormat.GEMINI_CONTENT,
+                    otherModel,
+                    "tool-signature",
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    null,
+                    MAPPER.createObjectNode())));
+    ProviderRequest crossModelRequest =
+        new ProviderRequest(
+            model(true),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(ProviderMessageRole.ASSISTANT, crossModelBlocks)),
+            List.of(),
+            ProviderCacheControl.none());
+    ArrayNode crossModelParts =
+        (ArrayNode)
+            MAPPER
+                .readTree(encoder.encode(crossModelRequest, descriptor()).bodyUtf8Bytes())
+                .path("contents")
+                .get(1)
+                .path("parts");
+    assertEquals(2, crossModelParts.size());
+    assertEquals("private thought", crossModelParts.get(0).path("text").asString(""));
+    assertFalse(crossModelParts.get(0).has("thought"));
+    assertFalse(crossModelParts.get(0).has("thoughtSignature"));
+    assertEquals("lookup", crossModelParts.get(1).path("functionCall").path("name").asString(""));
+    assertFalse(crossModelParts.get(1).has("thoughtSignature"));
   }
 
   /**
@@ -1275,7 +1406,7 @@ class GeminiRequestEncoderTest {
                 .get(1)
                 .get("parts");
     assertEquals(2, fallbackThoughtParts.size());
-    assertTrue(fallbackThoughtParts.get(0).path("thought").asBoolean(false));
+    assertFalse(fallbackThoughtParts.get(0).has("thought"));
     assertFalse(fallbackThoughtParts.get(0).has("thoughtSignature"));
     assertEquals("answer", fallbackThoughtParts.get(1).path("text").asString(""));
 
@@ -2721,7 +2852,7 @@ class GeminiRequestEncoderTest {
                 .get("parts");
     assertEquals(1, thinkingParts.size());
     assertEquals("durable_different_thinking", thinkingParts.get(0).path("text").asString(""));
-    assertTrue(thinkingParts.get(0).path("thought").asBoolean(false));
+    assertFalse(thinkingParts.get(0).has("thought"));
 
     // 2. Tool Calls 数量不一致 -> 退回 durable 语义
     ObjectNode p2 = MAPPER.createObjectNode();

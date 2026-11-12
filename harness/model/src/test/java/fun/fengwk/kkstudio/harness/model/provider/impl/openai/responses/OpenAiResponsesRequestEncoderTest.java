@@ -1108,10 +1108,10 @@ class OpenAiResponsesRequestEncoderTest {
     OpenAiResponsesEncodedRequest enc1 = encoder.encode(req1, desc);
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode input1 = root1.get("input");
-    assertEquals(2, input1.size());
-    assertEquals("reasoning", input1.get(0).path("type").asString(""));
-    assertEquals("my thoughts", input1.get(0).path("summary").get(0).path("text").asString(""));
-    assertEquals("message", input1.get(1).path("type").asString(""));
+    assertEquals(1, input1.size());
+    assertEquals("message", input1.get(0).path("type").asString(""));
+    assertEquals(
+        "my thoughtsmy answer", input1.get(0).path("content").get(0).path("text").asString(""));
 
     // 2. ToolResult empty blocks
     ProviderRequest req2 =

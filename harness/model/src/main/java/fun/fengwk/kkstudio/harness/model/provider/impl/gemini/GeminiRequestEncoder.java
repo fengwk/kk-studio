@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -132,7 +135,14 @@ final class GeminiRequestEncoder {
           currentParts = contentNode.putArray("parts");
         }
 
-        if (canReplay(msg.replayState(), descriptor, request.model().modelId(), msg.contents())) {
+        List<ObjectNode> blockReplayParts =
+            buildBlockReplayParts(descriptor, request.model().modelId(), msg.contents());
+        if (blockReplayParts != null) {
+          for (ObjectNode partNode : blockReplayParts) {
+            currentParts.add(partNode);
+          }
+        } else if (canReplay(
+            msg.replayState(), descriptor, request.model().modelId(), msg.contents())) {
           for (JsonNode partNode : msg.replayState().payload().path("parts")) {
             currentParts.add(partNode.deepCopy());
           }
@@ -560,11 +570,117 @@ final class GeminiRequestEncoder {
     }
   }
 
+  private static List<ObjectNode> buildBlockReplayParts(
+      ProviderDescriptor descriptor, String requestedModel, List<ProviderContentBlock> blocks) {
+    if (blocks.isEmpty()) {
+      return null;
+    }
+    var requestedAffinity = descriptor.affinity(requestedModel);
+    List<ObjectNode> parts = new ArrayList<>();
+    ObjectNode payload = NODES.objectNode();
+    payload.put("role", "model");
+    ArrayNode payloadParts = payload.putArray("parts");
+
+    for (ProviderContentBlock block : blocks) {
+      ProviderBlockData data = providerBlockData(block);
+      if (data == null
+          || data.protocol() != ProviderReplayFormat.GEMINI_CONTENT
+          || !data.affinity().equals(requestedAffinity)) {
+        return null;
+      }
+
+      ObjectNode part = NODES.objectNode();
+      JsonNode functionCallExtras = null;
+      ObjectNode nativeFields = (ObjectNode) data.nativeFields();
+      if (block instanceof ProviderToolCallBlock) {
+        functionCallExtras = nativeFields.remove("functionCall");
+      }
+      mergeNativeFields(part, nativeFields);
+      if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        part.put("text", thinkingBlock.thinking());
+        part.put("thought", data.thought() == null || data.thought().booleanValue());
+      } else if (block instanceof ProviderTextBlock textBlock) {
+        part.put("text", textBlock.text());
+        if (data.thought() != null) {
+          part.put("thought", data.thought().booleanValue());
+        }
+      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        ProviderToolCall call = toolCallBlock.toolCall();
+        ObjectNode functionCall = part.putObject("functionCall");
+        if (functionCallExtras != null) {
+          mergeNativeFields(functionCall, functionCallExtras);
+        }
+        functionCall.put("name", call.name());
+        if (call.id() != null && !call.id().isBlank()) {
+          functionCall.put("id", call.id());
+        }
+        JsonNode args =
+            ProviderJsonHelper.parseStrictJson(
+                call.argumentsJson(), "tool call arguments must be a valid JSON object");
+        if (!args.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "tool call arguments must be a valid JSON object");
+        }
+        functionCall.set("args", args);
+      } else if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+        if (!"gemini_part".equals(opaqueBlock.blockType())) {
+          return null;
+        }
+      } else {
+        return null;
+      }
+      if (data.thought() != null && !(block instanceof ProviderTextBlock)) {
+        part.put("thought", data.thought().booleanValue());
+      }
+      if (data.signature() != null) {
+        part.put("thoughtSignature", data.signature());
+      }
+      parts.add(part);
+      payloadParts.add(part.deepCopy());
+    }
+
+    if (!validateGeminiReplayPayload(payload, blocks)) {
+      return null;
+    }
+    return parts;
+  }
+
+  private static ProviderBlockData providerBlockData(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      return textBlock.providerBlockData();
+    }
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      return thinkingBlock.providerBlockData();
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      return toolCallBlock.providerBlockData();
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      return opaqueBlock.providerBlockData();
+    }
+    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+      return redactedBlock.providerBlockData();
+    }
+    return null;
+  }
+
+  private static void mergeNativeFields(ObjectNode target, JsonNode fields) {
+    if (fields == null || !fields.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini assistant block native fields");
+    }
+    for (var field : fields.properties()) {
+      target.set(field.getKey(), field.getValue().deepCopy());
+    }
+  }
+
   private static void encodeAssistantBlock(ArrayNode parts, ProviderContentBlock block) {
     if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      if (thinkingBlock.thinking() == null || thinkingBlock.thinking().isEmpty()) {
+        return;
+      }
       ObjectNode part = parts.addObject();
       part.put("text", thinkingBlock.thinking());
-      part.put("thought", true);
       return;
     }
     if (block instanceof ProviderTextBlock textBlock) {
@@ -594,6 +710,9 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "tool call arguments must be a valid JSON object");
       }
       functionCall.set("args", argsNode);
+      return;
+    }
+    if (block instanceof ProviderOpaqueBlock || block instanceof ProviderRedactedThinkingBlock) {
       return;
     }
     throw new ProviderException(
@@ -765,6 +884,9 @@ final class GeminiRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
         durableCalls.add(call);
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Native opaque and redacted content does not contribute to durable semantic comparison.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");

@@ -20,11 +20,13 @@ public record ProviderBlockData(
     String itemType,
     String contentType,
     boolean refusal,
+    Boolean thought,
+    boolean itemStart,
     JsonNode nativeFields) {
 
   public ProviderBlockData(
       ProviderReplayFormat protocol, ProviderReplayAffinity affinity, JsonNode nativeFields) {
-    this(protocol, affinity, null, null, null, null, null, false, nativeFields);
+    this(protocol, affinity, null, null, null, null, null, false, null, false, nativeFields);
   }
 
   public ProviderBlockData(
@@ -34,7 +36,67 @@ public record ProviderBlockData(
       String encryptedContent,
       String itemId,
       JsonNode nativeFields) {
-    this(protocol, affinity, signature, encryptedContent, itemId, null, null, false, nativeFields);
+    this(
+        protocol,
+        affinity,
+        signature,
+        encryptedContent,
+        itemId,
+        null,
+        null,
+        false,
+        null,
+        false,
+        nativeFields);
+  }
+
+  public ProviderBlockData(
+      ProviderReplayFormat protocol,
+      ProviderReplayAffinity affinity,
+      String signature,
+      String encryptedContent,
+      String itemId,
+      String itemType,
+      String contentType,
+      boolean refusal,
+      JsonNode nativeFields) {
+    this(
+        protocol,
+        affinity,
+        signature,
+        encryptedContent,
+        itemId,
+        itemType,
+        contentType,
+        refusal,
+        null,
+        false,
+        nativeFields);
+  }
+
+  public ProviderBlockData(
+      ProviderReplayFormat protocol,
+      ProviderReplayAffinity affinity,
+      String signature,
+      String encryptedContent,
+      String itemId,
+      String itemType,
+      String contentType,
+      boolean refusal,
+      Boolean thought,
+      JsonNode nativeFields) {
+    this(
+        protocol,
+        affinity,
+        signature,
+        encryptedContent,
+        itemId,
+        itemType,
+        contentType,
+        refusal,
+        thought,
+        false,
+        nativeFields);
   }
 
   public ProviderBlockData {

@@ -403,12 +403,12 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(
                     new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("sunny")))
             .get("input");
-    assertEquals(2, reasoningInput.size());
-    assertEquals("reasoning", reasoningInput.get(0).path("type").asString(""));
+    assertEquals(1, reasoningInput.size());
+    assertEquals("message", reasoningInput.get(0).path("type").asString(""));
     assertEquals(
-        "durable thought", reasoningInput.get(0).path("summary").get(0).path("text").asString(""));
+        "durable thoughtsunny",
+        reasoningInput.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(reasoningInput.get(0).has("encrypted_content"));
-    assertEquals("sunny", reasoningInput.get(1).path("content").get(0).path("text").asString(""));
 
     // 3. function_call 携带 status 与未来成员：affinity 失配回退语义编码
     ArrayNode extendedCallOutput = MAPPER.createArrayNode();
@@ -442,11 +442,11 @@ class OpenAiResponsesOpaqueItemReplayTest {
                 List.of(
                     new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("sunny")))
             .get("input");
-    assertEquals(2, summaryInput.size());
-    assertEquals("reasoning", summaryInput.get(0).path("type").asString(""));
+    assertEquals(1, summaryInput.size());
+    assertEquals("message", summaryInput.get(0).path("type").asString(""));
     assertEquals(
-        "durable thought", summaryInput.get(0).path("summary").get(0).path("text").asString(""));
-    assertEquals("sunny", summaryInput.get(1).path("content").get(0).path("text").asString(""));
+        "durable thoughtsunny",
+        summaryInput.get(0).path("content").get(0).path("text").asString(""));
 
     // 5. 空 reasoning 占位符 + hosted item 混排：占位符不承载原生推理，decline 原位回放而回退语义编码；回退省略 hosted
     //    native 事实，但绝不拒绝整个请求。
