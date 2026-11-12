@@ -568,6 +568,28 @@ class ProviderResourceMaterializerTest {
         "data:image/png;base64," + Base64.getEncoder().encodeToString(png), image.source());
   }
 
+  /** 意图：已有显示尺寸表示上传时已缩放，provider 物化必须将存储字节直接送达，不再按档位缩放。 */
+  @Test
+  void storedImageDimensionsBypassProviderRescaling() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+    stubContent(contentService, BLOB_ID, "image/png", BYTES);
+    ProviderResourceBlock storedImage =
+        ProviderResourceBlock.media(
+            BLOB_ID, "scan.png", "preview", ImageInputTier.P720, 4000, 2000, 1280, 640);
+
+    ProviderImageBlock image =
+        firstImage(
+            materializer(blobManager, contentService),
+            storedImage,
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+
+    assertEquals(IMAGE_DATA_URI, image.source());
+    verify(contentService).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
+  }
+
   /** 意图：缩放后的实际字符数只有在读取完成后才知道，request 预算必须按实际产物记账，而不是按原始大小。 */
   @Test
   void requestBudgetAccountsActualTransformedCharacters() {

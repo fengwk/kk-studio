@@ -159,8 +159,8 @@ public final class ProviderResourceMaterializer {
       InlineBudget budget) {
     List<ProviderContentBlock> contents = new ArrayList<>(message.contents().size());
     for (ProviderContentBlock content : message.contents()) {
-      contents.add(
-          materializePlainBlock(
+      contents.addAll(
+          materializePlainBlocks(
               content, inputModalities, mediaCapabilities, message.role(), budget));
     }
     if (contents.equals(message.contents())) {
@@ -170,14 +170,14 @@ public final class ProviderResourceMaterializer {
         message.role(), List.copyOf(contents), message.replayState(), message.reasoningEffort());
   }
 
-  private ProviderContentBlock materializePlainBlock(
+  private List<ProviderContentBlock> materializePlainBlocks(
       ProviderContentBlock block,
       Set<ModelInputModality> inputModalities,
       ProviderMediaCapabilities mediaCapabilities,
       ProviderMessageRole role,
       InlineBudget budget) {
     if (!(block instanceof ProviderResourceBlock resource)) {
-      return block;
+      return List.of(block);
     }
     return materializeUserResource(resource, inputModalities, mediaCapabilities, role, budget);
   }
@@ -187,35 +187,38 @@ public final class ProviderResourceMaterializer {
    *
    * <p>图片在用户位置不支持时显式失败（降级成文本会让模型误以为已看到图片内容）；非图片媒体保持既有文本回退。
    */
-  private ProviderContentBlock materializeUserResource(
+  private List<ProviderContentBlock> materializeUserResource(
       ProviderResourceBlock resource,
       Set<ModelInputModality> inputModalities,
       ProviderMediaCapabilities mediaCapabilities,
       ProviderMessageRole role,
       InlineBudget budget) {
     if (resource.isExternalizedText()) {
-      return new ProviderTextBlock(formatExternalizedText(resource));
+      return List.of(new ProviderTextBlock(formatExternalizedText(resource)));
     }
     StorageBlob blob = blobManager.getBlob(resource.blobId());
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
       // 缺失或非 ACTIVE：绝不读取内容，也绝不暴露陈旧媒体事实。
-      return new ProviderTextBlock(fallbackText(resource, null));
+      return List.of(new ProviderTextBlock(fallbackText(resource, null)));
     }
     if (role != ProviderMessageRole.USER) {
-      return new ProviderTextBlock(fallbackText(resource, blob));
+      return List.of(new ProviderTextBlock(fallbackText(resource, blob)));
     }
     ModelInputModality modality = modalityOf(blob.getMediaType());
     if (modality == null) {
-      return new ProviderTextBlock(fallbackText(resource, blob));
+      return List.of(new ProviderTextBlock(fallbackText(resource, blob)));
     }
     if (!inputModalities.contains(modality) || !mediaCapabilities.supports(modality, false)) {
       if (modality == ModelInputModality.IMAGE) {
         throw new IllegalArgumentException(
             imageRejectedMessage(resource, blob, inputModalities, false));
       }
-      return new ProviderTextBlock(fallbackText(resource, blob));
+      return List.of(new ProviderTextBlock(fallbackText(resource, blob)));
     }
-    return inlineMediaBlock(resource, blob, modality, budget);
+    if (modality == ModelInputModality.IMAGE) {
+      return List.of(inlineImage(resource, blob, budget));
+    }
+    return List.of(inlineMediaBlock(resource, blob, modality, budget));
   }
 
   /** TOOL 消息的物化：结果内媒体优先走原生 TOOL 位置，否则暂存为该批次之后的一条 USER 媒体消息。 */
@@ -288,7 +291,10 @@ public final class ProviderResourceMaterializer {
       return inlineMediaBlock(resource, blob, modality, budget);
     }
     if (modelSupports && mediaCapabilities.supports(modality, false)) {
-      ProviderContentBlock media = inlineMediaBlock(resource, blob, modality, budget);
+      ProviderContentBlock media =
+          modality == ModelInputModality.IMAGE
+              ? inlineImage(resource, blob, budget)
+              : inlineMediaBlock(resource, blob, modality, budget);
       deferred.add(
           new DeferredMedia(
               toolCallId,
@@ -375,6 +381,15 @@ public final class ProviderResourceMaterializer {
    */
   private ProviderImageBlock inlineImage(
       ProviderResourceBlock resource, StorageBlob blob, InlineBudget budget) {
+    if (resource.displayWidth() != null) {
+      long required =
+          ProviderInlineBlobReader.estimatedDataUriChars(blob.getMediaType(), blob.getSizeBytes());
+      budget.reserve(required);
+      String source =
+          blobReader.readDataUri(
+              resource.blobId(), blob.getMediaType(), blob.getSizeBytes(), required);
+      return new ProviderImageBlock(blob.getMediaType(), source);
+    }
     // 未指定图片档位的媒体按系统设置的默认档位；显式档位保持冻结值。
     ImageInputTier tier =
         resource.imageTier() == null ? defaultImageTier.get() : resource.imageTier();

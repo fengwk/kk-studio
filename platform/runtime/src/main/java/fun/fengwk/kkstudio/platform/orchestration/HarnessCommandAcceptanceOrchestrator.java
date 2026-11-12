@@ -259,7 +259,13 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    return new UserMessageContentPreparer.ReadyAttachment(ready.blobId(), ready.filename());
+    return new UserMessageContentPreparer.ReadyAttachment(
+        ready.blobId(),
+        ready.filename(),
+        ready.originalWidth(),
+        ready.originalHeight(),
+        ready.storedWidth(),
+        ready.storedHeight());
   }
 
   private HarnessRuntime requireRuntime() {

@@ -46,11 +46,21 @@ public final class UserMessageContentPreparer {
   }
 
   /** 一条 ATTACHMENT 的不可变权威事实。 */
-  public record ReadyAttachment(UUID blobId, String filename) {
+  public record ReadyAttachment(
+      UUID blobId,
+      String filename,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer storedWidth,
+      Integer storedHeight) {
 
     public ReadyAttachment {
       Objects.requireNonNull(blobId, "blobId");
       Objects.requireNonNull(filename, "filename");
+    }
+
+    public ReadyAttachment(UUID blobId, String filename) {
+      this(blobId, filename, null, null, null, null);
     }
   }
 
@@ -112,7 +122,11 @@ public final class UserMessageContentPreparer {
         ready.blobId(),
         ready.filename(),
         null,
-        imageTierForBlob(ready.blobId(), attachment.imageTier()));
+        imageTierForBlob(ready.blobId(), attachment.imageTier()),
+        ready.originalWidth(),
+        ready.originalHeight(),
+        ready.storedWidth(),
+        ready.storedHeight());
   }
 
   /** 自由文本中的资源 URI 也建立当前 Session 持有。 */
@@ -137,7 +151,14 @@ public final class UserMessageContentPreparer {
       return resource;
     }
     return ResourceMessageContent.media(
-        resource.blobId(), resource.name(), resource.preview(), imageTier);
+        resource.blobId(),
+        resource.name(),
+        resource.preview(),
+        imageTier,
+        resource.originalWidth(),
+        resource.originalHeight(),
+        resource.displayWidth(),
+        resource.displayHeight());
   }
 
   /**

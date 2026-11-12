@@ -147,8 +147,18 @@ public class StorageUploadService {
             transactionTemplate);
   }
 
-  /** 预约上传：内容命中返回 READY，否则返回 PENDING（含预签名 PUT）。 */
+  /** 预约用户上传：图片必须携带客户端缩放后的 MIME 与像素事实。 */
   public StorageUploadDTO reserve(StorageUploadReserveRequestDTO request) {
+    return reserve(request, true);
+  }
+
+  /** 预约服务端受控 staging：媒体事实由服务端在 complete 时探测。 */
+  public StorageUploadDTO reserveStaged(StorageUploadReserveRequestDTO request) {
+    return reserve(request, false);
+  }
+
+  private StorageUploadDTO reserve(
+      StorageUploadReserveRequestDTO request, boolean requireImageMetadata) {
     Objects.requireNonNull(request, "request must not be null");
     String filename = validateFilename(request.getFilename());
     String mediaType = normalizeMediaType(request.getMediaType());
@@ -161,7 +171,8 @@ public class StorageUploadService {
             request.getOriginalWidth(),
             request.getOriginalHeight(),
             request.getStoredWidth(),
-            request.getStoredHeight());
+            request.getStoredHeight(),
+            requireImageMetadata);
 
     // 一次操作读取同一份 TTL 快照：created_at 与响应快照到期时刻都由它换算。
     SystemSettings.StorageMedia media = settingsSnapshot.get().storageMedia();
@@ -480,7 +491,7 @@ public class StorageUploadService {
                 "upload " + uploadId + " is PENDING; complete it before consuming");
           }
           requireCleanupAvailable(locked, uploadTtl);
-          return new ReadyUpload(locked.getBlobId(), locked.getFilename());
+          return readyUpload(locked);
         });
   }
 
@@ -508,7 +519,25 @@ public class StorageUploadService {
           "upload " + uploadId + " is PENDING; complete it before previewing");
     }
     requireCleanupAvailable(upload, uploadTtl);
-    return new ReadyUpload(upload.getBlobId(), upload.getFilename());
+    return readyUpload(upload);
+  }
+
+  private ReadyUpload readyUpload(StorageUpload upload) {
+    if (upload.getOriginalWidth() != null) {
+      return new ReadyUpload(
+          upload.getBlobId(),
+          upload.getFilename(),
+          upload.getOriginalWidth(),
+          upload.getOriginalHeight(),
+          upload.getStoredWidth(),
+          upload.getStoredHeight());
+    }
+    StorageBlob blob = blobRepository.getById(upload.getBlobId());
+    Integer width =
+        blob == null || blob.getWidth() == null ? null : Math.toIntExact(blob.getWidth());
+    Integer height =
+        blob == null || blob.getHeight() == null ? null : Math.toIntExact(blob.getHeight());
+    return new ReadyUpload(upload.getBlobId(), upload.getFilename(), width, height, null, null);
   }
 
   /** 后台回收入口：由 {@link StorageUploadExpiryService} 执行候选扫描、claim 与对象回收。 */
@@ -657,7 +686,8 @@ public class StorageUploadService {
       Integer originalWidth,
       Integer originalHeight,
       Integer storedWidth,
-      Integer storedHeight) {
+      Integer storedHeight,
+      boolean requireImageMetadata) {
     if (!mediaType.startsWith("image/")) {
       if (format != null
           || originalWidth != null
@@ -681,8 +711,11 @@ public class StorageUploadService {
             && storedWidth != null
             && storedHeight != null;
     if (!anyImageMetadata) {
-      throw DomainException.validation(
-          "format", "image format and dimensions are required for image uploads");
+      if (requireImageMetadata) {
+        throw DomainException.validation(
+            "format", "image format and dimensions are required for image uploads");
+      }
+      return null;
     }
     if (!completeImageMetadata) {
       throw DomainException.validation(
@@ -797,5 +830,16 @@ public class StorageUploadService {
       String sha256) {}
 
   /** READY 上传的权威消费事实。 */
-  public record ReadyUpload(UUID blobId, String filename) {}
+  public record ReadyUpload(
+      UUID blobId,
+      String filename,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer storedWidth,
+      Integer storedHeight) {
+
+    public ReadyUpload(UUID blobId, String filename) {
+      this(blobId, filename, null, null, null, null);
+    }
+  }
 }

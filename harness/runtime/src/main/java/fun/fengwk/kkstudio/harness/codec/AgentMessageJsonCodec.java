@@ -74,7 +74,18 @@ public final class AgentMessageJsonCodec {
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
-      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
+      orderedSet(
+          "type",
+          "blobId",
+          "name",
+          "totalBytes",
+          "totalLines",
+          "preview",
+          "imageTier",
+          "originalWidth",
+          "originalHeight",
+          "displayWidth",
+          "displayHeight");
 
   public AgentMessageJsonCodec() {}
 
@@ -210,6 +221,10 @@ public final class AgentMessageJsonCodec {
         putNullableLong(node, "totalLines", value.totalLines());
         putNullableText(node, "preview", value.preview());
         putNullableText(node, "imageTier", wireName(value.imageTier()));
+        putNullableInt(node, "originalWidth", value.originalWidth());
+        putNullableInt(node, "originalHeight", value.originalHeight());
+        putNullableInt(node, "displayWidth", value.displayWidth());
+        putNullableInt(node, "displayHeight", value.displayHeight());
       }
       case AttachmentMessageContent value -> throw new IllegalArgumentException(
           "attachment content is transient and must never be persisted");
@@ -278,7 +293,11 @@ public final class AgentMessageJsonCodec {
             nullableLong(node, "totalBytes", "content"),
             nullableLong(node, "totalLines", "content"),
             nullableText(node, "preview", "content"),
-            nullableImageTier(node, "imageTier", "content"));
+            nullableImageTier(node, "imageTier", "content"),
+            nullableInt(node, "originalWidth", "content"),
+            nullableInt(node, "originalHeight", "content"),
+            nullableInt(node, "displayWidth", "content"),
+            nullableInt(node, "displayHeight", "content"));
       }
       default -> throw new IllegalArgumentException(
           "unknown agent message content type: "
@@ -436,6 +455,14 @@ public final class AgentMessageJsonCodec {
     }
   }
 
+  private static void putNullableInt(ObjectNode node, String field, Integer value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
   private static Long nullableLong(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || value.isNull()) {
@@ -445,6 +472,19 @@ public final class AgentMessageJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be integer or null");
     }
     return value.longValue();
+  }
+
+  private static Integer nullableInt(ObjectNode node, String field, String context) {
+    Long value = nullableLong(node, field, context);
+    if (value == null) {
+      return null;
+    }
+    try {
+      return Math.toIntExact(value);
+    } catch (ArithmeticException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " is outside integer range", error);
+    }
   }
 
   /** 可空图片输入档位字段：JSON null 或档位 wire 名称；未知名称显式失败。 */
