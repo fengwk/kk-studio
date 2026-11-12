@@ -226,9 +226,7 @@ public final class PlatformModelGateway implements ModelGateway {
       // 观察回调是唯一权威：adapter 自行注入的快照即使在缺失观察时也必须被清除；相同响应保留 completion 身份。
       outcome =
           new Succeeded(
-              observedResponse == response
-                  ? completion
-                  : new ProviderCompletion(observedResponse, completion.replayState()));
+              observedResponse == response ? completion : new ProviderCompletion(observedResponse));
     }
 
     @Override

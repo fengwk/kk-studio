@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -24,8 +23,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -145,26 +142,25 @@ class OpenAiChatThinkingTest {
     assertTrue(recordedEvents.get(2) instanceof ProviderStreamEvent.TextDelta);
     assertEquals("The sum is 2.", ((ProviderStreamEvent.TextDelta) recordedEvents.get(2)).text());
 
-    // 校验 ReplayState
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.OPENAI_CHAT, replayState.format());
-    assertEquals(descriptor.affinity("deepseek-reasoner"), replayState.affinity());
-
-    JsonNode payload = replayState.payload();
-    assertEquals("The sum is 2.", payload.path("content").asString(""));
+    // reasoning_details 留在思考 block 的 Provider 专属字段；文本与思考仍保持分块顺序。
+    assertEquals(2, completion.response().blocks().size());
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) completion.response().blocks().get(0);
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(1);
+    assertEquals("Step 1: calculate. Step 2: result is 2.", thinkingBlock.thinking());
     assertEquals(
-        "Step 1: calculate. Step 2: result is 2.", payload.path("reasoning_content").asString(""));
-    assertEquals(0.99, payload.path("reasoning_details").path("confidence").asDouble(0.0));
+        0.99,
+        thinkingBlock
+            .providerBlockData()
+            .nativeFields()
+            .path("reasoning_details")
+            .path("confidence")
+            .asDouble(0.0));
+    assertEquals("The sum is 2.", textBlock.text());
 
-    // 3. 次轮对话携带 ReplayState，验证 wire 上原位保真
+    // 3. 次轮对话携带原生 blocks，验证 wire 上保真
     ProviderMessage turn1Asst =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Step 1: calculate. Step 2: result is 2."),
-                new ProviderTextBlock("The sum is 2.")),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage user2 =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("What about 2+2?")));

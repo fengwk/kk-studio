@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
-
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -49,10 +47,6 @@ import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -1439,13 +1433,6 @@ class EntryPathTest {
   private static Entry cancelBarrier(UUID id, UUID parentId) {
     return assistantErrorWithMessage(
         id, parentId, AssistantError.CANCELLED_CODE, "Cancelled by user");
-  }
-
-  private static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
-        ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
-        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static Entry modelAttemptFailure(UUID id, UUID parentId, int attempt) {

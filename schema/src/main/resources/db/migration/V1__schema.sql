@@ -279,7 +279,6 @@ create table harness_entry (
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     created_at timestamptz(3) not null,
     entry_seq bigint generated always as identity,
-    provider_replay_state jsonb,
     constraint uk_harness_entry_session_id unique (session_id, id),
     constraint fk_harness_entry_session foreign key (session_id)
         references harness_session (id),
@@ -308,10 +307,6 @@ create table harness_entry (
     ),
     constraint ck_harness_entry_parent_not_self check (
         parent_entry_id is null or parent_entry_id <> id
-    ),
-    constraint ck_harness_entry_provider_replay_state check (
-        provider_replay_state is null
-        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -323,7 +318,6 @@ comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/ME
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
 comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';
-comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 payload 关联由应用维护';
 
 create unique index uk_harness_entry_single_root
     on harness_entry (session_id)
@@ -1228,7 +1222,6 @@ create table builtin_model_invocation (
     requested_at timestamptz(3),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
-    provider_replay_state jsonb,
     constraint fk_builtin_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
     constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
@@ -1250,10 +1243,6 @@ create table builtin_model_invocation (
     ),
     constraint ck_builtin_model_invocation_terminal_facts check (
         result is null or error is null
-    ),
-    constraint ck_builtin_model_invocation_provider_replay_state check (
-        provider_replay_state is null
-        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -1274,7 +1263,6 @@ comment on column builtin_model_invocation.group_execution is 'Model Group 当�
 comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
 comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 result 关联由应用维护';
 
 create unique index uk_builtin_model_invocation_result
     on builtin_model_invocation (result_entry_id)

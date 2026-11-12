@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -106,21 +104,16 @@ class AnthropicOpaqueReplayTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("answer", completion.response().text());
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-
-    JsonNode content = replayState.payload().path("content");
-    assertEquals(2, content.size());
-    ObjectNode expectedNativeBlock = NODES.objectNode();
-    expectedNativeBlock.put("type", "server_tool_use");
-    expectedNativeBlock.put("id", "srv_1");
-    expectedNativeBlock.put("name", "web_search");
-    expectedNativeBlock.putObject("input").put("query", "kk");
-    expectedNativeBlock.putObject("future_field").put("x", 1);
-    assertEquals(expectedNativeBlock, content.get(0));
-    assertEquals("text", content.get(1).path("type").asString(""));
-    assertEquals("answer", content.get(1).path("text").asString(""));
+    assertEquals(2, completion.response().blocks().size());
+    ProviderOpaqueBlock nativeBlock =
+        (ProviderOpaqueBlock) completion.response().blocks().getFirst();
+    assertEquals("server_tool_use", nativeBlock.blockType());
+    JsonNode nativeFields = nativeBlock.providerBlockData().nativeFields();
+    assertEquals("srv_1", nativeFields.path("id").asString(""));
+    assertEquals("web_search", nativeFields.path("name").asString(""));
+    assertEquals("kk", nativeFields.path("input").path("query").asString(""));
+    assertEquals(1, nativeFields.path("future_field").path("x").asInt());
+    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(1)).text());
 
     // 下一轮：native block（含解析后的 input）与已知 text 全部无损进入 wire
     ProviderRequest nextRequest =
@@ -132,7 +125,10 @@ class AnthropicOpaqueReplayTest {
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
-    assertEquals(expectedNativeBlock, assistantContent.get(0));
+    assertEquals("server_tool_use", assistantContent.get(0).path("type").asString(""));
+    assertEquals("srv_1", assistantContent.get(0).path("id").asString(""));
+    assertEquals("kk", assistantContent.get(0).path("input").path("query").asString(""));
+    assertEquals(1, assistantContent.get(0).path("future_field").path("x").asInt());
     assertEquals("answer", assistantContent.get(1).path("text").asString(""));
   }
 
@@ -256,19 +252,15 @@ class AnthropicOpaqueReplayTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode content = completion.replayState().payload().path("content");
     assertEquals(1, completion.response().blocks().size());
     ProviderOpaqueBlock block = (ProviderOpaqueBlock) completion.response().blocks().get(0);
     assertEquals("web_search_tool_result", block.blockType());
+    JsonNode nativeFields = block.providerBlockData().nativeFields();
+    assertEquals("srv_1", nativeFields.path("tool_use_id").asString(""));
     assertEquals(
-        "srv_1", block.providerBlockData().nativeFields().path("tool_use_id").asString(""));
-    assertEquals(1, content.size());
-    assertEquals("web_search_tool_result", content.get(0).path("type").asString(""));
-    assertEquals("srv_1", content.get(0).path("tool_use_id").asString(""));
-    assertEquals(
-        "https://example.com", content.get(0).path("content").get(0).path("url").asString(""));
-    assertEquals(false, content.get(0).path("flag").asBoolean(false));
-    assertEquals(4, content.get(0).size());
+        "https://example.com", nativeFields.path("content").get(0).path("url").asString(""));
+    assertEquals(false, nativeFields.path("flag").asBoolean(false));
+    assertEquals(3, nativeFields.size());
   }
 
   /**
@@ -524,17 +516,17 @@ class AnthropicOpaqueReplayTest {
     assertEquals("invalid thinking block in replay payload", signatureError.getMessage());
   }
 
-  private ProviderReplayState replayState(ObjectNode payload) {
+  private NativeReplayFixture replayState(ObjectNode payload) {
     return replayState(descriptor.affinity("claude-3-5-sonnet"), payload);
   }
 
-  private static ProviderReplayState replayState(
+  private static NativeReplayFixture replayState(
       ProviderReplayAffinity affinity, ObjectNode payload) {
-    return new ProviderReplayState(ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, payload);
+    return new NativeReplayFixture(affinity, payload.path("content"));
   }
 
   private JsonNode fallbackContent(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableContents)
+      NativeReplayFixture replayState, List<ProviderContentBlock> durableContents)
       throws IOException {
     ProviderRequest request =
         request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
@@ -542,7 +534,7 @@ class AnthropicOpaqueReplayTest {
   }
 
   private ProviderException assertReplayRejected(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableContents) {
+      NativeReplayFixture replayState, List<ProviderContentBlock> durableContents) {
     ProviderRequest request =
         request(List.of(userMsg(), assistantMsg(durableContents, replayState)));
     ProviderException error =
@@ -575,9 +567,14 @@ class AnthropicOpaqueReplayTest {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")));
   }
 
+  private record NativeReplayFixture(ProviderReplayAffinity affinity, JsonNode content) {}
+
   private static ProviderMessage assistantMsg(
-      List<ProviderContentBlock> blocks, ProviderReplayState replayState) {
-    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks, replayState);
+      List<ProviderContentBlock> blocks, NativeReplayFixture replayState) {
+    return new ProviderMessage(
+        ProviderMessageRole.ASSISTANT,
+        AnthropicNativeReplayTestSupport.withNativeData(
+            blocks, replayState.affinity(), replayState.content()));
   }
 
   private static ModelDescriptor model() {

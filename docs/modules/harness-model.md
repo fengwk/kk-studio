@@ -65,26 +65,17 @@ variant 的 `reasoningEffort` 是厂商自定义自由字符串，不是跨协�
 
 Catalog API 与持久化 variant 必须声明 `promptCacheRetention`（`NONE` / `SHORT` / `LONG`）；OpenAI 两种协议和 Anthropic 支持三档，Gemini 只支持 `NONE`。`NONE` 表示不发送显式缓存指令，并不承诺上游不缓存。缓存档位唯一取自冻结的 `ModelVariant`，Session UUID 只用于生成会话缓存键；模型组切换成员时使用该成员的 variant，压缩使用 Compaction Agent 的 variant。厂商选项使用 **`protocolOptionsJson` 字符串**，例如 `{"id":"default","promptCacheRetention":"SHORT","protocolOptionsJson":"{\"temperature\":0.7}"}`。编辑器只用 `JSON.parse` 检查语法与对象根节点，不把解析后的数字重新序列化；提交和加载保留内部 JSON 文本，仅去除外层空白。后端严格校验重复键、类型、尾随内容与字节上限，运行时才将文本解码为原生对象，因此大整数与高精度小数不会经过浏览器浮点数往返。
 
-[`ProviderReplayState`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderReplayState.java) = `(format, affinity, payload)`，四种格式 [`ProviderReplayFormat`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderReplayFormat.java) 为 `anthropic_messages` / `openai_responses` / `openai_chat` / `gemini_content`；[`ProviderReplayAffinity`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderReplayAffinity.java) = `(providerType, providerName, modelId)`，其中 `modelId` 是发往上游的真实 wire 模型标识。它从一次成功终态中冻结，随助手 Entry 持久保存，供后续请求重建原生上下文；`payload` 按 JSON 字段保留可回放的上游结构（`reasoning_content`、`encrypted_content`、thinking `signature` / redacted thinking、`thoughtSignature`），不承诺保留 wire 字节排版，也不进入公共 DTO、日志或异常。它不同于下文仅在 attempt 内交付的原生 SSE 通道。
+Assistant 回复按 Provider 内容块的顺序持久化。每个块携带规范化内容及可选的 [`ProviderBlockData`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderBlockData.java)，后者将 [`ProviderReplayFormat`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderReplayFormat.java)、[`ProviderReplayAffinity`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderReplayAffinity.java) 与原生字段放在其所属块上。协议语义字段（如 thinking signature、Responses encrypted content / item id、Gemini thought signature）使用强类型字段；`nativeFields` 保留未知或扩展 JSON。Entry payload 中块的数组顺序就是回放顺序，不另存整份 assistant 原生响应。
 
-各协议的冻结条件如下：
+原生字段仅在 Provider、协议与 wire model affinity 匹配时回放。不同模型时，投影可读 thinking 为普通内容、丢弃空或 redacted thinking 和不可移植的原生字段；Gemini 工具调用保留而移除源 thought signature。缺少兼容的 block 元数据时走语义编码。各协议只在其终态规则允许时给块附加 metadata；不适用于成功结果的截断、诊断或过滤响应不把原生字段写入相应块。
 
-| 协议 | 冻结条件 | 工具调用诊断 |
-| --- | --- | --- |
-| Anthropic | `COMPLETE`、`LENGTH` 或 `CONTINUE`，且无 tool call 诊断 | LENGTH 截断时把未闭合工具参数固化为 diagnostic，不伪造 `{}`；CONTINUE 不允许 tool call |
-| Gemini | 仅 `COMPLETE` | 截断时不冻结回放 |
-| OpenAI Chat | 仅 `COMPLETE` | 截断时不冻结回放 |
-| OpenAI Responses | `COMPLETE` 或 `LENGTH`，且无诊断、非 FILTERED、非空占位符 | 同 Anthropic 语义 |
+OpenAI Responses 的 reasoning item 按块保留 summary、content、item id 与 `encrypted_content`。同模型回放以该 item 的原生字段为准，不额外插入推理文本；跨模型时仅投影可读思考，密文、源 id 与不兼容字段不随请求发送。流中 captured 的 encrypted content 在终态省略它时仍保留在对应 thinking block 上，且绝不作为 semantic thinking 暴露。
 
-原位回放只由 `format`、`affinity`（是否等于当前 `ProviderDescriptor.affinity(requestedModel)`）与 payload 结构/durable 一致性决定，不存在前缀哈希或字节级比对。payload 结构非法、与 durable 事实矛盾或违反协议不变量时 fail closed 为 `INVALID_REQUEST`；`format` / `affinity` 失配或 durable 语义已被改写（压缩、编辑）时回退语义编码，能证明可重建的原生附加字段按 durable 语义投影，签名、密文、未知 item 等只有原生回放才能保真的事实随回退被丢弃，不会假装保真。回放 payload 不被改写（仅移除值为 JSON null 的已知可空字段）。因此缓存标记、JSON 字段顺序与 system 前缀都不参与回放判定。
+Entry 和模型 invocation 均不保存独立的 Provider replay-state 副本；原生上下文随 assistant 内容块一起序列化、持久化和回放。块级 metadata 不进入公共 DTO、日志或异常。
 
-OpenAI Responses 的 durable thinking 与 replay 一致性校验逐个 reasoning item 使用相同规则：终态非空白 `summary[].summary_text` 优先；没有可用摘要时读取 `content[].reasoning_text`，两者绝不拼接，再按 item 顺序聚合。有摘要时，即使 content 文本不同也仍以摘要为准，原生 content 无损保留。仅当终态存在 reasoning 且全部没有可比较纯文本时，保留已有流式思考；空占位符（无密文、无可用摘要、无 content 或其他附加事实）不冻结 native replay，重建时退回语义编码。content 的 array/object/type/text 形状在流式捕获阶段以 `INVALID_RESPONSE` 拒绝、在回放校验中以 `INVALID_REQUEST` 拒绝，真实文本矛盾即使 affinity 失配也以 `INVALID_REQUEST` 拒绝。携带 `encrypted_content` 而没有可比可读文本的 reasoning 是原生推理的权威事实；同模型原位回放只发送原生输出项，不额外插入推理文本。affinity 失配时回退语义编码，可读思考由 reasoning summary 承载。
+OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 保存在对应 assistant block metadata 中：同 Provider、协议和 wire 模型回放原生字段，跨 Provider 或模型转移时回退语义编码，可读思考以带 `<thinking>`/`</thinking>` 来源标记的普通文本保留，与 final text 明确分隔（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`）。`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
 
-流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，密文绝不当作 semantic thinking 外泄。同 affinity 原生回放保留 content、id 与密文等协议事实；切换 Provider 或 wire 模型后，校验成功才回退语义编码，保留 durable 思考和正文，不携带源 id 或密文。
-
-OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload 保留：`reasoning_content` 与 durable thinking 逐字校验一致，`reasoning_details` 只做类型校验。回放只受 `affinity` 门控——同一 Provider 与 wire 模型内原样回传（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`），跨 Provider 或模型转移时回退语义编码，可读思考以带 `<thinking>`/`</thinking>` 来源标记的普通文本保留，与 final text 明确分隔；`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
-
-工具绑定或 Environment 变化时，无 replay 的历史工具调用可投影为普通上下文。携带 replay 的助手消息若需降级，Runtime 放弃该消息不兼容的 opaque replay 并改用语义投影（调用与结果仍按既有规则配对，绝不把原生 payload 附着到被改写的内容上），不因存在 replay 就拒绝请求。模型切换与前缀编辑由编码器按 affinity 校验；压缩是摘要重建的有损边界。
+工具绑定或 Environment 变化时，历史工具调用仍按当前绑定规则投影；若 assistant 消息需降级，Runtime 放弃与当前 durable blocks 不兼容的原生字段并改用语义投影（调用与结果仍按既有规则配对），不把原生字段附着到被改写的内容上。模型切换与压缩按 block affinity 回退语义内容。
 
 语义回退把 assistant 的 `ProviderJsonBlock` 诊断（如 `tool_call_diagnostic`）投影为普通文本，四协议都不以 `INVALID_REQUEST` 拒绝：Anthropic/Gemini 各为独立 `text` 块/part，OpenAI Chat 并回 assistant `content`，OpenAI Responses 为 `output_text`。
 
@@ -237,8 +228,8 @@ Anthropic 的 `usage.output_tokens_details.thinking_tokens` 是输出的只读�
 | `fun.fengwk.kkstudio.harness.model` | 顶层 `ModelDescriptor`、`ModelVariant`、`ModelUsage`、`ModelCost`、`ModelPricing`、`ModelInvocationError` 等无状态值对象 | 不依赖 Tool、Session、Runtime 编排、Spring、JDBC、HTTP 或 SDK 类型 |
 | `fun.fengwk.kkstudio.harness.model.cache` | prompt cache 留存档位、能力与请求级 `ProviderCacheControl` | 只定义与 Provider 解耦的静态契约；协议字段映射由 Provider 编码器完成 |
 | `fun.fengwk.kkstudio.harness.model.codec` | `ModelDescriptor` / `ModelVariant` 的权威严格 JSON codec，以及跨模块共享的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)（object 判定、精确字段集合与标量原语） | 拒绝未知字段、重复键、错误类型与 trailing token；Provider replay 的持久化 UUID 在模块内做无回显 canonical 校验（本模块不依赖 Common）；不接触持久化或网络 |
-| `fun.fengwk.kkstudio.harness.model.provider` | Provider 中立请求、响应、消息、内容块、流事件、`ProviderAdapter`、replay state 与 context-pressure 判定 | 不出现 SDK 类型；wire 编码与 I/O 位于同模块的 `harness.model.provider.impl` |
-| `fun.fengwk.kkstudio.harness.model.provider.codec` | Provider 响应、replay state 与工具调用诊断的严格 JSON codec | 仅依赖 Jackson 与同模块模型值 |
+| `fun.fengwk.kkstudio.harness.model.provider` | Provider 中立请求、响应、消息、内容块与块级原生 metadata、流事件、`ProviderAdapter`、context-pressure 判定 | 不出现 SDK 类型；wire 编码与 I/O 位于同模块的 `harness.model.provider.impl` |
+| `fun.fengwk.kkstudio.harness.model.provider.codec` | Provider 响应、工具调用诊断的严格 JSON codec | 仅依赖 Jackson 与同模块模型值 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、阻塞调用骨架 `ProviderSseCall`、HTTP 错误格式化与分类骨架 `ProviderErrorHelper`、严格 JSON 与 usage 解析 `ProviderJsonHelper`、媒体白名单与 Base64 data URI 校验 `ProviderMediaValidator`、请求体上限守卫 `RequestBodySizeGuard` 与模型列表发现 `ProviderModelDiscovery` | 不修改原始响应正文；厂商特有错误关键词、文案与媒体策略留在各协议包；桥接器只承载 terminal-once 与 handler 失败封口 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl.transport` | `JdkHttpSseTransport`、`IncrementalSseParser`、`HttpSseLimits`、`HeaderSanitizer`、`TransportErrorKind`、`TransportException`、`ServerSentEvent` | 只依赖同模块模型契约与 JDK；不暴露凭据，不保留未清洗的异常上下文 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl.anthropic` | Messages wire 编码、流式聚合、Prompt Cache 断点、thinking 编码、错误映射与 adapter | 只经 transport 发起 I/O；opaque replay 不进入公共 DTO、日志或异常 |

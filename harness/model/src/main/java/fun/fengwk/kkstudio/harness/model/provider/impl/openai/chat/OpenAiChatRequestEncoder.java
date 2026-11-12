@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -518,18 +517,6 @@ final class OpenAiChatRequestEncoder {
       validateReplayPayload(blockReplay, message.contents());
       return buildReplayMessage(blockReplay);
     }
-    ProviderReplayState replayState = message.replayState();
-    if (replayState != null && replayState.format() == ProviderReplayFormat.OPENAI_CHAT) {
-      // 同 format 先严格校验 shape 与 durable 一致性：损坏或与 durable 矛盾必须 INVALID_REQUEST
-      validateReplayPayload(replayState.payload(), message.contents());
-      if (replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-        // affinity 匹配即原样回放 opaque 字段（前缀变化不影响，历史思考不丢失）
-        return buildReplayMessage(replayState.payload());
-      }
-      // affinity 失配（不同 provider/model/连接代次）时退回语义编码，绝不因为存在 replay 就拒绝请求
-    }
-    // 非 OPENAI_CHAT format 或 affinity 失配时走语义回退
-
     // 语义回退（semantic fallback）
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "assistant");

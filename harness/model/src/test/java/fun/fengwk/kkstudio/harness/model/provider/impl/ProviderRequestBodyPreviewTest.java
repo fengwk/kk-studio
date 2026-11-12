@@ -13,10 +13,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.JsonNodeFactory;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -35,8 +31,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -148,7 +142,6 @@ class ProviderRequestBodyPreviewTest {
         "gpt-4o",
         ProviderType.OPENAI,
         "{\"temperature\":0.2}",
-        ProviderReplayFormat.OPENAI_CHAT,
         "prompt_cache_key"),
     OPENAI_RESPONSES(
         "openai-responses",
@@ -156,7 +149,6 @@ class ProviderRequestBodyPreviewTest {
         "gpt-5.4-mini",
         ProviderType.OPENAI_RESPONSES,
         "{\"temperature\":0.2}",
-        null,
         "prompt_cache_key"),
     ANTHROPIC(
         "anthropic",
@@ -164,7 +156,6 @@ class ProviderRequestBodyPreviewTest {
         "claude-3-5-sonnet",
         ProviderType.ANTHROPIC,
         "{\"temperature\":0.2}",
-        ProviderReplayFormat.ANTHROPIC_MESSAGES,
         "cache_control"),
     GEMINI(
         "gemini",
@@ -172,7 +163,6 @@ class ProviderRequestBodyPreviewTest {
         "gemini-2.5-flash",
         ProviderType.GOOGLE,
         "{\"generationConfig\":{\"temperature\":0.2}}",
-        null,
         "temperature");
 
     private final String label;
@@ -180,7 +170,6 @@ class ProviderRequestBodyPreviewTest {
     private final String wireModelId;
     private final ProviderType providerType;
     private final String nativeOptionsJson;
-    private final ProviderReplayFormat replayFormat;
 
     /** 非默认 configuration 或 native option 真正生效时必须出现在请求体里的片段。 */
     private final String evidenceToken;
@@ -191,14 +180,12 @@ class ProviderRequestBodyPreviewTest {
         String wireModelId,
         ProviderType providerType,
         String nativeOptionsJson,
-        ProviderReplayFormat replayFormat,
         String evidenceToken) {
       this.label = label;
       this.basePath = basePath;
       this.wireModelId = wireModelId;
       this.providerType = providerType;
       this.nativeOptionsJson = nativeOptionsJson;
-      this.replayFormat = replayFormat;
       this.evidenceToken = evidenceToken;
     }
   }
@@ -219,24 +206,6 @@ class ProviderRequestBodyPreviewTest {
     assertTrue(
         new String(sent, StandardCharsets.UTF_8).contains(protocol.evidenceToken),
         "非默认 configuration/native option must reach the wire body: " + protocol);
-  }
-
-  @ParameterizedTest(name = "{0} replay 预览 == transport 实际发送体")
-  @EnumSource(
-      value = Protocol.class,
-      names = {"OPENAI_CHAT", "ANTHROPIC"})
-  void previewMatchesTransportSentBodyForReplayState(Protocol protocol) throws Exception {
-    ProviderAdapter adapter = adapterFor(protocol, new JdkHttpSseTransport(client, scheduler));
-    ProviderDescriptor descriptor = descriptorFor(protocol);
-    ProviderRequest request = replayRequest(protocol, descriptor);
-
-    byte[] sent = captureSentBody(adapter, descriptor, request);
-    byte[] previewed = adapter.encodeRequestBody(request, descriptor);
-
-    assertArrayEquals(sent, previewed, "preview must match the replay body: " + protocol);
-    assertTrue(
-        new String(sent, StandardCharsets.UTF_8).contains(REPLAY_TEXT),
-        "replay message must be materialized, never silently dropped: " + protocol);
   }
 
   /** 预览是无网络入口：任何协议、任何配置都不得触发 transport。 */
@@ -489,41 +458,6 @@ class ProviderRequestBodyPreviewTest {
         List.of(userMessage(), toolCallMessage(), toolResultMessage()),
         List.of(),
         cacheControl(protocol));
-  }
-
-  /** 兼容的 durable replay 与正式 transport 必须使用相同的编码结果。 */
-  private static ProviderRequest replayRequest(Protocol protocol, ProviderDescriptor descriptor) {
-    ModelDescriptor model = model(protocol);
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            protocol.replayFormat, descriptor.affinity(model.modelId()), replayPayload(protocol));
-    ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock(REPLAY_TEXT)),
-            replayState);
-    return new ProviderRequest(
-        model,
-        variant(protocol),
-        1024,
-        "Preview system instruction.",
-        List.of(userMessage(), assistant),
-        List.of(),
-        cacheControl(protocol));
-  }
-
-  private static JsonNode replayPayload(Protocol protocol) {
-    ObjectNode payload = JsonNodeFactory.instance.objectNode();
-    payload.put("role", "assistant");
-    if (protocol.replayFormat == ProviderReplayFormat.ANTHROPIC_MESSAGES) {
-      ArrayNode content = payload.putArray("content");
-      ObjectNode text = content.addObject();
-      text.put("type", "text");
-      text.put("text", REPLAY_TEXT);
-    } else {
-      payload.put("content", REPLAY_TEXT);
-    }
-    return payload;
   }
 
   /** Gemini 只支持隐式缓存，显式 cacheControl 会被编码器拒绝，因此只在该协议退化为 NONE。 */

@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -175,13 +174,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
 
-    // CONTINUE（pause_turn / compaction）同样是「下一请求必须原生回放上游字段」的终止态
-    boolean canReplay =
-        (stopReason == GenerationStopReason.COMPLETE
-            || stopReason == GenerationStopReason.LENGTH
-            || stopReason == GenerationStopReason.CONTINUE);
-    ArrayNode replayBlocks = NODES.arrayNode();
-
     // blocksByIndex 升序遍历，严格保持原生 block index 顺序
     for (WireBlockAccumulator block : blocksByIndex.values()) {
       switch (block.type) {
@@ -190,15 +182,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           responseBlocks.add(
               new ProviderTextBlock(
                   block.textBuffer.toString(), blockData(block.rawBlock, Set.of("text"))));
-          if (canReplay) {
-            // start 对象是 replay 基座：只覆盖 normalized 文本，citations 等官方附加字段原样保留
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("text", block.textBuffer.toString());
-            if (block.citations != null) {
-              obj.set("citations", block.citations.deepCopy());
-            }
-            replayBlocks.add(obj);
-          }
         }
         case "thinking" -> {
           combinedThinking.append(block.thinkingBuffer);
@@ -207,27 +190,12 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           responseBlocks.add(
               new ProviderThinkingBlock(
                   block.thinkingBuffer.toString(), blockData(thinkingFields, Set.of("thinking"))));
-          if (block.signature == null || block.signature.isBlank()) {
-            canReplay = false;
-          } else if (canReplay) {
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("thinking", block.thinkingBuffer.toString());
-            obj.put("signature", block.signature);
-            replayBlocks.add(obj);
-          }
         }
         case "redacted_thinking" -> {
           if (block.redactedData != null) {
             responseBlocks.add(
                 new ProviderRedactedThinkingBlock(
                     block.redactedData, blockData(block.rawBlock, Set.of("data"))));
-          }
-          if (block.redactedData == null || block.redactedData.isBlank()) {
-            canReplay = false;
-          } else if (canReplay) {
-            ObjectNode obj = block.rawBlock.deepCopy();
-            obj.put("data", block.redactedData);
-            replayBlocks.add(obj);
           }
         }
         case "tool_use" -> {
@@ -250,11 +218,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               responseBlocks.add(
                   new ProviderToolCallBlock(
                       call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
-              if (canReplay) {
-                ObjectNode obj = block.rawBlock.deepCopy();
-                obj.putObject("input");
-                replayBlocks.add(obj);
-              }
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
                 toolCallDiagnostics.add(
@@ -264,7 +227,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
                         block.toolName,
                         null,
                         "tool call truncated before arguments received"));
-                canReplay = false;
               } else {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
@@ -278,11 +240,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
               responseBlocks.add(
                   new ProviderToolCallBlock(
                       call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
-              if (canReplay) {
-                ObjectNode obj = block.rawBlock.deepCopy();
-                obj.set("input", parsedArgs);
-                replayBlocks.add(obj);
-              }
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
                 toolCallDiagnostics.add(
@@ -292,7 +249,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
                         block.toolName,
                         argsStr,
                         "tool arguments truncated before valid JSON formed"));
-                canReplay = false;
               } else {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE, "invalid tool arguments JSON");
@@ -306,10 +262,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             JsonNode parsedInput =
                 ProviderJsonHelper.tryParseJsonObject(block.nativeInputBuffer.toString());
             if (parsedInput == null) {
-              if (stopReason == GenerationStopReason.LENGTH) {
-                // 截断的 native tool 输入无法组成合法对象：保留余下 normalized 语义，但不冻结 replay
-                canReplay = false;
-              } else {
+              if (stopReason != GenerationStopReason.LENGTH) {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE,
                     "invalid native block input JSON accumulated from input_json_delta");
@@ -319,10 +272,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             }
           }
           responseBlocks.add(new ProviderOpaqueBlock(block.type, blockData(obj, Set.of())));
-          if (canReplay) {
-            // 未知但合法的 provider block：opaque 原样保留，只覆盖由 delta 累积出的 input
-            replayBlocks.add(obj);
-          }
         }
       }
     }
@@ -330,11 +279,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     if (stopReason == GenerationStopReason.FILTERED) {
       toolCalls.clear();
       toolCallDiagnostics.clear();
-      canReplay = false;
-    }
-
-    if (!toolCallDiagnostics.isEmpty()) {
-      canReplay = false;
     }
 
     if (!hasExplicitCacheBreakdown) {
@@ -420,19 +364,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
             null,
             null);
 
-    ProviderReplayState replayState = null;
-    if (canReplay) {
-      ObjectNode payload = NODES.objectNode();
-      payload.put("role", "assistant");
-      payload.set("content", replayBlocks);
-      replayState =
-          new ProviderReplayState(
-              ProviderReplayFormat.ANTHROPIC_MESSAGES,
-              descriptor.affinity(request.model().modelId()),
-              payload);
-    }
-
-    return new ProviderCompletion(response, replayState);
+    return new ProviderCompletion(response);
   }
 
   private ProviderBlockData blockData(ObjectNode rawBlock, Set<String> normalizedFields) {

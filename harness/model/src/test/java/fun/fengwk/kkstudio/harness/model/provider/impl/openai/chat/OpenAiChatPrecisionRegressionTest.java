@@ -106,7 +106,8 @@ class OpenAiChatPrecisionRegressionTest {
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode opaque = completion.replayState().payload().path("vendor_opaque");
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    JsonNode opaque = textBlock.providerBlockData().nativeFields().path("vendor_opaque");
     assertExactNumber(opaque.path("big"), "1e309");
     assertExactNumber(opaque.path("tiny"), "1e-324");
     assertExactNumber(opaque.path("exact"), "0.1234567890123456789012345678");
@@ -114,10 +115,7 @@ class OpenAiChatPrecisionRegressionTest {
     assertPreservedScale(opaque.path("ratio"), "1.10");
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("ok")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(textBlock));
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("messages")
@@ -144,7 +142,8 @@ class OpenAiChatPrecisionRegressionTest {
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode items = completion.replayState().payload().path("vendor_items");
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    JsonNode items = textBlock.providerBlockData().nativeFields().path("vendor_items");
     assertEquals(4, items.size());
     assertExactNumber(items.get(0).path("index"), "0");
     assertEquals("a", items.get(0).path("v").asString(""));
@@ -158,10 +157,7 @@ class OpenAiChatPrecisionRegressionTest {
     assertEquals("d", items.get(3).path("v").asString(""));
 
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("ok")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(textBlock));
     JsonNode replayed =
         wire(request(List.of(user("Hi"), assistant), List.of()))
             .path("messages")

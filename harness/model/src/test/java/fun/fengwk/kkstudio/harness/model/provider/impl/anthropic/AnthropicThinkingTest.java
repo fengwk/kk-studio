@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +16,6 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -27,22 +25,21 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -222,10 +219,9 @@ class AnthropicThinkingTest {
     assertInstanceOf(ProviderTextBlock.class, completion.response().blocks().get(1));
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState, "replayState must be formed for successful turn with signature");
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-    assertEquals(descriptor.affinity(modelName), replayState.affinity());
+    assertEquals(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES, thinkingBlock.providerBlockData().protocol());
+    assertEquals(descriptor.affinity(modelName), thinkingBlock.providerBlockData().affinity());
 
     // 3. 次轮后续请求重放 wire 断言
     ProviderMessage asstMsg1 =
@@ -373,18 +369,15 @@ class AnthropicThinkingTest {
     assertEquals("{\"city\":\"Munich\"}", toolCall.argumentsJson());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
+    assertEquals(2, completion.response().blocks().size());
+    ProviderThinkingBlock thinking =
+        (ProviderThinkingBlock) completion.response().blocks().getFirst();
+    assertEquals("sig_tool_call_munich_999", thinking.providerBlockData().signature());
+    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, thinking.providerBlockData().protocol());
 
     // 次轮带 ToolResult 的请求编码验证
     ProviderMessage asstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("User wants weather in Munich. Calling getWeather tool."),
-                new ProviderToolCallBlock(toolCall)),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage toolResultMsg =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -490,16 +483,17 @@ class AnthropicThinkingTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    assertNotNull(completion.replayState());
     assertEquals("", completion.response().thinking());
     assertEquals("Quantum mechanics answer.", completion.response().text());
+    assertEquals(2, completion.response().blocks().size());
+    ProviderRedactedThinkingBlock redacted =
+        (ProviderRedactedThinkingBlock) completion.response().blocks().getFirst();
+    assertEquals(encryptedThinkingData, redacted.data());
+    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, redacted.providerBlockData().protocol());
 
     // 次轮重放验证
     ProviderMessage asstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Quantum mechanics answer.")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage nextUser =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("Follow up question")));
@@ -572,18 +566,13 @@ class AnthropicThinkingTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    assertNull(
-        completion.replayState(),
-        "ReplayState must be disabled (null) when thinking signature is missing");
+    ProviderThinkingBlock thinking =
+        (ProviderThinkingBlock) completion.response().blocks().getFirst();
+    assertNull(thinking.providerBlockData().signature());
 
-    // 验证降级回放：无 replayState 时，thinking 块安全降级为普通 text
+    // Without a signature, block metadata cannot be replayed and the thinking is encoded as text.
     ProviderMessage asstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Thinking without signature."),
-                new ProviderTextBlock("Response")),
-            null);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderRequest nextReq =
         new ProviderRequest(
             modelDesc,
@@ -625,22 +614,25 @@ class AnthropicThinkingTest {
         new ProviderReplayAffinity(
             ProviderType.ANTHROPIC, "anthropic-thinking", "claude-haiku-4-5-20251001");
 
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content
-        .addObject()
-        .put("type", "thinking")
-        .put("thinking", "Thought")
-        .put("signature", "sig_valid");
-    content.addObject().put("type", "text").put("text", "Text");
-
     ProviderMessage asstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("Thought"), new ProviderTextBlock("Text")),
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, payload));
+            List.of(
+                new ProviderThinkingBlock(
+                    "Thought",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        mismatchedAffinity,
+                        "sig_valid",
+                        null,
+                        null,
+                        NODES.objectNode())),
+                new ProviderTextBlock(
+                    "Text",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        mismatchedAffinity,
+                        NODES.objectNode()))));
 
     ProviderRequest followUp =
         new ProviderRequest(
@@ -676,27 +668,24 @@ class AnthropicThinkingTest {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
     ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
 
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content
-        .addObject()
-        .put("type", "thinking")
-        .put("thinking", "Thought")
-        .put("signature", "sig_valid");
-    content.addObject().put("type", "text").put("text", "Text");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-sonnet-4-6"),
-            payload);
-
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-sonnet-4-6");
     ProviderMessage asstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderThinkingBlock("Thought"), new ProviderTextBlock("Text")),
-            replayState);
+            List.of(
+                new ProviderThinkingBlock(
+                    "Thought",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        affinity,
+                        "sig_valid",
+                        null,
+                        null,
+                        NODES.objectNode())),
+                new ProviderTextBlock(
+                    "Text",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, NODES.objectNode()))));
 
     // 与录制时不同的 system 指令，并额外插入一条更早的 user 消息：replay 仍按 affinity 生效
     ProviderRequest followUp =
@@ -733,7 +722,7 @@ class AnthropicThinkingTest {
    * <p>测试意图：防止 payload 内容被恶意篡改导致发往模型的请求偏离实际历史记录。
    */
   @Test
-  void should_disable_replay_when_payload_durable_contents_mismatch() throws IOException {
+  void blockNativeSignatureRemainsAttachedToUpdatedDurableThinking() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
     ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
@@ -748,44 +737,34 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content
-        .addObject()
-        .put("type", "thinking")
-        .put("thinking", "Original Thought in payload")
-        .put("signature", "sig_valid");
-    content.addObject().put("type", "text").put("text", "Text");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-sonnet-4-6"),
-            payload);
-
-    // Durable 内容中的 thinking 与 payload 不匹配
-    ProviderMessage tamperedMsg =
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-sonnet-4-6");
+    ProviderThinkingBlock thinking =
+        new ProviderThinkingBlock(
+            "Tampered Thought in durable content",
+            new ProviderBlockData(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                affinity,
+                "sig_valid",
+                null,
+                null,
+                NODES.objectNode()));
+    ProviderMessage assistant =
         new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Tampered Thought in durable content"),
-                new ProviderTextBlock("Text")),
-            replayState);
-
+            ProviderMessageRole.ASSISTANT, List.of(thinking, new ProviderTextBlock("Text")));
     ProviderRequest followUp =
         new ProviderRequest(
             modelDesc,
             variant,
             1024,
             "Test system instruction.",
-            List.of(userMsg, tamperedMsg, userMsg),
+            List.of(userMsg, assistant, userMsg),
             List.of(),
             ProviderCacheControl.none());
 
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    JsonNode wire = MAPPER.readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes());
+    JsonNode wireThinking = wire.path("messages").get(2).path("content").get(0);
+    assertEquals("Tampered Thought in durable content", wireThinking.path("thinking").asString(""));
+    assertEquals("sig_valid", wireThinking.path("signature").asString(""));
   }
 
   /**
@@ -891,10 +870,9 @@ class AnthropicThinkingTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("Thinking deeply about the answer.", completion.response().thinking());
     assertEquals("Here is the response.", completion.response().text());
-    assertNotNull(completion.replayState());
-    assertEquals(
-        "sig_test_fixture_signature",
-        completion.replayState().payload().path("content").get(0).path("signature").asString(""));
+    ProviderThinkingBlock thinking =
+        (ProviderThinkingBlock) completion.response().blocks().getFirst();
+    assertEquals("sig_test_fixture_signature", thinking.providerBlockData().signature());
   }
 
   /**
@@ -980,16 +958,13 @@ class AnthropicThinkingTest {
 
     assertEquals("Thinking: Quantum states...", completion.response().thinking());
     assertEquals("Superposition means...", completion.response().text());
-    assertNotNull(completion.replayState());
+    ProviderThinkingBlock thinking =
+        (ProviderThinkingBlock) completion.response().blocks().getFirst();
+    assertEquals("sig_minimax_budget", thinking.providerBlockData().signature());
 
-    // 轮次 2：重放轮次 1 的 assistant 生成并验证 wire 内容
+    // 轮次 2：重放轮次 1 的 assistant blocks 并验证 wire 内容
     ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Thinking: Quantum states..."),
-                new ProviderTextBlock("Superposition means...")),
-            completion.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, completion.response().blocks());
     ProviderMessage userMsg2 =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("Tell me more.")));

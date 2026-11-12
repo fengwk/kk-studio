@@ -50,7 +50,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -956,54 +955,6 @@ class GeminiRequestEncoderTest {
     assertEquals("toolA", parts.get(2).get("functionCall").get("name").asString(""));
   }
 
-  /** 验证当 ASSISTANT 具有合法 GEMINI_CONTENT replayState 时，原位回放其 native parts（含 thoughtSignature）。 */
-  @Test
-  void encodesAssistantMessage_replaysNativePartsWhenReplayMatches() throws Exception {
-    // 构造包含合法 replayState 的第二轮 ASSISTANT
-    ObjectNode replayPayload = MAPPER.createObjectNode();
-    replayPayload.put("role", "model");
-    ArrayNode replayedParts = replayPayload.putArray("parts");
-    ObjectNode p1 = replayedParts.addObject();
-    p1.put("text", "thought text");
-    p1.put("thought", true);
-    p1.put("thoughtSignature", "sig_123");
-    ObjectNode p2 = replayedParts.addObject();
-    p2.put("text", "normal text");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            replayPayload);
-
-    ProviderRequest req2 =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(
-                        new ProviderThinkingBlock("thought text"),
-                        new ProviderTextBlock("normal text")),
-                    replayState),
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q2")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest enc2 = encoder.encode(req2, descriptor());
-    JsonNode json = MAPPER.readTree(enc2.bodyUtf8Bytes());
-
-    ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
-    assertEquals(2, parts.size());
-    assertEquals("sig_123", parts.get(0).get("thoughtSignature").asString(""));
-    assertTrue(parts.get(0).get("thought").asBoolean(false));
-  }
-
   @Test
   void replaysGeminiBlocksOnlyForMatchingAffinityAndDropsSignaturesAcrossModels() throws Exception {
     ProviderReplayAffinity affinity = descriptor().affinity("gemini-2.5-flash");
@@ -1134,120 +1085,20 @@ class GeminiRequestEncoderTest {
     assertFalse(crossModelParts.get(1).has("thoughtSignature"));
   }
 
-  /**
-   * 意图：durable 与 replay 的 functionCall args 按数值语义比对（scale 无关）——{@code 1.0} 与 {@code 1.00} 视为一致，且原生
-   * part 形态与 opaque 字段完整保留；不同数值或整数与小数分型不同时安全退回 durable 语义编码。
-   */
+  /** 意图：匹配 affinity 时，typed text 与 opaque inlineData block 按原顺序保留未知字段。 */
   @Test
-  void comparesFunctionCallArgsByValueAndFallsBackWhenNumbersDiffer() throws Exception {
-    ObjectNode payload = MAPPER.createObjectNode();
-    payload.put("role", "model");
-    ArrayNode parts = payload.putArray("parts");
-    ObjectNode call = parts.addObject().putObject("functionCall");
-    call.put("name", "charge");
-    call.put("id", "c1");
-    ObjectNode args = call.putObject("args");
-    args.put("amount", new BigDecimal("1.0"));
-    args.putObject("nested").put("fee", new BigDecimal("1.00"));
-    call.putObject("futureCallField").put("trace", "t-1");
-    ObjectNode textPart = parts.addObject();
-    textPart.put("text", "answer");
-    textPart.putObject("futurePartField").put("sig", "s-1");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            payload);
-    ArrayNode replayedParts =
-        (ArrayNode)
-            encodeWithReplay(
-                    replayState,
-                    List.of(
-                        new ProviderTextBlock("answer"),
-                        new ProviderToolCallBlock(
-                            new ProviderToolCall(
-                                "c1", "charge", "{\"amount\":1.00,\"nested\":{\"fee\":1.000}}"))))
-                .get("contents")
-                .get(1)
-                .get("parts");
-    assertEquals(2, replayedParts.size());
-    JsonNode callOut = replayedParts.get(0).path("functionCall");
-    assertEquals("charge", callOut.path("name").asString(""));
-    // replay 原生 args 按值透传，opaque 字段完整保留（wire 数值文本保真由 *PrecisionRegressionTest 断言）
-    assertEquals("1.0", callOut.path("args").path("amount").decimalValue().toPlainString());
-    assertEquals(
-        "1.0", callOut.path("args").path("nested").path("fee").decimalValue().toPlainString());
-    assertEquals("t-1", callOut.path("futureCallField").path("trace").asString(""));
-    assertEquals("s-1", replayedParts.get(1).path("futurePartField").path("sig").asString(""));
-
-    ArrayNode highPrecisionParts =
-        (ArrayNode)
-            encodeWithReplay(
-                    replayState(argumentCall("0.1234567890123456789012345678")),
-                    List.of(
-                        new ProviderTextBlock("answer"),
-                        new ProviderToolCallBlock(
-                            new ProviderToolCall(
-                                "c1", "charge", "{\"amount\":0.1234567890123456789012345679}"))))
-                .get("contents")
-                .get(1)
-                .get("parts");
-    assertFalse(highPrecisionParts.get(0).has("functionCall"));
-
-    ArrayNode integerParts =
-        (ArrayNode)
-            encodeWithReplay(
-                    replayState(argumentCall("1")),
-                    List.of(
-                        new ProviderTextBlock("answer"),
-                        new ProviderToolCallBlock(
-                            new ProviderToolCall("c1", "charge", "{\"amount\":1.0}"))))
-                .get("contents")
-                .get(1)
-                .get("parts");
-    assertFalse(integerParts.get(0).has("functionCall"));
-  }
-
-  private static ObjectNode argumentCall(String amount) {
-    ObjectNode payload = MAPPER.createObjectNode();
-    payload.put("role", "model");
-    ArrayNode parts = payload.putArray("parts");
-    ObjectNode call = parts.addObject().putObject("functionCall");
-    call.put("name", "charge");
-    call.put("id", "c1");
-    call.putObject("args").put("amount", new BigDecimal(amount));
-    parts.addObject().put("text", "answer");
-    return payload;
-  }
-
-  private static ProviderReplayState replayState(ObjectNode payload) {
-    return new ProviderReplayState(
-        ProviderReplayFormat.GEMINI_CONTENT, descriptor().affinity("gemini-2.5-flash"), payload);
-  }
-
-  /** 意图：affinity 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
-  @Test
-  void replaysOpaqueUnknownPartsAndFieldsVerbatim() throws Exception {
-    ObjectNode replayPayload = MAPPER.createObjectNode();
-    replayPayload.put("role", "model");
-    ArrayNode replayedParts = replayPayload.putArray("parts");
-    ObjectNode textPart = replayedParts.addObject();
-    textPart.put("text", "answer");
-    textPart.putObject("futurePartField").put("trace", "t-1");
-    replayedParts
-        .addObject()
-        .putObject("inlineData")
-        .put("mimeType", "image/png")
-        .put("data", "QQ==");
-
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            replayPayload);
-
-    ProviderRequest req2 =
+  void replaysOpaqueUnknownBlocksAndFieldsVerbatim() throws Exception {
+    ProviderReplayAffinity affinity = descriptor().affinity("gemini-2.5-flash");
+    ObjectNode textFields = MAPPER.createObjectNode();
+    textFields.putObject("futurePartField").put("trace", "t-1");
+    ObjectNode inlineFields = MAPPER.createObjectNode();
+    inlineFields.putObject("inlineData").put("mimeType", "image/png").put("data", "QQ==");
+    List<ProviderContentBlock> blocks =
+        List.of(
+            new ProviderTextBlock("answer", geminiBlockData(affinity, null, null, textFields)),
+            new ProviderOpaqueBlock(
+                "gemini_part", geminiBlockData(affinity, null, null, inlineFields)));
+    ProviderRequest request =
         new ProviderRequest(
             model(false),
             DEFAULT_VARIANT,
@@ -1255,16 +1106,13 @@ class GeminiRequestEncoderTest {
             "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("answer")),
-                    replayState),
+                new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks),
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q2")))),
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode json = MAPPER.readTree(encoder.encode(req2, descriptor()).bodyUtf8Bytes());
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
     ArrayNode wireParts = (ArrayNode) json.get("contents").get(1).get("parts");
     assertEquals(2, wireParts.size());
     assertEquals("answer", wireParts.get(0).path("text").asString(""));

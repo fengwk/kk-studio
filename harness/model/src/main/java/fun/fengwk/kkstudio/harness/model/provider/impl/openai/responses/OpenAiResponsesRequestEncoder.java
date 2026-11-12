@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -398,16 +397,6 @@ public final class OpenAiResponsesRequestEncoder {
           }
           return;
         }
-        ProviderReplayState replayState = msg.replayState();
-        if (replayState != null
-            && canReplay(replayState, descriptor, model.modelId(), msg.contents())) {
-          ArrayNode outputArray = extractOutputArray(replayState.payload());
-          for (JsonNode item : outputArray) {
-            inputItems.add(item.deepCopy());
-          }
-          return;
-        }
-
         // Semantic fallback
         encodeAssistantSemanticFallback(msg.contents(), inputItems);
       }
@@ -735,50 +724,6 @@ public final class OpenAiResponsesRequestEncoder {
         ProviderErrorKind.INVALID_REQUEST,
         "OpenAI Responses does not support tool result content block type: "
             + block.getClass().getSimpleName());
-  }
-
-  /**
-   * 判断 durable replay 是否可在本轮原位回放。
-   *
-   * <p>先严格校验 payload 与 durable 语义的一致性（结构损坏或与 durable 文本/工具调用矛盾在此抛出 {@code INVALID_REQUEST}，与
-   * affinity 是否匹配无关）；随后 affinity 匹配时原位回放 payload 的全部 output item，否则回退语义编码。 opaque / native item
-   * 本身从不导致拒绝：affinity 匹配即原样回放，失配则随语义回退被丢弃。携带 opaque 密文、没有可比可读文本的 reasoning 是原生推理的 权威事实：原位回放保留密文，
-   * 缺失的 durable 可读思考由调用方作为普通 assistant 文本附带。
-   */
-  private static boolean canReplay(
-      ProviderReplayState replayState,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      List<ProviderContentBlock> durableContents) {
-    if (replayState == null) {
-      return false;
-    }
-    if (replayState.format() != ProviderReplayFormat.OPENAI_RESPONSES) {
-      return false;
-    }
-
-    ArrayNode outputArray = extractOutputArray(replayState.payload());
-    if (declinesReplay(outputArray, durableContents)) {
-      // 只由空 reasoning 占位符构成：不承载原生推理，改由语义编码承载 durable 思考。
-      return false;
-    }
-
-    return replayState.affinity().equals(descriptor.affinity(requestedModel));
-  }
-
-  private static ArrayNode extractOutputArray(JsonNode payload) {
-    if (payload == null || !payload.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid replay payload: must be a JSON object");
-    }
-    validateAllowedFields(payload, ALLOWED_PAYLOAD_FIELDS, "replay payload");
-    JsonNode outputNode = payload.get("output");
-    if (outputNode == null || !outputNode.isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "invalid replay payload: missing or non-array 'output' field");
-    }
-    return (ArrayNode) outputNode;
   }
 
   /**

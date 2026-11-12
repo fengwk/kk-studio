@@ -1,10 +1,5 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
-
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -15,12 +10,7 @@ import java.util.UUID;
  * <p>ROOT 没有 parent，其他 Entry 必须指向同一 Session 内的一个 parent Entry。
  */
 public record Entry(
-    UUID id,
-    UUID sessionId,
-    UUID parentEntryId,
-    EntryPayload payload,
-    Instant createdAt,
-    @JsonIgnore ProviderReplayState providerReplayState) {
+    UUID id, UUID sessionId, UUID parentEntryId, EntryPayload payload, Instant createdAt) {
 
   public Entry {
     Objects.requireNonNull(id, "id");
@@ -34,17 +24,5 @@ public record Entry(
     } else if (parentEntryId == null) {
       throw new IllegalArgumentException("non-ROOT entry must carry a parentEntryId");
     }
-    if (providerReplayState != null) {
-      if (!(payload instanceof MessagePayload messagePayload
-          && messagePayload.message().role() == AgentMessageRole.ASSISTANT)) {
-        throw new IllegalArgumentException(
-            "providerReplayState is only permitted on ASSISTANT MESSAGE entries");
-      }
-    }
-  }
-
-  public Entry(
-      UUID id, UUID sessionId, UUID parentEntryId, EntryPayload payload, Instant createdAt) {
-    this(id, sessionId, parentEntryId, payload, createdAt, null);
   }
 }

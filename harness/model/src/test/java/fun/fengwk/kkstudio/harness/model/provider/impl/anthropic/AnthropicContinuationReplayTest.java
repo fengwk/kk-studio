@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,7 +8,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -20,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -27,8 +26,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -93,21 +92,24 @@ class AnthropicContinuationReplayTest {
     // CONTINUE 不得携带 normalized 工具意图
     assertTrue(completion.response().toolCalls().isEmpty());
 
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState, "CONTINUE must freeze native replay state");
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-    JsonNode content = replayState.payload().path("content");
-    assertEquals(2, content.size());
-    assertEquals("server_tool_use", content.get(0).path("type").asString(""));
-    assertEquals("kk", content.get(0).path("input").path("query").asString(""));
-    assertEquals("Searching", content.get(1).path("text").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size());
+    assertEquals("server_tool_use", ((ProviderOpaqueBlock) blocks.get(0)).blockType());
+    assertEquals(
+        "kk",
+        ((ProviderOpaqueBlock) blocks.get(0))
+            .providerBlockData()
+            .nativeFields()
+            .path("input")
+            .path("query")
+            .asString(""));
+    assertEquals("Searching", ((ProviderTextBlock) blocks.get(1)).text());
+    assertEquals(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        ((ProviderOpaqueBlock) blocks.get(0)).providerBlockData().protocol());
 
     // 下一轮：CONTINUE 的 native replay 必须原样进入 wire
-    ProviderRequest nextRequest =
-        request(
-            List.of(
-                userMsg("search the web"),
-                assistantMsg(List.of(new ProviderTextBlock("Searching")), replayState)));
+    ProviderRequest nextRequest = request(List.of(userMsg("search the web"), assistantMsg(blocks)));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
@@ -135,10 +137,8 @@ class AnthropicContinuationReplayTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.CONTINUE, completion.response().stopReason());
-    assertNotNull(completion.replayState());
-    assertEquals(
-        "state",
-        completion.replayState().payload().path("content").get(0).path("text").asString(""));
+    assertEquals(1, completion.response().blocks().size());
+    assertEquals("state", ((ProviderTextBlock) completion.response().blocks().get(0)).text());
   }
 
   /**
@@ -152,17 +152,13 @@ class AnthropicContinuationReplayTest {
     compactionBlock.put("type", "compaction");
     compactionBlock.put("summary", "earlier turns were summarized");
     compactionBlock.put("signature", "sig-compaction");
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload(compactionBlock));
+    ProviderOpaqueBlock compaction = compactionBlock(compactionBlock);
 
     ProviderRequest continuationRequest =
         request(
             List.of(
                 userMsg("old question"),
-                assistantMsg(List.of(new ProviderTextBlock("")), replayState),
+                assistantMsg(List.of(compaction)),
                 userMsg("new question")));
     JsonNode messages = wire(encoder.encode(continuationRequest, descriptor)).path("messages");
 
@@ -184,11 +180,7 @@ class AnthropicContinuationReplayTest {
     ObjectNode compactionBlock = NODES.objectNode();
     compactionBlock.put("type", "compaction");
     compactionBlock.put("summary", "summarized");
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            payload(compactionBlock));
+    ProviderOpaqueBlock compaction = compactionBlock(compactionBlock);
 
     // 与录制时不同的 system 指令，且首条 user 消息也被替换；replay 不受影响
     ProviderRequest continuationRequest =
@@ -196,7 +188,7 @@ class AnthropicContinuationReplayTest {
             "A completely different system instruction.",
             List.of(
                 userMsg("unrelated earlier question"),
-                assistantMsg(List.of(new ProviderTextBlock("")), replayState),
+                assistantMsg(List.of(compaction)),
                 userMsg("new question")));
     JsonNode messages = wire(encoder.encode(continuationRequest, descriptor)).path("messages");
 
@@ -209,32 +201,13 @@ class AnthropicContinuationReplayTest {
   /** 测试意图：compaction block 必须唯一且位于消息首部，否则显式失败而不是编码出语义错误的请求。 */
   @Test
   void rejectsDuplicateOrMisplacedCompactionBlock() {
-    // 1. 两个 compaction block
-    ObjectNode duplicated = NODES.objectNode();
-    duplicated.put("role", "assistant");
-    ArrayNode duplicatedContent = duplicated.putArray("content");
-    duplicatedContent.addObject().put("type", "compaction").put("summary", "a");
-    duplicatedContent.addObject().put("type", "compaction").put("summary", "b");
-    ProviderException duplicateError =
-        assertRejected(
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                descriptor.affinity("claude-3-5-sonnet"),
-                duplicated));
+    ProviderOpaqueBlock first = compactionBlock("a");
+    ProviderOpaqueBlock second = compactionBlock("b");
+    ProviderException duplicateError = assertRejected(List.of(first, second));
     assertEquals("duplicate compaction block in replay payload", duplicateError.getMessage());
 
-    // 2. compaction block 不在首位
-    ObjectNode misplaced = NODES.objectNode();
-    misplaced.put("role", "assistant");
-    ArrayNode misplacedContent = misplaced.putArray("content");
-    misplacedContent.addObject().put("type", "text").put("text", "before");
-    misplacedContent.addObject().put("type", "compaction").put("summary", "s");
     ProviderException misplacedError =
-        assertRejected(
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                descriptor.affinity("claude-3-5-sonnet"),
-                misplaced));
+        assertRejected(List.of(new ProviderTextBlock("before"), compactionBlock("s")));
     assertEquals(
         "compaction block must be the first content block of the replay message",
         misplacedError.getMessage());
@@ -269,22 +242,34 @@ class AnthropicContinuationReplayTest {
     assertEquals("CONTINUE response must not contain tool calls", error.getMessage());
   }
 
-  private ProviderException assertRejected(ProviderReplayState replayState) {
-    ProviderRequest request =
-        request(
-            List.of(userMsg("hi"), assistantMsg(List.of(new ProviderTextBlock("")), replayState)));
+  private ProviderException assertRejected(List<ProviderContentBlock> blocks) {
+    ProviderRequest request = request(List.of(userMsg("hi"), assistantMsg(blocks)));
     ProviderException error =
         assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
     return error;
   }
 
-  /** 构造只含 role + content 的 assistant replay payload。 */
-  private static ObjectNode payload(ObjectNode firstBlock) {
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    payload.putArray("content").add(firstBlock);
-    return payload;
+  private ProviderOpaqueBlock compactionBlock(String summary) {
+    ObjectNode fields = NODES.objectNode();
+    fields.put("summary", summary);
+    return new ProviderOpaqueBlock(
+        "compaction",
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            fields));
+  }
+
+  private ProviderOpaqueBlock compactionBlock(ObjectNode rawBlock) {
+    ObjectNode fields = rawBlock.deepCopy();
+    fields.remove("type");
+    return new ProviderOpaqueBlock(
+        "compaction",
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            fields));
   }
 
   private AnthropicStreamAccumulator accumulator(ProviderRequest request) {
@@ -315,9 +300,8 @@ class AnthropicContinuationReplayTest {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock(text)));
   }
 
-  private static ProviderMessage assistantMsg(
-      List<ProviderContentBlock> blocks, ProviderReplayState replayState) {
-    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks, replayState);
+  private static ProviderMessage assistantMsg(List<ProviderContentBlock> blocks) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks);
   }
 
   private static ModelDescriptor model() {

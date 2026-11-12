@@ -60,6 +60,8 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
@@ -74,10 +76,12 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -120,13 +124,36 @@ public abstract class HarnessStoreInvocationContract {
   // ---- 模型调用 ----
 
   @Test
-  void modelInvocationAndEntryRoundtripProviderReplayState() {
-    ProviderReplayState replayState = sampleReplayState();
-
+  void modelInvocationAndEntryRoundtripOrderedProviderBlocks() {
+    ProviderBlockData textData =
+        new ProviderBlockData(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
+            JsonNodeFactory.instance.objectNode().put("source", "text"));
+    ProviderBlockData nativeData =
+        new ProviderBlockData(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
+            "gemini-function-call-signature",
+            null,
+            null,
+            JsonNodeFactory.instance.objectNode().put("source", "native"));
     ModelRequestSpec requestSpec = modelRequest();
-    ProviderResponse response = assistantResponse();
+    ProviderResponse response =
+        new ProviderResponse(
+            List.of(
+                new ProviderTextBlock("assistant reply", textData),
+                new ProviderOpaqueBlock("functionCall", nativeData)),
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+            "req-blocks",
+            null,
+            "{}",
+            List.of(),
+            null,
+            null);
 
-    // 1. 插入 READY modelInvocation 并推进到带有 replayState 的 SUCCEEDED
+    // 1. 插入 READY modelInvocation 并推进到包含 blocks 的 SUCCEEDED
     inTransaction(
         store,
         tx -> {
@@ -146,15 +173,17 @@ public abstract class HarnessStoreInvocationContract {
           builtin(store, tx).updateModelInvocation(current.markRunning(T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
           builtin(store, tx)
-              .updateModelInvocation(current.succeed(response, null, replayState, T2));
+              .updateModelInvocation(current.succeed(response, null, T2));
         });
 
     ModelInvocation foundModel =
         store.transaction(
             tx -> builtin(store, tx).findModelInvocation(TestIds.id(101)).orElseThrow());
-    assertEquals(replayState, foundModel.providerReplayState());
+    assertEquals(response.blocks(), foundModel.result().blocks());
+    assertEquals(textData, foundModel.result().blocks().get(0) instanceof ProviderTextBlock block ? block.providerBlockData() : null);
+    assertEquals(nativeData, foundModel.result().blocks().get(1) instanceof ProviderOpaqueBlock block ? block.providerBlockData() : null);
 
-    // 2. 插入按照 turn 协议合法的 user entry 与带有 matching replayState 的 assistant entry
+    // 2. 将 ordered block 投影成 assistant entry 并检查持久化历史
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
@@ -165,27 +194,22 @@ public abstract class HarnessStoreInvocationContract {
             baseline.sessionId(),
             userEntryId,
             mappedAssistant(requestSpec, response, T2),
-            T2,
-            replayState);
+            T2);
 
     inTransaction(store, tx -> tx.entries().insert(assistant));
 
     Entry foundEntry = store.transaction(tx -> tx.entries().find(assistantEntryId).orElseThrow());
-    assertEquals(replayState, foundEntry.providerReplayState());
+    MessagePayload storedPayload = (MessagePayload) foundEntry.payload();
     assertEquals(
-        "gemini-function-call-signature",
-        foundEntry
-            .providerReplayState()
-            .payload()
-            .path("parts")
-            .path(0)
-            .path("thoughtSignature")
-            .asText());
+        List.of(
+            new TextMessageContent("assistant reply"),
+            new NativeAssistantBlockContent("functionCall", nativeData)),
+        storedPayload.message().contents());
 
     var loadedPath = store.transaction(tx -> tx.entries().loadPath(assistantEntryId));
-    assertEquals(replayState, loadedPath.head().providerReplayState());
+    assertEquals(storedPayload, loadedPath.head().payload());
 
-    // 3. attachResultEntry 清空 invocation replayState
+    // 3. attachResultEntry retains the persisted assistant result entry.
     inTransaction(
         store,
         tx -> {
@@ -197,19 +221,8 @@ public abstract class HarnessStoreInvocationContract {
     ModelInvocation foundAttached =
         store.transaction(
             tx -> builtin(store, tx).findModelInvocation(TestIds.id(101)).orElseThrow());
-    assertNull(foundAttached.providerReplayState());
     assertEquals(assistantEntryId, foundAttached.resultEntryId());
-  }
-
-  private static ProviderReplayState sampleReplayState() {
-    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
-    var functionCall = payload.putArray("parts").addObject();
-    functionCall.putObject("functionCall").put("name", "bash").putObject("args");
-    functionCall.put("thoughtSignature", "gemini-function-call-signature");
-    return new ProviderReplayState(
-        ProviderReplayFormat.GEMINI_CONTENT,
-        new ProviderReplayAffinity(ProviderType.GOOGLE, "google", "gemini-3.8-flash"),
-        payload);
+    assertEquals(response.blocks(), foundAttached.result().blocks());
   }
 
   @Test

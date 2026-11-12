@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 
 import java.time.Instant;
@@ -37,7 +36,6 @@ public record ModelInvocation(
     List<ModelAttemptFailure> failedAttempts,
     Instant createdAt,
     Instant updatedAt,
-    @JsonIgnore ProviderReplayState providerReplayState,
     @JsonIgnore ModelGroupProgress groupProgress,
     Instant requestedAt) {
 
@@ -65,88 +63,9 @@ public record ModelInvocation(
       throw new IllegalArgumentException("streamCheckpoint attempt must match invocation attempt");
     }
     validateStatusFields(
-        status,
-        attempt,
-        failedAttempts,
-        result,
-        error,
-        resultEntryId,
-        streamCheckpoint,
-        providerReplayState);
+        status, attempt, failedAttempts, result, error, resultEntryId, streamCheckpoint);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
-  }
-
-  public ModelInvocation(
-      UUID id,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID requestHeadEntryId,
-      ModelRequestSpec requestSpec,
-      ModelInvocationStatus status,
-      int attempt,
-      StreamCheckpoint streamCheckpoint,
-      ProviderResponse result,
-      ModelInvocationError error,
-      UUID resultEntryId,
-      List<ModelAttemptFailure> failedAttempts,
-      Instant createdAt,
-      Instant updatedAt,
-      ProviderReplayState providerReplayState) {
-    this(
-        id,
-        threadId,
-        turnStartEntryId,
-        requestHeadEntryId,
-        requestSpec,
-        status,
-        attempt,
-        streamCheckpoint,
-        result,
-        error,
-        resultEntryId,
-        failedAttempts,
-        createdAt,
-        updatedAt,
-        providerReplayState,
-        null);
-  }
-
-  public ModelInvocation(
-      UUID id,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID requestHeadEntryId,
-      ModelRequestSpec requestSpec,
-      ModelInvocationStatus status,
-      int attempt,
-      StreamCheckpoint streamCheckpoint,
-      ProviderResponse result,
-      ModelInvocationError error,
-      UUID resultEntryId,
-      List<ModelAttemptFailure> failedAttempts,
-      Instant createdAt,
-      Instant updatedAt,
-      ProviderReplayState providerReplayState,
-      ModelGroupProgress groupProgress) {
-    this(
-        id,
-        threadId,
-        turnStartEntryId,
-        requestHeadEntryId,
-        requestSpec,
-        status,
-        attempt,
-        streamCheckpoint,
-        result,
-        error,
-        resultEntryId,
-        failedAttempts,
-        createdAt,
-        updatedAt,
-        providerReplayState,
-        groupProgress,
-        null);
   }
 
   public ModelInvocation(
@@ -227,7 +146,6 @@ public record ModelInvocation(
             failedAttempts,
             createdAt,
             now,
-            providerReplayState,
             progress,
             requestedAt);
     validateTransition(this, next);
@@ -367,21 +285,10 @@ public record ModelInvocation(
     UUID storedResultEntryId = stored.resultEntryId();
     UUID nextResultEntryId = next.resultEntryId();
     if (storedResultEntryId == null) {
-      if (nextResultEntryId != null) {
-        if (next.providerReplayState() != null) {
-          throw new IllegalArgumentException(
-              "linking a terminal result entry must clear providerReplayState");
-        }
-      } else if (!Objects.equals(stored.providerReplayState(), next.providerReplayState())) {
-        throw new IllegalArgumentException("terminal providerReplayState must not change");
-      }
       return;
     }
     if (!Objects.equals(storedResultEntryId, nextResultEntryId)) {
       throw new IllegalArgumentException("terminal resultEntryId must not change");
-    }
-    if (!Objects.equals(stored.providerReplayState(), next.providerReplayState())) {
-      throw new IllegalArgumentException("terminal providerReplayState must not change");
     }
   }
 
@@ -529,7 +436,6 @@ public record ModelInvocation(
         running.failedAttempts(),
         running.createdAt(),
         running.updatedAt(),
-        running.providerReplayState(),
         running.groupProgress(),
         now);
   }
@@ -569,7 +475,6 @@ public record ModelInvocation(
         nextFailures,
         createdAt,
         now,
-        null,
         progress,
         requestedAt);
   }
@@ -618,15 +523,9 @@ public record ModelInvocation(
         ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, failedAttempts, now);
   }
 
-  /**
-   * RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result、最终 streamCheckpoint 与可选的
-   * providerReplayState；attempt 必须为正数。
-   */
+  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result 与最终 streamCheckpoint；attempt 必须为正数。 */
   public ModelInvocation succeed(
-      ProviderResponse result,
-      StreamCheckpoint checkpoint,
-      ProviderReplayState providerReplayState,
-      Instant now) {
+      ProviderResponse result, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(
         ModelInvocationStatus.SUCCEEDED,
@@ -636,19 +535,12 @@ public record ModelInvocation(
         null,
         null,
         failedAttempts,
-        providerReplayState,
         now);
-  }
-
-  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result 与最终 streamCheckpoint；attempt 必须为正数。 */
-  public ModelInvocation succeed(
-      ProviderResponse result, StreamCheckpoint checkpoint, Instant now) {
-    return succeed(result, checkpoint, null, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，保留当前 streamCheckpoint；attempt 必须为正数。 */
   public ModelInvocation succeed(ProviderResponse result, Instant now) {
-    return succeed(result, streamCheckpoint, null, now);
+    return succeed(result, streamCheckpoint, now);
   }
 
   /**
@@ -731,20 +623,6 @@ public record ModelInvocation(
       UUID resultEntryId,
       List<ModelAttemptFailure> failedAttempts,
       Instant now) {
-    return withState(
-        status, attempt, streamCheckpoint, result, error, resultEntryId, failedAttempts, null, now);
-  }
-
-  private ModelInvocation withState(
-      ModelInvocationStatus status,
-      int attempt,
-      StreamCheckpoint streamCheckpoint,
-      ProviderResponse result,
-      ModelInvocationError error,
-      UUID resultEntryId,
-      List<ModelAttemptFailure> failedAttempts,
-      ProviderReplayState providerReplayState,
-      Instant now) {
     ModelInvocation next =
         new ModelInvocation(
             id,
@@ -761,7 +639,6 @@ public record ModelInvocation(
             failedAttempts,
             createdAt,
             now,
-            providerReplayState,
             groupProgress,
             requestedAt);
     validateTransition(this, next);
@@ -775,14 +652,7 @@ public record ModelInvocation(
       ProviderResponse result,
       ModelInvocationError error,
       UUID resultEntryId,
-      StreamCheckpoint streamCheckpoint,
-      ProviderReplayState providerReplayState) {
-    if (providerReplayState != null) {
-      if (status != ModelInvocationStatus.SUCCEEDED || result == null || resultEntryId != null) {
-        throw new IllegalArgumentException(
-            "providerReplayState is only allowed on SUCCEEDED invocations without resultEntryId");
-      }
-    }
+      StreamCheckpoint streamCheckpoint) {
     int expectedRunningFailures = Math.subtractExact(attempt, 1);
     boolean terminal = status.isTerminal();
     if (!terminal && resultEntryId != null) {

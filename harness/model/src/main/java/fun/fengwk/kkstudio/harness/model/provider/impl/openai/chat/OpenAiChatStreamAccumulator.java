@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -721,91 +720,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             null,
             null);
 
-    ProviderReplayState replayState = null;
-    if (canReplay) {
-      // replay 以 provider 原生 assistant message 为基座保留官方非规范化字段，known 字段再以 durable 事实补齐
-      ObjectNode payload = nativeAssistantMessage.deepCopy();
-      payload.put("role", "assistant");
-      payload.remove("annotations");
-      JsonNode audio = payload.get("audio");
-      if (audio != null) {
-        if (audio.isNull()) {
-          payload.remove("audio");
-        } else if (!audio.isObject()
-            || !audio.path("id").isString()
-            || audio.path("id").stringValue().isBlank()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "invalid assistant audio id");
-        } else {
-          payload.putObject("audio").put("id", audio.path("id").stringValue());
-        }
-      }
-      JsonNode nativeCalls = payload.get("tool_calls");
-      for (String knownField : KNOWN_ASSISTANT_FIELDS) {
-        payload.remove(knownField);
-      }
-      if (!contentBuilder.isEmpty() || (refusalBuilder.isEmpty() && toolCalls.isEmpty())) {
-        payload.put("content", contentBuilder.toString());
-      }
-      if (!refusalBuilder.isEmpty()) {
-        payload.put("refusal", refusalBuilder.toString());
-      }
-      if (nativeCalls != null && nativeCalls.isArray()) {
-        ArrayNode tcArr = payload.putArray("tool_calls");
-        for (JsonNode nativeCall : nativeCalls) {
-          if (nativeCall.isObject()) {
-            ObjectNode call = (ObjectNode) nativeCall.deepCopy();
-            JsonNode index = call.remove("index");
-            ProviderToolCall normalized =
-                index != null
-                        && index.isInt()
-                        && call.path("function").isObject()
-                        && (!call.path("type").isString()
-                            || "function".equals(call.path("type").stringValue()))
-                    ? completedCalls.remove(index.intValue())
-                    : null;
-            if (normalized != null) {
-              call.put("id", normalized.id());
-              call.put("type", "function");
-              ObjectNode fn = (ObjectNode) call.get("function");
-              fn.put("name", normalized.name());
-              fn.put("arguments", normalized.argumentsJson());
-            }
-            tcArr.add(call);
-          } else {
-            tcArr.add(nativeCall.deepCopy());
-          }
-        }
-      }
-      if (!completedCalls.isEmpty()) {
-        ArrayNode tcArr = (ArrayNode) payload.get("tool_calls");
-        if (tcArr == null) {
-          tcArr = payload.putArray("tool_calls");
-        }
-        for (ProviderToolCall tc : completedCalls.values()) {
-          ObjectNode call = tcArr.addObject();
-          call.put("id", tc.id());
-          call.put("type", "function");
-          ObjectNode fn = call.putObject("function");
-          fn.put("name", tc.name());
-          fn.put("arguments", tc.argumentsJson());
-        }
-      }
-      if (!reasoningContentBuilder.isEmpty()) {
-        payload.put("reasoning_content", reasoningContentBuilder.toString());
-      }
-      if (reasoningDetailsNode != null && !reasoningDetailsNode.isNull()) {
-        payload.set("reasoning_details", reasoningDetailsNode.deepCopy());
-      }
-
-      replayState =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_CHAT,
-              descriptor.affinity(request.model().modelId()),
-              payload);
-    }
-
-    return new ProviderCompletion(response, replayState);
+    return new ProviderCompletion(response);
   }
 
   private ProviderBlockData blockData(ObjectNode nativeFields, boolean replayable) {

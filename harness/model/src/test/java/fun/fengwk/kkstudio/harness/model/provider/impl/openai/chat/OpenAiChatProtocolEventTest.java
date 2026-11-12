@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,6 +27,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -170,8 +170,13 @@ class OpenAiChatProtocolEventTest {
     assertNotNull(completionRef.get());
     assertEquals("Hello", completionRef.get().response().text());
     assertEquals(GenerationStopReason.COMPLETE, completionRef.get().response().stopReason());
-    // 响应侧 annotations 仍经 raw 事件原样交付，但绝不写入请求侧 replay。
-    assertFalse(completionRef.get().replayState().payload().has("annotations"));
+    // 响应侧 annotations 经 raw 事件交付，不作为 assistant block 的 provider-native 字段保留。
+    assertTrue(
+        completionRef.get().response().blocks().stream()
+            .noneMatch(
+                block ->
+                    block instanceof ProviderOpaqueBlock opaque
+                        && opaque.providerBlockData().nativeFields().has("annotations")));
 
     // 事件名优先级：SSE name > payload object/type > chat.completion.chunk；[DONE] 为 done
     assertEquals(

@@ -26,15 +26,18 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -148,8 +151,8 @@ class GeminiStreamAccumulatorTest {
     assertEquals("Hello ", textDeltas.get(0).text());
     assertEquals("world!", textDeltas.get(1).text());
 
-    assertNotNull(completion.replayState());
-    assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
+    assertEquals(1, response.blocks().size());
+    assertEquals("Hello world!", ((ProviderTextBlock) response.blocks().get(0)).text());
   }
 
   /** 合法 STOP 前提下，具体诊断区分缓存关系错误与输出加法溢出，避免其他响应错误让负例误通过。 */
@@ -190,9 +193,9 @@ class GeminiStreamAccumulatorTest {
         """);
     ProviderCompletion completion = accumulator.finish();
     assertEquals("ACBD", completion.response().text());
-    JsonNode parts = completion.replayState().payload().path("parts");
-    assertEquals("AC", parts.get(0).path("text").asString(""));
-    assertEquals("BD", parts.get(1).path("text").asString(""));
+    assertEquals(2, completion.response().blocks().size());
+    assertEquals("AC", ((ProviderTextBlock) completion.response().blocks().get(0)).text());
+    assertEquals("BD", ((ProviderTextBlock) completion.response().blocks().get(1)).text());
   }
 
   /** 测试意图：终态后禁止新 content 和第二个 finishReason，usage-only 空 candidates 仍可更新用量。 */
@@ -382,9 +385,9 @@ class GeminiStreamAccumulatorTest {
     assertEquals(2, toolDeltas.size());
   }
 
-  /** 验证 MAX_TOKENS 导致 LENGTH 截断终态，且不生成 replayState（未闭合或截断无 replay）。 */
+  /** 验证 MAX_TOKENS 导致 LENGTH 截断终态。 */
   @Test
-  void handlesFinishReasonMaxTokens_resultsInLengthStopReasonWithoutReplay() throws Exception {
+  void handlesFinishReasonMaxTokens_resultsInLengthStopReason() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
@@ -406,12 +409,11 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.LENGTH, completion.response().stopReason());
-    assertNull(completion.replayState(), "LENGTH truncated output must not have replayState");
   }
 
-  /** 验证 SAFETY/RECITATION 等过滤原因映射为 FILTERED 终态，无 replayState。 */
+  /** 验证 SAFETY/RECITATION 等过滤原因映射为 FILTERED 终态。 */
   @Test
-  void handlesSafetyFilterFinishReason_resultsInFilteredStopReasonWithoutReplay() throws Exception {
+  void handlesSafetyFilterFinishReason_resultsInFilteredStopReason() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
@@ -433,16 +435,11 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
-    assertNull(completion.replayState());
   }
 
-  /**
-   * 意图：ESCALATION 表示请求被升级规则过滤，属于过滤终态而非协议错误，必须映射为 FILTERED， 同时忽略 tool call 且不生成
-   * replayState，避免把被过滤的输出当作可回放上下文。
-   */
+  /** 意图：ESCALATION 表示请求被升级规则过滤，属于过滤终态而非协议错误，必须映射为 FILTERED，同时忽略 tool call。 */
   @Test
-  void handlesEscalationFinishReason_resultsInFilteredStopReasonWithoutToolsOrReplay()
-      throws Exception {
+  void handlesEscalationFinishReason_resultsInFilteredStopReasonWithoutTools() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
@@ -468,7 +465,6 @@ class GeminiStreamAccumulatorTest {
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
     assertTrue(completion.response().toolCalls().isEmpty());
-    assertNull(completion.replayState());
   }
 
   /** 验证 promptFeedback blockReason（输入提示词被拒绝且无 candidate）映射为 FILTERED。 */
@@ -495,7 +491,6 @@ class GeminiStreamAccumulatorTest {
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
     assertEquals("", completion.response().text());
-    assertNull(completion.replayState());
   }
 
   /** 验证 MALFORMED_FUNCTION_CALL 异常终态被转换为 ProviderException(INVALID_RESPONSE)。 */
@@ -574,10 +569,11 @@ class GeminiStreamAccumulatorTest {
             new ProviderStreamEvent.TextDelta("Hello "),
             new ProviderStreamEvent.TextDelta("world!")),
         emittedEvents);
-    assertNotNull(completion.replayState());
-    assertEquals(
-        MAPPER.readTree("{\"role\":\"model\",\"parts\":[{\"text\":\"Hello world!\"}]}"),
-        completion.replayState().payload());
+    assertEquals(1, completion.response().blocks().size());
+    ProviderTextBlock text = (ProviderTextBlock) completion.response().blocks().get(0);
+    assertEquals("Hello world!", text.text());
+    assertEquals(descriptor.affinity("gemini-2.5-flash"), text.providerBlockData().affinity());
+    assertTrue(text.providerBlockData().nativeFields().isEmpty());
   }
 
   /** 测试意图：UNSPECIFIED 帧即使已交付文本，EOF 仍缺少终态，不能合成成功或多发增量。 */
@@ -795,13 +791,10 @@ class GeminiStreamAccumulatorTest {
     assertEquals("get_current_time", call.name());
     assertEquals("{}", call.argumentsJson());
 
-    assertNotNull(completion.replayState());
-    JsonNode replayPart = completion.replayState().payload().get("parts").get(0);
-    JsonNode replayFn = replayPart.get("functionCall");
-    assertEquals("get_current_time", replayFn.get("name").asString(""));
-    assertEquals("call_custom_1", replayFn.get("id").asString(""));
-    assertTrue(replayFn.get("args").isObject());
-    assertEquals(0, replayFn.get("args").size());
+    ProviderToolCallBlock callBlock = (ProviderToolCallBlock) response.blocks().get(0);
+    assertEquals("get_current_time", callBlock.toolCall().name());
+    assertEquals("call_custom_1", callBlock.toolCall().id());
+    assertTrue(callBlock.providerBlockData().nativeFields().isEmpty());
   }
 
   /** 意图：验证缺失 args 字段的 functionCall 严格抛出 INVALID_RESPONSE，绝不隐式合成 {}。 */
@@ -963,9 +956,9 @@ class GeminiStreamAccumulatorTest {
     }
   }
 
-  /** 意图：未知官方 Part（inlineData/executableCode 等）整体保留进 replay payload，不再被静默丢弃或补成空 text。 */
+  /** 意图：未知官方 Part（inlineData/executableCode 等）作为 opaque blocks 保留，不改写为文本。 */
   @Test
-  void preservesUnknownPartsVerbatimInReplayState() throws Exception {
+  void preservesUnknownPartsVerbatimAsOpaqueBlocks() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
@@ -995,14 +988,39 @@ class GeminiStreamAccumulatorTest {
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals("answer", completion.response().text());
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(3, parts.size());
-    assertEquals("answer", parts.get(0).path("text").asString(""));
-    assertEquals("image/png", parts.get(1).path("inlineData").path("mimeType").asString(""));
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
-    assertEquals("PYTHON", parts.get(2).path("executableCode").path("language").asString(""));
-    assertEquals("print(1)", parts.get(2).path("executableCode").path("code").asString(""));
-    assertFalse(parts.get(1).has("text"), "unknown part must not be rewritten as empty text");
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(3, blocks.size());
+    assertEquals("answer", ((ProviderTextBlock) blocks.get(0)).text());
+    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(1);
+    assertEquals("gemini_part", inlineData.blockType());
+    assertEquals(
+        "image/png",
+        inlineData
+            .providerBlockData()
+            .nativeFields()
+            .path("inlineData")
+            .path("mimeType")
+            .asString(""));
+    assertEquals(
+        "QQ==",
+        inlineData.providerBlockData().nativeFields().path("inlineData").path("data").asString(""));
+    ProviderOpaqueBlock executableCode = (ProviderOpaqueBlock) blocks.get(2);
+    assertEquals(
+        "PYTHON",
+        executableCode
+            .providerBlockData()
+            .nativeFields()
+            .path("executableCode")
+            .path("language")
+            .asString(""));
+    assertEquals(
+        "print(1)",
+        executableCode
+            .providerBlockData()
+            .nativeFields()
+            .path("executableCode")
+            .path("code")
+            .asString(""));
   }
 
   /**
@@ -1059,27 +1077,29 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("Hello world!", completion.response().text());
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(3, parts.size(), "每个带未知字段的 part 都必须保留自己的原生边界");
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(3, blocks.size(), "每个带未知字段的 part 都必须保留自己的原生边界");
 
-    JsonNode first = parts.get(0);
-    assertEquals("Hello", first.path("text").asString(""));
-    assertEquals("a", first.path("futureString").asString(""));
-    assertEquals(1, first.path("futureArray").size());
-    assertEquals(1, first.path("futureArray").get(0).path("a").asInt(0));
-    assertEquals(1, first.path("futureObject").path("nested").path("x").asInt(0));
-    assertEquals(1, first.path("futureScalar").asInt(0));
+    ProviderTextBlock first = (ProviderTextBlock) blocks.get(0);
+    JsonNode firstFields = first.providerBlockData().nativeFields();
+    assertEquals("Hello", first.text());
+    assertEquals("a", firstFields.path("futureString").asString(""));
+    assertEquals(1, firstFields.path("futureArray").size());
+    assertEquals(1, firstFields.path("futureArray").get(0).path("a").asInt(0));
+    assertEquals(1, firstFields.path("futureObject").path("nested").path("x").asInt(0));
+    assertEquals(1, firstFields.path("futureScalar").asInt(0));
 
-    JsonNode second = parts.get(1);
-    assertEquals(" world", second.path("text").asString(""));
-    assertEquals("b", second.path("futureString").asString(""), "未知字符串字段绝不被跨 chunk 拼接");
-    assertEquals(1, second.path("futureArray").size(), "未知数组字段绝不被跨 chunk 追加");
-    assertEquals(2, second.path("futureArray").get(0).path("b").asInt(0));
-    assertEquals(2, second.path("futureObject").path("nested").path("y").asInt(0));
-    assertEquals(3, second.path("futureObject").path("z").asInt(0));
-    assertEquals(2, second.path("futureScalar").asInt(0));
+    ProviderTextBlock second = (ProviderTextBlock) blocks.get(1);
+    JsonNode secondFields = second.providerBlockData().nativeFields();
+    assertEquals(" world", second.text());
+    assertEquals("b", secondFields.path("futureString").asString(""), "未知字符串字段绝不被跨 chunk 拼接");
+    assertEquals(1, secondFields.path("futureArray").size(), "未知数组字段绝不被跨 chunk 追加");
+    assertEquals(2, secondFields.path("futureArray").get(0).path("b").asInt(0));
+    assertEquals(2, secondFields.path("futureObject").path("nested").path("y").asInt(0));
+    assertEquals(3, secondFields.path("futureObject").path("z").asInt(0));
+    assertEquals(2, secondFields.path("futureScalar").asInt(0));
 
-    assertEquals("!", parts.get(2).path("text").asString(""));
+    assertEquals("!", ((ProviderTextBlock) blocks.get(2)).text());
   }
 
   /**
@@ -1121,22 +1141,37 @@ class GeminiStreamAccumulatorTest {
     assertEquals(1, completion.response().toolCalls().size());
     assertEquals("fn", completion.response().toolCalls().get(0).name());
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(4, parts.size(), "未知 union 成员与 functionCall 必须各自保留为独立 part");
-    assertEquals("t-1", parts.get(0).path("futurePartField").path("trace").asString(""));
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
-    assertFalse(parts.get(1).has("text"), "未知 part 绝不被补成空 text");
-    assertEquals("v", parts.get(2).path("toolResponse").path("response").path("k").asString(""));
-    assertFalse(parts.get(2).has("text"), "未知 union 成员绝不与相邻文本 part 合并");
-    assertEquals("fn", parts.get(3).path("functionCall").path("name").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(4, blocks.size(), "未知 union 成员与 functionCall 必须各自保留为独立 block");
+    ProviderTextBlock answer = (ProviderTextBlock) blocks.get(0);
+    assertEquals(
+        "t-1",
+        answer
+            .providerBlockData()
+            .nativeFields()
+            .path("futurePartField")
+            .path("trace")
+            .asString(""));
+    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(1);
+    assertEquals(
+        "QQ==",
+        inlineData.providerBlockData().nativeFields().path("inlineData").path("data").asString(""));
+    ProviderOpaqueBlock toolResponse = (ProviderOpaqueBlock) blocks.get(2);
+    assertEquals(
+        "v",
+        toolResponse
+            .providerBlockData()
+            .nativeFields()
+            .path("toolResponse")
+            .path("response")
+            .path("k")
+            .asString(""));
+    assertEquals("fn", ((ProviderToolCallBlock) blocks.get(3)).toolCall().name());
   }
 
-  /**
-   * 意图：part 同时声明 text 与 functionCall（同一 data oneof 冲突）时无法写入合法 replay，显式不冻结 replay；
-   * 文本与工具调用仍完整交付，绝不静默丢弃其中任何一方。
-   */
+  /** 意图：part 同时声明 text 与 functionCall（同一 data oneof 冲突）时，文本与工具调用仍完整交付，绝不静默丢弃其中任何一方。 */
   @Test
-  void skipsReplayFreezingWhenTextAndFunctionCallConflictInOnePart() throws Exception {
+  void preservesTextAndFunctionCallWhenOnePartContainsBoth() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
@@ -1157,7 +1192,6 @@ class GeminiStreamAccumulatorTest {
     assertEquals("partial ", completion.response().text());
     assertEquals(1, completion.response().toolCalls().size());
     assertEquals("fn", completion.response().toolCalls().get(0).name());
-    assertNull(completion.replayState(), "无法保真的 union 冲突必须显式不冻结 replay");
   }
 
   /**
@@ -1211,13 +1245,15 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = valuelessKnownFieldAccumulator.finish();
 
     assertEquals("answer", completion.response().text());
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(2, parts.size());
-    assertEquals("answer", parts.get(0).path("text").asString(""));
-    assertFalse(parts.get(0).has("thoughtSignature"), "空白签名无法写入合法 replay，按不存在处理");
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
-    assertFalse(parts.get(1).has("text"), "null text 无法写入合法 replay，且不承载语义");
-    assertFalse(parts.get(1).has("thoughtSignature"));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size());
+    ProviderTextBlock answer = (ProviderTextBlock) blocks.get(0);
+    assertEquals("answer", answer.text());
+    assertTrue(answer.providerBlockData().nativeFields().isEmpty(), "空白签名不承载原生语义");
+    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(1);
+    assertEquals(
+        "QQ==",
+        inlineData.providerBlockData().nativeFields().path("inlineData").path("data").asString(""));
   }
 
   /** 意图：同一 slot 的文本 part 在形状为超集且文本严格扩展时按完整累积形态整体替换（未知字段整体替换而非逐字段合并）， 形状不同的新 part 依旧按原顺序原样追加。 */
@@ -1264,16 +1300,26 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("Hello world", completion.response().text());
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(2, parts.size());
-    assertEquals("Hello world", parts.get(0).path("text").asString(""));
-    assertEquals("b", parts.get(0).path("futureString").asString(""));
-    assertEquals(2, parts.get(0).path("futureObject").path("b").asInt(0));
-    assertFalse(parts.get(0).path("futureObject").has("a"), "snapshot must replace unknown field");
-    assertEquals("image/jpeg", parts.get(1).path("inlineData").path("mimeType").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size());
+    ProviderTextBlock text = (ProviderTextBlock) blocks.get(0);
+    assertEquals("Hello world", text.text());
+    JsonNode nativeFields = text.providerBlockData().nativeFields();
+    assertEquals("b", nativeFields.path("futureString").asString(""));
+    assertEquals(2, nativeFields.path("futureObject").path("b").asInt(0));
+    assertFalse(nativeFields.path("futureObject").has("a"), "snapshot must replace unknown field");
+    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(1);
+    assertEquals(
+        "image/jpeg",
+        inlineData
+            .providerBlockData()
+            .nativeFields()
+            .path("inlineData")
+            .path("mimeType")
+            .asString(""));
   }
 
-  /** 意图：已知 functionCall 以规范化累积结果写回 replay，同时保留 part 级未知字段。 */
+  /** 意图：functionCall 规范化为工具调用 block，同时保留 part 级未知字段。 */
   @Test
   void normalizesFunctionCallAndPreservesUnknownPartFields() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
@@ -1297,11 +1343,14 @@ class GeminiStreamAccumulatorTest {
         }
         """);
 
-    JsonNode part = accumulator.finish().replayState().payload().get("parts").get(0);
-    assertEquals("fn", part.path("functionCall").path("name").asString(""));
-    assertEquals("c1", part.path("functionCall").path("id").asString(""));
-    assertEquals(1, part.path("functionCall").path("args").path("k").asInt(0));
-    assertEquals("t-1", part.path("futurePartField").path("trace").asString(""));
+    ProviderToolCallBlock call =
+        (ProviderToolCallBlock) accumulator.finish().response().blocks().get(0);
+    assertEquals("fn", call.toolCall().name());
+    assertEquals("c1", call.toolCall().id());
+    assertEquals("{\"k\":1}", call.toolCall().argumentsJson());
+    assertEquals(
+        "t-1",
+        call.providerBlockData().nativeFields().path("futurePartField").path("trace").asString(""));
   }
 
   @Test

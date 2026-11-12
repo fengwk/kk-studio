@@ -22,17 +22,20 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -212,23 +215,23 @@ class AnthropicStreamAccumulatorTest {
     assertEquals("{\"x\": 42}", response.toolCalls().get(0).argumentsJson());
     assertTrue(response.toolCallDiagnostics().isEmpty());
 
-    // replay state：只与 format 和 affinity（Provider/连接世代/wire 模型）绑定，与历史前缀无关
-    assertNotNull(completion.replayState());
-    assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, completion.replayState().format());
-    assertEquals(descriptor.affinity("claude-3-5-sonnet"), completion.replayState().affinity());
-    JsonNode replayPayload = completion.replayState().payload();
-    assertEquals("assistant", replayPayload.path("role").asString(""));
-    JsonNode replayContent = replayPayload.path("content");
-    assertEquals(3, replayContent.size());
-    assertEquals("thinking", replayContent.get(0).path("type").asString(""));
-    assertEquals("Let me think.", replayContent.get(0).path("thinking").asString(""));
-    assertEquals("sig_xyz", replayContent.get(0).path("signature").asString(""));
-    assertEquals("text", replayContent.get(1).path("type").asString(""));
-    assertEquals("Answer content", replayContent.get(1).path("text").asString(""));
-    assertEquals("tool_use", replayContent.get(2).path("type").asString(""));
-    assertEquals("call_abc", replayContent.get(2).path("id").asString(""));
-    assertEquals("calc", replayContent.get(2).path("name").asString(""));
-    assertEquals(42, replayContent.get(2).path("input").path("x").asInt(0));
+    // 回放元数据按原始 block 顺序随各自的语义字段保存。
+    List<ProviderContentBlock> responseBlocks = response.blocks();
+    assertEquals(3, responseBlocks.size());
+    ProviderThinkingBlock thinkingBlock = (ProviderThinkingBlock) responseBlocks.get(0);
+    ProviderTextBlock textBlock = (ProviderTextBlock) responseBlocks.get(1);
+    ProviderToolCallBlock toolCallBlock = (ProviderToolCallBlock) responseBlocks.get(2);
+    assertNotNull(thinkingBlock.providerBlockData());
+    assertNotNull(textBlock.providerBlockData());
+    assertNotNull(toolCallBlock.providerBlockData());
+    assertEquals("Let me think.", thinkingBlock.thinking());
+    assertEquals("sig_xyz", thinkingBlock.providerBlockData().signature());
+    assertEquals("Answer content", textBlock.text());
+    assertEquals("call_abc", toolCallBlock.toolCall().id());
+    assertEquals("calc", toolCallBlock.toolCall().name());
+    assertEquals(
+        42,
+        new ObjectMapper().readTree(toolCallBlock.toolCall().argumentsJson()).path("x").asInt());
 
     // 校验 emitted events 顺序与内容
     assertEquals(7, emittedEvents.size());
@@ -287,8 +290,7 @@ class AnthropicStreamAccumulatorTest {
     assertEquals("call_trunc", response.toolCallDiagnostics().get(0).id());
     assertEquals("{\"city\": \"New", response.toolCallDiagnostics().get(0).partialArguments());
 
-    // 存在 diagnostic 时不得生成 replayState
-    assertNull(completion.replayState());
+    assertTrue(completion.response().blocks().isEmpty());
   }
 
   @Test
@@ -441,7 +443,7 @@ class AnthropicStreamAccumulatorTest {
   }
 
   @Test
-  void handlesRedactedThinkingAndSignatureDeltaInReplayState() {
+  void handlesRedactedThinkingAndSignatureDeltaInOrderedBlocks() {
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
@@ -473,17 +475,18 @@ class AnthropicStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
 
-    // 验证 replayState 里包含 redacted_thinking 和 thinking 及其 signature
-    assertNotNull(completion.replayState());
-    JsonNode replayContent = completion.replayState().payload().path("content");
-    assertEquals("redacted_thinking", replayContent.get(0).path("type").asString(""));
-    assertEquals("redacted-data", replayContent.get(0).path("data").asString(""));
-    assertEquals("thinking", replayContent.get(1).path("type").asString(""));
-    assertEquals("sig-part-1", replayContent.get(1).path("signature").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size());
+    ProviderRedactedThinkingBlock redacted =
+        assertInstanceOf(ProviderRedactedThinkingBlock.class, blocks.get(0));
+    assertEquals("redacted-data", redacted.data());
+    ProviderThinkingBlock thinking = assertInstanceOf(ProviderThinkingBlock.class, blocks.get(1));
+    assertEquals("some thought", thinking.thinking());
+    assertEquals("sig-part-1", thinking.providerBlockData().signature());
   }
 
   @Test
-  void refusalYieldsFilteredStopReasonAndNullReplayState() {
+  void refusalYieldsFilteredStopReasonAndEmptyBlocks() {
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
@@ -501,7 +504,7 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
-    assertNull(completion.replayState());
+    assertTrue(completion.response().blocks().isEmpty());
   }
 
   @Test
@@ -569,7 +572,7 @@ class AnthropicStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(1, completion.response().toolCalls().size());
     assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
-    assertNotNull(completion.replayState());
+    assertInstanceOf(ProviderToolCallBlock.class, completion.response().blocks().get(0));
   }
 
   @Test
@@ -596,7 +599,7 @@ class AnthropicStreamAccumulatorTest {
     assertTrue(completion.response().toolCalls().isEmpty());
     assertEquals(1, completion.response().toolCallDiagnostics().size());
     assertEquals("", completion.response().toolCallDiagnostics().get(0).partialArguments());
-    assertNull(completion.replayState());
+    assertTrue(completion.response().blocks().isEmpty());
   }
 
   @Test
@@ -676,7 +679,7 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
     assertTrue(completion.response().toolCalls().isEmpty());
     assertTrue(completion.response().toolCallDiagnostics().isEmpty());
-    assertNull(completion.replayState());
+    assertTrue(completion.response().blocks().isEmpty());
   }
 
   @Test
@@ -766,7 +769,10 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("some thought", completion.response().thinking());
-    assertNull(completion.replayState());
+    assertInstanceOf(ProviderThinkingBlock.class, completion.response().blocks().get(0));
+    assertInstanceOf(ProviderRedactedThinkingBlock.class, completion.response().blocks().get(1));
+    assertEquals(
+        "", ((ProviderRedactedThinkingBlock) completion.response().blocks().get(1)).data());
   }
 
   @Test

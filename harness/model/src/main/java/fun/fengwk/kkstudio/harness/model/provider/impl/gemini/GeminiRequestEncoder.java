@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -52,9 +51,9 @@ import java.util.Set;
  *
  * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Gemini streamGenerateContent 规范的 UTF-8 JSON 字节数组。
  *
- * <p>assistant replay 直接使用 {@link ProviderReplayState} 中的 native payload（含 {@code thoughtSignature}
- * 与 functionCall opaque 字段）：只要求同 format、affinity 匹配且 payload 语义与 durable 一致。affinity 不匹配、format 不同或
- * durable 语义已被改写时退回 durable 语义编码；payload 结构或已知字段类型损坏则以 {@code INVALID_REQUEST} 拒绝。
+ * <p>assistant replay 从有序 blocks 的 Provider 元数据重建 Gemini parts（含 {@code thoughtSignature} 与
+ * functionCall 扩展）；只有同 protocol、provider/model affinity 匹配且 block 语义与 durable 内容一致时原样回放。否则按 durable
+ * 语义编码；跨模型工具签名不会保留。
  */
 final class GeminiRequestEncoder {
 
@@ -140,11 +139,6 @@ final class GeminiRequestEncoder {
         if (blockReplayParts != null) {
           for (ObjectNode partNode : blockReplayParts) {
             currentParts.add(partNode);
-          }
-        } else if (canReplay(
-            msg.replayState(), descriptor, request.model().modelId(), msg.contents())) {
-          for (JsonNode partNode : msg.replayState().payload().path("parts")) {
-            currentParts.add(partNode.deepCopy());
           }
         } else {
           for (ProviderContentBlock block : msg.contents()) {
@@ -717,37 +711,6 @@ final class GeminiRequestEncoder {
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST, "unsupported ASSISTANT content block");
-  }
-
-  /**
-   * 判定 replay 能否原位回放。
-   *
-   * <p>同 format (GEMINI_CONTENT) 的 payload 先做结构/已知字段类型校验（损坏一律 INVALID_REQUEST）。只有 affinity（provider
-   * / connection generation / wire model）完全匹配且 payload 语义投影与 durable 内容一致时才原位回放 native payload（含
-   * {@code thoughtSignature} 与 opaque functionCall 字段）；affinity 不匹配、format 不同或 durable 语义已被改写则退回
-   * durable 语义编码，绝不因为 payload 携带原生事实而拒绝请求。
-   */
-  private static boolean canReplay(
-      ProviderReplayState replayState,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      List<ProviderContentBlock> durableContents) {
-    if (replayState == null) {
-      return false;
-    }
-    if (replayState.format() != ProviderReplayFormat.GEMINI_CONTENT) {
-      return false;
-    }
-
-    // 同 format 的 payload 无论 affinity 是否匹配都先严格校验：损坏必须 INVALID_REQUEST。
-    boolean durableSemanticsMatch =
-        validateGeminiReplayPayload(replayState.payload(), durableContents);
-    // durable 语义不一致（历史被改写/压缩等）时绝不回放陈旧 native payload，退回 durable 语义编码。
-    if (!durableSemanticsMatch) {
-      return false;
-    }
-
-    return replayState.affinity().equals(descriptor.affinity(requestedModel));
   }
 
   /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；作为 opaque 原生事实只在原位回放时使用。 */

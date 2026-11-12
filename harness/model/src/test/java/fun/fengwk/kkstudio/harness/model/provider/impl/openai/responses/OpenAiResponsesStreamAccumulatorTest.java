@@ -26,13 +26,14 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -1815,32 +1816,51 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     assertEquals("sunny", accumulator.response().text());
-    assertNotNull(accumulator.replayState());
-    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
-    // 顺序与 terminal output 一致：未知 item 原样保留，message 走既有归一化
-    assertEquals(5, replayOutput.size());
+    List<?> blocks = accumulator.response().blocks();
+    // Ordered native item details stay on their owning assistant blocks.
+    assertEquals(5, blocks.size());
+    ProviderOpaqueBlock webSearch = (ProviderOpaqueBlock) blocks.get(0);
+    assertEquals("web_search_call", webSearch.providerBlockData().itemType());
+    assertEquals("ws_1", webSearch.providerBlockData().itemId());
     assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
-                + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}"),
-        replayOutput.get(0));
-    assertEquals("message", replayOutput.get(1).path("type").asString(""));
-    assertEquals("sunny", replayOutput.get(1).path("content").get(0).path("text").asString(""));
+        "weather",
+        webSearch
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("action")
+            .path("query")
+            .asString(""));
+    ProviderTextBlock text = (ProviderTextBlock) blocks.get(1);
+    assertEquals("sunny", text.text());
+    assertEquals("message", text.providerBlockData().itemType());
+    ProviderOpaqueBlock imageGeneration = (ProviderOpaqueBlock) blocks.get(2);
+    assertEquals("image_generation_call", imageGeneration.providerBlockData().itemType());
     assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"completed\",\"result\":\"aGVsbG8=\"}"),
-        replayOutput.get(2));
+        "aGVsbG8=",
+        imageGeneration
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("result")
+            .asString(""));
+    ProviderOpaqueBlock fileSearch = (ProviderOpaqueBlock) blocks.get(3);
+    assertEquals("file_search_call", fileSearch.providerBlockData().itemType());
     assertEquals(
-        MAPPER.readTree("{\"type\":\"file_search_call\",\"id\":\"fs_1\",\"queries\":[\"a\"]}"),
-        replayOutput.get(3));
+        "a",
+        fileSearch
+            .providerBlockData()
+            .nativeFields()
+            .path("item")
+            .path("queries")
+            .get(0)
+            .asString(""));
+    ProviderOpaqueBlock customTool = (ProviderOpaqueBlock) blocks.get(4);
+    assertEquals("custom_tool_call", customTool.providerBlockData().itemType());
     assertEquals(
-        MAPPER.readTree(
-            "{\"type\":\"custom_tool_call\",\"call_id\":\"ct_1\",\"name\":\"my_tool\",\"input\":\"{\\\"k\\\":1}\"}"),
-        replayOutput.get(4));
-
-    ProviderReplayState replayState = accumulator.replayState();
-    assertNotNull(replayState);
-    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, replayState.format());
+        "ct_1",
+        customTool.providerBlockData().nativeFields().path("item").path("call_id").asString(""));
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, webSearch.providerBlockData().protocol());
   }
 
   /**

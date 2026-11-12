@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -801,7 +800,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
           ProviderErrorKind.INVALID_RESPONSE, "failed to serialize raw usage JSON");
     }
 
-    ProviderReplayState replayState = null;
     List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     if (canReplay) {
       ArrayNode replayOutputArray =
@@ -814,13 +812,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
       // 只含空 reasoning 占位符的 replay 不承载任何原生推理，冻结它没有语义价值，交由下一轮语义编码。
       if (!replayOutputArray.isEmpty()
           && !OpenAiResponsesReplayItems.isEmptyPlaceholderOnly(replayOutputArray)) {
-        ObjectNode payload = NODES.objectNode();
-        payload.set("output", replayOutputArray);
-        replayState =
-            new ProviderReplayState(
-                ProviderReplayFormat.OPENAI_RESPONSES,
-                descriptor.affinity(request.model().modelId()),
-                payload);
         responseBlocks.addAll(responseBlocks(replayOutputArray, toolCalls));
       }
     }
@@ -847,7 +838,7 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
             null,
             null);
 
-    finishedCompletion = new ProviderCompletion(response, replayState);
+    finishedCompletion = new ProviderCompletion(response);
     return finishedCompletion;
   }
 
@@ -1042,10 +1033,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
 
   public ProviderResponse response() {
     return finish().response();
-  }
-
-  public ProviderReplayState replayState() {
-    return finish().replayState();
   }
 
   /** 把流内工具状态冻结为 replay 重建所需的不可变快照。 */

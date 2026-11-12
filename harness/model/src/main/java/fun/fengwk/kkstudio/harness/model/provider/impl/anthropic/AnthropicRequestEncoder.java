@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -528,10 +527,6 @@ public final class AnthropicRequestEncoder {
     msgNode.put("role", "assistant");
 
     ReplayDecision replay = evaluateBlockReplay(message, descriptor, requestedModel);
-    if (!replay.replayable()) {
-      replay =
-          evaluateReplay(message.replayState(), descriptor, requestedModel, message.contents());
-    }
     if (replay.replayable()) {
       ArrayNode replayedBlocks = NODES.arrayNode();
       for (JsonNode blockNode : replay.content()) {
@@ -630,39 +625,6 @@ public final class AnthropicRequestEncoder {
       target.set(entry.getKey(), entry.getValue().deepCopy());
     }
     return true;
-  }
-
-  private static ReplayDecision evaluateReplay(
-      ProviderReplayState replayState,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      List<ProviderContentBlock> durableContents) {
-    if (replayState == null || replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
-      return ReplayDecision.FALLBACK;
-    }
-
-    // 1. 源兼容性由 Provider/protocol/model affinity 决定，与 system/时间前缀无关；不兼容时按 durable 语义投影。
-    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-      return ReplayDecision.FALLBACK;
-    }
-
-    // 2. 兼容的 native replay 必须通过真实 payload 形状与 durable 一致性校验，再原位回放全部原生事实
-    // （thinking signature、redacted thinking、未知 block 与官方附加字段均 opaque 保留）。
-    JsonNode payload = replayState.payload();
-    if (payload == null
-        || !payload.isObject()
-        || payload.size() != 2
-        || !payload.has("role")
-        || !payload.get("role").isString()
-        || !"assistant".equals(payload.get("role").stringValue())
-        || !payload.has("content")
-        || !payload.get("content").isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload");
-    }
-    ArrayNode contentArray = (ArrayNode) payload.get("content");
-    boolean startsHistory = validatePayloadAgainstDurable(contentArray, durableContents);
-    return new ReplayDecision(true, contentArray, startsHistory);
   }
 
   /**

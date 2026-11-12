@@ -34,9 +34,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -201,10 +199,7 @@ class OpenAiChatModelProviderIntegrationTest {
 
     // Turn 2
     ProviderMessage asstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderToolCallBlock(toolCall)),
-            comp1.get().replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, comp1.get().response().blocks());
     ProviderMessage toolMsg =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -658,13 +653,7 @@ class OpenAiChatModelProviderIntegrationTest {
 
     // Turn 2: 并行两工具结果续跑
     ProviderMessage asst1 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Thinking: file_search and get_weather concurrently."),
-                new ProviderToolCallBlock(callSearch),
-                new ProviderToolCallBlock(callWeather)),
-            comp1.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, comp1.response().blocks());
     ProviderMessage tool1 =
         new ProviderMessage(
             ProviderMessageRole.TOOL,
@@ -701,12 +690,7 @@ class OpenAiChatModelProviderIntegrationTest {
 
     // Turn 3: 再次单工具结果续跑至文本输出
     ProviderMessage asst2 =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Thinking: read report content."),
-                new ProviderToolCallBlock(callRead)),
-            comp2.replayState());
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, comp2.response().blocks());
     ProviderMessage tool3 =
         new ProviderMessage(
             ProviderMessageRole.TOOL,

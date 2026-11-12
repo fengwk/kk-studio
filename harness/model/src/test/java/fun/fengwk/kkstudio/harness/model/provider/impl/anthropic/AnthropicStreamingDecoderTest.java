@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -169,15 +170,13 @@ class AnthropicStreamingDecoderTest {
     // 校验已知语义 text 得到保留
     assertEquals("Known text.", response.text());
 
-    // 未知但合法的 provider block 必须原样保留在 replay 中（无 delta 时不参与任何猜测性合并）
-    assertNotNull(completion.replayState());
-    JsonNode replayContent = completion.replayState().payload().path("content");
-    assertEquals(2, replayContent.size());
-    assertEquals("future_audio_block", replayContent.get(0).path("type").asString(""));
-    assertEquals("flac", replayContent.get(0).path("format").asString(""));
-    assertEquals(2, replayContent.get(0).size());
-    assertEquals("text", replayContent.get(1).path("type").asString(""));
-    assertEquals("Known text.", replayContent.get(1).path("text").asString(""));
+    // 未知但合法的 provider block 原样保留为带有原生字段的 opaque block。
+    assertEquals(2, response.blocks().size());
+    ProviderOpaqueBlock opaque = (ProviderOpaqueBlock) response.blocks().get(0);
+    assertEquals("future_audio_block", opaque.blockType());
+    assertEquals("flac", opaque.providerBlockData().nativeFields().path("format").asString(""));
+    assertEquals(1, opaque.providerBlockData().nativeFields().size());
+    assertEquals("Known text.", ((ProviderTextBlock) response.blocks().get(1)).text());
 
     // Anthropic 未报告原生 total/reasoning，保留 null；分类求和独立校验。
     ModelUsage usage = response.usage();

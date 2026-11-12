@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -92,9 +91,6 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
 
   private boolean terminalChunkReceived = false;
   private boolean promptBlocked = false;
-
-  /** 累积状态是否可安全写入原生 replay；无法保真的 union 冲突会显式关闭冻结，而不是交付损坏的回放。 */
-  private boolean replayFreezable = true;
 
   private JsonNode latestUsageSnapshot = null;
   private String rawUsageJson = "{}";
@@ -365,10 +361,6 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
     if (functionCallPart) {
       captureFunctionCall(trackedPart, partNode.get("functionCall"));
       emitFunctionCall(trackedPart);
-      if (text != null) {
-        // text 与 functionCall 属于同一个 data oneof：replay 只能承载其一，显式不冻结而非静默丢弃。
-        this.replayFreezable = false;
-      }
     }
   }
 
@@ -566,8 +558,10 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
     int toolCallIndex = 0;
     for (TrackedPart part : trackedParts) {
       boolean hasSemanticText = part.hasText || part.thought;
+      boolean replayablePart = !(part.hasText && part.isFunctionCall());
       if (hasSemanticText) {
-        ProviderBlockData textData = blockData(part.rawPart, Set.of("text", "thought"));
+        ProviderBlockData textData =
+            replayablePart ? blockData(part.rawPart, Set.of("text", "thought")) : null;
         if (part.thought) {
           responseBlocks.add(new ProviderThinkingBlock(part.text.toString(), textData));
         } else {
@@ -578,7 +572,8 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
         if (this.stopReason != GenerationStopReason.FILTERED) {
           responseBlocks.add(
               new ProviderToolCallBlock(
-                  effectiveToolCalls.get(toolCallIndex++), functionCallBlockData(part.rawPart)));
+                  effectiveToolCalls.get(toolCallIndex++),
+                  replayablePart ? functionCallBlockData(part.rawPart) : null));
         }
       } else if (!hasSemanticText) {
         responseBlocks.add(
@@ -598,12 +593,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
             null,
             null);
 
-    ProviderReplayState replayState = null;
-    if (this.stopReason == GenerationStopReason.COMPLETE && this.replayFreezable) {
-      replayState = buildReplayState();
-    }
-
-    return new ProviderCompletion(response, replayState);
+    return new ProviderCompletion(response);
   }
 
   private ProviderBlockData blockData(ObjectNode rawPart, Set<String> semanticFields) {
@@ -663,48 +653,6 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
         false,
         null,
         nativeFields);
-  }
-
-  private ProviderReplayState buildReplayState() {
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "model");
-    ArrayNode partsArray = payload.putArray("parts");
-
-    for (TrackedPart tp : trackedParts) {
-      // 完整原生 part：未知字段与未知 union 成员原样保留
-      ObjectNode partNode = tp.rawPart.deepCopy();
-      if (tp.isFunctionCall()) {
-        if (tp.functionCallName == null
-            || tp.functionCallName.isBlank()
-            || tp.functionCallId == null
-            || tp.functionCallId.isBlank()
-            || tp.functionCallArgs == null
-            || !tp.functionCallArgs.isObject()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
-        }
-        // 已知 functionCall 以规范化累积结果写回（id 稳定、args 显式为 JSON 对象）
-        ObjectNode fnNode = partNode.putObject("functionCall");
-        fnNode.put("name", tp.functionCallName);
-        fnNode.put("id", tp.functionCallId);
-        fnNode.set("args", tp.functionCallArgs.deepCopy());
-      } else if (tp.text.length() > 0) {
-        // 已知 text/thought 以规范化累积结果写回；纯未知 Part 不写回空 text
-        partNode.put("text", tp.text.toString());
-        if (tp.thought) {
-          partNode.put("thought", true);
-        }
-      }
-      if (tp.signature != null) {
-        partNode.put("thoughtSignature", tp.signature);
-      }
-      partsArray.add(partNode);
-    }
-
-    return new ProviderReplayState(
-        ProviderReplayFormat.GEMINI_CONTENT,
-        descriptor.affinity(request.model().modelId()),
-        payload);
   }
 
   /** 单个原生 part 的累积状态：rawPart 保真，已知字段由规范化累积结果统一写回。 */

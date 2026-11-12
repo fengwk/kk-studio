@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -42,9 +41,8 @@ import java.util.Objects;
  * batch 的 native TOOL 结果之后合并为单条 USER 自然语言上下文。降级输出绝不暴露 toolCallId、绝不使用 “Tool call / Tool result”
  * 伪协议，也不产生额外的 TOOL 结果。降级只发生在投影结果中，durable Entry 与 callIndex 永不被改写。
  *
- * <p>同一 assistant 之后的 native TOOL 结果先于该 USER 上下文输出，以保证 provider 要求的 tool-call adjacency；组内保持相对顺序。被
- * 降级改写的 assistant 消息若携带 {@link ProviderReplayState}，则放弃该消息的 opaque native replay（置 null）并继续语义投影，
- * 绝不把原生 payload 附着到已被改写的内容上；未被改写的消息原样保留 replay。
+ * <p>同一 assistant 之后的 native TOOL 结果先于该 USER 上下文输出，以保证 provider 要求的 tool-call
+ * adjacency；组内保持相对顺序。原生字段随各 block 投影；降级调用本身被移除时，其 block 元数据也随该 block 一并移除。
  *
  * <p>USER 上下文中每一项的动作来自调用冻结时的 Tool 语义 action（{@link
  * fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent#historyAction()}）；缺失 action
@@ -84,13 +82,9 @@ public final class ProviderMessageProjector {
     }
   }
 
-  public record ProjectedMessage(
-      AgentMessage message, ProviderReplayState replayState, String reasoningEffort) {
+  public record ProjectedMessage(AgentMessage message, String reasoningEffort) {
     public ProjectedMessage {
       Objects.requireNonNull(message, "message");
-      if (replayState != null && message.role() != AgentMessageRole.ASSISTANT) {
-        throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
-      }
       if (reasoningEffort != null && message.role() != AgentMessageRole.ASSISTANT) {
         throw new IllegalArgumentException(
             "reasoningEffort is only allowed for ASSISTANT messages");
@@ -98,11 +92,7 @@ public final class ProviderMessageProjector {
     }
 
     public static ProjectedMessage of(AgentMessage message) {
-      return new ProjectedMessage(message, null, null);
-    }
-
-    public static ProjectedMessage of(AgentMessage message, ProviderReplayState replayState) {
-      return new ProjectedMessage(message, replayState, null);
+      return new ProjectedMessage(message, null);
     }
   }
 
@@ -139,7 +129,7 @@ public final class ProviderMessageProjector {
       }
       batch.flush(result);
       if (message.role() == AgentMessageRole.ASSISTANT) {
-        projectAssistant(message, source.replayState(), source.reasoningEffort(), batch, result);
+        projectAssistant(message, source.reasoningEffort(), batch, result);
         continue;
       }
       result.add(
@@ -152,21 +142,9 @@ public final class ProviderMessageProjector {
   /**
    * 一条 assistant 消息的投影：native 调用保留为 wire 调用块并登记待配对，降级调用从消息中移除并登记进 batch 的 USER 上下文；全部内容
    * 都是降级调用时整条消息不再输出（其语义已完整进入 USER 上下文）。
-   *
-   * <p>携带 opaque native replay 的消息一旦发生降级改写，opaque payload 已无法安全附着，直接放弃该消息的 replay 并走语义投影；
-   * 未发生改写的消息原样保留 replay。
    */
   private void projectAssistant(
-      AgentMessage message,
-      ProviderReplayState replayState,
-      String reasoningEffort,
-      Batch batch,
-      List<ProviderMessage> result) {
-    ProviderReplayState effectiveReplayState = replayState;
-    if (replayState != null && hasNonNativeCall(message)) {
-      // Native replay 是不透明的：调用被改写后无法再附着该 opaque payload，放弃 replay 而非拒绝整个请求。
-      effectiveReplayState = null;
-    }
+      AgentMessage message, String reasoningEffort, Batch batch, List<ProviderMessage> result) {
     List<ProviderContentBlock> contents = new ArrayList<>(message.contents().size());
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof ToolCallMessageContent call) {
@@ -184,18 +162,7 @@ public final class ProviderMessageProjector {
     if (contents.isEmpty()) {
       return;
     }
-    result.add(
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, contents, effectiveReplayState, reasoningEffort));
-  }
-
-  private boolean hasNonNativeCall(AgentMessage message) {
-    for (AgentMessageContent content : message.contents()) {
-      if (content instanceof ToolCallMessageContent call && !isNative(call)) {
-        return true;
-      }
-    }
-    return false;
+    result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, reasoningEffort));
   }
 
   private ProviderToolResultBlock projectToolResult(ToolResultMessageContent content) {

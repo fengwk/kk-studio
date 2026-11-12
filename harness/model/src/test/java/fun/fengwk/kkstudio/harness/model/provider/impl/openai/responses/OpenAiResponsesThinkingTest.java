@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -18,13 +17,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -176,22 +173,16 @@ class OpenAiResponsesThinkingTest {
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_enc\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
     ProviderResponse resp = acc.response();
-    ProviderReplayState replayState = acc.replayState();
-    assertNotNull(replayState);
+    assertEquals(2, resp.blocks().size());
+    ProviderThinkingBlock reasoning = (ProviderThinkingBlock) resp.blocks().get(0);
+    assertEquals("enc_blob_123", reasoning.providerBlockData().encryptedContent());
+    assertEquals("rs_enc", reasoning.providerBlockData().itemId());
+    ProviderToolCallBlock nativeCall = (ProviderToolCallBlock) resp.blocks().get(1);
+    assertEquals("function_call", nativeCall.providerBlockData().itemType());
 
-    // 验证 replay payload 中包含保留了 encrypted_content 的 reasoning 项
-    JsonNode replayOutput = replayState.payload().get("output");
-    assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
-    assertEquals("enc_blob_123", replayOutput.get(0).path("encrypted_content").asString(""));
-    assertEquals("function_call", replayOutput.get(1).path("type").asString(""));
-
-    // 2. 将 replayState 放入后续 Assistant 消息中回放给服务端
+    // 2. 将带有原生 metadata 的 assistant blocks 放入后续请求
     ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderToolCallBlock(new ProviderToolCall("call_1", "query", "{}"))),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, resp.blocks());
 
     ProviderMessage toolResultMsg =
         new ProviderMessage(
@@ -258,18 +249,16 @@ class OpenAiResponsesThinkingTest {
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2tools\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
-    acc.response();
-    ProviderReplayState replayState = acc.replayState();
-    assertNotNull(replayState);
-    assertEquals(3, replayState.payload().get("output").size());
+    ProviderResponse response = acc.response();
+    assertEquals(3, response.blocks().size());
+    assertEquals(
+        "enc_blob",
+        ((ProviderThinkingBlock) response.blocks().get(0)).providerBlockData().encryptedContent());
+    assertEquals("c1", ((ProviderToolCallBlock) response.blocks().get(1)).toolCall().id());
+    assertEquals("c2", ((ProviderToolCallBlock) response.blocks().get(2)).toolCall().id());
 
     ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderToolCallBlock(new ProviderToolCall("c1", "t1", "{}")),
-                new ProviderToolCallBlock(new ProviderToolCall("c2", "t2", "{}"))),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, response.blocks());
 
     ProviderRequest req2 =
         request(
@@ -352,28 +341,15 @@ class OpenAiResponsesThinkingTest {
     assertEquals(1, resp.toolCalls().size());
     assertEquals("call_asym", resp.toolCalls().get(0).id());
 
-    // 4. 验证 durable replayState 必须包含从流式中保留的 encrypted_content
-    ProviderReplayState replayState = acc.replayState();
-    assertNotNull(replayState);
-    JsonNode replayOutput = replayState.payload().get("output");
-    assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
-    assertEquals("enc_blob_asym_999", replayOutput.get(0).path("encrypted_content").asString(""));
-    assertEquals(
-        "Deliberating deeply",
-        replayOutput.get(0).path("summary").get(0).path("text").asString(""));
-    assertEquals("function_call", replayOutput.get(1).path("type").asString(""));
-    assertEquals("call_asym", replayOutput.get(1).path("call_id").asString(""));
+    // 4. encrypted_content remains attached to its reasoning block after terminal reconciliation.
+    ProviderThinkingBlock reasoning = (ProviderThinkingBlock) resp.blocks().getFirst();
+    assertEquals("enc_blob_asym_999", reasoning.providerBlockData().encryptedContent());
+    assertEquals("rs_asym_1", reasoning.providerBlockData().itemId());
+    assertEquals("Deliberating deeply", reasoning.thinking());
 
-    // 5. 下一轮对话携带该 replayState 发起请求，验证 wire 编码中 encrypted_content 成功被回传
+    // 5. The same assistant blocks replay the encrypted content on the next request.
     ProviderMessage assistantMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(
-                new ProviderThinkingBlock("Deliberating deeply"),
-                new ProviderToolCallBlock(
-                    new ProviderToolCall("call_asym", "do_search", "{\"q\":\"test\"}"))),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, resp.blocks());
 
     ProviderMessage toolResultMsg =
         new ProviderMessage(

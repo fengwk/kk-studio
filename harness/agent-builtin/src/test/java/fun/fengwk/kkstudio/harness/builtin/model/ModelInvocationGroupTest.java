@@ -281,7 +281,6 @@ class ModelInvocationGroupTest {
         value.failedAttempts(),
         value.createdAt(),
         value.updatedAt(),
-        value.providerReplayState(),
         value.groupProgress(),
         requestedAt);
   }

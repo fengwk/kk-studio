@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
 
 import java.sql.ResultSet;
@@ -26,8 +25,6 @@ final class PostgresqlBuiltinRows {
 
   static final ModelRequestSpecJsonCodec MODEL_REQUESTS = new ModelRequestSpecJsonCodec();
   static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
-  static final ProviderReplayStateJsonCodec PROVIDER_REPLAY_STATES =
-      new ProviderReplayStateJsonCodec();
   static final StrictJson JSON = StrictJson.standard();
 
   static final RowMapper<ModelInvocation> MODEL_INVOCATION =
@@ -54,8 +51,6 @@ final class PostgresqlBuiltinRows {
                   "modelAttemptFailures"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
-              decodeNullable(
-                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode),
               decodeNullable(
                   resultSet.getString("group_execution"),
                   json -> JSON.read(json, ModelGroupProgress.class, "groupExecution")),

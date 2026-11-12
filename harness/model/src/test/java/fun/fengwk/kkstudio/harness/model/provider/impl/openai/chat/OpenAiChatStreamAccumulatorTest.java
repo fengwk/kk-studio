@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,6 +33,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -180,7 +181,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("hi", completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals(4L, completion.response().usage().providerTotalTokens());
-    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
+    assertEquals("hi", completion.response().text());
   }
 
   /**
@@ -208,7 +209,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(4L, completion.response().usage().providerTotalTokens());
     assertEquals(1, recordedEvents.size());
     assertEquals("hi", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
-    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
+    assertEquals("hi", completion.response().text());
   }
 
   /** 测试意图：tool_calls 终态后的冗余 finish_reason=tool_calls 幂等——不重复累积工具调用，也不重发 ToolCallDelta。 */
@@ -259,7 +260,7 @@ class OpenAiChatStreamAccumulatorTest {
     filtered.handleData("[DONE]");
     ProviderCompletion completion = filtered.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
-    assertNull(completion.replayState());
+    assertNull(((ProviderTextBlock) completion.response().blocks().get(0)).providerBlockData());
   }
 
   /**
@@ -364,10 +365,10 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(15L, usage.providerTotalTokens());
     assertEquals(15, usage.categorizedTokens());
 
-    // 验证生成了合法的 ReplayState
-    assertNotNull(completion.replayState());
-    assertEquals(ProviderReplayFormat.OPENAI_CHAT, completion.replayState().format());
-    assertEquals("Hello world!", completion.replayState().payload().path("content").asString(""));
+    // 响应文本块保留 Chat provider 身份。
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
+    assertEquals("Hello world!", textBlock.text());
+    assertEquals(ProviderReplayFormat.OPENAI_CHAT, textBlock.providerBlockData().protocol());
   }
 
   /** 验证 refusal 是正常完成的可见助手文本，并以原生字段进入 replay。 */
@@ -395,11 +396,8 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
     assertEquals(
         " help with that.", ((ProviderStreamEvent.TextDelta) recordedEvents.get(1)).text());
-    assertNotNull(completion.replayState());
-    assertFalse(completion.replayState().payload().has("content"));
-    assertEquals(
-        "I cannot help with that.",
-        completion.replayState().payload().path("refusal").asString(""));
+    assertEquals("I cannot help with that.", refusalBlock.text());
+    assertTrue(refusalBlock.providerBlockData().refusal());
   }
 
   @Test
@@ -462,12 +460,11 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(10, usage.outputTokens()); // completion includes reasoning tokens
     assertEquals(8, usage.reasoningTokens());
 
-    // 验证 replay payload 保真了 reasoning_content 与 reasoning_details
-    assertNotNull(completion.replayState());
+    ProviderThinkingBlock thinkingBlock =
+        (ProviderThinkingBlock) completion.response().blocks().get(0);
+    assertEquals("Pondering problem...", thinkingBlock.thinking());
     assertEquals(
-        "Pondering problem...",
-        completion.replayState().payload().path("reasoning_content").asString(""));
-    assertEquals(2, completion.replayState().payload().path("reasoning_details").size());
+        2, thinkingBlock.providerBlockData().nativeFields().path("reasoning_details").size());
   }
 
   @Test
@@ -522,9 +519,11 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("f2", completion.response().toolCalls().get(1).name());
     assertEquals("{\"b\":2}", completion.response().toolCalls().get(1).argumentsJson());
 
-    // 验证 replay payload
-    assertNotNull(completion.replayState());
-    assertEquals(2, completion.replayState().payload().path("tool_calls").size());
+    assertEquals(
+        2,
+        completion.response().blocks().stream()
+            .filter(ProviderToolCallBlock.class::isInstance)
+            .count());
   }
 
   /** 测试意图：无 type 的 identity-only 帧暂不投射；function 意图确定后从原生槽位一次补齐，满足 runtime 的 0 起连续序号与终态一致性。 */
@@ -567,12 +566,13 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("fn_1", completion.response().toolCalls().get(0).id());
     assertEquals("lookup", completion.response().toolCalls().get(0).name());
     assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
-    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
-    assertEquals(2, nativeCalls.size());
-    assertEquals("custom", nativeCalls.get(0).path("type").asString(""));
-    assertEquals("fn_1", nativeCalls.get(1).path("id").asString(""));
-    assertFalse(nativeCalls.get(0).has("index"));
-    assertFalse(nativeCalls.get(1).has("index"));
+    ProviderToolCallBlock callBlock =
+        completion.response().blocks().stream()
+            .filter(ProviderToolCallBlock.class::isInstance)
+            .map(ProviderToolCallBlock.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertEquals("fn_1", callBlock.toolCall().id());
   }
 
   /** 测试意图：已声明 type=function 的 identity-only 帧可提前投射，后续分段 id 必须发布累计前缀以兼容 runtime identity 校验。 */
@@ -603,8 +603,7 @@ class OpenAiChatStreamAccumulatorTest {
         recordedEvents);
     assertEquals("fn_1", completion.response().toolCalls().get(0).id());
     assertEquals(
-        "fn_1",
-        completion.replayState().payload().path("tool_calls").get(0).path("id").asString(""));
+        "fn_1", ((ProviderToolCallBlock) completion.response().blocks().get(0)).toolCall().id());
   }
 
   /** 测试意图：builder 建立后的 identity-only 片段只累积 id，不得因缺少 function 触发 NPE；明确 null 与标量 function 则是非法响应。 */
@@ -708,7 +707,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("fn_1", completion.response().toolCallDiagnostics().get(0).id());
     assertEquals("lookup", completion.response().toolCallDiagnostics().get(0).name());
     assertEquals("{\"q\":", completion.response().toolCallDiagnostics().get(0).partialArguments());
-    assertNull(completion.replayState());
+    assertNull(((ProviderTextBlock) completion.response().blocks().get(0)).providerBlockData());
   }
 
   /**
@@ -752,16 +751,13 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
     assertEquals("second", completion.response().toolCalls().get(1).name());
     assertEquals("{}", completion.response().toolCalls().get(1).argumentsJson());
-    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
     assertEquals(
-        List.of("a", "c", "b"),
-        List.of(
-            nativeCalls.get(0).path("id").asString(""),
-            nativeCalls.get(1).path("id").asString(""),
-            nativeCalls.get(2).path("id").asString("")));
-    for (JsonNode call : nativeCalls) {
-      assertFalse(call.has("index"));
-    }
+        List.of("a", "b"),
+        completion.response().blocks().stream()
+            .filter(ProviderToolCallBlock.class::isInstance)
+            .map(ProviderToolCallBlock.class::cast)
+            .map(block -> block.toolCall().id())
+            .toList());
   }
 
   @Test
@@ -796,7 +792,9 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(
         "{\"cmd\":\"cat /var/log",
         completion.response().toolCallDiagnostics().get(0).partialArguments());
-    assertNull(completion.replayState()); // LENGTH 截断不可保存 replay
+    assertNull(
+        ((ProviderTextBlock) completion.response().blocks().get(0))
+            .providerBlockData()); // LENGTH 截断不可保存 replay
   }
 
   @Test
@@ -814,7 +812,7 @@ class OpenAiChatStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
     assertTrue(completion.response().toolCalls().isEmpty());
-    assertNull(completion.replayState());
+    assertNull(((ProviderTextBlock) completion.response().blocks().get(0)).providerBlockData());
   }
 
   @Test
