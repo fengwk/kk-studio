@@ -109,7 +109,13 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
-	capabilities := coding.Provider{}.Capabilities()
+	capabilities := coding.Provider{LSPStatus: func(file string) (string, bool) {
+		support := lspFacade.Support(file)
+		if support.Language == nil {
+			return "", false
+		}
+		return *support.Language, support.Available && support.Supported
+	}}.Capabilities()
 	for id, handler := range lspFacade.Capabilities() {
 		capabilities[id] = handler
 	}

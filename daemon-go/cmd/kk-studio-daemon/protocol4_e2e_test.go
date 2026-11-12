@@ -189,6 +189,9 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 			if !strings.Contains(output.String(), tc.want) {
 				t.Fatalf("%s output=%q, want substring %q", tc.capability, output.String(), tc.want)
 			}
+			if tc.capability == "fs.read" && !strings.Contains(output.String(), "lsp: supported (text)") {
+				t.Fatalf("fs.read did not report the configured LSP status: %q", output.String())
+			}
 		})
 	}
 	if got, err := os.ReadFile(file); err != nil || string(got) != "needle edited\n" {
