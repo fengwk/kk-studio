@@ -14,7 +14,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -2540,6 +2545,39 @@ class DatabaseTurnResolverTest {
 
     assertEquals(
         BuiltinExecution.of(BuiltinExecution.model(settings.execution())), resolved.execution());
+  }
+
+  /** 真正的压缩回退必须留一条 WARN（配置与原因），而请求前窗口判断不得记录回退日志。 */
+  @Test
+  void invalidCompactionModelLogsWarnOnlyWhenACompactionActuallyFallsBack() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.compactionModel(new ModelSelection("deleted-model", "deleted"));
+    EntryPath path = fixture.path(settings("default"));
+
+    Logger logger = (Logger) LoggerFactory.getLogger(DatabaseTurnResolver.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      fixture.resolvedResult(path, null);
+      assertTrue(
+          logs.list.stream()
+              .noneMatch(
+                  event ->
+                      event.getLevel() == Level.WARN
+                          && event.getFormattedMessage().contains("compaction")));
+
+      fixture.resolvedCompaction(
+          path, new CompactionPreparation(CompactionTrigger.THRESHOLD, id(4)));
+
+      List<ILoggingEvent> warnings =
+          logs.list.stream().filter(event -> event.getLevel() == Level.WARN).toList();
+      assertEquals(1, warnings.size());
+      assertTrue(warnings.getFirst().getFormattedMessage().contains("deleted-model"));
+      assertTrue(warnings.getFirst().getFormattedMessage().contains("model not found"));
+    } finally {
+      logger.detachAppender(logs);
+    }
   }
 
   @Test
