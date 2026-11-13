@@ -62,7 +62,7 @@ func TestReadPastEOFReturnsEmptyRange(t *testing.T) {
 // COD-T-081: UTF-16LE BOM detection folds CRLF into line records and reports the final newline state.
 func TestReadUTF16LECRLFWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
-	data, err := EncodeText("中\r\n文", "UTF-16LE", 2)
+	data, err := encodeFixture("中\r\n文", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestReadTextIgnoresMediaExtension(t *testing.T) {
 // COD-T-089: fs.write retains the UTF-8 BOM when overwriting an existing file.
 func TestWriteRetainsUTF8BOM(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bom.txt")
-	before, err := EncodeText("old", "UTF-8", 3)
+	before, err := encodeFixture("old", "UTF-8", 3)
 	if err != nil {
 		t.Fatal(err)
 	}

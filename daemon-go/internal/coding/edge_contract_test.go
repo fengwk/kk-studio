@@ -151,7 +151,7 @@ func TestWritePreservesReadOnlyFilePermissions(t *testing.T) {
 // COD-T-033: editing a UTF-16LE file retains its BOM and charset.
 func TestEditUTF16LEPreservesBOM(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
-	original, err := EncodeText("a\nb\n", "UTF-16LE", 2)
+	original, err := encodeFixture("a\nb\n", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,12 +166,12 @@ func TestEditUTF16LEPreservesBOM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := DecodeText(written)
+	decoded, encoding, err := decodeFixture(written)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Charset != "UTF-16LE" || decoded.BOMBytes != 2 || decoded.Text != "a\nc\n" || written[0] != 0xff || written[1] != 0xfe {
-		t.Fatalf("decoded=%#v bytes=%x", decoded, written)
+	if encoding.Name != "UTF-16LE" || !encoding.BOM || decoded != "a\nc\n" || written[0] != 0xff || written[1] != 0xfe {
+		t.Fatalf("decoded=%q encoding=%#v bytes=%x", decoded, encoding, written)
 	}
 }
 

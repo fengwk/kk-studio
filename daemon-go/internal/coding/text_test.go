@@ -14,14 +14,14 @@ func TestTextUTF16RoundTrip(t *testing.T) {
 		charset string
 		bom     []byte
 	}{{"UTF-16LE", []byte{0xff, 0xfe}}, {"UTF-16BE", []byte{0xfe, 0xff}}} {
-		encoded, err := EncodeText("hi 🌍\n", tc.charset, len(tc.bom))
+		encoded, err := encodeFixture("hi 🌍\n", tc.charset, len(tc.bom))
 		if err != nil {
 			t.Fatal(err)
 		}
 		encoded = append(tc.bom, encoded[len(tc.bom):]...)
-		decoded, err := DecodeText(encoded)
-		if err != nil || decoded.Text != "hi 🌍\n" {
-			t.Fatalf("%s: %#v %v", tc.charset, decoded, err)
+		text, decoded, err := decodeFixture(encoded)
+		if err != nil || text != "hi 🌍\n" || !decoded.BOM {
+			t.Fatalf("%s: %q %#v %v", tc.charset, text, decoded, err)
 		}
 	}
 }
@@ -29,7 +29,7 @@ func TestTextUTF16RoundTrip(t *testing.T) {
 // COD-T-220
 func TestTextRejectsNULAndMalformedUTF8(t *testing.T) {
 	for _, data := range [][]byte{{'a', 0, 'b'}, {0xff}} {
-		if _, err := DecodeText(data); err == nil {
+		if _, _, err := decodeFixture(data); err == nil {
 			t.Fatalf("expected rejection of %x, got %v", data, err)
 		}
 	}
@@ -80,7 +80,7 @@ func (r *countingReader) Read(p []byte) (int, error) {
 // COD-T-053 COD-T-054: window reads must honor UTF-16 BOMs and reject malformed units inside the window.
 func TestReadTextWindowReaderHandlesUTF16AndRejectsMalformedUnits(t *testing.T) {
 	for _, charset := range []string{"UTF-16LE", "UTF-16BE"} {
-		encoded, err := EncodeText("first\nsecond", charset, 2)
+		encoded, err := encodeFixture("first\nsecond", charset, 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,7 +148,7 @@ func TestReadTextWindowReaderValidatesRangesAndEncoding(t *testing.T) {
 	if err != nil || defaultWindow.Body != "1|x" {
 		t.Fatalf("default window=%#v err=%v", defaultWindow, err)
 	}
-	validUTF16, err := EncodeText("x", "UTF-16LE", 2)
+	validUTF16, err := encodeFixture("x", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}

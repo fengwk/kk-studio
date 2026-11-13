@@ -12,7 +12,7 @@ import (
 
 // COD-T-099, COD-T-102: decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
 func TestReadTextWindowReaderPreservesMultibyteCharactersAcrossChunks(t *testing.T) {
-	utf16Data, err := EncodeText("a中😀\n", "UTF-16LE", 2)
+	utf16Data, err := encodeFixture("a中😀\n", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 		{0xed, 0xa0, 0x80}, {0xf4, 0x90, 0x80, 0x80},
 	}
 	for _, data := range sequences {
-		if _, err := DecodeText(data); err == nil {
+		if _, _, err := decodeFixture(data); err == nil {
 			t.Errorf("DecodeText accepted malformed UTF-8 %x", data)
 		}
 		if _, err := ReadTextWindowReader(bytes.NewReader(data), WindowOptions{Offset: 1, Limit: 1}); err == nil {
@@ -131,25 +131,25 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 			}
 		}
 	}
-	if _, err := EncodeText(string([]byte{0xed, 0xa0, 0x80}), "UTF-8", 0); err == nil {
+	if _, err := encodeFixture(string([]byte{0xed, 0xa0, 0x80}), "UTF-8", 0); err == nil {
 		t.Fatal("EncodeText accepted a surrogate-encoded invalid UTF-8 string")
 	}
 }
 
 // COD-T-221: decoding removes the BOM from text while retaining charset and BOM byte count.
 func TestDecodeTextReportsUTF8BOM(t *testing.T) {
-	decoded, err := DecodeText([]byte{0xef, 0xbb, 0xbf, 'a'})
-	if err != nil || decoded.Text != "a" || decoded.Charset != "UTF-8" || decoded.BOMBytes != 3 {
-		t.Fatalf("decoded=%#v err=%v", decoded, err)
+	text, decoded, err := decodeFixture([]byte{0xef, 0xbb, 0xbf, 'a'})
+	if err != nil || text != "a" || decoded.Name != "UTF-8" || !decoded.BOM {
+		t.Fatalf("text=%q encoding=%#v err=%v", text, decoded, err)
 	}
 }
 
 // COD-T-225: legal UTF-8 boundary code points decode without normalization.
 func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 	want := string([]rune{0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff})
-	got, err := DecodeText([]byte(want))
-	if err != nil || got.Text != want {
-		t.Fatalf("decoded=%q want=%q err=%v", got.Text, want, err)
+	got, _, err := decodeFixture([]byte(want))
+	if err != nil || got != want {
+		t.Fatalf("decoded=%q want=%q err=%v", got, want, err)
 	}
 }
 

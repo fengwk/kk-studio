@@ -15,6 +15,7 @@ const (
 	codecRead codecContext = iota
 	codecSearch
 	codecWrite
+	codecEdit
 )
 
 // codecError converts a text codec failure into a tool error with the CODEC code.
@@ -56,6 +57,8 @@ func binarySupport(context codecContext) string {
 		return "grep searches text files and directories."
 	case codecWrite:
 		return "write only rewrites text files."
+	case codecEdit:
+		return "edit only rewrites text files."
 	}
 	return "read supports text files, directories and supported media."
 }
@@ -67,6 +70,8 @@ func codecPastTense(context codecContext) string {
 		return "searched"
 	case codecWrite:
 		return "rewritten"
+	case codecEdit:
+		return "edited"
 	}
 	return "read"
 }
@@ -76,10 +81,22 @@ func codecUnknownTail(context codecContext) string {
 	switch context {
 	case codecSearch:
 		return ""
-	case codecWrite:
+	case codecWrite, codecEdit:
 		return " To rewrite it, convert it to UTF-8 or add a standard encoding declaration."
 	}
 	return " To use read, edit or write on it, convert it to UTF-8 or add a standard encoding declaration."
+}
+
+// decodeTextMessage renders a codec failure for a document whose path is not known.
+func decodeTextMessage(err error) string {
+	var unknown *textcodec.UnknownEncodingError
+	switch {
+	case errors.Is(err, textcodec.ErrBinary):
+		return "file appears to be binary"
+	case errors.As(err, &unknown):
+		return "file is not UTF-8 text and declares no encoding"
+	}
+	return err.Error()
 }
 
 // isUnicodeEncoding reports whether name needs no declaration to stay recognizable.
@@ -125,4 +142,44 @@ func writeEncoding(path string, existing *textcodec.Encoding, declared textcodec
 		return textcodec.Encoding{}, failRun(fmt.Sprintf("The new content removes the %s declaration of %s. Keep the declaration, or declare the new encoding explicitly to convert the file.", existing.Name, shown), "CODEC")
 	}
 	return textcodec.Encoding{Name: "UTF-8", Source: textcodec.SourceUTF8}, nil
+}
+
+// encodeEditContent encodes the result of an edit, which must keep the encoding of the file it
+// rewrites: a byte order mark stays authoritative, and otherwise the declaration of the result
+// has to resolve to the original encoding.
+func encodeEditContent(path string, existing textcodec.Encoding, content string) ([]byte, error) {
+	declared, hasDeclaration, err := textcodec.Declared(path, []byte(content))
+	if err != nil {
+		return nil, codecError(path, err, codecEdit)
+	}
+	if err = checkEditEncoding(path, existing, declared, hasDeclaration); err != nil {
+		return nil, err
+	}
+	encoded, err := textcodec.Encode(content, existing)
+	if err != nil {
+		return nil, codecError(path, err, codecEdit)
+	}
+	return encoded, nil
+}
+
+// checkEditEncoding refuses an edit that would change the effective encoding of a file.
+func checkEditEncoding(path string, existing, declared textcodec.Encoding, hasDeclaration bool) error {
+	if existing.BOM {
+		return nil
+	}
+	if !hasDeclaration {
+		if existing.Source == textcodec.SourceDeclaration && !isUnicodeEncoding(existing.Name) {
+			return failRun(changeEncodingMessage(path, existing.Name, "UTF-8"), "CODEC")
+		}
+		return nil
+	}
+	if declared.Name != existing.Name {
+		return failRun(changeEncodingMessage(path, existing.Name, declared.Name), "CODEC")
+	}
+	return nil
+}
+
+// changeEncodingMessage reports an edit that would silently re-encode a file.
+func changeEncodingMessage(path, from, to string) string {
+	return fmt.Sprintf("This change would change the encoding of %s from %s to %s. Use write with the complete content to convert the file.", filepath.ToSlash(path), from, to)
 }

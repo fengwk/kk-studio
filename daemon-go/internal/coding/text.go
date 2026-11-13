@@ -16,13 +16,6 @@ const (
 	MaxReadCodePoints = 60000
 )
 
-// DecodedText is a whole-file decode with the encoding metadata the edit tools restore.
-type DecodedText struct {
-	Text     string
-	Charset  string
-	BOMBytes int
-}
-
 type WindowOptions struct {
 	Path         string
 	Offset       int
@@ -44,54 +37,6 @@ type TextWindow struct {
 	TruncationReason string
 	NextLine         int
 	NextColumn       int
-}
-
-// DecodeText decodes a whole file with the shared codec. The edit tools keep using it until
-// they call the codec with the file path themselves.
-func DecodeText(data []byte) (DecodedText, error) {
-	text, encoding, err := textcodec.Decode("", data)
-	if err != nil {
-		return DecodedText{}, failRun(decodeTextMessage(err), "CODEC")
-	}
-	bom := 0
-	if encoding.BOM {
-		bom = bomLength(encoding.Name)
-	}
-	return DecodedText{Text: string(text), Charset: encoding.Name, BOMBytes: bom}, nil
-}
-
-// EncodeText restores the charset and byte order mark reported by DecodeText.
-func EncodeText(text, charset string, bomBytes int) ([]byte, error) {
-	encoded, err := textcodec.Encode(text, textcodec.Encoding{Name: charset, BOM: bomBytes > 0})
-	if err != nil {
-		return nil, failRun(err.Error(), "CODEC")
-	}
-	return encoded, nil
-}
-
-// decodeTextMessage renders a codec failure for a document whose path is not known yet.
-func decodeTextMessage(err error) string {
-	var unknown *textcodec.UnknownEncodingError
-	switch {
-	case errors.Is(err, textcodec.ErrBinary):
-		return "file appears to be binary"
-	case errors.As(err, &unknown):
-		return "file is not UTF-8 text and declares no encoding"
-	}
-	return err.Error()
-}
-
-// bomLength reports the width of the byte order mark of a Unicode encoding.
-func bomLength(name string) int {
-	switch name {
-	case "UTF-8":
-		return 3
-	case "UTF-16LE", "UTF-16BE":
-		return 2
-	case "UTF-32LE", "UTF-32BE":
-		return 4
-	}
-	return 0
 }
 
 // ReadTextWindow projects a string through the same bounded reader used by fs.read.

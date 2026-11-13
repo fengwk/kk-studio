@@ -184,3 +184,14 @@ func TestGrepDecodesAndListsUndecodableFiles(t *testing.T) {
 		t.Fatalf("text=%q", text)
 	}
 }
+
+// decodeFixture decodes fixture bytes with the shared codec and reports the text.
+func decodeFixture(data []byte) (string, textcodec.Encoding, error) {
+	text, encoding, err := textcodec.Decode("", data)
+	return string(text), encoding, err
+}
+
+// encodeFixture encodes text with a named encoding, restoring a BOM when bomBytes is positive.
+func encodeFixture(text, charset string, bomBytes int) ([]byte, error) {
+	return textcodec.Encode(text, textcodec.Encoding{Name: charset, BOM: bomBytes > 0})
+}
