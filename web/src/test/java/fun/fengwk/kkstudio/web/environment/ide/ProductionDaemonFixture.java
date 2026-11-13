@@ -12,6 +12,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -234,8 +235,60 @@ final class ProductionDaemonFixture implements AutoCloseable {
     return directory;
   }
 
+  /** code-server 私有 extensions 目录；可在首个视图打开前预置只读测试扩展，Daemon 启动时只收紧权限、不删除其他扩展。 */
+  Path ideExtensionsDirectory() throws IOException {
+    return ensureOwnerOnlyDirectory(privateCodeServerDirectory().resolve("extensions"));
+  }
+
+  /** code-server 私有 user-data 目录；显式用户设置写入其 {@code User/settings.json}。 */
+  Path ideUserDataDirectory() throws IOException {
+    return ensureOwnerOnlyDirectory(privateCodeServerDirectory().resolve("user-data"));
+  }
+
+  private Path privateCodeServerDirectory() throws IOException {
+    Path codeServer = dataDir.resolve("ide").resolve("code-server");
+    ensureOwnerOnlyDirectory(dataDir.resolve("ide"));
+    ensureOwnerOnlyDirectory(codeServer);
+    return codeServer;
+  }
+
+  /** 复制工作台配置探针扩展；探针只在真实 code-server 扩展宿主内读取 settings，不修改任何配置。 */
+  void installConfigurationProbe(Path repoRoot) throws IOException {
+    Path source =
+        repoRoot
+            .resolve("web/src/test/resources")
+            .resolve("fun/fengwk/kkstudio/web/environment/ide/configuration-probe");
+    if (!Files.isDirectory(source)) {
+      throw new IOException("the configuration probe extension is missing: " + source);
+    }
+    copyTree(source, ideExtensionsDirectory().resolve("kk-studio-acceptance-configuration-probe"));
+  }
+
+  /** 写入显式用户设置；code-server 启动后它必须是 globalValue 而不是默认值。 */
+  void writeUserSettings(String json) throws IOException {
+    Path settings = ensureOwnerOnlyDirectory(ideUserDataDirectory().resolve("User"));
+    writePrivate(settings.resolve("settings.json"), json + "\n");
+  }
+
   List<ProcessHandle> descendants() {
     return process.toHandle().descendants().toList();
+  }
+
+  /** 当前受 Daemon 管理的 code-server 进程。 */
+  List<ProcessHandle> codeServerProcesses() {
+    return descendants().stream().filter(ProductionDaemonFixture::isCodeServer).toList();
+  }
+
+  /** 只发送 SIGTERM 并等待 Daemon 自行退出（不强制结束），用于验证关停收敛。 */
+  boolean stopGracefully(Duration timeout) {
+    try {
+      ProcessHandle handle = process.toHandle();
+      handle.destroy();
+      return process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   void crashCodeServer() {
@@ -463,6 +516,14 @@ final class ProductionDaemonFixture implements AutoCloseable {
 
   private static void restrictDirectory(Path directory) throws IOException {
     Files.setPosixFilePermissions(directory, OWNER_ONLY_DIRECTORY);
+  }
+
+  private static Path ensureOwnerOnlyDirectory(Path directory) throws IOException {
+    if (!Files.isDirectory(directory)) {
+      Files.createDirectories(directory);
+    }
+    restrictDirectory(directory);
+    return directory;
   }
 
   private static void restrictFile(Path file) throws IOException {

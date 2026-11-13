@@ -76,11 +76,13 @@ import java.util.concurrent.TimeoutException;
  * <ul>
  *   <li><b>浏览器入口用例</b>：走真实浏览器协议——事件通道 {@code /ws/events} 登记打开意图、REST {@code
  *       /api/ide/environments/{id}/views} 领取视图、一次性 bootstrap 票据换 view 级 cookie、view 基址取 workbench
- *       HTML 与静态/worker 资源、浏览器 WebSocket 升级。
- *   <li><b>生命周期用例</b>：REST 关闭；resume 换代后旧 cookie/旧 epoch 失效；受管 code-server 崩溃后旧绑定判为
- *       VIEW_GONE，新视图在替代实例上恢复服务。
+ *       HTML、静态/worker 资源、浏览器 WebSocket 升级。
+ *   <li><b>生命周期用例</b>：REST 关闭；resume 换代后旧 cookie/旧 epoch 失效；两个受管视图共用同一 code-server 实例、 各自持有独立
+ *       workspace 文件；受管 code-server 崩溃后旧绑定判为 VIEW_GONE，新视图在替代实例上恢复服务；Daemon 正常关停后受管 code-server
+ *       进程收敛。
  *   <li><b>真实 Chromium 用例</b>：页面不拦截网络，经 Studio
- *       网关加载真实工作台；在工作台中打开终端，执行一条命令并看到输出；修改文件并保存，在宿主机上断言文件内容已落盘。
+ *       网关加载真实工作台；在工作台中打开终端，执行一条命令并看到输出；修改文件并保存，在宿主机上断言文件内容已落盘； 工作台在真实 code-server 中应用随包扩展的 {@code
+ *       configurationDefaults}，显式用户值优先，Git 自动发现仓库不变。
  * </ul>
  */
 @EnabledIfSystemProperty(
@@ -221,6 +223,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           fetchView(environmentId, firstView, firstCookie, "/_static/out/browser/serviceWorker.js");
       assertFalse(worker.isBlank(), "the view base must serve the code-server worker script");
 
+      // 浏览器 WebSocket 升级必须经 Studio 数据面完成；双向负载由真实工作台的终端用例断言。
       WebSocketSession socket = openBrowserWebSocket(environmentId, firstView, firstCookie);
       socket.closeAfterOpen();
 
@@ -242,9 +245,47 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertTrue(
           secondHtml.toLowerCase().contains("<html"),
           "the second view must return the code-server workbench HTML");
+      // 同一 Daemon 的两个受管视图共用一个 code-server 进程，但各自持有独立 workspace 文件
+      String firstWorkspace = first.path("workspacePath").asText();
+      String secondWorkspace = second.path("workspacePath").asText();
+      assertFalse(firstWorkspace.isBlank(), "the first view must expose its workspace file");
+      assertFalse(secondWorkspace.isBlank(), "the second view must expose its workspace file");
+      assertFalse(
+          firstWorkspace.equals(secondWorkspace),
+          "each managed view must own a distinct workspace file");
+      assertEquals(
+          daemon.workspaceDirectory().toRealPath().toString(),
+          JsonMapper.builder()
+              .build()
+              .readTree(Files.readString(Path.of(firstWorkspace)))
+              .path("folders")
+              .get(0)
+              .path("path")
+              .asText(),
+          "the first workspace file must point at the view directory");
+      assertEquals(
+          daemon.workspaceDirectory().toRealPath().toString(),
+          JsonMapper.builder()
+              .build()
+              .readTree(Files.readString(Path.of(secondWorkspace)))
+              .path("folders")
+              .get(0)
+              .path("path")
+              .asText(),
+          "the second workspace file must point at the view directory");
+      assertEquals(
+          1,
+          daemon.codeServerProcesses().size(),
+          "both views must share one managed code-server process");
 
       // 关闭第一个视图：第一个视图必须立即失效，第二个视图必须继续可用
       closeView(environmentId, firstView, browserSessionId, firstEpoch);
+      assertTrue(
+          Files.notExists(Path.of(firstWorkspace)),
+          "closing the first view must remove its workspace file");
+      assertTrue(
+          Files.isRegularFile(Path.of(secondWorkspace)),
+          "closing the first view must keep the second workspace file");
       assertViewRejected(environmentId, firstView, firstCookie, "a closed view must stop serving");
       String survivingSecond = fetchView(environmentId, secondView, secondCookie, "/");
       assertTrue(
@@ -255,6 +296,92 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertViewRejected(
           environmentId, secondView, secondCookie, "the second closed view must stop serving");
     }
+  }
+
+  /**
+   * IDE-T-153 默认情形：真实工作台必须把随包扩展的 {@code configurationDefaults} 当作默认值生效。
+   *
+   * <p>启动前把只读探针扩展放进 Daemon 私有 extensions 目录，让它在真实 code-server 扩展宿主内读取 {@code
+   * inspect()}；应用后的主题从真实工作台 DOM 观察到 Dark Modern。Git 扩展必须仍能自动发现仓库。
+   */
+  @Test
+  @Order(10)
+  void appliesBundledConfigurationDefaultsInTheRealWorkbench() throws Exception {
+    ConfigurationObservation observation =
+        observeManagedWorkbenchConfiguration(null, "dark_modern");
+    JsonNode snapshots = observation.probe().path("snapshots");
+
+    assertContributedDefault(snapshots, "workbench.colorTheme", "Dark Modern");
+    assertContributedDefault(snapshots, "window.density.editorTabHeight", "compact");
+    assertContributedBooleanDefault(snapshots, "chat.disableAIFeatures", true);
+    assertContributedBooleanDefault(snapshots, "extensions.ignoreRecommendations", true);
+    assertTrue(
+        snapshots.path("files.watcherExclude").path("defaultValue").path("**").asBoolean(),
+        "the bridge must contribute files.watcherExclude['**']=true");
+    assertTrue(
+        snapshots.path("files.watcherExclude").path("effective").path("**").asBoolean(),
+        "the contributed watcher exclusion must be effective");
+    assertFalse(
+        snapshots.path("files.watcherExclude").has("globalValue"),
+        "watcher exclusions must not be recorded as an explicit user value");
+    assertContributedDefault(snapshots, "task.autoDetect", "off");
+    assertContributedDefault(snapshots, "npm.autoDetect", "off");
+    assertContributedBooleanDefault(snapshots, "npm.fetchOnlinePackageInfo", false);
+    assertContributedBooleanDefault(snapshots, "typescript.disableAutomaticTypeAcquisition", true);
+
+    JsonNode autoDetection = snapshots.path("git.autoRepositoryDetection");
+    assertTrue(
+        autoDetection.path("defaultValue").asBoolean(),
+        "git.autoRepositoryDetection must keep its built-in default true");
+    assertTrue(
+        autoDetection.path("effective").asBoolean(),
+        "git.autoRepositoryDetection must stay effective");
+    assertFalse(
+        autoDetection.has("globalValue"),
+        "the bridge must not override git.autoRepositoryDetection");
+    assertGitDiscoveryUnchanged(observation.probe(), observation.workspace());
+  }
+
+  /**
+   * IDE-T-153 显式值情形：用户设置必须胜过随包默认值，且不改变已注册的默认值。
+   *
+   * <p>显式 {@code User/settings.json} 在 code-server 启动前写入，因此该断言不依赖运行中重载设置的时序；主题同样从真实工作台 DOM 观察到
+   * Light Modern。
+   */
+  @Test
+  @Order(11)
+  void honorsExplicitUserSettingsAboveBundledConfigurationDefaults() throws Exception {
+    ConfigurationObservation observation =
+        observeManagedWorkbenchConfiguration(explicitUserSettings(), "light_modern");
+    JsonNode snapshots = observation.probe().path("snapshots");
+
+    assertExplicitUserValue(snapshots, "workbench.colorTheme", "Dark Modern", "Light Modern");
+    assertExplicitUserValue(snapshots, "window.density.editorTabHeight", "compact", "default");
+    assertExplicitUserBoolean(snapshots, "chat.disableAIFeatures", true, false);
+    assertExplicitUserBoolean(snapshots, "extensions.ignoreRecommendations", true, false);
+    JsonNode watcherExclude = snapshots.path("files.watcherExclude");
+    assertTrue(
+        watcherExclude.path("defaultValue").path("**").asBoolean(),
+        "the contributed watcher exclusion must stay registered");
+    assertFalse(
+        watcherExclude.path("globalValue").path("**").asBoolean(),
+        "the explicit user watcher exclusion must be recorded as globalValue");
+    assertFalse(
+        watcherExclude.path("effective").path("**").asBoolean(),
+        "the explicit user watcher exclusion must win");
+    assertExplicitUserValue(snapshots, "task.autoDetect", "off", "on");
+    assertExplicitUserValue(snapshots, "npm.autoDetect", "off", "on");
+    assertExplicitUserBoolean(snapshots, "npm.fetchOnlinePackageInfo", false, true);
+    assertExplicitUserBoolean(snapshots, "typescript.disableAutomaticTypeAcquisition", true, false);
+
+    JsonNode autoDetection = snapshots.path("git.autoRepositoryDetection");
+    assertTrue(
+        autoDetection.path("effective").asBoolean(),
+        "git.autoRepositoryDetection must stay effective under an explicit user settings file");
+    assertFalse(
+        autoDetection.has("globalValue"),
+        "the explicit user settings must not disable Git repository detection");
+    assertGitDiscoveryUnchanged(observation.probe(), observation.workspace());
   }
 
   /** 关闭受管视图：REST 关闭必须成功。 */
@@ -442,6 +569,16 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
               Long.toString(bindingEpoch)));
 
       browserDriver.await("workbench-ready");
+      // TRN-T-077：真实浏览器 WebSocket 帧必须经 Studio 数据面双向通行
+      JsonNode duplex = browserDriver.await("websocket-duplex");
+      assertTrue(
+          duplex.path("viewFrames").asBoolean(), "the duplex socket must be the view socket");
+      assertTrue(
+          duplex.path("sent").asInt() > 0,
+          "the workbench socket must send browser frames through the tunnel: " + duplex);
+      assertTrue(
+          duplex.path("received").asInt() > 0,
+          "the workbench socket must receive workbench frames through the tunnel: " + duplex);
       browserDriver.await("terminal-success");
 
       // 宿主文件系统强断言：终端执行输出与退出码
@@ -483,6 +620,96 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       browserDriver.proceed();
       browserDriver.await("done");
       browserDriver.finish();
+    }
+  }
+
+  /**
+   * IDE-T-137：真实 native supervisor 下的两个私有视图与关停收敛。
+   *
+   * <p>两个视图必须产生不同 workspace 文件并分别指向各自目录；同一 code-server 进程存活；关闭视图一后其 workspace 文件消失、 视图二仍存在；Daemon
+   * 收到 SIGTERM 后必须自行退出并带走受管 code-server。
+   */
+  @Test
+  @Order(9)
+  void convergesTheNativeCodeServerScopeOnGracefulShutdown() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    Path dirOne = Files.createDirectory(daemon.workspaceDirectory().resolve("native-one"));
+    Path dirTwo = Files.createDirectory(daemon.workspaceDirectory().resolve("native-two"));
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewOne = UUID.randomUUID();
+      UUID viewTwo = UUID.randomUUID();
+      UUID claimOne = UUID.randomUUID();
+      UUID claimTwo = UUID.randomUUID();
+      events.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewOne, claimOne, null)));
+      JsonNode one =
+          openView(environmentId, viewOne, browserSessionId, identity, claimOne, "create", dirOne);
+      long oneEpoch = Long.parseLong(one.path("bindingEpoch").asText());
+
+      events.registerUsage(
+          browserSessionId, 2L, List.of(new IntentView(environmentId, viewTwo, claimTwo, null)));
+      JsonNode two =
+          openView(environmentId, viewTwo, browserSessionId, identity, claimTwo, "create", dirTwo);
+      long twoEpoch = Long.parseLong(two.path("bindingEpoch").asText());
+
+      String oneWorkspace = one.path("workspacePath").asText();
+      String twoWorkspace = two.path("workspacePath").asText();
+      assertFalse(oneWorkspace.isBlank(), "the first native view must expose a workspace file");
+      assertFalse(twoWorkspace.isBlank(), "the second native view must expose a workspace file");
+      assertFalse(
+          oneWorkspace.equals(twoWorkspace), "each native view must own a distinct workspace file");
+      assertEquals(
+          dirOne.toRealPath().toString(),
+          JsonMapper.builder()
+              .build()
+              .readTree(Files.readString(Path.of(oneWorkspace)))
+              .path("folders")
+              .get(0)
+              .path("path")
+              .asText(),
+          "the first workspace file must point at the first directory");
+      assertEquals(
+          dirTwo.toRealPath().toString(),
+          JsonMapper.builder()
+              .build()
+              .readTree(Files.readString(Path.of(twoWorkspace)))
+              .path("folders")
+              .get(0)
+              .path("path")
+              .asText(),
+          "the second workspace file must point at the second directory");
+      assertEquals(
+          1,
+          daemon.codeServerProcesses().size(),
+          "two native views must run one managed code-server process");
+      ProcessHandle managed = daemon.codeServerProcesses().stream().findFirst().orElseThrow();
+
+      closeView(environmentId, viewOne, browserSessionId, oneEpoch);
+      assertTrue(
+          Files.notExists(Path.of(oneWorkspace)),
+          "closing the first view must remove its workspace file");
+      assertTrue(
+          Files.isRegularFile(Path.of(twoWorkspace)),
+          "closing the first view must keep the second workspace file");
+      assertTrue(managed.isAlive(), "closing one view must keep the shared code-server alive");
+
+      closeView(environmentId, viewTwo, browserSessionId, twoEpoch);
+      assertTrue(managed.isAlive(), "an idle code-server must outlive the last closed view");
+
+      // Daemon 收到 SIGTERM 后必须自行收敛，并在关闭后带走受管 code-server 进程边界
+      assertTrue(
+          daemon.stopGracefully(Duration.ofSeconds(30)),
+          "the daemon must exit after SIGTERM; see " + daemon.stderrLog());
+      assertFalse(daemon.alive(), "the daemon must have exited");
+      long deadline = System.nanoTime() + RECOVERY_TIMEOUT.toNanos();
+      while (managed.isAlive()) {
+        assertTrue(
+            System.nanoTime() < deadline,
+            "the managed code-server must exit after the daemon shuts down");
+        Thread.sleep(200);
+      }
     }
   }
 
@@ -931,6 +1158,155 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     return environmentId;
   }
 
+  /** 在一次全新受管实例上观察真实工作台的随包配置；显式用户设置必须在 code-server 启动前写入。 */
+  private ConfigurationObservation observeManagedWorkbenchConfiguration(
+      String userSettings, String expectedTheme) throws Exception {
+    Path playwright = explicitPlaywrightModule();
+    Path node = nodeBinary();
+    browserTempDir = Files.createTempDirectory("kk-ide-br-");
+    Files.setPosixFilePermissions(browserTempDir, PosixFilePermissions.fromString("rwx------"));
+
+    String environmentId = startEnvironmentAndDaemon();
+    daemon.installConfigurationProbe(repoRoot());
+    if (userSettings != null) {
+      daemon.writeUserSettings(userSettings);
+    }
+    Path workspace = daemon.workspaceDirectory();
+    initializeGitRepository(workspace);
+
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, claimId);
+      long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+
+      browserDriver = BrowserDriver.start(node, recordsDir());
+      browserDriver.send(
+          Map.ofEntries(
+              Map.entry("playwrightModule", playwright.toString()),
+              Map.entry("baseUrl", baseUrl()),
+              Map.entry("environmentId", environmentId),
+              Map.entry("browserSessionId", browserSessionId.toString()),
+              Map.entry("workspaceDirectory", workspace.toString()),
+              Map.entry("browserTempDirectory", browserTempDir.toString()),
+              Map.entry("entryUrl", opened.path("entryUrl").asText()),
+              Map.entry("viewId", viewId.toString()),
+              Map.entry("bindingEpoch", Long.toString(bindingEpoch)),
+              Map.entry("scenario", "configuration"),
+              Map.entry("expectedTheme", expectedTheme)));
+      browserDriver.await("workbench-ready");
+      browserDriver.await("configuration-ready");
+      JsonNode probe = readConfigurationProbe(workspace);
+      browserDriver.send(Map.of("continue", true));
+      browserDriver.await("done");
+      browserDriver.finish();
+      browserDriver = null;
+      return new ConfigurationObservation(probe, workspace);
+    }
+  }
+
+  /** 读取真实扩展宿主导出的探针快照；文件和内容都在超时内等到。 */
+  private JsonNode readConfigurationProbe(Path workspace) throws Exception {
+    Path probeFile = workspace.resolve("config-probe.json");
+    long deadline = System.nanoTime() + RECOVERY_TIMEOUT.toNanos();
+    while (System.nanoTime() < deadline) {
+      if (Files.isRegularFile(probeFile)) {
+        JsonNode probe = JsonMapper.builder().build().readTree(Files.readString(probeFile));
+        if (probe.path("snapshots").isObject() && probe.path("git").isObject()) {
+          return probe;
+        }
+      }
+      Thread.sleep(100);
+    }
+    throw new AssertionError("the configuration probe did not report a snapshot in time");
+  }
+
+  /** 在 workspace 中构造一个空仓库，供内置 Git 扩展自动发现；无需提交。 */
+  private static void initializeGitRepository(Path workspace) throws IOException {
+    Path git = Files.createDirectory(workspace.resolve(".git"));
+    Files.createDirectories(git.resolve("refs/heads"));
+    Files.createDirectories(git.resolve("refs/tags"));
+    Files.createDirectories(git.resolve("objects/info"));
+    Files.createDirectories(git.resolve("objects/pack"));
+    Files.createDirectories(git.resolve("info"));
+    Files.writeString(git.resolve("HEAD"), "ref: refs/heads/main\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        git.resolve("config"),
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n"
+            + "\tlogallrefupdates = true\n",
+        StandardCharsets.UTF_8);
+  }
+
+  /** 显式用户设置：与随包默认值相反，且不触碰 git.autoRepositoryDetection。 */
+  private static String explicitUserSettings() {
+    return """
+        {
+          "workbench.colorTheme": "Light Modern",
+          "window.density.editorTabHeight": "default",
+          "chat.disableAIFeatures": false,
+          "extensions.ignoreRecommendations": false,
+          "files.watcherExclude": { "**": false },
+          "task.autoDetect": "on",
+          "npm.autoDetect": "on",
+          "npm.fetchOnlinePackageInfo": true,
+          "typescript.disableAutomaticTypeAcquisition": false
+        }
+        """;
+  }
+
+  private static void assertContributedDefault(JsonNode snapshots, String key, String expected) {
+    JsonNode snapshot = snapshots.path(key);
+    assertEquals(expected, snapshot.path("defaultValue").asText(), key + " defaultValue");
+    assertEquals(expected, snapshot.path("effective").asText(), key + " effective value");
+    assertFalse(snapshot.has("globalValue"), key + " must not have an explicit user value");
+  }
+
+  private static void assertContributedBooleanDefault(
+      JsonNode snapshots, String key, boolean expected) {
+    JsonNode snapshot = snapshots.path(key);
+    assertEquals(expected, snapshot.path("defaultValue").asBoolean(), key + " defaultValue");
+    assertEquals(expected, snapshot.path("effective").asBoolean(), key + " effective value");
+    assertFalse(snapshot.has("globalValue"), key + " must not have an explicit user value");
+  }
+
+  private static void assertExplicitUserValue(
+      JsonNode snapshots, String key, String defaultValue, String userValue) {
+    JsonNode snapshot = snapshots.path(key);
+    assertEquals(defaultValue, snapshot.path("defaultValue").asText(), key + " defaultValue");
+    assertEquals(userValue, snapshot.path("globalValue").asText(), key + " explicit user value");
+    assertEquals(userValue, snapshot.path("effective").asText(), key + " effective value");
+  }
+
+  private static void assertExplicitUserBoolean(
+      JsonNode snapshots, String key, boolean defaultValue, boolean userValue) {
+    JsonNode snapshot = snapshots.path(key);
+    assertEquals(defaultValue, snapshot.path("defaultValue").asBoolean(), key + " defaultValue");
+    assertEquals(userValue, snapshot.path("globalValue").asBoolean(), key + " explicit user value");
+    assertEquals(userValue, snapshot.path("effective").asBoolean(), key + " effective value");
+  }
+
+  /** 内置 Git 扩展必须在两种配置情形下都自动发现真实仓库。 */
+  private static void assertGitDiscoveryUnchanged(JsonNode probe, Path workspace)
+      throws IOException {
+    JsonNode git = probe.path("git");
+    assertTrue(git.path("present").asBoolean(), "the built-in Git extension must be available");
+    assertTrue(
+        git.path("discovered").asBoolean(),
+        "the built-in Git extension must discover the workspace");
+    String root = workspace.toRealPath().toString();
+    List<String> repositories = new ArrayList<>();
+    git.path("repositories").forEach(repository -> repositories.add(repository.asText()));
+    assertTrue(
+        repositories.contains(root),
+        "Git must report the opened workspace " + root + " but reported " + repositories);
+  }
+
+  private record ConfigurationObservation(JsonNode probe, Path workspace) {}
+
   private String baseUrl() {
     return "http://127.0.0.1:" + port;
   }
@@ -993,6 +1369,27 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       String mode,
       Long expectedEpochOverride)
       throws IOException {
+    return openViewBody(
+        environmentId,
+        viewId,
+        browserSessionId,
+        identity,
+        claimId,
+        mode,
+        expectedEpochOverride,
+        daemon.workspaceDirectory());
+  }
+
+  private String openViewBody(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      String mode,
+      Long expectedEpochOverride,
+      Path directory)
+      throws IOException {
     String daemonInstance = daemonInstances.get(viewId);
     if (daemonInstance == null) {
       daemonInstance =
@@ -1019,7 +1416,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         + "\",\"expectedDaemonInstanceId\":\""
         + daemonInstance
         + "\",\"directory\":\""
-        + daemon.workspaceDirectory()
+        + directory
         + "\"}";
   }
 
@@ -1102,8 +1499,27 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       UUID claimId,
       String mode)
       throws IOException {
+    return openView(
+        environmentId,
+        viewId,
+        browserSessionId,
+        identity,
+        claimId,
+        mode,
+        daemon.workspaceDirectory());
+  }
+
+  private JsonNode openView(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      String mode,
+      Path directory)
+      throws IOException {
     Response response =
-        postOpenView(environmentId, viewId, browserSessionId, identity, claimId, mode);
+        postOpenView(environmentId, viewId, browserSessionId, identity, claimId, mode, directory);
     try (response) {
       String text = response.body().string();
       assertEquals(200, response.code(), "OPEN_VIEW (" + mode + ") must succeed");
@@ -1161,6 +1577,25 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       UUID claimId,
       String mode)
       throws IOException {
+    return postOpenView(
+        environmentId,
+        viewId,
+        browserSessionId,
+        identity,
+        claimId,
+        mode,
+        daemon.workspaceDirectory());
+  }
+
+  private Response postOpenView(
+      String environmentId,
+      UUID viewId,
+      UUID browserSessionId,
+      EventIdentity identity,
+      UUID claimId,
+      String mode,
+      Path directory)
+      throws IOException {
     return browser
         .newCall(
             new Request.Builder()
@@ -1168,7 +1603,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                 .post(
                     RequestBody.create(
                         openViewBody(
-                            environmentId, viewId, browserSessionId, identity, claimId, mode),
+                            environmentId,
+                            viewId,
+                            browserSessionId,
+                            identity,
+                            claimId,
+                            mode,
+                            null,
+                            directory),
                         JSON))
                 .build())
         .execute();
@@ -1317,21 +1759,25 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private String fetchView(String environmentId, UUID viewId, String cookieValue, String suffix)
       throws IOException {
-    Response response =
-        browser
-            .newCall(
-                new Request.Builder()
-                    .url(baseUrl() + "/ide/" + environmentId + "/" + viewId + suffix)
-                    .header("Cookie", "kk_ide_session=" + cookieValue)
-                    .header("Sec-Fetch-Site", "same-origin")
-                    .get()
-                    .build())
-            .execute();
+    Response response = fetchViewResponse(environmentId, viewId, cookieValue, suffix);
     try (response) {
       String text = response.body().string();
       assertEquals(200, response.code(), "the view data plane must serve " + suffix);
       return text;
     }
+  }
+
+  private Response fetchViewResponse(
+      String environmentId, UUID viewId, String cookieValue, String suffix) throws IOException {
+    return browser
+        .newCall(
+            new Request.Builder()
+                .url(baseUrl() + "/ide/" + environmentId + "/" + viewId + suffix)
+                .header("Cookie", "kk_ide_session=" + cookieValue)
+                .header("Sec-Fetch-Site", "same-origin")
+                .get()
+                .build())
+        .execute();
   }
 
   private WebSocketSession openBrowserWebSocket(
@@ -1363,8 +1809,19 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
 
     @Override
+    public void onClosing(WebSocket webSocket, int code, String reason) {
+      webSocket.close(1000, null);
+    }
+
+    @Override
     public void onFailure(WebSocket webSocket, Throwable error, Response response) {
       opened.completeExceptionally(error);
+    }
+
+    void send(String text) {
+      if (!socket.send(text)) {
+        throw new AssertionError("the browser websocket must accept a queued frame");
+      }
     }
 
     void closeAfterOpen() {

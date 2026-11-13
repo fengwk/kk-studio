@@ -5,7 +5,7 @@
 //
 // Protocol (stdin): the first line is the JSON configuration:
 //   {playwrightModule, baseUrl, environmentId, browserSessionId, workspaceDirectory,
-//    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?}
+//    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?, expectedTheme?}
 // later lines are {"continue":true} for synchronization; the refresh-preserves-dirty scenario
 // additionally accepts {"navigate":{"entryUrl":"..."}} after the IndexedDB backup is committed.
 //
@@ -17,7 +17,9 @@
 //   {"event":"entry-restored"}
 //   {"event":"reload-restored"}
 //   {"event":"terminal-success"}
+//   {"event":"websocket-duplex","sent":<n>,"received":<n>,"viewFrames":true}
 //   {"event":"file-saved"}
+//   {"event":"configuration-ready"}
 //   {"event":"done"}
 //   {"event":"failure","stage":"<safe fixed name>","detail":"<error class or HTTP code>"}
 
@@ -97,6 +99,7 @@ function parseConfig(raw) {
     viewId: config.viewId,
     bindingEpoch: String(config.bindingEpoch),
     scenario: config.scenario,
+    expectedTheme: config.expectedTheme,
   }
 }
 
@@ -142,6 +145,57 @@ function awaitFile(filePath, predicate, timeoutMs = FILE_TIMEOUT) {
     const timer = setTimeout(() => finish(namedError('FileTimeoutError')), timeoutMs)
     void inspect()
   })
+}
+
+/**
+ * Observes the real browser WebSockets through CDP so the acceptance can prove that the
+ * workbench socket of the Studio view carried frames in both directions. No traffic is mocked.
+ */
+function watchWorkbenchWebSockets(context, page) {
+  const sockets = new Map()
+  const ready = (async () => {
+    const session = await context.newCDPSession(page)
+    await session.send('Network.enable')
+    session.on('Network.webSocketCreated', (event) => {
+      if (!sockets.has(event.requestId)) {
+        sockets.set(event.requestId, { url: event.url, sent: 0, received: 0 })
+      }
+    })
+    session.on('Network.webSocketFrameSent', (event) => {
+      const socket = sockets.get(event.requestId)
+      if (socket) socket.sent += 1
+    })
+    session.on('Network.webSocketFrameReceived', (event) => {
+      const socket = sockets.get(event.requestId)
+      if (socket) socket.received += 1
+    })
+  })()
+  ready.catch(() => {})
+  return {
+    async awaitDuplex(timeoutMs) {
+      await ready
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        for (const socket of sockets.values()) {
+          if (socket.sent > 0 && socket.received > 0 && isViewSocket(socket.url)) {
+            return socket
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      throw namedError('WebSocketDuplexTimeout')
+    },
+  }
+}
+
+/** The workbench socket must target this Studio view, never an external origin. */
+function isViewSocket(url) {
+  try {
+    const parsed = new URL(url)
+    return /^\/ide\/[0-9a-f-]{36}\/[0-9a-f-]{36}\//.test(parsed.pathname)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -283,6 +337,7 @@ async function run(config, lines) {
 
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
     const page = await context.newPage()
+    const workbenchSockets = watchWorkbenchWebSockets(context, page)
 
     // 1. First screen: load bootstrap URL and wait for workbench
     stage('workbench-goto')
@@ -295,13 +350,63 @@ async function run(config, lines) {
     const workbench = page.locator('.monaco-workbench').first()
     await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
 
-    stage('workbench-explorer')
-    const fileRow = page
-      .locator('.explorer-folders-view .monaco-list-row', { hasText: 'editable.txt' })
-      .first()
-    await fileRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+    // The configuration scenario only inspects the workbench-wide state; all other scenarios
+    // drive an editor and therefore need the workspace file in the explorer.
+    let fileRow = null
+    if (config.scenario !== 'configuration') {
+      stage('workbench-explorer')
+      fileRow = page
+        .locator('.explorer-folders-view .monaco-list-row', { hasText: 'editable.txt' })
+        .first()
+      await fileRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+    }
 
     emit({ event: 'workbench-ready' })
+
+    if (config.scenario === 'configuration') {
+      // The applied workbench theme is observed from the real workbench class, not from a probe.
+      const awaitTheme = async (theme) => {
+        stage('configuration-theme')
+        if (typeof theme !== 'string' || !/^[a-z0-9_-]{1,60}$/.test(theme)) {
+          throw namedError('ConfigurationError')
+        }
+        await page.waitForFunction(
+          (expected) =>
+            document.querySelector('.monaco-workbench')?.className.includes(
+              `vscode-theme-defaults-themes-${expected}-json`,
+            ),
+          theme,
+          { timeout: WORKBENCH_TIMEOUT },
+        )
+      }
+      // The probe runs inside the managed extension host and reports the registered settings.
+      const awaitProbe = async () => {
+        stage('configuration-probe')
+        await awaitFile(
+          join(config.workspaceDirectory, 'config-probe.json'),
+          (content) => {
+            try {
+              return typeof JSON.parse(content) === 'object'
+            } catch {
+              return false
+            }
+          },
+          WORKBENCH_TIMEOUT,
+        )
+        emit({ event: 'configuration-ready' })
+      }
+
+      await awaitTheme(config.expectedTheme)
+      await awaitProbe()
+      const acknowledge = await lines.next()
+      if (acknowledge.done || JSON.parse(acknowledge.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+      await browser.close()
+      browser = null
+      emit({ event: 'done' })
+      return
+    }
 
     if (config.scenario === 'dirty-close') {
       stage('dirty-editor')
@@ -455,6 +560,10 @@ async function run(config, lines) {
       throw namedError('TerminalExitCodeError')
     }
 
+    // 双向 payload：真实工作台 WebSocket 必须在本视图路径上既发送又接收过帧
+    stage('terminal-duplex')
+    const duplex = await workbenchSockets.awaitDuplex(TERMINAL_TIMEOUT)
+    emit({ event: 'websocket-duplex', sent: duplex.sent, received: duplex.received, viewFrames: true })
     emit({ event: 'terminal-success' })
 
     // 3. File editing interaction: open file, type in Monaco editor, save with Ctrl+S, assert fs
