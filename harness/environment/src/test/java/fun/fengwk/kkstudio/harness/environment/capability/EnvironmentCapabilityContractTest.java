@@ -185,7 +185,7 @@ class EnvironmentCapabilityContractTest {
                 edit,
                 new EnvironmentCapabilityCall(
                     "edit-call",
-                    "{\"path\":\"/srv/a.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}"),
+                    "{\"path\":\"/srv/a.txt\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"}]}"),
                 Duration.ZERO,
                 newFile));
   }

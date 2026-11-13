@@ -20,18 +20,18 @@ func TestEditCapabilityRejectsInvalidReplacementCases(t *testing.T) {
 		all     bool
 		want    string
 	}{
-		{name: "empty-old", content: "abc", old: "", new: "x", want: "old_string must not be empty"},
-		{name: "identical", content: "abc", old: "a\r\nb", new: "a\nb", want: "must differ after line-ending normalization"},
+		{name: "empty-old", content: "abc", old: "", new: "x", want: "Edit 1: old_string must not be empty"},
+		{name: "identical", content: "abc", old: "a\r\nb", new: "a\nb", want: "Edit 1: old_string and new_string must differ after line-ending normalization"},
 		{name: "not-found", content: "abc", old: "missing", new: "x", want: "Could not find old_string"},
 		{name: "multiple", content: "a a", old: "a", new: "x", want: "Found 2 exact matches"},
-		{name: "overlap", content: "aaa", old: "aa", new: "x", all: true, want: "overlapping exact matches"},
+		{name: "overlap", content: "aaa", old: "aa", new: "x", all: true, want: "Found overlapping exact matches for old_string"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "file.txt")
 			if err := os.WriteFile(path, []byte(test.content), 0600); err != nil {
 				t.Fatal(err)
 			}
-			args := map[string]any{"path": path, "old_string": test.old, "new_string": test.new, "replace_all": test.all}
+			args := editArgs(path, map[string]any{"old_string": test.old, "new_string": test.new, "replace_all": test.all})
 			result, err := editCapability(context.Background(), capabilityCall(t, test.name, args), runtime.CapabilityContext{})
 			if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
 				t.Fatalf("result=%#v err=%v", result, err)
@@ -56,7 +56,7 @@ func TestEditCapabilityRejectsMissingPathAndDirectory(t *testing.T) {
 		path string
 		want string
 	}{{missing, "does not exist"}, {directory, "path must be a file"}} {
-		result, err := editCapability(context.Background(), capabilityCall(t, "reject", map[string]any{"path": test.path, "old_string": "a", "new_string": "b"}), runtime.CapabilityContext{})
+		result, err := editCapability(context.Background(), capabilityCall(t, "reject", editArgs(test.path, replace("a", "b"))), runtime.CapabilityContext{})
 		if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
 			t.Fatalf("path=%s result=%#v err=%v want=%q", test.path, result, err, test.want)
 		}

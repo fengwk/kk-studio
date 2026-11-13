@@ -1,4 +1,4 @@
-Perform exact string replacements in a text file.
+Perform exact text replacements in one text file. One call can carry any number of independent replacements.
 
 Usage:
 - Prefer using `read` before editing an existing text file so you can copy the exact current text.
@@ -11,11 +11,12 @@ Usage:
   newline-normalized view, so CRLF/CR/LF spelling alone is not a change.
 - `edit` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
-- The edit fails if `old_string` is not found in the file with an error "Could not find old_string".
-- The edit fails if `old_string` is found more than once, reporting the match count as "Found N exact matches". Either provide a larger string with more surrounding context to make the match unique or use `replace_all` to change every instance of `old_string`.
-- Use `replace_all` for file-wide exact renames or repeated replacements when every occurrence should change.
+- Put all independent changes to one file into one call, one `edits` entry per change. Every entry matches the original file content, not the result of earlier entries, and entries must not overlap.
+- An entry fails if `old_string` is not found, or is found more than once without `replace_all`. Add surrounding context to make it unique, or set `replace_all` to change every occurrence, for example to rename an identifier.
+- If any entry fails, nothing is written and the error lists every failing entry with hints, such as text that matches when whitespace is ignored or the lines of duplicate matches. Fix those entries and send the whole call again.
+- Separate `edit` and `write` calls on the same file run in order; each starts from the file left by the previous call, and a later failure does not undo an earlier success. Issue a change that depends on another call's result only after that call has returned.
 - `path` must be an absolute path on the target Environment's file system. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project`.
 
 Examples:
-- `edit({ path: "/srv/project/src/app.ts", old_string: "const port = 80", new_string: "const port = 8080" })`
-- `edit({ path: "/srv/project/packages/web/src/app.ts", old_string: "oldName", new_string: "newName", replace_all: true })`
+- `edit({ path: "/srv/project/src/app.ts", edits: [{ old_string: "const port = 80", new_string: "const port = 8080" }] })`
+- `edit({ path: "/srv/project/src/app.ts", edits: [{ old_string: "oldName", new_string: "newName", replace_all: true }, { old_string: "// TODO: remove\n", new_string: "" }] })`

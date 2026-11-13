@@ -2069,7 +2069,8 @@ class EnvironmentDaemonServerTest {
       String fields =
           switch (descriptor.id().value()) {
             case "fs.write", "fs.write.preview" -> ",\"content\":\"text\"";
-            case "fs.edit", "fs.edit.preview" -> ",\"old_string\":\"old\",\"new_string\":\"new\"";
+            case "fs.edit",
+                "fs.edit.preview" -> ",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"new\"}]";
             case "fs.find", "fs.grep" -> ",\"pattern\":\"text\"";
             case "lsp.goto-definition" -> ",\"line\":1";
             case "lsp.workspace-symbols" -> ",\"query\":\"Symbol\"";
@@ -3643,7 +3644,7 @@ class EnvironmentDaemonServerTest {
             descriptor,
             new EnvironmentCapabilityCall(
                 CALL_ONE.toString(),
-                "{\"path\":\"/srv/repo/README.md\",\"old_string\":\"a\",\"new_string\":\"b\"}"),
+                "{\"path\":\"/srv/repo/README.md\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"}]}"),
             Duration.ofSeconds(5),
             new ExpectedFile("/srv/repo/README.md", "a".repeat(64)));
     fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());

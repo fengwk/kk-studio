@@ -123,8 +123,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({
         path: '/src/App.tsx',
-        old_string: 'const oldVal = 1;',
-        new_string: 'const newVal = 2;',
+        edits: [{ old_string: 'const oldVal = 1;', new_string: 'const newVal = 2;' }],
       }),
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
@@ -145,6 +144,87 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
     expect(container.querySelector('.is-added')).toBeNull()
     expect(container.querySelector('.is-removed')).toBeNull()
+  })
+
+  it('edit 多条目流式参数按条目展示 change i of n 与 replace all 徽标', () => {
+    const streamingCallMsg: ToolDialogueMessage = {
+      id: 'call-edit-multi-stream',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: null,
+      toolCallId: 'call-edit-multi-stream',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({
+        path: '/src/App.tsx',
+        edits: [
+          { old_string: 'const a = 1;', new_string: 'const a = 100;', replace_all: true },
+          { old_string: 'const b = 2;', new_string: 'const b = 200;' },
+          { old_string: 'const c = 3;', new_string: 'const c = 300;' },
+        ],
+      }),
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'streaming',
+    }
+
+    const { container } = render(<ToolMessageBlock message={streamingCallMsg} />)
+
+    expect(screen.getByText('第 1/3 处修改')).toBeInTheDocument()
+    expect(screen.getByText('第 2/3 处修改')).toBeInTheDocument()
+    expect(screen.getByText('第 3/3 处修改')).toBeInTheDocument()
+    const blocks = container.querySelectorAll('.thread-tool-preview-input-block')
+    expect(blocks).toHaveLength(3)
+    // 只有第一条要求整体替换。
+    expect(blocks[0]?.querySelector('.thread-tool-preview-badge')?.textContent).toBe('替换全部')
+    expect(blocks[1]?.querySelector('.thread-tool-preview-badge')).toBeNull()
+    expect(blocks[2]?.querySelector('.thread-tool-preview-badge')).toBeNull()
+    expect(blocks[0]?.querySelector('.is-input-old')?.textContent).toBe('const a = 1;')
+    expect(blocks[0]?.querySelector('.is-input-new')?.textContent).toBe('const a = 100;')
+    expect(blocks[2]?.querySelector('.is-input-old')?.textContent).toBe('const c = 3;')
+    expect(blocks[2]?.querySelector('.is-input-new')?.textContent).toBe('const c = 300;')
+  })
+
+  it('真实 editReview 替换多条目输入，只展示后端权威 diff', () => {
+    const reviewedCallMsg: ToolDialogueMessage = {
+      id: 'call-edit-multi-reviewed',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-edit-multi-reviewed',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({
+        path: '/src/App.tsx',
+        edits: [
+          { old_string: 'const a = 1;', new_string: 'const a = 100;' },
+          { old_string: 'const b = 2;', new_string: 'const b = 200;' },
+        ],
+      }),
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'done',
+      invocationStatus: 'WAITING_APPROVAL',
+      approval: {
+        required: true,
+        decision: null,
+        decisionId: null,
+        reason: null,
+        editReview: {
+          path: '/canonical/src/App.tsx',
+          diff: '-1|const a = 1;\n+1|const a = 100;\n-2|const b = 2;\n+2|const b = 200;',
+          sha256: validSha,
+        },
+      },
+    }
+
+    const { container } = render(<ToolMessageBlock message={reviewedCallMsg} />)
+
+    // 多条目在 Header 上表现为变更数量，不再逐条展开输入。
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('/src/App.tsx [2 changes]')
+    expect(container.querySelectorAll('.thread-tool-preview-input-block')).toHaveLength(0)
+    expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
   })
 
   it('真实 editReview 替换流式输入并展示多 hunk 编号 diff', () => {
@@ -171,8 +251,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
       rendererKey: 'edit',
       arguments: JSON.stringify({
         path: '/src/App.tsx',
-        old_string: 'const a = 1;\nconst b = 2;',
-        new_string: 'const a = 100;\nconst b = 200;',
+        edits: [{
+          old_string: 'const a = 1;\nconst b = 2;',
+          new_string: 'const a = 100;\nconst b = 200;',
+        }],
       }),
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
@@ -214,7 +296,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
         threadId="thread-1"
         invocationId="inv-1"
         toolName="edit"
-        argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
+        argumentsJson={JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        })}
         approval={{ required: true }}
       />,
       { wrapper },
@@ -233,7 +318,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
         threadId="thread-1"
         invocationId="inv-1"
         toolName="edit"
-        argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
+        argumentsJson={JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        })}
         approval={{
           required: true,
           editReview: { path: '/src/App.tsx', diff: '+b', sha256: 'invalid' },
@@ -249,7 +337,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
         threadId="thread-1"
         invocationId="inv-1"
         toolName="edit"
-        argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
+        argumentsJson={JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        })}
         approval={{
           required: true,
           editReview: { path: '/canonical/src/App.tsx', diff: '-a\n+b', sha256: validSha },
@@ -324,7 +415,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
       diff: '-old\n+new',
       sha256: validSha,
     }
-    const rawArgs = JSON.stringify({ path: '/src/SharedComponent.tsx', old_string: 'old', new_string: 'new' })
+    const rawArgs = JSON.stringify({
+      path: '/src/SharedComponent.tsx',
+      edits: [{ old_string: 'old', new_string: 'new' }],
+    })
     const approval = { required: true, editReview: reviewData }
 
     const { container: cardContainer } = render(
@@ -472,8 +566,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       environmentWaitFreshnessAt: null,
       argumentsJson: JSON.stringify({
         path: '/workspace/src/App.tsx',
-        old_string: 'const value = 1;',
-        new_string: 'const value = 2;',
+        edits: [{ old_string: 'const value = 1;', new_string: 'const value = 2;' }],
       }),
       approval: null,
       result: null,
@@ -790,7 +883,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
   })
 
   it('失败终态：真实错误透传，不展示“编辑成功”，保留错误摘要', () => {
-    const errorMsg = 'Pattern old_string not found in file: /workspace/src/App.tsx'
+    const errorMsg = 'Edit 1: Could not find old_string in /workspace/src/App.tsx.'
 
     const asstEntry = createEntry('asst-fail', 'MESSAGE', {
       message: {

@@ -159,3 +159,51 @@ it('畸形审批 JSON 不隐藏完整调用参数，未知失败也能重试', a
   await waitFor(() => expect(document.querySelector('.interaction-error-banner')).toBeInTheDocument())
   expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
 })
+
+it('多条目 edit 审批：有 review 时展示权威 diff，无 review 时禁用允许', () => {
+  const argumentsJson = JSON.stringify({
+    path: '/workspace/src/App.java',
+    edits: [
+      { old_string: 'const a = 1;', new_string: 'const a = 100;', replace_all: true },
+      { old_string: 'const b = 2;', new_string: 'const b = 200;' },
+    ],
+  })
+  const { rerender } = render(
+    <ApprovalCard
+      {...props}
+      toolName="edit"
+      argumentsJson={argumentsJson}
+      approval={{
+        required: true,
+        editReview: {
+          path: '/canonical/src/App.java',
+          diff: '-1|const a = 1;\n+1|const a = 100;',
+          sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        },
+      }}
+    />,
+    { wrapper },
+  )
+
+  // review 一旦存在就整体替换输入，用户只看真实文件变更。
+  expect(screen.getByText('/canonical/src/App.java')).toBeInTheDocument()
+  expect(document.querySelectorAll('.thread-tool-preview-input-block')).toHaveLength(0)
+  expect(document.querySelector('.thread-tool-preview-body.is-edit')?.textContent)
+    .toBe('-1|const a = 1;\n+1|const a = 100;')
+  expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
+
+  // 缺失 review：审批卡片仍处于等待预检的准备态，但允许必须禁用。
+  rerender(
+    <ApprovalCard
+      {...props}
+      toolName="edit"
+      argumentsJson={argumentsJson}
+      approval={{ required: true }}
+    />,
+  )
+  expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
+  expect(screen.getByText('未获取到有效的编辑审查信息，无法允许。')).toBeInTheDocument()
+  expect(document.querySelector('.thread-tool-preview-preparing')).toBeInTheDocument()
+  expect(document.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
+})

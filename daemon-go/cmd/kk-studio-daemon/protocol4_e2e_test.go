@@ -232,7 +232,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}{
 		{"read", "fs.read", fmt.Sprintf(`{"path":%q}`, file), "123e4567-e89b-42d3-a456-426614174001", "needle original"},
 		{"grep", "fs.grep", fmt.Sprintf(`{"path":%q,"pattern":"needle","literal":true}`, directory), "123e4567-e89b-42d3-a456-426614174002", "needle original"},
-		{"edit", "fs.edit", fmt.Sprintf(`{"path":%q,"old_string":"original","new_string":"edited"}`, file), "123e4567-e89b-42d3-a456-426614174003", "edited"},
+		{"edit", "fs.edit", fmt.Sprintf(`{"path":%q,"edits":[{"old_string":"original","new_string":"edited"}]}`, file), "123e4567-e89b-42d3-a456-426614174003", "edited"},
 		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
 	}
 	for _, tc := range cases {

@@ -520,7 +520,7 @@ class ToolExecutionGatewayAdmitTest {
         new ToolCall(
             callId,
             "edit",
-            "{\"path\":\"/workspace/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+            "{\"path\":\"/workspace/a.txt\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"new\"}]}"),
         new ToolBinding(
             edit.definition(),
             new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),

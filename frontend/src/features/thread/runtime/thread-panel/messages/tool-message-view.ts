@@ -149,7 +149,9 @@ export function buildToolMessageView({
         ? (preview.hasContent || preview.content.length > 0 || preview.path.length > 0)
         : (
           preview.mode === 'preparing'
-          || (preview.mode === 'input' && (preview.oldText.length > 0 || preview.newText.length > 0))
+          || (preview.mode === 'input' && preview.entries.some(
+            (entry) => entry.oldText.length > 0 || entry.newText.length > 0,
+          ))
           || (preview.mode === 'review' && preview.lines.length > 0)
         )
     )

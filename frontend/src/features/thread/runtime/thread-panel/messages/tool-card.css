@@ -136,6 +136,27 @@
   font-size: var(--font-size-xs);
 }
 
+/* 多条目输入的条目标题：序号让用户对齐「第几处修改」，replace all 单独成徽标。 */
+.thread-tool-preview-input-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.thread-tool-preview-badge {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--wash-1);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+
 .thread-tool-preview-body.is-edit .is-added {
   color: var(--accent);
 }

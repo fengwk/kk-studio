@@ -2,6 +2,7 @@ import {
   parseToolArguments,
   type ParsedToolArguments,
 } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
+import { isRecord } from '@/shared/lib/value'
 
 /** 工具卡片 Header 的单行摘要；detail 为已知工具的紧凑参数或未知工具的紧凑 JSON。 */
 export interface ToolCallSummary {
@@ -47,9 +48,7 @@ function formatKnownToolDetail(
     case 'write':
       return pathWithWorkdir(values)
     case 'edit':
-      return withOptions(pathWithWorkdir(values), [
-        ['replace_all', values.replace_all === true ? true : undefined],
-      ])
+      return editSummary(values)
     case 'bash': {
       const command = stringField(values.command)
       if (!command) {
@@ -67,10 +66,9 @@ function formatKnownToolDetail(
       }
       const base = `${JSON.stringify(pattern)} in ${path || '.'}${fromWorkdirSuffix(values)}`
       return withOptions(base, [
-        ['include', values.include],
+        ['glob', values.glob],
         ['ignore_case', values.ignore_case === true ? true : undefined],
         ['literal', values.literal === true ? true : undefined],
-        ['multiline', values.multiline === true ? true : undefined],
         ['limit', values.limit],
         ['timeout_seconds', values.timeout_seconds],
       ])
@@ -132,6 +130,21 @@ function formatRawArguments(parsed: ParsedToolArguments, rawArguments: string): 
     return JSON.stringify(parsed.values)
   }
   return rawArguments
+}
+
+/**
+ * edit 的 Header 只描述目标与变更规模：单条修改带上 replace_all 旗标，
+ * 多条时给出总数，并把「任一条整体替换」显示在同一个方括号里。
+ */
+function editSummary(values: Record<string, unknown>): string {
+  const base = pathWithWorkdir(values)
+  const edits = Array.isArray(values.edits) ? values.edits : []
+  const replaceAll = edits.some((entry) => isRecord(entry) && entry.replace_all === true)
+  if (edits.length <= 1) {
+    return replaceAll ? `${base} [replace_all]` : base
+  }
+  const scale = `${edits.length} changes${replaceAll ? ', replace_all' : ''}`
+  return `${base} [${scale}]`
 }
 
 function pathWithWorkdir(values: Record<string, unknown>): string {
