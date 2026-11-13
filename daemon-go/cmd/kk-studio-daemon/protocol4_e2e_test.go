@@ -19,6 +19,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	"github.com/fengwk/kk-studio/daemon/internal/update"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -102,7 +103,9 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}
 
 	runtimeDone := make(chan error, 1)
-	go func() { runtimeDone <- (productionRuntime{}).Run(ctx, initial) }()
+	go func() {
+		runtimeDone <- (productionRuntime{updateRunner: failingUpdateRunner{}}).Run(ctx, initial)
+	}()
 	var peer net.Conn
 	select {
 	case peer = <-accepted:
@@ -111,24 +114,9 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}
 	defer peer.Close()
 
-	protocols := new(http.Protocols)
-	protocols.SetUnencryptedHTTP2(true)
-	controlTransport := &http.Transport{Protocols: protocols, DialContext: func(context.Context, string, string) (net.Conn, error) { return peer, nil }}
+	controlTransport, bodyWriter, response := openProtocol4ControlStream(t, ctx, peer)
 	defer controlTransport.CloseIdleConnections()
-	controlClient := &http.Client{Transport: controlTransport}
-	bodyReader, bodyWriter := io.Pipe()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/control", bodyReader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := controlClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer response.Body.Close()
-	if response.ProtoMajor != 2 || response.StatusCode != http.StatusOK {
-		t.Fatalf("control stream response=%s status=%d", response.Proto, response.StatusCode)
-	}
 
 	settings := &protocol.Envelope{
 		MessageType:   protocol.MessageType_SETTINGS,
@@ -390,6 +378,42 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatalf("edited file=%q err=%v", got, err)
 	}
 
+	const updateOperationID = "123e4567-e89b-42d3-a456-426614174020"
+	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
+		MessageType: protocol.MessageType_UPDATE, EnvironmentId: proto.String(e2eEnvironmentID),
+		Payload: &protocol.Envelope_Update{Update: &protocol.Update{OperationId: proto.String(updateOperationID), TargetVersion: proto.String("2.0.0")}},
+	})
+	acceptedReceipt := readProductionUpdateReceipt(t, response.Body)
+	if acceptedReceipt.GetUpdateResult().GetOperationId() != updateOperationID || acceptedReceipt.GetUpdateResult().GetPhase() != protocol.UpdatePhase_UPDATE_ACCEPTED {
+		t.Fatalf("production update acceptance=%v", acceptedReceipt)
+	}
+	firstReceipt := readProductionUpdateReceipt(t, response.Body)
+	assertProductionUpdateReceipt(t, firstReceipt, updateOperationID, "test updater failed")
+
+	if err := peer.Close(); err != nil {
+		t.Fatalf("disconnect first production control channel: %v", err)
+	}
+	_ = bodyWriter.Close()
+	var reconnectPeer net.Conn
+	select {
+	case reconnectPeer = <-accepted:
+	case <-ctx.Done():
+		t.Fatal("production runtime did not reconnect")
+	}
+	defer reconnectPeer.Close()
+	reconnectTransport, reconnectWriter, reconnectResponse := openProtocol4ControlStream(t, ctx, reconnectPeer)
+	defer reconnectTransport.CloseIdleConnections()
+	defer reconnectResponse.Body.Close()
+	bodyWriter = reconnectWriter
+	writeControlEnvelope(t, reconnectWriter, settings)
+	writeControlEnvelope(t, reconnectWriter, configuration)
+	ready, err = readControlEnvelopeResult(reconnectResponse.Body)
+	if err != nil || ready.MessageType != protocol.MessageType_READY {
+		t.Fatalf("reconnected production runtime READY=%v err=%v", ready, err)
+	}
+	replayedReceipt := readProductionUpdateReceipt(t, reconnectResponse.Body)
+	assertProductionUpdateReceipt(t, replayedReceipt, updateOperationID, "test updater failed")
+
 	cancel()
 	_ = bodyWriter.Close()
 	select {
@@ -399,6 +423,62 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not shut down after context cancellation")
+	}
+}
+
+type failingUpdateRunner struct{}
+
+func (failingUpdateRunner) Configured() bool                    { return true }
+func (failingUpdateRunner) BusyReason() string                  { return "" }
+func (failingUpdateRunner) StopForUpdate(context.Context) error { return nil }
+func (failingUpdateRunner) HandleUpdate(context.Context, update.Command, config.DaemonConfig, func(update.Progress)) (update.Outcome, error) {
+	return update.Outcome{Phase: update.PhaseFailed, Message: "test updater failed"}, nil
+}
+
+func openProtocol4ControlStream(t *testing.T, ctx context.Context, peer net.Conn) (*http.Transport, *io.PipeWriter, *http.Response) {
+	t.Helper()
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+	controlTransport := &http.Transport{Protocols: protocols, DialContext: func(context.Context, string, string) (net.Conn, error) { return peer, nil }}
+	bodyReader, bodyWriter := io.Pipe()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://daemon/control", bodyReader)
+	if err != nil {
+		controlTransport.CloseIdleConnections()
+		_ = bodyWriter.Close()
+		t.Fatal(err)
+	}
+	response, err := (&http.Client{Transport: controlTransport}).Do(request)
+	if err != nil {
+		controlTransport.CloseIdleConnections()
+		_ = bodyWriter.Close()
+		t.Fatal(err)
+	}
+	if response.ProtoMajor != 2 || response.StatusCode != http.StatusOK {
+		controlTransport.CloseIdleConnections()
+		_ = response.Body.Close()
+		_ = bodyWriter.Close()
+		t.Fatalf("control stream response=%s status=%d", response.Proto, response.StatusCode)
+	}
+	return controlTransport, bodyWriter, response
+}
+
+func readProductionUpdateReceipt(t *testing.T, reader io.Reader) *protocol.Envelope {
+	t.Helper()
+	for {
+		envelope, err := readControlEnvelopeResult(reader)
+		if err != nil {
+			t.Fatalf("read production update receipt: %v", err)
+		}
+		if envelope.MessageType == protocol.MessageType_UPDATE_RESULT {
+			return envelope
+		}
+	}
+}
+
+func assertProductionUpdateReceipt(t *testing.T, envelope *protocol.Envelope, operationID, message string) {
+	t.Helper()
+	if envelope.MessageType != protocol.MessageType_UPDATE_RESULT || envelope.GetUpdateResult().GetOperationId() != operationID || envelope.GetUpdateResult().GetPhase() != protocol.UpdatePhase_UPDATE_FAILED || envelope.GetUpdateResult().GetMessage() != message {
+		t.Fatalf("production update receipt=%v, want UPDATE_FAILED for %s with message %q", envelope, operationID, message)
 	}
 }
 
