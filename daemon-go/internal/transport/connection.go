@@ -124,6 +124,10 @@ type ControlConnection struct {
 	mu            sync.Mutex
 	readMu        sync.Mutex
 	writeMu       sync.Mutex
+	sendStateMu   sync.Mutex
+	sendStateCond *sync.Cond
+	sendClosed    bool
+	activeSends   int
 	closed        chan struct{}
 	stopControl   chan struct{}
 	closeOnce     sync.Once
@@ -175,6 +179,7 @@ func (c *ControlConnection) handleControl(w http.ResponseWriter, r *http.Request
 	c.controlStream = pipe
 	close(c.controlReady)
 	c.mu.Unlock()
+	defer c.finishControlHandler()
 	pipe.flush()
 	select {
 	case <-r.Context().Done():
@@ -257,6 +262,10 @@ func (c *ControlConnection) Send(ctx context.Context, e *protocol.Envelope) erro
 	if err != nil {
 		return err
 	}
+	if err := c.beginSend(); err != nil {
+		return err
+	}
+	defer c.endSend()
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	if err := c.awaitControl(ctx); err != nil {
@@ -272,7 +281,49 @@ func (c *ControlConnection) Send(ctx context.Context, e *protocol.Envelope) erro
 	return protocol.WriteFrame(stream, b)
 }
 
+func (c *ControlConnection) beginSend() error {
+	c.sendStateMu.Lock()
+	defer c.sendStateMu.Unlock()
+	if c.sendClosed {
+		return net.ErrClosed
+	}
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	default:
+	}
+	c.activeSends++
+	return nil
+}
+
+func (c *ControlConnection) endSend() {
+	c.sendStateMu.Lock()
+	c.activeSends--
+	if c.sendClosed && c.activeSends == 0 && c.sendStateCond != nil {
+		c.sendStateCond.Broadcast()
+	}
+	c.sendStateMu.Unlock()
+}
+
+func (c *ControlConnection) finishControlHandler() {
+	c.sendStateMu.Lock()
+	if c.sendStateCond == nil {
+		c.sendStateCond = sync.NewCond(&c.sendStateMu)
+	}
+	c.sendClosed = true
+	c.sendStateCond.Broadcast()
+	for c.activeSends > 0 {
+		c.sendStateCond.Wait()
+	}
+	c.sendStateMu.Unlock()
+}
+
 func (c *ControlConnection) awaitControl(ctx context.Context) error {
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	default:
+	}
 	select {
 	case <-c.controlReady:
 		return nil

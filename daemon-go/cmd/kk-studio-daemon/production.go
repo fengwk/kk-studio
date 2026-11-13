@@ -23,9 +23,11 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/update"
 )
 
-type productionRuntime struct{}
+type productionRuntime struct {
+	updateRunner update.Runner
+}
 
-func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (runErr error) {
+func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (runErr error) {
 	if _, err := config.ReleaseKey(runtime.GOOS, runtime.GOARCH); err != nil {
 		return productionFailure("daemon platform is unsupported", err)
 	}
@@ -123,9 +125,12 @@ func (productionRuntime) Run(ctx context.Context, initial config.DaemonConfig) (
 	for _, declaration := range declarations {
 		capabilities[declaration.ID] = declaration.Execute
 	}
-	updateRunner := &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
-		return processes.Close(ctx)
-	}}
+	updateRunner := r.updateRunner
+	if updateRunner == nil {
+		updateRunner = &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
+			return processes.Close(ctx)
+		}}
+	}
 	uploader := dynamicResourceUploader{networks: networks, control: resourceControl}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
 		EnvironmentID:      initial.EnvironmentID,

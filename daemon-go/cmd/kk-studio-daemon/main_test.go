@@ -77,12 +77,12 @@ func TestInternalHelperDispatch(t *testing.T) {
 	}
 }
 
-// RUN-T-136 checks malformed command forms fail safely without echoing arguments.
+// RUN-T-136 pins the safe CLI diagnostic for malformed command forms.
 func TestInvalidCommandsDoNotEchoArguments(t *testing.T) {
 	var out, stderr bytes.Buffer
 	code := RunCLI(context.Background(), []string{"--unknown", "sensitive"}, Dependencies{}, &out, &stderr)
-	if code != 1 || bytes.Contains(stderr.Bytes(), []byte("sensitive")) {
-		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	if code != 1 || out.Len() != 0 || stderr.String() != "Invalid daemon configuration: daemon: expected exactly --config <absolute-path>\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), stderr.String())
 	}
 }
 
@@ -100,14 +100,21 @@ func TestCheckConfigCommands(t *testing.T) {
 	}
 }
 
-// RUN-T-138 requires exactly one absolute config path and a configured runtime.
+// RUN-T-138 pins CLI errors for malformed config arguments and requires a configured runtime.
 func TestConfigRunRequiresConfiguredRuntime(t *testing.T) {
 	path := commandConfigFixture(t)
 	var out, stderr bytes.Buffer
-	for _, args := range [][]string{{"--config"}, {"--config", path, "extra"}, {"--config", "relative.json"}} {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"--config"}, want: "Invalid daemon configuration: daemon: expected exactly --config <absolute-path>\n"},
+		{args: []string{"--config", path, "extra"}, want: "Invalid daemon configuration: daemon: expected exactly --config <absolute-path>\n"},
+		{args: []string{"--config", "relative.json"}, want: "Invalid daemon configuration: config: path must be absolute\n"},
+	} {
 		stderr.Reset()
-		if code := RunCLI(context.Background(), args, Dependencies{}, &out, &stderr); code != 1 || stderr.Len() == 0 {
-			t.Fatalf("args=%q code=%d stderr=%q", args, code, stderr.String())
+		if code := RunCLI(context.Background(), tc.args, Dependencies{}, &out, &stderr); code != 1 || out.Len() != 0 || stderr.String() != tc.want {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q, want %q", tc.args, code, out.String(), stderr.String(), tc.want)
 		}
 	}
 	stderr.Reset()
