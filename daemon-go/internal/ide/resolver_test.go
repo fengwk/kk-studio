@@ -80,6 +80,7 @@ func TestResolverRejectsInvalidMetadataAndUnboundViews(t *testing.T) {
 		{ViewID: viewID, BindingEpoch: 1, Mode: "http", Method: "GET", Path: "/a\\b"},
 		{ViewID: viewID, BindingEpoch: 1, Mode: "http", Method: "GET", Path: "/%2E%2e/"},
 		{ViewID: viewID, BindingEpoch: 1, Mode: "http", Method: "GET", Path: "/", Headers: http.Header{"X-Test": {"bad\rvalue"}}},
+		{ViewID: viewID, BindingEpoch: 1, Mode: "websocket", Method: http.MethodConnect, Path: "/", Headers: http.Header{":protocol": {"websocket"}}},
 	}
 	for _, request := range invalid {
 		if _, err := resolver.ResolveView(context.Background(), request); err == nil {

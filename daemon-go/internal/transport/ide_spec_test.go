@@ -219,6 +219,29 @@ func TestHandleIDE_ConnectRouteAndResolutionErrors(t *testing.T) {
 	}
 }
 
+// TRN-T-064 verifies the H2 extended-CONNECT marker is not treated as an upstream HTTP header.
+func TestHandleIDE_ConnectConsumesProtocolPseudoHeader(t *testing.T) {
+	resolved := false
+	connection := &ControlConnection{resolver: viewResolverFunc(func(_ context.Context, request ViewRequest) (ViewUpstream, error) {
+		resolved = true
+		if request.Headers.Get(":protocol") != "" {
+			t.Errorf("extended CONNECT pseudo-header reached resolver: %v", request.Headers)
+		}
+		return ViewUpstream{}, errors.New("UNAVAILABLE")
+	})}
+	request := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Path: "/ide/" + ideTestID + "/1/"},
+		Header: http.Header{":protocol": {"websocket"}},
+		Body:   http.NoBody,
+	}
+	response := httptest.NewRecorder()
+	connection.handleIDE(response, request)
+	if !resolved || response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("resolver called=%t status=%d", resolved, response.Code)
+	}
+}
+
 // TRN-T-058 and TRN-T-063 verify upgrade headers and closure after upstream EOF.
 func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

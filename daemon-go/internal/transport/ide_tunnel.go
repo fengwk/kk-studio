@@ -35,7 +35,11 @@ func (c *ControlConnection) handleIDE(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		viewPath += "?" + r.URL.RawQuery
 	}
-	up, err := c.resolver.ResolveView(r.Context(), ViewRequest{ViewID: id, BindingEpoch: epoch, Mode: mode, Method: r.Method, Path: viewPath, Headers: r.Header.Clone()})
+	headers := r.Header.Clone()
+	if mode == "websocket" {
+		headers.Del(":protocol")
+	}
+	up, err := c.resolver.ResolveView(r.Context(), ViewRequest{ViewID: id, BindingEpoch: epoch, Mode: mode, Method: r.Method, Path: viewPath, Headers: headers})
 	if err != nil {
 		http.Error(w, "IDE view resolution failed", resolverStatus(err))
 		return
